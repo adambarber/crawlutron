@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from typing import Any
@@ -127,8 +128,20 @@ class BrowserRenderer:
         import undetected_chromedriver as uc
 
         options = uc.ChromeOptions()
+        chrome_binary = os.environ.get("BROWSER_CRAWLER_CHROME_BINARY", "/usr/bin/chromium")
+        if chrome_binary:
+            options.binary_location = chrome_binary
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1365,768")
-        return uc.Chrome(options=options)
+
+        kwargs: dict[str, Any] = {"options": options}
+        driver_path = os.environ.get("BROWSER_CRAWLER_CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
+        if driver_path:
+            kwargs["driver_executable_path"] = driver_path
+        version_main = os.environ.get("BROWSER_CRAWLER_CHROME_VERSION_MAIN", "149")
+        if version_main:
+            kwargs["version_main"] = int(version_main)
+        return uc.Chrome(**kwargs)
