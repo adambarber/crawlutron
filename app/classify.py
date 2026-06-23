@@ -26,13 +26,22 @@ SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def classify_rendered_page(html: str | None, text: str | None, *, title: str | None = None) -> str:
-    haystack = f"{title or ''}\n{html or ''}\n{text or ''}".lower()
+    visible_haystack = f"{title or ''}\n{text or ''}".lower()
+    html_haystack = _html_without_script_and_style(html).lower()
+    haystack = f"{visible_haystack}\n{html_haystack}"
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return "binary_no_text"
     for classification, signatures in SIGNATURES:
         if any(signature in haystack for signature in signatures):
             return classification
     return "rendered"
+
+
+def _html_without_script_and_style(html: str | None) -> str:
+    import re
+
+    without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html or "", flags=re.IGNORECASE | re.DOTALL)
+    return re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
 
 
 def _html_has_no_user_visible_content(html: str | None) -> bool:

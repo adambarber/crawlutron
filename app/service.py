@@ -219,6 +219,20 @@ def _default_document_text_extractor(body: bytes, content_type: str | None, url:
     return ""
 
 
+def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
+    normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_content_type.startswith("text/") or normalized_content_type in {"application/json", "application/xml", "application/xhtml+xml"}:
+        return False
+    if "html" in normalized_content_type or "pdf" in normalized_content_type:
+        return False
+    lower_url = url.split("?", 1)[0].lower()
+    if lower_url.endswith((".zip", ".gz", ".tgz", ".7z", ".rar", ".xlsx", ".docx")):
+        return True
+    if body.startswith((b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b")):
+        return True
+    return normalized_content_type in {"application/octet-stream", "application/zip", "application/x-zip-compressed"}
+
+
 def _default_trafilatura_extractor(html: str, url: str) -> str:
     try:
         import trafilatura  # type: ignore[import-not-found]
@@ -226,6 +240,45 @@ def _default_trafilatura_extractor(html: str, url: str) -> str:
         return _text_from_html(html)
     extracted = trafilatura.extract(html, url=url)
     return (extracted or "").strip()
+
+
+def _binary_no_text_result(
+    *,
+    original_url: str,
+    normalized_url: str,
+    final_url: str | None,
+    strategy: str,
+    http_status: int | None,
+    headers: dict[str, str],
+    content_type: str | None,
+    elapsed_ms: int,
+) -> UniversalCrawlResult:
+    attempt = CrawlStrategyAttempt(
+        strategy=strategy,  # type: ignore[arg-type]
+        status="failed",
+        classification="binary_no_text",
+        http_status=http_status,
+        content_type=content_type,
+        elapsed_ms=elapsed_ms,
+        error="binary_no_text",
+    )
+    return UniversalCrawlResult(
+        original_url=original_url,
+        normalized_url=normalized_url,
+        final_url=final_url,
+        status="failed",
+        classification="binary_no_text",
+        selected_strategy=None,
+        attempted_strategies=[attempt],
+        http_status=http_status,
+        headers=headers,
+        content_type=content_type,
+        html=None,
+        text=None,
+        extraction_method="binary_no_text",
+        quality_score=0.0,
+        error="binary_no_text",
+    )
 
 
 def _http_strategy_result(
@@ -243,6 +296,17 @@ def _http_strategy_result(
         response = http_fetcher(normalized_url, _headers_for_strategy(strategy, policy["headers"]), policy["limits"]["timeout_seconds"])
         headers = {key.lower(): value for key, value in response.headers.items()}
         content_type = headers.get("content-type")
+        if strategy != "DOCUMENT_EXTRACT" and _looks_like_binary_body(response.body, content_type, response.final_url):
+            return _binary_no_text_result(
+                original_url=original_url,
+                normalized_url=normalized_url,
+                final_url=response.final_url,
+                strategy=strategy,
+                http_status=response.status_code,
+                headers=headers,
+                content_type=content_type,
+                elapsed_ms=response.elapsed_ms,
+            )
         body_text = _decode_body(response.body, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
