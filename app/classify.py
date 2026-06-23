@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
     ("captcha_detected", ("captcha", "verify you are human", "human verification")),
     (
         "bot_challenge_detected",
@@ -16,7 +17,6 @@ SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     ("rate_limited", ("429", "too many requests", "rate limit", "rate-limited")),
-    ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account")),
     ("paywall_detected", ("subscribe now", "subscription required", "continue reading", "paywall")),
     ("access_denied", ("access denied", "request has been blocked", "forbidden", "security rules", "403 forbidden")),
     ("not_found", ("custom404", "404. the page/url requested", "404 not found", "page not found", "not found")),

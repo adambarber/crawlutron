@@ -25,7 +25,17 @@ Classification = Literal[
     "dns_error",
     "invalid_url",
     "unsupported_scheme",
+    "private_network_target",
     "unknown_error",
+]
+
+CrawlStrategyName = Literal[
+    "HTTP_DECLARED_CRAWLER",
+    "HTTP_SITE_COMPAT",
+    "BROWSER_HEADLESS",
+    "BROWSER_HEADED_WARMED",
+    "DOCUMENT_EXTRACT",
+    "TRAFILATURA_EXTRACT",
 ]
 
 
@@ -59,4 +69,44 @@ class CrawlResult:
     elapsed_ms: int
     domain: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class HttpFetchResult:
+    url: str
+    final_url: str
+    status_code: int
+    headers: dict[str, str]
+    body: bytes
+    elapsed_ms: int
+
+
+@dataclass(frozen=True)
+class CrawlStrategyAttempt:
+    strategy: CrawlStrategyName
+    status: ResultStatus
+    classification: Classification
+    http_status: int | None
+    content_type: str | None
+    elapsed_ms: int
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class UniversalCrawlResult:
+    original_url: str
+    normalized_url: str | None
+    final_url: str | None
+    status: ResultStatus
+    classification: Classification
+    selected_strategy: CrawlStrategyName | None
+    attempted_strategies: list[CrawlStrategyAttempt]
+    http_status: int | None
+    headers: dict[str, str]
+    content_type: str | None
+    html: str | None
+    text: str | None
+    extraction_method: str | None
+    quality_score: float
     error: str | None = None
