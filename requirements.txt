@@ -3,3 +3,4 @@ uvicorn[standard]==0.38.0
 selenium==4.39.0
 undetected-chromedriver==3.5.5
 setuptools==80.9.0
+trafilatura==2.0.0

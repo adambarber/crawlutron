@@ -19,11 +19,16 @@ from .service import crawl_request, render_request
 from .settings import CrawlerSettings
 
 try:
-    from fastapi import Body, FastAPI, HTTPException
+    from fastapi import Body, FastAPI, HTTPException, Request
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
 except ImportError:  # pragma: no cover - imported in container runtime
     Body = None  # type: ignore[assignment]
     FastAPI = None  # type: ignore[assignment]
     HTTPException = Exception  # type: ignore[assignment]
+    JSONResponse = None  # type: ignore[assignment]
+    Request = object  # type: ignore[assignment]
+    RequestValidationError = Exception  # type: ignore[assignment]
 
 
 settings = CrawlerSettings.from_mapping()
@@ -166,6 +171,17 @@ if FastAPI is not None:
             {"name": "Crawler", "description": "Browser render and universal policy-driven crawl execution endpoints."},
         ],
     )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "code": "validation_error",
+                "message": "Request validation failed",
+                "details": {"errors": exc.errors()},
+            },
+        )
 
     @app.get("/health", tags=["Health"], summary="Service liveness check")
     async def health() -> dict[str, str]:

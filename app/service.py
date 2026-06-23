@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -202,8 +203,19 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
 
 
 def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
-    if (content_type or "").lower().startswith("text/"):
+    normalized_content_type = (content_type or "").lower()
+    if normalized_content_type.startswith("text/"):
         return _decode_body(body, content_type).strip()
+    if "pdf" in normalized_content_type or url.split("?", 1)[0].lower().endswith(".pdf"):
+        completed = subprocess.run(
+            ["pdftotext", "-", "-"],
+            input=body,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if completed.returncode == 0:
+            return completed.stdout.decode("utf-8", errors="replace").strip()
     return ""
 
 
