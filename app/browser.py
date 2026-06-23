@@ -61,7 +61,7 @@ class BrowserRenderer:
             attempts += 1
             driver = None
             try:
-                driver = self._driver_factory()
+                driver = self._new_driver(options.browser_profile)
                 driver.set_page_load_timeout(options.timeout_seconds)
                 self._warmup_session(driver)
                 driver.get(url)
@@ -191,7 +191,13 @@ class BrowserRenderer:
             error=error,
         )
 
-    def _undetected_chrome_driver(self) -> Any:
+    def _new_driver(self, browser_profile: dict[str, Any]) -> Any:
+        try:
+            return self._driver_factory(browser_profile)
+        except TypeError:
+            return self._driver_factory()
+
+    def _undetected_chrome_driver(self, browser_profile: dict[str, Any] | None = None) -> Any:
         import undetected_chromedriver as uc
 
         options = uc.ChromeOptions()
@@ -203,7 +209,14 @@ class BrowserRenderer:
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--window-size=1365,768")
+        profile = browser_profile or {}
+        if profile.get("viewport") == "mobile":
+            options.add_argument("--window-size=390,844")
+            options.add_argument("--user-agent=Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
+        else:
+            options.add_argument("--window-size=1365,768")
+        if profile.get("resource_mode") == "reduced":
+            options.add_argument("--blink-settings=imagesEnabled=false")
 
         kwargs: dict[str, Any] = {"options": options}
         driver_path = os.environ.get("BROWSER_CRAWLER_CHROMEDRIVER_PATH", "/usr/bin/chromedriver")

@@ -62,6 +62,7 @@ OUTPUT_FIELDS = [
     "discovered_link_count",
     "discovered_links_truncated",
     "discovered_links",
+    "diagnostics",
     "error",
 ]
 
@@ -80,6 +81,9 @@ EXAMPLE_POLICIES: dict[str, dict[str, Any]] = {
         "schema_version": POLICY_SCHEMA_VERSION,
         "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "BROWSER_HEADLESS"],
         "limits": {"timeout_seconds": 30, "max_retries": 2, "max_discovered_links": 250},
+        "request_profile": {"user_agent_family": "desktop_chrome", "accept_language": "en-US,en;q=0.9"},
+        "browser_profile": {"state": "fresh", "viewport": "desktop", "resource_mode": "full"},
+        "discovery": {"robots": True, "sitemaps": True, "feeds": True},
     },
     "headed_warmed_browser": {
         "schema_version": POLICY_SCHEMA_VERSION,
@@ -121,6 +125,13 @@ def capabilities_payload() -> dict[str, Any]:
             "discovered_links": True,
             "recursive_frontier": False,
             "warmup": True,
+            "request_profiles": True,
+            "browser_profiles": True,
+            "robots_diagnostics": True,
+            "sitemap_discovery": True,
+            "feed_discovery": True,
+            "adaptive_retry": True,
+            "runtime_diagnostics": True,
             "domain_aware_concurrency": True,
         },
         "openapi_url": "/openapi.json",

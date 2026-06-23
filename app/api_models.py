@@ -32,6 +32,11 @@ class CrawlClassification(str, Enum):
     login_required = "login_required"
     paywall_detected = "paywall_detected"
     rate_limited = "rate_limited"
+    cookie_consent_required = "cookie_consent_required"
+    javascript_required = "javascript_required"
+    unsupported_browser = "unsupported_browser"
+    geolocation_blocked = "geolocation_blocked"
+    waf_challenge_detected = "waf_challenge_detected"
     not_found = "not_found"
     site_error = "site_error"
     gone = "gone"
@@ -72,6 +77,9 @@ class CrawlPolicy(BaseModel):
     )
     limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan.")
     headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies.")
+    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile, including user-agent family, language, fetch metadata, and benign per-host cookies.")
+    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile, viewport, resource mode, and benign cookie jar hints.")
+    discovery: dict[str, bool] = Field(default_factory=dict, description="Optional robots, sitemap, and feed discovery toggles. Discovery output is diagnostic and non-recursive.")
 
 
 class CrawlRequest(BaseModel):
@@ -123,6 +131,7 @@ class CrawlResultModel(BaseModel):
     extraction_method: str | None = Field(None, description="Extraction method such as http_html, dom_text, pdf_text, or trafilatura_extract.")
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score. HTTP 200 alone is not content success.")
     classification_evidence: list[ClassificationEvidence] = Field(default_factory=list, description="Short evidence explaining the selected non-rendered classification, when a signature or HTTP status matched.")
+    diagnostics: dict[str, Any] = Field(default_factory=dict, description="Structured diagnostics such as request profile, robots/sitemap/feed discovery, retry/backoff, runtime, and content completeness metrics.")
     discovered_link_count: int = Field(0, ge=0, description="Total number of links discovered before max_discovered_links truncation.")
     discovered_links_truncated: bool = Field(False, description="True when discovered_links was truncated by policy limits.")
     discovered_links: list[DiscoveredLink] = Field(default_factory=list, description="Structured links extracted from the selected HTML or rendered DOM. The service reports links but does not enqueue them recursively.")

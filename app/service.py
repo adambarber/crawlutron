@@ -7,9 +7,9 @@ import urllib.error
 import urllib.request
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
-from dataclasses import asdict, dataclass
 from html import unescape
 from typing import Any
 
@@ -35,7 +35,19 @@ class CrawlExecutionJob:
     domain: str
 
 SUCCESS_CLASSIFICATIONS = {"rendered"}
-BLOCKED_CLASSIFICATIONS = {"captcha_detected", "bot_challenge_detected", "access_denied", "login_required", "paywall_detected", "rate_limited"}
+BLOCKED_CLASSIFICATIONS = {
+    "captcha_detected",
+    "bot_challenge_detected",
+    "access_denied",
+    "login_required",
+    "paywall_detected",
+    "rate_limited",
+    "cookie_consent_required",
+    "javascript_required",
+    "unsupported_browser",
+    "geolocation_blocked",
+    "waf_challenge_detected",
+}
 HTTP_STRATEGIES = {"HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "DOCUMENT_EXTRACT", "TRAFILATURA_EXTRACT"}
 BROWSER_STRATEGIES = {"BROWSER_HEADLESS", "BROWSER_HEADED_WARMED"}
 SUPPORTED_CRAWL_STRATEGIES = HTTP_STRATEGIES | BROWSER_STRATEGIES
@@ -137,6 +149,11 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         raise ValueError("invalid_policy_strategies")
     if any(strategy not in SUPPORTED_CRAWL_STRATEGIES for strategy in strategies):
         raise ValueError("invalid_policy_strategy")
+    request_profile = policy.get("request_profile") or {}
+    browser_profile = policy.get("browser_profile") or {}
+    discovery = policy.get("discovery") or {}
+    if not isinstance(request_profile, dict) or not isinstance(browser_profile, dict) or not isinstance(discovery, dict):
+        raise ValueError("invalid_policy_profile")
     return {
         "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
         "strategies": strategies,
@@ -147,21 +164,52 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             "max_discovered_links": int(limits.get("max_discovered_links", 250)),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},
+        "request_profile": dict(request_profile),
+        "browser_profile": dict(browser_profile),
+        "discovery": {str(key): bool(value) for key, value in discovery.items()},
     }
 
 
-def _headers_for_strategy(strategy: str, policy_headers: dict[str, str]) -> dict[str, str]:
-    headers = {"User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)"}
-    if strategy == "HTTP_SITE_COMPAT":
-        headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (compatible; dev-stack-browser-crawler/0.2; +https://local.dev-stack/crawler)",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            }
+def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
+    profile = policy.get("request_profile") or {}
+    headers = {
+        "User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": str(profile.get("accept_language", "en-US,en;q=0.9")),
+        "Accept-Encoding": "identity",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+    }
+    user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
+    if strategy == "HTTP_SITE_COMPAT" or user_agent_family == "desktop_chrome":
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
-    headers.update(policy_headers)
+    elif user_agent_family == "mobile_safari":
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        )
+    cookie_header = _cookie_header_for_url(profile, url)
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+    headers.update(policy["headers"])
     return headers
+
+
+def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
+    if profile.get("cookie_jar") not in {"per_host", "session"}:
+        return ""
+    cookies = profile.get("cookies") or {}
+    if not isinstance(cookies, dict):
+        return ""
+    host = (urlparse(url).hostname or "").lower()
+    host_cookies = cookies.get(host) or {}
+    if not isinstance(host_cookies, dict):
+        return ""
+    return "; ".join(f"{key}={value}" for key, value in host_cookies.items())
 
 
 def _decode_body(body: bytes, content_type: str | None) -> str:
@@ -203,6 +251,48 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
     if html_length >= 40:
         score += 0.05
     return min(score, 1.0)
+
+
+def _content_metrics(text: str | None, html: str | None) -> dict[str, int | float]:
+    visible_text_length = len((text or "").strip())
+    html_length = len((html or "").strip())
+    link_count = len(re.findall(r"<a\b", html or "", flags=re.IGNORECASE))
+    return {
+        "visible_text_length": visible_text_length,
+        "html_length": html_length,
+        "link_count": link_count,
+        "text_to_html_ratio": round(visible_text_length / html_length, 4) if html_length else 0.0,
+    }
+
+
+def _retry_after_seconds(headers: dict[str, str]) -> int | None:
+    value = headers.get("retry-after")
+    if not value:
+        return None
+    try:
+        return max(0, int(value.strip()))
+    except ValueError:
+        return None
+
+
+def _fetch_with_retries(
+    fetcher: HttpFetcher,
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    max_retries: int,
+) -> tuple[HttpFetchResult, dict[str, Any]]:
+    transient_errors: list[str] = []
+    max_attempts = max(1, max_retries + 1)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = fetcher(url, headers, timeout_seconds)
+            return response, {"attempts": attempt, "transient_errors": transient_errors}
+        except Exception as error:  # noqa: BLE001 - callers can inject mixed HTTP errors
+            transient_errors.append(str(error))
+            if attempt >= max_attempts:
+                raise
+    raise RuntimeError("unreachable_http_retry")
 
 
 class _AnchorCollector(HTMLParser):
@@ -312,6 +402,67 @@ def _default_trafilatura_extractor(html: str, url: str) -> str:
     return (extracted or "").strip()
 
 
+def _discovery_diagnostics(
+    *,
+    normalized_url: str,
+    html: str | None,
+    policy: dict[str, Any],
+    headers: dict[str, str],
+    http_fetcher: HttpFetcher,
+) -> dict[str, Any]:
+    discovery = policy.get("discovery") or {}
+    diagnostics: dict[str, Any] = {}
+    parsed = urlparse(normalized_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    robots_sitemaps: list[str] = []
+    if discovery.get("robots"):
+        robots_url = urljoin(origin, "/robots.txt")
+        try:
+            robots_response = http_fetcher(robots_url, headers, policy["limits"]["timeout_seconds"])
+            robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
+            robots_text = _decode_body(robots_response.body, robots_headers.get("content-type"))
+            crawl_delay = None
+            for line in robots_text.splitlines():
+                key, _, value = line.partition(":")
+                if key.strip().lower() == "crawl-delay":
+                    try:
+                        crawl_delay = int(value.strip())
+                    except ValueError:
+                        crawl_delay = None
+                elif key.strip().lower() == "sitemap":
+                    robots_sitemaps.append(value.strip())
+            diagnostics["robots"] = {
+                "url": robots_url,
+                "allowed": True,
+                "crawl_delay_seconds": crawl_delay,
+                "sitemaps": robots_sitemaps,
+            }
+        except Exception as error:  # noqa: BLE001 - diagnostics should not fail crawl
+            diagnostics["robots"] = {"url": robots_url, "error": str(error), "sitemaps": []}
+    sitemap_urls: list[str] = []
+    if discovery.get("sitemaps"):
+        for sitemap_url in robots_sitemaps or [urljoin(origin, "/sitemap.xml")]:
+            try:
+                sitemap_response = http_fetcher(sitemap_url, headers, policy["limits"]["timeout_seconds"])
+                sitemap_headers = {key.lower(): value for key, value in sitemap_response.headers.items()}
+                sitemap_text = _decode_body(sitemap_response.body, sitemap_headers.get("content-type"))
+                sitemap_urls.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap_text, flags=re.IGNORECASE))
+            except Exception:
+                continue
+    feeds: list[str] = []
+    if discovery.get("feeds"):
+        for match in re.finditer(r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE):
+            tag = match.group(0)
+            if "rss" not in tag.lower() and "atom" not in tag.lower():
+                continue
+            href_match = re.search(r"href=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
+            if href_match:
+                feeds.append(urljoin(normalized_url, href_match.group(1)))
+    if sitemap_urls or feeds:
+        diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
+    return diagnostics
+
+
 def _binary_no_text_result(
     *,
     original_url: str,
@@ -362,12 +513,20 @@ def _http_strategy_result(
     trafilatura_extractor: TrafilaturaExtractor,
 ) -> UniversalCrawlResult:
     started = time.monotonic()
+    retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
+    request_headers = _headers_for_strategy(strategy, policy, normalized_url)
     try:
-        response = http_fetcher(normalized_url, _headers_for_strategy(strategy, policy["headers"]), policy["limits"]["timeout_seconds"])
+        response, retry_diagnostics = _fetch_with_retries(
+            http_fetcher,
+            normalized_url,
+            request_headers,
+            policy["limits"]["timeout_seconds"],
+            policy["limits"]["max_retries"],
+        )
         headers = {key.lower(): value for key, value in response.headers.items()}
         content_type = headers.get("content-type")
         if strategy != "DOCUMENT_EXTRACT" and _looks_like_binary_body(response.body, content_type, response.final_url):
-            return _binary_no_text_result(
+            result = _binary_no_text_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
                 final_url=response.final_url,
@@ -377,6 +536,7 @@ def _http_strategy_result(
                 content_type=content_type,
                 elapsed_ms=response.elapsed_ms,
             )
+            return UniversalCrawlResult(**{**asdict(result), "diagnostics": {"retry": retry_diagnostics}})
         body_text = _decode_body(response.body, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
@@ -391,9 +551,7 @@ def _http_strategy_result(
         classification, classification_evidence = classify_rendered_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
-            classification_evidence = [
-                {"classification": "access_denied", "signature": "403", "source": "http_status", "context": "HTTP 403"}
-            ]
+            classification_evidence = [{"classification": "access_denied", "signature": "403", "source": "http_status", "context": "HTTP 403"}]
         elif response.status_code == 404:
             classification = "not_found"
             classification_evidence = [{"classification": "not_found", "signature": "404", "source": "http_status", "context": "HTTP 404"}]
@@ -415,7 +573,30 @@ def _http_strategy_result(
             extraction_method = "document_extract"
         elif strategy == "TRAFILATURA_EXTRACT":
             extraction_method = "trafilatura_extract"
+        diagnostics: dict[str, Any] = {
+            "request_profile": {
+                "user_agent_family": str(policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")),
+                "cookie_jar": str(policy.get("request_profile", {}).get("cookie_jar", "none")),
+            },
+            "retry": retry_diagnostics,
+            "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
+            "content_metrics": _content_metrics(text, html),
+        }
+        retry_after = _retry_after_seconds(headers)
+        if retry_after is not None:
+            diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
+        diagnostics.update(
+            _discovery_diagnostics(
+                normalized_url=normalized_url,
+                html=html,
+                policy=policy,
+                headers=request_headers,
+                http_fetcher=http_fetcher,
+            )
+        )
         quality = _quality_score(status, classification, text, html, response.status_code)
+        if status == "success" and diagnostics["content_metrics"]["visible_text_length"] >= 40:
+            quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
             _extract_discovered_links(html, response.final_url, max_links=policy["limits"]["max_discovered_links"]) if status == "success" else ([], 0, False)
         )
@@ -444,6 +625,7 @@ def _http_strategy_result(
             extraction_method=extraction_method,
             quality_score=quality,
             classification_evidence=classification_evidence,
+            diagnostics=diagnostics,
             discovered_link_count=discovered_link_count,
             discovered_links_truncated=discovered_links_truncated,
             discovered_links=discovered_links,
@@ -475,6 +657,7 @@ def _http_strategy_result(
             text=None,
             extraction_method=None,
             quality_score=0.0,
+            diagnostics={"retry": retry_diagnostics, "runtime": {"elapsed_ms": elapsed_ms}, "request_profile": policy.get("request_profile") or {}},
             error=str(error),
         )
 
@@ -493,6 +676,7 @@ async def _browser_strategy_result(
         respect_robots=True,
         include_html=True,
         include_text=True,
+        browser_profile=policy.get("browser_profile") or {},
     )
     job = CrawlJob(index=0, url=normalized_url, domain=registrable_domain(normalized_url), options=options)
     result = await _call_worker(browser_worker, job)
@@ -526,6 +710,11 @@ async def _browser_strategy_result(
         extraction_method=extraction_method,
         quality_score=quality,
         classification_evidence=[],
+        diagnostics={
+            "browser_profile": policy.get("browser_profile") or {},
+            "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
+            "content_metrics": _content_metrics(result.text, result.html),
+        },
         discovered_link_count=discovered_link_count,
         discovered_links_truncated=discovered_links_truncated,
         discovered_links=discovered_links,
@@ -583,6 +772,7 @@ async def _execute_crawl_chain(
                     text=None,
                     extraction_method=None,
                     quality_score=0.0,
+                    diagnostics={"browser_profile": policy.get("browser_profile") or {}, "runtime": {"error": "browser_worker_unavailable"}},
                     error="browser_worker_unavailable",
                 )
             else:

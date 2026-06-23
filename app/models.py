@@ -13,6 +13,11 @@ Classification = Literal[
     "login_required",
     "paywall_detected",
     "rate_limited",
+    "cookie_consent_required",
+    "javascript_required",
+    "unsupported_browser",
+    "geolocation_blocked",
+    "waf_challenge_detected",
     "not_found",
     "site_error",
     "gone",
@@ -47,6 +52,7 @@ class RenderOptions:
     respect_robots: bool = True
     include_html: bool = True
     include_text: bool = True
+    browser_profile: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,7 @@ class UniversalCrawlResult:
     extraction_method: str | None
     quality_score: float
     classification_evidence: list[ClassificationEvidence] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
     discovered_link_count: int = 0
     discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
