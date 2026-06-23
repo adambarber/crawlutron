@@ -20,6 +20,8 @@ from .validation import normalize_public_http_url, registrable_domain
 
 CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
 HttpFetcher = Callable[[str, dict[str, str], int], HttpFetchResult]
+DocumentTextExtractor = Callable[[bytes, str | None, str], str]
+TrafilaturaExtractor = Callable[[str, str], str]
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ SUCCESS_CLASSIFICATIONS = {"rendered"}
 BLOCKED_CLASSIFICATIONS = {"captcha_detected", "bot_challenge_detected", "access_denied", "login_required", "paywall_detected", "rate_limited"}
 HTTP_STRATEGIES = {"HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "DOCUMENT_EXTRACT", "TRAFILATURA_EXTRACT"}
 BROWSER_STRATEGIES = {"BROWSER_HEADLESS", "BROWSER_HEADED_WARMED"}
+SUPPORTED_CRAWL_STRATEGIES = HTTP_STRATEGIES | BROWSER_STRATEGIES
 DEFAULT_CRAWL_STRATEGIES = ["HTTP_DECLARED_CRAWLER", "BROWSER_HEADLESS"]
 
 
@@ -129,6 +132,8 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     strategies = policy.get("strategies") or DEFAULT_CRAWL_STRATEGIES
     if not isinstance(strategies, list) or not all(isinstance(strategy, str) for strategy in strategies) or not strategies:
         raise ValueError("invalid_policy_strategies")
+    if any(strategy not in SUPPORTED_CRAWL_STRATEGIES for strategy in strategies):
+        raise ValueError("invalid_policy_strategy")
     return {
         "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
         "strategies": strategies,
@@ -196,6 +201,21 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
     return min(score, 1.0)
 
 
+def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
+    if (content_type or "").lower().startswith("text/"):
+        return _decode_body(body, content_type).strip()
+    return ""
+
+
+def _default_trafilatura_extractor(html: str, url: str) -> str:
+    try:
+        import trafilatura  # type: ignore[import-not-found]
+    except ImportError:
+        return _text_from_html(html)
+    extracted = trafilatura.extract(html, url=url)
+    return (extracted or "").strip()
+
+
 def _http_strategy_result(
     *,
     original_url: str,
@@ -203,6 +223,8 @@ def _http_strategy_result(
     strategy: str,
     policy: dict[str, Any],
     http_fetcher: HttpFetcher,
+    document_text_extractor: DocumentTextExtractor,
+    trafilatura_extractor: TrafilaturaExtractor,
 ) -> UniversalCrawlResult:
     started = time.monotonic()
     try:
@@ -212,7 +234,12 @@ def _http_strategy_result(
         body_text = _decode_body(response.body, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
-        text = _text_from_html(body_text) if is_html else body_text.strip()
+        if strategy == "DOCUMENT_EXTRACT":
+            text = document_text_extractor(response.body, content_type, response.final_url).strip()
+        elif strategy == "TRAFILATURA_EXTRACT" and is_html:
+            text = trafilatura_extractor(body_text, response.final_url).strip()
+        else:
+            text = _text_from_html(body_text) if is_html else body_text.strip()
         classification = classify_rendered_page(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
@@ -341,6 +368,8 @@ async def _execute_crawl_chain(
     policy: dict[str, Any],
     http_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
+    document_text_extractor: DocumentTextExtractor,
+    trafilatura_extractor: TrafilaturaExtractor,
 ) -> UniversalCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: UniversalCrawlResult | None = None
@@ -352,6 +381,8 @@ async def _execute_crawl_chain(
                 strategy=strategy,
                 policy=policy,
                 http_fetcher=http_fetcher,
+                document_text_extractor=document_text_extractor,
+                trafilatura_extractor=trafilatura_extractor,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -432,6 +463,8 @@ async def crawl_request(
     settings: CrawlerSettings | None = None,
     browser_worker: CrawlWorker | None = None,
     http_fetcher: HttpFetcher | None = None,
+    document_text_extractor: DocumentTextExtractor | None = None,
+    trafilatura_extractor: TrafilaturaExtractor | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
@@ -439,6 +472,8 @@ async def crawl_request(
         raise ValueError("batch_size_exceeded")
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
+    active_document_text_extractor = document_text_extractor or _default_document_text_extractor
+    active_trafilatura_extractor = trafilatura_extractor or _default_trafilatura_extractor
 
     immediate_results: dict[int, UniversalCrawlResult] = {}
     jobs: list[CrawlExecutionJob] = []
@@ -484,6 +519,8 @@ async def crawl_request(
             policy=policy,
             http_fetcher=fetcher,
             browser_worker=browser_worker,
+            document_text_extractor=active_document_text_extractor,
+            trafilatura_extractor=active_trafilatura_extractor,
         )
         return index, result
 
