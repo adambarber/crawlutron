@@ -5,15 +5,16 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urljoin, urlparse
 import uuid
 from collections.abc import Awaitable, Callable
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlparse
 from dataclasses import asdict, dataclass
 from html import unescape
 from typing import Any
 
 from .api_models import POLICY_SCHEMA_VERSION
-from .classify import classify_rendered_page
+from .classify import classify_rendered_page_with_evidence
 from .models import CrawlJob, CrawlResult, CrawlStrategyAttempt, DiscoveredLink, HttpFetchResult, RenderOptions, UniversalCrawlResult
 from .scheduler import DomainScheduler
 from .settings import CrawlerSettings
@@ -143,6 +144,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
             "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
             "challenge_wait_seconds": int(limits.get("challenge_wait_seconds", 15)),
+            "max_discovered_links": int(limits.get("max_discovered_links", 250)),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},
     }
@@ -203,18 +205,46 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
     return min(score, 1.0)
 
 
-def _extract_discovered_links(html: str | None, source_url: str | None) -> list[DiscoveredLink]:
+class _AnchorCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.anchors: list[dict[str, Any]] = []
+        self._current: dict[str, Any] | None = None
+        self._depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() == "a" and self._current is None:
+            self._current = {"attrs": {key.lower(): value or "" for key, value in attrs}, "text": []}
+            self._depth = 1
+        elif self._current is not None:
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._current is None:
+            return
+        self._depth -= 1
+        if tag.lower() == "a" or self._depth <= 0:
+            self.anchors.append(self._current)
+            self._current = None
+            self._depth = 0
+
+    def handle_data(self, data: str) -> None:
+        if self._current is not None:
+            self._current["text"].append(data)
+
+
+def _extract_discovered_links(html: str | None, source_url: str | None, *, max_links: int = 250) -> tuple[list[DiscoveredLink], int, bool]:
     if not html or not source_url:
-        return []
+        return [], 0, False
     source_host = (urlparse(source_url).hostname or "").lower()
+    collector = _AnchorCollector()
+    collector.feed(html)
     links: list[DiscoveredLink] = []
     seen: set[str] = set()
-    for anchor_match in re.finditer(r"<a\b(?P<attrs>[^>]*)>(?P<body>.*?)</a>", html, flags=re.IGNORECASE | re.DOTALL):
-        attrs = anchor_match.group("attrs")
-        href_match = re.search(r"\bhref\s*=\s*(['\"])(?P<href>.*?)\1", attrs, flags=re.IGNORECASE | re.DOTALL)
-        if not href_match:
-            continue
-        href = unescape(href_match.group("href").strip())
+    total_count = 0
+    for anchor in collector.anchors:
+        attrs = anchor["attrs"]
+        href = unescape(str(attrs.get("href", "")).strip())
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         normalized_url = urljoin(source_url, href)
@@ -224,20 +254,22 @@ def _extract_discovered_links(html: str | None, source_url: str | None) -> list[
         if normalized_url in seen:
             continue
         seen.add(normalized_url)
-        rel_match = re.search(r"\brel\s*=\s*(['\"])(?P<rel>.*?)\1", attrs, flags=re.IGNORECASE | re.DOTALL)
-        link_text = _text_from_html(anchor_match.group("body"))
+        total_count += 1
+        if len(links) >= max_links:
+            continue
+        text = re.sub(r"\s+", " ", unescape(" ".join(anchor["text"]))).strip()
         links.append(
             DiscoveredLink(
                 url=href,
                 normalized_url=normalized_url,
-                text=link_text,
-                rel=(rel_match.group("rel").split() if rel_match else []),
+                text=text,
+                rel=str(attrs.get("rel", "")).split(),
                 source_url=source_url,
                 host=parsed.hostname.lower(),
                 is_same_host=parsed.hostname.lower() == source_host,
             )
         )
-    return links
+    return links, total_count, total_count > len(links)
 
 
 def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
@@ -356,19 +388,27 @@ def _http_strategy_result(
             text = ""
         else:
             text = _text_from_html(body_text) if is_html else body_text.strip()
-        classification = classify_rendered_page(html, text)
+        classification, classification_evidence = classify_rendered_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
+            classification_evidence = [
+                {"classification": "access_denied", "signature": "403", "source": "http_status", "context": "HTTP 403"}
+            ]
         elif response.status_code == 404:
             classification = "not_found"
+            classification_evidence = [{"classification": "not_found", "signature": "404", "source": "http_status", "context": "HTTP 404"}]
         elif response.status_code == 410:
             classification = "gone"
+            classification_evidence = [{"classification": "gone", "signature": "410", "source": "http_status", "context": "HTTP 410"}]
         elif response.status_code == 429:
             classification = "rate_limited"
+            classification_evidence = [{"classification": "rate_limited", "signature": "429", "source": "http_status", "context": "HTTP 429"}]
         elif response.status_code >= 500:
             classification = "site_error"
+            classification_evidence = [{"classification": "site_error", "signature": str(response.status_code), "source": "http_status", "context": f"HTTP {response.status_code}"}]
         if strategy == "TRAFILATURA_EXTRACT" and not is_html and classification == "rendered":
             classification = "binary_no_text"
+            classification_evidence = [{"classification": "binary_no_text", "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
         status = _status_for_classification(classification)
         extraction_method = "http_html" if is_html else "http_body"
         if strategy == "DOCUMENT_EXTRACT":
@@ -376,7 +416,9 @@ def _http_strategy_result(
         elif strategy == "TRAFILATURA_EXTRACT":
             extraction_method = "trafilatura_extract"
         quality = _quality_score(status, classification, text, html, response.status_code)
-        discovered_links = _extract_discovered_links(html, response.final_url) if status == "success" else []
+        discovered_links, discovered_link_count, discovered_links_truncated = (
+            _extract_discovered_links(html, response.final_url, max_links=policy["limits"]["max_discovered_links"]) if status == "success" else ([], 0, False)
+        )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
@@ -401,6 +443,9 @@ def _http_strategy_result(
             text=text,
             extraction_method=extraction_method,
             quality_score=quality,
+            classification_evidence=classification_evidence,
+            discovered_link_count=discovered_link_count,
+            discovered_links_truncated=discovered_links_truncated,
             discovered_links=discovered_links,
             error=None if status == "success" else classification,
         )
@@ -453,7 +498,9 @@ async def _browser_strategy_result(
     result = await _call_worker(browser_worker, job)
     extraction_method = result.metadata.get("extraction_method") or "dom_text"
     quality = _quality_score(result.status, result.classification, result.text, result.html, None)
-    discovered_links = _extract_discovered_links(result.html, result.final_url) if result.status == "success" else []
+    discovered_links, discovered_link_count, discovered_links_truncated = (
+        _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"]) if result.status == "success" else ([], 0, False)
+    )
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status=result.status,
@@ -478,6 +525,9 @@ async def _browser_strategy_result(
         text=result.text,
         extraction_method=extraction_method,
         quality_score=quality,
+        classification_evidence=[],
+        discovered_link_count=discovered_link_count,
+        discovered_links_truncated=discovered_links_truncated,
         discovered_links=discovered_links,
         error=result.error,
     )

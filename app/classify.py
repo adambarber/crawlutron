@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 
 SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
@@ -26,15 +28,43 @@ SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def classify_rendered_page(html: str | None, text: str | None, *, title: str | None = None) -> str:
+    classification, _evidence = classify_rendered_page_with_evidence(html, text, title=title)
+    return classification
+
+
+def classify_rendered_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = _html_without_script_and_style(html).lower()
-    haystack = f"{visible_haystack}\n{html_haystack}"
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
-        return "binary_no_text"
+        return "binary_no_text", [
+            {
+                "classification": "binary_no_text",
+                "signature": "empty_visible_content",
+                "source": "visible_text",
+                "context": "",
+            }
+        ]
     for classification, signatures in SIGNATURES:
-        if any(signature in haystack for signature in signatures):
-            return classification
-    return "rendered"
+        for signature in signatures:
+            visible_index = visible_haystack.find(signature)
+            if visible_index >= 0:
+                return classification, [_evidence(classification, signature, "visible_text", visible_haystack, visible_index)]
+            html_index = html_haystack.find(signature)
+            if html_index >= 0:
+                return classification, [_evidence(classification, signature, "html_without_script_style", html_haystack, html_index)]
+    return "rendered", []
+
+
+def _evidence(classification: str, signature: str, source: str, haystack: str, index: int) -> dict[str, str]:
+    start = max(0, index - 80)
+    end = min(len(haystack), index + len(signature) + 120)
+    context = " ".join(haystack[start:end].split())
+    return {
+        "classification": classification,
+        "signature": signature,
+        "source": source,
+        "context": context,
+    }
 
 
 def _html_without_script_and_style(html: str | None) -> str:

@@ -83,6 +83,14 @@ class HttpFetchResult:
 
 
 @dataclass(frozen=True)
+class ClassificationEvidence:
+    classification: str
+    signature: str
+    source: str
+    context: str
+
+
+@dataclass(frozen=True)
 class CrawlStrategyAttempt:
     strategy: CrawlStrategyName
     status: ResultStatus
@@ -120,5 +128,8 @@ class UniversalCrawlResult:
     text: str | None
     extraction_method: str | None
     quality_score: float
+    classification_evidence: list[ClassificationEvidence] = field(default_factory=list)
+    discovered_link_count: int = 0
+    discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
     error: str | None = None

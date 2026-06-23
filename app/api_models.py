@@ -60,6 +60,7 @@ class CrawlPolicyLimits(BaseModel):
     timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds.")
     max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy.")
     challenge_wait_seconds: int = Field(15, ge=0, le=120, description="Browser challenge wait budget for headed/warmed browser flows.")
+    max_discovered_links: int = Field(250, ge=0, le=2000, description="Maximum structured discovered links returned per selected page. Link counts still report total discovered before truncation.")
 
 
 class CrawlPolicy(BaseModel):
@@ -77,6 +78,13 @@ class CrawlRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
+
+
+class ClassificationEvidence(BaseModel):
+    classification: str = Field(description="Classification selected by this matched evidence.")
+    signature: str = Field(description="Signature that matched the selected source bucket.")
+    source: str = Field(description="Evidence source bucket, such as visible_text, html_without_script_style, or http_status.")
+    context: str = Field("", description="Short normalized context around the matched signature.")
 
 
 class DiscoveredLink(BaseModel):
@@ -114,6 +122,9 @@ class CrawlResultModel(BaseModel):
     text: str | None = Field(None, description="Extracted text evidence when available.")
     extraction_method: str | None = Field(None, description="Extraction method such as http_html, dom_text, pdf_text, or trafilatura_extract.")
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score. HTTP 200 alone is not content success.")
+    classification_evidence: list[ClassificationEvidence] = Field(default_factory=list, description="Short evidence explaining the selected non-rendered classification, when a signature or HTTP status matched.")
+    discovered_link_count: int = Field(0, ge=0, description="Total number of links discovered before max_discovered_links truncation.")
+    discovered_links_truncated: bool = Field(False, description="True when discovered_links was truncated by policy limits.")
     discovered_links: list[DiscoveredLink] = Field(default_factory=list, description="Structured links extracted from the selected HTML or rendered DOM. The service reports links but does not enqueue them recursively.")
     error: str | None = Field(None, description="Stable machine-readable error detail for the selected result, if any.")
 

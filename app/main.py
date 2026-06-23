@@ -58,6 +58,9 @@ OUTPUT_FIELDS = [
     "text",
     "extraction_method",
     "quality_score",
+    "classification_evidence",
+    "discovered_link_count",
+    "discovered_links_truncated",
     "discovered_links",
     "error",
 ]
@@ -76,7 +79,7 @@ EXAMPLE_POLICIES: dict[str, dict[str, Any]] = {
     "browser_fallback": {
         "schema_version": POLICY_SCHEMA_VERSION,
         "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "BROWSER_HEADLESS"],
-        "limits": {"timeout_seconds": 30, "max_retries": 2},
+        "limits": {"timeout_seconds": 30, "max_retries": 2, "max_discovered_links": 250},
     },
     "headed_warmed_browser": {
         "schema_version": POLICY_SCHEMA_VERSION,
@@ -105,6 +108,7 @@ def capabilities_payload() -> dict[str, Any]:
             "timeout_seconds": settings.default_timeout_seconds,
             "max_retries": settings.default_max_retries,
             "challenge_wait_seconds": 15,
+            "max_discovered_links": 250,
             "global_concurrency": settings.global_concurrency,
             "per_domain_concurrency": settings.per_domain_concurrency,
             "per_domain_delay_ms": settings.per_domain_delay_ms,
@@ -132,10 +136,12 @@ def agent_hints_payload() -> dict[str, Any]:
             "Prefer direct transparent crawler HTTP for sites that allow it.",
             "Use browser strategies only when direct HTTP is blocked, incomplete, or requires rendering.",
             "Do not treat HTTP 200 as content success without checking classification and quality score.",
+            "Inspect classification_evidence before turning block classifications into host policy changes.",
             "Preserve raw evidence and provenance in downstream artifacts.",
             "Do not mutate host policy automatically from a crawl result.",
             "Use attempt history to generate reviewable policy suggestions.",
-            "Treat discovered_links as extraction output only; callers own frontier queueing, dedupe, and persistence.",
+            "Treat discovered_links as bounded extraction output only; callers own frontier queueing, dedupe, and persistence.",
+            "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher max_discovered_links limit.",
             "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
         ],
         "example_policies": EXAMPLE_POLICIES,
@@ -243,7 +249,8 @@ if FastAPI is not None:
         description=(
             "Executes the caller-provided strategy chain for one URL or a batch of URLs. "
             "The service records per-URL provenance, selected strategy, every attempted strategy, raw evidence, "
-            "classification, quality score, structured discovered links, and stable error details. Fallback stops at the first successful content result. "
+            "classification evidence, quality score, bounded structured discovered links, and stable error details. "
+            "Fallback stops at the first successful content result. "
             "The service reports discovered links but does not recursively enqueue them."
         ),
         responses={400: {"model": CrawlerError, "description": "Invalid crawl request."}},
