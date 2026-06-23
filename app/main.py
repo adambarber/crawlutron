@@ -127,6 +127,11 @@ def capabilities_payload() -> dict[str, Any]:
             "warmup": True,
             "request_profiles": True,
             "browser_profiles": True,
+            "captcha_solving": False,
+            "proxy_rotation": False,
+            "identity_rotation": False,
+            "credential_bypass": False,
+            "cloudflare_bypass": False,
             "robots_diagnostics": True,
             "sitemap_discovery": True,
             "feed_discovery": True,
@@ -153,6 +158,9 @@ def agent_hints_payload() -> dict[str, Any]:
             "Use attempt history to generate reviewable policy suggestions.",
             "Treat discovered_links as bounded extraction output only; callers own frontier queueing, dedupe, and persistence.",
             "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher max_discovered_links limit.",
+            "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, geolocation, or access-denied controls; report those outcomes as classifications and evidence.",
+            "Do not solve CAPTCHAs, do not rotate proxies, do not rotate identities, do not inject credentials, and do not continue after explicit denial.",
+            "Passive challenge waiting only observes whether a public page resolves within the configured timeout; it must not click, solve, outsource, or evade challenges.",
             "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
         ],
         "example_policies": EXAMPLE_POLICIES,
@@ -181,7 +189,9 @@ if FastAPI is not None:
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
             "Clients submit resolved crawl policies, inspect per-URL provenance, and use attempt history "
-            "to make reviewable policy suggestions rather than mutating host policy automatically."
+            "to make reviewable policy suggestions rather than mutating host policy automatically. "
+            "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall outcomes but does not bypass, solve, "
+            "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
         version=API_VERSION,
         contact={"name": "dev-stack local services"},
