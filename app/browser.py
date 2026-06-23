@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import time
+import urllib.request
 from collections.abc import Callable
 from typing import Any
 
@@ -18,6 +20,15 @@ TRANSIENT_CLASSIFICATIONS = {
     "dns_error",
     "unknown_error",
 }
+BLOCKED_CLASSIFICATIONS = {
+    "captcha_detected",
+    "bot_challenge_detected",
+    "access_denied",
+    "login_required",
+    "paywall_detected",
+    "rate_limited",
+}
+FAILED_CLASSIFICATIONS = {"not_found", "site_error", "gone", "binary_no_text"}
 
 
 class BrowserRenderer:
@@ -26,9 +37,19 @@ class BrowserRenderer:
         *,
         driver_factory: Callable[[], Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        challenge_wait_seconds: float | None = None,
+        pdf_text_extractor: Callable[[str], str] | None = None,
+        warmup_urls: list[str] | None = None,
     ) -> None:
         self._driver_factory = driver_factory or self._undetected_chrome_driver
         self._sleep = sleep
+        self._challenge_wait_seconds = (
+            float(os.environ.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", "15"))
+            if challenge_wait_seconds is None
+            else challenge_wait_seconds
+        )
+        self._pdf_text_extractor = pdf_text_extractor or self._extract_pdf_text
+        self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
 
     def render(self, url: str, options: RenderOptions) -> CrawlResult:
         started = time.monotonic()
@@ -42,17 +63,23 @@ class BrowserRenderer:
             try:
                 driver = self._driver_factory()
                 driver.set_page_load_timeout(options.timeout_seconds)
+                self._warmup_session(driver)
                 driver.get(url)
                 self._wait_for_ready_state(driver)
-                html = self._extract_html(driver) if options.include_html else None
-                text = self._extract_text(driver) if options.include_text else None
-                classification = classify_rendered_page(html, text)
-                status = "success" if classification == "rendered" else "blocked"
+                html, text, classification, challenge_resolved = self._extract_with_challenge_wait(driver, options)
+                extraction_method = "dom_text"
+                final_url = getattr(driver, "current_url", url)
+                if self._looks_like_pdf(final_url) and not (text or "").strip():
+                    text = self._pdf_text_extractor(final_url)
+                    html = html if options.include_html else None
+                    classification = classify_rendered_page(html, text, title=getattr(driver, "title", ""))
+                    extraction_method = "pdf_text"
+                status = self._status_for_classification(classification)
                 return CrawlResult(
                     url=url,
                     status=status,
                     classification=classification,  # type: ignore[arg-type]
-                    final_url=getattr(driver, "current_url", url),
+                    final_url=final_url,
                     html=html,
                     text=text,
                     attempts=attempts,
@@ -62,6 +89,8 @@ class BrowserRenderer:
                         "title": getattr(driver, "title", ""),
                         "content_length": len(html or ""),
                         "browser_reused": False,
+                        "challenge_resolved": challenge_resolved,
+                        "extraction_method": extraction_method,
                     },
                 )
             except TimeoutError as error:
@@ -83,6 +112,30 @@ class BrowserRenderer:
 
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
+    def _warmup_session(self, driver: Any) -> None:
+        for warmup_url in self._warmup_urls:
+            driver.get(warmup_url)
+            self._wait_for_ready_state(driver)
+
+    def _extract_with_challenge_wait(self, driver: Any, options: RenderOptions) -> tuple[str | None, str | None, str, bool]:
+        html = self._extract_html(driver) if options.include_html else None
+        text = self._extract_text(driver) if options.include_text else None
+        classification = classify_rendered_page(html, text, title=getattr(driver, "title", ""))
+        if classification != "bot_challenge_detected":
+            return html, text, classification, False
+
+        deadline = time.monotonic() + self._challenge_wait_seconds
+        while time.monotonic() < deadline:
+            self._sleep(1)
+            self._wait_for_ready_state(driver)
+            next_html = self._extract_html(driver) if options.include_html else None
+            next_text = self._extract_text(driver) if options.include_text else None
+            next_classification = classify_rendered_page(next_html, next_text, title=getattr(driver, "title", ""))
+            if next_classification != "bot_challenge_detected":
+                return next_html, next_text, next_classification, True
+            html, text, classification = next_html, next_text, next_classification
+        return html, text, classification, False
+
     def _wait_for_ready_state(self, driver: Any) -> None:
         for _ in range(10):
             state = driver.execute_script("return document.readyState")
@@ -101,6 +154,20 @@ class BrowserRenderer:
             return str(driver.execute_script("return document.body ? document.body.innerText : ''"))
         except Exception:
             return ""
+
+    def _extract_pdf_text(self, url: str) -> str:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            pdf_bytes = response.read()
+        completed = subprocess.run(
+            ["pdftotext", "-", "-"],
+            input=pdf_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ""
+        return completed.stdout.decode("utf-8", errors="replace").strip()
 
     def _failure_result(
         self,
@@ -131,7 +198,8 @@ class BrowserRenderer:
         chrome_binary = os.environ.get("BROWSER_CRAWLER_CHROME_BINARY", "/usr/bin/chromium")
         if chrome_binary:
             options.binary_location = chrome_binary
-        options.add_argument("--headless=new")
+        if self._headless_enabled():
+            options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
@@ -145,3 +213,22 @@ class BrowserRenderer:
         if version_main:
             kwargs["version_main"] = int(version_main)
         return uc.Chrome(**kwargs)
+
+    def _warmup_urls_from_env(self) -> list[str]:
+        value = os.environ.get("BROWSER_CRAWLER_WARMUP_URLS", "")
+        return [url.strip() for url in value.split(",") if url.strip()]
+
+    def _headless_enabled(self) -> bool:
+        return os.environ.get("BROWSER_CRAWLER_HEADLESS", "true").strip().lower() not in {"0", "false", "no", "off"}
+
+    def _looks_like_pdf(self, url: str) -> bool:
+        return url.split("?", 1)[0].lower().endswith(".pdf")
+
+    def _status_for_classification(self, classification: str) -> str:
+        if classification == "rendered":
+            return "success"
+        if classification in BLOCKED_CLASSIFICATIONS:
+            return "blocked"
+        if classification in FAILED_CLASSIFICATIONS:
+            return "failed"
+        return "blocked"

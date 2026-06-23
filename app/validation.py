@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
@@ -29,7 +29,15 @@ def normalize_public_http_url(url: str) -> str:
     netloc = host
     if parsed.port:
         netloc = f"{host}:{parsed.port}"
-    return urlunparse((parsed.scheme, netloc, parsed.path or "", parsed.params, parsed.query, ""))
+    path = _strip_source_colon(parsed.path or "")
+    query = _strip_source_colon(parsed.query)
+    if query:
+        query = urlencode(parse_qsl(query, keep_blank_values=True), doseq=True)
+    return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
+
+
+def _strip_source_colon(value: str) -> str:
+    return value[:-1] if value.endswith(":") else value
 
 
 def registrable_domain(url: str) -> str:
