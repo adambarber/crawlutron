@@ -5,6 +5,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin, urlparse
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -13,7 +14,7 @@ from typing import Any
 
 from .api_models import POLICY_SCHEMA_VERSION
 from .classify import classify_rendered_page
-from .models import CrawlJob, CrawlResult, CrawlStrategyAttempt, HttpFetchResult, RenderOptions, UniversalCrawlResult
+from .models import CrawlJob, CrawlResult, CrawlStrategyAttempt, DiscoveredLink, HttpFetchResult, RenderOptions, UniversalCrawlResult
 from .scheduler import DomainScheduler
 from .settings import CrawlerSettings
 from .validation import normalize_public_http_url, registrable_domain
@@ -202,6 +203,43 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
     return min(score, 1.0)
 
 
+def _extract_discovered_links(html: str | None, source_url: str | None) -> list[DiscoveredLink]:
+    if not html or not source_url:
+        return []
+    source_host = (urlparse(source_url).hostname or "").lower()
+    links: list[DiscoveredLink] = []
+    seen: set[str] = set()
+    for anchor_match in re.finditer(r"<a\b(?P<attrs>[^>]*)>(?P<body>.*?)</a>", html, flags=re.IGNORECASE | re.DOTALL):
+        attrs = anchor_match.group("attrs")
+        href_match = re.search(r"\bhref\s*=\s*(['\"])(?P<href>.*?)\1", attrs, flags=re.IGNORECASE | re.DOTALL)
+        if not href_match:
+            continue
+        href = unescape(href_match.group("href").strip())
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        normalized_url = urljoin(source_url, href)
+        parsed = urlparse(normalized_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        if normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        rel_match = re.search(r"\brel\s*=\s*(['\"])(?P<rel>.*?)\1", attrs, flags=re.IGNORECASE | re.DOTALL)
+        link_text = _text_from_html(anchor_match.group("body"))
+        links.append(
+            DiscoveredLink(
+                url=href,
+                normalized_url=normalized_url,
+                text=link_text,
+                rel=(rel_match.group("rel").split() if rel_match else []),
+                source_url=source_url,
+                host=parsed.hostname.lower(),
+                is_same_host=parsed.hostname.lower() == source_host,
+            )
+        )
+    return links
+
+
 def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
     normalized_content_type = (content_type or "").lower()
     if normalized_content_type.startswith("text/"):
@@ -314,6 +352,8 @@ def _http_strategy_result(
             text = document_text_extractor(response.body, content_type, response.final_url).strip()
         elif strategy == "TRAFILATURA_EXTRACT" and is_html:
             text = trafilatura_extractor(body_text, response.final_url).strip()
+        elif strategy == "TRAFILATURA_EXTRACT":
+            text = ""
         else:
             text = _text_from_html(body_text) if is_html else body_text.strip()
         classification = classify_rendered_page(html, text)
@@ -327,6 +367,8 @@ def _http_strategy_result(
             classification = "rate_limited"
         elif response.status_code >= 500:
             classification = "site_error"
+        if strategy == "TRAFILATURA_EXTRACT" and not is_html and classification == "rendered":
+            classification = "binary_no_text"
         status = _status_for_classification(classification)
         extraction_method = "http_html" if is_html else "http_body"
         if strategy == "DOCUMENT_EXTRACT":
@@ -334,6 +376,7 @@ def _http_strategy_result(
         elif strategy == "TRAFILATURA_EXTRACT":
             extraction_method = "trafilatura_extract"
         quality = _quality_score(status, classification, text, html, response.status_code)
+        discovered_links = _extract_discovered_links(html, response.final_url) if status == "success" else []
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
@@ -358,6 +401,7 @@ def _http_strategy_result(
             text=text,
             extraction_method=extraction_method,
             quality_score=quality,
+            discovered_links=discovered_links,
             error=None if status == "success" else classification,
         )
     except Exception as error:  # noqa: BLE001 - HTTP clients raise mixed network exceptions
@@ -409,6 +453,7 @@ async def _browser_strategy_result(
     result = await _call_worker(browser_worker, job)
     extraction_method = result.metadata.get("extraction_method") or "dom_text"
     quality = _quality_score(result.status, result.classification, result.text, result.html, None)
+    discovered_links = _extract_discovered_links(result.html, result.final_url) if result.status == "success" else []
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status=result.status,
@@ -433,6 +478,7 @@ async def _browser_strategy_result(
         text=result.text,
         extraction_method=extraction_method,
         quality_score=quality,
+        discovered_links=discovered_links,
         error=result.error,
     )
 

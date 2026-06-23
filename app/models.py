@@ -94,6 +94,17 @@ class CrawlStrategyAttempt:
 
 
 @dataclass(frozen=True)
+class DiscoveredLink:
+    url: str
+    normalized_url: str
+    text: str
+    rel: list[str]
+    source_url: str
+    host: str
+    is_same_host: bool
+
+
+@dataclass(frozen=True)
 class UniversalCrawlResult:
     original_url: str
     normalized_url: str | None
@@ -109,4 +120,5 @@ class UniversalCrawlResult:
     text: str | None
     extraction_method: str | None
     quality_score: float
+    discovered_links: list[DiscoveredLink] = field(default_factory=list)
     error: str | None = None

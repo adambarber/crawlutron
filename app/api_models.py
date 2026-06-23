@@ -79,6 +79,16 @@ class CrawlRequest(BaseModel):
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
 
 
+class DiscoveredLink(BaseModel):
+    url: str = Field(description="Raw href value observed on the selected page.")
+    normalized_url: str = Field(description="Absolute public HTTP(S) URL resolved against the selected page final URL.")
+    text: str = Field("", description="Visible anchor text after whitespace normalization.")
+    rel: list[str] = Field(default_factory=list, description="Anchor rel tokens, when present.")
+    source_url: str = Field(description="Final page URL where this link was discovered.")
+    host: str = Field(description="Host for the normalized URL.")
+    is_same_host: bool = Field(description="True when the discovered link host matches the source page host exactly.")
+
+
 class StrategyAttempt(BaseModel):
     strategy: CrawlStrategy = Field(description="Strategy attempted for this URL.")
     status: CrawlStatus = Field(description="Attempt-level status.")
@@ -104,6 +114,7 @@ class CrawlResultModel(BaseModel):
     text: str | None = Field(None, description="Extracted text evidence when available.")
     extraction_method: str | None = Field(None, description="Extraction method such as http_html, dom_text, pdf_text, or trafilatura_extract.")
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score. HTTP 200 alone is not content success.")
+    discovered_links: list[DiscoveredLink] = Field(default_factory=list, description="Structured links extracted from the selected HTML or rendered DOM. The service reports links but does not enqueue them recursively.")
     error: str | None = Field(None, description="Stable machine-readable error detail for the selected result, if any.")
 
 

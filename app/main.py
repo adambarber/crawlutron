@@ -40,7 +40,7 @@ STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.BROWSER_HEADLESS: "Chromium rendering in headless mode for JavaScript-dependent pages.",
     CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Chromium with configured warmup URLs for challenge-prone municipal systems.",
     CrawlStrategy.DOCUMENT_EXTRACT: "Document/body extraction for PDFs and non-HTML responses when text evidence is needed.",
-    CrawlStrategy.TRAFILATURA_EXTRACT: "Main-text extraction strategy for noisy HTML; currently exposed as policy surface and falls back to built-in text extraction.",
+    CrawlStrategy.TRAFILATURA_EXTRACT: "HTML-only main-text extraction strategy for noisy HTML. It does not parse PDF or binary documents; use DOCUMENT_EXTRACT for PDFs.",
 }
 
 OUTPUT_FIELDS = [
@@ -58,6 +58,7 @@ OUTPUT_FIELDS = [
     "text",
     "extraction_method",
     "quality_score",
+    "discovered_links",
     "error",
 ]
 
@@ -112,7 +113,9 @@ def capabilities_payload() -> dict[str, Any]:
             "headed_browser": True,
             "pdf_extraction": True,
             "direct_http": True,
-            "trafilatura": False,
+            "trafilatura": True,
+            "discovered_links": True,
+            "recursive_frontier": False,
             "warmup": True,
             "domain_aware_concurrency": True,
         },
@@ -132,6 +135,7 @@ def agent_hints_payload() -> dict[str, Any]:
             "Preserve raw evidence and provenance in downstream artifacts.",
             "Do not mutate host policy automatically from a crawl result.",
             "Use attempt history to generate reviewable policy suggestions.",
+            "Treat discovered_links as extraction output only; callers own frontier queueing, dedupe, and persistence.",
             "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
         ],
         "example_policies": EXAMPLE_POLICIES,
@@ -239,7 +243,8 @@ if FastAPI is not None:
         description=(
             "Executes the caller-provided strategy chain for one URL or a batch of URLs. "
             "The service records per-URL provenance, selected strategy, every attempted strategy, raw evidence, "
-            "classification, quality score, and stable error details. Fallback stops at the first successful content result."
+            "classification, quality score, structured discovered links, and stable error details. Fallback stops at the first successful content result. "
+            "The service reports discovered links but does not recursively enqueue them."
         ),
         responses={400: {"model": CrawlerError, "description": "Invalid crawl request."}},
         openapi_extra={
