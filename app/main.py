@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from local_service_logging import configure_service_logging
 
 from .api_models import (
     API_VERSION,
@@ -32,7 +35,16 @@ except ImportError:  # pragma: no cover - imported in container runtime
 
 
 settings = CrawlerSettings.from_mapping()
+logger = configure_service_logging(
+    service_name="browser-crawler",
+    log_level=settings.log_level,
+    log_file_path=settings.log_file_path,
+    log_file_max_bytes=settings.log_file_max_bytes,
+    log_file_backup_count=settings.log_file_backup_count,
+)
 renderer = BrowserRenderer()
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.setLevel(logger.level)
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
@@ -258,8 +270,11 @@ if FastAPI is not None:
     )
     async def render(payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            return await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
+            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
+            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
+            return result
         except ValueError as error:
+            logger.warning("render_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
 
     @app.post(
@@ -312,12 +327,15 @@ if FastAPI is not None:
         )
     ) -> dict[str, Any]:
         try:
-            return await crawl_request(
+            result = await crawl_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
                 browser_worker=lambda job: renderer.render(job.url, job.options),
             )
+            logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
+            return result
         except ValueError as error:
+            logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
 else:
     app = None

@@ -15,6 +15,8 @@ COPY requirements.txt /app/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install -r /app/requirements.txt
 COPY app /app/app
+COPY --from=shared local_service_logging.py /app/local_service_logging.py
+RUN mkdir -p /app/logs
 
 EXPOSE 8765
-CMD ["sh", "-c", "if [ \"${BROWSER_CRAWLER_HEADLESS:-true}\" = \"false\" ]; then Xvfb :99 -screen 0 1365x768x24 -nolisten tcp >/tmp/browser-crawler-xvfb.log 2>&1 & export DISPLAY=:99; fi; exec uvicorn app.main:app --host 0.0.0.0 --port 8765"]
+CMD ["sh", "-c", "if [ \"${BROWSER_CRAWLER_HEADLESS:-true}\" = \"false\" ]; then Xvfb :99 -screen 0 1365x768x24 -nolisten tcp >/tmp/browser-crawler-xvfb.log 2>&1 & export DISPLAY=:99; fi; exec uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level ${BROWSER_CRAWLER_LOG_LEVEL:-info}"]
