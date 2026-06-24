@@ -362,6 +362,129 @@ def _extract_discovered_links(html: str | None, source_url: str | None, *, max_l
     return links, total_count, total_count > len(links)
 
 
+def _format_extracted_document_text(text: str, *, source_url: str) -> str:
+    """Normalize scraper-extracted document text for downstream annotation.
+
+    This keeps agenda section numbers and item numbers attached to their related
+    text before the text is handed to downstream tools such as Label Studio.
+    """
+    lines = [_clean_document_line(line) for line in text.splitlines()]
+    records: list[str] = []
+    action_by_item: dict[str, str] = {}
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if not line:
+            index += 1
+            continue
+        if _is_document_non_item_section(line):
+            index += 1
+            continue
+
+        range_action_match = re.match(r"^(?P<start>\d+[a-z])\s*-\s*(?P<end>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE)
+        if range_action_match:
+            action = range_action_match.group("action").strip()
+            for item_number in _document_item_range(range_action_match.group("start"), range_action_match.group("end")):
+                action_by_item[item_number] = action
+            index += 1
+            continue
+
+        action_match = re.match(r"^(?P<number>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE)
+        if action_match and not line.endswith("."):
+            action_by_item[action_match.group("number").lower()] = action_match.group("action").strip()
+            index += 1
+            continue
+
+        section_match = re.match(r"^(?P<number>\d+)\.$", line)
+        if section_match:
+            title_index = _next_non_empty_document_line(lines, index + 1)
+            if title_index is not None and not _is_document_item_marker(lines[title_index]):
+                records.append(f"{section_match.group('number')}. {lines[title_index]}")
+                index = title_index + 1
+                continue
+
+        item_match = re.match(r"^(?P<number>\d+[a-z])\.$", line, flags=re.IGNORECASE)
+        if item_match:
+            number = item_match.group("number").lower()
+            title_lines, next_index = _collect_document_item_lines(lines, index + 1)
+            if title_lines:
+                action = action_by_item.get(number)
+                action_suffix = f" [Action: {action}]" if action else ""
+                records.append(f"{number}. {' '.join(title_lines)}{action_suffix}")
+                index = next_index
+                continue
+
+        records.append(line)
+        index += 1
+
+    return "\n\n".join(records).strip()
+
+
+def _clean_document_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line.replace("\f", " ")).strip()
+
+
+def _next_non_empty_document_line(lines: list[str], start: int) -> int | None:
+    for index in range(start, len(lines)):
+        if lines[index]:
+            return index
+    return None
+
+
+def _is_document_item_marker(line: str) -> bool:
+    return bool(re.match(r"^\d+[a-z]\.?$", line, flags=re.IGNORECASE))
+
+
+def _is_document_record_boundary(line: str) -> bool:
+    return bool(
+        re.match(r"^\d+\.$", line)
+        or re.match(r"^\d+[a-z]\.?$", line, flags=re.IGNORECASE)
+        or re.match(r"^\d+[a-z]\s+.+$", line, flags=re.IGNORECASE)
+        or _is_document_non_item_section(line)
+        or line.lower() == "attachments"
+    )
+
+
+def _is_document_non_item_section(line: str) -> bool:
+    return line.upper().startswith("PUBLIC PARTICIPATION")
+
+
+def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str], int]:
+    title_lines: list[str] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        if not line:
+            index += 1
+            continue
+        numbered_continuation = re.match(r"^\d+\.\s+(?P<text>.+)$", line)
+        if numbered_continuation:
+            title_lines.append(numbered_continuation.group("text"))
+            index += 1
+            continue
+        if re.match(r"^\d+\.$", line):
+            next_index = _next_non_empty_document_line(lines, index + 1)
+            if next_index is not None and not _is_document_non_item_section(lines[next_index]):
+                title_lines.append(lines[next_index])
+                index = next_index + 1
+                continue
+            break
+        if _is_document_record_boundary(line):
+            break
+        title_lines.append(line)
+        index += 1
+    return title_lines, index
+
+
+def _document_item_range(start: str, end: str) -> list[str]:
+    start_match = re.match(r"^(\d+)([a-z])$", start.lower())
+    end_match = re.match(r"^(\d+)([a-z])$", end.lower())
+    if not start_match or not end_match or start_match.group(1) != end_match.group(1):
+        return [start.lower(), end.lower()]
+    prefix = start_match.group(1)
+    return [f"{prefix}{chr(code)}" for code in range(ord(start_match.group(2)), ord(end_match.group(2)) + 1)]
+
+
 def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
     normalized_content_type = (content_type or "").lower()
     if normalized_content_type.startswith("text/"):
@@ -541,7 +664,7 @@ def _http_strategy_result(
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
         if strategy == "DOCUMENT_EXTRACT":
-            text = document_text_extractor(response.body, content_type, response.final_url).strip()
+            text = _format_extracted_document_text(document_text_extractor(response.body, content_type, response.final_url), source_url=response.final_url)
         elif strategy == "TRAFILATURA_EXTRACT" and is_html:
             text = trafilatura_extractor(body_text, response.final_url).strip()
         elif strategy == "TRAFILATURA_EXTRACT":
