@@ -417,7 +417,48 @@ def _format_extracted_document_text(text: str, *, source_url: str) -> str:
         records.append(line)
         index += 1
 
-    return "\n\n".join(records).strip()
+    return "\n\n".join(_merge_document_paragraph_records(records)).strip()
+
+
+def _merge_document_paragraph_records(records: list[str]) -> list[str]:
+    merged: list[str] = []
+    for record in records:
+        if merged and _should_join_document_paragraph(merged[-1], record):
+            merged[-1] = _join_document_paragraph_lines(merged[-1], record)
+            continue
+        merged.append(record)
+    return merged
+
+
+def _should_join_document_paragraph(previous: str, current: str) -> bool:
+    if _is_numbered_document_record(previous) or _is_numbered_document_record(current):
+        return False
+    if _looks_like_document_heading(previous) or _looks_like_document_heading(current):
+        return False
+    if re.match(r"^[,;:.!?)]", current):
+        return True
+    if not re.search(r"[.!?:;)]$", previous) and _looks_like_document_prose(previous) and _looks_like_document_prose(current):
+        return True
+    return _looks_like_document_prose(previous) and _looks_like_document_prose(current) and current[:1].islower()
+
+
+def _join_document_paragraph_lines(previous: str, current: str) -> str:
+    if re.match(r"^[,;:.!?)]", current):
+        return f"{previous}{current[0]} {current[1:].lstrip()}"
+    return f"{previous} {current}"
+
+
+def _looks_like_document_prose(record: str) -> bool:
+    return bool(re.search(r"[a-z]", record)) and len(record.split()) >= 3
+
+
+def _looks_like_document_heading(record: str) -> bool:
+    letters = re.sub(r"[^A-Za-z]", "", record)
+    return bool(letters) and letters.upper() == letters and len(record.split()) <= 8
+
+
+def _is_numbered_document_record(record: str) -> bool:
+    return bool(re.match(r"^\d+[a-z]?\.\s", record, flags=re.IGNORECASE))
 
 
 def _clean_document_line(line: str) -> str:
