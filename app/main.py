@@ -283,11 +283,20 @@ if FastAPI is not None:
         tags=["Crawler"],
         summary="Execute a policy-driven crawl",
         description=(
-            "Executes the caller-provided strategy chain for one URL or a batch of URLs. "
-            "The service records per-URL provenance, selected strategy, every attempted strategy, raw evidence, "
-            "classification evidence, quality score, bounded structured discovered links, and stable error details. "
-            "Fallback stops at the first successful content result. "
-            "The service reports discovered links but does not recursively enqueue them."
+            "Policy is the caller-controlled execution plan for one URL or a batch of URLs. "
+            "Use policy.strategies to choose the ordered fallback chain; strategies run in order, the service records "
+            "every attempted strategy, and fallback stops at the first successful content result. Available strategy "
+            "options are HTTP_DECLARED_CRAWLER for transparent direct HTTP, HTTP_SITE_COMPAT for browser-like direct "
+            "HTTP headers, BROWSER_HEADLESS for headless Chromium rendering, BROWSER_HEADED_WARMED for headed Chromium "
+            "with warmup URLs, DOCUMENT_EXTRACT for PDF/non-HTML text extraction, and TRAFILATURA_EXTRACT for HTML "
+            "main-text extraction only. Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
+            "and max_discovered_links; omit limits to use defaults from /v1/capabilities. Use request_profile for "
+            "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "
+            "per-host cookies. Use browser_profile for browser state, viewport, and resource_mode. Use discovery for "
+            "robots, sitemaps, and feeds diagnostics. The service records per-URL provenance, selected strategy, raw "
+            "evidence, classification evidence, quality score, bounded discovered links, and stable error details. "
+            "It reports discovered links but does not recursively enqueue them, and it classifies denial/challenge "
+            "outcomes without CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
         ),
         responses={400: {"model": CrawlerError, "description": "Invalid crawl request."}},
         openapi_extra={

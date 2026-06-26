@@ -62,24 +62,24 @@ class CrawlStatus(str, Enum):
 
 
 class CrawlPolicyLimits(BaseModel):
-    timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds.")
-    max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy.")
-    challenge_wait_seconds: int = Field(15, ge=0, le=120, description="Browser challenge wait budget for headed/warmed browser flows.")
-    max_discovered_links: int = Field(250, ge=0, le=2000, description="Maximum structured discovered links returned per selected page. Link counts still report total discovered before truncation.")
+    timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
+    max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
+    challenge_wait_seconds: int = Field(15, ge=0, le=120, description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.")
+    max_discovered_links: int = Field(250, ge=0, le=2000, description="Bounded maximum structured discovered links returned per selected page. Default: 250. Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.")
 
 
 class CrawlPolicy(BaseModel):
-    schema_version: str = Field(POLICY_SCHEMA_VERSION, description="Caller-resolved policy schema version.")
+    schema_version: str = Field(POLICY_SCHEMA_VERSION, description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.")
     strategies: list[CrawlStrategy] = Field(
         default_factory=lambda: [CrawlStrategy.HTTP_DECLARED_CRAWLER, CrawlStrategy.BROWSER_HEADLESS],
         min_length=1,
-        description="Ordered execution chain. The service records every attempted strategy and stops at the first successful content result.",
+        description="Ordered execution chain. Default: HTTP_DECLARED_CRAWLER then BROWSER_HEADLESS. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available options: HTTP_DECLARED_CRAWLER (transparent direct HTTP), HTTP_SITE_COMPAT (browser-like direct HTTP headers), BROWSER_HEADLESS (headless Chromium rendering), BROWSER_HEADED_WARMED (headed Chromium with warmup URLs), DOCUMENT_EXTRACT (PDF/non-HTML text extraction), TRAFILATURA_EXTRACT (HTML main-text extraction only).",
     )
-    limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan.")
-    headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies.")
-    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile, including user-agent family, language, fetch metadata, and benign per-host cookies.")
-    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile, viewport, resource mode, and benign cookie jar hints.")
-    discovery: dict[str, bool] = Field(default_factory=dict, description="Optional robots, sitemap, and feed discovery toggles. Discovery output is diagnostic and non-recursive.")
+    limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.")
+    headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.")
+    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_SITE_COMPAT. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
+    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Chromium window size; reduced resource mode disables images.")
+    discovery: dict[str, bool] = Field(default_factory=dict, description="Optional discovery toggles: robots, sitemaps, and feeds. Discovery output is diagnostic and non-recursive; the service reports discovered links and metadata but callers own frontier queueing, dedupe, and persistence.")
 
 
 class CrawlRequest(BaseModel):

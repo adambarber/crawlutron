@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 import urllib.request
@@ -222,10 +223,35 @@ class BrowserRenderer:
         driver_path = os.environ.get("BROWSER_CRAWLER_CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
         if driver_path:
             kwargs["driver_executable_path"] = driver_path
-        version_main = os.environ.get("BROWSER_CRAWLER_CHROME_VERSION_MAIN", "149")
-        if version_main:
-            kwargs["version_main"] = int(version_main)
+        version_main = self._chrome_version_main(chrome_binary)
+        if version_main is not None:
+            kwargs["version_main"] = version_main
         return uc.Chrome(**kwargs)
+
+    def _chrome_version_main(self, chrome_binary: str) -> int | None:
+        configured_version = os.environ.get("BROWSER_CRAWLER_CHROME_VERSION_MAIN", "").strip()
+        if configured_version:
+            return int(configured_version)
+
+        if not chrome_binary:
+            return None
+
+        try:
+            completed = subprocess.run(
+                [chrome_binary, "--version"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return None
+
+        version_output = f"{completed.stdout}\n{completed.stderr}"
+        match = re.search(r"\b(\d+)\.\d+\.\d+\.\d+\b", version_output)
+        if match is None:
+            return None
+        return int(match.group(1))
 
     def _warmup_urls_from_env(self) -> list[str]:
         value = os.environ.get("BROWSER_CRAWLER_WARMUP_URLS", "")
