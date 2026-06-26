@@ -21,7 +21,7 @@ class CrawlerSettings:
     respect_robots: bool = True
     allowed_hosts: str = ""
     denied_hosts: str = ""
-    log_level: str = "INFO"
+    log_level: str = "info"
     log_file_path: str = "/app/logs/browser-crawler.jsonl"
     log_file_max_bytes: int = 10 * 1024 * 1024
     log_file_backup_count: int = 3
