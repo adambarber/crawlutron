@@ -17,6 +17,7 @@ from .api_models import (
     CrawlResponse,
     CrawlStrategy,
     DiscoveryResponse,
+    ReadinessResponse,
 )
 from .browser import BrowserRenderer
 from .service import crawl_request, render_request
@@ -180,6 +181,8 @@ def capabilities_payload() -> dict[str, Any]:
             "adaptive_retry": True,
             "runtime_diagnostics": True,
             "domain_aware_concurrency": True,
+            "readiness_endpoint": True,
+            "event_loop_thread_offload": True,
         },
         "openapi_url": "/openapi.json",
         "swagger_ui_url": "/docs",
@@ -191,6 +194,9 @@ def agent_hints_payload() -> dict[str, Any]:
         "service": "browser-crawler",
         "strategies": {strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()},
         "guidance": [
+            "Use GET /health for lightweight process liveness and Docker healthchecks.",
+            "Use GET /ready for crawl capacity/readiness; HTTP 503 means saturated backpressure, not necessarily crashed.",
+            "Long direct HTTP, document extraction, Trafilatura, and synchronous browser work are offloaded from the FastAPI event loop so liveness can stay responsive during crawls.",
             "Prefer direct transparent crawler HTTP for sites that allow it.",
             "Use browser strategies only when direct HTTP is blocked, incomplete, or requires rendering.",
             "Do not treat HTTP 200 as content success without checking classification and quality score.",
@@ -220,10 +226,12 @@ def discovery_payload() -> dict[str, Any]:
         "links": {
             "openapi": "/openapi.json",
             "swagger_ui": "/docs",
+            "liveness": "/health",
+            "readiness": "/ready",
             "capabilities": "/v1/capabilities",
             "agent_hints": "/v1/agent-hints",
         },
-        "recommended_endpoints": ["GET /health", "GET /v1/capabilities", "GET /v1/agent-hints", "POST /v1/crawl", "POST /v1/render"],
+        "recommended_endpoints": ["GET /health", "GET /ready", "GET /v1/capabilities", "GET /v1/agent-hints", "POST /v1/crawl", "POST /v1/render"],
         "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",
     }
 
@@ -233,6 +241,9 @@ if FastAPI is not None:
         title="Browser Crawler Execution Service",
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
+            "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
+            "saturation without implying process death. Blocking direct HTTP, document extraction, Trafilatura, "
+            "and synchronous browser work run off the FastAPI event loop so liveness stays responsive during crawls. "
             "Clients submit resolved crawl policies, inspect per-URL provenance, and use attempt history "
             "to make reviewable policy suggestions rather than mutating host policy automatically. "
             "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall outcomes but does not bypass, solve, "
@@ -242,7 +253,7 @@ if FastAPI is not None:
         contact={"name": "dev-stack local services"},
         license_info={"name": "Local development service"},
         openapi_tags=[
-            {"name": "Health", "description": "Liveness endpoints for local orchestration."},
+            {"name": "Health", "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration."},
             {"name": "Discovery", "description": "Machine-readable service capabilities and AI agent guidance."},
             {"name": "Crawler", "description": "Browser render and universal policy-driven crawl execution endpoints."},
         ],
@@ -259,11 +270,23 @@ if FastAPI is not None:
             },
         )
 
-    @app.get("/health", tags=["Health"], summary="Service liveness check")
+    @app.get(
+        "/health",
+        tags=["Health"],
+        summary="Service liveness check",
+        description="Lightweight process liveness endpoint used by Docker healthchecks. It does not inspect crawl saturation or start a browser.",
+    )
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/ready", tags=["Health"], summary="Service readiness check")
+    @app.get(
+        "/ready",
+        response_model=ReadinessResponse,
+        tags=["Health"],
+        summary="Service readiness check",
+        description="Reports active crawl load and configured capacity. Returns HTTP 503 when crawl work is saturated; this is backpressure, not a liveness failure.",
+        responses={503: {"model": ReadinessResponse, "description": "Crawler is saturated but the process is alive."}},
+    )
     async def ready() -> JSONResponse:
         payload = readiness_state.snapshot()
         return JSONResponse(status_code=503 if payload["saturated"] else 200, content=payload)

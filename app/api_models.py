@@ -151,6 +151,13 @@ class CrawlerError(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict, description="Optional structured error details.")
 
 
+class ReadinessResponse(BaseModel):
+    status: str = Field(description="Capacity state: ready below saturation, saturated at configured active crawl capacity.")
+    active_requests: int = Field(description="Currently active /v1/crawl and /v1/render requests tracked by the service.")
+    max_active_requests: int = Field(description="Configured active request capacity, derived from global crawler concurrency.")
+    saturated: bool = Field(description="True when active crawl work is at capacity; callers should treat HTTP 503 as backpressure, not process death.")
+
+
 class CapabilitiesResponse(BaseModel):
     service: str
     version: str
