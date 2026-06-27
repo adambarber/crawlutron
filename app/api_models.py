@@ -131,7 +131,7 @@ class CrawlResultModel(BaseModel):
     extraction_method: str | None = Field(None, description="Extraction method such as http_html, dom_text, pdf_text, or trafilatura_extract.")
     quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score. HTTP 200 alone is not content success.")
     classification_evidence: list[ClassificationEvidence] = Field(default_factory=list, description="Short evidence explaining the selected non-rendered classification, when a signature or HTTP status matched.")
-    diagnostics: dict[str, Any] = Field(default_factory=dict, description="Structured diagnostics such as request profile, robots/sitemap/feed discovery, retry/backoff, runtime, and content completeness metrics.")
+    diagnostics: dict[str, Any] = Field(default_factory=dict, description="Structured diagnostics such as request profile, robots/sitemap/feed discovery, retry/backoff, runtime, content completeness metrics, frames, and forms. Frame diagnostics report legacy frameset/iframe URLs; form diagnostics report metadata and controls without submitting forms.")
     discovered_link_count: int = Field(0, ge=0, description="Total number of links discovered before max_discovered_links truncation.")
     discovered_links_truncated: bool = Field(False, description="True when discovered_links was truncated by policy limits.")
     discovered_links: list[DiscoveredLink] = Field(default_factory=list, description="Structured links extracted from the selected HTML or rendered DOM. The service reports links but does not enqueue them recursively.")

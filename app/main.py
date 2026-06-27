@@ -299,9 +299,11 @@ if FastAPI is not None:
             "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "
             "per-host cookies. Use browser_profile for browser state, viewport, and resource_mode. Use discovery for "
             "robots, sitemaps, and feeds diagnostics. The service records per-URL provenance, selected strategy, raw "
-            "evidence, classification evidence, quality score, bounded discovered links, and stable error details. "
-            "It reports discovered links but does not recursively enqueue them, and it classifies denial/challenge "
-            "outcomes without CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
+            "evidence, classification evidence, quality score, bounded discovered links, diagnostics.frames for "
+            "legacy frameset/iframe URLs, diagnostics.forms for form metadata without submitting forms, and stable "
+            "error details. It reports discovered links but does not recursively enqueue them; callers must preserve "
+            "form/search state before enqueueing pagination URLs. It classifies denial/challenge outcomes without "
+            "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
         ),
         responses={400: {"model": CrawlerError, "description": "Invalid crawl request."}},
         openapi_extra={
