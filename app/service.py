@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import re
 import subprocess
 import time
@@ -96,10 +98,9 @@ def _disallowed_result(index_url: tuple[int, str], classification: str, elapsed_
 
 
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
-    result = worker(job)
-    if hasattr(result, "__await__"):
-        return await result  # type: ignore[misc]
-    return result  # type: ignore[return-value]
+    if inspect.iscoroutinefunction(worker):
+        return await worker(job)  # type: ignore[misc]
+    return await asyncio.to_thread(worker, job)
 
 
 def _result_dict(result: CrawlResult) -> dict[str, Any]:
@@ -1040,7 +1041,8 @@ async def _execute_crawl_chain(
     last_result: UniversalCrawlResult | None = None
     for strategy in policy["strategies"]:
         if strategy in HTTP_STRATEGIES:
-            result = _http_strategy_result(
+            result = await asyncio.to_thread(
+                _http_strategy_result,
                 original_url=original_url,
                 normalized_url=normalized_url,
                 strategy=strategy,

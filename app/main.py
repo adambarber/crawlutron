@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from local_service_logging import configure_service_logging
@@ -34,6 +35,32 @@ except ImportError:  # pragma: no cover - imported in container runtime
     RequestValidationError = Exception  # type: ignore[assignment]
 
 
+class ReadinessState:
+    def __init__(self, *, max_active_requests: int) -> None:
+        self._max_active_requests = max(1, max_active_requests)
+        self._active_requests = 0
+        self._lock = threading.Lock()
+
+    def begin_request(self) -> None:
+        with self._lock:
+            self._active_requests += 1
+
+    def end_request(self) -> None:
+        with self._lock:
+            self._active_requests = max(0, self._active_requests - 1)
+
+    def snapshot(self) -> dict[str, int | bool | str]:
+        with self._lock:
+            active_requests = self._active_requests
+        saturated = active_requests >= self._max_active_requests
+        return {
+            "status": "saturated" if saturated else "ready",
+            "active_requests": active_requests,
+            "max_active_requests": self._max_active_requests,
+            "saturated": saturated,
+        }
+
+
 settings = CrawlerSettings.from_mapping()
 logger = configure_service_logging(
     service_name="browser-crawler",
@@ -43,6 +70,7 @@ logger = configure_service_logging(
     log_file_backup_count=settings.log_file_backup_count,
 )
 renderer = BrowserRenderer()
+readiness_state = ReadinessState(max_active_requests=settings.global_concurrency)
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
 
@@ -235,6 +263,11 @@ if FastAPI is not None:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/ready", tags=["Health"], summary="Service readiness check")
+    async def ready() -> JSONResponse:
+        payload = readiness_state.snapshot()
+        return JSONResponse(status_code=503 if payload["saturated"] else 200, content=payload)
+
     @app.get(
         "/v1/capabilities",
         response_model=CapabilitiesResponse,
@@ -274,6 +307,7 @@ if FastAPI is not None:
         responses={400: {"model": CrawlerError, "description": "Invalid render request."}},
     )
     async def render(payload: dict[str, Any]) -> dict[str, Any]:
+        readiness_state.begin_request()
         try:
             result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
             logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
@@ -281,6 +315,8 @@ if FastAPI is not None:
         except ValueError as error:
             logger.warning("render_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
+        finally:
+            readiness_state.end_request()
 
     @app.post(
         "/v1/crawl",
@@ -342,6 +378,7 @@ if FastAPI is not None:
             ],
         )
     ) -> dict[str, Any]:
+        readiness_state.begin_request()
         try:
             result = await crawl_request(
                 payload.model_dump(exclude_none=True),
@@ -353,5 +390,7 @@ if FastAPI is not None:
         except ValueError as error:
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
+        finally:
+            readiness_state.end_request()
 else:
     app = None
