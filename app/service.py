@@ -241,6 +241,8 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
         return 0.0
     text_length = len((text or "").strip())
     html_length = len((html or "").strip())
+    normalized_html = (html or "").lower()
+    has_frameset = "<frameset" in normalized_html or "<frame" in normalized_html
     score = 0.45
     if http_status and 200 <= http_status < 300:
         score += 0.2
@@ -250,17 +252,24 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
         score += 0.15
     if html_length >= 40:
         score += 0.05
+    if has_frameset and text_length < 40:
+        score = min(score, 0.4)
     return min(score, 1.0)
 
 
-def _content_metrics(text: str | None, html: str | None) -> dict[str, int | float]:
+def _content_metrics(text: str | None, html: str | None) -> dict[str, int | float | bool]:
     visible_text_length = len((text or "").strip())
     html_length = len((html or "").strip())
     link_count = len(re.findall(r"<a\b", html or "", flags=re.IGNORECASE))
+    frame_count = len(re.findall(r"<iframe\b|<frame\b", html or "", flags=re.IGNORECASE))
+    form_count = len(re.findall(r"<form\b", html or "", flags=re.IGNORECASE))
     return {
         "visible_text_length": visible_text_length,
         "html_length": html_length,
         "link_count": link_count,
+        "frame_count": frame_count,
+        "form_count": form_count,
+        "has_frameset": bool(re.search(r"<frameset\b", html or "", flags=re.IGNORECASE)),
         "text_to_html_ratio": round(visible_text_length / html_length, 4) if html_length else 0.0,
     }
 
@@ -321,6 +330,135 @@ class _AnchorCollector(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._current is not None:
             self._current["text"].append(data)
+
+
+class _FrameCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.frames: list[dict[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        if normalized_tag not in {"frame", "iframe"}:
+            return
+        attr_map = {key.lower(): value or "" for key, value in attrs}
+        src = unescape(attr_map.get("src", "")).strip()
+        if not src:
+            return
+        self.frames.append(
+            {
+                "url": src,
+                "name": attr_map.get("name", ""),
+                "title": attr_map.get("title", ""),
+            }
+        )
+
+
+class _FormCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.forms: list[dict[str, Any]] = []
+        self._current: dict[str, Any] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized_tag = tag.lower()
+        attr_map = {key.lower(): value or "" for key, value in attrs}
+        if normalized_tag == "form":
+            self._current = {"attrs": attr_map, "controls": []}
+            return
+        if self._current is None:
+            return
+        if normalized_tag == "input":
+            control_type = (attr_map.get("type") or "text").lower()
+            self._current["controls"].append(
+                {
+                    "tag": "input",
+                    "type": control_type,
+                    "name": attr_map.get("name", ""),
+                    "id": attr_map.get("id", ""),
+                    "value": attr_map.get("value", ""),
+                }
+            )
+        elif normalized_tag in {"select", "textarea", "button"}:
+            self._current["controls"].append(
+                {
+                    "tag": normalized_tag,
+                    "type": attr_map.get("type", ""),
+                    "name": attr_map.get("name", ""),
+                    "id": attr_map.get("id", ""),
+                    "value": attr_map.get("value", ""),
+                }
+            )
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "form" and self._current is not None:
+            self.forms.append(self._current)
+            self._current = None
+
+
+def _extract_frames(html: str | None, source_url: str | None) -> list[dict[str, Any]]:
+    if not html or not source_url:
+        return []
+    source_host = (urlparse(source_url).hostname or "").lower()
+    collector = _FrameCollector()
+    collector.feed(html)
+    frames: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for frame in collector.frames:
+        normalized_url = urljoin(source_url, frame["url"])
+        parsed = urlparse(normalized_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            continue
+        if normalized_url in seen:
+            continue
+        seen.add(normalized_url)
+        frames.append(
+            {
+                "url": frame["url"],
+                "normalized_url": normalized_url,
+                "name": frame["name"],
+                "title": frame["title"],
+                "source_url": source_url,
+                "host": parsed.hostname.lower(),
+                "is_same_host": parsed.hostname.lower() == source_host,
+            }
+        )
+    return frames
+
+
+def _extract_forms(html: str | None, source_url: str | None) -> list[dict[str, Any]]:
+    if not html or not source_url:
+        return []
+    collector = _FormCollector()
+    collector.feed(html)
+    forms: list[dict[str, Any]] = []
+    for form in collector.forms:
+        attrs = form["attrs"]
+        action = unescape(str(attrs.get("action", "")).strip())
+        normalized_action = urljoin(source_url, action) if action else source_url
+        forms.append(
+            {
+                "method": (attrs.get("method") or "GET").upper(),
+                "action": action,
+                "normalized_action": normalized_action,
+                "target": attrs.get("target", ""),
+                "name": attrs.get("name", ""),
+                "id": attrs.get("id", ""),
+                "controls": form["controls"],
+            }
+        )
+    return forms
+
+
+def _html_diagnostics(html: str | None, source_url: str | None) -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {}
+    frames = _extract_frames(html, source_url)
+    forms = _extract_forms(html, source_url)
+    if frames:
+        diagnostics["frames"] = frames
+    if forms:
+        diagnostics["forms"] = forms
+    return diagnostics
 
 
 def _extract_discovered_links(html: str | None, source_url: str | None, *, max_links: int = 250) -> tuple[list[DiscoveredLink], int, bool]:
@@ -746,6 +884,7 @@ def _http_strategy_result(
             "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
             "content_metrics": _content_metrics(text, html),
         }
+        diagnostics.update(_html_diagnostics(html, response.final_url))
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
@@ -878,6 +1017,7 @@ async def _browser_strategy_result(
             "browser_profile": policy.get("browser_profile") or {},
             "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
             "content_metrics": _content_metrics(result.text, result.html),
+            **_html_diagnostics(result.html, result.final_url),
         },
         discovered_link_count=discovered_link_count,
         discovered_links_truncated=discovered_links_truncated,
