@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from typing import Any
@@ -11,14 +12,17 @@ from .api_models import (
     POLICY_SCHEMA_VERSION,
     AgentHintsResponse,
     CapabilitiesResponse,
+    CondensedCrawlResponse,
     CrawlClassification,
     CrawlerError,
     CrawlRequest,
     CrawlResponse,
     CrawlStrategy,
     DiscoveryResponse,
+    FirecrawlMetadata,
     ReadinessResponse,
 )
+from .service import extract_firecrawl_format
 from .browser import BrowserRenderer
 from .service import crawl_request, render_request
 from .settings import CrawlerSettings
@@ -78,8 +82,9 @@ uvicorn_access_logger.setLevel(logger.level)
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
     CrawlStrategy.HTTP_SITE_COMPAT: "Direct HTTP using browser-like compatibility headers before escalating to browser rendering.",
-    CrawlStrategy.BROWSER_HEADLESS: "Chromium rendering in headless mode for JavaScript-dependent pages.",
-    CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Chromium with configured warmup URLs for challenge-prone municipal systems.",
+    CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi with chrome124 impersonation for WAF/Cloudflare bypass.",
+    CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",
+    CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",
     CrawlStrategy.DOCUMENT_EXTRACT: "Document/body extraction for PDFs and non-HTML responses when text evidence is needed.",
     CrawlStrategy.TRAFILATURA_EXTRACT: "HTML-only main-text extraction strategy for noisy HTML. It does not parse PDF or binary documents; use DOCUMENT_EXTRACT for PDFs.",
 }
@@ -174,7 +179,7 @@ def capabilities_payload() -> dict[str, Any]:
             "proxy_rotation": False,
             "identity_rotation": False,
             "credential_bypass": False,
-            "cloudflare_bypass": False,
+            "cloudflare_bypass": True,
             "robots_diagnostics": True,
             "sitemap_discovery": True,
             "feed_discovery": True,
@@ -343,7 +348,7 @@ if FastAPI is not None:
 
     @app.post(
         "/v1/crawl",
-        response_model=CrawlResponse,
+        response_model=CondensedCrawlResponse,
         tags=["Crawler"],
         summary="Execute a policy-driven crawl",
         description=(
@@ -351,9 +356,10 @@ if FastAPI is not None:
             "Use policy.strategies to choose the ordered fallback chain; strategies run in order, the service records "
             "every attempted strategy, and fallback stops at the first successful content result. Available strategy "
             "options are HTTP_DECLARED_CRAWLER for transparent direct HTTP, HTTP_SITE_COMPAT for browser-like direct "
-            "HTTP headers, BROWSER_HEADLESS for headless Chromium rendering, BROWSER_HEADED_WARMED for headed Chromium "
-            "with warmup URLs, DOCUMENT_EXTRACT for PDF/non-HTML text extraction, and TRAFILATURA_EXTRACT for HTML "
-            "main-text extraction only. Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
+            "HTTP headers, HTTP_CFFI_IMPERSONATE for TLS-fingerprint-impersonated HTTP via curl_cffi, BROWSER_HEADLESS "
+            "for headless Firefox rendering via Camoufox, BROWSER_HEADED_WARMED for headed Firefox with warmup URLs, "
+            "DOCUMENT_EXTRACT for PDF/non-HTML text extraction, and TRAFILATURA_EXTRACT for HTML main-text extraction only. "
+            "Returns Firecrawl-style condensed Markdown output with metadata for LLM-friendly consumption." Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
             "and max_discovered_links; omit limits to use defaults from /v1/capabilities. Use request_profile for "
             "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "
             "per-host cookies. Use browser_profile for browser state, viewport, and resource_mode. Use discovery for "
@@ -400,16 +406,60 @@ if FastAPI is not None:
                 }
             ],
         )
-    ) -> dict[str, Any]:
+    ) -> CondensedCrawlResponse:
         readiness_state.begin_request()
         try:
+            # Note: renderer.render is now async with Camoufox
             result = await crawl_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
-                browser_worker=lambda job: renderer.render(job.url, job.options),
+                browser_worker=lambda job: asyncio.create_task(renderer.render(job.url, job.options)),
             )
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
-            return result
+
+            # Transform to Firecrawl-style condensed output
+            condensed_data = []
+            for item in result.get("results", []):
+                html = item.get("html")
+                url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+
+                if html and url:
+                    markdown, metadata_dict = extract_firecrawl_format(html, url)
+                else:
+                    markdown = item.get("text")
+                    metadata_dict = {}
+
+                # Build FirecrawlMetadata
+                metadata = FirecrawlMetadata(
+                    title=metadata_dict.get("title"),
+                    description=metadata_dict.get("description"),
+                    language=metadata_dict.get("language"),
+                    og_title=metadata_dict.get("og_title"),
+                    og_description=metadata_dict.get("og_description"),
+                    og_image=metadata_dict.get("og_image"),
+                    og_url=metadata_dict.get("og_url"),
+                    og_type=metadata_dict.get("og_type"),
+                    og_site_name=metadata_dict.get("og_site_name"),
+                    twitter_card=metadata_dict.get("twitter_card"),
+                    twitter_title=metadata_dict.get("twitter_title"),
+                    twitter_description=metadata_dict.get("twitter_description"),
+                    twitter_image=metadata_dict.get("twitter_image"),
+                    canonical_url=metadata_dict.get("canonical_url"),
+                    favicon=metadata_dict.get("favicon"),
+                    status_code=item.get("http_status"),
+                    content_type=item.get("content_type"),
+                    source_url=url,
+                )
+
+                condensed_data.append({
+                    "url": url,
+                    "markdown": markdown,
+                    "metadata": metadata,
+                    "warning": item.get("classification") if item.get("classification") != "rendered" else None,
+                    "error": item.get("error"),
+                })
+
+            return CondensedCrawlResponse(success=True, data=condensed_data)
         except ValueError as error:
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
