@@ -37,6 +37,7 @@ Classification = Literal[
 CrawlStrategyName = Literal[
     "HTTP_DECLARED_CRAWLER",
     "HTTP_SITE_COMPAT",
+    "HTTP_CFFI_IMPERSONATE",
     "BROWSER_HEADLESS",
     "BROWSER_HEADED_WARMED",
     "DOCUMENT_EXTRACT",

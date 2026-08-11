@@ -16,6 +16,7 @@ class CrawlStrategy(str, Enum):
 
     HTTP_DECLARED_CRAWLER = "HTTP_DECLARED_CRAWLER"
     HTTP_SITE_COMPAT = "HTTP_SITE_COMPAT"
+    HTTP_CFFI_IMPERSONATE = "HTTP_CFFI_IMPERSONATE"
     BROWSER_HEADLESS = "BROWSER_HEADLESS"
     BROWSER_HEADED_WARMED = "BROWSER_HEADED_WARMED"
     DOCUMENT_EXTRACT = "DOCUMENT_EXTRACT"
@@ -73,12 +74,12 @@ class CrawlPolicy(BaseModel):
     strategies: list[CrawlStrategy] = Field(
         default_factory=lambda: [CrawlStrategy.HTTP_DECLARED_CRAWLER, CrawlStrategy.BROWSER_HEADLESS],
         min_length=1,
-        description="Ordered execution chain. Default: HTTP_DECLARED_CRAWLER then BROWSER_HEADLESS. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available options: HTTP_DECLARED_CRAWLER (transparent direct HTTP), HTTP_SITE_COMPAT (browser-like direct HTTP headers), BROWSER_HEADLESS (headless Chromium rendering), BROWSER_HEADED_WARMED (headed Chromium with warmup URLs), DOCUMENT_EXTRACT (PDF/non-HTML text extraction), TRAFILATURA_EXTRACT (HTML main-text extraction only).",
+        description="Ordered execution chain. Default: HTTP_DECLARED_CRAWLER then BROWSER_HEADLESS. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available options: HTTP_DECLARED_CRAWLER (transparent direct HTTP), HTTP_SITE_COMPAT (browser-like direct HTTP headers), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via curl_cffi), BROWSER_HEADLESS (headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs), DOCUMENT_EXTRACT (PDF/non-HTML text extraction), TRAFILATURA_EXTRACT (HTML main-text extraction only).",
     )
     limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.")
     headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.")
-    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_SITE_COMPAT. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
-    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Chromium window size; reduced resource mode disables images.")
+    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_SITE_COMPAT and HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
+    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.")
     discovery: dict[str, bool] = Field(default_factory=dict, description="Optional discovery toggles: robots, sitemaps, and feeds. Discovery output is diagnostic and non-recursive; the service reports discovered links and metadata but callers own frontier queueing, dedupe, and persistence.")
 
 
@@ -143,6 +144,42 @@ class CrawlResponse(BaseModel):
     submitted_count: int = Field(description="Number of URLs accepted in the request payload.")
     policy_schema_version: str = Field(description="Policy schema version used for this execution.")
     results: list[CrawlResultModel] = Field(description="Per-URL crawl results in submitted order.")
+
+
+# Firecrawl-style condensed output models
+class FirecrawlMetadata(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    language: str | None = None
+    og_title: str | None = None
+    og_description: str | None = None
+    og_image: str | None = None
+    og_url: str | None = None
+    og_type: str | None = None
+    og_site_name: str | None = None
+    twitter_card: str | None = None
+    twitter_title: str | None = None
+    twitter_description: str | None = None
+    twitter_image: str | None = None
+    canonical_url: str | None = None
+    favicon: str | None = None
+    status_code: int | None = None
+    content_type: str | None = None
+    scrape_id: str | None = None
+    source_url: str | None = None
+
+
+class CondensedCrawlResult(BaseModel):
+    url: str
+    markdown: str | None = None
+    metadata: FirecrawlMetadata
+    warning: str | None = None
+    error: str | None = None
+
+
+class CondensedCrawlResponse(BaseModel):
+    success: bool
+    data: list[CondensedCrawlResult]
 
 
 class CrawlerError(BaseModel):
