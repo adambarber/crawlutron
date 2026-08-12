@@ -57,20 +57,30 @@ renderer = BrowserRenderer()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
 
+def _format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """Unified output formatter: produce ``(markdown, metadata_dict)`` for any result.
+
+    Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
+    this single path. HTML results become complete structured Markdown via markdownify;
+    results without HTML (PDF text, main-text-only extraction, etc.) fall back to the
+    strategy's extracted ``text`` so the consumer always receives a consistent Markdown
+    payload regardless of how the content was acquired.
+    """
+    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+    html = item.get("html")
+    if html and url:
+        markdown_text, metadata_dict = extract_firecrawl_format(html, url)
+        if markdown_text:
+            return markdown_text, metadata_dict
+    return item.get("text"), {}
+
+
 def build_condensed_crawl_response(results: list[dict[str, Any]]) -> CondensedCrawlResponse:
     """Transform internal crawl results into the Firecrawl-style condensed response."""
     condensed_data: list[dict[str, Any]] = []
     for item in results:
-        html = item.get("html")
+        markdown, metadata_dict = _format_crawl_item(item)
         url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-
-        if html and url:
-            markdown, metadata_dict = item.get("firecrawl_format", (None, {}))
-            if markdown is None:
-                markdown, metadata_dict = extract_firecrawl_format(html, url)
-        else:
-            markdown = item.get("text")
-            metadata_dict = {}
 
         metadata = FirecrawlMetadata(
             title=metadata_dict.get("title"),
