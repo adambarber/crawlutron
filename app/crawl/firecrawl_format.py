@@ -6,32 +6,51 @@ from typing import Any, Optional
 
 
 def extract_firecrawl_format(html: str | None, url: str) -> tuple[str | None, dict[str, Any]]:
-    """Extract Firecrawl-style condensed Markdown and metadata from HTML."""
+    """Extract Firecrawl-style condensed Markdown and metadata from HTML.
+
+    The Markdown is the COMPLETE page text, not just the article body. We
+    convert the full HTML with ``markdownify`` first (full structured Markdown),
+    then fall back to trafilatura's main-content extraction and finally a
+    lightweight tag-stripping pass. (An earlier version used trafilatura with
+    ``favor_precision=True``, which dropped almost all page text on non-article
+    pages such as homepages and returned only a short snippet.)
+    """
     if not html or not html.strip():
         return None, {}
 
-    markdown_text: str | None = None
+    markdown_text = _extract_complete_markdown(html, url)
+    return (markdown_text or "").strip() or None, _extract_firecrawl_metadata(html, url)
+
+
+def _extract_complete_markdown(html: str, url: str) -> str | None:
+    """Complete page Markdown: markdownify first, defensive fallbacks after."""
+    return (
+        _markdownify_html(html)
+        or _trafilatura_markdown(html, url)
+        or _text_from_html(html)
+    )
+
+
+def _markdownify_html(html: str) -> str | None:
+    try:
+        from markdownify import markdownify as md_convert
+        return md_convert(html)
+    except Exception:  # noqa: BLE001  # pragma: no cover - markdownify unavailable
+        return None
+
+
+def _trafilatura_markdown(html: str, url: str) -> str | None:
     try:
         import trafilatura
-        markdown_text = trafilatura.extract(
+        return trafilatura.extract(
             html,
             output_format="markdown",
             include_links=True,
             include_images=True,
-            favor_precision=True,
             url=url,
         )
-    except Exception:  # noqa: BLE001  # pragma: no cover - trafilatura internal failure
-        markdown_text = None
-
-    if not markdown_text or not markdown_text.strip():
-        try:
-            from markdownify import markdownify as md_convert
-            markdown_text = md_convert(html)  # pragma: no cover - markdownify not installed in test env
-        except Exception:  # noqa: BLE001  # pragma: no cover - markdownify internal failure
-            markdown_text = _text_from_html(html) or None
-
-    return (markdown_text or "").strip() or None, _extract_firecrawl_metadata(html, url)
+    except Exception:  # noqa: BLE001  # pragma: no cover - trafilatura unavailable
+        return None
 
 
 def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
