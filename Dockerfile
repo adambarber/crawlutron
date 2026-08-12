@@ -11,12 +11,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked   --mount=type=cache
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip   pip install -r /app/requirements.txt
+
+# Pre-fetch Camoufox binary (slow, so do it before copying app code)
+RUN python -m camoufox fetch
+
 COPY app /app/app
 COPY --from=shared local_service_logging.py /app/local_service_logging.py
 RUN mkdir -p /app/logs
 
-# Pre-fetch Camoufox binary
-RUN python -c "from camoufox.sync_api import Camoufox; Camoufox().start().stop()"
-
 EXPOSE 8765
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8765", "--log-level", "${BROWSER_CRAWLER_LOG_LEVEL:-info}"]
+CMD uvicorn app.main:app --host 0.0.0.0 --port 8765 --log-level ${BROWSER_CRAWLER_LOG_LEVEL:-info}

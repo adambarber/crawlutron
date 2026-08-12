@@ -1,0 +1,14 @@
+# Ignore test files and other development artifacts
+tests/
+*.pyc
+__pycache__/
+*.log
+logs/
+.git/
+.gitignore
+README.md
+.env
+.env.*
+*.md
+.DS_Store
+camoufox-bin/
