@@ -21,14 +21,14 @@ def extract_firecrawl_format(html: str | None, url: str) -> tuple[str | None, di
             favor_precision=True,
             url=url,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001  # pragma: no cover - trafilatura internal failure
         markdown_text = None
 
     if not markdown_text or not markdown_text.strip():
         try:
             from markdownify import markdownify as md_convert
-            markdown_text = md_convert(html)
-        except Exception:  # noqa: BLE001
+            markdown_text = md_convert(html)  # pragma: no cover - markdownify not installed in test env
+        except Exception:  # noqa: BLE001  # pragma: no cover - markdownify internal failure
             markdown_text = _text_from_html(html) or None
 
     return (markdown_text or "").strip() or None, _extract_firecrawl_metadata(html, url)

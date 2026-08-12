@@ -9,7 +9,6 @@ from app.discovery.agent_hints import agent_hints_payload, create_agent_hints_ro
 from app.discovery.well_known import discovery_payload, create_well_known_router
 from app.settings import CrawlerSettings
 
-
 class DecompressionTest(unittest.TestCase):
     def test_gzip(self) -> None:
         import gzip
@@ -26,7 +25,6 @@ class DecompressionTest(unittest.TestCase):
 
     def test_unknown_encoding(self) -> None:
         self.assertEqual(decompress_body(b"hello", "unknown"), b"hello")
-
 
 class FirecrawlFormatTest(unittest.TestCase):
     def test_empty_html_returns_none(self) -> None:
@@ -53,7 +51,6 @@ class FirecrawlFormatTest(unittest.TestCase):
         self.assertIn("Hello", text)
         self.assertNotIn("var x", text)
         self.assertNotIn("body{}", text)
-
 
 class ReadinessStateTest(unittest.TestCase):
     def test_initial_state_is_ready(self) -> None:
@@ -86,7 +83,6 @@ class ReadinessStateTest(unittest.TestCase):
         snap = state.snapshot()
         self.assertEqual(snap["active_requests"], 0)
 
-
 class CapabilitiesPayloadTest(unittest.TestCase):
     def test_capabilities_payload_structure(self) -> None:
         settings = CrawlerSettings.from_mapping()
@@ -105,7 +101,6 @@ class CapabilitiesPayloadTest(unittest.TestCase):
         payload = capabilities_payload(settings)
         self.assertGreater(len(payload["supported_strategies"]), 0)
         self.assertIn("HTTP_DECLARED_CRAWLER", payload["supported_strategies"])
-
 
 class AgentHintsPayloadTest(unittest.TestCase):
     def test_agent_hints_payload_structure(self) -> None:
@@ -126,7 +121,6 @@ class AgentHintsPayloadTest(unittest.TestCase):
         self.assertGreater(len(payload["example_policies"]), 0)
         self.assertIn("browser_fallback", payload["example_policies"])
 
-
 class DiscoveryPayloadTest(unittest.TestCase):
     def test_discovery_payload_structure(self) -> None:
         payload = discovery_payload()
@@ -142,7 +136,6 @@ class DiscoveryPayloadTest(unittest.TestCase):
         self.assertIn("openapi", payload["links"])
         self.assertIn("capabilities", payload["links"])
         self.assertIn("agent_hints", payload["links"])
-
 
 if __name__ == "__main__":
     unittest.main()

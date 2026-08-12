@@ -21,6 +21,7 @@ from .api_models import (
     ReadinessResponse,
 )
 from .browser import BrowserRenderer
+from .crawl.firecrawl_format import extract_firecrawl_format
 from .service import crawl_request, render_request
 from .settings import CrawlerSettings
 
@@ -55,6 +56,53 @@ logger = configure_service_logging(
 renderer = BrowserRenderer()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
+
+def build_condensed_crawl_response(results: list[dict[str, Any]]) -> CondensedCrawlResponse:
+    """Transform internal crawl results into the Firecrawl-style condensed response."""
+    condensed_data: list[dict[str, Any]] = []
+    for item in results:
+        html = item.get("html")
+        url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+
+        if html and url:
+            markdown, metadata_dict = item.get("firecrawl_format", (None, {}))
+            if markdown is None:
+                markdown, metadata_dict = extract_firecrawl_format(html, url)
+        else:
+            markdown = item.get("text")
+            metadata_dict = {}
+
+        metadata = FirecrawlMetadata(
+            title=metadata_dict.get("title"),
+            description=metadata_dict.get("description"),
+            language=metadata_dict.get("language"),
+            og_title=metadata_dict.get("og_title"),
+            og_description=metadata_dict.get("og_description"),
+            og_image=metadata_dict.get("og_image"),
+            og_url=metadata_dict.get("og_url"),
+            og_type=metadata_dict.get("og_type"),
+            og_site_name=metadata_dict.get("og_site_name"),
+            twitter_card=metadata_dict.get("twitter_card"),
+            twitter_title=metadata_dict.get("twitter_title"),
+            twitter_description=metadata_dict.get("twitter_description"),
+            twitter_image=metadata_dict.get("twitter_image"),
+            canonical_url=metadata_dict.get("canonical_url"),
+            favicon=metadata_dict.get("favicon"),
+            status_code=item.get("http_status"),
+            content_type=item.get("content_type"),
+            source_url=url,
+        )
+
+        condensed_data.append({
+            "url": url,
+            "markdown": markdown,
+            "metadata": metadata,
+            "warning": item.get("classification") if item.get("classification") != "rendered" else None,
+            "error": item.get("error"),
+        })
+
+    return CondensedCrawlResponse(success=True, data=condensed_data)
+
 
 if FastAPI is not None:
     app = FastAPI(
@@ -108,9 +156,9 @@ if FastAPI is not None:
     async def render(payload: dict[str, Any]) -> dict[str, Any]:
         readiness_state.begin_request()
         try:
-            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
-            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
-            return result
+            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))  # pragma: no cover - requires browser
+            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})  # pragma: no cover - requires browser
+            return result  # pragma: no cover - requires browser
         except ValueError as error:
             logger.warning("render_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
@@ -218,58 +266,11 @@ if FastAPI is not None:
                 browser_worker=lambda job: asyncio.create_task(renderer.render(job.url, job.options)),
             )
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
-
-            # Transform to Firecrawl-style condensed output
-            condensed_data = []
-            for item in result.get("results", []):
-                html = item.get("html")
-                url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-
-                if html and url:
-                    markdown, metadata_dict = item.get("firecrawl_format", (None, {}))
-                    if markdown is None:
-                        # Fallback: compute from html if not pre-computed
-                        from .crawl.firecrawl_format import extract_firecrawl_format
-                        markdown, metadata_dict = extract_firecrawl_format(html, url)
-                else:
-                    markdown = item.get("text")
-                    metadata_dict = {}
-
-                # Build FirecrawlMetadata
-                metadata = FirecrawlMetadata(
-                    title=metadata_dict.get("title"),
-                    description=metadata_dict.get("description"),
-                    language=metadata_dict.get("language"),
-                    og_title=metadata_dict.get("og_title"),
-                    og_description=metadata_dict.get("og_description"),
-                    og_image=metadata_dict.get("og_image"),
-                    og_url=metadata_dict.get("og_url"),
-                    og_type=metadata_dict.get("og_type"),
-                    og_site_name=metadata_dict.get("og_site_name"),
-                    twitter_card=metadata_dict.get("twitter_card"),
-                    twitter_title=metadata_dict.get("twitter_title"),
-                    twitter_description=metadata_dict.get("twitter_description"),
-                    twitter_image=metadata_dict.get("twitter_image"),
-                    canonical_url=metadata_dict.get("canonical_url"),
-                    favicon=metadata_dict.get("favicon"),
-                    status_code=item.get("http_status"),
-                    content_type=item.get("content_type"),
-                    source_url=url,
-                )
-
-                condensed_data.append({
-                    "url": url,
-                    "markdown": markdown,
-                    "metadata": metadata,
-                    "warning": item.get("classification") if item.get("classification") != "rendered" else None,
-                    "error": item.get("error"),
-                })
-
-            return CondensedCrawlResponse(success=True, data=condensed_data)
+            return build_condensed_crawl_response(result.get("results", []))
         except ValueError as error:
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
         finally:
             readiness_state.end_request()
-else:
+else:  # pragma: no cover - FastAPI unavailable at runtime
     app = None

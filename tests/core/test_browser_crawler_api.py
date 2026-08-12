@@ -9,8 +9,6 @@ from pathlib import Path
 CRAWLER_APP = Path(__file__).resolve().parents[2]
 SHARED_PYTHON = Path(__file__).resolve().parents[4] / "docker" / "shared" / "python"
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
-sys.path.insert(0, str(SHARED_PYTHON))
-sys.path.insert(0, str(CRAWLER_APP))
 
 from fastapi.testclient import TestClient
 
@@ -18,7 +16,6 @@ from app import main as crawler_main
 from app.models import CrawlJob, CrawlResult
 from app.service import render_request
 from app.settings import CrawlerSettings
-
 
 class BrowserCrawlerApiTest(unittest.TestCase):
     def test_main_configures_shared_json_logging_from_settings(self) -> None:
@@ -420,10 +417,7 @@ class BrowserCrawlerApiTest(unittest.TestCase):
                 )
             )
 
-
-
         self.assertEqual(str(context.exception), "batch_size_exceeded")
-
 
 if __name__ == "__main__":
     unittest.main()

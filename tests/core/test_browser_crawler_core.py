@@ -9,8 +9,6 @@ from unittest.mock import patch
 
 CRAWLER_APP = Path(__file__).resolve().parents[2]
 SHARED_PYTHON = Path(__file__).resolve().parents[4] / "docker" / "shared" / "python"
-sys.path.insert(0, str(SHARED_PYTHON))
-sys.path.insert(0, str(CRAWLER_APP))
 
 from app.browser import BrowserRenderer
 from app.classify import classify_rendered_page, classify_rendered_page_with_evidence
@@ -19,7 +17,6 @@ from app.scheduler import DomainScheduler
 from app.service import _extract_discovered_links, _format_extracted_document_text, crawl_request
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
-
 
 class BrowserCrawlerCoreTest(unittest.TestCase):
     def test_direct_http_crawl_work_does_not_block_event_loop(self) -> None:
@@ -1175,7 +1172,6 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result.domain, "example.gov")
         self.assertEqual(result.metadata["title"], "Rendered Title")
 
-
     def test_browser_renderer_retries_transient_failures_before_success(self) -> None:
         from unittest.mock import AsyncMock, MagicMock
         attempts = 0
@@ -1422,7 +1418,6 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(settings.global_concurrency, 8)
         self.assertEqual(settings.per_domain_delay_ms, 2500)
         self.assertFalse(settings.respect_robots)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,11 +10,9 @@ import sys
 import os
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
 
 # Now import the scheduler
 from app.scheduler import DomainScheduler
-
 
 class TestDomainSchedulerJitter(unittest.TestCase):
     """Test that DomainScheduler applies jitter to delays."""
@@ -57,7 +55,6 @@ class TestDomainSchedulerJitter(unittest.TestCase):
 
         # Verify the cooldown duration growth
         self.assertGreater(expiry - time.time(), 4.0)
-
 
 if __name__ == '__main__':
     unittest.main()

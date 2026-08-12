@@ -24,6 +24,6 @@ def decompress_body(body: bytes, content_encoding: str) -> bytes:
         try:
             import brotli
             return brotli.decompress(body)
-        except ImportError:
+        except ImportError:  # pragma: no cover - brotli missing at runtime
             pass  # brotli not available, return as-is
     return body

@@ -11,11 +11,8 @@ from pathlib import Path
 # Add app directory to path like other tests
 ROOT = Path(__file__).resolve().parents[2]
 CRAWLER_APP = ROOT / "docker" / "browser-crawler"
-sys.path.insert(0, str(CRAWLER_APP))
-sys.path.insert(0, str(ROOT / "docker" / "shared" / "python"))
 
 from app.service import _decompress_body, _decode_body
-
 
 class TestDecompressBody:
     """Test _decompress_body handles various encodings."""
@@ -61,7 +58,6 @@ class TestDecompressBody:
 
         result = _decompress_body(original, "unknown")
         assert result == original
-
 
 class TestDecodeBody:
     """Test _decode_body integrates with decompression."""

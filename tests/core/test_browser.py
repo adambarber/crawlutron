@@ -7,7 +7,6 @@ from app.browser import (
     BrowserRenderer,
 )
 
-
 class BrowserRendererStatusTest(unittest.TestCase):
     def test_status_for_classification_rendered(self) -> None:
         renderer = BrowserRenderer()
@@ -51,7 +50,6 @@ class BrowserRendererStatusTest(unittest.TestCase):
                     self.assertFalse(renderer._headless_enabled())
                 finally:
                     del os.environ["BROWSER_CRAWLER_HEADLESS"]
-
 
 if __name__ == "__main__":
     unittest.main()
