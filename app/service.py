@@ -98,8 +98,9 @@ def _disallowed_result(index_url: tuple[int, str], classification: str, elapsed_
 
 
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
-    if inspect.iscoroutinefunction(worker):
-        return await worker(job)  # type: ignore[misc]
+    result = worker(job)
+    if inspect.iscoroutine(result):
+        return await result
     return await asyncio.to_thread(worker, job)
 
 
@@ -199,21 +200,34 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
 
 def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
     profile = policy.get("request_profile") or {}
+    # Use gzip, deflate, br instead of identity for Accept-Encoding
+    # Accept-Language is always present for all strategies
     headers = {
         "User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": str(profile.get("accept_language", "en-US,en;q=0.9")),
-        "Accept-Encoding": "identity",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
     }
     user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
-    if strategy == "HTTP_SITE_COMPAT" or user_agent_family == "desktop_chrome":
+    is_browser_like = strategy == "HTTP_SITE_COMPAT" or user_agent_family == "desktop_chrome"
+    if is_browser_like:
         headers["User-Agent"] = (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
+        # Add Referer for browser-like strategies
+        headers["Referer"] = "https://www.google.com/"
+        # Fix Sec-Fetch-Site: cross-site because we have a Google Referer
+        headers["Sec-Fetch-Site"] = "cross-site"
+        # Add User-Agent Client Hints
+        headers["Sec-CH-UA"] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+        headers["Sec-CH-UA-Mobile"] = "?0"
+        headers["Sec-CH-UA-Platform"] = '"Windows"'
+        # Sec-Fetch-User indicates a user-triggered navigation
+        headers["Sec-Fetch-User"] = "?1"
     elif user_agent_family == "mobile_safari":
         headers["User-Agent"] = (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
@@ -239,7 +253,28 @@ def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
     return "; ".join(f"{key}={value}" for key, value in host_cookies.items())
 
 
-def _decode_body(body: bytes, content_type: str | None) -> str:
+def _decompress_body(body: bytes, content_encoding: str) -> bytes:
+    """Decompress response body based on Content-Encoding header."""
+    encoding = content_encoding.lower().strip()
+    if "gzip" in encoding:
+        import gzip
+        return gzip.decompress(body)
+    if "deflate" in encoding:
+        import zlib
+        return zlib.decompress(body)
+    if "br" in encoding:
+        try:
+            import brotli
+            return brotli.decompress(body)
+        except ImportError:
+            pass  # brotli not available, return as-is
+    return body
+
+
+def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] | None = None) -> str:
+    # Decompress if needed
+    if headers:
+        body = _decompress_body(body, headers.get("content-encoding", ""))
     charset = "utf-8"
     if content_type:
         match = re.search(r"charset=([^;]+)", content_type, flags=re.IGNORECASE)

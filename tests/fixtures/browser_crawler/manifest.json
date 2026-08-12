@@ -1,0 +1,65 @@
+{
+  "fixtures": [
+    {
+      "file": "massgov_city_town_websites.browser.html",
+      "source": "real_browser_crawl",
+      "source_url": "https://www.mass.gov/lists/massachusetts-city-and-town-websites",
+      "expected_classification": "rendered",
+      "expected_min_links": 398,
+      "scenarios": [
+        "direct_http_blocked_browser_success",
+        "large_navigation_and_municipal_link_extraction"
+      ]
+    },
+    {
+      "file": "massgov_municipal_databank.browser.html",
+      "source": "real_browser_crawl",
+      "source_url": "https://www.mass.gov/info-details/division-of-local-services-municipal-databank",
+      "expected_classification": "rendered",
+      "expected_min_links": 65,
+      "scenarios": [
+        "direct_http_blocked_browser_success",
+        "resource_link_extraction"
+      ]
+    },
+    {
+      "file": "massgov_403.http.html",
+      "source": "real_direct_http_crawl",
+      "source_url": "https://www.mass.gov/lists/massachusetts-city-and-town-websites",
+      "expected_classification": "access_denied",
+      "expected_min_links": 0,
+      "scenarios": [
+        "direct_http_blocked_browser_success",
+        "access_denied_evidence"
+      ]
+    },
+    {
+      "file": "worcester_primegov_city_council_agenda_74977.pdf",
+      "source": "real_direct_http_crawl",
+      "source_url": "https://worcesterma.primegov.com/Public/CompiledDocument?meetingTemplateId=74977&compileOutputType=1",
+      "final_content_type": "application/pdf",
+      "sha256": "45ecb2da192bcf17a43e77ab292a03ffb7aeb4dbfbed0e3c82bec6fd1ef8009e",
+      "bytes": 131006,
+      "expected_classification": "rendered",
+      "scenarios": [
+        "document_extract",
+        "primegov_pdf_redirect",
+        "worcester_city_council_agenda"
+      ]
+    },
+    {
+      "file": "worcester_primegov_city_council_agenda_74977.txt",
+      "source": "real_document_extract",
+      "source_url": "https://worcesterma.primegov.com/Public/CompiledDocument?meetingTemplateId=74977&compileOutputType=1",
+      "extraction_method": "pdftotext",
+      "sha256": "aa33063abb2c3804a10e9db555b07f78b637de0c19480102dd7fabe7ee84c7ae",
+      "chars": 16531,
+      "expected_classification": "rendered",
+      "scenarios": [
+        "document_extract",
+        "spacy_entity_development",
+        "worcester_city_council_agenda"
+      ]
+    }
+  ]
+}
