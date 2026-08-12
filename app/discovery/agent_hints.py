@@ -8,17 +8,16 @@ from app.api_models import AgentHintsResponse, CrawlStrategy
 from app.settings import CrawlerSettings
 
 
-API_VERSION = "1.0.0"
-POLICY_SCHEMA_VERSION = "1.0"
+from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
     CrawlStrategy.HTTP_SITE_COMPAT: "Direct HTTP using browser-like compatibility headers before escalating to browser rendering.",
     CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi with chrome124 impersonation for WAF/Cloudflare bypass.",
     CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",
-    CrawlStrategy.BROWSER_HEADED_WARMED: "Heated Firefox with warmup URLs for sites requiring session persistence.",
-    CrawlStrategy.DOCUMENT_EXTRACT: "PDF and non-HTML text extraction without browser rendering.",
-    CrawlStrategy.TRAFILATURA_EXTRACT: "HTML main-text extraction using Trafilatura.",
+    CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",
+    CrawlStrategy.DOCUMENT_EXTRACT: "Document/body extraction for PDFs and non-HTML responses when text evidence is needed.",
+    CrawlStrategy.TRAFILATURA_EXTRACT: "HTML-only main-text extraction strategy for noisy HTML. It does not parse PDF or binary documents; use DOCUMENT_EXTRACT for PDFs.",
 }
 
 GUIDANCE = [

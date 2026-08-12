@@ -8,8 +8,7 @@ from app.api_models import DiscoveryResponse
 from app.settings import CrawlerSettings
 
 
-API_VERSION = "1.0.0"
-POLICY_SCHEMA_VERSION = "1.0"
+from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 
 def discovery_payload() -> dict[str, Any]:

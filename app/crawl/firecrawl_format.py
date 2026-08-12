@@ -45,10 +45,10 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
         metadata["title"] = re.sub(r"\s+", " ", title_match.group(1)).strip()
 
     # meta tags
-    for match in re.finditer(r'<meta\\s+([^>]+)>', html, flags=re.IGNORECASE):
+    for match in re.finditer(r'<meta\s+([^>]+)>', html, flags=re.IGNORECASE):
         attrs = match.group(1)
-        name_match = re.search(r'(?:name|property)\\s*=\\s*["\']([^"\']+)["\']', attrs, flags=re.IGNORECASE)
-        content_match = re.search(r'content\\s*=\\s*["\']([^"\']*)["\']', attrs, flags=re.IGNORECASE)
+        name_match = re.search(r'(?:name|property)\s*=\s*["\']([^"\']+)["\']', attrs, flags=re.IGNORECASE)
+        content_match = re.search(r'content\s*=\s*["\']([^"\']*)["\']', attrs, flags=re.IGNORECASE)
         if not name_match or not content_match:
             continue
         name = name_match.group(1).lower().strip()
@@ -73,21 +73,21 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
             metadata[mapped] = value
 
     # canonical URL
-    canonical_match = re.search(r'<link\\s+[^>]*rel\\s*=\\s*["\']canonical["\'][^>]*href\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
+    canonical_match = re.search(r'<link\s+[^>]*rel\s*=\s*["\']canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
     if not canonical_match:
-        canonical_match = re.search(r'<link\\s+[^>]*href\\s*=\\s*["\']([^"\']+)["\'][^>]*rel\\s*=\\s*["\']canonical["\']', html, flags=re.IGNORECASE)
+        canonical_match = re.search(r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\']canonical["\']', html, flags=re.IGNORECASE)
     if canonical_match:
         metadata["canonical_url"] = canonical_match.group(1).strip()
 
     # favicon
-    favicon_match = re.search(r'<link\\s+[^>]*rel\\s*=\\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*href\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
+    favicon_match = re.search(r'<link\s+[^>]*rel\s*=\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*href\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
     if not favicon_match:
-        favicon_match = re.search(r'<link\\s+[^>]*href\\s*=\\s*["\']([^"\']+)["\'][^>]*rel\\s*=\\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\']', html, flags=re.IGNORECASE)
+        favicon_match = re.search(r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\']', html, flags=re.IGNORECASE)
     if favicon_match:
         metadata["favicon"] = favicon_match.group(1).strip()
 
     # language
-    lang_match = re.search(r'<html\\s+[^>]*lang\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
+    lang_match = re.search(r'<html\s+[^>]*lang\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
     if lang_match:
         metadata["language"] = lang_match.group(1).strip()
 

@@ -12,31 +12,28 @@ from app.api_models import (
 from app.settings import CrawlerSettings
 
 
-API_VERSION = "1.0.0"
-POLICY_SCHEMA_VERSION = "1.0"
+from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 OUTPUT_FIELDS = [
-    "url",
-    "markdown",
-    "metadata.title",
-    "metadata.description",
-    "metadata.language",
-    "metadata.og_title",
-    "metadata.og_description",
-    "metadata.og_image",
-    "metadata.og_url",
-    "metadata.og_type",
-    "metadata.og_site_name",
-    "metadata.twitter_card",
-    "metadata.twitter_title",
-    "metadata.twitter_description",
-    "metadata.twitter_image",
-    "metadata.canonical_url",
-    "metadata.favicon",
-    "metadata.status_code",
-    "metadata.content_type",
-    "metadata.source_url",
-    "warning",
+    "original_url",
+    "normalized_url",
+    "final_url",
+    "status",
+    "classification",
+    "selected_strategy",
+    "attempted_strategies",
+    "http_status",
+    "headers",
+    "content_type",
+    "html",
+    "text",
+    "extraction_method",
+    "quality_score",
+    "classification_evidence",
+    "discovered_link_count",
+    "discovered_links_truncated",
+    "discovered_links",
+    "diagnostics",
     "error",
 ]
 

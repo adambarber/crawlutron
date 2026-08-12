@@ -4,6 +4,7 @@ import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api_models import ReadinessResponse
@@ -46,20 +47,28 @@ def create_health_router(settings: CrawlerSettings) -> APIRouter:
     class HealthResponse(BaseModel):
         status: str = Field(description="Always 'ok' for liveness check.")
 
-    @router.get("/health", response_model=HealthResponse)
+    @router.get(
+        "/health",
+        response_model=HealthResponse,
+        summary="Service liveness check",
+        description="Lightweight process liveness endpoint used by Docker healthchecks. It does not inspect crawl saturation or start a browser."
+    )
     async def health() -> HealthResponse:
         """Liveness check - always returns ok."""
         return HealthResponse(status="ok")
 
     @router.get("/ready", response_model=ReadinessResponse)
-    async def ready() -> ReadinessResponse:
-        """Readiness check - returns saturated when at capacity."""
+    async def ready() -> JSONResponse:
+        """Readiness check - returns HTTP 503 when saturated."""
         snap = readiness_state.snapshot()
-        return ReadinessResponse(
-            status=snap["status"],
-            active_requests=snap["active_requests"],
-            max_active_requests=snap["max_active_requests"],
-            saturated=snap["saturated"],
+        return JSONResponse(
+            status_code=503 if snap["saturated"] else 200,
+            content=ReadinessResponse(
+                status=snap["status"],
+                active_requests=snap["active_requests"],
+                max_active_requests=snap["max_active_requests"],
+                saturated=snap["saturated"],
+            ).model_dump(),
         )
 
     return router, readiness_state

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 from typing import Any
 
 from local_service_logging import configure_service_logging
@@ -16,13 +15,11 @@ from .api_models import (
     CrawlClassification,
     CrawlerError,
     CrawlRequest,
-    CrawlResponse,
     CrawlStrategy,
     DiscoveryResponse,
     FirecrawlMetadata,
     ReadinessResponse,
 )
-from .service import extract_firecrawl_format
 from .browser import BrowserRenderer
 from .service import crawl_request, render_request
 from .settings import CrawlerSettings
@@ -40,30 +37,11 @@ except ImportError:  # pragma: no cover - imported in container runtime
     RequestValidationError = Exception  # type: ignore[assignment]
 
 
-class ReadinessState:
-    def __init__(self, *, max_active_requests: int) -> None:
-        self._max_active_requests = max(1, max_active_requests)
-        self._active_requests = 0
-        self._lock = threading.Lock()
-
-    def begin_request(self) -> None:
-        with self._lock:
-            self._active_requests += 1
-
-    def end_request(self) -> None:
-        with self._lock:
-            self._active_requests = max(0, self._active_requests - 1)
-
-    def snapshot(self) -> dict[str, int | bool | str]:
-        with self._lock:
-            active_requests = self._active_requests
-        saturated = active_requests >= self._max_active_requests
-        return {
-            "status": "saturated" if saturated else "ready",
-            "active_requests": active_requests,
-            "max_active_requests": self._max_active_requests,
-            "saturated": saturated,
-        }
+# Import modular routers
+from .health.readiness import create_health_router
+from .discovery.capabilities import create_capabilities_router
+from .discovery.agent_hints import create_agent_hints_router
+from .discovery.well_known import create_well_known_router
 
 
 settings = CrawlerSettings.from_mapping()
@@ -75,171 +53,8 @@ logger = configure_service_logging(
     log_file_backup_count=settings.log_file_backup_count,
 )
 renderer = BrowserRenderer()
-readiness_state = ReadinessState(max_active_requests=settings.global_concurrency)
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
-
-STRATEGY_DESCRIPTIONS = {
-    CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
-    CrawlStrategy.HTTP_SITE_COMPAT: "Direct HTTP using browser-like compatibility headers before escalating to browser rendering.",
-    CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi with chrome124 impersonation for WAF/Cloudflare bypass.",
-    CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",
-    CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",
-    CrawlStrategy.DOCUMENT_EXTRACT: "Document/body extraction for PDFs and non-HTML responses when text evidence is needed.",
-    CrawlStrategy.TRAFILATURA_EXTRACT: "HTML-only main-text extraction strategy for noisy HTML. It does not parse PDF or binary documents; use DOCUMENT_EXTRACT for PDFs.",
-}
-
-OUTPUT_FIELDS = [
-    "original_url",
-    "normalized_url",
-    "final_url",
-    "status",
-    "classification",
-    "selected_strategy",
-    "attempted_strategies",
-    "http_status",
-    "headers",
-    "content_type",
-    "html",
-    "text",
-    "extraction_method",
-    "quality_score",
-    "classification_evidence",
-    "discovered_link_count",
-    "discovered_links_truncated",
-    "discovered_links",
-    "diagnostics",
-    "error",
-]
-
-EXAMPLE_POLICIES: dict[str, dict[str, Any]] = {
-    "direct_transparent_crawler_http": {
-        "schema_version": POLICY_SCHEMA_VERSION,
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
-        "limits": {"timeout_seconds": 20, "max_retries": 1},
-    },
-    "site_compatible_http": {
-        "schema_version": POLICY_SCHEMA_VERSION,
-        "strategies": ["HTTP_SITE_COMPAT"],
-        "limits": {"timeout_seconds": 20, "max_retries": 1},
-    },
-    "browser_fallback": {
-        "schema_version": POLICY_SCHEMA_VERSION,
-        "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "BROWSER_HEADLESS"],
-        "limits": {"timeout_seconds": 30, "max_retries": 2, "max_discovered_links": 250},
-        "request_profile": {"user_agent_family": "desktop_chrome", "accept_language": "en-US,en;q=0.9"},
-        "browser_profile": {"state": "fresh", "viewport": "desktop", "resource_mode": "full"},
-        "discovery": {"robots": True, "sitemaps": True, "feeds": True},
-    },
-    "headed_warmed_browser": {
-        "schema_version": POLICY_SCHEMA_VERSION,
-        "strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADED_WARMED"],
-        "limits": {"timeout_seconds": 45, "max_retries": 1, "challenge_wait_seconds": 20},
-    },
-    "document_extraction": {
-        "schema_version": POLICY_SCHEMA_VERSION,
-        "strategies": ["DOCUMENT_EXTRACT", "HTTP_DECLARED_CRAWLER"],
-        "limits": {"timeout_seconds": 30, "max_retries": 1},
-    },
-}
-
-
-def capabilities_payload() -> dict[str, Any]:
-    return {
-        "service": "browser-crawler",
-        "version": API_VERSION,
-        "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "supported_strategies": [strategy.value for strategy in CrawlStrategy],
-        "supported_classifications": [classification.value for classification in CrawlClassification],
-        "output_fields": OUTPUT_FIELDS,
-        "default_limits": {
-            "batch_size": settings.max_batch_size,
-            "max_batch_size": settings.max_batch_size,
-            "timeout_seconds": settings.default_timeout_seconds,
-            "max_retries": settings.default_max_retries,
-            "challenge_wait_seconds": 15,
-            "max_discovered_links": 250,
-            "global_concurrency": settings.global_concurrency,
-            "per_domain_concurrency": settings.per_domain_concurrency,
-            "per_domain_delay_ms": settings.per_domain_delay_ms,
-        },
-        "features": {
-            "headed_browser": True,
-            "pdf_extraction": True,
-            "direct_http": True,
-            "trafilatura": True,
-            "discovered_links": True,
-            "frame_discovery": True,
-            "form_discovery": True,
-            "recursive_frontier": False,
-            "warmup": True,
-            "request_profiles": True,
-            "browser_profiles": True,
-            "captcha_solving": False,
-            "proxy_rotation": False,
-            "identity_rotation": False,
-            "credential_bypass": False,
-            "cloudflare_bypass": True,
-            "robots_diagnostics": True,
-            "sitemap_discovery": True,
-            "feed_discovery": True,
-            "adaptive_retry": True,
-            "runtime_diagnostics": True,
-            "domain_aware_concurrency": True,
-            "readiness_endpoint": True,
-            "event_loop_thread_offload": True,
-        },
-        "openapi_url": "/openapi.json",
-        "swagger_ui_url": "/docs",
-    }
-
-
-def agent_hints_payload() -> dict[str, Any]:
-    return {
-        "service": "browser-crawler",
-        "strategies": {strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()},
-        "guidance": [
-            "Use GET /health for lightweight process liveness and Docker healthchecks.",
-            "Use GET /ready for crawl capacity/readiness; HTTP 503 means saturated backpressure, not necessarily crashed.",
-            "Long direct HTTP, document extraction, Trafilatura, and synchronous browser work are offloaded from the FastAPI event loop so liveness can stay responsive during crawls.",
-            "Prefer direct transparent crawler HTTP for sites that allow it.",
-            "Use browser strategies only when direct HTTP is blocked, incomplete, or requires rendering.",
-            "Do not treat HTTP 200 as content success without checking classification and quality score.",
-            "Inspect classification_evidence before turning block classifications into host policy changes.",
-            "Preserve raw evidence and provenance in downstream artifacts.",
-            "Do not mutate host policy automatically from a crawl result.",
-            "Use attempt history to generate reviewable policy suggestions.",
-            "Treat discovered_links as bounded extraction output only; callers own frontier queueing, dedupe, and persistence.",
-            "Inspect diagnostics.frames for legacy frameset and iframe URLs; the service reports frames but does not recursively crawl them.",
-            "Inspect diagnostics.forms for form actions, methods, targets, and controls; the service reports forms but does not automatically submit them.",
-            "Treat discovered pagination links as URL evidence only; callers must preserve form/search state before enqueueing paginated result URLs.",
-            "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher max_discovered_links limit.",
-            "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, geolocation, or access-denied controls; report those outcomes as classifications and evidence.",
-            "Do not solve CAPTCHAs, do not rotate proxies, do not rotate identities, do not inject credentials, and do not continue after explicit denial.",
-            "Passive challenge waiting only observes whether a public page resolves within the configured timeout; it must not click, solve, outsource, or evade challenges.",
-            "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
-        ],
-        "example_policies": EXAMPLE_POLICIES,
-    }
-
-
-def discovery_payload() -> dict[str, Any]:
-    return {
-        "service": "browser-crawler",
-        "version": API_VERSION,
-        "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "links": {
-            "openapi": "/openapi.json",
-            "swagger_ui": "/docs",
-            "liveness": "/health",
-            "readiness": "/ready",
-            "capabilities": "/v1/capabilities",
-            "agent_hints": "/v1/agent-hints",
-        },
-        "recommended_endpoints": ["GET /health", "GET /ready", "GET /v1/capabilities", "GET /v1/agent-hints", "POST /v1/crawl", "POST /v1/render"],
-        "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",
-    }
-
 
 if FastAPI is not None:
     app = FastAPI(
@@ -264,6 +79,14 @@ if FastAPI is not None:
         ],
     )
 
+    # Include modular routers
+    health_router, readiness_state = create_health_router(settings)
+    app.include_router(health_router)
+
+    app.include_router(create_capabilities_router(settings))
+    app.include_router(create_agent_hints_router(settings))
+    app.include_router(create_well_known_router(settings))
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -274,58 +97,6 @@ if FastAPI is not None:
                 "details": {"errors": exc.errors()},
             },
         )
-
-    @app.get(
-        "/health",
-        tags=["Health"],
-        summary="Service liveness check",
-        description="Lightweight process liveness endpoint used by Docker healthchecks. It does not inspect crawl saturation or start a browser.",
-    )
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
-
-    @app.get(
-        "/ready",
-        response_model=ReadinessResponse,
-        tags=["Health"],
-        summary="Service readiness check",
-        description="Reports active crawl load and configured capacity. Returns HTTP 503 when crawl work is saturated; this is backpressure, not a liveness failure.",
-        responses={503: {"model": ReadinessResponse, "description": "Crawler is saturated but the process is alive."}},
-    )
-    async def ready() -> JSONResponse:
-        payload = readiness_state.snapshot()
-        return JSONResponse(status_code=503 if payload["saturated"] else 200, content=payload)
-
-    @app.get(
-        "/v1/capabilities",
-        response_model=CapabilitiesResponse,
-        tags=["Discovery"],
-        summary="Describe crawler capabilities",
-        description="Returns machine-readable strategies, classifications, output fields, defaults, limits, feature flags, and documentation URLs.",
-        responses={500: {"model": CrawlerError, "description": "Unexpected service metadata error."}},
-    )
-    async def capabilities() -> dict[str, Any]:
-        return capabilities_payload()
-
-    @app.get(
-        "/v1/agent-hints",
-        response_model=AgentHintsResponse,
-        tags=["Discovery"],
-        summary="Provide crawler guidance for agents",
-        description="Concise operational guidance and example policy snippets for AI agents and automation clients.",
-    )
-    async def agent_hints() -> dict[str, Any]:
-        return agent_hints_payload()
-
-    @app.get(
-        "/.well-known/crawler-service",
-        response_model=DiscoveryResponse,
-        tags=["Discovery"],
-        summary="Discover crawler service contracts",
-        description="Stable discovery document pointing agents to OpenAPI, capabilities, hints, and supported endpoints.",
-    )
-    async def well_known_crawler_service() -> dict[str, Any]:
-        return discovery_payload()
 
     @app.post(
         "/v1/render",
@@ -381,14 +152,33 @@ if FastAPI is not None:
                                 "summary": "Direct HTTP with browser fallback",
                                 "value": {
                                     "url": "https://records.example.gov/search?q=permit",
-                                    "policy": EXAMPLE_POLICIES["browser_fallback"],
+                                    "policy": {
+                                        "strategies": [
+                                            "HTTP_DECLARED_CRAWLER",
+                                            "HTTP_SITE_COMPAT",
+                                            "HTTP_CFFI_IMPERSONATE",
+                                            "BROWSER_HEADLESS",
+                                        ],
+                                        "limits": {
+                                            "timeout_seconds": 30,
+                                            "max_retries": 2,
+                                            "max_discovered_links": 250,
+                                        },
+                                    },
                                 },
                             },
                             "document_extraction": {
                                 "summary": "Document extraction policy",
                                 "value": {
                                     "urls": ["https://records.example.gov/agenda.pdf"],
-                                    "policy": EXAMPLE_POLICIES["document_extraction"],
+                                    "policy": {
+                                        "strategies": ["DOCUMENT_EXTRACT"],
+                                        "limits": {
+                                            "timeout_seconds": 60,
+                                            "max_retries": 1,
+                                            "max_discovered_links": 0,
+                                        },
+                                    },
                                 },
                             },
                         }
@@ -403,14 +193,25 @@ if FastAPI is not None:
             examples=[
                 {
                     "url": "https://records.example.gov/search?q=permit",
-                    "policy": EXAMPLE_POLICIES["browser_fallback"],
+                    "policy": {
+                        "strategies": [
+                            "HTTP_DECLARED_CRAWLER",
+                            "HTTP_SITE_COMPAT",
+                            "HTTP_CFFI_IMPERSONATE",
+                            "BROWSER_HEADLESS",
+                        ],
+                        "limits": {
+                            "timeout_seconds": 30,
+                            "max_retries": 2,
+                            "max_discovered_links": 250,
+                        },
+                    },
                 }
             ],
         )
     ) -> CondensedCrawlResponse:
         readiness_state.begin_request()
         try:
-            # Note: renderer.render is now async with Camoufox
             result = await crawl_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
@@ -425,7 +226,11 @@ if FastAPI is not None:
                 url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
 
                 if html and url:
-                    markdown, metadata_dict = extract_firecrawl_format(html, url)
+                    markdown, metadata_dict = item.get("firecrawl_format", (None, {}))
+                    if markdown is None:
+                        # Fallback: compute from html if not pre-computed
+                        from .crawl.firecrawl_format import extract_firecrawl_format
+                        markdown, metadata_dict = extract_firecrawl_format(html, url)
                 else:
                     markdown = item.get("text")
                     metadata_dict = {}
