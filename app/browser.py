@@ -80,10 +80,11 @@ class BrowserRenderer:
         started = time.monotonic()
 
         # Create browser with Camoufox
-        browser_kwargs = self._get_browser_kwargs(options.browser_profile)
+        launch_kwargs = self._get_browser_kwargs(options.browser_profile)
+        page_kwargs = self._get_page_kwargs(options.browser_profile)
 
-        async with self._browser_factory(**browser_kwargs) as browser:
-            page = await browser.new_page()
+        async with self._browser_factory(**launch_kwargs) as browser:
+            page = await browser.new_page(**page_kwargs)
 
             # Warmup URLs
             for warmup_url in self._warmup_urls:
@@ -130,6 +131,11 @@ class BrowserRenderer:
             )
 
     def _get_browser_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
+        """Launch-only kwargs for the Camoufox/Playwright browser factory.
+
+        ``viewport`` is a page/context option (not a launch option), so it is
+        returned separately by :meth:`_get_page_kwargs`.
+        """
         kwargs: dict[str, Any] = {
             "headless": self._headless_enabled(),
             "humanize": True,
@@ -137,18 +143,19 @@ class BrowserRenderer:
 
         profile = browser_profile or {}
 
-        # Viewport settings
-        viewport = profile.get("viewport")
-        if viewport == "mobile":
-            kwargs["viewport"] = {"width": 390, "height": 844}
-        else:
-            kwargs["viewport"] = {"width": 1365, "height": 768}
-
-        # Resource mode
+        # Resource mode maps to browser launch args.
         if profile.get("resource_mode") == "reduced":
-            kwargs["browser_args"] = ["--blink-settings=imagesEnabled=false"]
+            kwargs["args"] = ["--blink-settings=imagesEnabled=false"]
 
         return kwargs
+
+    def _get_page_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
+        """Page/context kwargs, applied at ``browser.new_page`` time."""
+        profile = browser_profile or {}
+        viewport = profile.get("viewport")
+        if viewport == "mobile":
+            return {"viewport": {"width": 390, "height": 844}}
+        return {"viewport": {"width": 1365, "height": 768}}
 
     async def _extract_with_challenge_wait(self, page: Any, options: RenderOptions) -> tuple[str | None, str | None, str, bool]:  # pragma: no cover - requires browser
         html = await self._extract_html(page) if options.include_html else None

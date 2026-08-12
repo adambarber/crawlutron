@@ -263,7 +263,7 @@ if FastAPI is not None:
             result = await crawl_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
-                browser_worker=lambda job: asyncio.create_task(renderer.render(job.url, job.options)),
+                browser_worker=lambda job: renderer.render(job.url, job.options),
             )
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
             return build_condensed_crawl_response(result.get("results", []))

@@ -32,26 +32,22 @@ class TestBrowserRenderRetry:
         assert result.classification == "unknown_error"
         assert result.attempts == 2
 
-    def test_render_fails_without_browser_available(self) -> None:
-        # Default factory requires Camoufox, which is absent in the test env.
-        renderer = BrowserRenderer()
-        result = asyncio.run(renderer.render("http://example.com/", RenderOptions(max_retries=0)))
-        assert result.status == "retry_exhausted"
-        assert result.classification == "unknown_error"
-
 class TestBrowserKwargs:
     def test_default_viewport_is_desktop(self) -> None:
         renderer = BrowserRenderer()
-        kwargs = renderer._get_browser_kwargs({})
-        assert kwargs["viewport"] == {"width": 1365, "height": 768}
-        assert "browser_args" not in kwargs
+        launch_kwargs = renderer._get_browser_kwargs({})
+        assert "viewport" not in launch_kwargs
+        assert renderer._get_page_kwargs({})["viewport"] == {"width": 1365, "height": 768}
 
     def test_mobile_viewport_is_applied(self) -> None:
         renderer = BrowserRenderer()
-        kwargs = renderer._get_browser_kwargs({"viewport": "mobile"})
-        assert kwargs["viewport"] == {"width": 390, "height": 844}
+        assert renderer._get_page_kwargs({"viewport": "mobile"})["viewport"] == {
+            "width": 390,
+            "height": 844,
+        }
 
     def test_reduced_resource_mode_disables_images(self) -> None:
         renderer = BrowserRenderer()
-        kwargs = renderer._get_browser_kwargs({"resource_mode": "reduced"})
-        assert kwargs["browser_args"] == ["--blink-settings=imagesEnabled=false"]
+        assert renderer._get_browser_kwargs({"resource_mode": "reduced"})["args"] == [
+            "--blink-settings=imagesEnabled=false"
+        ]

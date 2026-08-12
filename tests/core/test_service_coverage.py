@@ -16,6 +16,7 @@ from app.service import (  # noqa: E402
     _default_trafilatura_extractor,
     _document_item_range,
     _execute_crawl_chain,
+    _call_worker,
     _extract_discovered_links,
     _extract_forms,
     _extract_frames,
@@ -349,4 +350,23 @@ class TestServiceEdgeCases:
         assert result.diagnostics["robots"].get("crawl_delay_seconds") is None
         assert "discovery" in result.diagnostics
         assert result.diagnostics["discovery"]["feeds"]
+
+class TestCallWorkerContract:
+    def test_awaits_coroutine_worker_directly(self) -> None:
+        class _Job:
+            pass
+
+        async def coro_worker(job):
+            return "coro-result"
+
+        assert asyncio.run(_call_worker(coro_worker, _Job())) == "coro-result"
+
+    def test_runs_sync_worker_in_thread(self) -> None:
+        class _Job:
+            pass
+
+        def sync_worker(job):
+            return "sync-result"
+
+        assert asyncio.run(_call_worker(sync_worker, _Job())) == "sync-result"
 
