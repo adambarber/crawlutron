@@ -57,7 +57,18 @@ def create_health_router(settings: CrawlerSettings) -> APIRouter:
         """Liveness check - always returns ok."""
         return HealthResponse(status="ok")
 
-    @router.get("/ready", response_model=ReadinessResponse)
+    @router.get(
+        "/ready",
+        response_model=ReadinessResponse,
+        summary="Service readiness check",
+        description="Reports active crawl saturation without implying process death. Returns 503 if saturated. Enables backpressure signaling for callers.",
+        responses={
+            503: {
+                "description": "Service saturated - too many active crawl requests",
+                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}},
+            }
+        },
+    )
     async def ready() -> JSONResponse:
         """Readiness check - returns HTTP 503 when saturated."""
         snap = readiness_state.snapshot()
