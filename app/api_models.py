@@ -5,6 +5,19 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.constants import (
+    DEFAULT_STRATEGIES,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_TRAFILATURA,
+    BROWSER_HEADED_WARMED,
+    BROWSER_HEADLESS,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+    SUPPORTED_EXTRACTIONS,
+    SUPPORTED_STRATEGIES,
+)
+
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 API_VERSION = "0.2.0"
@@ -12,15 +25,34 @@ SERVICE_NAME = "browser-crawler"
 
 
 class CrawlStrategy(str, Enum):
-    """Supported crawl execution strategies in fallback order."""
+    """Fetch execution strategies, tried in fallback order.
 
-    HTTP_DECLARED_CRAWLER = "HTTP_DECLARED_CRAWLER"
-    HTTP_SITE_COMPAT = "HTTP_SITE_COMPAT"
-    HTTP_CFFI_IMPERSONATE = "HTTP_CFFI_IMPERSONATE"
-    BROWSER_HEADLESS = "BROWSER_HEADLESS"
-    BROWSER_HEADED_WARMED = "BROWSER_HEADED_WARMED"
-    DOCUMENT_EXTRACT = "DOCUMENT_EXTRACT"
-    TRAFILATURA_EXTRACT = "TRAFILATURA_EXTRACT"
+    These describe *how* to retrieve bytes for a URL. How those bytes are
+    parsed into text/markdown is a separate concern handled by
+    :class:`CrawlExtractionMethod` (the ``extraction`` policy field), which is
+    orthogonal to the fetch strategy.
+    """
+
+    HTTP_DECLARED_CRAWLER = HTTP_DECLARED_CRAWLER
+    HTTP_CFFI_IMPERSONATE = HTTP_CFFI_IMPERSONATE
+    BROWSER_HEADLESS = BROWSER_HEADLESS
+    BROWSER_HEADED_WARMED = BROWSER_HEADED_WARMED
+
+
+class CrawlExtractionMethod(str, Enum):
+    """Output/parsing pipeline applied to content a fetch strategy retrieves.
+
+    Extraction is orthogonal to the fetch strategy: any fetch strategy may be
+    paired with any extraction method. ``FULL`` is the default unified
+    pipeline (trafilatura HTML main text, markitdown for documents, plain-text
+    passthrough). ``TRAFILATURA`` forces HTML main-text extraction only.
+    ``DOCUMENT`` forces markitdown document extraction for PDFs and other
+    non-HTML bodies.
+    """
+
+    FULL = EXTRACTION_FULL
+    TRAFILATURA = EXTRACTION_TRAFILATURA
+    DOCUMENT = EXTRACTION_DOCUMENT
 
 
 class CrawlClassification(str, Enum):
@@ -72,13 +104,22 @@ class CrawlPolicyLimits(BaseModel):
 class CrawlPolicy(BaseModel):
     schema_version: str = Field(POLICY_SCHEMA_VERSION, description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.")
     strategies: list[CrawlStrategy] = Field(
-        default_factory=lambda: [CrawlStrategy.HTTP_DECLARED_CRAWLER, CrawlStrategy.BROWSER_HEADLESS],
+        default_factory=lambda: [
+            CrawlStrategy.HTTP_DECLARED_CRAWLER,
+            CrawlStrategy.HTTP_CFFI_IMPERSONATE,
+            CrawlStrategy.BROWSER_HEADLESS,
+            CrawlStrategy.BROWSER_HEADED_WARMED,
+        ],
         min_length=1,
-        description="Ordered execution chain. Default: HTTP_DECLARED_CRAWLER then BROWSER_HEADLESS. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available options: HTTP_DECLARED_CRAWLER (transparent direct HTTP), HTTP_SITE_COMPAT (browser-like direct HTTP headers), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via curl_cffi), BROWSER_HEADLESS (headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs), DOCUMENT_EXTRACT (PDF/non-HTML text extraction), TRAFILATURA_EXTRACT (HTML main-text extraction only).",
+        description="Ordered fetch execution chain. Default: HTTP_DECLARED_CRAWLER, then HTTP_CFFI_IMPERSONATE, then BROWSER_HEADLESS, then BROWSER_HEADED_WARMED. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available fetch strategies: HTTP_DECLARED_CRAWLER (transparent direct HTTP with the service's declared crawler identity), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via curl_cffi with browser-like headers for WAF/Cloudflare bypass), BROWSER_HEADLESS (headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
+    )
+    extraction: CrawlExtractionMethod = Field(
+        CrawlExtractionMethod.FULL,
+        description="Output/parsing pipeline applied to the content the selected fetch strategy retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
     )
     limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.")
     headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.")
-    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_SITE_COMPAT and HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
+    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
     browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.")
     discovery: dict[str, bool] = Field(default_factory=dict, description="Optional discovery toggles: robots, sitemaps, and feeds. Discovery output is diagnostic and non-recursive; the service reports discovered links and metadata but callers own frontier queueing, dedupe, and persistence.")
 
@@ -200,6 +241,7 @@ class CapabilitiesResponse(BaseModel):
     version: str
     policy_schema_version: str
     supported_strategies: list[CrawlStrategy]
+    supported_extractions: list[CrawlExtractionMethod]
     supported_classifications: list[CrawlClassification]
     output_fields: list[str]
     default_limits: dict[str, int]
@@ -211,6 +253,7 @@ class CapabilitiesResponse(BaseModel):
 class AgentHintsResponse(BaseModel):
     service: str
     strategies: dict[CrawlStrategy, str]
+    extractions: dict[CrawlExtractionMethod, str]
     guidance: list[str]
     example_policies: dict[str, dict[str, Any]]
 

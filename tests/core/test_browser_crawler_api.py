@@ -14,6 +14,18 @@ from fastapi.testclient import TestClient
 
 from app import main as crawler_main
 from app.models import CrawlJob, CrawlResult
+from app.constants import (
+    BROWSER_HEADLESS,
+    BROWSER_HEADED_WARMED,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_METHOD_DOCUMENT,
+    EXTRACTION_METHOD_HTTP_HTML,
+    EXTRACTION_METHOD_TRAFILATURA,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
 from app.service import render_request
 from app.settings import CrawlerSettings
 
@@ -34,9 +46,11 @@ class BrowserCrawlerApiTest(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["service"], "browser-crawler")
         self.assertEqual(body["policy_schema_version"], "2026-06-23")
-        self.assertIn("HTTP_DECLARED_CRAWLER", body["supported_strategies"])
-        self.assertIn("HTTP_CFFI_IMPERSONATE", body["supported_strategies"])
-        self.assertIn("TRAFILATURA_EXTRACT", body["supported_strategies"])
+        self.assertIn(HTTP_DECLARED_CRAWLER, body["supported_strategies"])
+        self.assertIn(HTTP_CFFI_IMPERSONATE, body["supported_strategies"])
+        self.assertIn("full", body["supported_extractions"])
+        self.assertIn("document", body["supported_extractions"])
+        self.assertIn("trafilatura", body["supported_extractions"])
         self.assertTrue(body["features"]["cloudflare_bypass"])
         self.assertIn("captcha_detected", body["supported_classifications"])
         self.assertIn("selected_strategy", body["output_fields"])
@@ -81,11 +95,15 @@ class BrowserCrawlerApiTest(unittest.TestCase):
         self.assertIn("backpressure", guidance_text)
         self.assertIn("fastapi event loop", guidance_text)
         self.assertIn("offloaded", guidance_text)
-        self.assertIn("HTTP_SITE_COMPAT", body["strategies"])
+        self.assertIn(HTTP_CFFI_IMPERSONATE, body["strategies"])
+        self.assertIn("full", body["extractions"])
+        self.assertIn("document", body["extractions"])
+        self.assertIn("trafilatura", body["extractions"])
         self.assertIn("browser_fallback", body["example_policies"])
-        self.assertIn("DOCUMENT_EXTRACT", body["example_policies"]["document_extraction"]["strategies"])
-        self.assertIn("html-only", body["strategies"]["TRAFILATURA_EXTRACT"].lower())
-        self.assertIn("does not parse pdf", body["strategies"]["TRAFILATURA_EXTRACT"].lower())
+        self.assertIn(HTTP_DECLARED_CRAWLER, body["example_policies"]["document_extraction"]["strategies"])
+        self.assertIn("document", body["example_policies"]["document_extraction"]["extraction"])
+        self.assertIn("html-only", body["extractions"]["trafilatura"].lower())
+        self.assertIn("does not parse pdf", body["extractions"]["trafilatura"].lower())
 
     def test_health_endpoint_remains_lightweight_liveness(self) -> None:
         client = TestClient(crawler_main.app)
@@ -180,9 +198,17 @@ class BrowserCrawlerApiTest(unittest.TestCase):
         self.assertIn("pagination", crawl_post["description"].lower())
         self.assertIn("examples", crawl_post["requestBody"]["content"]["application/json"])
         strategy_schema = schema["components"]["schemas"]["CrawlStrategy"]
-        self.assertIn("HTTP_DECLARED_CRAWLER", strategy_schema["enum"])
-        self.assertIn("BROWSER_HEADED_WARMED", strategy_schema["enum"])
-        self.assertIn("TRAFILATURA_EXTRACT", strategy_schema["enum"])
+        self.assertIn(HTTP_DECLARED_CRAWLER, strategy_schema["enum"])
+        self.assertIn(BROWSER_HEADED_WARMED, strategy_schema["enum"])
+        self.assertIn(HTTP_CFFI_IMPERSONATE, strategy_schema["enum"])
+        self.assertNotIn("DOCUMENT_EXTRACT", strategy_schema["enum"])
+        self.assertNotIn("TRAFILATURA_EXTRACT", strategy_schema["enum"])
+        # TRAFILATURA_EXTRACT/DOCUMENT_EXTRACT are extraction methods, not strategies
+        extraction_schema = schema["components"]["schemas"].get("CrawlExtractionMethod")
+        self.assertIsNotNone(extraction_schema)
+        if extraction_schema:
+            for member in (EXTRACTION_FULL, EXTRACTION_TRAFILATURA, EXTRACTION_DOCUMENT):
+                self.assertIn(member, extraction_schema["enum"])
         classification_schema = schema["components"]["schemas"]["CrawlClassification"]
         self.assertIn("captcha_detected", classification_schema["enum"])
         self.assertIn("rendered", classification_schema["enum"])
@@ -220,10 +246,10 @@ class BrowserCrawlerApiTest(unittest.TestCase):
                         "final_url": "https://records.example.gov/search?q=permit",
                         "status": "success",
                         "classification": "rendered",
-                        "selected_strategy": "HTTP_DECLARED_CRAWLER",
+                        "selected_strategy": HTTP_DECLARED_CRAWLER,
                         "attempted_strategies": [
                             {
-                                "strategy": "HTTP_DECLARED_CRAWLER",
+                                "strategy": HTTP_DECLARED_CRAWLER,
                                 "status": "success",
                                 "classification": "rendered",
                                 "http_status": 200,
@@ -237,7 +263,7 @@ class BrowserCrawlerApiTest(unittest.TestCase):
                         "content_type": "text/html; charset=utf-8",
                         "html": "<html><body><main>Permit records</main><a href=\"/permits\">Permits</a></body></html>",
                         "text": "Permit records Permits",
-                        "extraction_method": "http_html",
+                        "extraction_method": EXTRACTION_METHOD_HTTP_HTML,
                         "quality_score": 0.95,
                         "classification_evidence": [],
                         "diagnostics": {
@@ -270,7 +296,7 @@ class BrowserCrawlerApiTest(unittest.TestCase):
                 json={
                     "url": "https://records.example.gov/search?q=permit",
                     "policy": {
-                        "strategies": ["HTTP_DECLARED_CRAWLER"],
+                        "strategies": [HTTP_DECLARED_CRAWLER],
                         "request_profile": {"user_agent_family": "desktop_chrome"},
                     },
                 },
@@ -308,7 +334,7 @@ class BrowserCrawlerApiTest(unittest.TestCase):
 
         response = client.post(
             "/v1/crawl",
-            json={"url": "not-a-url", "strategy": "HTTP_DECLARED_CRAWLER"},
+            json={"url": "not-a-url", "strategy": HTTP_DECLARED_CRAWLER},
         )
 
         self.assertEqual(response.status_code, 422)

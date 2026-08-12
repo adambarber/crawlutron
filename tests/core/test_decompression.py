@@ -59,6 +59,30 @@ class TestDecompressBody:
         result = _decompress_body(original, "unknown")
         assert result == original
 
+    def test_corrupt_gzip_returns_body_as_is(self):
+        """curl_cffi auto-decompresses a gzip body but may leave the
+        Content-Encoding: gzip header on the response; a non-gzip body labeled
+        gzip must pass through unchanged (regression guard)."""
+        already_decompressed = b"<!doctype html><html><body>mass.gov content</body></html>"
+
+        result = _decompress_body(already_decompressed, "gzip")
+        assert result == already_decompressed
+
+    def test_corrupt_brotli_returns_body_as_is(self):
+        """A body labeled br that is not valid brotli must pass through unchanged."""
+        not_brotli = b"not valid brotli bytes"
+
+        result = _decompress_body(not_brotli, "br")
+        assert result == not_brotli
+
+    def test_corrupt_deflate_returns_body_as_is(self):
+        """A body labeled deflate that is not a valid zlib stream must pass
+        through unchanged rather than raising."""
+        not_deflate = b"<!doctype html><html><body>not zlib</body></html>"
+
+        result = _decompress_body(not_deflate, "deflate")
+        assert result == not_deflate
+
 class TestDecodeBody:
     """Test _decode_body integrates with decompression."""
 

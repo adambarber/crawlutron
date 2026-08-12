@@ -2,28 +2,34 @@
 
 import gzip
 import zlib
-from typing import Optional
 
 
 def decompress_body(body: bytes, content_encoding: str) -> bytes:
     """Decompress response body based on Content-Encoding header.
 
-    Args:
-        body: The response body bytes.
-        content_encoding: The Content-Encoding header value.
-
-    Returns:
-        Decompressed body bytes, or original body if encoding not supported.
+    Exception-safe: if a decoder is unavailable or the body was already
+    decompressed (e.g. curl_cffi auto-decompresses a gzip body but leaves the
+    ``Content-Encoding: gzip`` header on the response), the original body is
+    returned unchanged instead of raising.
     """
     encoding = content_encoding.lower().strip()
     if "gzip" in encoding:
-        return gzip.decompress(body)
+        try:
+            return gzip.decompress(body)
+        except Exception:
+            return body
     if "deflate" in encoding:
-        return zlib.decompress(body)
+        try:
+            return zlib.decompress(body)
+        except Exception:
+            return body
     if "br" in encoding:
         try:
             import brotli
+        except ImportError:  # pragma: no cover - brotli is a required dependency
+            return body
+        try:
             return brotli.decompress(body)
-        except ImportError:  # pragma: no cover - brotli missing at runtime
-            pass  # brotli not available, return as-is
+        except Exception:
+            return body
     return body

@@ -21,7 +21,26 @@ from .models import CrawlJob, CrawlResult, CrawlStrategyAttempt, DiscoveredLink,
 from .scheduler import DomainScheduler
 from .settings import CrawlerSettings
 from .validation import normalize_public_http_url, registrable_domain
-from app.crawl.extraction import extract_content
+from app.crawl.extraction import extract_content, _extract_html, _extract_document
+from app.constants import (
+    DEFAULT_EXTRACTION,
+    DEFAULT_STRATEGIES,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    EXTRACTION_METHOD_DOCUMENT,
+    EXTRACTION_METHOD_DOM_TEXT,
+    EXTRACTION_METHOD_HTTP_BODY,
+    EXTRACTION_METHOD_HTTP_HTML,
+    EXTRACTION_METHOD_TRAFILATURA,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+    BROWSER_HEADLESS,
+    BROWSER_HEADED_WARMED,
+    SUPPORTED_EXTRACTIONS,
+    SUPPORTED_STRATEGIES,
+)
 
 
 CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
@@ -49,10 +68,13 @@ BLOCKED_CLASSIFICATIONS = {
     "geolocation_blocked",
     "waf_challenge_detected",
 }
-HTTP_STRATEGIES = {"HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "HTTP_CFFI_IMPERSONATE", "DOCUMENT_EXTRACT", "TRAFILATURA_EXTRACT"}
-BROWSER_STRATEGIES = {"BROWSER_HEADLESS", "BROWSER_HEADED_WARMED"}
+HTTP_STRATEGIES = {HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE}
+BROWSER_STRATEGIES = {BROWSER_HEADLESS, BROWSER_HEADED_WARMED}
 SUPPORTED_CRAWL_STRATEGIES = HTTP_STRATEGIES | BROWSER_STRATEGIES
-DEFAULT_CRAWL_STRATEGIES = ["HTTP_DECLARED_CRAWLER", "HTTP_SITE_COMPAT", "HTTP_CFFI_IMPERSONATE", "BROWSER_HEADLESS"]
+DEFAULT_CRAWL_STRATEGIES = list(DEFAULT_STRATEGIES)
+
+SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
+DEFAULT_EXTRACTION = DEFAULT_EXTRACTION
 
 
 def _payload_urls(payload: dict[str, Any]) -> list[str]:
@@ -176,6 +198,9 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         raise ValueError("invalid_policy_strategies")
     if any(strategy not in SUPPORTED_CRAWL_STRATEGIES for strategy in strategies):
         raise ValueError("invalid_policy_strategy")
+    extraction = policy.get("extraction") or DEFAULT_EXTRACTION
+    if extraction not in SUPPORTED_EXTRACTION_METHODS:
+        raise ValueError("invalid_policy_extraction")
     request_profile = policy.get("request_profile") or {}
     browser_profile = policy.get("browser_profile") or {}
     discovery = policy.get("discovery") or {}
@@ -184,6 +209,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     return {
         "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
         "strategies": strategies,
+        "extraction": extraction,
         "limits": {
             "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
             "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
@@ -211,7 +237,7 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         "Sec-Fetch-Site": "none",
     }
     user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
-    is_browser_like = strategy == "HTTP_SITE_COMPAT" or user_agent_family == "desktop_chrome"
+    is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
     if is_browser_like:
         headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -505,7 +531,11 @@ def _html_diagnostics(html: str | None, source_url: str | None) -> dict[str, Any
 def _extract_discovered_links(html: str | None, source_url: str | None, *, max_links: int = 250) -> tuple[list[DiscoveredLink], int, bool]:
     if not html or not source_url:
         return [], 0, False
-    source_host = (urlparse(source_url).hostname or "").lower()
+    try:
+        norm_source = normalize_public_http_url(source_url)
+    except ValueError:
+        norm_source = source_url
+    source_host = (urlparse(norm_source).hostname or "").lower()
     collector = _AnchorCollector()
     collector.feed(html)
     links: list[DiscoveredLink] = []
@@ -516,9 +546,9 @@ def _extract_discovered_links(html: str | None, source_url: str | None, *, max_l
         href = unescape(str(attrs.get("href", "")).strip())
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
-        normalized_url = urljoin(source_url, href)
-        parsed = urlparse(normalized_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        try:
+            normalized_url = normalize_public_http_url(urljoin(source_url, href))
+        except ValueError:
             continue
         if normalized_url in seen:
             continue
@@ -526,6 +556,7 @@ def _extract_discovered_links(html: str | None, source_url: str | None, *, max_l
         total_count += 1
         if len(links) >= max_links:
             continue
+        parsed = urlparse(normalized_url)
         text = re.sub(r"\s+", " ", unescape(" ".join(anchor["text"]))).strip()
         links.append(
             DiscoveredLink(
@@ -739,7 +770,7 @@ def _discovery_diagnostics(
         try:
             robots_response = http_fetcher(robots_url, headers, policy["limits"]["timeout_seconds"])
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
-            robots_text = _decode_body(robots_response.body, robots_headers.get("content-type"))
+            robots_text = _decode_body(_decompress_body(robots_response.body, robots_headers.get("content-encoding", "")), robots_headers.get("content-type"))
             crawl_delay = None
             for line in robots_text.splitlines():
                 key, _, value = line.partition(":")
@@ -764,7 +795,7 @@ def _discovery_diagnostics(
             try:
                 sitemap_response = http_fetcher(sitemap_url, headers, policy["limits"]["timeout_seconds"])
                 sitemap_headers = {key.lower(): value for key, value in sitemap_response.headers.items()}
-                sitemap_text = _decode_body(sitemap_response.body, sitemap_headers.get("content-type"))
+                sitemap_text = _decode_body(_decompress_body(sitemap_response.body, sitemap_headers.get("content-encoding", "")), sitemap_headers.get("content-type"))
                 sitemap_urls.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap_text, flags=re.IGNORECASE))
             except Exception:
                 continue
@@ -796,18 +827,18 @@ def _binary_no_text_result(
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status="failed",
-        classification="binary_no_text",
+        classification=EXTRACTION_METHOD_BINARY_NO_TEXT,
         http_status=http_status,
         content_type=content_type,
         elapsed_ms=elapsed_ms,
-        error="binary_no_text",
+        error=EXTRACTION_METHOD_BINARY_NO_TEXT,
     )
     return UniversalCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=final_url,
         status="failed",
-        classification="binary_no_text",
+        classification=EXTRACTION_METHOD_BINARY_NO_TEXT,
         selected_strategy=None,
         attempted_strategies=[attempt],
         http_status=http_status,
@@ -815,9 +846,9 @@ def _binary_no_text_result(
         content_type=content_type,
         html=None,
         text=None,
-        extraction_method="binary_no_text",
+        extraction_method = EXTRACTION_METHOD_BINARY_NO_TEXT,
         quality_score=0.0,
-        error="binary_no_text",
+        error=EXTRACTION_METHOD_BINARY_NO_TEXT,
     )
 
 
@@ -842,7 +873,7 @@ def _http_strategy_result(
         )
         headers = {key.lower(): value for key, value in response.headers.items()}
         content_type = headers.get("content-type")
-        if strategy != "DOCUMENT_EXTRACT" and _looks_like_binary_body(response.body, content_type, response.final_url):
+        if policy.get("extraction") != EXTRACTION_DOCUMENT and _looks_like_binary_body(response.body, content_type, response.final_url):
             result = _binary_no_text_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
@@ -854,19 +885,33 @@ def _http_strategy_result(
                 elapsed_ms=response.elapsed_ms,
             )
             return UniversalCrawlResult(**{**asdict(result), "diagnostics": {"retry": retry_diagnostics}})
-        body_text = _decode_body(response.body, content_type)
+        decompressed = _decompress_body(response.body, headers.get("content-encoding", ""))
+        body_text = _decode_body(decompressed, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
-        extracted = extract_content(response.body, content_type, response.final_url)
-        if strategy == "TRAFILATURA_EXTRACT" and not is_html:
-            text = ""
-            markdown = None
-        else:
+        extraction = policy.get("extraction", DEFAULT_EXTRACTION)
+        if extraction == EXTRACTION_DOCUMENT:
+            extracted = _extract_document(decompressed, response.final_url)
             text = extracted.text or ""
             markdown = extracted.markdown
-            if strategy == "DOCUMENT_EXTRACT" and (content_type or "").lower().startswith("text/"):
+            if (content_type or "").lower().startswith("text/"):
                 text = _format_extracted_document_text(text, source_url=response.final_url)
                 markdown = text
+            extraction_method = EXTRACTION_METHOD_DOCUMENT
+        elif extraction == EXTRACTION_TRAFILATURA:
+            if is_html:
+                extracted = _extract_html(body_text, response.final_url)
+                text = extracted.text or ""
+                markdown = extracted.markdown
+            else:
+                text = ""
+                markdown = None
+            extraction_method = EXTRACTION_METHOD_TRAFILATURA
+        else:
+            extracted = extract_content(decompressed, content_type, response.final_url)
+            text = extracted.text or ""
+            markdown = extracted.markdown
+            extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY
         classification, classification_evidence = classify_rendered_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
@@ -883,15 +928,10 @@ def _http_strategy_result(
         elif response.status_code >= 500:
             classification = "site_error"
             classification_evidence = [{"classification": "site_error", "signature": str(response.status_code), "source": "http_status", "context": f"HTTP {response.status_code}"}]
-        if strategy == "TRAFILATURA_EXTRACT" and not is_html and classification == "rendered":  # pragma: no cover - non-html TRAFILATURA always yields binary_no_text
-            classification = "binary_no_text"
-            classification_evidence = [{"classification": "binary_no_text", "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
+        if extraction == EXTRACTION_TRAFILATURA and not is_html and classification == "rendered":  # pragma: no cover - non-html TRAFILATURA always yields binary_no_text
+            classification = EXTRACTION_METHOD_BINARY_NO_TEXT
+            classification_evidence = [{"classification": EXTRACTION_METHOD_BINARY_NO_TEXT, "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
         status = _status_for_classification(classification)
-        extraction_method = "http_html" if is_html else "http_body"
-        if strategy == "DOCUMENT_EXTRACT":
-            extraction_method = "document_extract"
-        elif strategy == "TRAFILATURA_EXTRACT":
-            extraction_method = "trafilatura_extract"
         diagnostics: dict[str, Any] = {
             "request_profile": {
                 "user_agent_family": str(policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")),
@@ -1001,15 +1041,31 @@ async def _browser_strategy_result(
     )
     job = CrawlJob(index=0, url=normalized_url, domain=registrable_domain(normalized_url), options=options)
     result = await _call_worker(browser_worker, job)
+    extraction = policy.get("extraction", DEFAULT_EXTRACTION)
     content = result.html if result.html else result.text
     if content:
-        extracted = extract_content(content, None, result.final_url)
-        text = extracted.text or ""
-        markdown = extracted.markdown
+        if extraction == EXTRACTION_DOCUMENT:
+            extracted = _extract_document(
+                content.encode("utf-8", "replace") if isinstance(content, str) else content,
+                result.final_url,
+            )
+            text = extracted.text or ""
+            markdown = extracted.markdown
+            extraction_method = EXTRACTION_METHOD_DOCUMENT
+        elif extraction == EXTRACTION_TRAFILATURA:
+            extracted = _extract_html(content, result.final_url)
+            text = extracted.text or ""
+            markdown = extracted.markdown
+            extraction_method = EXTRACTION_METHOD_TRAFILATURA
+        else:
+            extracted = extract_content(content, None, result.final_url)
+            text = extracted.text or ""
+            markdown = extracted.markdown
+            extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
     else:
         text = ""
         markdown = None
-    extraction_method = result.metadata.get("extraction_method") or "dom_text"
+        extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
     quality = _quality_score(result.status, result.classification, text, result.html, None)
     discovered_links, discovered_link_count, discovered_links_truncated = (
         _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"]) if result.status == "success" else ([], 0, False)
@@ -1059,17 +1115,17 @@ async def _execute_crawl_chain(
     normalized_url: str,
     policy: dict[str, Any],
     http_fetcher: HttpFetcher,
+    cffi_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
 ) -> UniversalCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: UniversalCrawlResult | None = None
     for strategy in policy["strategies"]:
         if strategy in HTTP_STRATEGIES:
-            # Use curl_cffi fetcher for HTTP_CFFI_IMPERSONATE strategy
-            if strategy == "HTTP_CFFI_IMPERSONATE":
-                strategy_fetcher = _default_cffi_fetcher  # pragma: no cover - requires network
-            else:
-                strategy_fetcher = http_fetcher
+            # HTTP_CFFI_IMPERSONATE uses the curl_cffi-based fetcher (injected in
+            # tests, otherwise the real-network default). All other HTTP strategies
+            # use the direct HTTP fetcher.
+            strategy_fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
             result = await asyncio.to_thread(
                 _http_strategy_result,
                 original_url=original_url,
@@ -1158,6 +1214,7 @@ async def crawl_request(
     settings: CrawlerSettings | None = None,
     browser_worker: CrawlWorker | None = None,
     http_fetcher: HttpFetcher | None = None,
+    cffi_fetcher: HttpFetcher | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
@@ -1165,6 +1222,7 @@ async def crawl_request(
         raise ValueError("batch_size_exceeded")
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
+    cffi = cffi_fetcher or _default_cffi_fetcher
 
     immediate_results: dict[int, UniversalCrawlResult] = {}
     jobs: list[CrawlExecutionJob] = []
@@ -1192,6 +1250,7 @@ async def crawl_request(
             normalized_url=normalized_url,
             policy=policy,
             http_fetcher=fetcher,
+            cffi_fetcher=cffi,
             browser_worker=browser_worker,
         )
         return index, result

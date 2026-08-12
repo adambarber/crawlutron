@@ -5,3 +5,4 @@ curl_cffi>=0.7.0
 trafilatura==2.0.0
 markitdown[pdf,docx,pptx,xlsx]>=0.1.0
 setuptools==80.9.0
+brotli>=1.1.0

@@ -20,6 +20,14 @@ from .api_models import (
     FirecrawlMetadata,
     ReadinessResponse,
 )
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
 from .browser import BrowserRenderer
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
@@ -189,10 +197,11 @@ if FastAPI is not None:
             "Policy is the caller-controlled execution plan for one URL or a batch of URLs. "
             "Use policy.strategies to choose the ordered fallback chain; strategies run in order, the service records "
             "every attempted strategy, and fallback stops at the first successful content result. Available strategy "
-            "options are HTTP_DECLARED_CRAWLER for transparent direct HTTP, HTTP_SITE_COMPAT for browser-like direct "
-            "HTTP headers, HTTP_CFFI_IMPERSONATE for TLS-fingerprint-impersonated HTTP via curl_cffi, BROWSER_HEADLESS "
-            "for headless Firefox rendering via Camoufox, BROWSER_HEADED_WARMED for headed Firefox with warmup URLs, "
-            "DOCUMENT_EXTRACT for PDF/non-HTML text extraction, and TRAFILATURA_EXTRACT for HTML main-text extraction only. "
+            "options (fetch strategies, tried in order) are HTTP_DECLARED_CRAWLER for transparent direct HTTP, "
+            "HTTP_CFFI_IMPERSONATE for TLS-fingerprint-impersonated HTTP via curl_cffi with browser-like headers, "
+            "BROWSER_HEADLESS for headless Firefox rendering via Camoufox, and BROWSER_HEADED_WARMED for headed Firefox "
+            "with warmup URLs. How retrieved content is parsed is controlled separately by policy.extraction (full, "
+            "trafilatura, or document); extraction is orthogonal to the fetch strategy. "
             "Returns Firecrawl-style condensed Markdown output with metadata for LLM-friendly consumption. "
             "Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
             "and max_discovered_links; omit limits to use defaults from /v1/capabilities. Use request_profile for "
@@ -217,10 +226,9 @@ if FastAPI is not None:
                                     "url": "https://records.example.gov/search?q=permit",
                                     "policy": {
                                         "strategies": [
-                                            "HTTP_DECLARED_CRAWLER",
-                                            "HTTP_SITE_COMPAT",
-                                            "HTTP_CFFI_IMPERSONATE",
-                                            "BROWSER_HEADLESS",
+                                            HTTP_DECLARED_CRAWLER,
+                                            HTTP_CFFI_IMPERSONATE,
+                                            BROWSER_HEADLESS,
                                         ],
                                         "limits": {
                                             "timeout_seconds": 30,
@@ -235,7 +243,8 @@ if FastAPI is not None:
                                 "value": {
                                     "urls": ["https://records.example.gov/agenda.pdf"],
                                     "policy": {
-                                        "strategies": ["DOCUMENT_EXTRACT"],
+                                        "strategies": [HTTP_DECLARED_CRAWLER],
+                                        "extraction": EXTRACTION_DOCUMENT,
                                         "limits": {
                                             "timeout_seconds": 60,
                                             "max_retries": 1,
@@ -258,10 +267,9 @@ if FastAPI is not None:
                     "url": "https://records.example.gov/search?q=permit",
                     "policy": {
                         "strategies": [
-                            "HTTP_DECLARED_CRAWLER",
-                            "HTTP_SITE_COMPAT",
-                            "HTTP_CFFI_IMPERSONATE",
-                            "BROWSER_HEADLESS",
+                            HTTP_DECLARED_CRAWLER,
+                            HTTP_CFFI_IMPERSONATE,
+                            BROWSER_HEADLESS,
                         ],
                         "limits": {
                             "timeout_seconds": 30,

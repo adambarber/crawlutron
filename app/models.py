@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from app.constants import (
+    BROWSER_HEADED_WARMED,
+    BROWSER_HEADLESS,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
+
 
 ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed"]
 Classification = Literal[
@@ -35,13 +42,10 @@ Classification = Literal[
 ]
 
 CrawlStrategyName = Literal[
-    "HTTP_DECLARED_CRAWLER",
-    "HTTP_SITE_COMPAT",
-    "HTTP_CFFI_IMPERSONATE",
-    "BROWSER_HEADLESS",
-    "BROWSER_HEADED_WARMED",
-    "DOCUMENT_EXTRACT",
-    "TRAFILATURA_EXTRACT",
+    HTTP_DECLARED_CRAWLER,
+    HTTP_CFFI_IMPERSONATE,
+    BROWSER_HEADLESS,
+    BROWSER_HEADED_WARMED,
 ]
 
 

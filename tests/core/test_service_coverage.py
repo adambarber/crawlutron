@@ -9,6 +9,21 @@ from pathlib import Path
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
 
 from app.models import CrawlStrategyAttempt, HttpFetchResult, UniversalCrawlResult  # noqa: E402
+from app.constants import (
+    BROWSER_HEADLESS,
+    BROWSER_HEADED_WARMED,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    EXTRACTION_METHOD_DOCUMENT,
+    EXTRACTION_METHOD_DOM_TEXT,
+    EXTRACTION_METHOD_HTTP_BODY,
+    EXTRACTION_METHOD_HTTP_HTML,
+    EXTRACTION_METHOD_TRAFILATURA,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
 from app.service import (  # noqa: E402
     _collect_document_item_lines,
     _cookie_header_for_url,
@@ -52,7 +67,7 @@ def discovery_fetcher(url, headers, timeout):
 
 BASE_POLICY = {
     "schema_version": "2026-06-23",
-    "strategies": ["HTTP_DECLARED_CRAWLER"],
+    "strategies": [HTTP_DECLARED_CRAWLER],
     "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
     "headers": {},
     "request_profile": {},
@@ -90,6 +105,7 @@ class TestValidationHelpers:
             ({"policy": {"headers": "x"}}, "invalid_policy_headers"),
             ({"policy": {"strategies": "x"}}, "invalid_policy_strategies"),
             ({"policy": {"request_profile": "x"}}, "invalid_policy_profile"),
+            ({"policy": {"extraction": "bogus"}}, "invalid_policy_extraction"),
         ]
         for payload, expected in cases:
             try:
@@ -106,7 +122,7 @@ class TestValidationHelpers:
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
         policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
-        headers = _headers_for_strategy("HTTP_DECLARED_CRAWLER", policy, "http://x/")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, policy, "http://x/")
         assert "iPhone" in headers["User-Agent"]
 
     def test_cookie_header_invalid_structures(self) -> None:
@@ -171,7 +187,7 @@ class TestPureParsing:
         assert len(collector.frames) == 1
 
 class TestHttpStrategyResult:
-    def _run(self, status=200, strategy="HTTP_DECLARED_CRAWLER", fetcher=None,
+    def _run(self, status=200, strategy=HTTP_DECLARED_CRAWLER, fetcher=None,
              ctype="text/html; charset=utf-8", body=b"<html><body>hello</body></html>",
              final_url="http://example.com/", policy=None):
         if fetcher is None:
@@ -207,19 +223,19 @@ class TestHttpStrategyResult:
             body=b"PK\x03\x04data",
             final_url="http://example.com/a.zip",
         )
-        assert result.classification == "binary_no_text"
+        assert result.classification == EXTRACTION_METHOD_BINARY_NO_TEXT
 
     def test_document_extract_strategy(self) -> None:
         result = self._run(
-            strategy="DOCUMENT_EXTRACT",
+            policy={"extraction": EXTRACTION_DOCUMENT},
             ctype="text/csv",
             body=b"name,age\nAlice,30\nBob,25",
         )
         assert "Alice" in (result.text or "")
 
     def test_trafilatura_extract_html_and_non_html(self) -> None:
-        assert "hello" in (self._run(strategy="TRAFILATURA_EXTRACT").text or "")
-        non_html = self._run(strategy="TRAFILATURA_EXTRACT", ctype="application/json", body=b"{}")
+        assert "hello" in (self._run(policy={"extraction": EXTRACTION_TRAFILATURA}).text or "")
+        non_html = self._run(policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}")
         assert non_html.text == ""
 
     def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
@@ -243,15 +259,16 @@ class TestExecuteCrawlChain:
             normalized_url="http://example.com/",
             policy=dict(BASE_POLICY, strategies=[strategy]),
             http_fetcher=ok_fetcher,
+            cffi_fetcher=ok_fetcher,
             browser_worker=None,
             **kwargs,
         )
 
     def test_http_strategy_runs(self) -> None:
-        assert asyncio.run(self._run_chain("HTTP_DECLARED_CRAWLER")).status == "success"
+        assert asyncio.run(self._run_chain(HTTP_DECLARED_CRAWLER)).status == "success"
 
     def test_browser_strategy_without_worker(self) -> None:
-        assert asyncio.run(self._run_chain("BROWSER_HEADLESS")).classification == "browser_crash"
+        assert asyncio.run(self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
 
     def test_unsupported_strategy(self) -> None:
         assert asyncio.run(self._run_chain("NOT_A_STRATEGY")).classification == "unknown_error"
@@ -260,7 +277,7 @@ class TestCrawlRequest:
     def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
         payload = {"urls": ["http://example.com/"] * (settings.max_batch_size + 1),
-                   "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
+                   "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         try:
             asyncio.run(crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
  browser_worker=None))
@@ -269,7 +286,7 @@ class TestCrawlRequest:
             assert str(exc) == "batch_size_exceeded"
 
     def test_invalid_url_raises(self) -> None:
-        payload = {"url": "not a url", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
+        payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         try:
             asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
  browser_worker=None))
@@ -278,7 +295,7 @@ class TestCrawlRequest:
             assert str(exc).startswith("invalid_url")
 
     def test_success_with_injected_fetcher(self) -> None:
-        payload = {"url": "http://example.com/", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
+        payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         result = asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
  browser_worker=None))
         assert result["submitted_count"] == 1
@@ -305,6 +322,15 @@ class TestServiceEdgeCases:
         )
         assert all("ftp://" not in getattr(link, "url", str(link)) for link in links)
         assert any("https://ok/x" in getattr(link, "url", str(link)) for link in links)
+
+    def test_extract_discovered_links_handles_unnormalizable_source_url(self) -> None:
+        # normalize_public_http_url rejects non-http source URLs; the link extractor
+        # must fall back to the raw source rather than crash.
+        links, count, truncated = _extract_discovered_links(
+            "<a href='https://ok.example/x'>ok</a>", "ftp://example.com/"
+        )
+        assert count == 1
+        assert truncated is False
 
     def test_should_join_document_paragraph_heading(self) -> None:
         # A heading line must never be joined to the next paragraph.

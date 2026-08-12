@@ -17,6 +17,21 @@ from app.scheduler import DomainScheduler
 from app.service import _extract_discovered_links, _format_extracted_document_text, crawl_request
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
+from app.constants import (
+    BROWSER_HEADLESS,
+    BROWSER_HEADED_WARMED,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_FULL,
+    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    EXTRACTION_METHOD_DOCUMENT,
+    EXTRACTION_METHOD_DOM_TEXT,
+    EXTRACTION_METHOD_HTTP_BODY,
+    EXTRACTION_METHOD_HTTP_HTML,
+    EXTRACTION_METHOD_TRAFILATURA,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
 
 
 def make_fetcher(status_code: int = 200, content_type: str = "text/html", body: bytes = b"",
@@ -44,12 +59,13 @@ def make_renderer(page, **kwargs):
     return BrowserRenderer(browser_factory=lambda **kw: ctx, sleep=lambda _: None, **kwargs)
 
 
-def run_crawl(url: str, policy: dict, http_fetcher=None, browser_worker=None):
+def run_crawl(url: str, policy: dict, http_fetcher=None, browser_worker=None, cffi_fetcher=None):
     return asyncio.run(
         crawl_request(
             {"url": url, "policy": policy},
             settings=CrawlerSettings(per_domain_delay_ms=0),
             http_fetcher=http_fetcher,
+            cffi_fetcher=cffi_fetcher,
             browser_worker=browser_worker,
         )
     )
@@ -115,16 +131,16 @@ def assert_browser_fallback(test, browser_worker, expected_text):
     fetcher = make_fetcher(status_code=403, content_type="text/html", body=b"Access Denied", elapsed_ms=2)
     response = run_crawl(
         "https://records.example.gov/search",
-        {"strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"]},
-        http_fetcher=fetcher,
+        {"strategies": [HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]},
+        cffi_fetcher=fetcher,
         browser_worker=browser_worker,
     )
     result = response["results"][0]
     test.assertEqual(result["status"], "success")
-    test.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
+    test.assertEqual(result["selected_strategy"], BROWSER_HEADLESS)
     test.assertEqual(
         [attempt["strategy"] for attempt in result["attempted_strategies"]],
-        ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"],
+        [HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS],
     )
     test.assertEqual(result["attempted_strategies"][0]["status"], "blocked")
     test.assertEqual(result["text"], expected_text)
@@ -144,7 +160,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         async def run_probe() -> int:
             crawl_task = asyncio.create_task(
                 crawl_request(
-                    {"url": "https://records.example.gov/search", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
+                    {"url": "https://records.example.gov/search", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}},
                     settings=CrawlerSettings(per_domain_delay_ms=0),
                     http_fetcher=fetcher,
                 )
@@ -176,7 +192,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         async def run_probe() -> int:
             crawl_task = asyncio.create_task(
                 crawl_request(
-                    {"url": "https://records.example.gov/search", "policy": {"strategies": ["BROWSER_HEADLESS"]}},
+                    {"url": "https://records.example.gov/search", "policy": {"strategies": [BROWSER_HEADLESS]}},
                     settings=CrawlerSettings(per_domain_delay_ms=0),
                     browser_worker=browser_worker,
                 )
@@ -235,6 +251,14 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         # Non-standard port should be preserved
         normalized = normalize_public_http_url("http://example.com:8080/search")
         self.assertEqual(normalized, "http://example.com:8080/search")
+
+    def test_url_normalization_is_single_source_of_truth_for_trailing_slash_and_default_ports(self) -> None:
+        # boston.gov/ and boston.gov must collapse to the same normalized key.
+        self.assertEqual(normalize_public_http_url("https://boston.gov/"), "https://boston.gov")
+        self.assertEqual(normalize_public_http_url("https://boston.gov"), "https://boston.gov")
+        # default ports are stripped (port 443 / 80)
+        self.assertEqual(normalize_public_http_url("https://boston.gov:443/"), "https://boston.gov")
+        self.assertEqual(normalize_public_http_url("http://boston.gov:80/"), "http://boston.gov")
 
     def test_registrable_domain_handles_two_part_host(self) -> None:
         self.assertEqual(registrable_domain("https://example.com"), "example.com")
@@ -387,7 +411,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = asyncio.run(
             crawl_request(
-                {"url": "https://assessor.example.gov/default.asp", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
+                {"url": "https://assessor.example.gov/default.asp", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}},
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
             )
@@ -440,7 +464,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = asyncio.run(
             crawl_request(
-                {"url": "https://assessor.example.gov/search-middle-ns.asp", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
+                {"url": "https://assessor.example.gov/search-middle-ns.asp", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}},
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
             )
@@ -472,7 +496,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             "not_found": "Custom404 • Example, MA • CivicEngage",
             "site_error": "Runtime Error Server Error in '/' Application",
             "gone": "410 Gone",
-            "binary_no_text": "",
+            EXTRACTION_METHOD_BINARY_NO_TEXT: "",
         }
 
         for expected, text in examples.items():
@@ -497,7 +521,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             crawl_request(
                 {
                     "url": "https://records.example.gov/search?q=permit",
-                    "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 5}},
+                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER], "limits": {"timeout_seconds": 5}},
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
@@ -509,12 +533,12 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["normalized_url"], "https://records.example.gov/search?q=permit")
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["classification"], "rendered")
-        self.assertEqual(result["selected_strategy"], "HTTP_DECLARED_CRAWLER")
-        self.assertEqual(result["attempted_strategies"][0]["strategy"], "HTTP_DECLARED_CRAWLER")
+        self.assertEqual(result["selected_strategy"], HTTP_DECLARED_CRAWLER)
+        self.assertEqual(result["attempted_strategies"][0]["strategy"], HTTP_DECLARED_CRAWLER)
         self.assertEqual(result["http_status"], 200)
         self.assertEqual(result["content_type"], "text/html; charset=utf-8")
         self.assertIn("Permit records", result["text"])
-        self.assertEqual(result["extraction_method"], "http_html")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_HTTP_HTML)
         self.assertGreater(result["quality_score"], 0.8)
         self.assertEqual(
             result["discovered_links"],
@@ -540,6 +564,60 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             ],
         )
 
+    def test_crawl_request_decompresses_gzip_http_body_before_extraction_and_links(self) -> None:
+        import gzip
+
+        html = (
+            '<html><body><main>City websites</main>'
+            '<a href="/abington">Abington</a>'
+            '<a href="/abington">Abington duplicate</a>'
+            '<a href="https://www.boston.gov">Boston</a>'
+            '<a href="https://www.boston.gov/">Boston trailing slash</a>'
+            '<a href="#section">Skip anchor</a>'
+            '</body></html>'
+        ).encode("utf-8")
+        gz = gzip.compress(html)
+
+        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
+            return HttpFetchResult(
+                url=url,
+                final_url=url,
+                status_code=200,
+                headers={"content-type": "text/html; charset=utf-8", "content-encoding": "gzip"},
+                body=gz,
+                elapsed_ms=3,
+            )
+
+        response = asyncio.run(
+            crawl_request(
+                {
+                    "url": "https://example.gov/cities",
+                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER], "limits": {"timeout_seconds": 5}},
+                },
+                settings=CrawlerSettings(per_domain_delay_ms=0),
+                http_fetcher=fetcher,
+            )
+        )
+        result = response["results"][0]
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["classification"], "rendered")
+        # The wire body was gzip-compressed; html/markdown must be decompressed, not raw gzip.
+        self.assertNotIn("\x1f\x8b", result["html"])
+        self.assertNotIn("\x1f\x8b", result["markdown"] or "")
+        self.assertIn("City websites", result["text"])
+        # Links are extracted from the decompressed HTML and duplicate normalized_urls collapse.
+        normalized = [link["normalized_url"] for link in result["discovered_links"]]
+        self.assertEqual(
+            normalized,
+            [
+                "https://example.gov/abington",
+                "https://www.boston.gov",
+            ],
+        )
+        self.assertEqual(len(normalized), len(set(normalized)))
+        self.assertEqual(result["discovered_link_count"], len(normalized))
+        self.assertFalse(result["discovered_links_truncated"])
+
     def test_crawl_request_applies_request_compatibility_profile_and_cookie_policy(self) -> None:
         captured_headers: dict[str, str] = {}
 
@@ -559,7 +637,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 {
                     "url": "https://records.example.gov/search",
                     "policy": {
-                        "strategies": ["HTTP_SITE_COMPAT"],
+                        "strategies": [HTTP_CFFI_IMPERSONATE],
                         "request_profile": {
                             "user_agent_family": "desktop_chrome",
                             "accept_language": "en-US,en;q=0.9",
@@ -569,7 +647,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                     },
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
+                cffi_fetcher=fetcher,
             )
         )
 
@@ -603,7 +681,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             crawl_request(
                 {
                     "url": "https://records.example.gov/search",
-                    "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"max_retries": 1}},
+                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER], "limits": {"max_retries": 1}},
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
@@ -629,7 +707,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = asyncio.run(
             crawl_request(
-                {"url": "https://records.example.gov/search", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
+                {"url": "https://records.example.gov/search", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}},
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
             )
@@ -666,7 +744,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 {
                     "url": "https://records.example.gov/search",
                     "policy": {
-                        "strategies": ["HTTP_DECLARED_CRAWLER"],
+                        "strategies": [HTTP_DECLARED_CRAWLER],
                         "discovery": {"robots": True, "sitemaps": True, "feeds": True},
                     },
                 },
@@ -712,7 +790,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 {
                     "url": "https://records.example.gov/search",
                     "policy": {
-                        "strategies": ["HTTP_DECLARED_CRAWLER", "BROWSER_HEADLESS"],
+                        "strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
                         "browser_profile": {
                             "state": "per_host_warmed",
                             "viewport": "mobile",
@@ -737,7 +815,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             html="<html><body>Rendered permits</body></html>",
             text="Rendered permits Link",
             elapsed_ms=5,
-            metadata={"extraction_method": "dom_text"},
+            metadata={"extraction_method": EXTRACTION_METHOD_DOM_TEXT},
         )
         assert_browser_fallback(self, browser_worker, "Rendered permits")
 
@@ -766,7 +844,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             crawl_request(
                 {
                     "url": "https://records.example.gov/search",
-                    "policy": {"strategies": ["HTTP_DECLARED_CRAWLER", "BROWSER_HEADLESS"]},
+                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS]},
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
@@ -800,13 +878,13 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/archive.zip",
-            {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER]},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["classification"], "binary_no_text")
+        self.assertEqual(result["classification"], EXTRACTION_METHOD_BINARY_NO_TEXT)
         self.assertIsNone(result["selected_strategy"])
         self.assertIsNone(result["html"])
         self.assertIsNone(result["text"])
@@ -822,17 +900,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/agenda.pdf",
-            {"strategies": ["DOCUMENT_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_DOCUMENT},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["selected_strategy"], "DOCUMENT_EXTRACT")
+        self.assertEqual(result["selected_strategy"], HTTP_DECLARED_CRAWLER)
         self.assertEqual(result["content_type"], "application/pdf")
         self.assertTrue(result["text"].startswith("%PDF-1.7"))
         self.assertIsNone(result["html"])
-        self.assertEqual(result["extraction_method"], "document_extract")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_DOCUMENT)
         self.assertGreater(result["quality_score"], 0.8)
 
     def test_document_extract_formats_agenda_numbers_with_related_text(self) -> None:
@@ -915,7 +993,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/notice.txt",
-            {"strategies": ["DOCUMENT_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_DOCUMENT},
             http_fetcher=fetcher,
         )
 
@@ -932,14 +1010,14 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/data.csv",
-            {"strategies": ["DOCUMENT_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_DOCUMENT},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
         self.assertIn("Alice", result["text"])
-        self.assertEqual(result["extraction_method"], "document_extract")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_DOCUMENT)
 
     def test_crawl_request_default_document_extractor_uses_text_bodies(self) -> None:
         fetcher = make_fetcher(
@@ -951,14 +1029,14 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/notice.txt",
-            {"strategies": ["DOCUMENT_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_DOCUMENT},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["text"], "Posted notice text")
-        self.assertEqual(result["extraction_method"], "document_extract")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_DOCUMENT)
 
     def test_crawl_request_uses_trafilatura_extractor_for_noisy_html(self) -> None:
         fetcher = make_fetcher(
@@ -970,15 +1048,15 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/detail",
-            {"strategies": ["TRAFILATURA_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_TRAFILATURA},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["selected_strategy"], "TRAFILATURA_EXTRACT")
+        self.assertEqual(result["selected_strategy"], HTTP_DECLARED_CRAWLER)
         self.assertIn("Permit detail record text", result["text"])
-        self.assertEqual(result["extraction_method"], "trafilatura_extract")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_TRAFILATURA)
         self.assertGreater(result["quality_score"], 0.8)
 
     def test_trafilatura_strategy_does_not_parse_pdf_bodies(self) -> None:
@@ -991,14 +1069,42 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         response = run_crawl(
             "https://records.example.gov/agenda.pdf",
-            {"strategies": ["TRAFILATURA_EXTRACT"]},
+            {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": EXTRACTION_TRAFILATURA},
             http_fetcher=fetcher,
         )
 
         result = response["results"][0]
-        self.assertEqual(result["extraction_method"], "trafilatura_extract")
-        self.assertEqual(result["classification"], "binary_no_text")
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_TRAFILATURA)
+        self.assertEqual(result["classification"], EXTRACTION_METHOD_BINARY_NO_TEXT)
         self.assertEqual(result["discovered_links"], [])
+
+    def test_crawl_request_browser_extraction_can_force_document_pipeline(self) -> None:
+        # Extraction is orthogonal to the fetch strategy: BROWSER_HEADLESS paired
+        # with the document extraction pipeline yields a document_extract result.
+        body_html = "<html><body><nav>Menu</nav><main>Permit detail record text</main></body></html>"
+        response = run_crawl(
+            "https://records.example.gov/detail",
+            {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT},
+            browser_worker=make_browser_worker(html=body_html),
+        )
+        result = response["results"][0]
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_strategy"], BROWSER_HEADLESS)
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_DOCUMENT)
+        self.assertIn("Permit detail record text", result["text"])
+
+    def test_crawl_request_browser_extraction_can_force_trafilura_pipeline(self) -> None:
+        body_html = "<html><body><nav>Menu</nav><main>Permit detail record text</main></body></html>"
+        response = run_crawl(
+            "https://records.example.gov/detail",
+            {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA},
+            browser_worker=make_browser_worker(html=body_html),
+        )
+        result = response["results"][0]
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_strategy"], BROWSER_HEADLESS)
+        self.assertEqual(result["extraction_method"], EXTRACTION_METHOD_TRAFILATURA)
+        self.assertIn("Permit detail record text", result["text"])
 
     def test_crawl_request_rejects_unknown_strategy_before_execution(self) -> None:
         with self.assertRaises(ValueError) as context:

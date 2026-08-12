@@ -4,7 +4,14 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import AgentHintsResponse, CrawlStrategy
+from app.api_models import AgentHintsResponse, CrawlExtractionMethod, CrawlStrategy
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
 from app.settings import CrawlerSettings
 
 
@@ -12,18 +19,21 @@ from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
-    CrawlStrategy.HTTP_SITE_COMPAT: "Direct HTTP using browser-like compatibility headers before escalating to browser rendering.",
-    CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi with chrome124 impersonation for WAF/Cloudflare bypass.",
+    CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi (chrome124) with browser-like compatibility headers for WAF/Cloudflare bypass.",
     CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",
     CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",
-    CrawlStrategy.DOCUMENT_EXTRACT: "Document/body extraction for PDFs and non-HTML responses when text evidence is needed.",
-    CrawlStrategy.TRAFILATURA_EXTRACT: "HTML-only main-text extraction strategy for noisy HTML. It does not parse PDF or binary documents; use DOCUMENT_EXTRACT for PDFs.",
+}
+
+EXTRACTION_DESCRIPTIONS = {
+    CrawlExtractionMethod.FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",
+    CrawlExtractionMethod.TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",
+    CrawlExtractionMethod.DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",
 }
 
 GUIDANCE = [
     "Use GET /health for lightweight process liveness and Docker healthchecks.",
     "Use GET /ready for crawl capacity/readiness; HTTP 503 means saturated backpressure, not necessarily crashed.",
-    "Long direct HTTP, document extraction, Trafilatura, and synchronous browser work are offloaded from the FastAPI event loop so liveness can stay responsive during crawls.",
+    "Long direct HTTP, document extraction, trafilatura extraction, and synchronous browser work are offloaded from the FastAPI event loop so liveness can stay responsive during crawls.",
     "Prefer direct transparent crawler HTTP for sites that allow it.",
     "Use browser strategies only when direct HTTP is blocked, incomplete, or requires rendering.",
     "Do not treat HTTP 200 as content success without checking classification and quality score.",
@@ -45,10 +55,9 @@ GUIDANCE = [
 EXAMPLE_POLICIES = {
     "browser_fallback": {
         "strategies": [
-            "HTTP_DECLARED_CRAWLER",
-            "HTTP_SITE_COMPAT",
-            "HTTP_CFFI_IMPERSONATE",
-            "BROWSER_HEADLESS",
+            HTTP_DECLARED_CRAWLER,
+            HTTP_CFFI_IMPERSONATE,
+            BROWSER_HEADLESS,
         ],
         "limits": {
             "timeout_seconds": 30,
@@ -57,7 +66,8 @@ EXAMPLE_POLICIES = {
         },
     },
     "document_extraction": {
-        "strategies": ["DOCUMENT_EXTRACT"],
+        "strategies": [HTTP_DECLARED_CRAWLER],
+        "extraction": EXTRACTION_DOCUMENT,
         "limits": {
             "timeout_seconds": 60,
             "max_retries": 1,
@@ -65,7 +75,8 @@ EXAMPLE_POLICIES = {
         },
     },
     "trafilatura_only": {
-        "strategies": ["TRAFILATURA_EXTRACT"],
+        "strategies": [HTTP_DECLARED_CRAWLER],
+        "extraction": EXTRACTION_TRAFILATURA,
         "limits": {
             "timeout_seconds": 15,
             "max_retries": 1,
@@ -73,7 +84,7 @@ EXAMPLE_POLICIES = {
         },
     },
     "direct_http_only": {
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
+        "strategies": [HTTP_DECLARED_CRAWLER],
         "limits": {
             "timeout_seconds": 10,
             "max_retries": 2,
@@ -87,6 +98,7 @@ def agent_hints_payload() -> dict[str, Any]:
     return {
         "service": "browser-crawler",
         "strategies": {strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()},
+        "extractions": {method.value: description for method, description in EXTRACTION_DESCRIPTIONS.items()},
         "guidance": GUIDANCE,
         "example_policies": EXAMPLE_POLICIES,
     }

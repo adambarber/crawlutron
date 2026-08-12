@@ -7,9 +7,11 @@ from fastapi import APIRouter
 from app.api_models import (
     CapabilitiesResponse,
     CrawlClassification,
+    CrawlExtractionMethod,
     CrawlStrategy,
 )
 from app.settings import CrawlerSettings
+from app.constants import SUPPORTED_STRATEGIES, SUPPORTED_EXTRACTIONS
 
 
 from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
@@ -44,6 +46,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
         "version": API_VERSION,
         "policy_schema_version": POLICY_SCHEMA_VERSION,
         "supported_strategies": [strategy.value for strategy in CrawlStrategy],
+        "supported_extractions": [method.value for method in CrawlExtractionMethod],
         "supported_classifications": [classification.value for classification in CrawlClassification],
         "output_fields": OUTPUT_FIELDS,
         "default_limits": {
