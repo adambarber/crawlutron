@@ -463,7 +463,7 @@ if FastAPI is not None:
             return CondensedCrawlResponse(success=True, data=condensed_data)
         except ValueError as error:
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
-            raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
+            raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
         finally:
             readiness_state.end_request()
 else:

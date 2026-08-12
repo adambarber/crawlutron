@@ -253,22 +253,8 @@ def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
     return "; ".join(f"{key}={value}" for key, value in host_cookies.items())
 
 
-def _decompress_body(body: bytes, content_encoding: str) -> bytes:
-    """Decompress response body based on Content-Encoding header."""
-    encoding = content_encoding.lower().strip()
-    if "gzip" in encoding:
-        import gzip
-        return gzip.decompress(body)
-    if "deflate" in encoding:
-        import zlib
-        return zlib.decompress(body)
-    if "br" in encoding:
-        try:
-            import brotli
-            return brotli.decompress(body)
-        except ImportError:
-            pass  # brotli not available, return as-is
-    return body
+# Decompression extracted to app.crawl.decompression
+from app.crawl.decompression import decompress_body as _decompress_body
 
 
 def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] | None = None) -> str:
@@ -282,12 +268,6 @@ def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] 
             charset = match.group(1).strip()
     return body.decode(charset, errors="replace")
 
-
-def _text_from_html(html: str) -> str:
-    without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
-    without_styles = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"<[^>]+>", " ", without_styles)
-    return re.sub(r"\s+", " ", unescape(text)).strip()
 
 
 def _status_for_classification(classification: str) -> str:
@@ -766,93 +746,10 @@ def _default_trafilatura_extractor(html: str, url: str) -> str:
     return (extracted or "").strip()
 
 
-def extract_firecrawl_format(html: str | None, url: str) -> tuple[str | None, dict[str, Any]]:
-    """Extract Firecrawl-style condensed Markdown and metadata from HTML."""
-    if not html or not html.strip():
-        return None, {}
-
-    markdown_text: str | None = None
-    try:
-        import trafilatura
-        markdown_text = trafilatura.extract(
-            html,
-            output_format="markdown",
-            include_links=True,
-            include_images=True,
-            favor_precision=True,
-            url=url,
-        )
-    except Exception:  # noqa: BLE001
-        markdown_text = None
-
-    if not markdown_text or not markdown_text.strip():
-        try:
-            from markdownify import markdownify as md_convert
-            markdown_text = md_convert(html)
-        except Exception:  # noqa: BLE001
-            markdown_text = _text_from_html(html) or None
-
-    return (markdown_text or "").strip() or None, _extract_firecrawl_metadata(html, url)
+# Firecrawl format extraction moved to app.crawl.firecrawl_format
+from app.crawl.firecrawl_format import extract_firecrawl_format, _text_from_html
 
 
-def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
-    """Extract Firecrawl-style metadata from HTML meta tags."""
-    import re
-    metadata: dict[str, Any] = {"source_url": url}
-
-    # title
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
-    if title_match:
-        metadata["title"] = re.sub(r"\s+", " ", title_match.group(1)).strip()
-
-    # meta tags
-    for match in re.finditer(r'<meta\\s+([^>]+)>', html, flags=re.IGNORECASE):
-        attrs = match.group(1)
-        name_match = re.search(r'(?:name|property)\\s*=\\s*["\']([^"\']+)["\']', attrs, flags=re.IGNORECASE)
-        content_match = re.search(r'content\\s*=\\s*["\']([^"\']*)["\']', attrs, flags=re.IGNORECASE)
-        if not name_match or not content_match:
-            continue
-        name = name_match.group(1).lower().strip()
-        value = content_match.group(1).strip()
-        if not value:
-            continue
-        key_map = {
-            "description": "description",
-            "og:title": "og_title",
-            "og:description": "og_description",
-            "og:image": "og_image",
-            "og:url": "og_url",
-            "og:type": "og_type",
-            "og:site_name": "og_site_name",
-            "twitter:card": "twitter_card",
-            "twitter:title": "twitter_title",
-            "twitter:description": "twitter_description",
-            "twitter:image": "twitter_image",
-        }
-        mapped = key_map.get(name)
-        if mapped:
-            metadata[mapped] = value
-
-    # canonical URL
-    canonical_match = re.search(r'<link\\s+[^>]*rel\\s*=\\s*["\']canonical["\'][^>]*href\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if not canonical_match:
-        canonical_match = re.search(r'<link\\s+[^>]*href\\s*=\\s*["\']([^"\']+)["\'][^>]*rel\\s*=\\s*["\']canonical["\']', html, flags=re.IGNORECASE)
-    if canonical_match:
-        metadata["canonical_url"] = canonical_match.group(1).strip()
-
-    # favicon
-    favicon_match = re.search(r'<link\\s+[^>]*rel\\s*=\\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*href\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if not favicon_match:
-        favicon_match = re.search(r'<link\\s+[^>]*href\\s*=\\s*["\']([^"\']+)["\'][^>]*rel\\s*=\\s*["\'](?:icon|shortcut icon|apple-touch-icon)["\']', html, flags=re.IGNORECASE)
-    if favicon_match:
-        metadata["favicon"] = favicon_match.group(1).strip()
-
-    # language
-    lang_match = re.search(r'<html\\s+[^>]*lang\\s*=\\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if lang_match:
-        metadata["language"] = lang_match.group(1).strip()
-
-    return metadata
 
 def _discovery_diagnostics(
     *,
@@ -1304,25 +1201,8 @@ async def crawl_request(
             normalized_url = normalize_public_http_url(original_url)
             domain = registrable_domain(normalized_url)
         except ValueError as error:
-            classification = str(error)
-            immediate_results[index] = UniversalCrawlResult(
-                original_url=original_url,
-                normalized_url=None,
-                final_url=None,
-                status="disallowed",
-                classification=classification,  # type: ignore[arg-type]
-                selected_strategy=None,
-                attempted_strategies=[],
-                http_status=None,
-                headers={},
-                content_type=None,
-                html=None,
-                text=None,
-                extraction_method=None,
-                quality_score=0.0,
-                error=classification,
-            )
-            continue
+            # Raise validation error to be caught by FastAPI exception handler
+            raise ValueError(f"invalid_url: {error}") from error
         jobs.append(CrawlExecutionJob(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain))
 
     scheduler = DomainScheduler(

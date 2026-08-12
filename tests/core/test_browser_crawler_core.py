@@ -110,6 +110,36 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
             "https://www.example.gov/document.pdf?t=202606081542580",
         )
 
+    def test_url_validation_rejects_missing_hostname(self) -> None:
+        for url in [
+            "http:///path",
+            "https://",
+            "http://?query=1",
+        ]:
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError) as cm:
+                    normalize_public_http_url(url)
+                self.assertEqual(str(cm.exception), "invalid_url")
+
+    def test_url_validation_normalizes_port_in_netloc(self) -> None:
+        normalized = normalize_public_http_url("https://example.gov:8443/path")
+        self.assertEqual(normalized, "https://example.gov:8443/path")
+
+        # Non-standard port should be preserved
+        normalized = normalize_public_http_url("http://example.com:8080/search")
+        self.assertEqual(normalized, "http://example.com:8080/search")
+
+    def test_registrable_domain_handles_two_part_host(self) -> None:
+        self.assertEqual(registrable_domain("https://example.com"), "example.com")
+        self.assertEqual(registrable_domain("https://sub.example.com"), "example.com")
+        self.assertEqual(registrable_domain("https://a.b.c.example.com"), "example.com")
+
+    def test_registrable_domain_handles_two_part_public_suffixes(self) -> None:
+        self.assertEqual(registrable_domain("https://example.co.uk"), "example.co.uk")
+        self.assertEqual(registrable_domain("https://sub.example.co.uk"), "example.co.uk")
+        self.assertEqual(registrable_domain("https://a.b.example.org.uk"), "example.org.uk")
+        self.assertEqual(registrable_domain("https://example.com.au"), "example.com.au")
+
     def test_classifier_does_not_treat_youtube_sign_in_copy_as_captcha(self) -> None:
         text = "Sign in to confirm you're not a bot. This helps protect our community. Learn more."
 
@@ -1018,6 +1048,99 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
 
         self.assertEqual([result.url for result in results], [job.url for job in jobs])
         self.assertEqual(events[:2], [("start", "example.gov"), ("start", "example.org")])
+
+    def test_scheduler_set_domain_cooldown_applies_wait(self) -> None:
+        # Cooldown check only runs when delay_seconds > 0
+        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.01)
+        scheduler.set_domain_cooldown("example.com", 0.1)
+
+        start = time.time()
+
+        async def worker(job: CrawlJob) -> CrawlResult:
+            return CrawlResult(
+                url=job.url,
+                status="success",
+                classification="rendered",
+                final_url=job.url,
+                html="<html>ok</html>",
+                text="ok",
+                attempts=1,
+                elapsed_ms=1,
+                domain=job.domain,
+            )
+
+        jobs = [
+            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
+        ]
+
+        results = asyncio.run(scheduler.run(jobs, worker))
+
+        elapsed = time.time() - start
+        # Should have waited for cooldown (~0.1s)
+        self.assertGreaterEqual(elapsed, 0.05)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "success")
+
+    def test_scheduler_set_domain_cooldown_zero_does_not_wait(self) -> None:
+        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0)
+        scheduler.set_domain_cooldown("example.com", 0)
+
+        start = time.time()
+
+        async def worker(job: CrawlJob) -> CrawlResult:
+            return CrawlResult(
+                url=job.url,
+                status="success",
+                classification="rendered",
+                final_url=job.url,
+                html="<html>ok</html>",
+                text="ok",
+                attempts=1,
+                elapsed_ms=1,
+                domain=job.domain,
+            )
+
+        jobs = [
+            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
+        ]
+
+        results = asyncio.run(scheduler.run(jobs, worker))
+
+        elapsed = time.time() - start
+        # Should NOT wait for zero cooldown
+        self.assertLess(elapsed, 0.05)
+        self.assertEqual(len(results), 1)
+
+    def test_scheduler_cooldown_expires_before_job(self) -> None:
+        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0)
+        # Set cooldown in the past
+        scheduler._domain_cooldowns["example.com"] = time.time() - 1.0
+
+        start = time.time()
+
+        async def worker(job: CrawlJob) -> CrawlResult:
+            return CrawlResult(
+                url=job.url,
+                status="success",
+                classification="rendered",
+                final_url=job.url,
+                html="<html>ok</html>",
+                text="ok",
+                attempts=1,
+                elapsed_ms=1,
+                domain=job.domain,
+            )
+
+        jobs = [
+            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
+        ]
+
+        results = asyncio.run(scheduler.run(jobs, worker))
+
+        elapsed = time.time() - start
+        # Expired cooldown should not cause wait
+        self.assertLess(elapsed, 0.05)
+        self.assertEqual(len(results), 1)
 
     def test_browser_renderer_extracts_rendered_html_and_text_with_fake_browser(self) -> None:
         from unittest.mock import AsyncMock, MagicMock

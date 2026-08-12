@@ -306,6 +306,22 @@ class BrowserCrawlerApiTest(unittest.TestCase):
         self.assertEqual(body["message"], "Request validation failed")
         self.assertIn("errors", body["details"])
 
+    def test_crawl_endpoint_rejects_invalid_url_with_422(self) -> None:
+        client = TestClient(crawler_main.app)
+
+        response = client.post(
+            "/v1/crawl",
+            json={"url": "not-a-url", "strategy": "HTTP_DECLARED_CRAWLER"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        # FastAPI HTTPException wraps detail in "detail" key
+        detail = body.get("detail", body)
+        self.assertEqual(detail["code"], "validation_error")
+        self.assertEqual(detail["message"], "Request validation failed")
+        self.assertIn("errors", detail["details"])
+
     def test_render_request_accepts_single_url_payload_and_returns_response_shape(self) -> None:
         async def worker(job: CrawlJob) -> CrawlResult:
             return CrawlResult(
@@ -403,6 +419,8 @@ class BrowserCrawlerApiTest(unittest.TestCase):
                     worker=lambda job: None,
                 )
             )
+
+
 
         self.assertEqual(str(context.exception), "batch_size_exceeded")
 
