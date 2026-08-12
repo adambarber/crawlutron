@@ -21,12 +21,11 @@ from .models import CrawlJob, CrawlResult, CrawlStrategyAttempt, DiscoveredLink,
 from .scheduler import DomainScheduler
 from .settings import CrawlerSettings
 from .validation import normalize_public_http_url, registrable_domain
+from app.crawl.extraction import extract_content
 
 
 CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
 HttpFetcher = Callable[[str, dict[str, str], int], HttpFetchResult]
-DocumentTextExtractor = Callable[[bytes, str | None, str], str]
-TrafilaturaExtractor = Callable[[str, str], str]
 
 
 @dataclass(frozen=True)
@@ -706,23 +705,6 @@ def _document_item_range(start: str, end: str) -> list[str]:
     return [f"{prefix}{chr(code)}" for code in range(ord(start_match.group(2)), ord(end_match.group(2)) + 1)]
 
 
-def _default_document_text_extractor(body: bytes, content_type: str | None, url: str) -> str:
-    normalized_content_type = (content_type or "").lower()
-    if normalized_content_type.startswith("text/"):
-        return _decode_body(body, content_type).strip()
-    if "pdf" in normalized_content_type or url.split("?", 1)[0].lower().endswith(".pdf"):
-        completed = subprocess.run(
-            ["pdftotext", "-", "-"],
-            input=body,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if completed.returncode == 0:
-            return completed.stdout.decode("utf-8", errors="replace").strip()
-    return ""
-
-
 def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
     normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
     if normalized_content_type.startswith("text/") or normalized_content_type in {"application/json", "application/xml", "application/xhtml+xml"}:
@@ -736,18 +718,6 @@ def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> 
         return True
     return normalized_content_type in {"application/octet-stream", "application/zip", "application/x-zip-compressed"}
 
-
-def _default_trafilatura_extractor(html: str, url: str) -> str:  # pragma: no cover - optional extraction backend (trafilatura)
-    try:
-        import trafilatura  # type: ignore[import-not-found]
-    except ImportError:
-        return _text_from_html(html)
-    extracted = trafilatura.extract(html, url=url)
-    return (extracted or "").strip()
-
-
-# Firecrawl format extraction moved to app.crawl.firecrawl_format
-from app.crawl.firecrawl_format import extract_firecrawl_format, _text_from_html
 
 
 
@@ -858,8 +828,6 @@ def _http_strategy_result(
     strategy: str,
     policy: dict[str, Any],
     http_fetcher: HttpFetcher,
-    document_text_extractor: DocumentTextExtractor,
-    trafilatura_extractor: TrafilaturaExtractor,
 ) -> UniversalCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
@@ -889,14 +857,16 @@ def _http_strategy_result(
         body_text = _decode_body(response.body, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
-        if strategy == "DOCUMENT_EXTRACT":
-            text = _format_extracted_document_text(document_text_extractor(response.body, content_type, response.final_url), source_url=response.final_url)
-        elif strategy == "TRAFILATURA_EXTRACT" and is_html:
-            text = trafilatura_extractor(body_text, response.final_url).strip()
-        elif strategy == "TRAFILATURA_EXTRACT":
+        extracted = extract_content(response.body, content_type, response.final_url)
+        if strategy == "TRAFILATURA_EXTRACT" and not is_html:
             text = ""
+            markdown = None
         else:
-            text = _text_from_html(body_text) if is_html else body_text.strip()
+            text = extracted.text or ""
+            markdown = extracted.markdown
+            if strategy == "DOCUMENT_EXTRACT" and (content_type or "").lower().startswith("text/"):
+                text = _format_extracted_document_text(text, source_url=response.final_url)
+                markdown = text
         classification, classification_evidence = classify_rendered_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
@@ -972,6 +942,7 @@ def _http_strategy_result(
             content_type=content_type,
             html=html,
             text=text,
+            markdown=markdown,
             extraction_method=extraction_method,
             quality_score=quality,
             classification_evidence=classification_evidence,
@@ -1030,8 +1001,16 @@ async def _browser_strategy_result(
     )
     job = CrawlJob(index=0, url=normalized_url, domain=registrable_domain(normalized_url), options=options)
     result = await _call_worker(browser_worker, job)
+    content = result.html if result.html else result.text
+    if content:
+        extracted = extract_content(content, None, result.final_url)
+        text = extracted.text or ""
+        markdown = extracted.markdown
+    else:
+        text = ""
+        markdown = None
     extraction_method = result.metadata.get("extraction_method") or "dom_text"
-    quality = _quality_score(result.status, result.classification, result.text, result.html, None)
+    quality = _quality_score(result.status, result.classification, text, result.html, None)
     discovered_links, discovered_link_count, discovered_links_truncated = (
         _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"]) if result.status == "success" else ([], 0, False)
     )
@@ -1056,14 +1035,15 @@ async def _browser_strategy_result(
         headers={},
         content_type=None,
         html=result.html,
-        text=result.text,
+        text=text,
+        markdown=markdown,
         extraction_method=extraction_method,
         quality_score=quality,
         classification_evidence=[],
         diagnostics={
             "browser_profile": policy.get("browser_profile") or {},
             "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
-            "content_metrics": _content_metrics(result.text, result.html),
+            "content_metrics": _content_metrics(text, result.html),
             **_html_diagnostics(result.html, result.final_url),
         },
         discovered_link_count=discovered_link_count,
@@ -1080,8 +1060,6 @@ async def _execute_crawl_chain(
     policy: dict[str, Any],
     http_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
-    document_text_extractor: DocumentTextExtractor,
-    trafilatura_extractor: TrafilaturaExtractor,
 ) -> UniversalCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: UniversalCrawlResult | None = None
@@ -1099,8 +1077,6 @@ async def _execute_crawl_chain(
                 strategy=strategy,
                 policy=policy,
                 http_fetcher=strategy_fetcher,
-                document_text_extractor=document_text_extractor,
-                trafilatura_extractor=trafilatura_extractor,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -1182,8 +1158,6 @@ async def crawl_request(
     settings: CrawlerSettings | None = None,
     browser_worker: CrawlWorker | None = None,
     http_fetcher: HttpFetcher | None = None,
-    document_text_extractor: DocumentTextExtractor | None = None,
-    trafilatura_extractor: TrafilaturaExtractor | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
@@ -1191,8 +1165,6 @@ async def crawl_request(
         raise ValueError("batch_size_exceeded")
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
-    active_document_text_extractor = document_text_extractor or _default_document_text_extractor
-    active_trafilatura_extractor = trafilatura_extractor or _default_trafilatura_extractor
 
     immediate_results: dict[int, UniversalCrawlResult] = {}
     jobs: list[CrawlExecutionJob] = []
@@ -1221,8 +1193,6 @@ async def crawl_request(
             policy=policy,
             http_fetcher=fetcher,
             browser_worker=browser_worker,
-            document_text_extractor=active_document_text_extractor,
-            trafilatura_extractor=active_trafilatura_extractor,
         )
         return index, result
 

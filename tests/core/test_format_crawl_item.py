@@ -5,9 +5,13 @@ from app.main import _format_crawl_item  # noqa: E402
 
 class TestFormatCrawlItemUnified:
     def test_html_result_uses_markdownify(self) -> None:
+        from app.crawl.extraction import extract_content
+
+        html = "<html><head><title>T</title></head><body><p>Body text here</p></body></html>"
         item = {
+            "html": html,
+            "markdown": extract_content(html, "text/html", "http://example.com/").markdown,
             "final_url": "http://example.com/",
-            "html": "<html><head><title>T</title></head><body><p>Body text here</p></body></html>",
         }
         markdown, metadata = _format_crawl_item(item)
         assert markdown is not None
@@ -33,6 +37,12 @@ class TestFormatCrawlItemUnified:
         }
         markdown, metadata = _format_crawl_item(item)
         assert markdown == "fallback body text"
+
+    def test_document_markdown_without_html_returns_empty_metadata(self) -> None:
+        item = {"final_url": "http://example.com/doc.csv", "markdown": "# Heading\n\nbody"}
+        markdown, metadata = _format_crawl_item(item)
+        assert markdown == "# Heading\n\nbody"
+        assert metadata == {}
 
     def test_missing_text_returns_none_markdown(self) -> None:
         item = {"final_url": "http://example.com/x"}

@@ -2,7 +2,8 @@
 
 import unittest
 from app.crawl.decompression import decompress_body
-from app.crawl.firecrawl_format import extract_firecrawl_format, _text_from_html
+from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
+from app.crawl.extraction import extract_content
 from app.health.readiness import ReadinessState, create_health_router
 from app.discovery.capabilities import capabilities_payload, create_capabilities_router
 from app.discovery.agent_hints import agent_hints_payload, create_agent_hints_router, EXAMPLE_POLICIES, STRATEGY_DESCRIPTIONS
@@ -27,23 +28,28 @@ class DecompressionTest(unittest.TestCase):
         self.assertEqual(decompress_body(b"hello", "unknown"), b"hello")
 
 class FirecrawlFormatTest(unittest.TestCase):
-    def test_empty_html_returns_none(self) -> None:
-        md, meta = extract_firecrawl_format("", "https://example.com")
-        self.assertIsNone(md)
-        self.assertEqual(meta, {})
+    def test_extract_firecrawl_metadata_handles_empty(self) -> None:
+        meta = _extract_firecrawl_metadata("", "https://example.com")
+        self.assertEqual(meta, {"source_url": "https://example.com"})
 
     def test_extracts_title_and_meta(self) -> None:
         html = """<html lang="en"><head><title>Test Page</title>
+        <meta content="no-name-attribute">
+        <meta name="description" content="">
         <meta name="description" content="A test page">
         <meta property="og:title" content="OG Title">
         </head><body><main>Content here</main></body></html>"""
-        md, meta = extract_firecrawl_format(html, "https://example.com")
-        self.assertIsNotNone(md)
+        meta = _extract_firecrawl_metadata(html, "https://example.com")
         self.assertEqual(meta["title"], "Test Page")
         self.assertEqual(meta["description"], "A test page")
         self.assertEqual(meta["og_title"], "OG Title")
         self.assertEqual(meta["language"], "en")
         self.assertEqual(meta["source_url"], "https://example.com")
+
+    def test_extract_content_html_returns_markdown(self) -> None:
+        html = "<html><body><main>Content here</main></body></html>"
+        result = extract_content(html, "text/html", "https://example.com")
+        self.assertIn("Content here", result.markdown or "")
 
     def test_text_from_html_strips_tags(self) -> None:
         html = "<html><body><script>var x=1;</script><style>body{}</style><p>Hello</p></body></html>"

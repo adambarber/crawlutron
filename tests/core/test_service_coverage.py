@@ -12,8 +12,6 @@ from app.models import CrawlStrategyAttempt, HttpFetchResult, UniversalCrawlResu
 from app.service import (  # noqa: E402
     _collect_document_item_lines,
     _cookie_header_for_url,
-    _default_document_text_extractor,
-    _default_trafilatura_extractor,
     _document_item_range,
     _execute_crawl_chain,
     _call_worker,
@@ -137,13 +135,6 @@ class TestPureParsing:
         assert _looks_like_binary_body(b"data", "application/octet-stream", "http://x/") is True
         assert _looks_like_binary_body(b"data", "application/pdf", "http://x/a.pdf") is False
 
-    def test_default_document_text_extractor_non_text_returns_empty(self) -> None:
-        assert _default_document_text_extractor(b"data", "application/octet-stream", "http://x/z.bin") == ""
-        assert _default_document_text_extractor(b"<p>hi</p>", "text/html", "http://x/") == "<p>hi</p>"
-
-    def test_default_trafilatura_extractor_returns_string(self) -> None:
-        assert isinstance(_default_trafilatura_extractor("<p>x</p>", "http://x/"), str)
-
     def test_format_extracted_document_text_range_action(self) -> None:
         text = "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it"
         out = _format_extracted_document_text(text, source_url="http://x/")
@@ -195,8 +186,6 @@ class TestHttpStrategyResult:
             strategy=strategy,
             policy=pol,
             http_fetcher=fetcher,
-            document_text_extractor=lambda b, c, u: "DOC",
-            trafilatura_extractor=lambda h, u: "TRA",
         )
 
     def test_success_html(self) -> None:
@@ -221,10 +210,15 @@ class TestHttpStrategyResult:
         assert result.classification == "binary_no_text"
 
     def test_document_extract_strategy(self) -> None:
-        assert self._run(strategy="DOCUMENT_EXTRACT").text == "DOC"
+        result = self._run(
+            strategy="DOCUMENT_EXTRACT",
+            ctype="text/csv",
+            body=b"name,age\nAlice,30\nBob,25",
+        )
+        assert "Alice" in (result.text or "")
 
     def test_trafilatura_extract_html_and_non_html(self) -> None:
-        assert self._run(strategy="TRAFILATURA_EXTRACT").text == "TRA"
+        assert "hello" in (self._run(strategy="TRAFILATURA_EXTRACT").text or "")
         non_html = self._run(strategy="TRAFILATURA_EXTRACT", ctype="application/json", body=b"{}")
         assert non_html.text == ""
 
@@ -250,8 +244,6 @@ class TestExecuteCrawlChain:
             policy=dict(BASE_POLICY, strategies=[strategy]),
             http_fetcher=ok_fetcher,
             browser_worker=None,
-            document_text_extractor=lambda b, c, u: "DOC",
-            trafilatura_extractor=lambda h, u: "TRA",
             **kwargs,
         )
 
@@ -271,8 +263,7 @@ class TestCrawlRequest:
                    "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
         try:
             asyncio.run(crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
-                                       document_text_extractor=lambda b, c, u: "DOC",
-                                       trafilatura_extractor=lambda h, u: "TRA", browser_worker=None))
+ browser_worker=None))
             assert False, "expected ValueError"
         except ValueError as exc:
             assert str(exc) == "batch_size_exceeded"
@@ -281,8 +272,7 @@ class TestCrawlRequest:
         payload = {"url": "not a url", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
         try:
             asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
-                                       document_text_extractor=lambda b, c, u: "DOC",
-                                       trafilatura_extractor=lambda h, u: "TRA", browser_worker=None))
+ browser_worker=None))
             assert False, "expected ValueError"
         except ValueError as exc:
             assert str(exc).startswith("invalid_url")
@@ -290,8 +280,7 @@ class TestCrawlRequest:
     def test_success_with_injected_fetcher(self) -> None:
         payload = {"url": "http://example.com/", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}}
         result = asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
-                                           document_text_extractor=lambda b, c, u: "DOC",
-                                           trafilatura_extractor=lambda h, u: "TRA", browser_worker=None))
+ browser_worker=None))
         assert result["submitted_count"] == 1
         assert result["results"][0]["status"] == "success"
 

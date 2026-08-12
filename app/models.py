@@ -141,3 +141,4 @@ class UniversalCrawlResult:
     discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
     error: str | None = None
+    markdown: str | None = None

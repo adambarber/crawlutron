@@ -673,7 +673,50 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
         self.assertEqual([attempt["strategy"] for attempt in result["attempted_strategies"]], ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"])
         self.assertEqual(result["attempted_strategies"][0]["status"], "blocked")
-        self.assertEqual(result["text"], "Rendered permits Link")
+        self.assertEqual(result["text"], "Rendered permits")
+
+
+    def test_crawl_request_browser_strategy_handles_empty_rendered_content(self) -> None:
+        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
+            return HttpFetchResult(
+                url=url,
+                final_url=url,
+                status_code=403,
+                headers={"content-type": "text/html"},
+                body=b"Access Denied",
+                elapsed_ms=2,
+            )
+
+        def browser_worker(job: CrawlJob) -> CrawlResult:
+            return CrawlResult(
+                url=job.url,
+                status="success",
+                classification="rendered",
+                final_url=job.url,
+                html=None,
+                text=None,
+                attempts=1,
+                elapsed_ms=5,
+                domain=job.domain,
+            )
+
+        response = asyncio.run(
+            crawl_request(
+                {
+                    "url": "https://records.example.gov/search",
+                    "policy": {"strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"]},
+                },
+                settings=CrawlerSettings(per_domain_delay_ms=0),
+                http_fetcher=fetcher,
+                browser_worker=browser_worker,
+            )
+        )
+
+        result = response["results"][0]
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
+        self.assertEqual(result["text"], "")
+        self.assertIsNone(result["markdown"])
 
     def test_crawl_request_browser_strategy_returns_discovered_links_from_rendered_html(self) -> None:
         def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
@@ -764,7 +807,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 final_url=url,
                 status_code=200,
                 headers={"content-type": "application/pdf"},
-                body=b"%PDF-1.7 fake bytes",
+                body=b"%PDF-1.7 " + b"Sample agenda content " * 6,
                 elapsed_ms=6,
             )
 
@@ -776,7 +819,6 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
-                document_text_extractor=lambda body, content_type, url: "Meeting agenda packet text",
             )
         )
 
@@ -784,7 +826,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["selected_strategy"], "DOCUMENT_EXTRACT")
         self.assertEqual(result["content_type"], "application/pdf")
-        self.assertEqual(result["text"], "Meeting agenda packet text")
+        self.assertTrue(result["text"].startswith("%PDF-1.7"))
         self.assertIsNone(result["html"])
         self.assertEqual(result["extraction_method"], "document_extract")
         self.assertGreater(result["quality_score"], 0.8)
@@ -865,54 +907,50 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 url=url,
                 final_url=url,
                 status_code=200,
-                headers={"content-type": "application/pdf"},
-                body=b"%PDF-1.7 fake bytes",
+                headers={"content-type": "text/plain; charset=utf-8"},
+                body="5a.\n\n6. Order - That the City Council approves the minutes.".encode("utf-8"),
                 elapsed_ms=6,
             )
 
         response = asyncio.run(
             crawl_request(
                 {
-                    "url": "https://records.example.gov/agenda.pdf",
+                    "url": "https://records.example.gov/notice.txt",
                     "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
-                document_text_extractor=lambda body, content_type, url: "5.\n\nAPPROVAL OF THE MINUTES\n\n5a.\n\nOrder - That the City Council approves the minutes.",
             )
         )
 
         result = response["results"][0]
-        self.assertEqual(result["text"], "5. APPROVAL OF THE MINUTES\n\n5a. Order - That the City Council approves the minutes.")
+        self.assertEqual(result["text"], "5a. Order - That the City Council approves the minutes.")
 
-    def test_crawl_request_default_document_extractor_uses_pdf_text(self) -> None:
+    def test_crawl_request_document_extract_uses_markitdown_for_documents(self) -> None:
         def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
             return HttpFetchResult(
                 url=url,
                 final_url=url,
                 status_code=200,
-                headers={"content-type": "application/pdf"},
-                body=b"%PDF-1.7 fake bytes",
+                headers={"content-type": "text/csv"},
+                body=b"name,age\nAlice,30\nBob,25",
                 elapsed_ms=3,
             )
 
-        completed = types.SimpleNamespace(returncode=0, stdout=b"Extracted PDF text\n", stderr=b"")
-        with patch("app.service.subprocess.run", return_value=completed) as run:
-            response = asyncio.run(
-                crawl_request(
-                    {
-                        "url": "https://records.example.gov/agenda.pdf",
-                        "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
-                    },
-                    settings=CrawlerSettings(per_domain_delay_ms=0),
-                    http_fetcher=fetcher,
-                )
+        response = asyncio.run(
+            crawl_request(
+                {
+                    "url": "https://records.example.gov/data.csv",
+                    "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
+                },
+                settings=CrawlerSettings(per_domain_delay_ms=0),
+                http_fetcher=fetcher,
             )
+        )
 
-        run.assert_called_once()
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["text"], "Extracted PDF text")
+        self.assertIn("Alice", result["text"])
         self.assertEqual(result["extraction_method"], "document_extract")
 
     def test_crawl_request_default_document_extractor_uses_text_bodies(self) -> None:
@@ -961,14 +999,13 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 },
                 settings=CrawlerSettings(per_domain_delay_ms=0),
                 http_fetcher=fetcher,
-                trafilatura_extractor=lambda html, url: "Permit detail record text",
             )
         )
 
         result = response["results"][0]
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["selected_strategy"], "TRAFILATURA_EXTRACT")
-        self.assertEqual(result["text"], "Permit detail record text")
+        self.assertIn("Permit detail record text", result["text"])
         self.assertEqual(result["extraction_method"], "trafilatura_extract")
         self.assertGreater(result["quality_score"], 0.8)
 

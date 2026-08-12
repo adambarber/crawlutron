@@ -21,7 +21,7 @@ from .api_models import (
     ReadinessResponse,
 )
 from .browser import BrowserRenderer
-from .crawl.firecrawl_format import extract_firecrawl_format
+from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .settings import CrawlerSettings
 
@@ -61,18 +61,23 @@ def _format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]
     """Unified output formatter: produce ``(markdown, metadata_dict)`` for any result.
 
     Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
-    this single path. HTML results become complete structured Markdown via markdownify;
-    results without HTML (PDF text, main-text-only extraction, etc.) fall back to the
-    strategy's extracted ``text`` so the consumer always receives a consistent Markdown
-    payload regardless of how the content was acquired.
+    this single path. The ``markdown`` field is populated by the unified extraction
+    pipeline (trafilatura for web HTML, markitdown for documents, pass-through for plain
+    text). For HTML pages the HTML metadata is extracted from the raw markup; results
+    without HTML fall back to the strategy's extracted ``text`` so the consumer always
+    receives a consistent Markdown payload regardless of how the content was acquired.
     """
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
     html = item.get("html")
-    if html and url:
-        markdown_text, metadata_dict = extract_firecrawl_format(html, url)
-        if markdown_text:
-            return markdown_text, metadata_dict
-    return item.get("text"), {}
+    markdown = item.get("markdown")
+    if markdown:
+        if html and url:
+            return markdown, _extract_firecrawl_metadata(html, url)
+        return markdown, {}
+    text = item.get("text")
+    if not text:
+        return None, {}
+    return text, {}
 
 
 def build_condensed_crawl_response(results: list[dict[str, Any]]) -> CondensedCrawlResponse:
