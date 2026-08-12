@@ -5,7 +5,7 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 CRAWLER_APP = Path(__file__).resolve().parents[2]
 SHARED_PYTHON = Path(__file__).resolve().parents[4] / "docker" / "shared" / "python"
@@ -18,18 +18,128 @@ from app.service import _extract_discovered_links, _format_extracted_document_te
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
 
+
+def make_fetcher(status_code: int = 200, content_type: str = "text/html", body: bytes = b"",
+                 elapsed_ms: int = 1, final_url: str | None = None, delay: float = 0.0):
+    def _fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
+        if delay:
+            time.sleep(delay)
+        return HttpFetchResult(
+            url=url,
+            final_url=final_url if final_url is not None else url,
+            status_code=status_code,
+            headers={"content-type": content_type},
+            body=body,
+            elapsed_ms=elapsed_ms,
+        )
+    return _fetcher
+
+
+def make_renderer(page, **kwargs):
+    mock_browser = AsyncMock()
+    mock_browser.new_page = AsyncMock(return_value=page)
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_browser)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return BrowserRenderer(browser_factory=lambda **kw: ctx, sleep=lambda _: None, **kwargs)
+
+
+def run_crawl(url: str, policy: dict, http_fetcher=None, browser_worker=None):
+    return asyncio.run(
+        crawl_request(
+            {"url": url, "policy": policy},
+            settings=CrawlerSettings(per_domain_delay_ms=0),
+            http_fetcher=http_fetcher,
+            browser_worker=browser_worker,
+        )
+    )
+
+
+def ok_worker():
+    async def worker(job):
+        return CrawlResult(
+            url=job.url,
+            status="success",
+            classification="rendered",
+            final_url=job.url,
+            html="<html>ok</html>",
+            text="ok",
+            attempts=1,
+            elapsed_ms=1,
+            domain=job.domain,
+        )
+    return worker
+
+
+def make_browser_worker(html: str | None = "", text: str | None = "", final_url=None,
+                        elapsed_ms: int = 5, metadata=None, status: str = "success",
+                        classification: str = "rendered"):
+    def _worker(job):
+        kwargs = dict(
+            url=job.url,
+            status=status,
+            classification=classification,
+            final_url=final_url if final_url is not None else job.url,
+            html=html,
+            text=text,
+            attempts=1,
+            elapsed_ms=elapsed_ms,
+            domain=job.domain,
+        )
+        if metadata is not None:
+            kwargs["metadata"] = metadata
+        return CrawlResult(**kwargs)
+    return _worker
+
+
+def run_cooldown_case(test, cooldown, expect_wait, past=False, delay_seconds=0.0):
+    scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=delay_seconds)
+    if past:
+        scheduler._domain_cooldowns["example.com"] = time.time() - 1.0
+    else:
+        scheduler.set_domain_cooldown("example.com", cooldown)
+    start = time.time()
+    worker = ok_worker()
+    jobs = [CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions())]
+    results = asyncio.run(scheduler.run(jobs, worker))
+    elapsed = time.time() - start
+    if expect_wait:
+        test.assertGreaterEqual(elapsed, 0.05)
+    else:
+        test.assertLess(elapsed, 0.05)
+    test.assertEqual(len(results), 1)
+    test.assertEqual(results[0].status, "success")
+
+
+def assert_browser_fallback(test, browser_worker, expected_text):
+    fetcher = make_fetcher(status_code=403, content_type="text/html", body=b"Access Denied", elapsed_ms=2)
+    response = run_crawl(
+        "https://records.example.gov/search",
+        {"strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"]},
+        http_fetcher=fetcher,
+        browser_worker=browser_worker,
+    )
+    result = response["results"][0]
+    test.assertEqual(result["status"], "success")
+    test.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
+    test.assertEqual(
+        [attempt["strategy"] for attempt in result["attempted_strategies"]],
+        ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"],
+    )
+    test.assertEqual(result["attempted_strategies"][0]["status"], "blocked")
+    test.assertEqual(result["text"], expected_text)
+    return result
+
+
 class BrowserCrawlerCoreTest(unittest.TestCase):
     def test_direct_http_crawl_work_does_not_block_event_loop(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            time.sleep(0.1)
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=b"<html><body>Responsive direct HTTP</body></html>",
-                elapsed_ms=100,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><body>Responsive direct HTTP</body></html>",
+            elapsed_ms=100,
+            delay=0.1,
+        )
 
         async def run_probe() -> int:
             crawl_task = asyncio.create_task(
@@ -260,22 +370,20 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(links[0].text, "One")
 
     def test_crawl_request_reports_frames_and_forms_and_scores_sparse_frameset_as_low_quality(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url="https://assessor.example.gov/default.asp",
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=(
-                    "<html><head><title>Legacy Assessors</title></head>"
-                    "<frameset rows='100,*'>"
-                    "<frame name='search' src='search-middle-ns.asp'>"
-                    "<frame name='results' src='home-bottom.asp'>"
-                    "</frameset>"
-                    "</html>"
-                ).encode("utf-8"),
-                elapsed_ms=3,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/html",
+            body=(
+            "<html><head><title>Legacy Assessors</title></head>"
+            "<frameset rows='100,*'>"
+            "<frame name='search' src='search-middle-ns.asp'>"
+            "<frame name='results' src='home-bottom.asp'>"
+            "</frameset>"
+            "</html>"
+            ).encode("utf-8"),
+            elapsed_ms=3,
+            final_url="https://assessor.example.gov/default.asp",
+        )
 
         response = asyncio.run(
             crawl_request(
@@ -314,23 +422,21 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertTrue(result["diagnostics"]["content_metrics"]["has_frameset"])
 
     def test_crawl_request_reports_search_form_discovery_without_submitting_it(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url="https://assessor.example.gov/search-middle-ns.asp",
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=(
-                    "<html><body>"
-                    "<form method='POST' action='SearchResults.asp' name='frmSearch' id='frmSearch' target='bottom'>"
-                    "<input name='SearchStreetName' id='SearchStreetName' value=''>"
-                    "<input type='hidden' name='SearchSubmitted' value='yes'>"
-                    "<input type='submit' name='cmdGo' value='Go'>"
-                    "</form>"
-                    "</body></html>"
-                ).encode("utf-8"),
-                elapsed_ms=3,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/html",
+            body=(
+            "<html><body>"
+            "<form method='POST' action='SearchResults.asp' name='frmSearch' id='frmSearch' target='bottom'>"
+            "<input name='SearchStreetName' id='SearchStreetName' value=''>"
+            "<input type='hidden' name='SearchSubmitted' value='yes'>"
+            "<input type='submit' name='cmdGo' value='Go'>"
+            "</form>"
+            "</body></html>"
+            ).encode("utf-8"),
+            elapsed_ms=3,
+            final_url="https://assessor.example.gov/search-middle-ns.asp",
+        )
 
         response = asyncio.run(
             crawl_request(
@@ -374,20 +480,18 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
                 self.assertEqual(classify_rendered_page("<html></html>", text, title=text), expected)
 
     def test_crawl_request_runs_direct_http_strategy_and_records_provenance(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url="https://records.example.gov/search?q=permit",
-                status_code=200,
-                headers={"content-type": "text/html; charset=utf-8"},
-                body=(
-                    '<html><body><main>Permit records</main>'
-                    '<a href="/permits" rel="tag next">Permits</a>'
-                    '<a href="https://other.example.gov/nope">Off host</a>'
-                    '</body></html>'
-                ).encode("utf-8"),
-                elapsed_ms=7,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/html; charset=utf-8",
+            body=(
+            '<html><body><main>Permit records</main>'
+            '<a href="/permits" rel="tag next">Permits</a>'
+            '<a href="https://other.example.gov/nope">Off host</a>'
+            '</body></html>'
+            ).encode("utf-8"),
+            elapsed_ms=7,
+            final_url="https://records.example.gov/search?q=permit",
+        )
 
         response = asyncio.run(
             crawl_request(
@@ -582,15 +686,12 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
     def test_crawl_request_passes_browser_state_profile_to_browser_worker(self) -> None:
         captured_options: list[RenderOptions] = []
 
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=403,
-                headers={"content-type": "text/html"},
-                body=b"Access Denied",
-                elapsed_ms=2,
-            )
+        fetcher = make_fetcher(
+            status_code=403,
+            content_type="text/html",
+            body=b"Access Denied",
+            elapsed_ms=2,
+        )
 
         def browser_worker(job: CrawlJob) -> CrawlResult:
             captured_options.append(job.options)
@@ -632,115 +733,34 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(captured_options[0].browser_profile["resource_mode"], "reduced")
 
     def test_crawl_request_falls_back_to_browser_when_direct_http_is_blocked(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=403,
-                headers={"content-type": "text/html"},
-                body=b"<html><body>Access Denied</body></html>",
-                elapsed_ms=3,
-            )
-
-        def browser_worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html="<html><body>Rendered permits</body></html>",
-                text="Rendered permits Link",
-                attempts=1,
-                elapsed_ms=5,
-                domain=job.domain,
-                metadata={"extraction_method": "dom_text"},
-            )
-
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/search",
-                    "policy": {"strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-                browser_worker=browser_worker,
-            )
+        browser_worker = make_browser_worker(
+            html="<html><body>Rendered permits</body></html>",
+            text="Rendered permits Link",
+            elapsed_ms=5,
+            metadata={"extraction_method": "dom_text"},
         )
-
-        result = response["results"][0]
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
-        self.assertEqual([attempt["strategy"] for attempt in result["attempted_strategies"]], ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"])
-        self.assertEqual(result["attempted_strategies"][0]["status"], "blocked")
-        self.assertEqual(result["text"], "Rendered permits")
+        assert_browser_fallback(self, browser_worker, "Rendered permits")
 
 
     def test_crawl_request_browser_strategy_handles_empty_rendered_content(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=403,
-                headers={"content-type": "text/html"},
-                body=b"Access Denied",
-                elapsed_ms=2,
-            )
-
-        def browser_worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html=None,
-                text=None,
-                attempts=1,
-                elapsed_ms=5,
-                domain=job.domain,
-            )
-
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/search",
-                    "policy": {"strategies": ["HTTP_SITE_COMPAT", "BROWSER_HEADLESS"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-                browser_worker=browser_worker,
-            )
-        )
-
-        result = response["results"][0]
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["selected_strategy"], "BROWSER_HEADLESS")
-        self.assertEqual(result["text"], "")
+        browser_worker = make_browser_worker(html=None, text=None, elapsed_ms=5)
+        result = assert_browser_fallback(self, browser_worker, "")
         self.assertIsNone(result["markdown"])
 
     def test_crawl_request_browser_strategy_returns_discovered_links_from_rendered_html(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=403,
-                headers={"content-type": "text/html"},
-                body=b"Access Denied",
-                elapsed_ms=2,
-            )
+        fetcher = make_fetcher(
+            status_code=403,
+            content_type="text/html",
+            body=b"Access Denied",
+            elapsed_ms=2,
+        )
 
-        def browser_worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url="https://records.example.gov/rendered",
-                html='<html><body><a href="/rendered/details">Details</a></body></html>',
-                text="Rendered details",
-                attempts=1,
-                elapsed_ms=11,
-                domain=job.domain,
-            )
+        browser_worker = make_browser_worker(
+            final_url="https://records.example.gov/rendered",
+            html='<html><body><a href="/rendered/details">Details</a></body></html>',
+            text="Rendered details",
+            elapsed_ms=11,
+        )
 
         response = asyncio.run(
             crawl_request(
@@ -771,25 +791,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         )
 
     def test_crawl_request_classifies_binary_archive_without_returning_decoded_body(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "application/octet-stream"},
-                body=b"PK\x03\x04\x14\x00\x00\x00binary zip bytes that should not be decoded",
-                elapsed_ms=4,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="application/octet-stream",
+            body=b"PK\x03\x04\x14\x00\x00\x00binary zip bytes that should not be decoded",
+            elapsed_ms=4,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/archive.zip",
-                    "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/archive.zip",
+            {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -801,25 +813,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["quality_score"], 0.0)
 
     def test_crawl_request_uses_document_extract_for_pdf_bodies(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "application/pdf"},
-                body=b"%PDF-1.7 " + b"Sample agenda content " * 6,
-                elapsed_ms=6,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="application/pdf",
+            body=b"%PDF-1.7 " + b"Sample agenda content " * 6,
+            elapsed_ms=6,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/agenda.pdf",
-                    "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/agenda.pdf",
+            {"strategies": ["DOCUMENT_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -902,50 +906,34 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         )
 
     def test_crawl_request_formats_document_extract_text_before_returning_it(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/plain; charset=utf-8"},
-                body="5a.\n\n6. Order - That the City Council approves the minutes.".encode("utf-8"),
-                elapsed_ms=6,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/plain; charset=utf-8",
+            body="5a.\n\n6. Order - That the City Council approves the minutes.".encode("utf-8"),
+            elapsed_ms=6,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/notice.txt",
-                    "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/notice.txt",
+            {"strategies": ["DOCUMENT_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
         self.assertEqual(result["text"], "5a. Order - That the City Council approves the minutes.")
 
     def test_crawl_request_document_extract_uses_markitdown_for_documents(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/csv"},
-                body=b"name,age\nAlice,30\nBob,25",
-                elapsed_ms=3,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/csv",
+            body=b"name,age\nAlice,30\nBob,25",
+            elapsed_ms=3,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/data.csv",
-                    "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/data.csv",
+            {"strategies": ["DOCUMENT_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -954,25 +942,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["extraction_method"], "document_extract")
 
     def test_crawl_request_default_document_extractor_uses_text_bodies(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/plain; charset=utf-8"},
-                body="Posted notice text".encode("utf-8"),
-                elapsed_ms=3,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/plain; charset=utf-8",
+            body="Posted notice text".encode("utf-8"),
+            elapsed_ms=3,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/notice.txt",
-                    "policy": {"strategies": ["DOCUMENT_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/notice.txt",
+            {"strategies": ["DOCUMENT_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -981,25 +961,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(result["extraction_method"], "document_extract")
 
     def test_crawl_request_uses_trafilatura_extractor_for_noisy_html(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=b"<html><nav>Menu</nav><main>Permit detail record text</main></html>",
-                elapsed_ms=4,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="text/html",
+            body=b"<html><nav>Menu</nav><main>Permit detail record text</main></html>",
+            elapsed_ms=4,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/detail",
-                    "policy": {"strategies": ["TRAFILATURA_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/detail",
+            {"strategies": ["TRAFILATURA_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -1010,25 +982,17 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertGreater(result["quality_score"], 0.8)
 
     def test_trafilatura_strategy_does_not_parse_pdf_bodies(self) -> None:
-        def fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "application/pdf"},
-                body=b"%PDF-1.7 binary pdf bytes",
-                elapsed_ms=5,
-            )
+        fetcher = make_fetcher(
+            status_code=200,
+            content_type="application/pdf",
+            body=b"%PDF-1.7 binary pdf bytes",
+            elapsed_ms=5,
+        )
 
-        response = asyncio.run(
-            crawl_request(
-                {
-                    "url": "https://records.example.gov/agenda.pdf",
-                    "policy": {"strategies": ["TRAFILATURA_EXTRACT"]},
-                },
-                settings=CrawlerSettings(per_domain_delay_ms=0),
-                http_fetcher=fetcher,
-            )
+        response = run_crawl(
+            "https://records.example.gov/agenda.pdf",
+            {"strategies": ["TRAFILATURA_EXTRACT"]},
+            http_fetcher=fetcher,
         )
 
         result = response["results"][0]
@@ -1084,97 +1048,13 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         self.assertEqual(events[:2], [("start", "example.gov"), ("start", "example.org")])
 
     def test_scheduler_set_domain_cooldown_applies_wait(self) -> None:
-        # Cooldown check only runs when delay_seconds > 0
-        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.01)
-        scheduler.set_domain_cooldown("example.com", 0.1)
-
-        start = time.time()
-
-        async def worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html="<html>ok</html>",
-                text="ok",
-                attempts=1,
-                elapsed_ms=1,
-                domain=job.domain,
-            )
-
-        jobs = [
-            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
-        ]
-
-        results = asyncio.run(scheduler.run(jobs, worker))
-
-        elapsed = time.time() - start
-        # Should have waited for cooldown (~0.1s)
-        self.assertGreaterEqual(elapsed, 0.05)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].status, "success")
+        run_cooldown_case(self, cooldown=0.1, expect_wait=True, delay_seconds=0.01)
 
     def test_scheduler_set_domain_cooldown_zero_does_not_wait(self) -> None:
-        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0)
-        scheduler.set_domain_cooldown("example.com", 0)
-
-        start = time.time()
-
-        async def worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html="<html>ok</html>",
-                text="ok",
-                attempts=1,
-                elapsed_ms=1,
-                domain=job.domain,
-            )
-
-        jobs = [
-            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
-        ]
-
-        results = asyncio.run(scheduler.run(jobs, worker))
-
-        elapsed = time.time() - start
-        # Should NOT wait for zero cooldown
-        self.assertLess(elapsed, 0.05)
-        self.assertEqual(len(results), 1)
+        run_cooldown_case(self, cooldown=0, expect_wait=False)
 
     def test_scheduler_cooldown_expires_before_job(self) -> None:
-        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0)
-        # Set cooldown in the past
-        scheduler._domain_cooldowns["example.com"] = time.time() - 1.0
-
-        start = time.time()
-
-        async def worker(job: CrawlJob) -> CrawlResult:
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html="<html>ok</html>",
-                text="ok",
-                attempts=1,
-                elapsed_ms=1,
-                domain=job.domain,
-            )
-
-        jobs = [
-            CrawlJob(index=0, url="https://example.com/page1", domain="example.com", options=RenderOptions()),
-        ]
-
-        results = asyncio.run(scheduler.run(jobs, worker))
-
-        elapsed = time.time() - start
-        # Expired cooldown should not cause wait
-        self.assertLess(elapsed, 0.05)
-        self.assertEqual(len(results), 1)
+        run_cooldown_case(self, cooldown=0, expect_wait=False, past=True)
 
     def test_browser_renderer_extracts_rendered_html_and_text_with_fake_browser(self) -> None:
         from unittest.mock import AsyncMock, MagicMock
@@ -1186,17 +1066,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.content = AsyncMock(return_value="<html><body><main>Rendered HTML</main></body></html>")
         mock_page.goto = AsyncMock()
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None
-        )
+        renderer = make_renderer(mock_page)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/search", RenderOptions(timeout_seconds=7)))
@@ -1225,17 +1095,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = AsyncMock(side_effect=lambda script: "Rendered Title" if "document.title" in script else "complete")
         mock_page.content = AsyncMock(return_value="<html><body>ok</body></html>")
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None
-        )
+        renderer = make_renderer(mock_page)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/search", RenderOptions(max_retries=1)))
@@ -1254,17 +1114,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = AsyncMock(side_effect=lambda script: "Checking your browser" if "document.title" in script else ("complete" if "document.readyState" in script else ""))
         mock_page.content = AsyncMock(return_value="<html><body>captcha required</body></html>")
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None
-        )
+        renderer = make_renderer(mock_page)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/search", RenderOptions(max_retries=2)))
@@ -1307,18 +1157,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = mock_evaluate
         mock_page.content = mock_content
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None,
-            challenge_wait_seconds=2  # short wait for test
-        )
+        renderer = make_renderer(mock_page, challenge_wait_seconds=2)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/search", RenderOptions()))
@@ -1351,18 +1190,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = mock_evaluate
         mock_page.content = AsyncMock(return_value="<html><title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body></html>")
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None,
-            challenge_wait_seconds=0
-        )
+        renderer = make_renderer(mock_page, challenge_wait_seconds=0)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/search", RenderOptions()))
@@ -1388,18 +1216,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = mock_evaluate
         mock_page.content = AsyncMock(return_value="")
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None,
-            pdf_text_extractor=lambda url: "PDF agenda text",
-        )
+        renderer = make_renderer(mock_page, pdf_text_extractor=lambda url: "PDF agenda text",)
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/agenda.pdf", RenderOptions()))
@@ -1419,18 +1236,7 @@ class BrowserCrawlerCoreTest(unittest.TestCase):
         mock_page.evaluate = AsyncMock(side_effect=lambda script: "Rendered" if "document.title" in script else "complete")
         mock_page.content = AsyncMock(return_value="<html><body>ok</body></html>")
 
-        mock_browser = AsyncMock()
-        mock_browser.new_page = AsyncMock(return_value=mock_page)
-
-        mock_browser_context = MagicMock()
-        mock_browser_context.__aenter__ = AsyncMock(return_value=mock_browser)
-        mock_browser_context.__aexit__ = AsyncMock(return_value=False)
-
-        renderer = BrowserRenderer(
-            browser_factory=lambda **kwargs: mock_browser_context,
-            sleep=lambda _: None,
-            warmup_urls=["https://records.example.gov/"]
-        )
+        renderer = make_renderer(mock_page, warmup_urls=["https://records.example.gov/"])
 
         import asyncio
         result = asyncio.run(renderer.render("https://records.example.gov/page", RenderOptions()))
