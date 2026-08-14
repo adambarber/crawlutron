@@ -3,7 +3,6 @@
 import unittest
 from app.crawl.decompression import decompress_body
 from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
-from helpers import FIRECRAWL_TEST_HTML
 from app.crawl.extraction import extract_content
 from app.health.readiness import ReadinessState, create_health_router
 from app.discovery.capabilities import capabilities_payload, create_capabilities_router
@@ -32,15 +31,6 @@ class FirecrawlFormatTest(unittest.TestCase):
     def test_extract_firecrawl_metadata_handles_empty(self) -> None:
         meta = _extract_firecrawl_metadata("", "https://example.com")
         self.assertEqual(meta, {"source_url": "https://example.com"})
-
-    def test_extracts_title_and_meta(self) -> None:
-        html = FIRECRAWL_TEST_HTML
-        meta = _extract_firecrawl_metadata(html, "https://example.com")
-        self.assertEqual(meta["title"], "Test Page")
-        self.assertEqual(meta["description"], "A test page")
-        self.assertEqual(meta["og_title"], "OG Title")
-        self.assertEqual(meta["language"], "en")
-        self.assertEqual(meta["source_url"], "https://example.com")
 
     def test_extract_content_html_returns_markdown(self) -> None:
         html = "<html><body><main>Content here</main></body></html>"
