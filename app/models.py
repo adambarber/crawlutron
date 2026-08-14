@@ -39,6 +39,7 @@ Classification = Literal[
     "unsupported_scheme",
     "private_network_target",
     "unknown_error",
+    "not_modified",
 ]
 
 CrawlStrategyName = Literal[
@@ -146,3 +147,4 @@ class UniversalCrawlResult:
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
     error: str | None = None
     markdown: str | None = None
+    next_page_url: str | None = None

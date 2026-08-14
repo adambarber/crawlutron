@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any
 
 from local_service_logging import configure_service_logging
@@ -11,7 +12,8 @@ from .api_models import (
     POLICY_SCHEMA_VERSION,
     AgentHintsResponse,
     CapabilitiesResponse,
-    CondensedCrawlResponse,
+    UnifiedCrawlResponse,
+    UnifiedCrawlResult,
     CrawlClassification,
     CrawlerError,
     CrawlRequest,
@@ -28,15 +30,16 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from .browser import BrowserRenderer
+from .crawl.strategies.browser import BrowserRenderer
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .settings import CrawlerSettings
+from .metrics import metrics
 
 try:
-    from fastapi import Body, FastAPI, HTTPException, Request
+    from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
     from fastapi.exceptions import RequestValidationError
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, Response
 except ImportError:  # pragma: no cover - imported in container runtime
     Body = None  # type: ignore[assignment]
     FastAPI = None  # type: ignore[assignment]
@@ -88,43 +91,110 @@ def _format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]
     return text, {}
 
 
-def build_condensed_crawl_response(results: list[dict[str, Any]]) -> CondensedCrawlResponse:
-    """Transform internal crawl results into the Firecrawl-style condensed response."""
-    condensed_data: list[dict[str, Any]] = []
-    for item in results:
-        markdown, metadata_dict = _format_crawl_item(item)
-        url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+def _build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+    """Map an internal engine result into the unified API response model.
 
-        metadata = FirecrawlMetadata(
-            title=metadata_dict.get("title"),
-            description=metadata_dict.get("description"),
-            language=metadata_dict.get("language"),
-            og_title=metadata_dict.get("og_title"),
-            og_description=metadata_dict.get("og_description"),
-            og_image=metadata_dict.get("og_image"),
-            og_url=metadata_dict.get("og_url"),
-            og_type=metadata_dict.get("og_type"),
-            og_site_name=metadata_dict.get("og_site_name"),
-            twitter_card=metadata_dict.get("twitter_card"),
-            twitter_title=metadata_dict.get("twitter_title"),
-            twitter_description=metadata_dict.get("twitter_description"),
-            twitter_image=metadata_dict.get("twitter_image"),
-            canonical_url=metadata_dict.get("canonical_url"),
-            favicon=metadata_dict.get("favicon"),
-            status_code=item.get("http_status"),
-            content_type=item.get("content_type"),
-            source_url=url,
-        )
+    The unified response carries both the LLM-friendly ``markdown`` and the
+    full ``diagnostics`` payload. Firecrawl-style metadata is produced by the
+    shared Firecrawl metadata extractor (``extract_firecrawl_format``) from the
+    raw HTML when available.
+    """
+    markdown, metadata_dict = _format_crawl_item(item)
+    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+    metadata = FirecrawlMetadata(
+        **{key: value for key, value in metadata_dict.items() if key in FirecrawlMetadata.model_fields}
+    )
+    if metadata.source_url is None:
+        metadata.source_url = url
+    return UnifiedCrawlResult(
+        original_url=item["original_url"],
+        normalized_url=item.get("normalized_url"),
+        final_url=item.get("final_url"),
+        status=item["status"],
+        classification=item["classification"],
+        selected_strategy=item.get("selected_strategy"),
+        attempted_strategies=item.get("attempted_strategies", []),
+        error=item.get("error"),
+        markdown=markdown,
+        metadata=metadata,
+        html=item.get("html"),
+        text=item.get("text"),
+        quality_score=item.get("quality_score", 0.0),
+        classification_evidence=item.get("classification_evidence", []),
+        http_status=item.get("http_status"),
+        headers=item.get("headers", {}),
+        content_type=item.get("content_type"),
+        extraction_method=item.get("extraction_method"),
+        diagnostics=item.get("diagnostics", {}),
+        discovered_link_count=item.get("discovered_link_count", 0),
+        discovered_links_truncated=item.get("discovered_links_truncated", False),
+        discovered_links=item.get("discovered_links", []),
+        next_page_url=item.get("next_page_url"),
+    )
 
-        condensed_data.append({
-            "url": url,
-            "markdown": markdown,
-            "metadata": metadata,
-            "warning": item.get("classification") if item.get("classification") != "rendered" else None,
-            "error": item.get("error"),
-        })
 
-    return CondensedCrawlResponse(success=True, data=condensed_data)
+def _render_result_to_universal(item: dict[str, Any]) -> dict[str, Any]:
+    """Adapt a browser ``CrawlResult`` dict into the unified result shape.
+
+    ``/v1/render`` reuses the same browser worker as the universal crawl path,
+    so its output is normalized through the identical ``_build_unified_result``
+    pipeline. Browser-specific discovery (intercepted XHR, screenshots) lives in
+    the result ``metadata`` dict and is carried into ``diagnostics`` so the
+    unified schema stays the single source of truth for both endpoints.
+    """
+    metadata = item.get("metadata") or {}
+    diagnostics: dict[str, Any] = {
+        key: value
+        for key, value in metadata.items()
+        if key not in {"title", "content_length", "browser_reused", "challenge_resolved", "extraction_method"}
+    }
+    diagnostics.setdefault("browser_profile", {})
+    return {
+        "original_url": item["url"],
+        "normalized_url": item["url"],
+        "final_url": item.get("final_url"),
+        "status": item["status"],
+        "classification": item["classification"],
+        "selected_strategy": None,
+        "attempted_strategies": [
+            {
+                "strategy": "BROWSER_HEADLESS",
+                "status": item["status"],
+                "classification": item["classification"],
+                "http_status": None,
+                "content_type": None,
+                "elapsed_ms": int(item.get("elapsed_ms", 0)),
+                "error": item.get("error"),
+            }
+        ],
+        "error": item.get("error"),
+        "markdown": None,
+        "metadata": {},
+        "html": item.get("html"),
+        "text": item.get("text"),
+        "quality_score": 1.0 if item["status"] == "success" else 0.0,
+        "classification_evidence": [],
+        "http_status": None,
+        "headers": {},
+        "content_type": None,
+        "extraction_method": metadata.get("extraction_method"),
+        "diagnostics": diagnostics,
+        "discovered_link_count": 0,
+        "discovered_links_truncated": False,
+        "discovered_links": [],
+        "next_page_url": None,
+    }
+
+
+def build_condensed_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlResponse:
+    """Backward-compatible alias: build the unified response (was CondensedCrawlResponse)."""
+    return UnifiedCrawlResponse(
+        request_id="crawl_unified",
+        submitted_count=len(results),
+        policy_schema_version=POLICY_SCHEMA_VERSION,
+        success=True,
+        results=[_build_unified_result(item) for item in results],
+    )
 
 
 if FastAPI is not None:
@@ -158,6 +228,13 @@ if FastAPI is not None:
     app.include_router(create_agent_hints_router(settings))
     app.include_router(create_well_known_router(settings))
 
+    @app.on_event("shutdown")
+    async def _shutdown() -> None:
+        from app.crawl.strategies.http import close_async_http_client
+
+        await close_async_http_client()
+        await renderer.close()
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -176,21 +253,47 @@ if FastAPI is not None:
         description="Backward-compatible browser-render endpoint. Prefer POST /v1/crawl for policy-driven universal crawling.",
         responses={400: {"model": CrawlerError, "description": "Invalid render request."}},
     )
-    async def render(payload: dict[str, Any]) -> dict[str, Any]:
+    async def render(payload: dict[str, Any]) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
             result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))  # pragma: no cover - requires browser
             logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})  # pragma: no cover - requires browser
-            return result  # pragma: no cover - requires browser
+            return UnifiedCrawlResponse(
+                request_id=result["request_id"],
+                submitted_count=result["submitted_count"],
+                policy_schema_version=POLICY_SCHEMA_VERSION,
+                success=True,
+                results=[_build_unified_result(_render_result_to_universal(item)) for item in result.get("results", [])],
+            )
         except ValueError as error:
             logger.warning("render_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
         finally:
             readiness_state.end_request()
 
+    async def _deliver_webhook(webhook_url: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
+        """Run the crawl in the background and POST the result to ``webhook_url`` (#15).
+
+        Best-effort delivery: failures are swallowed so a dead callback never
+        crashes the crawler worker.
+        """
+        result = await crawl_request(
+            payload_dict,
+            settings=crawl_settings,
+            browser_worker=lambda job: renderer.render(job.url, job.options),
+        )
+        metrics.observe_crawl(results=result.get("results", []))
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(webhook_url, json=result, headers={"Content-Type": "application/json"})
+        except Exception:  # noqa: BLE001 - webhook delivery is best-effort
+            pass
+
     @app.post(
         "/v1/crawl",
-        response_model=CondensedCrawlResponse,
+        response_model=UnifiedCrawlResponse,
         tags=["Crawler"],
         summary="Execute a policy-driven crawl",
         description=(
@@ -260,6 +363,7 @@ if FastAPI is not None:
         },
     )
     async def crawl(
+        background_tasks: BackgroundTasks,
         payload: CrawlRequest = Body(
             ...,
             examples=[
@@ -279,21 +383,54 @@ if FastAPI is not None:
                     },
                 }
             ],
-        )
-    ) -> CondensedCrawlResponse:
+        ),
+    ) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
+            payload_dict = payload.model_dump(exclude_none=True)
+            webhook_url = payload.webhook_url
+            if webhook_url:
+                # #15: accept immediately (202) and deliver the result out-of-band.
+                if not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://")):
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"code": "validation_error", "message": "Invalid webhook_url", "details": {}},
+                    )
+                background_tasks.add_task(_deliver_webhook, webhook_url, payload_dict, settings)
+                metrics.observe_crawl(accepted=True)
+                request_id = f"crawl_{uuid.uuid4().hex[:12]}"
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "status": "accepted",
+                        "request_id": request_id,
+                        "status_url": f"/v1/crawl/{request_id}",
+                        "webhook_url": webhook_url,
+                    },
+                )
             result = await crawl_request(
-                payload.model_dump(exclude_none=True),
+                payload_dict,
                 settings=settings,
                 browser_worker=lambda job: renderer.render(job.url, job.options),
             )
+            metrics.observe_crawl(results=result.get("results", []))
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
-            return build_condensed_crawl_response(result.get("results", []))
+            return UnifiedCrawlResponse(
+                request_id=result["request_id"],
+                submitted_count=result["submitted_count"],
+                policy_schema_version=result["policy_schema_version"],
+                success=True,
+                results=[_build_unified_result(item) for item in result.get("results", [])],
+            )
         except ValueError as error:
+            metrics.observe_crawl(errors=1)
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
         finally:
             readiness_state.end_request()
+    @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
+    async def metrics_endpoint() -> "Response":
+        return Response(metrics.as_prometheus(), media_type="text/plain; version=0.0.4")
+
 else:  # pragma: no cover - FastAPI unavailable at runtime
     app = None
