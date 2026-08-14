@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 from local_service_logging import configure_service_logging
@@ -198,8 +199,21 @@ def build_condensed_crawl_response(results: list[dict[str, Any]]) -> UnifiedCraw
 
 
 if FastAPI is not None:
+    def _lifespan(app: FastAPI):
+        @asynccontextmanager
+        async def lifespan_context(allow_concurrency: bool, *args, **kwargs):
+            yield
+            # Shutdown: close shared HTTP client and browser renderer.
+            from app.crawl.strategies.http import close_async_http_client
+
+            await close_async_http_client()
+            await renderer.close()
+
+        return lifespan_context
+
     app = FastAPI(
         title="Browser Crawler Execution Service",
+        lifespan=_lifespan(None),
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
@@ -227,13 +241,6 @@ if FastAPI is not None:
     app.include_router(create_capabilities_router(settings))
     app.include_router(create_agent_hints_router(settings))
     app.include_router(create_well_known_router(settings))
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        from app.crawl.strategies.http import close_async_http_client
-
-        await close_async_http_client()
-        await renderer.close()
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
