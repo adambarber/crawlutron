@@ -19,27 +19,40 @@ class DomainScheduler:
         self._domain_cooldowns: dict[str, float] = {}
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
-        """Set a cooldown period for a domain after a rate limit (429) response."""
+        """Set a cooldown period for a domain after a rate limit (429) response.
+
+        Also purges any other domain cooldowns that have already elapsed so the
+        mapping cannot leak memory across a long-lived service.
+        """
         if seconds > 0:
             self._domain_cooldowns[domain] = time.time() + seconds
+        self._purge_expired_cooldowns()
+
+    def _purge_expired_cooldowns(self) -> None:
+        """Drop cooldown entries that have already elapsed (memory-leak guard)."""
+        now = time.time()
+        self._domain_cooldowns = {domain: expiry for domain, expiry in self._domain_cooldowns.items() if expiry > now}
 
     async def run(self, jobs: list[CrawlJob], worker: CrawlWorker) -> list[CrawlResult]:
+        # Purge stale cooldowns up front so the dict cannot grow without bound.
+        self._purge_expired_cooldowns()
         global_gate = asyncio.Semaphore(self._global_limit)
         domain_gates: dict[str, asyncio.Semaphore] = defaultdict(lambda: asyncio.Semaphore(self._per_domain_limit))
         result_count = max((job.index for job in jobs), default=-1) + 1
         results: list[CrawlResult | None] = [None] * result_count
 
         async def run_one(job: CrawlJob) -> None:
+            # Domain cooldown MUST be awaited *before* acquiring the global
+            # semaphore, otherwise a single rate-limited domain would block
+            # every other domain's concurrency slot (cooldown deadlock).
+            cooldown_expiry = self._domain_cooldowns.get(job.domain)
+            if cooldown_expiry is not None:
+                now = time.time()
+                if now < cooldown_expiry:
+                    await asyncio.sleep(cooldown_expiry - now)
             async with global_gate:
                 async with domain_gates[job.domain]:
-                    # Check if we're in a cooldown period for this domain
-                    if self._delay_seconds and self._domain_cooldowns:
-                        now = time.time()
-                        for domain, expiry in self._domain_cooldowns.items():
-                            if domain == job.domain and now < expiry:
-                                remaining = expiry - now
-                                await asyncio.sleep(remaining)
-                    # Apply jitter to the delay
+                    # Apply jitter to the per-domain delay
                     delay_sleep = self._delay_seconds * random.uniform(0.8, 1.2) if self._delay_seconds > 0 else 0
                     await asyncio.sleep(delay_sleep)
                     results[job.index] = await worker(job)

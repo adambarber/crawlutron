@@ -34,8 +34,14 @@ DEFAULT_STRATEGIES: list[str] = [
 EXTRACTION_FULL: str = "full"
 EXTRACTION_TRAFILATURA: str = "trafilatura"
 EXTRACTION_DOCUMENT: str = "document"
+EXTRACTION_DOM: str = "dom"
 
-SUPPORTED_EXTRACTIONS: list[str] = [EXTRACTION_FULL, EXTRACTION_TRAFILATURA, EXTRACTION_DOCUMENT]
+SUPPORTED_EXTRACTIONS: list[str] = [
+    EXTRACTION_FULL,
+    EXTRACTION_TRAFILATURA,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_DOM,
+]
 DEFAULT_EXTRACTION: str = EXTRACTION_FULL
 
 # Human-readable descriptions for discovery/agent-hints.
@@ -43,6 +49,7 @@ EXTRACTION_DESCRIPTIONS: dict[str, str] = {
     EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",
     EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",
     EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",
+    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura pipelines.",
 }
 
 # ---------------------------------------------------------------------------

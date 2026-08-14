@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 
@@ -25,15 +26,20 @@ def normalize_public_http_url(url: str) -> str:
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
-    if host in PRIVATE_HOSTS:
-        raise ValueError("private_network_target")
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    else:
-        if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+    # Local dev/test escape hatch: the crawler is a localhost dev service and
+    # tests run a real in-process server on loopback. Allow opting out of the
+    # private-network guard via env var rather than relaxing it by default.
+    allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "") not in {"", "0", "false", "no"}
+    if not allow_private:
+        if host in PRIVATE_HOSTS:
             raise ValueError("private_network_target")
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+                raise ValueError("private_network_target")
 
     default_port = 80 if parsed.scheme == "http" else 443
     port = parsed.port
@@ -43,7 +49,11 @@ def normalize_public_http_url(url: str) -> str:
     path = _strip_source_colon(parsed.path or "").rstrip("/")
     query = _strip_source_colon(parsed.query)
     if query:
-        query = urlencode(parse_qsl(query, keep_blank_values=True), doseq=True)
+        # Sort query parameters so that URLs differing only in parameter order
+        # canonicalize to the same string (Katana-style deep normalization).
+        pairs = parse_qsl(query, keep_blank_values=True)
+        pairs.sort()
+        query = urlencode(pairs, doseq=True)
     return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
 
 

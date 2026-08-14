@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.constants import (
     DEFAULT_STRATEGIES,
     EXTRACTION_DOCUMENT,
+    EXTRACTION_DOM,
     EXTRACTION_FULL,
     EXTRACTION_TRAFILATURA,
     BROWSER_HEADED_WARMED,
@@ -53,6 +54,7 @@ class CrawlExtractionMethod(str, Enum):
     FULL = EXTRACTION_FULL
     TRAFILATURA = EXTRACTION_TRAFILATURA
     DOCUMENT = EXTRACTION_DOCUMENT
+    DOM = EXTRACTION_DOM
 
 
 class CrawlClassification(str, Enum):
@@ -84,6 +86,7 @@ class CrawlClassification(str, Enum):
     unsupported_scheme = "unsupported_scheme"
     private_network_target = "private_network_target"
     unknown_error = "unknown_error"
+    not_modified = "not_modified"
 
 
 class CrawlStatus(str, Enum):
@@ -99,6 +102,10 @@ class CrawlPolicyLimits(BaseModel):
     max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
     challenge_wait_seconds: int = Field(15, ge=0, le=120, description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.")
     max_discovered_links: int = Field(250, ge=0, le=2000, description="Bounded maximum structured discovered links returned per selected page. Default: 250. Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.")
+    respect_robots: bool = Field(True, description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.")
+    max_depth: int = Field(0, ge=0, le=20, description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.")
+    max_pages: int = Field(0, ge=0, le=2000, description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).")
+
 
 
 class CrawlPolicy(BaseModel):
@@ -122,12 +129,16 @@ class CrawlPolicy(BaseModel):
     request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
     browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.")
     discovery: dict[str, bool] = Field(default_factory=dict, description="Optional discovery toggles: robots, sitemaps, and feeds. Discovery output is diagnostic and non-recursive; the service reports discovered links and metadata but callers own frontier queueing, dedupe, and persistence.")
+    scope_regex: str | None = Field(None, description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.")
+    css_selector: str | None = Field(None, description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.")
+    xpath: str | None = Field(None, description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.")
 
 
 class CrawlRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
+    webhook_url: str | None = Field(None, description="Optional callback URL. When provided, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
 
 
 class ClassificationEvidence(BaseModel):
@@ -157,37 +168,6 @@ class StrategyAttempt(BaseModel):
     error: str | None = Field(None, description="Stable machine-readable error detail for this attempt, if any.")
 
 
-class CrawlResultModel(BaseModel):
-    original_url: str = Field(description="Caller-provided URL before normalization.")
-    normalized_url: str | None = Field(description="Public normalized URL used for execution, or null when disallowed.")
-    final_url: str | None = Field(description="Final URL after redirects or browser navigation.")
-    status: CrawlStatus = Field(description="Overall per-URL status.")
-    classification: CrawlClassification = Field(description="Overall per-URL classification after fallback selection.")
-    selected_strategy: CrawlStrategy | None = Field(description="Strategy that produced the selected result, or null when no strategy succeeded.")
-    attempted_strategies: list[StrategyAttempt] = Field(description="Ordered per-strategy attempt history.")
-    http_status: int | None = Field(None, description="Selected HTTP status, when available.")
-    headers: dict[str, str] = Field(default_factory=dict, description="Selected response headers, lower-cased when observed.")
-    content_type: str | None = Field(None, description="Selected content type, when available.")
-    html: str | None = Field(None, description="Raw HTML/body evidence when requested and available.")
-    text: str | None = Field(None, description="Extracted text evidence when available.")
-    extraction_method: str | None = Field(None, description="Extraction method such as http_html, dom_text, pdf_text, or trafilatura_extract.")
-    quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score. HTTP 200 alone is not content success.")
-    classification_evidence: list[ClassificationEvidence] = Field(default_factory=list, description="Short evidence explaining the selected non-rendered classification, when a signature or HTTP status matched.")
-    diagnostics: dict[str, Any] = Field(default_factory=dict, description="Structured diagnostics such as request profile, robots/sitemap/feed discovery, retry/backoff, runtime, content completeness metrics, frames, and forms. Frame diagnostics report legacy frameset/iframe URLs; form diagnostics report metadata and controls without submitting forms.")
-    discovered_link_count: int = Field(0, ge=0, description="Total number of links discovered before max_discovered_links truncation.")
-    discovered_links_truncated: bool = Field(False, description="True when discovered_links was truncated by policy limits.")
-    discovered_links: list[DiscoveredLink] = Field(default_factory=list, description="Structured links extracted from the selected HTML or rendered DOM. The service reports links but does not enqueue them recursively.")
-    error: str | None = Field(None, description="Stable machine-readable error detail for the selected result, if any.")
-
-
-class CrawlResponse(BaseModel):
-    request_id: str = Field(description="Service-generated request identifier.")
-    submitted_count: int = Field(description="Number of URLs accepted in the request payload.")
-    policy_schema_version: str = Field(description="Policy schema version used for this execution.")
-    results: list[CrawlResultModel] = Field(description="Per-URL crawl results in submitted order.")
-
-
-# Firecrawl-style condensed output models
 class FirecrawlMetadata(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -208,19 +188,47 @@ class FirecrawlMetadata(BaseModel):
     content_type: str | None = None
     scrape_id: str | None = None
     source_url: str | None = None
+    json_ld: dict | list | None = None
 
 
-class CondensedCrawlResult(BaseModel):
-    url: str
-    markdown: str | None = None
-    metadata: FirecrawlMetadata
-    warning: str | None = None
-    error: str | None = None
+class UnifiedCrawlResult(BaseModel):
+    # 1. Identity & Routing
+    original_url: str = Field(description="Caller-provided URL before normalization.")
+    normalized_url: str | None = Field(None, description="Public normalized URL used for execution.")
+    final_url: str | None = Field(None, description="Final URL after redirects or browser navigation.")
+    # 2. Execution Status
+    status: CrawlStatus = Field(description="Overall per-URL status (success, blocked, failed, etc.).")
+    classification: CrawlClassification = Field(description="Overall per-URL classification.")
+    selected_strategy: CrawlStrategy | None = Field(None, description="Strategy that produced the selected result.")
+    attempted_strategies: list[StrategyAttempt] = Field(default_factory=list, description="Ordered per-strategy attempt history.")
+    error: str | None = Field(None, description="Stable machine-readable error detail, if any.")
+    # 3. Firecrawl-Style LLM Output (The "Meat")
+    markdown: str | None = Field(None, description="Cleaned page content in Markdown format for LLM consumption.")
+    metadata: FirecrawlMetadata = Field(default_factory=FirecrawlMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata.")
+    # 4. Raw Data & Evidence (For debugging & non-LLM pipelines)
+    html: str | None = Field(None, description="Raw HTML/body evidence when requested and available.")
+    text: str | None = Field(None, description="Extracted text evidence (pre-markdown) when available.")
+    quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score.")
+    classification_evidence: list[ClassificationEvidence] = Field(default_factory=list)
+    # 5. HTTP Details
+    http_status: int | None = Field(None)
+    headers: dict[str, str] = Field(default_factory=dict)
+    content_type: str | None = Field(None)
+    extraction_method: str | None = Field(None, description="http_html, dom_text, pdf_text, trafilatura_extract, etc.")
+    # 6. Discovery & Diagnostics
+    diagnostics: dict[str, Any] = Field(default_factory=dict, description="robots, sitemaps, frames, forms, js_endpoints, intercepted_xhr, etc.")
+    discovered_link_count: int = Field(0, ge=0)
+    discovered_links_truncated: bool = Field(False)
+    discovered_links: list[DiscoveredLink] = Field(default_factory=list)
+    next_page_url: str | None = Field(None, description="Auto-detected pagination URL, if found.")
 
 
-class CondensedCrawlResponse(BaseModel):
-    success: bool
-    data: list[CondensedCrawlResult]
+class UnifiedCrawlResponse(BaseModel):
+    request_id: str = Field(description="Service-generated request identifier.")
+    submitted_count: int = Field(description="Number of URLs accepted in the request payload.")
+    policy_schema_version: str = Field(description="Policy schema version used for this execution.")
+    success: bool = Field(description="True if the request was processed without fatal service errors.")
+    results: list[UnifiedCrawlResult] = Field(description="Per-URL crawl results in submitted order.")
 
 
 class CrawlerError(BaseModel):
