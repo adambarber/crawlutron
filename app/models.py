@@ -11,7 +11,7 @@ from app.constants import (
 )
 
 
-ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed"]
+ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
 Classification = Literal[
     "rendered",
     "captcha_detected",

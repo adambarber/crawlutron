@@ -95,6 +95,7 @@ class CrawlStatus(str, Enum):
     disallowed = "disallowed"
     retry_exhausted = "retry_exhausted"
     failed = "failed"
+    skipped = "skipped"
 
 
 class CrawlPolicyLimits(BaseModel):
