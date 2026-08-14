@@ -1,5 +1,6 @@
 """Firecrawl-compatible metadata extraction from HTML."""
 
+import json
 import re
 from html import unescape
 from typing import Any
@@ -40,6 +41,21 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
         }.get(name)
         if mapped:
             metadata[mapped] = value
+
+    # JSON-LD structured data
+    json_ld_blocks = re.findall(
+        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    parsed_json_ld: list[Any] = []
+    for block in json_ld_blocks:
+        try:
+            parsed_json_ld.append(json.loads(block))
+        except Exception:  # noqa: BLE001 - malformed JSON-LD is skipped
+            continue
+    if parsed_json_ld:
+        metadata["json_ld"] = parsed_json_ld[0] if len(parsed_json_ld) == 1 else parsed_json_ld
 
     # canonical URL
     canonical_match = re.search(r'<link\s+[^>]*rel\s*=\s*["\'][^"\']*canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
