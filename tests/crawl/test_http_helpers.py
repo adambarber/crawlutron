@@ -132,7 +132,7 @@ class TestHeaderHelpers:
 class TestFetchRetries:
     def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         try:
-            _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
+            asyncio.run(_fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0))
             assert False, "expected re-raise"
         except ConnectionError:
             pass
@@ -196,13 +196,13 @@ class TestHttpStrategyResult:
         pol = dict(BASE_POLICY)
         if policy:
             pol.update(policy)
-        return _http_strategy_result(
+        return asyncio.run(_http_strategy_result(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             strategy=strategy,
             policy=pol,
             http_fetcher=fetcher,
-        )
+        ))
 
     def test_success_html(self) -> None:
         assert self._run().status == "success"
