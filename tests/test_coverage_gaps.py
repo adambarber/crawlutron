@@ -56,7 +56,8 @@ from app.constants import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from app.models import CrawlJob, CrawlResult, RenderOptions
 from app.service import render_request
 from app.validation import normalize_public_http_url, registrable_domain
-from tests.helpers.server import spawn_server
+from helpers import ServerTestCase
+from helpers.server import spawn_server
 
 
 class TestValidationGaps(unittest.TestCase):
@@ -159,7 +160,7 @@ class TestFirecrawlFormatGaps(unittest.TestCase):
         self.assertEqual(md["favicon"], "/fav.ico")
 
 
-class TestDocumentGaps(unittest.TestCase):
+class TestDocumentGaps(ServerTestCase):
     def test_format_table_empty(self):
         self.assertEqual(_format_table([]), "")
 
@@ -167,12 +168,8 @@ class TestDocumentGaps(unittest.TestCase):
         self.assertEqual(_default_document_text_extractor("http://127.0.0.1:1/nowhere.pdf"), "")
 
     def test_extract_broken_pdf_from_server(self):
-        srv = spawn_server()
-        try:
-            text = _default_document_text_extractor(srv.base_url + "/broken.pdf")
-            self.assertEqual(text, "")
-        finally:
-            srv.stop()
+        text = _default_document_text_extractor(self.base + "/broken.pdf")
+        self.assertEqual(text, "")
 
 
 class TestExtractionGaps(unittest.TestCase):
@@ -473,15 +470,7 @@ class TestServiceRenderRequest(unittest.TestCase):
             ))
 
 
-class TestHttpServerGaps(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.stop()
+class TestHttpServerGaps(ServerTestCase):
 
     def _policy(self, extra=None):
         policy = {"request_profile": {}, "headers": {}, "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}}

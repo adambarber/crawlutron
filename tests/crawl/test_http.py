@@ -10,13 +10,12 @@ from app.crawl.strategies.http import (
     _http_strategy_result,
     _looks_like_binary_body,
 )
+from helpers import ServerTestCase
+from app.constants import HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
 
 
 def _run(**kwargs):
     return asyncio.run(_http_strategy_result(**kwargs))
-from helpers.server import spawn_server
-
-from app.constants import HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
 
 
 def http_policy(**overrides):
@@ -34,16 +33,7 @@ def http_policy(**overrides):
     return policy
 
 
-class HttpStrategyTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.stop()
-
+class HttpStrategyTest(ServerTestCase):
     def test_http_strategy_extracts_html_markdown_and_links(self) -> None:
         result = _run(
             original_url=f"{self.base}/",
@@ -134,19 +124,16 @@ class HttpStrategyTest(unittest.TestCase):
         self.assertIn("| Alice | Engineering | 120000 |", result.markdown or "")
 
     def test_looks_like_binary_body_detects_archives(self) -> None:
-        self.assertTrue(_looks_like_binary_body(b"PK\x03\x04", "application/octet-stream", "http://x/a.zip"))
+        self.assertTrue(_looks_like_binary_body(b"PK", "application/octet-stream", "http://x/a.zip"))
         self.assertFalse(_looks_like_binary_body(b"<html>", "text/html", "http://x/"))
         self.assertFalse(_looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf"))
 
     def test_crawl_request_async_returns_unified_results_dict(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        response = asyncio.run(crawl_request(payload, browser_worker=None, cache=HttpCache()))
+        payload = self.make_payload(
+            strategies=[HTTP_DECLARED_CRAWLER],
+            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        )
+        response = self.run_crawl(payload)
         self.assertEqual(response["submitted_count"], 1)
         self.assertEqual(len(response["results"]), 1)
         self.assertIn("Example Org", response["results"][0]["markdown"])

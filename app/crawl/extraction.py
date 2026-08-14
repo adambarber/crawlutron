@@ -96,7 +96,7 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
         from markdownify import markdownify as html_to_md
 
         md = html_to_md(html_fragment) or None
-    except Exception:  # noqa: BLE001  # pragma: no cover - markdownify unavailable
+    except Exception:  # noqa: BLE001
         md = None
     text = _text_from_html(html_fragment) or None
     return text, md
@@ -122,7 +122,7 @@ def _extract_selected(
     if css_selector:
         try:
             from bs4 import BeautifulSoup
-        except ImportError:  # pragma: no cover - bs4 is a required dependency
+        except ImportError:
             return ExtractedContent(None, None)
         soup = BeautifulSoup(html, "html.parser")
         selected = soup.select(css_selector)
@@ -135,7 +135,7 @@ def _extract_selected(
             return ExtractedContent(None, None)
         try:
             nodes = tree.xpath(xpath)
-        except Exception:  # noqa: BLE001 - invalid XPath is caller error, not extraction
+        except Exception:  # invalid XPath is caller error, not extraction
             return ExtractedContent(None, None)
         if not nodes:
             return ExtractedContent(None, None)
@@ -175,7 +175,7 @@ def _extract_html(
             include_links=True,
             deduplicate=True,
         )
-    except Exception:  # noqa: BLE001  # pragma: no cover - trafilatura unavailable
+    except Exception:  # noqa: BLE001
         md = None
     if not md or not md.strip():
         # Fallback to markdownify before the plain-text extractor so that
@@ -184,22 +184,22 @@ def _extract_html(
             from markdownify import markdownify as html_to_md
 
             md = html_to_md(html) or None
-        except Exception:  # noqa: BLE001  # pragma: no cover - markdownify unavailable
+        except Exception:  # noqa: BLE001
             md = None
     if not md or not md.strip():
-        md = _text_from_html(html) or None  # pragma: no cover - defensive fallback
+        md = _text_from_html(html) or None
     return ExtractedContent(md, md)
 
 
 def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     try:
         from markitdown import MarkItDown
-    except ImportError:  # pragma: no cover - markitdown is a required dependency
+    except ImportError:
         return ExtractedContent(None, None)
     try:
         res = MarkItDown().convert_stream(io.BytesIO(body))
         md = res.text_content if res is not None else None
-    except Exception:  # noqa: BLE001  # pragma: no cover - unparseable documents fall through
+    except Exception:  # noqa: BLE001
         md = None
     if not md or not md.strip():
         return ExtractedContent(None, None)
@@ -228,7 +228,7 @@ def _parse_html_tree(html: str | None):
     try:
         from lxml import etree
         from lxml.etree import ParserError
-    except ImportError:  # pragma: no cover - lxml is a required dependency
+    except ImportError:
         return None
     try:
         return etree.HTML(html)

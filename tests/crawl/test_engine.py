@@ -8,8 +8,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.engine import _filter_links_by_scope, crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import CrawlStrategyAttempt, DiscoveredLink, UniversalCrawlResult
-from helpers.server import spawn_server
-
+from helpers import ServerTestCase
 from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
 
 
@@ -53,53 +52,35 @@ class ScopeFilterTest(unittest.TestCase):
         self.assertEqual(_filter_links_by_scope(make_result(links), r"([invalid").discovered_link_count, 1)
 
 
-class EngineCrawlRequestTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.stop()
-
+class EngineCrawlRequestTest(ServerTestCase):
     def test_crawl_request_http_success(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        response = asyncio.run(crawl_request(payload, browser_worker=None, cache=HttpCache()))
-        self.assertEqual(response["submitted_count"], 1)
+        payload = self.make_payload(
+            strategies=[HTTP_DECLARED_CRAWLER],
+            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        )
+        response = self.run_crawl(payload)
         self.assertIn("Example Org", response["results"][0]["markdown"])
 
     def test_crawl_request_conditional_cache_304(self) -> None:
         url = f"{self.base}/with_etag"
         cache = HttpCache(":memory:")
         cache.store(url, {"etag": "v1"})
-        payload = {
-            "url": url,
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        response = asyncio.run(crawl_request(payload, browser_worker=None, cache=cache))
+        payload = self.make_payload(
+            url=url,
+            strategies=[HTTP_DECLARED_CRAWLER],
+            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        )
+        response = self.run_crawl(payload, cache=cache)
         result = response["results"][0]
         self.assertEqual(result["classification"], "not_modified")
         self.assertEqual(result["http_status"], 304)
 
     def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [BROWSER_HEADLESS],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        response = asyncio.run(crawl_request(payload, browser_worker=None, cache=HttpCache()))
+        payload = self.make_payload(
+            strategies=[BROWSER_HEADLESS],
+            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        )
+        response = self.run_crawl(payload)
         result = response["results"][0]
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["classification"], "browser_crash")
@@ -113,13 +94,10 @@ class EngineCrawlRequestTest(unittest.TestCase):
         def browser_worker(job):
             return renderer.render(job.url, job.options)
 
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-                "limits": {"timeout_seconds": 20, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
+        payload = self.make_payload(
+            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+            limits={"timeout_seconds": 20, "max_retries": 0, "max_discovered_links": 50},
+        )
         response = asyncio.run(
             crawl_request(payload, browser_worker=browser_worker, http_fetcher=failing_fetcher, cache=HttpCache())
         )

@@ -9,21 +9,12 @@ from app.crawl.strategies.document import (
     _format_table,
     _pdf_to_markdown,
 )
-from helpers.server import spawn_server
+from helpers import ServerTestCase
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
 
 
-class PdfTablePreservationTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.server.stop()
-
+class PdfTablePreservationTest(ServerTestCase):
     def test_format_table_renders_markdown(self) -> None:
         md = _format_table([["Name", "Department", "Salary"], ["Alice", "Engineering", "120000"]])
         self.assertIn("Name", md)

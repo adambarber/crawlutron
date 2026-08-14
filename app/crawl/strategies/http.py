@@ -110,7 +110,7 @@ BLOCKED_CLASSIFICATIONS = {
 }
 
 
-async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:  # pragma: no cover - real network I/O
+async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient``."""
     client = get_async_http_client()
     started = time.monotonic()
@@ -134,7 +134,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     )
 
 
-async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:  # pragma: no cover - real network I/O
+async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi."""
     try:
         import curl_cffi.requests as cffi_requests
@@ -152,7 +152,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
             body=response.content,
             elapsed_ms=elapsed_ms,
         )
-    except Exception:  # noqa: BLE001 - any cffi failure falls back to plain httpx
+    except Exception:  # any cffi failure falls back to plain httpx
         return await _default_http_fetcher(url, headers, timeout_seconds)
 
 
@@ -531,7 +531,7 @@ async def _http_strategy_result(
         elif response.status_code >= 500:
             classification = "site_error"
             classification_evidence = [{"classification": "site_error", "signature": str(response.status_code), "source": "http_status", "context": f"HTTP {response.status_code}"}]
-        if extraction == EXTRACTION_TRAFILATURA and not is_html and classification == "rendered":  # pragma: no cover
+        if extraction == EXTRACTION_TRAFILATURA and not is_html and classification == "rendered":
             classification = EXTRACTION_METHOD_BINARY_NO_TEXT
             classification_evidence = [{"classification": EXTRACTION_METHOD_BINARY_NO_TEXT, "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
         status = _status_for_classification(classification)

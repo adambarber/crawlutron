@@ -40,7 +40,7 @@ try:
     from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse, Response
-except ImportError:  # pragma: no cover - imported in container runtime
+except ImportError:
     Body = None  # type: ignore[assignment]
     FastAPI = None  # type: ignore[assignment]
     HTTPException = Exception  # type: ignore[assignment]
@@ -256,8 +256,8 @@ if FastAPI is not None:
     async def render(payload: dict[str, Any]) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
-            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))  # pragma: no cover - requires browser
-            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})  # pragma: no cover - requires browser
+            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
+            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
             return UnifiedCrawlResponse(
                 request_id=result["request_id"],
                 submitted_count=result["submitted_count"],
@@ -288,7 +288,7 @@ if FastAPI is not None:
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 await client.post(webhook_url, json=result, headers={"Content-Type": "application/json"})
-        except Exception:  # noqa: BLE001 - webhook delivery is best-effort
+        except Exception:  # webhook delivery is best-effort
             pass
 
     @app.post(
@@ -432,5 +432,5 @@ if FastAPI is not None:
     async def metrics_endpoint() -> "Response":
         return Response(metrics.as_prometheus(), media_type="text/plain; version=0.0.4")
 
-else:  # pragma: no cover - FastAPI unavailable at runtime
+else:
     app = None

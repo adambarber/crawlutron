@@ -3,18 +3,12 @@
 import unittest
 
 from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
+from helpers import FIRECRAWL_TEST_HTML
 
 
 class FirecrawlMetadataTest(unittest.TestCase):
     def test_extracts_title_and_meta(self) -> None:
-        html = (
-            "<html lang='en'><head><title>Test Page</title>"
-            "<meta content='no-name-attribute'>"
-            "<meta name='description' content=''>"
-            "<meta name='description' content='A test page'>"
-            "<meta property='og:title' content='OG Title'>"
-            "</head><body><main>Content here</main></body></html>"
-        )
+        html = FIRECRAWL_TEST_HTML
         meta = _extract_firecrawl_metadata(html, "https://example.com")
         self.assertEqual(meta["title"], "Test Page")
         self.assertEqual(meta["description"], "A test page")

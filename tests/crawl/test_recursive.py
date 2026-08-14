@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import HttpFetchResult
+from helpers import ServerTestCase
 
 
 def site_fetcher(pages):
@@ -143,23 +144,15 @@ class RecursiveCrawlTest(unittest.TestCase):
             self.assertIsNotNone(result["markdown"])
 
 
-class RecursiveCrawlServerTest(unittest.TestCase):
-    def setUp(self):
-        from helpers.server import spawn_server
-
-        self.srv = spawn_server()
-        self.base = self.srv.base_url
-
-    def tearDown(self):
-        self.srv.stop()
-
+class RecursiveCrawlServerTest(ServerTestCase):
     def test_real_server_recursive_follows_links(self):
-        payload = {
-            "url": self.base + "/",
-            "policy": {"limits": {"max_depth": 1, "max_pages": 10}},
-        }
-        out = asyncio.run(crawl_request(payload, http_fetcher=None, cache=HttpCache()))
-        urls = {r["normalized_url"] for r in out["results"]}
+        payload = self.make_payload(
+            url=f"{self.base}/",
+            strategies=["HTTP_DECLARED_CRAWLER"],
+            limits={"max_depth": 1, "max_pages": 10},
+        )
+        response = self.run_crawl(payload)
+        urls = {r["normalized_url"] for r in response["results"]}
         self.assertIn(self.base, urls)
         self.assertIn(self.base + "/page2", urls)
 

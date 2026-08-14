@@ -52,7 +52,7 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
     for block in json_ld_blocks:
         try:
             parsed_json_ld.append(json.loads(block))
-        except Exception:  # noqa: BLE001 - malformed JSON-LD is skipped
+        except Exception:  # malformed JSON-LD is skipped
             continue
     if parsed_json_ld:
         metadata["json_ld"] = parsed_json_ld[0] if len(parsed_json_ld) == 1 else parsed_json_ld

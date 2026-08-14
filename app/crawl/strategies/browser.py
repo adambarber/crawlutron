@@ -84,7 +84,7 @@ class BrowserRenderer:
             attempts += 1
             try:
                 result = await self._render_with_browser(url, options)
-                return result  # pragma: no cover - requires browser
+                return result
             except TimeoutError as error:
                 last_error = str(error)
                 self._reset_browser()
@@ -98,9 +98,9 @@ class BrowserRenderer:
                     return self._failure_result(url, "retry_exhausted", "unknown_error", attempts, started, last_error)
                 self._sleep(min(2 ** (attempts - 1), 5))
 
-        return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)  # pragma: no cover - unreachable: loop body always returns
+        return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
-    async def _acquire_browser(self, options: RenderOptions) -> Any:  # pragma: no cover - requires browser
+    async def _acquire_browser(self, options: RenderOptions) -> Any:
         """Return a reused browser instance, launching one on first use (#6)."""
         if self._browser is None or getattr(self._browser, "is_closed", False):
             launch_kwargs = self._get_browser_kwargs(options.browser_profile)
@@ -112,7 +112,7 @@ class BrowserRenderer:
             self._browser_reused = True
         return self._browser
 
-    async def close(self) -> None:  # pragma: no cover - requires browser
+    async def close(self) -> None:
         """Release the reused browser instance at service shutdown (#6)."""
         cm = self._browser_cm
         self._browser_cm = None
@@ -120,10 +120,10 @@ class BrowserRenderer:
         if cm is not None:
             try:
                 await cm.__aexit__(None, None, None)
-            except Exception:  # noqa: BLE001 - best-effort teardown
+            except Exception:  # best-effort teardown
                 pass
 
-    async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:  # pragma: no cover - requires browser
+    async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
         started = time.monotonic()
 
         browser = await self._acquire_browser(options)
@@ -196,7 +196,7 @@ class BrowserRenderer:
             metadata=metadata,
         )
 
-    async def _run_action_chain(self, page: Any, actions: list[dict[str, Any]]) -> None:  # pragma: no cover - requires browser
+    async def _run_action_chain(self, page: Any, actions: list[dict[str, Any]]) -> None:
         """Execute a sequence of browser actions before extraction (#10).
 
         Supported action types: ``click``, ``fill``, ``hover``, ``scroll``
@@ -227,10 +227,10 @@ class BrowserRenderer:
                     self._sleep(float(action.get("seconds", 1)))
                 elif action_type == "execute_js" and "script" in action:
                     await page.evaluate(action["script"])
-            except Exception:  # noqa: BLE001 - action chains are best-effort
+            except Exception:  # action chains are best-effort
                 continue
 
-    async def _capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:  # pragma: no cover - requires browser
+    async def _capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:
         """Capture targeted element screenshots as base64 (#14)."""
         shots: list[dict[str, Any]] = []
         for selector in selectors:
@@ -240,7 +240,7 @@ class BrowserRenderer:
                     continue
                 data = base64.b64encode(await element.screenshot()).decode("ascii")
                 shots.append({"selector": selector, "screenshot": data})
-            except Exception:  # noqa: BLE001 - best-effort per-element capture
+            except Exception:  # best-effort per-element capture
                 continue
         return shots
 
@@ -265,18 +265,18 @@ class BrowserRenderer:
             try:
                 payload = await response.json()
                 entry["payload"] = payload
-            except Exception:  # noqa: BLE001 - payload capture is best-effort
+            except Exception:  # payload capture is best-effort
                 entry["payload"] = None
             collected.append(entry)
 
         return on_response
 
-    async def _lazy_load_scroll(self, page: Any) -> None:  # pragma: no cover - requires browser
+    async def _lazy_load_scroll(self, page: Any) -> None:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content."""
         for _ in range(LAZY_SCROLL_STEPS):
             try:
                 await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
-            except Exception:  # noqa: BLE001 - scrolling is best-effort
+            except Exception:  # scrolling is best-effort
                 return
             self._sleep(LAZY_SCROLL_DELAY_SECONDS)
 
@@ -302,7 +302,7 @@ class BrowserRenderer:
             return {"viewport": {"width": 390, "height": 844}}
         return {"viewport": {"width": 1365, "height": 768}}
 
-    async def _extract_with_challenge_wait(self, page: Any, options: RenderOptions) -> tuple[str | None, str | None, str, bool]:  # pragma: no cover - requires browser
+    async def _extract_with_challenge_wait(self, page: Any, options: RenderOptions) -> tuple[str | None, str | None, str, bool]:
         html = await self._extract_html(page) if options.include_html else None
         text = await self._extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
@@ -325,20 +325,20 @@ class BrowserRenderer:
 
         return html, text, classification, False
 
-    async def _wait_for_ready_state(self, page: Any) -> None:  # pragma: no cover - requires browser
+    async def _wait_for_ready_state(self, page: Any) -> None:
         for _ in range(10):
             state = await page.evaluate("() => document.readyState")
             if state in {"interactive", "complete"}:
                 return
             self._sleep(0.1)
 
-    async def _extract_html(self, page: Any) -> str:  # pragma: no cover - requires browser
+    async def _extract_html(self, page: Any) -> str:
         try:
             return await page.content()
         except Exception:
             return ""
 
-    async def _extract_text(self, page: Any) -> str:  # pragma: no cover - requires browser
+    async def _extract_text(self, page: Any) -> str:
         try:
             return await page.evaluate("() => document.body ? document.body.innerText : ''")
         except Exception:
@@ -366,7 +366,7 @@ class BrowserRenderer:
             error=error,
         )
 
-    def _create_camoufox_browser(self, **kwargs: Any):  # pragma: no cover - camoufox not installed in test env
+    def _create_camoufox_browser(self, **kwargs: Any):
         """Factory for AsyncCamoufox browser."""
         from camoufox.async_api import AsyncCamoufox
         return AsyncCamoufox(**kwargs)

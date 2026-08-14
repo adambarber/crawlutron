@@ -8,21 +8,20 @@ from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
-from helpers.server import spawn_server
-
+from helpers import ServerTestCase
 from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 
 
-class BrowserRendererTest(unittest.TestCase):
+class BrowserRendererTest(ServerTestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
+        super().setUpClass()
         cls.renderer = BrowserRenderer()
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.server.stop()
+        cls.renderer.close()
+        super().tearDownClass()
 
     def _render(self, path: str, **options) -> object:
         url = f"{self.base}{path}"
@@ -63,13 +62,10 @@ class BrowserRendererTest(unittest.TestCase):
         self.assertEqual(result.status, "blocked")
 
     def test_crawl_request_uses_browser_strategy(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [BROWSER_HEADLESS],
-                "limits": {"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
-            },
-        }
+        payload = self.make_payload(
+            strategies=[BROWSER_HEADLESS],
+            limits={"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
+        )
         response = asyncio.run(
             crawl_request(
                 payload,

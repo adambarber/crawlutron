@@ -6,36 +6,40 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, build_condensed_crawl_response
+from helpers import ServerTestCase
 from helpers.server import spawn_server, WEBHOOK_RECEIVED
 
 
-class CrawlApiTest(unittest.TestCase):
+def _crawl_payload(test_case, **extra):
+    payload = {
+        "url": f"{test_case.base}/",
+        "policy": {
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        },
+    }
+    payload.update(extra)
+    return payload
+
+
+class CrawlApiTest(ServerTestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.server = spawn_server()
-        cls.base = cls.server.base_url
+        super().setUpClass()
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.server.stop()
+        super().tearDownClass()
 
     def setUp(self) -> None:
         self.client = TestClient(app)
         WEBHOOK_RECEIVED.clear()
 
     def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        resp = self.client.post("/v1/crawl", json=payload)
+        resp = self.client.post("/v1/crawl", json=_crawl_payload(self))
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
-        # Unified envelope shape
         self.assertIn("request_id", body)
         self.assertEqual(body["submitted_count"], 1)
         self.assertIn("policy_schema_version", body)
@@ -43,27 +47,19 @@ class CrawlApiTest(unittest.TestCase):
         self.assertEqual(len(body["results"]), 1)
 
         result = body["results"][0]
-        # Both LLM markdown and full diagnostics are present.
         self.assertIn("Example Org", result["markdown"])
         self.assertIsInstance(result["diagnostics"], dict)
         self.assertIn("content_metrics", result["diagnostics"])
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["classification"], "rendered")
         self.assertEqual(result["http_status"], 200)
-        # Firecrawl metadata + JSON-LD
         self.assertIsNotNone(result["metadata"].get("json_ld"))
-        # Discovery + pagination captured
         self.assertGreaterEqual(result["discovered_link_count"], 1)
         self.assertEqual(result["next_page_url"], f"{self.base}/page2")
 
     def test_v1_crawl_batch_returns_one_result_per_url(self) -> None:
-        payload = {
-            "urls": [f"{self.base}/", f"{self.base}/page2"],
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
+        payload = _crawl_payload(self, urls=[f"{self.base}/", f"{self.base}/page2"])
+        payload.pop("url")
         resp = self.client.post("/v1/crawl", json=payload)
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -72,14 +68,11 @@ class CrawlApiTest(unittest.TestCase):
         self.assertIn("Example Org", body["results"][0]["markdown"])
 
     def test_v1_crawl_discovery_includes_robots_and_sitemap(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "discovery": {"robots": True, "sitemaps": True, "feeds": True},
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
+        payload = _crawl_payload(self, policy={
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "discovery": {"robots": True, "sitemaps": True, "feeds": True},
+            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        })
         resp = self.client.post("/v1/crawl", json=payload)
         self.assertEqual(resp.status_code, 200)
         result = resp.json()["results"][0]
@@ -92,14 +85,7 @@ class CrawlApiTest(unittest.TestCase):
         self.assertIn("/page2", diagnostics["discovery"]["sitemap_urls"])
 
     def test_v1_crawl_404_is_classified_not_found(self) -> None:
-        payload = {
-            "url": f"{self.base}/missing",
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        resp = self.client.post("/v1/crawl", json=payload)
+        resp = self.client.post("/v1/crawl", json=_crawl_payload(self, url=f"{self.base}/missing"))
         self.assertEqual(resp.status_code, 200)
         result = resp.json()["results"][0]
         self.assertEqual(result["status"], "failed")
@@ -110,22 +96,19 @@ class CrawlApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 422)
 
     def test_v1_crawl_scope_regex_limits_discovered_links(self) -> None:
-        # The server runs on http://127.0.0.1; a scope regex that only matches
-        # https://example.com must filter out every discovered loopback link.
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
+        payload = _crawl_payload(
+            self,
+            policy={
                 "strategies": ["HTTP_DECLARED_CRAWLER"],
                 "scope_regex": r"^https://example\.com",
                 "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 100},
             },
-        }
+        )
         resp = self.client.post("/v1/crawl", json=payload)
         self.assertEqual(resp.status_code, 200)
         result = resp.json()["results"][0]
         self.assertEqual(result["discovered_link_count"], 0)
         self.assertEqual(result["discovered_links"], [])
-
 
     def test_v1_crawl_webhook_returns_202_and_delivers(self) -> None:
         payload = {
@@ -148,25 +131,12 @@ class CrawlApiTest(unittest.TestCase):
         self.assertIn("results", delivered)
 
     def test_metrics_endpoint_exposes_prometheus_text(self) -> None:
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        self.client.post("/v1/crawl", json=payload)
+        self.client.post("/v1/crawl", json=_crawl_payload(self))
         resp = self.client.get("/metrics")
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertIn("crawler_crawl_requests_total", resp.text)
         self.assertIn("crawler_crawl_results_total", resp.text)
-        # After one crawl, at least one result was observed.
         self.assertIn("crawler_crawl_results_total 1", resp.text)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
 
 
 class DiscoveryAndRenderApiTest(unittest.TestCase):
@@ -194,7 +164,6 @@ class DiscoveryAndRenderApiTest(unittest.TestCase):
             self.assertTrue(resp.json())
 
     def test_condensed_response_alias(self) -> None:
-        from app.main import build_condensed_crawl_response
         resp = build_condensed_crawl_response([
             {"original_url": "http://x/", "final_url": "http://x/", "status": "success", "classification": "rendered"}
         ])
@@ -228,6 +197,9 @@ class DiscoveryAndRenderApiTest(unittest.TestCase):
         exc = RequestValidationError(
             errors=[{"loc": ("body", "url"), "msg": "field required", "type": "value_error.missing"}]
         )
-        import asyncio
         response = asyncio.run(handler(request, exc))
         self.assertEqual(response.status_code, 422)
+
+
+if __name__ == "__main__":
+    unittest.main()

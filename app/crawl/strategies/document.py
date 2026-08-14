@@ -79,9 +79,9 @@ def _default_document_text_extractor(url: str) -> str:
     try:
         with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - public crawled URL
             pdf_bytes = response.read()
-    except Exception:  # noqa: BLE001 - extraction failure yields empty text
+    except Exception:  # extraction failure yields empty text
         return ""
     try:
         return _extract_pdf_bytes_to_markdown(pdf_bytes)
-    except Exception:  # noqa: BLE001 - unparseable PDFs fall through
+    except Exception:  # unparseable PDFs fall through
         return ""
