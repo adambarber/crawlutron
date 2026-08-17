@@ -21,6 +21,8 @@ from app.classify import classify_page_with_evidence
 from app.constants import (
     BROWSER_HEADLESS,
     BROWSER_HEADED_WARMED,
+    BROWSER_BLOCKED_CLASSIFICATIONS,
+    HTTP_BLOCKED_CLASSIFICATIONS,
     DEFAULT_EXTRACTION,
     DEFAULT_STRATEGIES,
     EXTRACTION_DOCUMENT,
@@ -294,6 +296,10 @@ async def _browser_strategy_result(
     )
 
 
+
+# Block/challenge classifications that should trigger strategy auto-escalation (#7).
+BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
+
 async def _execute_crawl_chain(
     *,
     original_url: str,
@@ -394,6 +400,12 @@ async def _execute_crawl_chain(
             retry_after = cooldown.get("retry_after_seconds")
             if retry_after is not None:
                 scheduler.set_domain_cooldown(domain, float(retry_after))
+        if result.classification in BLOCKED_CLASSIFICATIONS:
+            # A challenge/block page (CAPTCHA, Cloudflare/WAF, login wall, etc.) is not a
+            # usable result. Auto-escalate to the next strategy in the chain (e.g. direct
+            # HTTP -> curl_cffi TLS impersonation -> headless browser) before giving up (#7).
+            # The final fallback keeps the last (blocked) result.
+            continue
         if result.status == "success" and result.quality_score > 0:
             scoped = _filter_links_by_scope(result, policy.get("scope_regex"))
             return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
