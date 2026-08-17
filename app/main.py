@@ -71,6 +71,32 @@ settings = CrawlerSettings.from_mapping()
 
 # Job store for resumable crawls (#3+#14)
 job_store = JobStore(settings.cache_dir + "/jobs.db")
+
+async def _execute_crawl(payload_dict: dict) -> dict:
+    """Shared crawl execution for /v1/crawl and /v1/map."""
+    return await crawl_request(
+        payload_dict,
+        settings=settings,
+        browser_worker=lambda job: renderer.render(job.url, job.options),
+        shutdown_event=shutdown_event,
+    )
+
+
+def _build_job_status(job) -> JobStatusResponse:
+    """Build JobStatusResponse from job state."""
+    return JobStatusResponse(
+        job_id=job.job_id,
+        root_url=job.root_url,
+        status=job.status.value,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        frontier_size=len(job.frontier),
+        visited_size=len(job.visited),
+        results_count=len(job.results),
+        stats=job.stats,
+        error=job.error,
+    )
+
 logger = configure_service_logging(
     service_name="browser-crawler",
     log_level=settings.log_level,
@@ -445,12 +471,7 @@ if FastAPI is not None:
                         "webhook_url": webhook_url,
                     },
                 )
-            result = await crawl_request(
-                payload_dict,
-                settings=settings,
-                browser_worker=lambda job: renderer.render(job.url, job.options),
-                shutdown_event=shutdown_event,
-            )
+            result = await _execute_crawl(payload_dict)
             metrics.observe_crawl(results=result.get("results", []))
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
             unified = [_build_unified_result(item) for item in result.get("results", [])]
@@ -506,12 +527,7 @@ if FastAPI is not None:
             limits = dict(policy.get("limits") or {})
             limits.setdefault("max_discovered_links", 2000)
             policy["limits"] = limits
-            result = await crawl_request(
-                payload_dict,
-                settings=settings,
-                browser_worker=lambda job: renderer.render(job.url, job.options),
-                shutdown_event=shutdown_event,
-            )
+            result = await _execute_crawl(payload_dict)
             metrics.observe_crawl(results=result.get("results", []))
             logger.info("map_request_completed", extra={"url_count": len(result.get("results", []))})
             return build_site_map(result)
@@ -571,18 +587,7 @@ if FastAPI is not None:
                 status_code=404,
                 detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
             )
-        return JobStatusResponse(
-            job_id=job.job_id,
-            root_url=job.root_url,
-            status=job.status.value,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-            frontier_size=len(job.frontier),
-            visited_size=len(job.visited),
-            results_count=len(job.results),
-            stats=job.stats,
-            error=job.error,
-        )
+        return _build_job_status(job)
 
     @app.post(
         "/v1/jobs/{job_id}/control",

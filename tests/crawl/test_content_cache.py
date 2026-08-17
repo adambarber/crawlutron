@@ -25,6 +25,21 @@ from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_resu
 
 # --------------------------- unit: pure cache behavior ---------------------------
 
+
+def _make_etag_test_setup(tmp_path, etag_server):
+    """Common setup for etag-based content cache tests."""
+    host, port = etag_server.server_address
+    url = f"http://127.0.0.1:{port}/"
+    policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
+
+    def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
+        return _default_http_fetcher(u, headers, timeout, max_content_length)
+
+    cache = HttpCache()
+    content_cache = ContentCache(tmp_path)
+    return url, policy, fetcher, cache, content_cache
+
+
 def test_set_get_roundtrip(tmp_path):
     c = ContentCache(cache_dir=tmp_path / "u", default_ttl=3600)
     assert c.get("missing") is None
@@ -192,15 +207,7 @@ def etag_server():
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
     from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
-    host, port = etag_server.server_address
-    url = f"http://127.0.0.1:{port}/"
-    policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
-
-    def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return _default_http_fetcher(u, headers, timeout, max_content_length)
-
-    cache = HttpCache()
-    content_cache = ContentCache(tmp_path)
+    url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     # First crawl: stores 200 + etag.
     r1 = await _http_strategy_result(
         original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
