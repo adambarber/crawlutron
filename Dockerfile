@@ -27,6 +27,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --user -r requirements.txt
 
 # ==========================================
+# 2b. Isolated Camoufox browser-binary stage
+# ==========================================
+# The browser binary download (~1.3 GB) is isolated into its own stage that
+# depends ONLY on the camoufox requirement line. Editing other requirements
+# (e.g. adding h2) therefore cannot invalidate this download, eliminating the
+# >10 minute rebuilds previously caused by a full layer-cache miss.
+FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS camoufox-binary
+
+WORKDIR /app
+COPY browser-crawler/requirements.txt .
+RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
+RUN python -m camoufox fetch
+
+# ==========================================
 # 2. Runtime Stage: Lean production image
 # ==========================================
 FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS runtime
@@ -71,11 +85,9 @@ ENV HOME=/home/appuser
 # Copy installed Python packages from builder stage to the appuser's local directory
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
-# Pre-fetch the Camoufox browser binary EARLY.
-# Executed as appuser so permissions are correct for the runtime profile/cache directories.
-# Cache mount: persists the downloaded browser binary across builds so an earlier-layer
-# cache miss (e.g. editing requirements.txt) no longer re-downloads ~1.3 GB from scratch.
-RUN --mount=type=cache,target=/home/appuser/.cache/camoufox python -m camoufox fetch
+# Bring in the pre-fetched Camoufox browser binary from the isolated stage
+# (committed to the image) so the runtime does not re-download it.
+COPY --from=camoufox-binary --chown=appuser:appuser /root/.cache/camoufox /home/appuser/.cache/camoufox
 
 # Copy application code and the shared logging module (no external build context needed)
 COPY --chown=appuser:appuser browser-crawler/app /app/app
