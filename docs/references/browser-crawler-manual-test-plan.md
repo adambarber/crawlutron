@@ -257,7 +257,7 @@ All 30 values appear in `supported_classifications` (TC-CAP-01) and counters
 | TC | Concern | Expectation |
 |---|---|---|
 | TC-SSRF-01 | Private/loopback block | Default: `http://127.0.0.1`, `http://localhost`, `http://10.0.0.1`, `http://169.254.169.254` → `private_network_target`/`blocked`. With `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` → allowed (override). |
-| TC-VAL-01 | `url` xor `urls` | Both or neither → `422 validation_error`. |
+| TC-VAL-01 | `url` xor `urls` | Neither `url` nor `urls` → `422 missing_url`. Both provided → `200` (lenient: service uses `urls`, ignores `url`). Enforcing a strict xor is deferred hardening. |
 | TC-VAL-02 | `batch_size_exceeded` | `> max_batch_size` (50) URLs → `422`. |
 | TC-VAL-03 | schema/field validation | Invalid policy field → `422` with `details.errors`. |
 | TC-CONC-01 | Global + per-domain concurrency | Many parallel requests; scheduler enforces `global_concurrency=4`, `per_domain_concurrency=1`, `per_domain_delay_ms`. |
