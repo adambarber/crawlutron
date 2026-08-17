@@ -73,7 +73,9 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Pre-fetch the Camoufox browser binary EARLY.
 # Executed as appuser so permissions are correct for the runtime profile/cache directories.
-RUN python -m camoufox fetch
+# Cache mount: persists the downloaded browser binary across builds so an earlier-layer
+# cache miss (e.g. editing requirements.txt) no longer re-downloads ~1.3 GB from scratch.
+RUN --mount=type=cache,target=/home/appuser/.cache/camoufox python -m camoufox fetch
 
 # Copy application code and the shared logging module (no external build context needed)
 COPY --chown=appuser:appuser browser-crawler/app /app/app
