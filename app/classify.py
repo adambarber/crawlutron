@@ -5,7 +5,7 @@ from typing import Any
 
 CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
-    ("captcha_detected", ("captcha", "verify you are human", "human verification")),
+    ("captcha_detected", ("verify you are human", "human verification", "complete the captcha", "captcha challenge", "prove you are human", "security check", "i'm not a robot")),
     (
         "bot_challenge_detected",
         (
@@ -18,13 +18,13 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "cloudflare ray id",
         ),
     ),
-    ("cookie_consent_required", ("accept all cookies", "we use cookies", "cookie consent", "manage cookies")),
+    ("cookie_consent_required", ("this site uses cookies to", "by continuing you agree", "we value your privacy", "cookie settings", "reject all", "manage preferences")),
     ("javascript_required", ("javascript is required", "enable javascript to view", "requires javascript")),
     ("unsupported_browser", ("browser is not supported", "unsupported browser", "please update your browser")),
     ("geolocation_blocked", ("not available in your location", "unavailable in your region", "location restricted")),
     ("waf_challenge_detected", ("web application firewall", "incident id", "request blocked by web application firewall")),
-    ("rate_limited", ("429", "too many requests", "rate limit", "rate-limited")),
-    ("paywall_detected", ("subscribe now", "subscription required", "continue reading", "paywall")),
+    ("rate_limited", ("too many requests", "rate limit exceeded", "rate-limited", "throttled", "quota exceeded")),
+    ("paywall_detected", ("subscription required to", "paywall", "metered paywall", "premium subscription", "unlock this article", "subscriber only", "members only")),
     ("access_denied", ("access denied", "request has been blocked", "forbidden", "security rules", "403 forbidden")),
     ("not_found", ("custom404", "404. the page/url requested", "404 not found", "page not found", "not found")),
     ("site_error", ("runtime error", "server error in '/' application", "application error")),
@@ -76,7 +76,12 @@ def _html_without_script_and_style(html: str | None) -> str:
     import re
 
     without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html or "", flags=re.IGNORECASE | re.DOTALL)
-    return re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
+    without_styles = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
+    # Remove all remaining HTML tags (but preserve comments), leaving only text content
+    # This prevents matching on class="grecaptcha", recaptcha-v3-script="", src="...recaptcha..." etc.
+    # while still allowing detection of signals in HTML comments like <!-- access denied -->
+    text_only = re.sub(r"<(?!\!\-\-)[^>]+>", " ", without_styles)
+    return text_only
 
 
 def _html_has_no_user_visible_content(html: str | None) -> bool:

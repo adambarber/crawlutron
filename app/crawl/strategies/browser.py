@@ -197,6 +197,9 @@ class BrowserRenderer:
             # and visible text are reachable by the standard HTML/text extractors.
             await self._flatten_shadow_dom(page)
 
+            # Auto-accept cookie consent (best-effort) before extraction
+            await self._auto_accept_cookie_consent(page)
+
             # Extract with challenge waiting
             html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
 
@@ -439,6 +442,82 @@ class BrowserRenderer:
             )
         except Exception:  # flattening is best-effort; never fail a render over it
             pass
+
+    async def _auto_accept_cookie_consent(self, page: Any) -> bool:
+        """Auto-click cookie consent accept buttons (best-effort).
+
+        Returns True if a consent button was clicked, False otherwise.
+        """
+        try:
+            # Common cookie consent button selectors and text patterns
+            consent_selectors = [
+                # Generic button/anchor with common accept text
+                'button:has-text("Accept All")',
+                'button:has-text("Accept all")',
+                'button:has-text("Accept All Cookies")',
+                'button:has-text("Accept all cookies")',
+                'button:has-text("I Accept")',
+                'button:has-text("I Agree")',
+                'button:has-text("Allow All")',
+                'button:has-text("Allow all")',
+                'button:has-text("Continue")',
+                'button:has-text("Got it")',
+                'button:has-text("OK")',
+                'button:has-text("Ok")',
+                'a:has-text("Accept All")',
+                'a:has-text("Accept all")',
+                'a:has-text("I Accept")',
+                'a:has-text("I Agree")',
+                # Common ID/class patterns
+                'button[id*="accept"]',
+                'button[class*="accept"]',
+                'button[id*="consent"]',
+                'button[class*="consent"]',
+                'button[id*="cookie"]',
+                'button[class*="cookie"]',
+                '#onetrust-accept-btn-handler',
+                '.cc-btn.cc-allow',
+                '.cookie-consent-accept',
+                '[data-testid="cookie-accept"]',
+                '[data-cy="accept-cookies"]',
+            ]
+
+            for selector in consent_selectors:
+                try:
+                    element = await page.query_selector(selector)
+                    if element:
+                        # Check if element is visible
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            await element.click()
+                            self._sleep(0.5)  # Brief wait for consent to register
+                            return True
+                except Exception:
+                    continue
+
+            # Fallback: evaluate JS to find buttons by text content
+            clicked = await page.evaluate("""() => {
+                const acceptTexts = [
+                    'accept all', 'accept all cookies', 'i accept', 'i agree',
+                    'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
+                ];
+                const buttons = document.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
+                for (const btn of buttons) {
+                    const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
+                    if (acceptTexts.some(t => text.includes(t))) {
+                        // Check if visible
+                        const style = window.getComputedStyle(btn);
+                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                            btn.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }""")
+            return bool(clicked)
+        except Exception:
+            return False
 
     def _failure_result(
         self,
