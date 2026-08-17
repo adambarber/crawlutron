@@ -405,7 +405,7 @@ class TestEngineGaps(unittest.TestCase):
             headers = {"retry-after": "30", "content-type": "text/plain"}
             body = b"rate limited"
 
-        def fetcher(url, headers, timeout):
+        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             return _Resp()
 
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)

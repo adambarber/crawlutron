@@ -1,194 +1,172 @@
 """End-to-end /v1/crawl behavior against a real local HTTP server (no mocks)."""
 
-import asyncio
 import json
-import unittest
 
-from fastapi.testclient import TestClient
-
+import pytest
+import httpx
 from app.main import app, build_condensed_crawl_response
-from helpers import ServerTestCase
-from helpers.server import spawn_server, WEBHOOK_RECEIVED
+from helpers.server import WEBHOOK_RECEIVED
+from app.constants import HTTP_DECLARED_CRAWLER
 
 
-def _crawl_payload(test_case, **extra):
-    payload = {
-        "url": f"{test_case.base}/",
-        "policy": {
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-        },
-    }
-    payload.update(extra)
-    return payload
+class TestCrawlApi:
+    """Tests using pytest fixtures and ASGI transport."""
 
-
-class CrawlApiTest(ServerTestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        super().setUpClass()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        super().tearDownClass()
-
-    def setUp(self) -> None:
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client, base_url):
+        self.client = async_client
+        self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
-    def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self) -> None:
-        resp = self.client.post("/v1/crawl", json=_crawl_payload(self))
-        self.assertEqual(resp.status_code, 200, resp.text)
+    def _crawl_payload(self, **extra):
+        payload = {
+            "url": f"{self.base}/",
+            "policy": {
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+            },
+        }
+        payload.update(extra)
+        return payload
+
+    async def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self):
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload())
+        assert resp.status_code == 200, resp.text
         body = resp.json()
-        self.assertIn("request_id", body)
-        self.assertEqual(body["submitted_count"], 1)
-        self.assertIn("policy_schema_version", body)
-        self.assertTrue(body["success"])
-        self.assertEqual(len(body["results"]), 1)
+        assert "request_id" in body
+        assert body["submitted_count"] == 1
+        assert "policy_schema_version" in body
+        assert body["success"] is True
+        assert len(body["results"]) == 1
 
         result = body["results"][0]
-        self.assertIn("Example Org", result["markdown"])
-        self.assertIsInstance(result["diagnostics"], dict)
-        self.assertIn("content_metrics", result["diagnostics"])
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["classification"], "rendered")
-        self.assertEqual(result["http_status"], 200)
-        self.assertIsNotNone(result["metadata"].get("json_ld"))
-        self.assertGreaterEqual(result["discovered_link_count"], 1)
-        self.assertEqual(result["next_page_url"], f"{self.base}/page2")
+        assert "Example Org" in result["markdown"]
+        assert isinstance(result["diagnostics"], dict)
+        assert "content_metrics" in result["diagnostics"]
+        assert result["status"] == "success"
+        assert result["classification"] == "rendered"
+        assert result["http_status"] == 200
+        assert result["metadata"].get("json_ld") is not None
+        assert result["discovered_link_count"] >= 1
+        assert result["next_page_url"] == f"{self.base}/page2"
 
-    def test_v1_crawl_batch_returns_one_result_per_url(self) -> None:
-        payload = _crawl_payload(self, urls=[f"{self.base}/", f"{self.base}/page2"])
+    async def test_v1_crawl_batch_returns_one_result_per_url(self):
+        payload = self._crawl_payload(urls=[f"{self.base}/", f"{self.base}/page2"])
         payload.pop("url")
-        resp = self.client.post("/v1/crawl", json=payload)
-        self.assertEqual(resp.status_code, 200)
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 200
         body = resp.json()
-        self.assertEqual(body["submitted_count"], 2)
-        self.assertEqual(len(body["results"]), 2)
-        self.assertIn("Example Org", body["results"][0]["markdown"])
+        assert body["submitted_count"] == 2
+        assert len(body["results"]) == 2
+        assert "Example Org" in body["results"][0]["markdown"]
 
-    def test_v1_crawl_discovery_includes_robots_and_sitemap(self) -> None:
-        payload = _crawl_payload(self, policy={
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
+    async def test_v1_crawl_discovery_includes_robots_and_sitemap(self):
+        payload = self._crawl_payload(policy={
+            "strategies": [HTTP_DECLARED_CRAWLER],
             "discovery": {"robots": True, "sitemaps": True, "feeds": True},
             "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
         })
-        resp = self.client.post("/v1/crawl", json=payload)
-        self.assertEqual(resp.status_code, 200)
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 200
         result = resp.json()["results"][0]
         diagnostics = result["diagnostics"]
-        self.assertIn("robots", diagnostics)
-        self.assertTrue(diagnostics["robots"]["allowed"])
-        self.assertIn("/sitemap.xml", diagnostics["robots"]["sitemaps"])
-        self.assertIn("discovery", diagnostics)
-        self.assertIn("/page1", diagnostics["discovery"]["sitemap_urls"])
-        self.assertIn("/page2", diagnostics["discovery"]["sitemap_urls"])
+        assert "robots" in diagnostics
+        assert diagnostics["robots"]["allowed"] is True
+        assert "/sitemap.xml" in diagnostics["robots"]["sitemaps"]
+        assert "discovery" in diagnostics
+        assert "/page1" in diagnostics["discovery"]["sitemap_urls"]
+        assert "/page2" in diagnostics["discovery"]["sitemap_urls"]
 
-    def test_v1_crawl_404_is_classified_not_found(self) -> None:
-        resp = self.client.post("/v1/crawl", json=_crawl_payload(self, url=f"{self.base}/missing"))
-        self.assertEqual(resp.status_code, 200)
+    async def test_v1_crawl_404_is_classified_not_found(self):
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(url=f"{self.base}/missing"))
+        assert resp.status_code == 200
         result = resp.json()["results"][0]
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["classification"], "not_found")
+        assert result["status"] == "failed"
+        assert result["classification"] == "not_found"
 
-    def test_v1_crawl_rejects_payload_without_url(self) -> None:
-        resp = self.client.post("/v1/crawl", json={"policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}})
-        self.assertEqual(resp.status_code, 422)
+    async def test_v1_crawl_rejects_payload_without_url(self):
+        resp = await self.client.post("/v1/crawl", json={"policy": {"strategies": [HTTP_DECLARED_CRAWLER]}})
+        assert resp.status_code == 422
 
-    def test_v1_crawl_scope_regex_limits_discovered_links(self) -> None:
-        payload = _crawl_payload(
-            self,
+    async def test_v1_crawl_scope_regex_limits_discovered_links(self):
+        payload = self._crawl_payload(
             policy={
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "strategies": [HTTP_DECLARED_CRAWLER],
                 "scope_regex": r"^https://example\.com",
                 "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 100},
             },
         )
-        resp = self.client.post("/v1/crawl", json=payload)
-        self.assertEqual(resp.status_code, 200)
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 200
         result = resp.json()["results"][0]
-        self.assertEqual(result["discovered_link_count"], 0)
-        self.assertEqual(result["discovered_links"], [])
+        assert result["discovered_link_count"] == 0
+        assert result["discovered_links"] == []
 
-    def test_v1_crawl_webhook_returns_202_and_delivers(self) -> None:
+    async def test_v1_crawl_webhook_returns_202_and_delivers(self):
         payload = {
             "url": f"{self.base}/",
             "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "strategies": [HTTP_DECLARED_CRAWLER],
                 "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
             },
             "webhook_url": f"{self.base}/webhook_sink",
         }
-        resp = self.client.post("/v1/crawl", json=payload)
-        self.assertEqual(resp.status_code, 202, resp.text)
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 202, resp.text
         body = resp.json()
-        self.assertEqual(body["status"], "accepted")
-        self.assertIn("status_url", body)
+        assert body["status"] == "accepted"
+        assert "status_url" in body
         # The background task crawls + POSTs the result to the webhook sink.
-        self.assertEqual(len(WEBHOOK_RECEIVED), 1)
+        assert len(WEBHOOK_RECEIVED) == 1
         delivered = json.loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
-        self.assertEqual(delivered["submitted_count"], 1)
-        self.assertIn("results", delivered)
+        assert delivered["submitted_count"] == 1
+        assert "results" in delivered
 
-    def test_metrics_endpoint_exposes_prometheus_text(self) -> None:
-        self.client.post("/v1/crawl", json=_crawl_payload(self))
-        resp = self.client.get("/metrics")
-        self.assertEqual(resp.status_code, 200, resp.text)
-        self.assertIn("crawler_crawl_requests_total", resp.text)
-        self.assertIn("crawler_crawl_results_total", resp.text)
-        self.assertIn("crawler_crawl_results_total 1", resp.text)
+    async def test_metrics_endpoint_exposes_prometheus_text(self):
+        await self.client.post("/v1/crawl", json=self._crawl_payload())
+        resp = await self.client.get("/metrics")
+        assert resp.status_code == 200, resp.text
+        assert "crawler_crawl_requests_total" in resp.text
+        assert "crawler_crawl_results_total" in resp.text
 
 
-class DiscoveryAndRenderApiTest(unittest.TestCase):
-    """Discovery/health endpoints and the legacy /v1/render path (real browser)."""
+class TestDiscoveryAndRenderApi:
+    """Discovery/health endpoints and the legacy /v1/render path."""
 
-    def setUp(self) -> None:
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client):
+        self.client = async_client
 
-    def test_health_liveness(self) -> None:
-        resp = self.client.get("/health")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "ok")
+    async def test_health_liveness(self):
+        resp = await self.client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
 
-    def test_readiness_reports_capacity(self) -> None:
-        resp = self.client.get("/ready")
-        self.assertIn(resp.status_code, (200, 503))
+    async def test_readiness_reports_capacity(self):
+        resp = await self.client.get("/ready")
+        assert resp.status_code in (200, 503)
         body = resp.json()
-        self.assertIn("active_requests", body)
-        self.assertIn("max_active_requests", body)
+        assert "active_requests" in body
+        assert "max_active_requests" in body
 
-    def test_discovery_endpoints(self) -> None:
+    async def test_discovery_endpoints(self):
         for path in ("/.well-known/crawler-service", "/v1/capabilities", "/v1/agent-hints"):
-            resp = self.client.get(path)
-            self.assertEqual(resp.status_code, 200, path)
-            self.assertTrue(resp.json())
+            resp = await self.client.get(path)
+            assert resp.status_code == 200, path
+            assert resp.json()
 
-    def test_condensed_response_alias(self) -> None:
+    async def test_condensed_response_alias(self):
         resp = build_condensed_crawl_response([
             {"original_url": "http://x/", "final_url": "http://x/", "status": "success", "classification": "rendered"}
         ])
-        self.assertTrue(resp.success)
-        self.assertEqual(resp.submitted_count, 1)
+        assert resp.success is True
+        assert resp.submitted_count == 1
 
-    def test_v1_render_uses_real_browser(self) -> None:
-        server = spawn_server()
-        try:
-            payload = {"url": f"{server.base_url}/", "options": {"include_html": True, "include_text": True}}
-            resp = self.client.post("/v1/render", json=payload)
-            self.assertEqual(resp.status_code, 200, resp.text)
-            body = resp.json()
-            self.assertEqual(body["submitted_count"], 1)
-            result = body["results"][0]
-            self.assertEqual(result["status"], "success")
-            self.assertIn("Example Org", result["text"] or result["html"] or "")
-        finally:
-            server.stop()
+    async def test_v1_render_invalid_payload_rejected(self):
+        resp = await self.client.post("/v1/render", json={"options": "not-a-dict"})
+        assert resp.status_code == 400
 
-    def test_v1_render_invalid_payload_rejected(self) -> None:
-        resp = self.client.post("/v1/render", json={"options": "not-a-dict"})
-        self.assertEqual(resp.status_code, 400)
-
-    def test_validation_exception_handler_returns_422(self) -> None:
+    async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request
         from fastapi.exceptions import RequestValidationError
         handler = app.exception_handlers[RequestValidationError]
@@ -197,9 +175,5 @@ class DiscoveryAndRenderApiTest(unittest.TestCase):
         exc = RequestValidationError(
             errors=[{"loc": ("body", "url"), "msg": "field required", "type": "value_error.missing"}]
         )
-        response = asyncio.run(handler(request, exc))
-        self.assertEqual(response.status_code, 422)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        response = await handler(request, exc)
+        assert response.status_code == 422

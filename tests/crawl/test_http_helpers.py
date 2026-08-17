@@ -54,13 +54,13 @@ def make_fetch(status=200, body=b"<html><body>hello</body></html>", ctype="text/
     return HttpFetchResult(url=url, final_url=final_url, status_code=status,
                            headers={"content-type": ctype}, body=body, elapsed_ms=1)
 
-def ok_fetcher(url, headers, timeout):
+def ok_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
     return make_fetch(url=url)
 
-def raise_fetcher(url, headers, timeout):
+def raise_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
     raise ConnectionError("network down")
 
-def discovery_fetcher(url, headers, timeout):
+def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
     if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
         raise ConnectionError("discovery failed")
     return make_fetch()
@@ -130,9 +130,9 @@ class TestHeaderHelpers:
         assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, "http://host/") == ""
 
 class TestFetchRetries:
-    def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
+    async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         try:
-            asyncio.run(_fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0))
+            await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
             assert False, "expected re-raise"
         except ConnectionError:
             pass
@@ -187,64 +187,64 @@ class TestPureParsing:
         assert len(collector.frames) == 1
 
 class TestHttpStrategyResult:
-    def _run(self, status=200, strategy=HTTP_DECLARED_CRAWLER, fetcher=None,
+    async def _run(self, status=200, strategy=HTTP_DECLARED_CRAWLER, fetcher=None,
              ctype="text/html; charset=utf-8", body=b"<html><body>hello</body></html>",
              final_url="http://example.com/", policy=None):
         if fetcher is None:
-            def fetcher(url, headers, timeout):  # noqa: F811
+            def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):  # noqa: F811
                 return make_fetch(status=status, ctype=ctype, body=body, final_url=final_url, url=url)
         pol = dict(BASE_POLICY)
         if policy:
             pol.update(policy)
-        return asyncio.run(_http_strategy_result(
+        return await _http_strategy_result(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             strategy=strategy,
             policy=pol,
             http_fetcher=fetcher,
-        ))
+        )
 
-    def test_success_html(self) -> None:
-        assert self._run().status == "success"
+    async def test_success_html(self) -> None:
+        assert (await self._run()).status == "success"
 
-    def test_status_classification_overrides(self) -> None:
+    async def test_status_classification_overrides(self) -> None:
         for status, classification in [(403, "access_denied"), (404, "not_found"),
                                        (410, "gone"), (429, "rate_limited"), (500, "site_error")]:
-            assert self._run(status=status).classification == classification, status
+            assert (await self._run(status=status)).classification == classification, status
 
-    def test_network_error_handler(self) -> None:
-        result = self._run(fetcher=raise_fetcher)
+    async def test_network_error_handler(self) -> None:
+        result = await self._run(fetcher=raise_fetcher)
         assert result.status == "failed"
         assert result.classification == "network_error"
 
-    def test_binary_body_short_circuits(self) -> None:
-        result = self._run(
+    async def test_binary_body_short_circuits(self) -> None:
+        result = await self._run(
             ctype="application/octet-stream",
             body=b"PK\x03\x04data",
             final_url="http://example.com/a.zip",
         )
         assert result.classification == EXTRACTION_METHOD_BINARY_NO_TEXT
 
-    def test_document_extract_strategy(self) -> None:
-        result = self._run(
+    async def test_document_extract_strategy(self) -> None:
+        result = await self._run(
             policy={"extraction": EXTRACTION_DOCUMENT},
             ctype="text/csv",
             body=b"name,age\nAlice,30\nBob,25",
         )
         assert "Alice" in (result.text or "")
 
-    def test_trafilatura_extract_html_and_non_html(self) -> None:
-        assert "hello" in (self._run(policy={"extraction": EXTRACTION_TRAFILATURA}).text or "")
-        non_html = self._run(policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}")
+    async def test_trafilatura_extract_html_and_non_html(self) -> None:
+        assert "hello" in ((await self._run(policy={"extraction": EXTRACTION_TRAFILATURA})).text or "")
+        non_html = await self._run(policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}")
         assert non_html.text == ""
 
-    def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
-        def feed_fetcher(url, headers, timeout):
+    async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
+        def feed_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
                 raise ConnectionError("discovery failed")
             return make_fetch(body=b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>')
 
-        result = self._run(
+        result = await self._run(
             fetcher=feed_fetcher,
             policy={"discovery": {"robots": True, "sitemaps": True, "feeds": True}},
         )
@@ -264,40 +264,40 @@ class TestExecuteCrawlChain:
             **kwargs,
         )
 
-    def test_http_strategy_runs(self) -> None:
-        assert asyncio.run(self._run_chain(HTTP_DECLARED_CRAWLER)).status == "success"
+    async def test_http_strategy_runs(self) -> None:
+        assert (await self._run_chain(HTTP_DECLARED_CRAWLER)).status == "success"
 
-    def test_browser_strategy_without_worker(self) -> None:
-        assert asyncio.run(self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
+    async def test_browser_strategy_without_worker(self) -> None:
+        assert (await self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
 
-    def test_unsupported_strategy(self) -> None:
-        assert asyncio.run(self._run_chain("NOT_A_STRATEGY")).classification == "unknown_error"
+    async def test_unsupported_strategy(self) -> None:
+        assert (await self._run_chain("NOT_A_STRATEGY")).classification == "unknown_error"
 
 class TestCrawlRequest:
-    def test_batch_size_exceeded(self) -> None:
+    async def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
         payload = {"urls": ["http://example.com/"] * (settings.max_batch_size + 1),
                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         try:
-            asyncio.run(crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
- browser_worker=None))
+            await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
+ browser_worker=None)
             assert False, "expected ValueError"
         except ValueError as exc:
             assert str(exc) == "batch_size_exceeded"
 
-    def test_invalid_url_raises(self) -> None:
+    async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         try:
-            asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
- browser_worker=None))
+            await crawl_request(payload, http_fetcher=ok_fetcher,
+ browser_worker=None)
             assert False, "expected ValueError"
         except ValueError as exc:
             assert str(exc).startswith("invalid_url")
 
-    def test_success_with_injected_fetcher(self) -> None:
+    async def test_success_with_injected_fetcher(self) -> None:
         payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
-        result = asyncio.run(crawl_request(payload, http_fetcher=ok_fetcher,
- browser_worker=None))
+        result = await crawl_request(payload, http_fetcher=ok_fetcher,
+ browser_worker=None)
         assert result["submitted_count"] == 1
         assert result["results"][0]["status"] == "success"
 
@@ -347,8 +347,8 @@ class TestServiceEdgeCases:
         # PK magic with a non-.zip URL still classifies as binary.
         assert _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/file") is True
 
-    def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
-        def fetcher(url, headers, timeout):
+    async def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
+        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             if url.endswith("/robots.txt"):
                 return make_fetch(body=b"User-agent: *\nCrawl-delay: notanumber\n")
             if "sitemap" in url:
@@ -357,8 +357,8 @@ class TestServiceEdgeCases:
                 body=b'<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>hi</body></html>'
             )
 
-        result = TestHttpStrategyResult()._run(
-            fetcher=fetcher, policy={"discovery": {"robots": True, "sitemaps": True, "feeds": True}}
+        result = await TestHttpStrategyResult()._run(
+            fetcher=fetcher, policy={"limits": {"timeout_seconds": 5, "max_retries": 0}, "discovery": {"robots": True, "sitemaps": True, "feeds": True}}
         )
         assert result.status == "success"
         assert "robots" in result.diagnostics
@@ -367,21 +367,21 @@ class TestServiceEdgeCases:
         assert result.diagnostics["discovery"]["feeds"]
 
 class TestCallWorkerContract:
-    def test_awaits_coroutine_worker_directly(self) -> None:
+    async def test_awaits_coroutine_worker_directly(self) -> None:
         class _Job:
             pass
 
         async def coro_worker(job):
             return "coro-result"
 
-        assert asyncio.run(_call_worker(coro_worker, _Job())) == "coro-result"
+        assert await _call_worker(coro_worker, _Job()) == "coro-result"
 
-    def test_runs_sync_worker_in_thread(self) -> None:
+    async def test_runs_sync_worker_in_thread(self) -> None:
         class _Job:
             pass
 
         def sync_worker(job):
             return "sync-result"
 
-        assert asyncio.run(_call_worker(sync_worker, _Job())) == "sync-result"
+        assert await _call_worker(sync_worker, _Job()) == "sync-result"
 

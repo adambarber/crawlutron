@@ -1,81 +1,73 @@
 """Real headless-browser behavior via Camoufox (no mocks)."""
 
-import asyncio
 import base64
-import unittest
 
+import pytest
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
-from helpers import ServerTestCase
-from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
+from app.constants import BROWSER_HEADLESS
 
 
-class BrowserRendererTest(ServerTestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        super().setUpClass()
-        cls.renderer = BrowserRenderer()
+class TestBrowserRenderer:
+    @pytest.fixture(autouse=True)
+    async def setup_renderer(self):
+        self.renderer = BrowserRenderer()
+        # Reuse a single browser instance across all tests
+        yield
+        await self.renderer.close()
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.renderer.close()
-        super().tearDownClass()
-
-    def _render(self, path: str, **options) -> object:
-        url = f"{self.base}{path}"
+    async def _render(self, path: str, base_url: str, **options) -> object:
+        url = f"{base_url}{path}"
         opts = RenderOptions(browser_profile=options.pop("browser_profile", {}), **options)
-        return asyncio.run(self.renderer.render(url, opts))
+        return await self.renderer.render(url, opts)
 
-    def test_browser_renders_html_content(self) -> None:
-        result = self._render("/")
-        self.assertEqual(result.status, "success")
-        self.assertEqual(result.classification, "rendered")
-        self.assertIn("Example Org", result.text or "")
-        self.assertIn("Example Org", result.html or "")
+    async def test_browser_renders_html_content(self, base_url):
+        result = await self._render("/", base_url)
+        assert result.status == "success"
+        assert result.classification == "rendered"
+        assert "Example Org" in (result.text or "")
+        assert "Example Org" in (result.html or "")
 
-    def test_browser_captures_xhr_and_fetch_endpoints(self) -> None:
-        result = self._render("/dynamic")
+    async def test_browser_captures_xhr_and_fetch_endpoints(self, base_url):
+        result = await self._render("/dynamic", base_url)
         intercepted = result.metadata.get("intercepted_xhr") or []
         urls = [entry["url"] for entry in intercepted]
-        self.assertTrue(any(url.endswith("/api/data") for url in urls), intercepted)
+        assert any(url.endswith("/api/data") for url in urls), intercepted
         # The page appends the fetched JSON to the DOM, so the data appears in text.
-        self.assertIn('"items"', result.text or "")
+        assert '"items"' in (result.text or "")
 
-    def test_browser_lazy_scroll_triggers_deferred_content(self) -> None:
-        result = self._render("/lazy")
+    async def test_browser_lazy_scroll_triggers_deferred_content(self, base_url):
+        result = await self._render("/lazy", base_url)
         # The lazy div is only revealed after scrolling to the bottom.
-        self.assertIn("Lazy Content Revealed", result.html or "")
+        assert "Lazy Content Revealed" in (result.html or "")
 
-    def test_browser_captures_screenshot_as_base64(self) -> None:
-        result = self._render("/", browser_profile={"include_screenshot": True})
+    async def test_browser_captures_screenshot_as_base64(self, base_url):
+        result = await self._render("/", base_url, browser_profile={"include_screenshot": True})
         screenshot = result.metadata.get("screenshot")
-        self.assertIsInstance(screenshot, str)
-        self.assertTrue(len(screenshot) > 0)
+        assert isinstance(screenshot, str)
+        assert len(screenshot) > 0
         decoded = base64.b64decode(screenshot)
-        self.assertTrue(decoded.startswith(b"\x89PNG") or len(decoded) > 0)
+        assert decoded.startswith(b"\x89PNG") or len(decoded) > 0
 
-    def test_browser_classifies_access_denied_page(self) -> None:
-        result = self._render("/blocked")
-        self.assertEqual(result.classification, "access_denied")
-        self.assertEqual(result.status, "blocked")
+    async def test_browser_classifies_access_denied_page(self, base_url):
+        result = await self._render("/blocked", base_url)
+        assert result.classification == "access_denied"
+        assert result.status == "blocked"
 
-    def test_crawl_request_uses_browser_strategy(self) -> None:
-        payload = self.make_payload(
-            strategies=[BROWSER_HEADLESS],
-            limits={"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
+    async def test_crawl_request_uses_browser_strategy(self, base_url):
+        payload = {
+            "url": f"{base_url}/",
+            "policy": {
+                "strategies": [BROWSER_HEADLESS],
+                "limits": {"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
+            },
+        }
+        response = await crawl_request(
+            payload,
+            browser_worker=lambda job: self.renderer.render(job.url, job.options),
+            cache=HttpCache(),
         )
-        response = asyncio.run(
-            crawl_request(
-                payload,
-                browser_worker=lambda job: self.renderer.render(job.url, job.options),
-                cache=HttpCache(),
-            )
-        )
-        self.assertEqual(response["submitted_count"], 1)
-        self.assertIn("Example Org", response["results"][0]["markdown"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert response["submitted_count"] == 1
+        assert "Example Org" in response["results"][0]["markdown"]

@@ -1,55 +1,48 @@
 """Tests for browser.py module."""
 
-import unittest
 from app.browser import (
     BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     BrowserRenderer,
 )
 
-class BrowserRendererStatusTest(unittest.TestCase):
-    def test_status_for_classification_rendered(self) -> None:
+class TestBrowserRendererStatus:
+    def test_status_for_classification_rendered(self):
         renderer = BrowserRenderer()
-        self.assertEqual(renderer._status_for_classification("rendered"), "success")
+        assert renderer._status_for_classification("rendered") == "success"
 
-    def test_status_for_classification_blocked(self) -> None:
+    def test_status_for_classification_blocked(self):
         renderer = BrowserRenderer()
         for classification in BLOCKED_CLASSIFICATIONS:
-            with self.subTest(classification=classification):
-                self.assertEqual(renderer._status_for_classification(classification), "blocked")
+            assert renderer._status_for_classification(classification) == "blocked"
 
-    def test_status_for_classification_failed(self) -> None:
+    def test_status_for_classification_failed(self):
         renderer = BrowserRenderer()
         for classification in FAILED_CLASSIFICATIONS:
-            with self.subTest(classification=classification):
-                self.assertEqual(renderer._status_for_classification(classification), "failed")
+            assert renderer._status_for_classification(classification) == "failed"
 
-    def test_status_for_classification_unknown_defaults_to_blocked(self) -> None:
+    def test_status_for_classification_unknown_defaults_to_blocked(self):
         renderer = BrowserRenderer()
-        self.assertEqual(renderer._status_for_classification("unknown_classification"), "blocked")
+        assert renderer._status_for_classification("unknown_classification") == "blocked"
 
-    def test_looks_like_pdf(self) -> None:
+    def test_looks_like_pdf(self):
         renderer = BrowserRenderer()
-        self.assertTrue(renderer._looks_like_pdf("https://example.com/document.pdf"))
-        self.assertTrue(renderer._looks_like_pdf("https://example.com/document.PDF"))
-        self.assertTrue(renderer._looks_like_pdf("https://example.com/path/file.pdf?query=1"))
-        self.assertFalse(renderer._looks_like_pdf("https://example.com/document.html"))
-        self.assertFalse(renderer._looks_like_pdf("https://example.com/"))
+        assert renderer._looks_like_pdf("https://example.com/document.pdf")
+        assert renderer._looks_like_pdf("https://example.com/document.PDF")
+        assert renderer._looks_like_pdf("https://example.com/path/file.pdf?query=1")
+        assert not renderer._looks_like_pdf("https://example.com/document.html")
+        assert not renderer._looks_like_pdf("https://example.com/")
 
-    def test_headless_enabled_default(self) -> None:
+    def test_headless_enabled_default(self):
         renderer = BrowserRenderer()
-        self.assertTrue(renderer._headless_enabled())
+        assert renderer._headless_enabled() is True
 
-    def test_headless_enabled_false_values(self) -> None:
+    def test_headless_enabled_false_values(self):
         import os
         for val in ["0", "false", "no", "off", "FALSE"]:
-            with self.subTest(val=val):
-                os.environ["BROWSER_CRAWLER_HEADLESS"] = val
-                try:
-                    renderer = BrowserRenderer()
-                    self.assertFalse(renderer._headless_enabled())
-                finally:
-                    del os.environ["BROWSER_CRAWLER_HEADLESS"]
-
-if __name__ == "__main__":
-    unittest.main()
+            os.environ["BROWSER_CRAWLER_HEADLESS"] = val
+            try:
+                renderer = BrowserRenderer()
+                assert renderer._headless_enabled() is False
+            finally:
+                del os.environ["BROWSER_CRAWLER_HEADLESS"]

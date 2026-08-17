@@ -4,9 +4,7 @@ Uses a hand-rolled fake Playwright-compatible page (no real browser, no
 unittest.mock) so the orchestration logic is exercised deterministically.
 """
 
-import asyncio
 import base64
-import unittest
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
@@ -111,8 +109,8 @@ class FakeBrowserCM:
         return False
 
 
-class ActionChainTest(unittest.TestCase):
-    def test_action_chain_dispatches_correctly(self):
+class TestActionChain:
+    async def test_action_chain_dispatches_correctly(self):
         page = FakePage()
         renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
         actions = [
@@ -125,15 +123,15 @@ class ActionChainTest(unittest.TestCase):
             {"type": "wait_seconds", "seconds": 0.0},
             {"type": "execute_js", "script": "window.x=1"},
         ]
-        asyncio.run(renderer._run_action_chain(page, actions))
+        await renderer._run_action_chain(page, actions)
         called = {(c[0], c[1]) for c in page.calls}
-        self.assertIn(("click", "#go"), called)
-        self.assertIn(("fill", "#q", "hello"), page.calls)
-        self.assertIn(("hover", "#menu"), called)
-        self.assertIn(("wait_for_selector", "#loaded", 3000), page.calls)
-        self.assertTrue(page.elements["#bottom"].scrolled)
+        assert ("click", "#go") in called
+        assert ("fill", "#q", "hello") in page.calls
+        assert ("hover", "#menu") in called
+        assert ("wait_for_selector", "#loaded", 3000) in page.calls
+        assert page.elements["#bottom"].scrolled
 
-    def test_action_chain_is_best_effort(self):
+    async def test_action_chain_is_best_effort(self):
         page = FakePage()
 
         async def boom(selector=None):
@@ -141,55 +139,48 @@ class ActionChainTest(unittest.TestCase):
 
         page.click = boom
         renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
-        # Should not raise despite the failing action.
-        asyncio.run(renderer._run_action_chain(page, [{"type": "click", "selector": "#x"}]))
+        await renderer._run_action_chain(page, [{"type": "click", "selector": "#x"}])
 
 
-class ElementScreenshotTest(unittest.TestCase):
-    def test_capture_element_screenshots(self):
+class TestElementScreenshot:
+    async def test_capture_element_screenshots(self):
         page = FakePage()
         renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
-        shots = asyncio.run(renderer._capture_element_screenshots(page, ["#a", "#missing"]))
+        shots = await renderer._capture_element_screenshots(page, ["#a", "#missing"])
         selectors = {s["selector"] for s in shots}
-        self.assertIn("#a", selectors)
-        self.assertNotIn("#missing", selectors)
+        assert "#a" in selectors
+        assert "#missing" not in selectors
         for s in shots:
             decoded = base64.b64decode(s["screenshot"])
-            self.assertEqual(decoded, b"elementpng")
+            assert decoded == b"elementpng"
 
 
-class BrowserReuseTest(unittest.TestCase):
-    def test_single_browser_reused_across_renders(self):
+class TestBrowserReuse:
+    async def test_single_browser_reused_across_renders(self):
         browser = FakeBrowser()
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
         opts = RenderOptions(browser_profile={})
-        # Two renders should reuse the SAME browser instance.
-        asyncio.run(renderer.render("http://example.com/", opts))
-        self.assertFalse(renderer._browser_reused)
-        asyncio.run(renderer.render("http://example.com/page", opts))
-        self.assertTrue(renderer._browser_reused)
-        # The browser context manager is entered only once.
-        self.assertEqual(cm.enters, 1)
-        self.assertEqual(browser.pages, 2)
+        await renderer.render("http://example.com/", opts)
+        assert not renderer._browser_reused
+        await renderer.render("http://example.com/page", opts)
+        assert renderer._browser_reused
+        assert cm.enters == 1
+        assert browser.pages == 2
 
-    def test_close_releases_browser(self):
+    async def test_close_releases_browser(self):
         browser = FakeBrowser()
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        asyncio.run(renderer.render("http://example.com/", RenderOptions(browser_profile={})))
-        asyncio.run(renderer.close())
-        self.assertIsNone(renderer._browser)
-        self.assertIsNone(renderer._browser_cm)
+        await renderer.render("http://example.com/", RenderOptions(browser_profile={}))
+        await renderer.close()
+        assert renderer._browser is None
+        assert renderer._browser_cm is None
 
-    def test_render_still_succeeds_with_fake_browser(self):
+    async def test_render_still_succeeds_with_fake_browser(self):
         browser = FakeBrowser()
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        result = asyncio.run(renderer.render("http://example.com/", RenderOptions(browser_profile={})))
-        self.assertEqual(result.status, "success")
-        self.assertIn("Visible body text", result.text or "")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        result = await renderer.render("http://example.com/", RenderOptions(browser_profile={}))
+        assert result.status == "success"
+        assert "Visible body text" in (result.text or "")

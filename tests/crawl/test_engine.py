@@ -1,14 +1,12 @@
 """Engine orchestration behavior: scope filtering, conditional caching, fallback (no mocks)."""
 
-import asyncio
 import urllib.error
-import unittest
 
+import pytest
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _filter_links_by_scope, crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import CrawlStrategyAttempt, DiscoveredLink, UniversalCrawlResult
-from helpers import ServerTestCase
 from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
 
 
@@ -33,79 +31,91 @@ def make_result(links):
     )
 
 
-class ScopeFilterTest(unittest.TestCase):
-    def test_scope_regex_filters_discovered_links(self) -> None:
+class TestScopeFilter:
+    def test_scope_regex_filters_discovered_links(self):
         links = [
             DiscoveredLink(url="https://example.com/x", normalized_url="https://example.com/x", text="x", rel=[], source_url="https://example.com/", host="example.com", is_same_host=True),
             DiscoveredLink(url="https://other.com/y", normalized_url="https://other.com/y", text="y", rel=[], source_url="https://example.com/", host="other.com", is_same_host=False),
         ]
         filtered = _filter_links_by_scope(make_result(links), r"^https://example\.com")
-        self.assertEqual(len(filtered.discovered_links), 1)
-        self.assertEqual(filtered.discovered_links[0].url, "https://example.com/x")
+        assert len(filtered.discovered_links) == 1
+        assert filtered.discovered_links[0].url == "https://example.com/x"
 
-    def test_none_scope_keeps_all(self) -> None:
+    def test_none_scope_keeps_all(self):
         links = [DiscoveredLink(url="https://a.com/x", normalized_url="https://a.com/x", text="x", rel=[], source_url="https://a.com/", host="a.com", is_same_host=True)]
-        self.assertEqual(_filter_links_by_scope(make_result(links), None).discovered_link_count, 1)
+        assert _filter_links_by_scope(make_result(links), None).discovered_link_count == 1
 
-    def test_invalid_scope_regex_keeps_all(self) -> None:
+    def test_invalid_scope_regex_keeps_all(self):
         links = [DiscoveredLink(url="https://a.com/x", normalized_url="https://a.com/x", text="x", rel=[], source_url="https://a.com/", host="a.com", is_same_host=True)]
-        self.assertEqual(_filter_links_by_scope(make_result(links), r"([invalid").discovered_link_count, 1)
+        assert _filter_links_by_scope(make_result(links), r"([invalid").discovered_link_count == 1
 
 
-class EngineCrawlRequestTest(ServerTestCase):
-    def test_crawl_request_http_success(self) -> None:
-        payload = self.make_payload(
-            strategies=[HTTP_DECLARED_CRAWLER],
-            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-        )
-        response = self.run_crawl(payload)
-        self.assertIn("Example Org", response["results"][0]["markdown"])
+class TestEngineCrawlRequest:
+    async def test_crawl_request_http_success(self, base_url):
+        from helpers import run_crawl_async
+        payload = {
+            "url": f"{base_url}/",
+            "policy": {
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+            },
+        }
+        response = await run_crawl_async(payload)
+        assert "Example Org" in response["results"][0]["markdown"]
 
-    def test_crawl_request_conditional_cache_304(self) -> None:
-        url = f"{self.base}/with_etag"
+    async def test_crawl_request_conditional_cache_304(self, base_url):
+        from helpers import run_crawl_async
+        url = f"{base_url}/with_etag"
         cache = HttpCache(":memory:")
         cache.store(url, {"etag": "v1"})
-        payload = self.make_payload(
-            url=url,
-            strategies=[HTTP_DECLARED_CRAWLER],
-            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-        )
-        response = self.run_crawl(payload, cache=cache)
+        payload = {
+            "url": url,
+            "policy": {
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+            },
+        }
+        response = await run_crawl_async(payload, cache=cache)
         result = response["results"][0]
-        self.assertEqual(result["classification"], "not_modified")
-        self.assertEqual(result["http_status"], 304)
+        assert result["classification"] == "not_modified"
+        assert result["http_status"] == 304
 
-    def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self) -> None:
-        payload = self.make_payload(
-            strategies=[BROWSER_HEADLESS],
-            limits={"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-        )
-        response = self.run_crawl(payload)
+    async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
+        from helpers import run_crawl_async
+        payload = {
+            "url": f"{base_url}/",
+            "policy": {
+                "strategies": [BROWSER_HEADLESS],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+            },
+        }
+        response = await run_crawl_async(payload)
         result = response["results"][0]
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["classification"], "browser_crash")
+        assert result["status"] == "failed"
+        assert result["classification"] == "browser_crash"
 
-    def test_crawl_request_http_failure_falls_back_to_browser(self) -> None:
-        def failing_fetcher(target_url, headers, timeout):
+    async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
+        from helpers import run_crawl_async
+
+        def failing_fetcher(target_url, headers, timeout, max_content_length=50 * 1024 * 1024):
             raise urllib.error.URLError("connection refused")
 
         renderer = BrowserRenderer()
 
-        def browser_worker(job):
-            return renderer.render(job.url, job.options)
+        async def browser_worker(job):
+            return await renderer.render(job.url, job.options)
 
-        payload = self.make_payload(
-            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-            limits={"timeout_seconds": 20, "max_retries": 0, "max_discovered_links": 50},
-        )
-        response = asyncio.run(
-            crawl_request(payload, browser_worker=browser_worker, http_fetcher=failing_fetcher, cache=HttpCache())
+        payload = {
+            "url": f"{base_url}/",
+            "policy": {
+                "strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+                "limits": {"timeout_seconds": 20, "max_retries": 0, "max_discovered_links": 50},
+            },
+        }
+        response = await crawl_request(
+            payload, browser_worker=browser_worker, http_fetcher=failing_fetcher, cache=HttpCache()
         )
         result = response["results"][0]
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["classification"], "rendered")
-        self.assertIn("Example Org", result["markdown"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert result["status"] == "success"
+        assert result["classification"] == "rendered"
+        assert "Example Org" in result["markdown"]

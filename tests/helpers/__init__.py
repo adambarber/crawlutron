@@ -2,14 +2,20 @@
 
 import asyncio
 import unittest
+from typing import Any
 
-from app.crawl.engine import crawl_request
 from app.crawl.cache import HttpCache
+from app.crawl.engine import crawl_request
 from app.constants import HTTP_DECLARED_CRAWLER
 
 
 class ServerTestCase(unittest.TestCase):
-    """Base test case providing a real HTTP server (no mocks)."""
+    """Base test case providing a real HTTP server (no mocks).
+
+    Kept as a unittest.TestCase for backward compatibility with existing
+    unittest-based tests. New tests should use pytest fixtures from conftest.py
+    (base_url, make_crawl_payload, etc.) instead.
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -53,16 +59,16 @@ class ServerTestCase(unittest.TestCase):
 
     def assert_crawl_ok(self, response: dict) -> None:
         """Assert a successful crawl response."""
-        self.assertEqual(response["submitted_count"], 1)
-        self.assertEqual(len(response["results"]), 1)
-        self.assertEqual(response["results"][0]["status"], "success")
+        assert response["submitted_count"] == 1
+        assert len(response["results"]) == 1
+        assert response["results"][0]["status"] == "success"
 
     def assert_crawl_failed(self, response: dict, classification: str | None = None) -> None:
         """Assert a failed crawl response."""
-        self.assertEqual(response["submitted_count"], 1)
-        self.assertEqual(response["results"][0]["status"], "error")
+        assert response["submitted_count"] == 1
+        assert response["results"][0]["status"] == "failed"
         if classification:
-            self.assertEqual(response["results"][0]["classification"], classification)
+            assert response["results"][0]["classification"] == classification
 
 
 # Shared HTML fixtures to avoid duplication across test modules.
@@ -74,3 +80,11 @@ FIRECRAWL_TEST_HTML = (
     "<meta property='og:title' content='OG Title'>"
     "</head><body><main>Content here</main></body></html>"
 )
+
+
+# Async helper for pytest-based tests
+async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> dict:
+    """Async version of run_crawl for pytest-asyncio tests."""
+    if cache is None:
+        cache = HttpCache()
+    return await crawl_request(payload, browser_worker=browser_worker, cache=cache)
