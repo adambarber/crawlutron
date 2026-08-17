@@ -69,11 +69,26 @@ class BrowserRenderer:
         self._browser_cm: Any = None
         self._browser: Any = None
         self._browser_reused = False
+        # Recycle the reused browser after this many successful renders to bound
+        # the memory of a long-lived Camoufox process (see _acquire_browser).
+        self._render_count = 0
+        self._max_browser_renders = int(os.environ.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", "100"))
 
-    def _reset_browser(self) -> None:
-        """Drop any cached browser instance so the next render recreates it."""
+    async def _reset_browser(self) -> None:
+        """Close any cached browser instance so the next render recreates it.
+
+        The previous browser context manager is torn down (best-effort) so its
+        underlying Camoufox process is not leaked between failed attempts.
+        """
+        cm = self._browser_cm
         self._browser_cm = None
         self._browser = None
+        self._browser_reused = False
+        if cm is not None:
+            try:
+                await cm.__aexit__(None, None, None)
+            except Exception:  # best-effort teardown
+                pass
 
     async def render(self, url: str, options: RenderOptions) -> CrawlResult:
         started = time.monotonic()
@@ -88,13 +103,13 @@ class BrowserRenderer:
                 return result
             except TimeoutError as error:
                 last_error = str(error)
-                self._reset_browser()
+                await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "navigation_timeout", attempts, started, last_error)
                 self._sleep(min(2 ** (attempts - 1), 5))
             except Exception as error:  # noqa: BLE001
                 last_error = str(error)
-                self._reset_browser()
+                await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "unknown_error", attempts, started, last_error)
                 self._sleep(min(2 ** (attempts - 1), 5))
@@ -102,16 +117,39 @@ class BrowserRenderer:
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
     async def _acquire_browser(self, options: RenderOptions) -> Any:
-        """Return a reused browser instance, launching one on first use (#6)."""
-        if self._browser is None or getattr(self._browser, "is_closed", False):
+        """Return a reused browser instance, launching one on first use (#6).
+
+        Recycles the browser once it has served ``_max_browser_renders`` to
+        bound memory growth of a long-lived Camoufox process.
+        """
+        if (
+            self._browser is None
+            or getattr(self._browser, "is_closed", False)
+            or self._render_count >= self._max_browser_renders
+        ):
+            if self._browser is not None:
+                await self._reset_browser()
             launch_kwargs = self._get_browser_kwargs(options.browser_profile)
             cm = self._browser_factory(**launch_kwargs)
             self._browser = await cm.__aenter__()
             self._browser_cm = cm
             self._browser_reused = False
+            self._render_count = 0
         else:
             self._browser_reused = True
         return self._browser
+
+    @staticmethod
+    async def _safe_close_page(page: Any) -> None:
+        """Best-effort page teardown so rendered tabs/processes are not leaked."""
+        if page is None:
+            return
+        try:
+            close = getattr(page, "close", None)
+            if close is not None:
+                await close()
+        except Exception:  # best-effort teardown
+            pass
 
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown (#6)."""
@@ -132,73 +170,78 @@ class BrowserRenderer:
 
         browser = await self._acquire_browser(options)
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
+        try:
+            # Katana-style XHR/fetch interception.
+            intercepted_xhr: list[dict[str, Any]] = []
+            page.on("response", self._make_response_handler(intercepted_xhr))
 
-        # Katana-style XHR/fetch interception.
-        intercepted_xhr: list[dict[str, Any]] = []
-        page.on("response", self._make_response_handler(intercepted_xhr))
+            # Warmup URLs
+            for warmup_url in self._warmup_urls:
+                await page.goto(warmup_url, wait_until="domcontentloaded")
+                await self._wait_for_ready_state(page)
 
-        # Warmup URLs
-        for warmup_url in self._warmup_urls:
-            await page.goto(warmup_url, wait_until="domcontentloaded")
+            # Navigate to target URL
+            await page.goto(url, wait_until="domcontentloaded")
             await self._wait_for_ready_state(page)
 
-        # Navigate to target URL
-        await page.goto(url, wait_until="domcontentloaded")
-        await self._wait_for_ready_state(page)
+            # Browser action chains (#10): run policy-specified interactions before extraction.
+            actions = (options.browser_profile or {}).get("actions") or []
+            if actions:
+                await self._run_action_chain(page, actions)
 
-        # Browser action chains (#10): run policy-specified interactions before extraction.
-        actions = (options.browser_profile or {}).get("actions") or []
-        if actions:
-            await self._run_action_chain(page, actions)
+            # Lazy-load scroll: trigger deferred/infinite-scroll content.
+            await self._lazy_load_scroll(page)
 
-        # Lazy-load scroll: trigger deferred/infinite-scroll content.
-        await self._lazy_load_scroll(page)
+            # Extract with challenge waiting
+            html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
 
-        # Extract with challenge waiting
-        html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
+            extraction_method = "dom_text"
+            final_url = page.url
 
-        extraction_method = "dom_text"
-        final_url = page.url
+            # PDF extraction fallback
+            if self._looks_like_pdf(final_url) and not (text or "").strip():
+                text = self._pdf_text_extractor(final_url)
+                html = html if options.include_html else None
+                title = await page.evaluate("() => document.title")
+                classification = classify_rendered_page(html, text, title=title)
+                extraction_method = "pdf_text"
 
-        # PDF extraction fallback
-        if self._looks_like_pdf(final_url) and not (text or "").strip():
-            text = self._pdf_text_extractor(final_url)
-            html = html if options.include_html else None
-            title = await page.evaluate("() => document.title")
-            classification = classify_rendered_page(html, text, title=title)
-            extraction_method = "pdf_text"
+            status = self._status_for_classification(classification)
 
-        status = self._status_for_classification(classification)
+            metadata: dict[str, Any] = {
+                "title": await page.evaluate("() => document.title"),
+                "content_length": len(html or ""),
+                "browser_reused": self._browser_reused,
+                "challenge_resolved": challenge_resolved,
+                "extraction_method": extraction_method,
+                "intercepted_xhr": intercepted_xhr,
+            }
 
-        metadata: dict[str, Any] = {
-            "title": await page.evaluate("() => document.title"),
-            "content_length": len(html or ""),
-            "browser_reused": self._browser_reused,
-            "challenge_resolved": challenge_resolved,
-            "extraction_method": extraction_method,
-            "intercepted_xhr": intercepted_xhr,
-        }
+            # Screenshots (#14): optional full-page, plus targeted element screenshots by CSS selector.
+            if options.browser_profile.get("include_screenshot"):
+                screenshot_bytes = await page.screenshot(full_page=True)
+                metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
+            element_shots = (options.browser_profile or {}).get("screenshot_selectors") or []
+            if element_shots:
+                metadata["element_screenshots"] = await self._capture_element_screenshots(page, element_shots)
 
-        # Screenshots (#14): optional full-page, plus targeted element screenshots by CSS selector.
-        if options.browser_profile.get("include_screenshot"):
-            screenshot_bytes = await page.screenshot(full_page=True)
-            metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
-        element_shots = (options.browser_profile or {}).get("screenshot_selectors") or []
-        if element_shots:
-            metadata["element_screenshots"] = await self._capture_element_screenshots(page, element_shots)
-
-        return CrawlResult(
-            url=url,
-            status=status,
-            classification=classification,  # type: ignore[arg-type]
-            final_url=final_url,
-            html=html,
-            text=text,
-            attempts=1,
-            elapsed_ms=int((time.monotonic() - started) * 1000),
-            domain=registrable_domain(url),
-            metadata=metadata,
-        )
+            self._render_count += 1
+            return CrawlResult(
+                url=url,
+                status=status,
+                classification=classification,  # type: ignore[arg-type]
+                final_url=final_url,
+                html=html,
+                text=text,
+                attempts=1,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                domain=registrable_domain(url),
+                metadata=metadata,
+            )
+        finally:
+            # Always release the page so the rendered tab/process is not leaked
+            # between crawls (the root of the Camoufox memory growth).
+            await self._safe_close_page(page)
 
     async def _run_action_chain(self, page: Any, actions: list[dict[str, Any]]) -> None:
         """Execute a sequence of browser actions before extraction (#10).
