@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.constants import (
     DEFAULT_STRATEGIES,
@@ -142,6 +142,29 @@ class CrawlRequest(BaseModel):
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
     webhook_url: str | None = Field(None, description="Optional callback URL. When provided, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
+
+
+class RenderOptionsRequest(BaseModel):
+    """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    timeout_seconds: int | None = Field(None, description="Per-render navigation timeout in seconds.")
+    wait_until: str | None = Field(None, description="Render settle condition, e.g. network_idle_or_timeout.")
+    max_retries: int | None = Field(None, description="Maximum retries for a transient render failure.")
+    respect_robots: bool | None = Field(None, description="Whether to honor robots.txt for the render target.")
+    include_html: bool | None = Field(None, description="Include the rendered HTML in the result.")
+    include_text: bool | None = Field(None, description="Include extracted visible text in the result.")
+
+
+class RenderRequest(BaseModel):
+    """Request body for ``POST /v1/render`` (backward-compatible browser render)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    url: str | None = Field(None, description="Single public HTTP(S) URL to render. Use either url or urls.")
+    urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to render. Use either url or urls.")
+    options: RenderOptionsRequest | None = Field(None, description="Browser render options; omitted fields use server defaults.")
 
 
 class ClassificationEvidence(BaseModel):

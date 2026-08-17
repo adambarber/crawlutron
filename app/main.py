@@ -19,6 +19,7 @@ from .api_models import (
     CrawlerError,
     CrawlRequest,
     CrawlStrategy,
+    RenderRequest,
     DiscoveryResponse,
     FirecrawlMetadata,
     ReadinessResponse,
@@ -135,7 +136,7 @@ def _build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     )
 
 
-def _render_result_to_universal(item: dict[str, Any]) -> dict[str, Any]:
+def _render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
     """Adapt a browser ``CrawlResult`` dict into the unified result shape.
 
     ``/v1/render`` reuses the same browser worker as the universal crawl path,
@@ -188,7 +189,7 @@ def _render_result_to_universal(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_condensed_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlResponse:
+def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlResponse:
     """Backward-compatible alias: build the unified response (was CondensedCrawlResponse)."""
     return UnifiedCrawlResponse(
         request_id="crawl_unified",
@@ -262,17 +263,21 @@ if FastAPI is not None:
         description="Backward-compatible browser-render endpoint. Prefer POST /v1/crawl for policy-driven universal crawling.",
         responses={400: {"model": CrawlerError, "description": "Invalid render request."}},
     )
-    async def render(payload: dict[str, Any]) -> UnifiedCrawlResponse:
+    async def render(payload: RenderRequest) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
-            result = await render_request(payload, settings=settings, worker=lambda job: renderer.render(job.url, job.options))
+            result = await render_request(
+                payload.model_dump(exclude_none=True),
+                settings=settings,
+                worker=lambda job: renderer.render(job.url, job.options),
+            )
             logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
             return UnifiedCrawlResponse(
                 request_id=result["request_id"],
                 submitted_count=result["submitted_count"],
                 policy_schema_version=POLICY_SCHEMA_VERSION,
                 success=True,
-                results=[_build_unified_result(_render_result_to_universal(item)) for item in result.get("results", [])],
+                results=[_build_unified_result(_render_result_to_unified(item)) for item in result.get("results", [])],
             )
         except ValueError as error:
             logger.warning("render_request_rejected", extra={"error": str(error)})

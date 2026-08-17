@@ -4,7 +4,7 @@ import json
 
 import pytest
 import httpx
-from app.main import app, build_condensed_crawl_response
+from app.main import app, build_unified_crawl_response
 from helpers.server import WEBHOOK_RECEIVED
 from app.constants import HTTP_DECLARED_CRAWLER
 
@@ -156,15 +156,17 @@ class TestDiscoveryAndRenderApi:
             assert resp.json()
 
     async def test_condensed_response_alias(self):
-        resp = build_condensed_crawl_response([
+        resp = build_unified_crawl_response([
             {"original_url": "http://x/", "final_url": "http://x/", "status": "success", "classification": "rendered"}
         ])
         assert resp.success is True
         assert resp.submitted_count == 1
 
     async def test_v1_render_invalid_payload_rejected(self):
+        # With a typed request body, a malformed body shape is rejected by
+        # FastAPI with 422 before reaching the handler.
         resp = await self.client.post("/v1/render", json={"options": "not-a-dict"})
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request
