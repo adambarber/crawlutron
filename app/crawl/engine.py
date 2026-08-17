@@ -52,6 +52,14 @@ from app.crawl.extraction import (
     _html_diagnostics,
     extract_content,
 )
+from app.crawl.fetch_helpers import _fetch_and_decode
+from app.crawl.payload_helpers import _payload_policy, _payload_urls, SUPPORTED_EXTRACTION_METHODS
+from app.crawl.result_helpers import (
+    _binary_no_text_result,
+    _blocked_engine_result,
+    _failed_engine_result,
+    _skipped_engine_result,
+)
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.http import (
     _default_cffi_fetcher,
@@ -82,7 +90,6 @@ class CrawlTask:
     domain: str
 
 
-SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -103,69 +110,7 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
-def _payload_urls(payload: dict[str, Any]) -> list[str]:
-    if "urls" in payload:
-        urls = payload["urls"]
-        if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
-            raise ValueError("invalid_urls")
-        return urls
-    if "url" in payload and isinstance(payload["url"], str):
-        return [payload["url"]]
-    raise ValueError("missing_url")
 
-
-def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[str, Any]:
-    from app.api_models import POLICY_SCHEMA_VERSION
-
-    policy = payload.get("policy") or {}
-    if not isinstance(policy, dict):
-        raise ValueError("invalid_policy")
-    limits = policy.get("limits") or {}
-    if not isinstance(limits, dict):
-        raise ValueError("invalid_policy_limits")
-    headers = policy.get("headers") or {}
-    if not isinstance(headers, dict):
-        raise ValueError("invalid_policy_headers")
-    strategies = policy.get("strategies") or DEFAULT_STRATEGIES
-    if not isinstance(strategies, list) or not all(isinstance(strategy, str) for strategy in strategies) or not strategies:
-        raise ValueError("invalid_policy_strategies")
-    if any(strategy not in SUPPORTED_STRATEGIES for strategy in strategies):
-        raise ValueError("invalid_policy_strategy")
-    extraction = policy.get("extraction") or DEFAULT_EXTRACTION
-    if extraction not in SUPPORTED_EXTRACTION_METHODS:
-        raise ValueError("invalid_policy_extraction")
-    request_profile = policy.get("request_profile") or {}
-    browser_profile = policy.get("browser_profile") or {}
-    discovery = policy.get("discovery") or {}
-    if not isinstance(request_profile, dict) or not isinstance(browser_profile, dict) or not isinstance(discovery, dict):
-        raise ValueError("invalid_policy_profile")
-    try:
-        max_depth = max(0, min(20, int(limits.get("max_depth", 0))))
-        max_pages = max(0, min(2000, int(limits.get("max_pages", 0))))
-        respect_robots = bool(limits.get("respect_robots", True))
-    except (TypeError, ValueError):
-        raise ValueError("invalid_policy_limits") from None
-    return {
-        "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
-        "strategies": strategies,
-        "extraction": extraction,
-        "scope_regex": policy.get("scope_regex"),
-        "css_selector": policy.get("css_selector"),
-        "xpath": policy.get("xpath"),
-        "limits": {
-            "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
-            "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
-            "challenge_wait_seconds": int(limits.get("challenge_wait_seconds", 15)),
-            "max_discovered_links": int(limits.get("max_discovered_links", 250)),
-            "respect_robots": respect_robots,
-            "max_depth": max_depth,
-            "max_pages": max_pages,
-        },
-        "headers": {str(key): str(value) for key, value in headers.items()},
-        "request_profile": dict(request_profile),
-        "browser_profile": dict(browser_profile),
-        "discovery": {str(key): bool(value) for key, value in discovery.items()},
-    }
 
 
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
@@ -366,31 +311,11 @@ async def _execute_crawl_chain(
                     browser_worker=browser_worker,
                 )
         else:
-            result = EngineCrawlResult(
+            result = _failed_engine_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
-                final_url=None,
-                status="failed",
+                strategy=strategy,
                 classification="unknown_error",
-                selected_strategy=None,
-                attempted_strategies=[
-                    CrawlStrategyAttempt(
-                        strategy=strategy,  # type: ignore[arg-type]
-                        status="failed",
-                        classification="unknown_error",
-                        http_status=None,
-                        content_type=None,
-                        elapsed_ms=0,
-                        error="unsupported_strategy",
-                    )
-                ],
-                http_status=None,
-                headers={},
-                content_type=None,
-                html=None,
-                text=None,
-                extraction_method=None,
-                quality_score=0.0,
                 error="unsupported_strategy",
             )
         attempts.extend(result.attempted_strategies)
@@ -508,20 +433,9 @@ async def crawl_request(
             return cached[1]
         rules: list[tuple[bool, str]] = []
         robots_url = urljoin(origin, "/robots.txt")
-        try:
-            resp = fetcher(robots_url, {}, policy["limits"]["timeout_seconds"])
-            if inspect.iscoroutine(resp):
-                resp = await resp
-            if resp.status_code == 200:
-                from app.crawl.strategies.http import _decode_body, _decompress_body
-
-                body = _decode_body(
-                    _decompress_body(resp.body, resp.headers.get("content-encoding", "")),
-                    resp.headers.get("content-type"),
-                )
-                rules = _parse_robots_rules(body)
-        except Exception:  # noqa: BLE001
-            rules = []
+        body = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
+        if body is not None:
+            rules = _parse_robots_rules(body)
         robots_cache[origin] = (now + robots_ttl, rules)
         return rules
 
@@ -549,37 +463,13 @@ async def crawl_request(
         return _robots_allows(target_url, await _fetch_robots_rules(origin))
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
-        attempt = CrawlStrategyAttempt(
-            strategy="HTTP_DECLARED_CRAWLER",  # type: ignore[arg-type]
-            status="skipped",
-            classification="robots_disallowed",
-            http_status=None,
-            content_type=None,
-            elapsed_ms=0,
-            error="robots_txt_disallowed",
-        )
-        return EngineCrawlResult(
+        return _skipped_engine_result(
             original_url=job.original_url,
             normalized_url=job.normalized_url,
-            final_url=None,
-            status="skipped",
+            strategy="HTTP_DECLARED_CRAWLER",
             classification="robots_disallowed",
-            selected_strategy=None,
-            attempted_strategies=[attempt],
-            http_status=None,
-            headers={},
-            content_type=None,
-            html=None,
-            text=None,
-            markdown=None,
-            extraction_method=None,
-            quality_score=0.0,
-            classification_evidence=[],
-            diagnostics={"robots": {"allowed": False}},
-            discovered_link_count=0,
-            discovered_links_truncated=False,
-            discovered_links=[],
             error="robots_txt_disallowed",
+            diagnostics={"robots": {"allowed": False}},
         )
 
     async def _sitemap_seed_urls() -> list[str]:
@@ -588,20 +478,9 @@ async def crawl_request(
             parsed = urlparse(job.normalized_url)
             origin = f"{parsed.scheme}://{parsed.netloc}"
             sitemap_url = urljoin(origin, "/sitemap.xml")
-            try:
-                resp = fetcher(sitemap_url, {}, policy["limits"]["timeout_seconds"])
-                if inspect.iscoroutine(resp):
-                    resp = await resp
-                if resp.status_code == 200:
-                    from app.crawl.strategies.http import _decode_body, _decompress_body
-
-                    text = _decode_body(
-                        _decompress_body(resp.body, resp.headers.get("content-encoding", "")),
-                        resp.headers.get("content-type"),
-                    )
-                    seeds.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE))
-            except Exception:  # noqa: BLE001
-                continue
+            text = await _fetch_and_decode(fetcher, sitemap_url, {}, policy["limits"]["timeout_seconds"])
+            if text is not None:
+                seeds.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE))
         return seeds
 
     # --- crawl orchestration ---

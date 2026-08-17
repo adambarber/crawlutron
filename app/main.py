@@ -30,6 +30,8 @@ from .api_models import (
     FirecrawlMetadata,
     ReadinessResponse,
 )
+from .api.main_helpers import _build_job_status, _raise_not_found
+from .api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.constants import (
     BROWSER_HEADLESS,
     EXTRACTION_DOCUMENT,
@@ -81,21 +83,6 @@ async def _execute_crawl(payload_dict: dict) -> dict:
         shutdown_event=shutdown_event,
     )
 
-
-def _build_job_status(job) -> JobStatusResponse:
-    """Build JobStatusResponse from job state."""
-    return JobStatusResponse(
-        job_id=job.job_id,
-        root_url=job.root_url,
-        status=job.status.value,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-        frontier_size=len(job.frontier),
-        visited_size=len(job.visited),
-        results_count=len(job.results),
-        stats=job.stats,
-        error=job.error,
-    )
 
 logger = configure_service_logging(
     service_name="browser-crawler",
@@ -390,33 +377,14 @@ if FastAPI is not None:
                                 "summary": "Direct HTTP with browser fallback",
                                 "value": {
                                     "url": "https://records.example.gov/search?q=permit",
-                                    "policy": {
-                                        "strategies": [
-                                            HTTP_DECLARED_CRAWLER,
-                                            HTTP_CFFI_IMPERSONATE,
-                                            BROWSER_HEADLESS,
-                                        ],
-                                        "limits": {
-                                            "timeout_seconds": 30,
-                                            "max_retries": 2,
-                                            "max_discovered_links": 250,
-                                        },
-                                    },
+                                    "policy": BROWSER_FALLBACK_POLICY,
                                 },
                             },
                             "document_extraction": {
                                 "summary": "Document extraction policy",
                                 "value": {
                                     "urls": ["https://records.example.gov/agenda.pdf"],
-                                    "policy": {
-                                        "strategies": [HTTP_DECLARED_CRAWLER],
-                                        "extraction": EXTRACTION_DOCUMENT,
-                                        "limits": {
-                                            "timeout_seconds": 60,
-                                            "max_retries": 1,
-                                            "max_discovered_links": 0,
-                                        },
-                                    },
+                                    "policy": DOCUMENT_EXTRACTION_POLICY,
                                 },
                             },
                         }
@@ -432,18 +400,7 @@ if FastAPI is not None:
             examples=[
                 {
                     "url": "https://records.example.gov/search?q=permit",
-                    "policy": {
-                        "strategies": [
-                            HTTP_DECLARED_CRAWLER,
-                            HTTP_CFFI_IMPERSONATE,
-                            BROWSER_HEADLESS,
-                        ],
-                        "limits": {
-                            "timeout_seconds": 30,
-                            "max_retries": 2,
-                            "max_discovered_links": 250,
-                        },
-                    },
+                    "policy": BROWSER_FALLBACK_POLICY,
                 }
             ],
         ),
@@ -583,10 +540,7 @@ if FastAPI is not None:
     async def get_job(job_id: str) -> JobStatusResponse:
         job = job_store.load(job_id)
         if job is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
-            )
+            _raise_not_found(job_id)
         return _build_job_status(job)
 
     @app.post(
@@ -600,10 +554,7 @@ if FastAPI is not None:
     async def control_job(job_id: str, payload: JobControlRequest) -> JobStatusResponse:
         job = job_store.load(job_id)
         if job is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
-            )
+            _raise_not_found(job_id)
 
         action = payload.action.lower()
         if action == "pause":
@@ -634,18 +585,7 @@ if FastAPI is not None:
             )
 
         job_store.save(job)
-        return JobStatusResponse(
-            job_id=job.job_id,
-            root_url=job.root_url,
-            status=job.status.value,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-            frontier_size=len(job.frontier),
-            visited_size=len(job.visited),
-            results_count=len(job.results),
-            stats=job.stats,
-            error=job.error,
-        )
+        return _build_job_status(job)
 
     @app.delete(
         "/v1/jobs/{job_id}",
@@ -656,10 +596,7 @@ if FastAPI is not None:
     )
     async def delete_job(job_id: str) -> dict[str, str]:
         if not job_store.delete(job_id):
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
-            )
+            _raise_not_found(job_id)
         return {"status": "deleted", "job_id": job_id}
 
     @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")

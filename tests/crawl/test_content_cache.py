@@ -228,15 +228,7 @@ async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
 
 async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
     """If the etag changed, revalidation returns 200 and fresh content is served (#5)."""
-    host, port = etag_server.server_address
-    url = f"http://127.0.0.1:{port}/"
-    policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
-
-    def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return _default_http_fetcher(u, headers, timeout, max_content_length)
-
-    cache = HttpCache()
-    content_cache = ContentCache(tmp_path)
+    url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     await _http_strategy_result(
         original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
         policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,

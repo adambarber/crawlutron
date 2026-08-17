@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api_models import AgentHintsResponse, CrawlExtractionMethod, CrawlStrategy
+from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.constants import (
     BROWSER_HEADLESS,
     EXTRACTION_DOCUMENT,
@@ -53,27 +54,8 @@ GUIDANCE = [
 ]
 
 EXAMPLE_POLICIES = {
-    "browser_fallback": {
-        "strategies": [
-            HTTP_DECLARED_CRAWLER,
-            HTTP_CFFI_IMPERSONATE,
-            BROWSER_HEADLESS,
-        ],
-        "limits": {
-            "timeout_seconds": 30,
-            "max_retries": 2,
-            "max_discovered_links": 250,
-        },
-    },
-    "document_extraction": {
-        "strategies": [HTTP_DECLARED_CRAWLER],
-        "extraction": EXTRACTION_DOCUMENT,
-        "limits": {
-            "timeout_seconds": 60,
-            "max_retries": 1,
-            "max_discovered_links": 0,
-        },
-    },
+    "browser_fallback": BROWSER_FALLBACK_POLICY,
+    "document_extraction": DOCUMENT_EXTRACTION_POLICY,
     "trafilatura_only": {
         "strategies": [HTTP_DECLARED_CRAWLER],
         "extraction": EXTRACTION_TRAFILATURA,

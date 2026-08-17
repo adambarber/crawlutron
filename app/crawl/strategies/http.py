@@ -77,6 +77,7 @@ from app.crawl.extraction import (
     extract_js_endpoints,
     extract_content,
 )
+from app.crawl.result_helpers import _binary_no_text_result
 from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult, HttpFetcher
 from app.validation import normalize_public_http_url, registrable_domain
 from urllib.parse import urljoin, urlparse
@@ -537,44 +538,6 @@ def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> 
         return True
     return normalized_content_type in {"application/octet-stream", "application/zip", "application/x-zip-compressed"}
 
-
-def _binary_no_text_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    final_url: str | None,
-    strategy: str,
-    http_status: int | None,
-    headers: dict[str, str],
-    content_type: str | None,
-    elapsed_ms: int,
-) -> EngineCrawlResult:
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
-        status="failed",
-        classification=EXTRACTION_METHOD_BINARY_NO_TEXT,
-        http_status=http_status,
-        content_type=content_type,
-        elapsed_ms=elapsed_ms,
-        error=EXTRACTION_METHOD_BINARY_NO_TEXT,
-    )
-    return EngineCrawlResult(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        final_url=final_url,
-        status="failed",
-        classification=EXTRACTION_METHOD_BINARY_NO_TEXT,
-        selected_strategy=None,
-        attempted_strategies=[attempt],
-        http_status=http_status,
-        headers=headers,
-        content_type=content_type,
-        html=None,
-        text=None,
-        extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT,
-        quality_score=0.0,
-        error=EXTRACTION_METHOD_BINARY_NO_TEXT,
-    )
 
 
 async def _discovery_diagnostics(
