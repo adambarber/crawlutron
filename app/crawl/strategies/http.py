@@ -7,6 +7,8 @@ import inspect
 import re
 import socket
 import time
+import hashlib
+from urllib.parse import urlparse
 import json
 import base64
 from dataclasses import asdict
@@ -298,6 +300,56 @@ def _store_set_cookies(url: str, response_headers: dict[str, str]) -> None:
             _GLOBAL_COOKIE_JAR.add_cookie_header(url, value)
 
 
+_BUILTIN_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+]
+_BUILTIN_ACCEPT_LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.8",
+    "fr-FR,fr;q=0.9",
+    "de-DE,de;q=0.9",
+    "es-ES,es;q=0.9",
+]
+
+
+def _domain_seed(url: str) -> str:
+    """Hostname used as the rotation seed (stable; avoids normalization side effects)."""
+    return urlparse(url).hostname or ""
+
+
+def _rotating_index(profile: dict[str, Any], domain: str, pool_size: int) -> int:
+    """Deterministic per-host pool index so repeated crawls of the same host keep a
+    stable fingerprint (the disk content-cache key stays consistent) while different
+    hosts rotate through the pool (#11)."""
+    seed = f"{profile.get('fingerprint_seed', '')}:{domain}".encode("utf-8")
+    return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
+
+
+def _select_fingerprint(profile: dict[str, Any], domain: str) -> dict[str, str]:
+    """Select fingerprint signals for a host (#11). Rotation is deterministic per host.
+    Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
+    falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
+    and curl_cffi TLS impersonation rather than conflicting with them."""
+    out: dict[str, str] = {}
+    ua_pool = list(profile.get("user_agents") or [])
+    if not ua_pool and profile.get("fingerprint_rotation"):
+        ua_pool = _BUILTIN_USER_AGENTS
+    if ua_pool:
+        out["user_agent"] = ua_pool[_rotating_index(profile, domain, len(ua_pool))]
+    al_pool = list(profile.get("accept_languages") or [])
+    if not al_pool and profile.get("fingerprint_rotation"):
+        al_pool = _BUILTIN_ACCEPT_LANGUAGES
+    if al_pool:
+        out["accept_language"] = al_pool[_rotating_index(profile, domain, len(al_pool))]
+    return out
+
+
 def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
     profile = policy.get("request_profile") or {}
     headers = {
@@ -311,7 +363,13 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     }
     user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
-    if is_browser_like:
+    # Fingerprint injection/rotation (#11): deterministic per-host selection so a single
+    # crawl rotates fingerprints across hosts while staying stable per host.
+    fp = _select_fingerprint(profile, _domain_seed(url))
+    if "user_agent" in fp:
+        headers["User-Agent"] = fp["user_agent"]
+        is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
+    elif is_browser_like:
         headers["User-Agent"] = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -327,6 +385,8 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
             "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         )
+    if "accept_language" in fp:
+        headers["Accept-Language"] = fp["accept_language"]
     cookie_header = _cookie_header_for_url(profile, url)
     if cookie_header:
         headers["Cookie"] = cookie_header

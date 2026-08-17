@@ -48,6 +48,7 @@ from app.service import (  # noqa: E402
     crawl_request,
 )
 from app.settings import CrawlerSettings  # noqa: E402
+from app.crawl.strategies.http import _select_fingerprint, _rotating_index  # noqa: E402
 
 def make_fetch(status=200, body=b"<html><body>hello</body></html>", ctype="text/html; charset=utf-8",
                final_url="http://example.com/", url="http://example.com/"):
@@ -385,3 +386,47 @@ class TestCallWorkerContract:
 
         assert await _call_worker(sync_worker, _Job()) == "sync-result"
 
+
+
+class TestFingerprintInjectionRotation:
+    def test_user_agent_pool_rotates_per_domain_and_is_stable(self):
+        profile = {"user_agents": ["UA-A", "UA-B", "UA-C"]}
+        # Use more hosts than pool size so rotation is clearly visible.
+        hosts = [f"{c}.com" for c in "abcdef"]
+        seen = {d: _select_fingerprint(profile, d).get("user_agent") for d in hosts}
+        # rotation: different hosts get a variety of UAs (not all identical)
+        assert len(set(seen.values())) > 1
+        # stability: same host -> same UA across calls (keeps content-cache key stable)
+        assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
+        assert _select_fingerprint(profile, "a.com")["user_agent"] == seen["a.com"]
+
+    def test_fingerprint_rotation_changes_accept_language_per_domain(self):
+        base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
+        langs = {
+            d: _headers_for_strategy("HTTP_DECLARED_CRAWLER", base, f"http://{d}/")["Accept-Language"]
+            for d in ("a.com", "b.com", "c.com", "d.com", "e.com")
+        }
+        # across 5 distinct hosts the built-in pool (size 5) yields variety
+        assert len(set(langs.values())) > 1
+        # same host is stable
+        again = _headers_for_strategy("HTTP_DECLARED_CRAWLER", base, "http://a.com/")["Accept-Language"]
+        assert again == langs["a.com"]
+
+    def test_default_request_has_no_fingerprint_rotation(self):
+        headers = _headers_for_strategy(
+            "HTTP_DECLARED_CRAWLER", {"request_profile": {}, "headers": {}}, "http://x/",
+        )
+        assert headers["Accept-Language"] == "en-US,en;q=0.9"
+        assert "Mozilla" not in headers["User-Agent"]
+
+    def test_fingerprint_injected_user_agent_lands_in_headers(self):
+        profile = {"request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]}, "headers": {}}
+        h1 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://a.com/")
+        h2 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://b.com/")
+        assert h1["User-Agent"] == "Rotated-UA-1"
+        assert h2["User-Agent"] == "Rotated-UA-2"
+
+    def test_explicit_headers_still_override_fingerprint(self):
+        profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
+        h = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://a.com/")
+        assert h["User-Agent"] == "forced"
