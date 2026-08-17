@@ -9,12 +9,35 @@ from app.crawl.engine import crawl_request
 from app.constants import HTTP_DECLARED_CRAWLER
 
 
+def build_payload(
+    *,
+    url: str | None = None,
+    urls: list[str] | None = None,
+    strategies: list[str] | None = None,
+    limits: dict | None = None,
+    **extra,
+) -> dict:
+    """Build a crawl request payload dict from keyword arguments."""
+    payload = {}
+    if url:
+        payload["url"] = url
+    if urls:
+        payload["urls"] = urls
+    if strategies is not None:
+        payload["policy"] = {"strategies": strategies}
+    if limits is not None:
+        payload.setdefault("policy", {})["limits"] = limits
+    payload.update(extra)
+    return payload
+
+
 class ServerTestCase(unittest.TestCase):
     """Base test case providing a real HTTP server (no mocks).
 
     Kept as a unittest.TestCase for backward compatibility with existing
     unittest-based tests. New tests should use pytest fixtures from conftest.py
-    (base_url, make_crawl_payload, etc.) instead.
+    (base_url) and helpers from helpers/__init__.py (run_crawl_async,
+    crawl_homepage_async, build_payload) instead.
     """
 
     @classmethod
@@ -26,30 +49,6 @@ class ServerTestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.server.stop()
-
-    def make_payload(
-        self,
-        *,
-        url: str | None = None,
-        urls: list[str] | None = None,
-        strategies: list[str] | None = None,
-        limits: dict | None = None,
-        **extra,
-    ) -> dict:
-        """Build a crawl request payload with sensible defaults."""
-        if url is None and urls is None:
-            url = f"{self.base}/"
-        payload = {}
-        if url:
-            payload["url"] = url
-        if urls:
-            payload["urls"] = urls
-        if strategies is not None:
-            payload["policy"] = {"strategies": strategies}
-        if limits is not None:
-            payload.setdefault("policy", {})["limits"] = limits
-        payload.update(extra)
-        return payload
 
     def run_crawl(self, payload: dict, *, cache=None, browser_worker=None) -> dict:
         """Execute crawl_request with test-friendly defaults."""
@@ -88,3 +87,20 @@ async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> 
     if cache is None:
         cache = HttpCache()
     return await crawl_request(payload, browser_worker=browser_worker, cache=cache)
+
+
+async def crawl_homepage_async(
+    base_url: str,
+    *,
+    strategies: list[str] | None = None,
+    limits: dict | None = None,
+    cache=None,
+    browser_worker=None,
+) -> dict:
+    """Crawl the local test server homepage and return the unified response dict."""
+    payload = build_payload(
+        url=f"{base_url}/",
+        strategies=strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],
+        limits=limits if limits is not None else {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+    )
+    return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)

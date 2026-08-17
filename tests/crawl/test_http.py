@@ -127,15 +127,8 @@ class TestHttpStrategy:
         assert not _looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf")
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
-        from helpers import run_crawl_async
-        payload = {
-            "url": f"{base_url}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        response = await run_crawl_async(payload)
+        from helpers import crawl_homepage_async
+        response = await crawl_homepage_async(base_url)
         assert response["submitted_count"] == 1
         assert len(response["results"]) == 1
         assert "Example Org" in response["results"][0]["markdown"]

@@ -90,22 +90,7 @@ def _disable_lazy_scroll():
     browser_module.LAZY_SCROLL_DELAY_SECONDS = original_delay
 
 
-@pytest.fixture
-def make_crawl_payload(base_url):
-    """Factory for building crawl request payloads."""
-    def _make(url=None, urls=None, strategies=None, limits=None, **extra):
-        payload = {}
-        if url:
-            payload["url"] = url
-        if urls:
-            payload["urls"] = urls
-        if strategies is not None:
-            payload["policy"] = {"strategies": strategies}
-        if limits is not None:
-            payload.setdefault("policy", {})["limits"] = limits
-        payload.update(extra)
-        return payload
-    return _make
+
 
 
 @pytest.fixture

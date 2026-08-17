@@ -52,15 +52,8 @@ class TestScopeFilter:
 
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):
-        from helpers import run_crawl_async
-        payload = {
-            "url": f"{base_url}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        response = await run_crawl_async(payload)
+        from helpers import crawl_homepage_async
+        response = await crawl_homepage_async(base_url)
         assert "Example Org" in response["results"][0]["markdown"]
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
