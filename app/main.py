@@ -207,8 +207,18 @@ if FastAPI is not None:
     def _lifespan(app: FastAPI):
         @asynccontextmanager
         async def lifespan_context(allow_concurrency: bool, *args, **kwargs):
+            # Startup: load cookie jar if persistence enabled
+            if settings.cookie_persistence_enabled:
+                from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+                _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
+
             yield
-            # Shutdown: signal graceful stop, then close shared HTTP client and browser renderer.
+
+            # Shutdown: save cookie jar if persistence enabled, then close clients
+            if settings.cookie_persistence_enabled:
+                from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+                _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
+
             from app.crawl.strategies.http import close_async_http_client
 
             shutdown_event.set()

@@ -35,6 +35,8 @@ class CrawlerSettings:
     adaptive_min_delay: float = 0.5
     adaptive_max_delay: float = 30.0
     adaptive_latency_factor: float = 1.0
+    cookie_persistence_enabled: bool = False
+    cookie_jar_path: str = "/app/cache/cookie_jar.json"
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -65,4 +67,8 @@ class CrawlerSettings:
             adaptive_min_delay=float(source.get("BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay)),
             adaptive_max_delay=float(source.get("BROWSER_CRAWLER_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay)),
             adaptive_latency_factor=float(source.get("BROWSER_CRAWLER_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor)),
+            cookie_persistence_enabled=_parse_bool_env_value(
+                source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED", "false")
+            ),
+            cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", "/app/cache/cookie_jar.json"),
         )

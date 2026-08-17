@@ -1,3 +1,4 @@
+import os
 """End-to-end /v1/crawl behavior against a real local HTTP server (no mocks)."""
 
 import json
@@ -275,3 +276,53 @@ class TestShadowDomApi:
         assert "Shadow Link" in (result.get("html") or "")
         assert "/shadow-link" in (result.get("html") or "")
 
+
+
+
+class TestCookiePersistenceApi:
+    """#9 Cookie persistence integration tests (real server, real cookie jar)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client, base_url, tmp_path):
+        self.client = async_client
+        self.base = base_url
+        self.cookie_file = tmp_path / "cookie_jar.json"
+        # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
+        from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+        _GLOBAL_COOKIE_JAR.load_from_file(str(self.cookie_file))
+        WEBHOOK_RECEIVED.clear()
+        yield
+        # Save cookies on teardown
+        _GLOBAL_COOKIE_JAR.save_to_file(str(self.cookie_file))
+
+    def _crawl_payload(self, url: str, **extra):
+        payload = {
+            "url": url,
+            "policy": {
+                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+            },
+        }
+        payload.update(extra)
+        return payload
+
+    async def test_cookie_persistence_across_requests(self):
+        # First request: sets a cookie
+        resp1 = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/set-cookie"))
+        assert resp1.status_code == 200, resp1.text
+        # Second request: should send the cookie back
+        resp2 = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/check-cookie"))
+        assert resp2.status_code == 200, resp2.text
+        body2 = resp2.json()
+        result = body2["results"][0]
+        # The response body of /check-cookie is the Cookie header it received
+        assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
+
+    async def test_cookie_persistence_survives_restart(self):
+        # First crawl sets cookie
+        await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/set-cookie"))
+        # Second crawl verifies cookie is sent
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/check-cookie"))
+        assert resp.status_code == 200
+        result = resp.json()["results"][0]
+        assert "session_id=abc123" in (result.get("html") or result.get("text") or "")

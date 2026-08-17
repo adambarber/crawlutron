@@ -128,6 +128,14 @@ def _build_routes() -> dict[str, dict[str, Any]]:
             "headers": {"content-type": "text/html; charset=utf-8"},
             "body": PAGE2_HTML.encode("utf-8"),
         },
+        "/set-cookie": {
+            "status": 200,
+            "headers": {
+                "content-type": "text/plain; charset=utf-8",
+                "set-cookie": "session_id=abc123; Path=/; HttpOnly; SameSite=Lax"
+            },
+            "body": b"cookie set",
+        },
         "/shadow": {
             "status": 200,
             "headers": {"content-type": "text/html; charset=utf-8"},
@@ -235,7 +243,21 @@ class _Handler(BaseHTTPRequestHandler):
     routes = _build_routes()
 
     def _handle(self) -> None:
-        route = self.routes.get(self.path.split("?", 1)[0])
+        path = self.path.split("?", 1)[0]
+
+        # Dynamic route: /check-cookie echoes the received Cookie header
+        if path == "/check-cookie":
+            cookie_header = self.headers.get("Cookie", "")
+            body = cookie_header.encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "text/plain; charset=utf-8")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return
+
+        route = self.routes.get(path)
         if route is None:
             self.send_response(404)
             self.send_header("content-type", "text/plain")

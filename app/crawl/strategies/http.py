@@ -162,6 +162,33 @@ class CookieJar:
     def clear(self) -> None:
         self._cookies.clear()
 
+    def save_to_file(self, path: str) -> None:
+        """Persist the cookie jar to a JSON file."""
+        import json
+        data = {domain: cookies for domain, cookies in self._cookies.items()}
+        # Ensure parent directory exists
+        import os
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    @classmethod
+    def load_from_file(cls, path: str) -> "CookieJar":
+        """Load a cookie jar from a JSON file. Returns empty jar if file missing/invalid."""
+        import json, os
+        jar = cls()
+        if not os.path.exists(path):
+            return jar
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for domain, cookies in data.items():
+                    if isinstance(cookies, dict):
+                        jar._cookies[domain] = cookies
+        except Exception:
+            pass  # corrupted file -> empty jar
+        return jar
 
 # Module-level cookie jar for persistent cross-request cookie storage (#2).
 _GLOBAL_COOKIE_JAR = CookieJar()
