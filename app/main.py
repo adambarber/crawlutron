@@ -19,6 +19,11 @@ from .api_models import (
     CrawlerError,
     CrawlRequest,
     CrawlStrategy,
+    JobControlRequest,
+    JobCreateRequest,
+    JobCreateResponse,
+    JobListResponse,
+    JobStatusResponse,
     MapRequest,
     RenderRequest,
     DiscoveryResponse,
@@ -38,6 +43,7 @@ from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .output_formats import serialize_results
 from .map import build_site_map
+from .crawl.job_store import JobStore, JobStatus
 from .settings import CrawlerSettings
 from .metrics import metrics
 
@@ -62,6 +68,9 @@ from .discovery.well_known import create_well_known_router
 
 
 settings = CrawlerSettings.from_mapping()
+
+# Job store for resumable crawls (#3+#14)
+job_store = JobStore(settings.cache_dir + "/jobs.db")
 logger = configure_service_logging(
     service_name="browser-crawler",
     log_level=settings.log_level,
@@ -514,6 +523,139 @@ if FastAPI is not None:
             ) from error
         finally:
             readiness_state.end_request()
+
+
+    @app.post(
+        "/v1/jobs",
+        tags=["Crawler"],
+        summary="Create a new resumable whole-site crawl job (#3+#14)",
+        description=(
+            "Create a crawl job that recursively discovers and crawls URLs from a root URL. "
+            "The job persists its state (frontier, visited, results) to disk and can be "
+            "paused, resumed, and inspected across restarts. Callers own the job lifecycle."
+        ),
+        responses={422: {"model": CrawlerError, "description": "Invalid job request."}},
+    )
+    async def create_job(payload: JobCreateRequest) -> JobCreateResponse:
+        job = job_store.create(payload.root_url, payload.policy.model_dump(exclude_none=True))
+        return JobCreateResponse(
+            job_id=job.job_id,
+            status=job.status.value,
+            root_url=job.root_url,
+            created_at=job.created_at,
+        )
+
+    @app.get(
+        "/v1/jobs",
+        tags=["Crawler"],
+        summary="List all crawl jobs (#3+#14)",
+        description="Return a list of all crawl jobs with basic status info.",
+    )
+    async def list_jobs() -> JobListResponse:
+        jobs = job_store.list_jobs()
+        return JobListResponse(
+            jobs=[JobStatusResponse(**j) for j in jobs]
+        )
+
+    @app.get(
+        "/v1/jobs/{job_id}",
+        tags=["Crawler"],
+        summary="Get crawl job status and results (#3+#14)",
+        description="Return the full job state including frontier, visited URLs, and results.",
+        responses={404: {"model": CrawlerError, "description": "Job not found."}},
+    )
+    async def get_job(job_id: str) -> JobStatusResponse:
+        job = job_store.load(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
+            )
+        return JobStatusResponse(
+            job_id=job.job_id,
+            root_url=job.root_url,
+            status=job.status.value,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            frontier_size=len(job.frontier),
+            visited_size=len(job.visited),
+            results_count=len(job.results),
+            stats=job.stats,
+            error=job.error,
+        )
+
+    @app.post(
+        "/v1/jobs/{job_id}/control",
+        tags=["Crawler"],
+        summary="Control a crawl job (pause/resume/cancel) (#3+#14)",
+        description="Pause, resume, or cancel a running crawl job.",
+        responses={404: {"model": CrawlerError, "description": "Job not found."},
+                   422: {"model": CrawlerError, "description": "Invalid action."}},
+    )
+    async def control_job(job_id: str, payload: JobControlRequest) -> JobStatusResponse:
+        job = job_store.load(job_id)
+        if job is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
+            )
+
+        action = payload.action.lower()
+        if action == "pause":
+            if job.status != JobStatus.RUNNING:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "invalid_state", "message": "Can only pause a running job"},
+                )
+            job.status = JobStatus.PAUSED
+        elif action == "resume":
+            if job.status != JobStatus.PAUSED:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "invalid_state", "message": "Can only resume a paused job"},
+                )
+            job.status = JobStatus.RUNNING
+        elif action == "cancel":
+            if job.status in {JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED}:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "invalid_state", "message": "Job already terminal"},
+                )
+            job.status = JobStatus.CANCELLED
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_action", "message": f"Unknown action: {action}"},
+            )
+
+        job_store.save(job)
+        return JobStatusResponse(
+            job_id=job.job_id,
+            root_url=job.root_url,
+            status=job.status.value,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            frontier_size=len(job.frontier),
+            visited_size=len(job.visited),
+            results_count=len(job.results),
+            stats=job.stats,
+            error=job.error,
+        )
+
+    @app.delete(
+        "/v1/jobs/{job_id}",
+        tags=["Crawler"],
+        summary="Delete a crawl job (#3+#14)",
+        description="Permanently remove a crawl job and its data.",
+        responses={404: {"model": CrawlerError, "description": "Job not found."}},
+    )
+    async def delete_job(job_id: str) -> dict[str, str]:
+        if not job_store.delete(job_id):
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
+            )
+        return {"status": "deleted", "job_id": job_id}
 
     @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
     async def metrics_endpoint() -> "Response":

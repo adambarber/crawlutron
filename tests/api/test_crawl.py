@@ -326,3 +326,99 @@ class TestCookiePersistenceApi:
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
+
+class TestJobApi:
+    """#3+#14 Job API integration tests (real server)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client, base_url):
+        self.client = async_client
+        self.base = base_url
+        WEBHOOK_RECEIVED.clear()
+
+    async def test_v1_jobs_create_list_get(self):
+        # Create a job
+        resp = await self.client.post("/v1/jobs", json={
+            "root_url": f"{self.base}/",
+            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 10, "max_retries": 0}},
+        })
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        job_id = body["job_id"]
+        assert body["status"] == "pending"
+        assert body["root_url"] == f"{self.base}/"
+
+        # List jobs
+        resp2 = await self.client.get("/v1/jobs")
+        assert resp2.status_code == 200
+        jobs = resp2.json()["jobs"]
+        assert len(jobs) >= 1
+        assert any(j["job_id"] == job_id for j in jobs)
+
+        # Get job
+        resp3 = await self.client.get(f"/v1/jobs/{job_id}")
+        assert resp3.status_code == 200
+        job = resp3.json()
+        assert job["job_id"] == job_id
+        assert job["status"] == "pending"
+        assert job["frontier_size"] == 1
+
+    async def test_v1_jobs_control_pause_resume_cancel(self):
+        resp = await self.client.post("/v1/jobs", json={
+            "root_url": f"{self.base}/",
+            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+        })
+        job_id = resp.json()["job_id"]
+
+        # Cannot pause a pending job
+        resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
+        assert resp_pause.status_code == 422
+
+        # Manually set to running (simulating engine starting it)
+        from app.crawl.job_store import JobStatus
+        from app.main import job_store
+        job = job_store.load(job_id)
+        job.status = JobStatus.RUNNING
+        job_store.save(job)
+
+        # Pause
+        resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
+        assert resp_pause.status_code == 200
+        assert resp_pause.json()["status"] == "paused"
+
+        # Resume
+        resp_resume = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "resume"})
+        assert resp_resume.status_code == 200
+        assert resp_resume.json()["status"] == "running"
+
+        # Cancel
+        resp_cancel = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
+        assert resp_cancel.status_code == 200
+        assert resp_cancel.json()["status"] == "cancelled"
+
+    async def test_v1_jobs_delete(self):
+        resp = await self.client.post("/v1/jobs", json={
+            "root_url": f"{self.base}/",
+            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+        })
+        job_id = resp.json()["job_id"]
+
+        resp_del = await self.client.delete(f"/v1/jobs/{job_id}")
+        assert resp_del.status_code == 200
+        assert resp_del.json()["status"] == "deleted"
+
+        # Verify deleted
+        resp_get = await self.client.get(f"/v1/jobs/{job_id}")
+        assert resp_get.status_code == 404
+
+    async def test_v1_jobs_invalid_action(self):
+        resp = await self.client.post("/v1/jobs", json={
+            "root_url": f"{self.base}/",
+            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+        })
+        job_id = resp.json()["job_id"]
+
+        resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
+        assert resp_bad.status_code == 422
+        assert "invalid_action" in resp_bad.json()["detail"]["code"]
+

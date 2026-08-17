@@ -318,3 +318,56 @@ class DiscoveryResponse(BaseModel):
     links: dict[str, str]
     recommended_endpoints: list[str]
     description: str
+
+class JobCreateRequest(BaseModel):
+    """Create a new resumable whole-site crawl job (#3+#14)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    root_url: str = Field(..., description="Root public HTTP(S) URL to crawl recursively.")
+    policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Crawl policy (strategies, limits, scope_regex, extraction).")
+
+
+class JobCreateResponse(BaseModel):
+    """Response from creating a crawl job."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str = Field(..., description="Unique job identifier.")
+    status: str = Field(..., description="Initial job status (always 'pending').")
+    root_url: str
+    created_at: float
+
+
+class JobStatusResponse(BaseModel):
+    """Status of a crawl job."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    root_url: str
+    status: str
+    created_at: float
+    updated_at: float
+    frontier_size: int
+    visited_size: int
+    results_count: int
+    stats: dict[str, int] = Field(default_factory=dict)
+    error: str | None = None
+
+
+class JobListResponse(BaseModel):
+    """List of crawl jobs."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    jobs: list[JobStatusResponse]
+
+
+class JobControlRequest(BaseModel):
+    """Control a crawl job (pause/resume/cancel)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    action: str = Field(..., description="One of: pause, resume, cancel.")
+
