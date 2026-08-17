@@ -69,6 +69,22 @@ LAZY_HTML = """<!doctype html>
 </body></html>
 """
 
+SHADOW_HTML = """<!doctype html>
+<html lang="en"><head><title>Shadow Page</title></head>
+<body>
+  <h1>Shadow Host</h1>
+  <div id="host"></div>
+  <script>
+    var host = document.getElementById('host');
+    var sr = host.attachShadow({mode: 'open'});
+    var a = document.createElement('a');
+    a.href = '/shadow-link';
+    a.textContent = 'Shadow Link';
+    sr.appendChild(a);
+  </script>
+</body></html>
+"""
+
 BLOG_HTML = """<!doctype html>
 <html><head>
   <title>Blog</title>
@@ -111,6 +127,11 @@ def _build_routes() -> dict[str, dict[str, Any]]:
             "status": 200,
             "headers": {"content-type": "text/html; charset=utf-8"},
             "body": PAGE2_HTML.encode("utf-8"),
+        },
+        "/shadow": {
+            "status": 200,
+            "headers": {"content-type": "text/html; charset=utf-8"},
+            "body": SHADOW_HTML.encode("utf-8"),
         },
         "/dynamic": {
             "status": 200,

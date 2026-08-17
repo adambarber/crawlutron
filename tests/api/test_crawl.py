@@ -250,3 +250,28 @@ class TestMapApi:
         resp = await self.client.post("/v1/map", json={"policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}})
         assert resp.status_code == 422
 
+class TestShadowDomApi:
+    """#25 Shadow-DOM flattening via browser renderer (real camoufox)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client, base_url):
+        self.client = async_client
+        self.base = base_url
+        WEBHOOK_RECEIVED.clear()
+
+    async def test_v1_crawl_shadow_dom_flattened(self):
+        resp = await self.client.post("/v1/crawl", json={
+            "url": f"{self.base}/shadow",
+            "policy": {
+                "strategies": ["BROWSER_HEADLESS"],
+                "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+            },
+        })
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        result = body["results"][0]
+        assert result["status"] == "success"
+        # After flattening, the shadow-root anchor is in the HTML and extracted.
+        assert "Shadow Link" in (result.get("html") or "")
+        assert "/shadow-link" in (result.get("html") or "")
+

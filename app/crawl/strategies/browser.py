@@ -193,6 +193,10 @@ class BrowserRenderer:
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
             await self._lazy_load_scroll(page)
 
+            # Shadow-DOM flattening (#25): inline open shadow roots so their links
+            # and visible text are reachable by the standard HTML/text extractors.
+            await self._flatten_shadow_dom(page)
+
             # Extract with challenge waiting
             html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
 
@@ -398,6 +402,43 @@ class BrowserRenderer:
             return await page.evaluate("() => document.body ? document.body.innerText : ''")
         except Exception:
             return ""
+
+    async def _flatten_shadow_dom(self, page: Any) -> None:
+        # #25: move the children of every open shadow root into its light-DOM host
+        # so that page.content() (and thus link/text extraction) includes shadow-DOM
+        # content. Closed shadow roots are not accessible and are left untouched.
+        # Nested shadow roots are handled by recursing into each shadow root before
+        # its children are moved.
+        try:
+            await page.evaluate(
+                """() => {
+                    const collect = (root, acc) => {
+                        const els = root.querySelectorAll ? root.querySelectorAll('*') : [];
+                        for (const el of els) {
+                            acc.push(el);
+                            if (el.shadowRoot && el.shadowRoot.mode === 'open') {
+                                collect(el.shadowRoot, acc);
+                            }
+                        }
+                    };
+                    const all = [];
+                    collect(document, all);
+                    for (const el of all) {
+                        const sr = el.shadowRoot;
+                        if (sr && sr.mode === 'open') {
+                            const kids = Array.from(sr.childNodes);
+                            for (const k of kids) {
+                                if (k.nodeType === 1) {
+                                    el.appendChild(document.importNode(k, true));
+                                }
+                            }
+                        }
+                    }
+                    return true;
+                }"""
+            )
+        except Exception:  # flattening is best-effort; never fail a render over it
+            pass
 
     def _failure_result(
         self,
