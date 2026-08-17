@@ -61,3 +61,38 @@ EXTRACTION_METHOD_DOCUMENT: str = "document_extract"
 EXTRACTION_METHOD_TRAFILATURA: str = "trafilatura_extract"
 EXTRACTION_METHOD_DOM_TEXT: str = "dom_text"
 EXTRACTION_METHOD_BINARY_NO_TEXT: str = "binary_no_text"
+
+
+# ---------------------------------------------------------------------------
+# Classification groupings (consumed by HTTP/browser strategy status mappers
+# and the test suite). Centralized so the HTTP vs browser blocked sets cannot
+# silently drift apart across modules.
+# ---------------------------------------------------------------------------
+SUCCESS_CLASSIFICATIONS: frozenset[str] = frozenset({"rendered"})
+
+HTTP_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
+    {
+        "captcha_detected",
+        "bot_challenge_detected",
+        "access_denied",
+        "login_required",
+        "paywall_detected",
+        "rate_limited",
+        "cookie_consent_required",
+        "javascript_required",
+        "unsupported_browser",
+        "geolocation_blocked",
+        "waf_challenge_detected",
+    }
+)
+
+BROWSER_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
+    {
+        "captcha_detected",
+        "bot_challenge_detected",
+        "access_denied",
+        "login_required",
+        "paywall_detected",
+        "rate_limited",
+    }
+)

@@ -13,7 +13,7 @@ from typing import Any
 # allow loopback crawl targets in this process too
 os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
 
-from app.classify import classify_rendered_page_with_evidence
+from app.classify import classify_page_with_evidence
 from app.crawl.cache import HttpCache
 from app.crawl.decompression import decompress_body
 from app.crawl.engine import (
@@ -22,7 +22,6 @@ from app.crawl.engine import (
     EXTRACTION_TRAFILATURA,
     _execute_crawl_chain,
     _payload_policy,
-    _result_dict,
     crawl_request,
 )
 from app.crawl.extraction import (
@@ -53,7 +52,7 @@ from app.crawl.strategies.http import (
     _decode_body,
 )
 from app.constants import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
-from app.models import CrawlJob, CrawlResult, RenderOptions
+from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.service import render_request
 from app.validation import normalize_public_http_url, registrable_domain
 from helpers import ServerTestCase
@@ -136,7 +135,7 @@ class TestCacheGaps(unittest.TestCase):
 
 class TestClassifyGaps(unittest.TestCase):
     def test_html_without_script_style_signal(self):
-        classification, evidence = classify_rendered_page_with_evidence(
+        classification, evidence = classify_page_with_evidence(
             "<html><!-- access denied --></html>", "clean visible text",
         )
         self.assertEqual(classification, "access_denied")
@@ -343,7 +342,7 @@ class TestEngineGaps(unittest.TestCase):
         return worker
 
     def test_result_dict(self):
-        d = _result_dict(CrawlResult(url="http://x/", status="success", classification="rendered",
+        d = to_dict(CrawlResult(url="http://x/", status="success", classification="rendered",
                                     final_url="http://x/", html=None, text="t", attempts=1,
                                     elapsed_ms=1, domain="x", metadata={}))
         self.assertEqual(d["url"], "http://x/")

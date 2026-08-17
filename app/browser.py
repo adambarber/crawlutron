@@ -7,7 +7,7 @@ callers and tests.
 """
 
 from app.crawl.strategies.browser import (
-    BLOCKED_CLASSIFICATIONS,
+    BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     TRANSIENT_CLASSIFICATIONS,
     BrowserRenderer,
@@ -15,7 +15,7 @@ from app.crawl.strategies.browser import (
 
 __all__ = [
     "BrowserRenderer",
-    "BLOCKED_CLASSIFICATIONS",
+    "BROWSER_BLOCKED_CLASSIFICATIONS",
     "FAILED_CLASSIFICATIONS",
     "TRANSIENT_CLASSIFICATIONS",
 ]

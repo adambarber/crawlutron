@@ -6,9 +6,9 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
-from .models import CrawlJob, CrawlResult, UniversalCrawlResult, CrawlStrategyAttempt
+from .models import CrawlJob, CrawlResult, EngineCrawlResult, CrawlStrategyAttempt
 
-CrawlWorker = Callable[[CrawlJob], Awaitable[UniversalCrawlResult]]
+SchedulerWorker = Callable[[CrawlJob], Awaitable[EngineCrawlResult]]
 
 
 class _TokenBucket:
@@ -100,7 +100,7 @@ class DomainScheduler:
         now_mono = time.monotonic()
         self._circuit_open_until = {d: exp for d, exp in self._circuit_open_until.items() if exp > now_mono}
 
-    async def run(self, jobs: list[CrawlJob], worker: CrawlWorker) -> list[UniversalCrawlResult]:
+    async def run(self, jobs: list[CrawlJob], worker: SchedulerWorker) -> list[EngineCrawlResult]:
         # Purge stale state up front so dicts cannot grow without bound.
         self._purge_expired()
         global_gate = asyncio.Semaphore(self._global_limit)
@@ -108,7 +108,7 @@ class DomainScheduler:
             lambda: asyncio.Semaphore(self._per_domain_limit),
         )
         result_count = max((job.index for job in jobs), default=-1) + 1
-        results: list[UniversalCrawlResult | None] = [None] * result_count
+        results: list[EngineCrawlResult | None] = [None] * result_count
 
         async def run_one(job: CrawlJob) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global
@@ -122,7 +122,7 @@ class DomainScheduler:
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
-                results[job.index] = UniversalCrawlResult(
+                results[job.index] = EngineCrawlResult(
                     original_url=job.url,
                     normalized_url=job.normalized_url,
                     final_url=None,

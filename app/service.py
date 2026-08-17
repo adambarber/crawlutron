@@ -22,17 +22,13 @@ import uuid
 from typing import Any
 
 from app.validation import normalize_public_http_url, registrable_domain
-from collections.abc import Awaitable, Callable
-from dataclasses import asdict
-from typing import Any
 
 from app.crawl.engine import (
-    CrawlExecutionJob,
+    CrawlTask,
     _call_worker,
     _execute_crawl_chain,
     _payload_policy,
     _payload_urls,
-    _universal_result_dict,
     crawl_request,
 )
 from app.crawl.extraction import (
@@ -57,12 +53,15 @@ from app.crawl.strategies.http import (
     _should_join_document_paragraph,
     _collect_document_item_lines,
 )
-from app.models import CrawlJob, CrawlResult, RenderOptions
+from app.models import (
+    CrawlJob,
+    CrawlResult,
+    RenderOptions,
+    CrawlWorker,
+    to_dict,
+)
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-
-
-CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
 
 
 def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
@@ -136,11 +135,7 @@ async def render_request(
     return {
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
         "submitted_count": len(urls),
-        "results": [_result_dict(result) for result in ordered_results],
+        "results": [to_dict(result) for result in ordered_results],
     }
 
 
-
-
-def _result_dict(result: CrawlResult) -> dict[str, Any]:
-    return asdict(result)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
 
-from app.models import CrawlStrategyAttempt, HttpFetchResult, UniversalCrawlResult  # noqa: E402
+from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult  # noqa: E402
 from app.constants import (
     BROWSER_HEADLESS,
     BROWSER_HEADED_WARMED,

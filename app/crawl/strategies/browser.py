@@ -17,11 +17,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from app.classify import classify_rendered_page
+from app.classify import classify_page
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
 from app.crawl.strategies.http import CookieJar, _check_ssrf_protection
 from app.validation import registrable_domain
+from app.constants import BROWSER_BLOCKED_CLASSIFICATIONS
 
 
 TRANSIENT_CLASSIFICATIONS = {
@@ -32,7 +33,7 @@ TRANSIENT_CLASSIFICATIONS = {
     "dns_error",
     "unknown_error",
 }
-BLOCKED_CLASSIFICATIONS = {
+BROWSER_BLOCKED_CLASSIFICATIONS = {
     "captcha_detected",
     "bot_challenge_detected",
     "access_denied",
@@ -203,7 +204,7 @@ class BrowserRenderer:
                 text = self._pdf_text_extractor(final_url)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
-                classification = classify_rendered_page(html, text, title=title)
+                classification = classify_page(html, text, title=title)
                 extraction_method = "pdf_text"
 
             status = self._status_for_classification(classification)
@@ -360,7 +361,7 @@ class BrowserRenderer:
         html = await self._extract_html(page) if options.include_html else None
         text = await self._extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
-        classification = classify_rendered_page(html, text, title=title)
+        classification = classify_page(html, text, title=title)
 
         if classification != "bot_challenge_detected":
             return html, text, classification, False
@@ -372,7 +373,7 @@ class BrowserRenderer:
             next_html = await self._extract_html(page) if options.include_html else None
             next_text = await self._extract_text(page) if options.include_text else None
             next_title = await page.evaluate("() => document.title")
-            next_classification = classify_rendered_page(next_html, next_text, title=next_title)
+            next_classification = classify_page(next_html, next_text, title=next_title)
             if next_classification != "bot_challenge_detected":
                 return next_html, next_text, next_classification, True
             html, text, classification = next_html, next_text, next_classification
@@ -438,7 +439,7 @@ class BrowserRenderer:
     def _status_for_classification(self, classification: str) -> str:
         if classification == "rendered":
             return "success"
-        if classification in BLOCKED_CLASSIFICATIONS:
+        if classification in BROWSER_BLOCKED_CLASSIFICATIONS:
             return "blocked"
         if classification in FAILED_CLASSIFICATIONS:
             return "failed"

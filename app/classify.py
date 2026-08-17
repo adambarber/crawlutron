@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
     ("captcha_detected", ("captcha", "verify you are human", "human verification")),
     (
@@ -32,12 +32,12 @@ SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def classify_rendered_page(html: str | None, text: str | None, *, title: str | None = None) -> str:
-    classification, _evidence = classify_rendered_page_with_evidence(html, text, title=title)
+def classify_page(html: str | None, text: str | None, *, title: str | None = None) -> str:
+    classification, _evidence = classify_page_with_evidence(html, text, title=title)
     return classification
 
 
-def classify_rendered_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
+def classify_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = _html_without_script_and_style(html).lower()
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
@@ -49,7 +49,7 @@ def classify_rendered_page_with_evidence(html: str | None, text: str | None, *, 
                 "context": "",
             }
         ]
-    for classification, signatures in SIGNATURES:
+    for classification, signatures in CLASSIFICATION_SIGNATURES:
         for signature in signatures:
             visible_index = visible_haystack.find(signature)
             if visible_index >= 0:

@@ -1,7 +1,7 @@
 """Tests for browser.py module."""
 
 from app.browser import (
-    BLOCKED_CLASSIFICATIONS,
+    BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     BrowserRenderer,
 )
@@ -13,7 +13,7 @@ class TestBrowserRendererStatus:
 
     def test_status_for_classification_blocked(self):
         renderer = BrowserRenderer()
-        for classification in BLOCKED_CLASSIFICATIONS:
+        for classification in BROWSER_BLOCKED_CLASSIFICATIONS:
             assert renderer._status_for_classification(classification) == "blocked"
 
     def test_status_for_classification_failed(self):

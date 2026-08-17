@@ -46,8 +46,8 @@ def normalize_public_http_url(url: str) -> str:
     if port == default_port:
         port = None
     netloc = host if port is None else f"{host}:{port}"
-    path = _strip_source_colon(parsed.path or "").rstrip("/")
-    query = _strip_source_colon(parsed.query)
+    path = _strip_trailing_colon(parsed.path or "").rstrip("/")
+    query = _strip_trailing_colon(parsed.query)
     if query:
         # Sort query parameters so that URLs differing only in parameter order
         # canonicalize to the same string (Katana-style deep normalization).
@@ -57,7 +57,7 @@ def normalize_public_http_url(url: str) -> str:
     return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
 
 
-def _strip_source_colon(value: str) -> str:
+def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
 
 

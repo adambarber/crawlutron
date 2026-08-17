@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from app.constants import (
@@ -125,7 +126,7 @@ class DiscoveredLink:
 
 
 @dataclass(frozen=True)
-class UniversalCrawlResult:
+class EngineCrawlResult:
     original_url: str
     normalized_url: str | None
     final_url: str | None
@@ -148,3 +149,18 @@ class UniversalCrawlResult:
     error: str | None = None
     markdown: str | None = None
     next_page_url: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Shared callable aliases (single source of truth for worker/fetcher types).
+# `CrawlWorker` is the per-URL render/strategy worker used by the engine and
+# service layers; `SchedulerWorker` (defined in app.scheduler) is the worker the
+# domain scheduler drives, which returns the internal engine result.
+# ---------------------------------------------------------------------------
+CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
+HttpFetcher = Callable[[str, dict[str, str], int], Any]
+
+
+def to_dict(result: Any) -> dict[str, Any]:
+    """Return a JSON-serializable dict for any frozen-dataclass crawl result."""
+    return asdict(result)

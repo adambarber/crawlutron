@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 import pytest
-from app.models import CrawlJob, CrawlStrategyAttempt, UniversalCrawlResult
+from app.models import CrawlJob, CrawlStrategyAttempt, EngineCrawlResult
 from app.scheduler import DomainScheduler
 
 
@@ -14,8 +14,8 @@ def make_job(index: int, url: str) -> CrawlJob:
     return CrawlJob(index=index, url=url, domain=url.split("/")[2], options=None)
 
 
-def _make_result(url: str, domain: str) -> UniversalCrawlResult:
-    return UniversalCrawlResult(
+def _make_result(url: str, domain: str) -> EngineCrawlResult:
+    return EngineCrawlResult(
         original_url=url,
         normalized_url=url,
         final_url=url,

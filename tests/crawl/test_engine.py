@@ -6,12 +6,12 @@ import pytest
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _filter_links_by_scope, crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import CrawlStrategyAttempt, DiscoveredLink, UniversalCrawlResult
+from app.models import CrawlStrategyAttempt, DiscoveredLink, EngineCrawlResult
 from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
 
 
 def make_result(links):
-    return UniversalCrawlResult(
+    return EngineCrawlResult(
         original_url="https://example.com/",
         normalized_url="https://example.com/",
         final_url="https://example.com/",

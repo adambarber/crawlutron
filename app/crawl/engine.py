@@ -14,11 +14,10 @@ import re
 import time
 import uuid
 from urllib.parse import urljoin, urlparse
-from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
-from app.classify import classify_rendered_page_with_evidence
+from app.classify import classify_page_with_evidence
 from app.constants import (
     BROWSER_HEADLESS,
     BROWSER_HEADED_WARMED,
@@ -37,6 +36,8 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
+    HTTP_STRATEGIES,
+    BROWSER_STRATEGIES,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.extraction import (
@@ -55,45 +56,30 @@ from app.crawl.strategies.http import (
     _http_strategy_result,
     _quality_score,
 )
-from app.models import CrawlJob, CrawlResult, CrawlStrategyAttempt, RenderOptions, UniversalCrawlResult
+from app.models import (
+    CrawlJob,
+    CrawlResult,
+    CrawlStrategyAttempt,
+    RenderOptions,
+    EngineCrawlResult,
+    CrawlWorker,
+    HttpFetcher,
+    to_dict,
+)
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
 
 
-CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
-HttpFetcher = Callable[[str, dict[str, str], int], Any]
-
-
 @dataclass(frozen=True)
-class CrawlExecutionJob:
+class CrawlTask:
     index: int
     original_url: str
     normalized_url: str
     domain: str
 
 
-SUCCESS_CLASSIFICATIONS = {"rendered"}
-BLOCKED_CLASSIFICATIONS = {
-    "captcha_detected",
-    "bot_challenge_detected",
-    "access_denied",
-    "login_required",
-    "paywall_detected",
-    "rate_limited",
-    "cookie_consent_required",
-    "javascript_required",
-    "unsupported_browser",
-    "geolocation_blocked",
-    "waf_challenge_detected",
-    "not_modified",
-}
-HTTP_STRATEGIES = {HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE}
-BROWSER_STRATEGIES = {BROWSER_HEADLESS, BROWSER_HEADED_WARMED}
-SUPPORTED_CRAWL_STRATEGIES = HTTP_STRATEGIES | BROWSER_STRATEGIES
-DEFAULT_CRAWL_STRATEGIES = list(DEFAULT_STRATEGIES)
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
-DEFAULT_EXTRACTION = DEFAULT_EXTRACTION
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -122,10 +108,10 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     headers = policy.get("headers") or {}
     if not isinstance(headers, dict):
         raise ValueError("invalid_policy_headers")
-    strategies = policy.get("strategies") or DEFAULT_CRAWL_STRATEGIES
+    strategies = policy.get("strategies") or DEFAULT_STRATEGIES
     if not isinstance(strategies, list) or not all(isinstance(strategy, str) for strategy in strategies) or not strategies:
         raise ValueError("invalid_policy_strategies")
-    if any(strategy not in SUPPORTED_CRAWL_STRATEGIES for strategy in strategies):
+    if any(strategy not in SUPPORTED_STRATEGIES for strategy in strategies):
         raise ValueError("invalid_policy_strategy")
     extraction = policy.get("extraction") or DEFAULT_EXTRACTION
     if extraction not in SUPPORTED_EXTRACTION_METHODS:
@@ -171,15 +157,8 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
     return await asyncio.to_thread(worker, job)
 
 
-def _result_dict(result: CrawlResult) -> dict[str, Any]:
-    return asdict(result)
 
-
-def _universal_result_dict(result: UniversalCrawlResult) -> dict[str, Any]:
-    return asdict(result)
-
-
-def _filter_links_by_scope(result: UniversalCrawlResult, scope_regex: str | None) -> UniversalCrawlResult:
+def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -> EngineCrawlResult:
     if not scope_regex:
         return result
     try:
@@ -187,7 +166,7 @@ def _filter_links_by_scope(result: UniversalCrawlResult, scope_regex: str | None
     except re.error:
         return result
     filtered = [link for link in result.discovered_links if pattern.search(link.normalized_url)]
-    return UniversalCrawlResult(
+    return EngineCrawlResult(
         **{
             **asdict(result),
             "discovered_links": filtered,
@@ -205,7 +184,7 @@ async def _browser_strategy_result(
     strategy: str,
     policy: dict[str, Any],
     browser_worker: CrawlWorker,
-) -> UniversalCrawlResult:
+) -> EngineCrawlResult:
     options = RenderOptions(
         timeout_seconds=policy["limits"]["timeout_seconds"],
         max_retries=policy["limits"]["max_retries"],
@@ -273,7 +252,7 @@ async def _browser_strategy_result(
         elapsed_ms=result.elapsed_ms,
         error=result.error,
     )
-    return UniversalCrawlResult(
+    return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=result.final_url,
@@ -310,9 +289,9 @@ async def _execute_crawl_chain(
     cache: HttpCache | None = None,
     scheduler: DomainScheduler | None = None,
     domain: str = "",
-) -> UniversalCrawlResult:
+) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
-    last_result: UniversalCrawlResult | None = None
+    last_result: EngineCrawlResult | None = None
     for strategy in policy["strategies"]:
         if strategy in HTTP_STRATEGIES:
             strategy_fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
@@ -326,7 +305,7 @@ async def _execute_crawl_chain(
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
-                result = UniversalCrawlResult(
+                result = EngineCrawlResult(
                     original_url=original_url,
                     normalized_url=normalized_url,
                     final_url=None,
@@ -363,7 +342,7 @@ async def _execute_crawl_chain(
                     browser_worker=browser_worker,
                 )
         else:
-            result = UniversalCrawlResult(
+            result = EngineCrawlResult(
                 original_url=original_url,
                 normalized_url=normalized_url,
                 final_url=None,
@@ -399,10 +378,10 @@ async def _execute_crawl_chain(
                 scheduler.set_domain_cooldown(domain, float(retry_after))
         if result.status == "success" and result.quality_score > 0:
             scoped = _filter_links_by_scope(result, policy.get("scope_regex"))
-            return UniversalCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(UniversalCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+            return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
     assert last_result is not None
     scoped = _filter_links_by_scope(last_result, policy.get("scope_regex"))
-    return UniversalCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(UniversalCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+    return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
 
 
 async def crawl_request(
@@ -425,14 +404,14 @@ async def crawl_request(
     cffi = cffi_fetcher or _default_cffi_fetcher
     shutdown_event = shutdown_event or asyncio.Event()
 
-    jobs: list[CrawlExecutionJob] = []
+    jobs: list[CrawlTask] = []
     for index, original_url in enumerate(urls):
         try:
             normalized_url = normalize_public_http_url(original_url)
             domain = registrable_domain(normalized_url)
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
-        jobs.append(CrawlExecutionJob(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain))
+        jobs.append(CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain))
 
     # Limits are the same for all jobs; extract once for scheduler config
     limits = policy.get("limits", {})
@@ -443,7 +422,7 @@ async def crawl_request(
         max_rps=float(limits.get("max_rps", 0) or 0),
     )
 
-    async def run_job(job: CrawlExecutionJob) -> tuple[int, UniversalCrawlResult]:
+    async def run_job(job: CrawlTask) -> tuple[int, EngineCrawlResult]:
         index = job.index
         original_url = job.original_url
         normalized_url = job.normalized_url
@@ -529,7 +508,7 @@ async def crawl_request(
         origin = f"{parsed.scheme}://{parsed.netloc}"
         return _robots_allows(target_url, await _fetch_robots_rules(origin))
 
-    def _robots_disallowed_result(job: CrawlExecutionJob) -> UniversalCrawlResult:
+    def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
         attempt = CrawlStrategyAttempt(
             strategy="HTTP_DECLARED_CRAWLER",  # type: ignore[arg-type]
             status="skipped",
@@ -539,7 +518,7 @@ async def crawl_request(
             elapsed_ms=0,
             error="robots_txt_disallowed",
         )
-        return UniversalCrawlResult(
+        return EngineCrawlResult(
             original_url=job.original_url,
             normalized_url=job.normalized_url,
             final_url=None,
@@ -596,15 +575,15 @@ async def crawl_request(
     recursive = max_depth > 0
 
     if not recursive:
-        by_index: dict[int, UniversalCrawlResult] = {}
-        allowed_jobs: list[CrawlExecutionJob] = []
+        by_index: dict[int, EngineCrawlResult] = {}
+        allowed_jobs: list[CrawlTask] = []
         for job in jobs:
             if respect_robots and not await _robots_allows_target(job.normalized_url):
                 by_index[job.index] = _robots_disallowed_result(job)
             else:
                 allowed_jobs.append(job)
 
-        async def _worker(job: CrawlExecutionJob) -> UniversalCrawlResult:
+        async def _worker(job: CrawlTask) -> EngineCrawlResult:
             _, result = await run_job(job)
             return result
 
@@ -612,9 +591,9 @@ async def crawl_request(
         for job, result in zip(allowed_jobs, scheduled_results):
             by_index[job.index] = result
     else:
-        by_index: dict[int, UniversalCrawlResult] = {}
+        by_index: dict[int, EngineCrawlResult] = {}
         visited: set[str] = set()
-        frontier: list[tuple[int, CrawlExecutionJob]] = [(0, job) for job in jobs]
+        frontier: list[tuple[int, CrawlTask]] = [(0, job) for job in jobs]
         next_index = len(jobs)
         page_count = 0
         # bounded recursive BFS (#11) seeded by sitemaps (#13)
@@ -623,7 +602,7 @@ async def crawl_request(
                 if seed in visited:
                     continue
                 frontier.append(
-                    (0, CrawlExecutionJob(index=next_index, original_url=seed, normalized_url=seed, domain=registrable_domain(seed)))
+                    (0, CrawlTask(index=next_index, original_url=seed, normalized_url=seed, domain=registrable_domain(seed)))
                 )
                 next_index += 1
         while frontier and (max_pages == 0 or page_count < max_pages):
@@ -655,7 +634,7 @@ async def crawl_request(
                 frontier.append(
                     (
                         depth + 1,
-                        CrawlExecutionJob(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
+                        CrawlTask(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
                     )
                 )
                 next_index += 1
@@ -670,7 +649,7 @@ async def crawl_request(
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
         "submitted_count": len(urls),
         "policy_schema_version": policy["schema_version"],
-        "results": [_universal_result_dict(result) for result in ordered_results],
+        "results": [to_dict(result) for result in ordered_results],
     }
     if webhook_url is not None:
         response["webhook_url"] = webhook_url

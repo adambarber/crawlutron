@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-def _bool(value: str) -> bool:
+def _parse_bool_env_value(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -37,7 +37,7 @@ class CrawlerSettings:
             max_batch_size=int(source.get("BROWSER_CRAWLER_MAX_BATCH_SIZE", cls.max_batch_size)),
             default_timeout_seconds=int(source.get("BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS", cls.default_timeout_seconds)),
             default_max_retries=int(source.get("BROWSER_CRAWLER_DEFAULT_MAX_RETRIES", cls.default_max_retries)),
-            respect_robots=_bool(source.get("BROWSER_CRAWLER_RESPECT_ROBOTS", str(cls.respect_robots))),
+            respect_robots=_parse_bool_env_value(source.get("BROWSER_CRAWLER_RESPECT_ROBOTS", str(cls.respect_robots))),
             allowed_hosts=source.get("BROWSER_CRAWLER_ALLOWED_HOSTS", cls.allowed_hosts),
             denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
             log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),

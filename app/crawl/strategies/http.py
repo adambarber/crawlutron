@@ -7,7 +7,6 @@ import inspect
 import re
 import socket
 import time
-from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from typing import Any
 
@@ -20,7 +19,7 @@ except ImportError:
     _charset_from_bytes = None  # type: ignore[assignment]
 import urllib.request
 
-from app.classify import classify_rendered_page_with_evidence
+from app.classify import classify_page_with_evidence
 from app.constants import (
     DEFAULT_EXTRACTION,
     EXTRACTION_DOCUMENT,
@@ -33,6 +32,8 @@ from app.constants import (
     EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
     HTTP_CFFI_IMPERSONATE,
+    SUCCESS_CLASSIFICATIONS,
+    HTTP_BLOCKED_CLASSIFICATIONS,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.decompression import decompress_body as _decompress_body
@@ -45,12 +46,9 @@ from app.crawl.extraction import (
     extract_js_endpoints,
     extract_content,
 )
-from app.models import CrawlStrategyAttempt, HttpFetchResult, UniversalCrawlResult
+from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult, HttpFetcher
 from app.validation import normalize_public_http_url, registrable_domain
 from urllib.parse import urljoin, urlparse
-
-
-HttpFetcher = Callable[[str, dict[str, str], int], Any]
 
 
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
@@ -171,20 +169,6 @@ def _check_ssrf_protection(url: str) -> None:
             raise ValueError(f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}")
 
 
-SUCCESS_CLASSIFICATIONS = {"rendered"}
-BLOCKED_CLASSIFICATIONS = {
-    "captcha_detected",
-    "bot_challenge_detected",
-    "access_denied",
-    "login_required",
-    "paywall_detected",
-    "rate_limited",
-    "cookie_consent_required",
-    "javascript_required",
-    "unsupported_browser",
-    "geolocation_blocked",
-    "waf_challenge_detected",
-}
 
 
 async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
@@ -347,7 +331,7 @@ def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] 
 def _status_for_classification(classification: str) -> str:
     if classification in SUCCESS_CLASSIFICATIONS:
         return "success"
-    if classification in BLOCKED_CLASSIFICATIONS:
+    if classification in HTTP_BLOCKED_CLASSIFICATIONS:
         return "blocked"
     if classification == "not_modified":
         return "success"
@@ -448,7 +432,7 @@ def _binary_no_text_result(
     headers: dict[str, str],
     content_type: str | None,
     elapsed_ms: int,
-) -> UniversalCrawlResult:
+) -> EngineCrawlResult:
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status="failed",
@@ -458,7 +442,7 @@ def _binary_no_text_result(
         elapsed_ms=elapsed_ms,
         error=EXTRACTION_METHOD_BINARY_NO_TEXT,
     )
-    return UniversalCrawlResult(
+    return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=final_url,
@@ -552,7 +536,7 @@ async def _http_strategy_result(
     policy: dict[str, Any],
     http_fetcher: Any,
     cache: HttpCache | None = None,
-) -> UniversalCrawlResult:
+) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
     # Provide default limits for backward compatibility with tests
@@ -585,7 +569,7 @@ async def _http_strategy_result(
                 elapsed_ms=elapsed_ms,
                 error=None,
             )
-            return UniversalCrawlResult(
+            return EngineCrawlResult(
                 original_url=original_url,
                 normalized_url=normalized_url,
                 final_url=response.final_url,
@@ -623,7 +607,7 @@ async def _http_strategy_result(
                 content_type=content_type,
                 elapsed_ms=response.elapsed_ms,
             )
-            return UniversalCrawlResult(**{**asdict(result), "diagnostics": {"retry": retry_diagnostics}})
+            return EngineCrawlResult(**{**asdict(result), "diagnostics": {"retry": retry_diagnostics}})
         decompressed = _decompress_body(response.body, headers.get("content-encoding", ""))
         body_text = _decode_body(decompressed, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
@@ -651,7 +635,7 @@ async def _http_strategy_result(
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY
-        classification, classification_evidence = classify_rendered_page_with_evidence(html, text)
+        classification, classification_evidence = classify_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
             classification_evidence = [{"classification": "access_denied", "signature": "403", "source": "http_status", "context": "HTTP 403"}]
@@ -712,7 +696,7 @@ async def _http_strategy_result(
             elapsed_ms=response.elapsed_ms,
             error=None if status == "success" else classification,
         )
-        return UniversalCrawlResult(
+        return EngineCrawlResult(
             original_url=original_url,
             normalized_url=normalized_url,
             final_url=response.final_url,
@@ -747,7 +731,7 @@ async def _http_strategy_result(
             elapsed_ms=elapsed_ms,
             error=str(error),
         )
-        return UniversalCrawlResult(
+        return EngineCrawlResult(
             original_url=original_url,
             normalized_url=normalized_url,
             final_url=None,
