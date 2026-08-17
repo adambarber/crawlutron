@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1.7
+# Build context is the `docker/` directory (parent of all services) so the shared
+# local_service_logging.py module is reachable without an external build context.
 ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
@@ -20,7 +22,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies to a standard local directory
-COPY requirements.txt .
+COPY browser-crawler/requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --user -r requirements.txt
 
@@ -73,9 +75,9 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 # Executed as appuser so permissions are correct for the runtime profile/cache directories.
 RUN python -m camoufox fetch
 
-# Copy application code
-COPY --chown=appuser:appuser app /app/app
-COPY --from=shared --chown=appuser:appuser local_service_logging.py /app/local_service_logging.py
+# Copy application code and the shared logging module (no external build context needed)
+COPY --chown=appuser:appuser browser-crawler/app /app/app
+COPY --chown=appuser:appuser shared/python/local_service_logging.py /app/local_service_logging.py
 
 EXPOSE 8765
 
@@ -84,7 +86,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8765/health || exit 1
 
 # Production command
-CMD uvicorn app.main:app --host 0.0.0.0 --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-level ${BROWSER_CRAWLER_LOG_LEVEL}
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools
@@ -95,7 +97,7 @@ FROM runtime AS development
 USER root
 
 # Install development tools (pytest, pytest-asyncio, ruff, etc.)
-COPY requirements-dev.txt .
+COPY browser-crawler/requirements-dev.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-dev.txt
 
@@ -103,4 +105,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 USER appuser
 
 # Development command with hot-reloading and debug logging
-CMD uvicorn app.main:app --host 0.0.0.0 --port 8765 --reload --log-level debug
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8765 --reload --log-level debug"]
