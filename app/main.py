@@ -66,6 +66,7 @@ logger = configure_service_logging(
     log_file_backup_count=settings.log_file_backup_count,
 )
 renderer = BrowserRenderer()
+shutdown_event = asyncio.Event()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
 
@@ -203,9 +204,10 @@ if FastAPI is not None:
         @asynccontextmanager
         async def lifespan_context(allow_concurrency: bool, *args, **kwargs):
             yield
-            # Shutdown: close shared HTTP client and browser renderer.
+            # Shutdown: signal graceful stop, then close shared HTTP client and browser renderer.
             from app.crawl.strategies.http import close_async_http_client
 
+            shutdown_event.set()
             await close_async_http_client()
             await renderer.close()
 
@@ -288,6 +290,7 @@ if FastAPI is not None:
             payload_dict,
             settings=crawl_settings,
             browser_worker=lambda job: renderer.render(job.url, job.options),
+            shutdown_event=shutdown_event,
         )
         metrics.observe_crawl(results=result.get("results", []))
         try:
@@ -419,6 +422,7 @@ if FastAPI is not None:
                 payload_dict,
                 settings=settings,
                 browser_worker=lambda job: renderer.render(job.url, job.options),
+                shutdown_event=shutdown_event,
             )
             metrics.observe_crawl(results=result.get("results", []))
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})

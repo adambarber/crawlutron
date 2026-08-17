@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import socket
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
@@ -12,6 +13,11 @@ from typing import Any
 
 import httpx
 import urllib.error
+
+try:
+    from charset_normalizer import from_bytes as _charset_from_bytes
+except ImportError:
+    _charset_from_bytes = None  # type: ignore[assignment]
 import urllib.request
 
 from app.classify import classify_rendered_page_with_evidence
@@ -94,6 +100,77 @@ async def close_async_http_client() -> None:
         await client.aclose()
 
 
+class CookieJar:
+    """In-memory cookie jar (Feature: Persistent Cookie Jars).
+
+    Cookies are stored per-domain and merged into ``Set-Cookie`` response
+    headers / ``Cookie`` request headers across recursive page loads.
+    """
+
+    def __init__(self) -> None:
+        self._cookies: dict[str, dict[str, str]] = {}
+
+    def add_cookie_header(self, url: str, set_cookie_header: str) -> None:
+        """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain."""
+        from http.cookies import SimpleCookie
+        host = (urlparse(url).hostname or "").lower()
+        jar = SimpleCookie()
+        try:
+            jar.load(set_cookie_header)
+        except Exception:
+            return
+        for cookie in jar.values():
+            self._cookies.setdefault(host, {})[cookie.key] = cookie.value
+
+    def cookie_header_for(self, url: str) -> str:
+        """Return a ``Cookie`` header string for the given URL's domain."""
+        host = (urlparse(url).hostname or "").lower()
+        domain_cookies = self._cookies.get(host, {})
+        if not domain_cookies:
+            return ""
+        return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
+
+    def clear(self) -> None:
+        self._cookies.clear()
+
+
+# Module-level cookie jar for persistent cross-request cookie storage (#2).
+_GLOBAL_COOKIE_JAR = CookieJar()
+
+
+def _is_private_or_loopback_ip(ip: str) -> bool:
+    """Return True if ``ip`` is private, loopback, or link-local (SSRF protection)."""
+    import ipaddress
+
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return True
+    return addr.is_private or addr.is_loopback or addr.is_link_local
+
+
+def _check_ssrf_protection(url: str) -> None:
+    """Resolve the URL hostname and abort if any IP is private/loopback.
+
+    Set BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1 to disable for local testing.
+    """
+    import os
+    if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1":
+        return
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return
+    try:
+        addrinfo = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return
+    for entry in addrinfo:
+        ip = entry[4][0]
+        if _is_private_or_loopback_ip(ip):
+            raise ValueError(f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}")
+
+
 SUCCESS_CLASSIFICATIONS = {"rendered"}
 BLOCKED_CLASSIFICATIONS = {
     "captcha_detected",
@@ -110,39 +187,63 @@ BLOCKED_CLASSIFICATIONS = {
 }
 
 
-async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
-    """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient``."""
+async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
+    """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
+    granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
+    _check_ssrf_protection(url)
     client = get_async_http_client()
     started = time.monotonic()
+    timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
     try:
-        response = await client.request(
-            "GET", url, headers=headers, timeout=float(timeout_seconds), follow_redirects=True
-        )
-    except httpx.HTTPStatusError as error:  # 4xx/5xx still return a response
+        # Peek at response headers first, then read body if within size limit (#5)
+        async with client.stream("GET", url, headers=headers, timeout=timeout, follow_redirects=True) as response:
+            content_length = response.headers.get("content-length")
+            if content_length and int(content_length) > max_content_length:
+                return HttpFetchResult(
+                    url=url, final_url=str(response.url), status_code=413,
+                    headers={"content-type": "application/octet-stream"},
+                    body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
+                )
+            body = await response.aread()
+            status_code = response.status_code
+            resp_headers = {key.lower(): value for key, value in response.headers.items()}
+            final_url = str(response.url)
+    except httpx.HTTPStatusError as error:
         response = error.response
+        body = response.content
+        status_code = response.status_code
+        resp_headers = {key.lower(): value for key, value in response.headers.items()}
+        final_url = str(response.url)
     elapsed_ms = int((time.monotonic() - started) * 1000)
-    body = response.content
-    status_code = response.status_code
-    # urllib-based callers expect HttpFetchResult even for error statuses.
+    # Persist Set-Cookie headers into the global jar for subsequent requests (#2)
+    _store_set_cookies(url, resp_headers)
     return HttpFetchResult(
         url=url,
-        final_url=str(response.url),
+        final_url=final_url,
         status_code=status_code,
-        headers={key.lower(): value for key, value in response.headers.items()},
+        headers=resp_headers,
         body=body,
         elapsed_ms=elapsed_ms,
     )
 
 
-async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int) -> HttpFetchResult:
+async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi."""
     try:
         import curl_cffi.requests as cffi_requests
     except ImportError:
-        return await _default_http_fetcher(url, headers, timeout_seconds)
+        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
         async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
             response = await client.get(url, headers=headers, allow_redirects=True)
+        # Content-length check (#5)
+        content_length = response.headers.get("content-length")
+        if content_length and int(content_length) > max_content_length:
+            return HttpFetchResult(
+                url=url, final_url=str(response.url), status_code=413,
+                headers={key.lower(): value for key, value in response.headers.items()},
+                body=b"", elapsed_ms=int((time.monotonic() - 0) * 1000),
+            )
         elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
         return HttpFetchResult(
             url=url,
@@ -153,20 +254,35 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
             elapsed_ms=elapsed_ms,
         )
     except Exception:  # any cffi failure falls back to plain httpx
-        return await _default_http_fetcher(url, headers, timeout_seconds)
+        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
 
 
 def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
-    if profile.get("cookie_jar") not in {"per_host", "session"}:
-        return ""
-    cookies = profile.get("cookies") or {}
-    if not isinstance(cookies, dict):
-        return ""
+    """Build a Cookie header from both policy cookies and the global persistent jar (#2)."""
     host = (urlparse(url).hostname or "").lower()
-    host_cookies = cookies.get(host) or {}
-    if not isinstance(host_cookies, dict):
-        return ""
-    return "; ".join(f"{key}={value}" for key, value in host_cookies.items())
+    parts: list[str] = []
+
+    # Static policy cookies
+    if profile.get("cookie_jar") in {"per_host", "session"}:
+        cookies = profile.get("cookies") or {}
+        if isinstance(cookies, dict):
+            host_cookies = cookies.get(host) or {}
+            if isinstance(host_cookies, dict):
+                parts.extend(f"{key}={value}" for key, value in host_cookies.items())
+
+    # Persistent cookies from prior responses
+    jar_header = _GLOBAL_COOKIE_JAR.cookie_header_for(url)
+    if jar_header:
+        parts.append(jar_header)
+
+    return "; ".join(parts)
+
+
+def _store_set_cookies(url: str, response_headers: dict[str, str]) -> None:
+    """Extract Set-Cookie headers from a response into the global jar (#2)."""
+    for key, value in response_headers.items():
+        if key.lower() == "set-cookie":
+            _GLOBAL_COOKIE_JAR.add_cookie_header(url, value)
 
 
 def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
@@ -206,6 +322,8 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
 
 
 def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] | None = None) -> str:
+    """Decode response body, using charset-normalizer to detect encoding when
+    the declared charset produces replacement characters or is missing (#3)."""
     if headers:
         body = _decompress_body(body, headers.get("content-encoding", ""))
     charset = "utf-8"
@@ -213,7 +331,17 @@ def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] 
         match = re.search(r"charset=([^;]+)", content_type, flags=re.IGNORECASE)
         if match:
             charset = match.group(1).strip()
-    return body.decode(charset, errors="replace")
+    try:
+        text = body.decode(charset, errors="replace")
+    except (LookupError, UnicodeDecodeError):
+        text = body.decode("utf-8", errors="replace")
+    # If the declared charset produced replacement chars, sniff with charset-normalizer
+    if "\ufffd" in text and _charset_from_bytes is not None:
+        detected = _charset_from_bytes(body)
+        best = detected.best()
+        if best is not None and best.encoding:
+            text = str(best)
+    return text
 
 
 def _status_for_classification(classification: str) -> str:
@@ -280,12 +408,13 @@ async def _fetch_with_retries(
     headers: dict[str, str],
     timeout_seconds: int,
     max_retries: int,
+    max_content_length: int = 50 * 1024 * 1024,
 ) -> tuple[Any, dict[str, Any]]:
     transient_errors: list[str] = []
     max_attempts = max(1, max_retries + 1)
     for attempt in range(1, max_attempts + 1):
         try:
-            response = fetcher(url, headers, timeout_seconds)
+            response = fetcher(url, headers, timeout_seconds, max_content_length)
             if inspect.iscoroutine(response):
                 response = await response
             return response, {"attempts": attempt, "transient_errors": transient_errors}
@@ -357,6 +486,7 @@ async def _discovery_diagnostics(
     http_fetcher: Any,
 ) -> dict[str, Any]:
     discovery = policy.get("discovery") or {}
+    limits = policy.get("limits", {})
     diagnostics: dict[str, Any] = {}
     parsed = urlparse(normalized_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -364,7 +494,7 @@ async def _discovery_diagnostics(
     if discovery.get("robots"):
         robots_url = urljoin(origin, "/robots.txt")
         try:
-            robots_response = http_fetcher(robots_url, headers, policy["limits"]["timeout_seconds"])
+            robots_response = http_fetcher(robots_url, headers, limits.get("timeout_seconds", 10))
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
@@ -392,7 +522,7 @@ async def _discovery_diagnostics(
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
             try:
-                sitemap_response = http_fetcher(sitemap_url, headers, policy["limits"]["timeout_seconds"])
+                sitemap_response = http_fetcher(sitemap_url, headers, limits.get("timeout_seconds", 10))
                 if inspect.iscoroutine(sitemap_response):
                     sitemap_response = await sitemap_response
                 sitemap_headers = {key.lower(): value for key, value in sitemap_response.headers.items()}
@@ -425,6 +555,11 @@ async def _http_strategy_result(
 ) -> UniversalCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
+    # Provide default limits for backward compatibility with tests
+    limits = policy.get("limits", {})
+    timeout_seconds = limits.get("timeout_seconds", 10)
+    max_retries = limits.get("max_retries", 0)
+    max_content_length = limits.get("max_content_length_bytes", 50 * 1024 * 1024)
     request_headers = _headers_for_strategy(strategy, policy, normalized_url)
     if cache is not None:
         request_headers.update(cache.conditional_headers(normalized_url))
@@ -433,8 +568,9 @@ async def _http_strategy_result(
             http_fetcher,
             normalized_url,
             request_headers,
-            policy["limits"]["timeout_seconds"],
-            policy["limits"]["max_retries"],
+            timeout_seconds,
+            max_retries,
+            max_content_length,
         )
 
         # HTTP conditional caching: a 304 means the page is unchanged.
@@ -565,7 +701,7 @@ async def _http_strategy_result(
         if status == "success" and diagnostics["content_metrics"]["visible_text_length"] >= 40:
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
-            _extract_discovered_links(html, response.final_url, max_links=policy["limits"]["max_discovered_links"]) if status == "success" else ([], 0, False)
+            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 250)) if status == "success" else ([], 0, False)
         )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]

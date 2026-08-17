@@ -20,6 +20,7 @@ from typing import Any
 from app.classify import classify_rendered_page
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
+from app.crawl.strategies.http import CookieJar, _check_ssrf_protection
 from app.validation import registrable_domain
 
 
@@ -124,6 +125,9 @@ class BrowserRenderer:
                 pass
 
     async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
+        # SSRF protection (#7): validate URL before navigating
+        _check_ssrf_protection(url)
+
         started = time.monotonic()
 
         browser = await self._acquire_browser(options)
@@ -281,7 +285,10 @@ class BrowserRenderer:
             self._sleep(LAZY_SCROLL_DELAY_SECONDS)
 
     def _get_browser_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
-        """Launch-only kwargs for the Camoufox/Playwright browser factory."""
+        """Launch-only kwargs for the Camoufox/Playwright browser factory.
+
+        Persistent cookies are passed via ``storage_state`` so cookies from a
+        previous session are retained across recursive page loads."""
         kwargs: dict[str, Any] = {
             "headless": self._headless_enabled(),
             "humanize": True,
@@ -291,6 +298,10 @@ class BrowserRenderer:
 
         if profile.get("resource_mode") == "reduced":
             kwargs["args"] = ["--blink-settings=imagesEnabled=false"]
+
+        storage_state = profile.get("storage_state")
+        if storage_state:
+            kwargs["storage_state"] = storage_state
 
         return kwargs
 

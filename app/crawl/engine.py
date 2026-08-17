@@ -414,6 +414,7 @@ async def crawl_request(
     cffi_fetcher: HttpFetcher | None = None,
     cache: HttpCache | None = None,
     webhook_url: str | None = None,
+    shutdown_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
@@ -422,6 +423,7 @@ async def crawl_request(
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
     cffi = cffi_fetcher or _default_cffi_fetcher
+    shutdown_event = shutdown_event or asyncio.Event()
 
     jobs: list[CrawlExecutionJob] = []
     for index, original_url in enumerate(urls):
@@ -432,10 +434,13 @@ async def crawl_request(
             raise ValueError(f"invalid_url: {error}") from error
         jobs.append(CrawlExecutionJob(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain))
 
+    # Limits are the same for all jobs; extract once for scheduler config
+    limits = policy.get("limits", {})
     scheduler = DomainScheduler(
         global_limit=active_settings.global_concurrency,
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
+        max_rps=float(limits.get("max_rps", 0) or 0),
     )
 
     async def run_job(job: CrawlExecutionJob) -> tuple[int, UniversalCrawlResult]:
@@ -598,9 +603,14 @@ async def crawl_request(
                 by_index[job.index] = _robots_disallowed_result(job)
             else:
                 allowed_jobs.append(job)
-        scheduled_pairs = await scheduler.run(allowed_jobs, run_job) if allowed_jobs else []
-        for index, result in scheduled_pairs:
-            by_index[index] = result
+
+        async def _worker(job: CrawlExecutionJob) -> UniversalCrawlResult:
+            _, result = await run_job(job)
+            return result
+
+        scheduled_results = await scheduler.run(allowed_jobs, _worker) if allowed_jobs else []
+        for job, result in zip(allowed_jobs, scheduled_results):
+            by_index[job.index] = result
     else:
         by_index: dict[int, UniversalCrawlResult] = {}
         visited: set[str] = set()
@@ -617,6 +627,8 @@ async def crawl_request(
                 )
                 next_index += 1
         while frontier and (max_pages == 0 or page_count < max_pages):
+            if shutdown_event.is_set():
+                break
             depth, job = frontier.pop(0)
             if job.normalized_url in visited:
                 continue

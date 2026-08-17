@@ -106,6 +106,8 @@ class CrawlPolicyLimits(BaseModel):
     respect_robots: bool = Field(True, description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.")
     max_depth: int = Field(0, ge=0, le=20, description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.")
     max_pages: int = Field(0, ge=0, le=2000, description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).")
+    max_rps: float = Field(0.0, ge=0.0, le=100.0, description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.")
+    max_content_length_bytes: int = Field(50 * 1024 * 1024, ge=0, description="Maximum content size in bytes per response. 50MB default protects against OOM from large PDFs or infinite JSON streams.")
 
 
 
