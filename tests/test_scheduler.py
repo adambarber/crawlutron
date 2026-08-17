@@ -94,3 +94,46 @@ class TestScheduler:
         await scheduler.run(jobs, ok_worker)
         elapsed = time.monotonic() - started
         assert elapsed >= 0.05
+
+
+class TestAdaptiveThrottling:
+    def test_delay_starts_at_configured_value_without_latency(self):
+        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=True)
+        # No latency observed yet -> adaptive delay equals the configured fixed delay.
+        assert s.current_delay("example.com") == 1.0
+
+    def test_delay_increases_after_slow_response(self):
+        s = DomainScheduler(
+            global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=True,
+            adaptive_min_delay=0.5, adaptive_max_delay=30.0, adaptive_latency_factor=1.0,
+        )
+        s.record_latency("example.com", 5000)  # 5s latency
+        d = s.current_delay("example.com")
+        assert d > 1.0
+        assert d <= 30.0
+
+    def test_delay_floors_after_fast_response(self):
+        s = DomainScheduler(
+            global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=True,
+            adaptive_min_delay=0.5, adaptive_max_delay=30.0, adaptive_latency_factor=1.0,
+        )
+        s.record_latency("example.com", 50)  # 50ms latency
+        assert s.current_delay("example.com") == 0.5
+
+    def test_disabled_adaptive_ignores_latency(self):
+        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=False)
+        s.record_latency("example.com", 5000)
+        assert s.current_delay("example.com") == 1.0
+
+    def test_latency_ema_smooths(self):
+        s = DomainScheduler(
+            global_limit=2, per_domain_limit=1, delay_seconds=0.0, adaptive=True,
+            adaptive_min_delay=0.0, adaptive_max_delay=100.0, adaptive_latency_factor=1.0,
+            adaptive_smoothing=0.5,
+        )
+        s.record_latency("example.com", 1000)  # -> ~1.0s
+        first = s.current_delay("example.com")
+        s.record_latency("example.com", 100)   # -> EMA (1000+100)/2 = 550ms -> 0.55s
+        second = s.current_delay("example.com")
+        assert abs(first - 1.0) < 1e-6
+        assert abs(second - 0.55) < 1e-6

@@ -43,6 +43,11 @@ class DomainScheduler:
         max_rps: float = 0.0,
         circuit_threshold: int = 5,
         circuit_cooldown: float = 60.0,
+        adaptive: bool = True,
+        adaptive_min_delay: float = 0.5,
+        adaptive_max_delay: float = 30.0,
+        adaptive_latency_factor: float = 1.0,
+        adaptive_smoothing: float = 0.2,
     ) -> None:
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
@@ -50,6 +55,13 @@ class DomainScheduler:
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
         self._circuit_cooldown = max(1.0, circuit_cooldown)
+        # Adaptive throttling (AutoThrottle-style, #6): per-domain delay is driven by
+        # observed response latency rather than a single fixed value.
+        self._adaptive = adaptive
+        self._adaptive_min_delay = max(0.0, adaptive_min_delay)
+        self._adaptive_max_delay = max(self._adaptive_min_delay, adaptive_max_delay)
+        self._adaptive_latency_factor = max(0.0, adaptive_latency_factor)
+        self._adaptive_smoothing = min(1.0, max(0.0, adaptive_smoothing))
 
         # Track when domains are allowed to be hit again to implement domain-level cooldowns
         self._domain_cooldowns: dict[str, float] = {}
@@ -60,6 +72,9 @@ class DomainScheduler:
         # Circuit breaker: consecutive failures per domain
         self._domain_failures: dict[str, int] = defaultdict(int)
         self._circuit_open_until: dict[str, float] = {}
+
+        # Adaptive throttling state: EMA of observed latency (ms) per domain.
+        self._domain_latency_ema: dict[str, float] = {}
 
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
         """Set a cooldown period for a domain after a rate limit (429) response.
@@ -92,6 +107,35 @@ class DomainScheduler:
             self._domain_failures[domain] = 0
             return False
         return True
+
+    def record_latency(self, domain: str, latency_ms: float) -> None:
+        """Feed observed response latency (ms) into the adaptive delay estimator (#6)."""
+        if latency_ms is None or latency_ms < 0:
+            return
+        prev = self._domain_latency_ema.get(domain)
+        alpha = self._adaptive_smoothing
+        self._domain_latency_ema[domain] = (
+            latency_ms if prev is None else prev * (1.0 - alpha) + latency_ms * alpha
+        )
+
+    def _recompute_delay(self, domain: str) -> float:
+        """Target per-domain delay (seconds) from the latency EMA (#6)."""
+        lat = self._domain_latency_ema.get(domain)
+        if lat is None:
+            return self._delay_seconds
+        target = (lat / 1000.0) * self._adaptive_latency_factor
+        return min(self._adaptive_max_delay, max(self._adaptive_min_delay, target))
+
+    def current_delay(self, domain: str) -> float:
+        """Delay (seconds) to apply before the next request to ``domain`` (#6).
+
+        When adaptive throttling is enabled this is latency-driven; otherwise the
+        fixed ``delay_seconds`` is used. Domain cooldowns (Retry-After) are applied
+        separately on top of this in ``run``.
+        """
+        if not self._adaptive:
+            return self._delay_seconds
+        return self._recompute_delay(domain)
 
     def _purge_expired(self) -> None:
         """Drop cooldown and circuit-breaker entries that have already elapsed."""
@@ -170,13 +214,24 @@ class DomainScheduler:
 
             async with global_gate:
                 async with domain_gates[job.domain]:
-                    # Apply jitter to the per-domain delay
-                    delay_sleep = self._delay_seconds * random.uniform(0.8, 1.2) if self._delay_seconds > 0 else 0
+                    # Apply jitter to the (possibly adaptive) per-domain delay
+                    base_delay = self.current_delay(job.domain)
+                    delay_sleep = base_delay * random.uniform(0.8, 1.2) if base_delay > 0 else 0
                     await asyncio.sleep(delay_sleep)
                     try:
                         result = await worker(job)
                         if result.status == "success":
                             self.record_success(job.domain)
+                            # Feed observed latency into the adaptive estimator (#6).
+                            # Render results (CrawlResult) may not carry diagnostics, so
+                            # guard attribute access.
+                            diag = getattr(result, "diagnostics", None)
+                            latency = None
+                            if isinstance(diag, dict):
+                                rt = diag.get("runtime") or {}
+                                latency = rt.get("elapsed_ms")
+                            if latency:
+                                self.record_latency(job.domain, latency)
                         elif result.status in ("failed", "network_error"):
                             self.record_failure(job.domain)
                         results[job.index] = result

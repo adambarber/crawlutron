@@ -30,6 +30,11 @@ class CrawlerSettings:
     # Opt-in disk content cache (#5). Disabled by default so per-URL content is
     # always freshly fetched unless explicitly enabled (e.g. in the container image).
     content_cache_enabled: bool = False
+    # Adaptive throttling (#6): per-domain delay is driven by observed latency.
+    adaptive_throttling: bool = True
+    adaptive_min_delay: float = 0.5
+    adaptive_max_delay: float = 30.0
+    adaptive_latency_factor: float = 1.0
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -54,4 +59,10 @@ class CrawlerSettings:
             content_cache_enabled=_parse_bool_env_value(
                 source.get("BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", str(cls.content_cache_enabled))
             ),
+            adaptive_throttling=_parse_bool_env_value(
+                source.get("BROWSER_CRAWLER_ADAPTIVE_THROTTLING", str(cls.adaptive_throttling))
+            ),
+            adaptive_min_delay=float(source.get("BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay)),
+            adaptive_max_delay=float(source.get("BROWSER_CRAWLER_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay)),
+            adaptive_latency_factor=float(source.get("BROWSER_CRAWLER_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor)),
         )

@@ -439,6 +439,10 @@ async def crawl_request(
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
         max_rps=float(limits.get("max_rps", 0) or 0),
+        adaptive=active_settings.adaptive_throttling,
+        adaptive_min_delay=active_settings.adaptive_min_delay,
+        adaptive_max_delay=active_settings.adaptive_max_delay,
+        adaptive_latency_factor=active_settings.adaptive_latency_factor,
     )
 
     async def run_job(job: CrawlTask) -> tuple[int, EngineCrawlResult]:
