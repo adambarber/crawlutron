@@ -128,7 +128,44 @@ class TestCrawlApi:
         assert resp.status_code == 200, resp.text
         assert "crawler_crawl_requests_total" in resp.text
         assert "crawler_crawl_results_total" in resp.text
+    async def test_v1_crawl_jsonl_output_format(self):
+        # #17: output_format=jsonl returns newline-delimited JSON (one object per URL).
+        resp = await self.client.post(
+            "/v1/crawl", json=self._crawl_payload(output_format="jsonl")
+        )
+        assert resp.status_code == 200, resp.text
+        assert "application/x-ndjson" in resp.headers.get("content-type", "")
+        lines = [ln for ln in resp.text.splitlines() if ln.strip()]
+        assert len(lines) == 1
+        obj = json.loads(lines[0])
+        assert obj["original_url"] == f"{self.base}/"
+        assert obj["status"] == "success"
+        assert obj["classification"] == "rendered"
 
+    async def test_v1_crawl_markdown_output_format(self):
+        resp = await self.client.post(
+            "/v1/crawl", json=self._crawl_payload(output_format="markdown")
+        )
+        assert resp.status_code == 200, resp.text
+        assert "text/markdown" in resp.headers.get("content-type", "")
+        assert f"# {self.base}" in resp.text
+        assert "Example Org" in resp.text
+
+    async def test_v1_crawl_csv_output_format(self):
+        resp = await self.client.post(
+            "/v1/crawl", json=self._crawl_payload(output_format="csv")
+        )
+        assert resp.status_code == 200, resp.text
+        assert "text/csv" in resp.headers.get("content-type", "")
+        rows = [ln for ln in resp.text.splitlines() if ln.strip()]
+        assert rows[0].startswith("original_url,")
+        assert len(rows) == 2  # header + one result
+
+    async def test_v1_crawl_unsupported_output_format_rejected(self):
+        resp = await self.client.post(
+            "/v1/crawl", json=self._crawl_payload(output_format="xml")
+        )
+        assert resp.status_code == 422
 
 class TestDiscoveryAndRenderApi:
     """Discovery/health endpoints and the legacy /v1/render path."""

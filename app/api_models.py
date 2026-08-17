@@ -142,6 +142,10 @@ class CrawlRequest(BaseModel):
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
     webhook_url: str | None = Field(None, description="Optional callback URL. When provided, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
+    output_format: str | None = Field(
+        None,
+        description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
+    )
 
 
 class RenderOptionsRequest(BaseModel):

@@ -35,6 +35,7 @@ from app.constants import (
 from .crawl.strategies.browser import BrowserRenderer
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
+from .output_formats import serialize_results
 from .settings import CrawlerSettings
 from .metrics import metrics
 
@@ -431,12 +432,25 @@ if FastAPI is not None:
             )
             metrics.observe_crawl(results=result.get("results", []))
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
+            unified = [_build_unified_result(item) for item in result.get("results", [])]
+            output_format = payload.output_format
+            if output_format and output_format.lower() != "json":
+                # #17: emit the results in the requested wire format instead of the
+                # default UnifiedCrawlResponse model.
+                try:
+                    body, media_type = serialize_results([u.model_dump() for u in unified], output_format)
+                except ValueError as error:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"code": "validation_error", "message": str(error), "details": {}},
+                    ) from error
+                return Response(content=body, media_type=media_type)
             return UnifiedCrawlResponse(
                 request_id=result["request_id"],
                 submitted_count=result["submitted_count"],
                 policy_schema_version=result["policy_schema_version"],
                 success=True,
-                results=[_build_unified_result(item) for item in result.get("results", [])],
+                results=unified,
             )
         except ValueError as error:
             metrics.observe_crawl(errors=1)
