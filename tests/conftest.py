@@ -28,6 +28,17 @@ os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = os.environ.get(
 os.environ["BROWSER_CRAWLER_LOG_FILE"] = os.environ.get(
     "BROWSER_CRAWLER_LOG_FILE", "/tmp/browser_crawler_test.log"
 )
+os.environ["BROWSER_CRAWLER_CACHE_DIR"] = os.environ.get(
+    "BROWSER_CRAWLER_CACHE_DIR", "/tmp/browser_crawler_test_cache"
+)
+os.environ["BROWSER_CRAWLER_CACHE_TTL_SECONDS"] = os.environ.get(
+    "BROWSER_CRAWLER_CACHE_TTL_SECONDS", "3600"
+)
+# Keep the opt-in content cache disabled during tests so fake-fetcher suites that
+# serve different content for the same URL stay isolated (#5).
+os.environ["BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"] = os.environ.get(
+    "BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", "false"
+)
 
 # Save original sleep functions before any patching
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep

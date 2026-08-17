@@ -7,6 +7,8 @@ import inspect
 import re
 import socket
 import time
+import json
+import base64
 from dataclasses import asdict
 from typing import Any
 
@@ -36,6 +38,33 @@ from app.constants import (
     HTTP_BLOCKED_CLASSIFICATIONS,
 )
 from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
+
+
+def _serialize_response(resp: Any) -> dict[str, Any]:
+    """Capture a fetcher response into a JSON-serializable envelope."""
+    return {
+        "status_code": int(resp.status_code),
+        "headers": dict(resp.headers),
+        "body_b64": base64.b64encode(resp.body).decode("ascii"),
+        "final_url": str(resp.final_url),
+        "elapsed_ms": int(getattr(resp, "elapsed_ms", 0)),
+    }
+
+
+def _rebuild_response(data: dict[str, Any]) -> Any:
+    """Reconstruct a minimal response object from a cached envelope."""
+    class _CachedResponse:
+        pass
+
+    r = _CachedResponse()
+    r.status_code = data["status_code"]
+    r.headers = data["headers"]
+    r.body = base64.b64decode(data["body_b64"])
+    r.final_url = data["final_url"]
+    r.elapsed_ms = data.get("elapsed_ms", 0)
+    return r
+
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
     _detect_pagination,
@@ -536,6 +565,7 @@ async def _http_strategy_result(
     policy: dict[str, Any],
     http_fetcher: Any,
     cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
@@ -544,21 +574,65 @@ async def _http_strategy_result(
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
     max_content_length = limits.get("max_content_length_bytes", 50 * 1024 * 1024)
-    request_headers = _headers_for_strategy(strategy, policy, normalized_url)
+    base_headers = _headers_for_strategy(strategy, policy, normalized_url)
+    request_headers = dict(base_headers)
     if cache is not None:
         request_headers.update(cache.conditional_headers(normalized_url))
-    try:
-        response, retry_diagnostics = await _fetch_with_retries(
-            http_fetcher,
-            normalized_url,
-            request_headers,
-            timeout_seconds,
-            max_retries,
-            max_content_length,
-        )
 
-        # HTTP conditional caching: a 304 means the page is unchanged.
-        if cache is not None and response.status_code == 304:
+    extraction = policy.get("extraction", DEFAULT_EXTRACTION)
+
+    # Disk content cache (#5): serve an unchanged URL from local disk instead of
+    # re-downloading. The key is derived from the *base* request headers (excluding
+    # HTTP conditional-revalidation headers) so it stays stable across crawls -- the
+    # conditional headers only change the 304 handshake, never the payload.
+    ckey: str | None = None
+    content_hit = False
+    revalidated_304 = False
+    if content_cache is not None:
+        ckey = content_cache.make_key(
+            "http", normalized_url, strategy,
+            json.dumps(sorted(base_headers.items()), separators=(",", ":")),
+            extraction, policy.get("css_selector"), policy.get("xpath"),
+        )
+        cached = content_cache.get(ckey)
+        if cached is not None:
+            validator = cache.conditional_headers(normalized_url) if cache is not None else {}
+            if not validator:
+                # No validator to re-check against -> serve cached payload directly.
+                # Staleness is bounded by the cache TTL (acceptable for etag-less pages).
+                response = _rebuild_response(cached)
+                content_hit = True
+                retry_diagnostics = {"attempts": 0, "transient_errors": [], "content_cache": "hit"}
+            else:
+                # A validator exists -> revalidate with a cheap conditional GET so we
+                # never serve stale content for an etagged/last-modified URL.
+                reval_headers = dict(base_headers)
+                reval_headers.update(validator)
+                response, retry_diagnostics = await _fetch_with_retries(
+                    http_fetcher, normalized_url, reval_headers,
+                    timeout_seconds, max_retries, max_content_length,
+                )
+                if response.status_code == 304:
+                    response = _rebuild_response(cached)
+                    retry_diagnostics = {**retry_diagnostics, "content_cache": "hit_revalidated"}
+                    revalidated_304 = True
+                # otherwise the response is fresh and falls through to be stored below.
+
+    try:
+        if not content_hit and not revalidated_304:
+            response, retry_diagnostics = await _fetch_with_retries(
+                http_fetcher,
+                normalized_url,
+                request_headers,
+                timeout_seconds,
+                max_retries,
+                max_content_length,
+            )
+
+        # HTTP conditional caching: a 304 from a real fetch means the page is unchanged.
+        # (A revalidation-304 already had its cached body restored above, so it must
+        #  NOT be reported as not_modified -- we serve the cached content instead.)
+        if cache is not None and response.status_code == 304 and not revalidated_304:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             attempt = CrawlStrategyAttempt(
                 strategy=strategy,  # type: ignore[arg-type]
@@ -594,6 +668,13 @@ async def _http_strategy_result(
             if etag or last_modified:
                 cache.store(normalized_url, dict(response.headers))
 
+        if content_cache is not None and ckey is not None and not content_hit:
+            if response.status_code < 300 and response.status_code != 304:
+                try:
+                    content_cache.set(ckey, _serialize_response(response))
+                except Exception:  # noqa: BLE001
+                    pass
+
         headers = {key.lower(): value for key, value in response.headers.items()}
         content_type = headers.get("content-type")
         if policy.get("extraction") != EXTRACTION_DOCUMENT and _looks_like_binary_body(response.body, content_type, response.final_url):
@@ -612,7 +693,6 @@ async def _http_strategy_result(
         body_text = _decode_body(decompressed, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
-        extraction = policy.get("extraction", DEFAULT_EXTRACTION)
         if extraction == EXTRACTION_DOCUMENT:
             extracted = _extract_document(decompressed, response.final_url)
             text = extracted.text or ""

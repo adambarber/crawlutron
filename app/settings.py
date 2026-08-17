@@ -25,6 +25,11 @@ class CrawlerSettings:
     log_file_path: str = "/app/logs/browser-crawler.jsonl"
     log_file_max_bytes: int = 10 * 1024 * 1024
     log_file_backup_count: int = 3
+    cache_dir: str = "/app/cache"
+    cache_ttl_seconds: int = 3600
+    # Opt-in disk content cache (#5). Disabled by default so per-URL content is
+    # always freshly fetched unless explicitly enabled (e.g. in the container image).
+    content_cache_enabled: bool = False
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -44,4 +49,9 @@ class CrawlerSettings:
             log_file_path=source.get("BROWSER_CRAWLER_LOG_FILE", cls.log_file_path),
             log_file_max_bytes=int(source.get("BROWSER_CRAWLER_LOG_MAX_BYTES", cls.log_file_max_bytes)),
             log_file_backup_count=int(source.get("BROWSER_CRAWLER_LOG_BACKUP_COUNT", cls.log_file_backup_count)),
+            cache_dir=source.get("BROWSER_CRAWLER_CACHE_DIR", cls.cache_dir),
+            cache_ttl_seconds=int(source.get("BROWSER_CRAWLER_CACHE_TTL_SECONDS", cls.cache_ttl_seconds)),
+            content_cache_enabled=_parse_bool_env_value(
+                source.get("BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", str(cls.content_cache_enabled))
+            ),
         )

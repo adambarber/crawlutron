@@ -54,7 +54,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BROWSER_CRAWLER_LOG_LEVEL=info \
     # Set workers to 1 by default for browser automation to prevent memory exhaustion.
     # Scale horizontally via containers if more concurrency is needed.
-    BROWSER_CRAWLER_WORKERS=1
+    BROWSER_CRAWLER_WORKERS=1 \
+    # Opt-in in-container disk content cache (#5): cache successful HTTP/Browser
+    # responses on disk (under BROWSER_CRAWLER_CACHE_DIR) to avoid re-download/
+    # re-extract on repeat crawls. No external sidecar (Redis/Memcached) required.
+    BROWSER_CRAWLER_CONTENT_CACHE_ENABLED=true \
+    BROWSER_CRAWLER_CACHE_DIR=/app/cache \
+    BROWSER_CRAWLER_CACHE_TTL_SECONDS=3600
 
 WORKDIR /app
 
@@ -75,7 +81,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Create a non-root user for security
 RUN useradd -m -s /bin/bash appuser \
-    && mkdir -p /app/logs \
+    && mkdir -p /app/logs /app/cache \
     && chown -R appuser:appuser /app
 
 # Switch to non-root user

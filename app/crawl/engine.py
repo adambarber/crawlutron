@@ -40,6 +40,7 @@ from app.constants import (
     BROWSER_STRATEGIES,
 )
 from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
@@ -83,6 +84,21 @@ SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
+
+# Lazy, disk-backed content cache (#5). Created on first use so importing
+# this module has no filesystem side effects (tests can pass their own).
+_SHARED_CONTENT_CACHE: ContentCache | None = None
+
+
+def _get_shared_content_cache() -> ContentCache:
+    global _SHARED_CONTENT_CACHE
+    if _SHARED_CONTENT_CACHE is None:
+        settings = CrawlerSettings.from_mapping()
+        _SHARED_CONTENT_CACHE = ContentCache(
+            cache_dir=settings.cache_dir,
+            default_ttl=settings.cache_ttl_seconds,
+        )
+    return _SHARED_CONTENT_CACHE
 
 
 def _payload_urls(payload: dict[str, Any]) -> list[str]:
@@ -287,6 +303,7 @@ async def _execute_crawl_chain(
     cffi_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
     cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
     scheduler: DomainScheduler | None = None,
     domain: str = "",
 ) -> EngineCrawlResult:
@@ -302,6 +319,7 @@ async def _execute_crawl_chain(
                 policy=policy,
                 http_fetcher=strategy_fetcher,
                 cache=cache,
+                content_cache=content_cache,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -392,6 +410,7 @@ async def crawl_request(
     http_fetcher: HttpFetcher | None = None,
     cffi_fetcher: HttpFetcher | None = None,
     cache: HttpCache | None = None,
+    content_cache: ContentCache | None = None,
     webhook_url: str | None = None,
     shutdown_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
@@ -434,6 +453,11 @@ async def crawl_request(
             cffi_fetcher=cffi,
             browser_worker=browser_worker,
             cache=cache or _SHARED_HTTP_CACHE,
+            # Content cache is opt-in (#5): only use the shared instance when explicitly
+            # enabled via settings, so test suites that fake per-test content for the
+            # same URL stay isolated. Callers may still pass an explicit ``content_cache``.
+            content_cache=content_cache
+            or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
             scheduler=scheduler,
             domain=job.domain,
         )
