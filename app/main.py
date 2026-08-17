@@ -19,6 +19,7 @@ from .api_models import (
     CrawlerError,
     CrawlRequest,
     CrawlStrategy,
+    MapRequest,
     RenderRequest,
     DiscoveryResponse,
     FirecrawlMetadata,
@@ -36,6 +37,7 @@ from .crawl.strategies.browser import BrowserRenderer
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .output_formats import serialize_results
+from .map import build_site_map
 from .settings import CrawlerSettings
 from .metrics import metrics
 
@@ -458,6 +460,51 @@ if FastAPI is not None:
             raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
         finally:
             readiness_state.end_request()
+    @app.post(
+        "/v1/map",
+        tags=["Crawler"],
+        summary="Discover the URL frontier for a root URL (#2)",
+        description=(
+            "Map a root URL to the URLs reachable from it: in-page discovered links plus the "
+            "URLs advertised via robots.txt sitemaps and feeds. Discovery is always enabled; the "
+            "caller controls the fetch policy (strategies, limits, scope_regex). The service returns "
+            "the de-duplicated frontier but does not recursively enqueue it; callers own recursion, "
+            "dedupe, persistence, and host-policy decisions."
+        ),
+        responses={400: {"model": CrawlerError, "description": "Invalid map request."}},
+    )
+    async def map_site(payload: MapRequest) -> dict:
+        readiness_state.begin_request()
+        try:
+            payload_dict = payload.model_dump(exclude_none=True)
+            # #2: mapping is a discovery operation; force discovery on regardless of caller input.
+            policy = payload_dict.setdefault("policy", {})
+            disc = dict(policy.get("discovery") or {})
+            disc["robots"] = True
+            disc["sitemaps"] = True
+            disc["feeds"] = True
+            policy["discovery"] = disc
+            limits = dict(policy.get("limits") or {})
+            limits.setdefault("max_discovered_links", 2000)
+            policy["limits"] = limits
+            result = await crawl_request(
+                payload_dict,
+                settings=settings,
+                browser_worker=lambda job: renderer.render(job.url, job.options),
+                shutdown_event=shutdown_event,
+            )
+            metrics.observe_crawl(results=result.get("results", []))
+            logger.info("map_request_completed", extra={"url_count": len(result.get("results", []))})
+            return build_site_map(result)
+        except ValueError as error:
+            logger.warning("map_request_rejected", extra={"error": str(error)})
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}},
+            ) from error
+        finally:
+            readiness_state.end_request()
+
     @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
     async def metrics_endpoint() -> "Response":
         return Response(metrics.as_prometheus(), media_type="text/plain; version=0.0.4")

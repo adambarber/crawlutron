@@ -148,6 +148,21 @@ class CrawlRequest(BaseModel):
     )
 
 
+class MapRequest(BaseModel):
+    """#2 Site-map request: discover the URL frontier for a root URL.
+
+    Discovery (robots sitemaps + feeds + in-page links) is forced on; the caller
+    controls the fetch ``policy`` (strategies, limits, scope_regex) and the rest
+    is delegated to the shared crawl engine.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    url: str = Field(..., description="Root public HTTP(S) URL to map.")
+    policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.")
+
+
+
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
 

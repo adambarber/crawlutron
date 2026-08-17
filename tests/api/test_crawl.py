@@ -216,3 +216,37 @@ class TestDiscoveryAndRenderApi:
         )
         response = await handler(request, exc)
         assert response.status_code == 422
+
+class TestMapApi:
+    """#2 /v1/map against a real local server (no mocks)."""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, async_client, base_url):
+        self.client = async_client
+        self.base = base_url
+        WEBHOOK_RECEIVED.clear()
+
+    def _map_payload(self, **extra):
+        payload = {
+            "url": f"{self.base}/",
+            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}},
+        }
+        payload.update(extra)
+        return payload
+
+    async def test_v1_map_returns_url_frontier(self):
+        resp = await self.client.post("/v1/map", json=self._map_payload())
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "all_urls" in body
+        # sitemap advertises /page1 and /page2 (sitemap URLs are path-relative)
+        assert "/page2" in body["all_urls"]
+        # robots points at /sitemap.xml
+        assert "/sitemap.xml" in body["sitemaps"]
+        # in-page links are discovered too
+        assert len(body["links"]) >= 1
+
+    async def test_v1_map_rejects_missing_url(self):
+        resp = await self.client.post("/v1/map", json={"policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}})
+        assert resp.status_code == 422
+
