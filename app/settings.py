@@ -37,6 +37,10 @@ class CrawlerSettings:
     adaptive_latency_factor: float = 1.0
     cookie_persistence_enabled: bool = False
     cookie_jar_path: str = "/app/cache/cookie_jar.json"
+    # HTTP client connection pool tuning
+    http_max_connections: int = 100
+    http_max_keepalive: int = 20
+    http_keepalive_expiry: float = 60.0
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -71,4 +75,7 @@ class CrawlerSettings:
                 source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED", "false")
             ),
             cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", "/app/cache/cookie_jar.json"),
+            http_max_connections=int(source.get("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections)),
+            http_max_keepalive=int(source.get("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive)),
+            http_keepalive_expiry=float(source.get("BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry)),
         )

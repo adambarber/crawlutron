@@ -1,11 +1,16 @@
 """Common test utilities to reduce duplication across test modules."""
 
 import asyncio
+import tempfile
+import pathlib
 import unittest
-from typing import Any
+from typing import Any, Callable, Awaitable
 
+import httpx
 from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
+from app.crawl.job_store import JobStore
 from app.constants import HTTP_DECLARED_CRAWLER
 
 
@@ -104,3 +109,120 @@ async def crawl_homepage_async(
         limits=limits if limits is not None else {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
     )
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
+
+
+# --- New helpers to reduce test duplication ---
+
+
+def make_async_client(app) -> Callable[[], Awaitable[httpx.AsyncClient]]:
+    """Create a factory for async test clients.
+
+    Usage:
+        async with make_async_client(app)() as client:
+            resp = await client.post("/v1/endpoint", json={...})
+
+    This avoids repeating the httpx.ASGITransport + AsyncClient boilerplate.
+    """
+    def _factory() -> httpx.AsyncClient:
+        transport = httpx.ASGITransport(app=app)
+        return httpx.AsyncClient(transport=transport, base_url="http://test")
+    return _factory
+
+
+async def run_async_test(
+    app,
+    test_fn: Callable[[httpx.AsyncClient], Awaitable[None]],
+) -> None:
+    """Run an async test function with a test client.
+
+    Usage:
+        async def test():
+            async with make_async_client(app)() as client:
+                resp = await client.post("/v1/endpoint", json={...})
+                assert resp.status_code == 200
+        run_async_test(app, test)
+
+    Or more simply:
+        await run_async_test(app, lambda client: client.post(...))
+    """
+    async with make_async_client(app)() as client:
+        await test_fn(client)
+
+
+def make_content_cache(tmpdir: str, *, default_ttl: float = 1, clock=None) -> ContentCache:
+    """Create a ContentCache with test-friendly defaults.
+
+    Args:
+        tmpdir: Temporary directory path
+        default_ttl: Default TTL in seconds (default 1)
+        clock: Optional clock function for time control (default: time.monotonic)
+
+    Returns:
+        Configured ContentCache instance
+    """
+    if clock is None:
+        import time
+        clock = time.monotonic
+    return ContentCache(tmpdir, default_ttl=default_ttl, clock=clock)
+
+
+def make_job_store(tmpdir: str) -> JobStore:
+    """Create a JobStore with test-friendly defaults.
+
+    Args:
+        tmpdir: Temporary directory path
+
+    Returns:
+        Configured JobStore instance
+    """
+    db_path = pathlib.Path(tmpdir) / "jobs.db"
+    return JobStore(db_path)
+
+
+async def run_job_control_test(
+    app,
+    job_store: JobStore,
+    job_id: str,
+    action: str,
+    expected_status: int = 422,
+) -> None:
+    """Run a job control test with the given action and expected status.
+
+    This helper encapsulates the common pattern for testing job control endpoints.
+
+    Usage:
+        job = job_store.create("http://example.com/", {})
+        await run_job_control_test(app, job_store, job.job_id, "cancel", 422)
+    """
+    from httpx import AsyncClient
+    import httpx
+
+    async with make_async_client(app)() as client:
+        resp = await client.post(
+            f"/v1/jobs/{job_id}/control",
+            json={"action": action}
+        )
+        assert resp.status_code == expected_status
+
+def make_content_cache_with_entry(tmpdir: str, key: str = "key1", value: dict = None, *, default_ttl: float = 1, clock=None) -> ContentCache:
+    """Create a ContentCache with a test entry already set.
+
+    This reduces duplication in ContentCache tests that all start with
+    the same setup pattern.
+
+    Args:
+        tmpdir: Temporary directory path
+        key: Cache key to set (default: "key1")
+        value: Value to store (default: {"data": "1"})
+        default_ttl: Default TTL in seconds (default 1)
+        clock: Optional clock function for time control
+
+    Returns:
+        Configured ContentCache instance with the entry already set
+    """
+    if value is None:
+        value = {"data": "1"}
+    cache = make_content_cache(tmpdir, default_ttl=default_ttl, clock=clock)
+    cache.set(key, value)
+    return cache
+

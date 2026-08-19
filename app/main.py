@@ -326,6 +326,8 @@ if FastAPI is not None:
         Best-effort delivery: failures are swallowed so a dead callback never
         crashes the crawler worker.
         """
+        # SSRF protection for webhook URL (#P0)
+        _validate_webhook_url(webhook_url)
         result = await crawl_request(
             payload_dict,
             settings=crawl_settings,
@@ -335,15 +337,51 @@ if FastAPI is not None:
         metrics.observe_crawl(results=result.get("results", []))
         try:
             import httpx
+            import json
+            import os
+
+            # Limit webhook payload size to prevent OOM/DoS (default 10MB)
+            max_webhook_size = int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
+            payload_bytes = json.dumps(result, separators=(",", ":")).encode("utf-8")
+            if len(payload_bytes) > max_webhook_size:
+                logger.warning("webhook_payload_too_large", extra={"size": len(payload_bytes), "limit": max_webhook_size})
+                return
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(webhook_url, json=result, headers={"Content-Type": "application/json"})
+                await client.post(webhook_url, content=payload_bytes, headers={"Content-Type": "application/json"})
         except Exception:  # webhook delivery is best-effort
             pass
 
+    def _validate_webhook_url(webhook_url: str) -> None:
+        """Validate webhook URL to prevent SSRF attacks.
+
+        Similar to crawl target validation but for outbound webhook callbacks.
+        """
+        import os
+        from urllib.parse import urlparse
+        import ipaddress
+
+        allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1"
+        parsed = urlparse(webhook_url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("webhook_url must use http or https scheme")
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("webhook_url missing hostname")
+        if not allow_private:
+            if hostname in {"localhost", "host.docker.internal"}:
+                raise ValueError("webhook_url points to private network target")
+            try:
+                address = ipaddress.ip_address(hostname)
+            except ValueError:
+                pass
+            else:
+                if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+                    raise ValueError("webhook_url points to private network target")
+
     @app.post(
         "/v1/crawl",
-        response_model=UnifiedCrawlResponse,
+        response_model=None,
         tags=["Crawler"],
         summary="Execute a policy-driven crawl",
         description=(
@@ -367,7 +405,11 @@ if FastAPI is not None:
             "form/search state before enqueueing pagination URLs. It classifies denial/challenge outcomes without "
             "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
         ),
-        responses={400: {"model": CrawlerError, "description": "Invalid crawl request."}},
+        responses={
+            200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
+            202: {"model": CrawlerError, "description": "Accepted for async webhook delivery; check status_url."},
+            422: {"model": CrawlerError, "description": "Invalid crawl request or unsupported output format."},
+        },
         openapi_extra={
             "requestBody": {
                 "content": {

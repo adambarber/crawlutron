@@ -98,6 +98,18 @@ class CrawlStatus(str, Enum):
     skipped = "skipped"
 
 
+class DiscoveryConfig(BaseModel):
+    """Typed discovery toggles for crawl policy.
+
+    Only recognized keys are accepted; extra keys are rejected.
+    """
+    robots: bool = Field(True, description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow patterns.")
+    sitemaps: bool = Field(True, description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common locations.")
+    feeds: bool = Field(True, description='Detect RSS/Atom/JSON Feed links via <link rel="alternate"> and common feed paths.')
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class CrawlPolicyLimits(BaseModel):
     timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
     max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
@@ -131,7 +143,7 @@ class CrawlPolicy(BaseModel):
     headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.")
     request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
     browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.")
-    discovery: dict[str, bool] = Field(default_factory=dict, description="Optional discovery toggles: robots, sitemaps, and feeds. Discovery output is diagnostic and non-recursive; the service reports discovered links and metadata but callers own frontier queueing, dedupe, and persistence.")
+    discovery: DiscoveryConfig | None = Field(None, description="Optional discovery configuration. Only robots, sitemaps, and feeds are recognized. Omit to use defaults (all enabled).")
     scope_regex: str | None = Field(None, description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.")
     css_selector: str | None = Field(None, description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.")
     xpath: str | None = Field(None, description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.")
@@ -189,7 +201,7 @@ class RenderRequest(BaseModel):
 class ClassificationEvidence(BaseModel):
     classification: str = Field(description="Classification selected by this matched evidence.")
     signature: str = Field(description="Signature that matched the selected source bucket.")
-    source: str = Field(description="Evidence source bucket, such as visible_text, html_without_script_style, or http_status.")
+    source: str = Field(description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or http_status.")
     context: str = Field("", description="Short normalized context around the matched signature.")
 
 

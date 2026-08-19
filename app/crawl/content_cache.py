@@ -30,7 +30,7 @@ def _default_clock() -> float:
 
 
 class ContentCache:
-    """Disk-backed key/value cache with per-entry TTL."""
+    """Disk-backed key/value cache with per-entry TTL and optional LRU eviction."""
 
     def __init__(
         self,
@@ -39,11 +39,13 @@ class ContentCache:
         default_ttl: int = 3600,
         namespace: str = "content",
         clock: Callable[[], float] = _default_clock,
+        max_entries: int | None = None,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
         self.namespace = namespace
         self.clock = clock
+        self.max_entries = max_entries
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
@@ -51,11 +53,35 @@ class ContentCache:
     @staticmethod
     def make_key(*parts: Any) -> str:
         """Build a stable cache key from arbitrary parts."""
-        return "|".join(json.dumps(p, sort_keys=True, separators=(",", ":")) if not isinstance(p, str) else p for p in parts)
+        return "|".join(json.dumps(p, sort_keys=True, separators=(",", ":")) for p in parts)
 
     def _path_for(self, key: str) -> Path:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
+
+    def _touch_access_time(self, path: Path) -> None:
+        """Update file mtime for LRU tracking."""
+        try:
+            path.touch(exist_ok=True)
+        except OSError:
+            pass
+
+    def _enforce_max_entries(self) -> None:
+        """Evict least recently used entries if over max_entries."""
+        if self.max_entries is None or self.max_entries <= 0:
+            return
+        with self._lock:
+            entries = list(self.cache_dir.glob(f"{self.namespace}.*.json"))
+            if len(entries) <= self.max_entries:
+                return
+            # Sort by mtime (oldest first) and remove excess
+            entries.sort(key=lambda p: p.stat().st_mtime)
+            to_remove = len(entries) - self.max_entries
+            for path in entries[:to_remove]:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
     # -- public API ---------------------------------------------------------
     def get(self, key: str, ttl: int | None = None) -> Any | None:
@@ -71,6 +97,8 @@ class ContentCache:
         expires = envelope.get("expires")
         if expires is not None and self.clock() > expires:
             return None
+        # Update access time for LRU
+        self._touch_access_time(path)
         return envelope.get("value")
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -84,6 +112,8 @@ class ContentCache:
         path = self._path_for(key)
         with self._lock:
             path.write_text(json.dumps(envelope))
+        # Enforce size limit after write
+        self._enforce_max_entries()
 
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""

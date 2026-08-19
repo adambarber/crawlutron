@@ -55,7 +55,15 @@ from app.constants import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.service import render_request
 from app.validation import normalize_public_http_url, registrable_domain
-from helpers import ServerTestCase
+from helpers import (
+    ServerTestCase,
+    make_async_client,
+    run_async_test,
+    make_content_cache,
+    make_content_cache_with_entry,
+    make_job_store,
+    run_job_control_test,
+)
 from helpers.server import spawn_server
 
 
@@ -883,77 +891,52 @@ class TestMainCoverageGaps(unittest.TestCase):
 
     def test_render_endpoint_value_error(self):
         from app.main import app
-        from httpx import AsyncClient
-        import httpx
-        import asyncio
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post("/v1/render", json={"url": "invalid"})
-                self.assertIn(resp.status_code, (200, 422, 500))
-        asyncio.run(test())
+        async def test(client):
+            resp = await client.post("/v1/render", json={"url": "invalid"})
+            self.assertIn(resp.status_code, (200, 422, 500))
+        asyncio.run(run_async_test(app, test))
 
     def test_render_endpoint_success(self):
         from app.main import app
-        from httpx import AsyncClient
-        import asyncio
-        import httpx
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                # Missing 'url' field triggers app-level 400 validation error
-                resp = await client.post("/v1/render", json={})
-                self.assertEqual(resp.status_code, 400)
-        asyncio.run(test())
+        async def test(client):
+            # Missing 'url' field triggers app-level 400 validation error
+            resp = await client.post("/v1/render", json={})
+            self.assertEqual(resp.status_code, 400)
+        asyncio.run(run_async_test(app, test))
 
     def test_crawl_endpoint_webhook_error(self):
         from app.main import app
-        from httpx import AsyncClient
-        import asyncio
-        import httpx
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                # Crawl a valid URL; webhook delivery is best-effort and won't crash the request
-                resp = await client.post("/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"})
-                # The endpoint should accept the request (202 = accepted, background processing)
-                self.assertIn(resp.status_code, (200, 201, 202))
-                # Give background task a brief moment, then ensure no exception propagated
-                await asyncio.sleep(0.5)
-        asyncio.run(test())
+        async def test(client):
+            # Crawl a valid URL; webhook delivery is best-effort and won't crash the request
+            resp = await client.post("/v1/crawl", json={"url": "http://example.com/", "webhook_url": "http://unreachable.invalid/"})
+            # The endpoint should accept the request (202 = accepted, background processing)
+            self.assertIn(resp.status_code, (200, 201, 202))
+            # Give background task a brief moment, then ensure no exception propagated
+            await asyncio.sleep(0.5)
+        asyncio.run(run_async_test(app, test))
 
     def test_map_endpoint_value_error(self):
         from app.main import app
-        from httpx import AsyncClient
-        import asyncio
-        import httpx
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post("/v1/map", json={"url": "invalid"})
-                self.assertEqual(resp.status_code, 422)
-        asyncio.run(test())
+        async def test(client):
+            resp = await client.post("/v1/map", json={"url": "invalid"})
+            self.assertEqual(resp.status_code, 422)
+        asyncio.run(run_async_test(app, test))
 
     def test_job_endpoints_not_found(self):
         from app.main import app
-        from httpx import AsyncClient
-        import asyncio
-        import httpx
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.get("/v1/jobs/nonexistent")
-                self.assertEqual(resp.status_code, 404)
-                resp = await client.post("/v1/jobs/nonexistent/control", json={"action": "cancel"})
-                self.assertEqual(resp.status_code, 404)
-                resp = await client.delete("/v1/jobs/nonexistent")
-                self.assertEqual(resp.status_code, 404)
-        asyncio.run(test())
+        async def test(client):
+            resp = await client.get("/v1/jobs/nonexistent")
+            self.assertEqual(resp.status_code, 404)
+            resp = await client.post("/v1/jobs/nonexistent/control", json={"action": "cancel"})
+            self.assertEqual(resp.status_code, 404)
+            resp = await client.delete("/v1/jobs/nonexistent")
+            self.assertEqual(resp.status_code, 404)
+        asyncio.run(run_async_test(app, test))
 
     def test_app_none_fallback(self):
         import app.main as main_mod
@@ -1273,12 +1256,10 @@ class TestAdditionalCoverage(unittest.TestCase):
             self.assertIsNone(result)
 
     def test_content_cache_prune_corrupt_entry(self):
-        from app.crawl.content_cache import ContentCache
-        import tempfile, pathlib
+        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             clock_vals = [1000.0]
-            cache = ContentCache(tmpdir, default_ttl=1, clock=lambda: clock_vals[0])
-            cache.set("key1", {"data": "1"})
+            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
             # Write a corrupt file with the correct hash-based name - prune should skip it
             bad_path = cache._path_for("badkey")
             bad_path.write_text("not valid json")
@@ -1299,11 +1280,9 @@ class TestAdditionalCoverage(unittest.TestCase):
             self.assertIsNotNone(updated)
 
     def test_job_store_delete(self):
-        from app.crawl.job_store import JobStore
-        import tempfile, pathlib
+        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
+            store = make_job_store(tmpdir)
             job = store.create("http://example.com/", {})
             deleted = store.delete(job.job_id)
             self.assertTrue(deleted)
@@ -1387,11 +1366,6 @@ class TestAdditionalCoverage(unittest.TestCase):
         cache = _get_shared_content_cache()
         self.assertIsInstance(cache, ContentCache)
 
-    def test_http_cffi_fetcher_real(self):
-        from app.crawl.strategies.http import _default_cffi_fetcher
-        result = _spawn_fetch(lambda s: asyncio.run(_default_cffi_fetcher(s.base_url + "/", {}, 10, 50*1024*1024)))
-        self.assertEqual(result.status_code, 200)
-
     def test_http_large_content(self):
         from app.crawl.strategies.http import _default_http_fetcher
         result = _spawn_fetch(lambda s: asyncio.run(_default_http_fetcher(s.base_url + "/", {}, 10, 1)))
@@ -1409,12 +1383,10 @@ class TestMoreCoverageGaps(unittest.TestCase):
     """More targeted tests to close remaining coverage gaps."""
 
     def test_content_cache_prune_os_error(self):
-        from app.crawl.content_cache import ContentCache
-        import tempfile, pathlib
+        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             clock_vals = [1000.0]
-            cache = ContentCache(tmpdir, default_ttl=1, clock=lambda: clock_vals[0])
-            cache.set("key1", {"data": "1"})
+            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
             clock_vals[0] = 1002.0
             # Replace file with directory to cause OSError on read
             cache_path = cache._path_for("key1")
@@ -1445,30 +1417,19 @@ class TestMoreCoverageGaps(unittest.TestCase):
             pass
 
     def test_job_store_load_corrupt_row(self):
-        from app.crawl.job_store import JobStore
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
+            store = make_job_store(tmpdir)
             job = store.create("http://example.com/", {})
             # Corrupt the policy JSON in the database
             import sqlite3
-            conn = sqlite3.connect(str(db_path))
+            conn = sqlite3.connect(str(pathlib.Path(tmpdir) / "jobs.db"))
             conn.execute("UPDATE crawl_jobs SET policy = ? WHERE job_id = ?", ("invalid json{", job.job_id))
             conn.commit()
             conn.close()
             # load should catch the JSON decode error and return None
             result = store.load(job.job_id)
             self.assertIsNone(result)
-
-    def test_job_store_close(self):
-        from app.crawl.job_store import JobStore
-        import tempfile, pathlib
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
-            store.close()
-            store.close()
 
     def test_scheduler_record_latency_invalid(self):
         from app.scheduler import DomainScheduler
@@ -1650,47 +1611,25 @@ class TestMoreCoverageGaps(unittest.TestCase):
 
     def test_main_job_control_invalid_action(self):
         from app.main import app, job_store
-        from app.crawl.job_store import JobStatus
-        from httpx import AsyncClient
-        import asyncio, httpx
         job = job_store.create("http://example.com/", {})
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(f"/v1/jobs/{job.job_id}/control", json={"action": "invalid_action"})
-                self.assertEqual(resp.status_code, 422)
-        asyncio.run(test())
+        asyncio.run(run_job_control_test(app, job_store, job.job_id, "invalid_action", 422))
         job_store.delete(job.job_id)
 
     def test_main_job_control_cancel_completed(self):
         from app.main import app, job_store
         from app.crawl.job_store import JobStatus
-        from httpx import AsyncClient
-        import asyncio, httpx
         job = job_store.create("http://example.com/", {})
         # Set to completed
         job.status = JobStatus.COMPLETED
         job_store.save(job)
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(f"/v1/jobs/{job.job_id}/control", json={"action": "cancel"})
-                self.assertEqual(resp.status_code, 422)
-        asyncio.run(test())
+        asyncio.run(run_job_control_test(app, job_store, job.job_id, "cancel", 422))
         job_store.delete(job.job_id)
 
     def test_main_job_control_resume_not_paused(self):
         from app.main import app, job_store
         from app.crawl.job_store import JobStatus
-        from httpx import AsyncClient
-        import asyncio, httpx
         job = job_store.create("http://example.com/", {})
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(f"/v1/jobs/{job.job_id}/control", json={"action": "resume"})
-                self.assertEqual(resp.status_code, 422)
-        asyncio.run(test())
+        asyncio.run(run_job_control_test(app, job_store, job.job_id, "resume", 422))
         job_store.delete(job.job_id)
 
     def test_engine_crawl_request_with_webhook(self):

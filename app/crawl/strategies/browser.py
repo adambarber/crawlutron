@@ -10,6 +10,7 @@ render JavaScript-heavy pages. Beyond basic DOM extraction it now also:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import re
@@ -17,12 +18,16 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+import logging
+
 from app.classify import classify_page
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
 from app.crawl.strategies.http import CookieJar, _check_ssrf_protection
 from app.validation import registrable_domain
 from app.constants import BROWSER_BLOCKED_CLASSIFICATIONS
+
+logger = logging.getLogger(__name__)
 
 
 TRANSIENT_CLASSIFICATIONS = {
@@ -32,14 +37,6 @@ TRANSIENT_CLASSIFICATIONS = {
     "tls_error",
     "dns_error",
     "unknown_error",
-}
-BROWSER_BLOCKED_CLASSIFICATIONS = {
-    "captcha_detected",
-    "bot_challenge_detected",
-    "access_denied",
-    "login_required",
-    "paywall_detected",
-    "rate_limited",
 }
 FAILED_CLASSIFICATIONS = {"not_found", "site_error", "gone", "binary_no_text"}
 
@@ -233,7 +230,6 @@ class BrowserRenderer:
             if element_shots:
                 metadata["element_screenshots"] = await self._capture_element_screenshots(page, element_shots)
 
-            self._render_count += 1
             return CrawlResult(
                 url=url,
                 status=status,
@@ -250,6 +246,9 @@ class BrowserRenderer:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
             await self._safe_close_page(page)
+            # Increment render count for ALL attempts (success or failure) so
+            # browser recycle logic bounds total attempts per browser instance.
+            self._render_count += 1
 
     async def _run_action_chain(self, page: Any, actions: list[dict[str, Any]]) -> None:
         """Execute a sequence of browser actions before extraction (#10).
@@ -352,9 +351,38 @@ class BrowserRenderer:
 
         storage_state = profile.get("storage_state")
         if storage_state:
-            kwargs["storage_state"] = storage_state
+            # Validate storage_state path to prevent path traversal
+            safe_path = self._validate_storage_state_path(storage_state)
+            if safe_path:
+                kwargs["storage_state"] = safe_path
+            else:
+                logger.warning("invalid_storage_state_path", extra={"path": str(storage_state)})
 
         return kwargs
+
+    def _validate_storage_state_path(self, storage_state: str) -> str | None:
+        """Validate storage_state path is safe (no traversal, under allowed dirs)."""
+        import os
+        from pathlib import Path
+
+        # Allow known keys (e.g., "default", "session")
+        if storage_state in {"default", "session", "persistent"}:
+            return storage_state
+
+        # For file paths, ensure they're under an allowed directory
+        try:
+            path = Path(storage_state).resolve()
+            # Allow paths under /app/cache or /tmp
+            allowed_dirs = [Path("/app/cache").resolve(), Path("/tmp").resolve()]
+            for allowed in allowed_dirs:
+                try:
+                    path.relative_to(allowed)
+                    return str(path)
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        return None
 
     def _get_page_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
         """Page/context kwargs, applied at ``browser.new_page`` time."""
@@ -375,7 +403,8 @@ class BrowserRenderer:
 
         deadline = time.monotonic() + self._challenge_wait_seconds
         while time.monotonic() < deadline:
-            self._sleep(1)
+            # Use asyncio.sleep to avoid busy-waiting if injected sleep is patched/no-op
+            await asyncio.sleep(1)
             await self._wait_for_ready_state(page)
             next_html = await self._extract_html(page) if options.include_html else None
             next_text = await self._extract_text(page) if options.include_text else None
@@ -412,6 +441,9 @@ class BrowserRenderer:
         # content. Closed shadow roots are not accessible and are left untouched.
         # Nested shadow roots are handled by recursing into each shadow root before
         # its children are moved.
+        # FIX: Collect shadow root children FIRST, then move in separate pass to
+        # avoid mutation during iteration (could cause duplicates, infinite loops,
+        # or HierarchyRequestError if moving a node into its own descendant).
         try:
             await page.evaluate(
                 """() => {
@@ -426,15 +458,26 @@ class BrowserRenderer:
                     };
                     const all = [];
                     collect(document, all);
+                    // Phase 1: Collect all (host, child) pairs to move
+                    const moves = [];
                     for (const el of all) {
                         const sr = el.shadowRoot;
                         if (sr && sr.mode === 'open') {
                             const kids = Array.from(sr.childNodes);
                             for (const k of kids) {
                                 if (k.nodeType === 1) {
-                                    el.appendChild(document.importNode(k, true));
+                                    // Deep-clone to avoid mutation issues
+                                    moves.push({host: el, child: document.importNode(k, true)});
                                 }
                             }
+                        }
+                    }
+                    // Phase 2: Apply all moves
+                    for (const {host, child} of moves) {
+                        try {
+                            host.appendChild(child);
+                        } catch (e) {
+                            // Ignore HierarchyRequestError etc. (best-effort)
                         }
                     }
                     return true;

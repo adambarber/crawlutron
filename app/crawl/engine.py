@@ -408,6 +408,15 @@ async def crawl_request(
     robots_cache: dict[str, tuple[float, list[tuple[bool, str]]]] = {}
     robots_ttl = 600.0
 
+    def _purge_robots_cache(now: float | None = None) -> int:
+        """Remove expired entries from robots cache; return number removed."""
+        if now is None:
+            now = time.monotonic()
+        expired = [origin for origin, (expires, _) in robots_cache.items() if expires <= now]
+        for origin in expired:
+            del robots_cache[origin]
+        return len(expired)
+
     def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
         rules: list[tuple[bool, str]] = []
         active = False
@@ -428,6 +437,9 @@ async def crawl_request(
 
     async def _fetch_robots_rules(origin: str) -> list[tuple[bool, str]]:
         now = time.monotonic()
+        # Periodically purge expired entries to prevent unbounded growth
+        if len(robots_cache) > 1000:
+            _purge_robots_cache(now)
         cached = robots_cache.get(origin)
         if cached and cached[0] > now:
             return cached[1]

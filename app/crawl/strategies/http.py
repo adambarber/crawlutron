@@ -87,12 +87,25 @@ from urllib.parse import urljoin, urlparse
 _DEFAULT_HTTP_CLIENT: "httpx.AsyncClient | None" = None
 
 
-def _build_async_client() -> "httpx.AsyncClient":
+def _default_settings() -> "CrawlerSettings":
+    """Get default crawler settings for HTTP client configuration."""
+    from app.settings import CrawlerSettings
+    return CrawlerSettings.from_mapping()
+
+
+def _build_async_client(settings: "CrawlerSettings | None" = None) -> "httpx.AsyncClient":
+    """Build an httpx.AsyncClient with configurable connection pool."""
+    if settings is None:
+        settings = _default_settings()
     client = httpx.AsyncClient(
         http2=True,
         follow_redirects=True,
         timeout=30.0,
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0),
+        limits=httpx.Limits(
+            max_connections=settings.http_max_connections,
+            max_keepalive_connections=settings.http_max_keepalive,
+            keepalive_expiry=settings.http_keepalive_expiry,
+        ),
         headers={"User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)"},
     )
     try:
@@ -102,7 +115,7 @@ def _build_async_client() -> "httpx.AsyncClient":
     return client
 
 
-def get_async_http_client() -> "httpx.AsyncClient":
+def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.AsyncClient":
     """Return the pooled ``httpx.AsyncClient`` bound to the current event loop.
 
     The client is reused while the running event loop is unchanged (HTTP/2
@@ -110,14 +123,16 @@ def get_async_http_client() -> "httpx.AsyncClient":
     example when a test harness drives many ``asyncio.run`` calls in sequence).
     """
     global _DEFAULT_HTTP_CLIENT
+    if settings is None:
+        settings = _default_settings()
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = None
     if _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed:
-        _DEFAULT_HTTP_CLIENT = _build_async_client()
+        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
     elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
-        _DEFAULT_HTTP_CLIENT = _build_async_client()
+        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
     return _DEFAULT_HTTP_CLIENT
 
 

@@ -14,24 +14,35 @@ def _make_engine_result(
     final_url: str | None,
     status: str,
     classification: str,
-    selected_strategy: str | None,
     attempt: CrawlStrategyAttempt,
     http_status: int | None,
-    headers: dict[str, str],
-    content_type: str | None,
-    html: str | None,
-    text: str | None,
-    markdown: str | None,
-    extraction_method: str | None,
-    quality_score: float,
-    classification_evidence: list,
-    diagnostics: dict,
-    discovered_link_count: int,
-    discovered_links_truncated: bool,
-    discovered_links: list,
     error: str | None,
+    selected_strategy: str | None = None,
+    headers: dict[str, str] | None = None,
+    content_type: str | None = None,
+    html: str | None = None,
+    text: str | None = None,
+    markdown: str | None = None,
+    extraction_method: str | None = None,
+    quality_score: float = 0.0,
+    classification_evidence: list | None = None,
+    diagnostics: dict | None = None,
+    discovered_link_count: int = 0,
+    discovered_links_truncated: bool = False,
+    discovered_links: list | None = None,
 ) -> EngineCrawlResult:
-    """Construct an EngineCrawlResult from a pre-built attempt."""
+    """Construct an EngineCrawlResult from a pre-built attempt.
+
+    Many parameters have defaults for the common "empty result" case.
+    """
+    if headers is None:
+        headers = {}
+    if classification_evidence is None:
+        classification_evidence = []
+    if diagnostics is None:
+        diagnostics = {}
+    if discovered_links is None:
+        discovered_links = []
     return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
@@ -68,7 +79,7 @@ def _failed_engine_result(
     http_status: int | None = None,
     final_url: str | None = None,
 ) -> EngineCrawlResult:
-    """Construct a failed/blocked EngineCrawlResult with a single attempt."""
+    """Construct a failed EngineCrawlResult with a single attempt."""
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status="failed",
@@ -84,22 +95,10 @@ def _failed_engine_result(
         final_url=final_url,
         status="failed",
         classification=classification,
-        selected_strategy=None,
         attempt=attempt,
         http_status=http_status,
-        headers={},
-        content_type=None,
-        html=None,
-        text=None,
-        markdown=None,
-        extraction_method=None,
-        quality_score=0.0,
-        classification_evidence=[],
-        diagnostics=diagnostics or {},
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        discovered_links=[],
         error=error,
+        diagnostics=diagnostics or {},
     )
 
 
@@ -128,22 +127,10 @@ def _blocked_engine_result(
         final_url=final_url,
         status="blocked",
         classification=classification,
-        selected_strategy=None,
         attempt=attempt,
         http_status=http_status,
-        headers={},
-        content_type=None,
-        html=None,
-        text=None,
-        markdown=None,
-        extraction_method=None,
-        quality_score=0.0,
-        classification_evidence=[],
-        diagnostics={},
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        discovered_links=[],
         error=classification,
+        diagnostics={},
     )
 
 
@@ -172,22 +159,10 @@ def _skipped_engine_result(
         final_url=None,
         status="skipped",
         classification=classification,
-        selected_strategy=None,
         attempt=attempt,
         http_status=None,
-        headers={},
-        content_type=None,
-        html=None,
-        text=None,
-        markdown=None,
-        extraction_method=None,
-        quality_score=0.0,
-        classification_evidence=[],
-        diagnostics=diagnostics or {},
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        discovered_links=[],
         error=error,
+        diagnostics=diagnostics or {},
     )
 
 
@@ -218,20 +193,11 @@ def _binary_no_text_result(
         final_url=final_url,
         status="failed",
         classification="binary_no_text",
-        selected_strategy=None,
         attempt=attempt,
         http_status=http_status,
+        error="binary_no_text",
         headers=headers,
         content_type=content_type,
-        html=None,
-        text=None,
-        markdown=None,
         extraction_method="binary_no_text",
-        quality_score=0.0,
-        classification_evidence=[],
         diagnostics={},
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        discovered_links=[],
-        error="binary_no_text",
     )
