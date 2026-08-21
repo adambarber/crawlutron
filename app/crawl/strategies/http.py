@@ -348,7 +348,11 @@ def _check_ssrf_protection(url: str) -> None:
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        return
+        # An unresolvable hostname is not a valid public target; fail closed
+        # rather than silently allowing it. Previously this let unresolvable
+        # hostnames bypass the private-IP block and reach loopback via the pin
+        # fallback in _resolve_and_pin_host.
+        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}")
     for entry in addrinfo:
         ip = entry[4][0]
         if _is_private_or_loopback_ip(ip):
@@ -376,7 +380,10 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
-        return hostname, "127.0.0.1"
+        # Do NOT fall back to loopback. Returning the original hostname makes
+        # the HTTP client attempt resolution itself and fail with a connection
+        # error instead of silently connecting to 127.0.0.1 (SSRF bypass, F9).
+        return hostname, hostname
     for entry in addrinfo:
         ip = entry[4][0]
         if not _is_private_or_loopback_ip(ip):
