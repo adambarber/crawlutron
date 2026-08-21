@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 import uuid
 
@@ -90,8 +91,14 @@ class JobStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        # Wait for the write lock instead of raising "database is locked" under
+        # concurrent access from FastAPI's worker threads.
+        self._conn.execute("PRAGMA busy_timeout=5000")
         # Enable WAL mode for better concurrent read/write performance
         self._conn.execute("PRAGMA journal_mode=WAL")
+        # Serialize all connection use across threads (sqlite3 connections are
+        # not safe for concurrent use even with check_same_thread=False).
+        self._lock = threading.Lock()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -138,11 +145,17 @@ class JobStore:
             status=JobStatus.PENDING,
             frontier=[root_url],
         )
-        self.save(job)
+        with self._lock:
+            self._persist(job)
         return job
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job state to SQLite."""
+        """Persist job state to SQLite (thread-safe)."""
+        with self._lock:
+            self._persist(job)
+
+    def _persist(self, job: CrawlJobState) -> None:
+        """Write job state to SQLite. Caller must hold ``self._lock``."""
         job.updated_at = time.time()
         self._conn.execute("""
             INSERT INTO crawl_jobs (job_id, root_url, policy, status, frontier, visited, results,
@@ -175,11 +188,12 @@ class JobStore:
 
     def load(self, job_id: str) -> CrawlJobState | None:
         """Load job state from SQLite. Returns None if not found."""
-        row = self._conn.execute(
-            "SELECT job_id, root_url, policy, status, frontier, visited, results, "
-            "created_at, updated_at, error, stats FROM crawl_jobs WHERE job_id = ?",
-            (job_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT job_id, root_url, policy, status, frontier, visited, results, "
+                "created_at, updated_at, error, stats FROM crawl_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
         if row is None:
             return None
         try:
@@ -192,20 +206,22 @@ class JobStore:
 
     def delete(self, job_id: str) -> bool:
         """Delete job from SQLite. Returns True if existed."""
-        cur = self._conn.execute("DELETE FROM crawl_jobs WHERE job_id = ?", (job_id,))
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM crawl_jobs WHERE job_id = ?", (job_id,))
+            self._conn.commit()
         return cur.rowcount > 0
 
     def list_jobs(self) -> list[dict[str, Any]]:
         """List all jobs with basic info (no frontier/visited/results)."""
-        rows = self._conn.execute("""
-            SELECT job_id, root_url, status, created_at, updated_at,
-                   json_array_length(frontier) as frontier_size,
-                   json_array_length(visited) as visited_size,
-                   json_array_length(results) as results_count
-            FROM crawl_jobs
-            ORDER BY created_at DESC
-        """).fetchall()
+        with self._lock:
+            rows = self._conn.execute("""
+                SELECT job_id, root_url, status, created_at, updated_at,
+                       json_array_length(frontier) as frontier_size,
+                       json_array_length(visited) as visited_size,
+                       json_array_length(results) as results_count
+                FROM crawl_jobs
+                ORDER BY created_at DESC
+            """).fetchall()
         return [
             {
                 "job_id": r[0],
@@ -221,5 +237,6 @@ class JobStore:
         ]
 
     def close(self) -> None:
-        """Close the database connection."""
-        self._conn.close()
+        """Close the database connection (thread-safe)."""
+        with self._lock:
+            self._conn.close()
