@@ -7,6 +7,8 @@ import inspect
 import re
 import socket
 import time
+import threading
+import tempfile
 import hashlib
 from urllib.parse import urlparse
 import json
@@ -149,49 +151,76 @@ class CookieJar:
     """In-memory cookie jar (Feature: Persistent Cookie Jars).
 
     Cookies are stored per-domain and merged into ``Set-Cookie`` response
-    headers / ``Cookie`` request headers across recursive page loads.
+    headers / ``Cookie`` request headers across recursive page loads. All
+    access is guarded by a lock because the jar is shared across concurrent
+    requests (a single global instance).
     """
 
     def __init__(self) -> None:
         self._cookies: dict[str, dict[str, str]] = {}
+        self._lock = threading.Lock()
 
     def add_cookie_header(self, url: str, set_cookie_header: str) -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain."""
         from http.cookies import SimpleCookie
+
         host = (urlparse(url).hostname or "").lower()
         jar = SimpleCookie()
         try:
             jar.load(set_cookie_header)
         except Exception:
             return
-        for cookie in jar.values():
-            self._cookies.setdefault(host, {})[cookie.key] = cookie.value
+        with self._lock:
+            target = self._cookies.setdefault(host, {})
+            for cookie in jar.values():
+                target[cookie.key] = cookie.value
 
     def cookie_header_for(self, url: str) -> str:
         """Return a ``Cookie`` header string for the given URL's domain."""
         host = (urlparse(url).hostname or "").lower()
-        domain_cookies = self._cookies.get(host, {})
+        with self._lock:
+            domain_cookies = dict(self._cookies.get(host, {}))
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
 
     def clear(self) -> None:
-        self._cookies.clear()
+        with self._lock:
+            self._cookies.clear()
 
     def save_to_file(self, path: str) -> None:
-        """Persist the cookie jar to a JSON file."""
+        """Persist the cookie jar to a JSON file atomically.
+
+        Writes to a temp file in the same directory and ``os.replace``s it into
+        place, so a crash (or write error) mid-serialization cannot leave a
+        truncated/corrupted file that silently loses all persisted cookies.
+        """
         import json
-        data = {domain: cookies for domain, cookies in self._cookies.items()}
-        # Ensure parent directory exists
         import os
+
+        with self._lock:
+            data = {domain: dict(cookies) for domain, cookies in self._cookies.items()}
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+        directory = os.path.dirname(path) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".cookiejar.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load_from_file(cls, path: str) -> "CookieJar":
         """Load a cookie jar from a JSON file. Returns empty jar if file missing/invalid."""
         import json, os
+
         jar = cls()
         if not os.path.exists(path):
             return jar
@@ -199,9 +228,10 @@ class CookieJar:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
-                for domain, cookies in data.items():
-                    if isinstance(cookies, dict):
-                        jar._cookies[domain] = cookies
+                with jar._lock:
+                    for domain, cookies in data.items():
+                        if isinstance(cookies, dict):
+                            jar._cookies[domain] = cookies
         except Exception:
             pass  # corrupted file -> empty jar
         return jar
