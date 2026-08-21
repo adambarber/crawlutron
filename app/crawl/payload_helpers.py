@@ -18,6 +18,10 @@ from app.settings import CrawlerSettings
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
+# Bounded default for max_pages. A missing or zero value must NOT mean
+# "unlimited" (F4) - it falls back to this sane cap instead.
+DEFAULT_MAX_PAGES = 100
+
 
 def _payload_urls(payload: dict[str, Any]) -> list[str]:
     if "urls" in payload:
@@ -55,7 +59,13 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         raise ValueError("invalid_policy_profile")
     try:
         max_depth = max(0, min(20, int(limits.get("max_depth", 0))))
-        max_pages = max(0, min(2000, int(limits.get("max_pages", 0))))
+        # F4: a missing/zero max_pages must be bounded, never "unlimited".
+        # Any positive request is clamped to [1, 2000].
+        requested_pages = int(limits.get("max_pages", 0))
+        if requested_pages <= 0:
+            max_pages = DEFAULT_MAX_PAGES
+        else:
+            max_pages = max(1, min(2000, requested_pages))
         respect_robots = bool(limits.get("respect_robots", True))
     except (TypeError, ValueError):
         raise ValueError("invalid_policy_limits") from None

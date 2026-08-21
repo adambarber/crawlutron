@@ -583,6 +583,9 @@ async def crawl_request(
     # --- crawl orchestration ---
     limits = policy["limits"]
     max_depth = int(limits.get("max_depth") or 0)
+    # F4: 0 is no longer "unlimited"; the policy always emits a bounded
+    # value (DEFAULT_MAX_PAGES when unset), but guard here too so a 0 never
+    # loops forever.
     max_pages = int(limits.get("max_pages") or 0)
     respect_robots = bool(limits.get("respect_robots"))
     include_html = bool((policy.get("browser_profile") or {}).get("include_html", True))
@@ -624,7 +627,7 @@ async def crawl_request(
                     (0, CrawlTask(index=next_index, original_url=seed, normalized_url=seed, domain=registrable_domain(seed)))
                 )
                 next_index += 1
-        while frontier and (max_pages == 0 or page_count < max_pages):
+        while frontier and page_count < max_pages:
             if shutdown_event.is_set():
                 break
             depth, job = frontier.popleft()
