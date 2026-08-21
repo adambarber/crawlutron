@@ -109,3 +109,24 @@ def test_crawljobstate_serialization():
     assert loaded.frontier == ["http://example.com/a", "http://example.com/b"]
     assert loaded.visited == {"http://example.com/"}
     assert len(loaded.results) == 1
+
+
+
+
+
+
+def test_create_returns_full_uuid_hex():
+    """HIGH #9: job IDs must not be short brute-forceable suffixes."""
+    store = JobStore(":memory:")
+    job = store.create("https://example.com/", {"limits": {}})
+    assert len(job.job_id) == 32
+    assert all(c in "0123456789abcdef" for c in job.job_id)
+    loaded = store.load(job.job_id)
+    assert loaded is not None
+    assert loaded.job_id == job.job_id
+
+
+def test_ids_are_unique():
+    store = JobStore(":memory:")
+    ids = {store.create("https://example.com/", {"limits": {}}).job_id for _ in range(50)}
+    assert len(ids) == 50

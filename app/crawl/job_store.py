@@ -109,7 +109,8 @@ class JobStore:
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
         """Create a new crawl job with initial frontier containing root_url."""
-        job_id = uuid.uuid4().hex[:12]
+        # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
+        job_id = uuid.uuid4().hex
         job = CrawlJobState(
             job_id=job_id,
             root_url=root_url,
