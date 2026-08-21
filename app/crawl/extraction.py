@@ -17,7 +17,10 @@ forms), Katana-inspired JS endpoint discovery, and auto-pagination detection.
 
 from __future__ import annotations
 
+import concurrent.futures
 import io
+import logging
+import os
 import re
 from html import unescape
 from html.parser import HTMLParser
@@ -27,6 +30,38 @@ from urllib.parse import urljoin, urlparse
 from app.crawl.firecrawl_format import _text_from_html
 from app.models import DiscoveredLink
 from app.validation import normalize_public_http_url
+
+logger = logging.getLogger(__name__)
+
+# Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
+# A pathological selector (or adversarial payload) could otherwise run
+# unbounded and tie up a request worker. Override via env var.
+_EXTRACTION_SELECTOR_TIMEOUT = float(
+    os.environ.get("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", "2.0")
+)
+
+_EXTRACTION_SELECTOR_SENTINEL = object()
+
+
+def _eval_selector(fn, timeout):
+    """Run a selector evaluation in a worker thread so it cannot hang a request.
+
+    Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
+    exceeded ``timeout`` seconds. The runaway worker is abandoned (not joined)
+    on timeout, which bounds caller latency even though the evaluation keeps
+    running briefly in the background.
+
+    This is the defense for the XPath/CSS DoS finding: user-supplied selectors
+    are evaluated with a hard wall-clock cap.
+    """
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(fn)
+    try:
+        return fut.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return _EXTRACTION_SELECTOR_SENTINEL
+    finally:
+        ex.shutdown(wait=False)
 
 
 _PDF_MAGIC = b"%PDF"
@@ -125,7 +160,15 @@ def _extract_selected(
         except ImportError:
             return ExtractedContent(None, None)
         soup = BeautifulSoup(html, "html.parser")
-        selected = soup.select(css_selector)
+        selected = _eval_selector(
+            lambda: soup.select(css_selector), _EXTRACTION_SELECTOR_TIMEOUT
+        )
+        if selected is _EXTRACTION_SELECTOR_SENTINEL:
+            logger.warning(
+                "extraction_selector_timeout",
+                extra={"selector_type": "css", "selector": css_selector},
+            )
+            return ExtractedContent(None, None)
         if not selected:
             return ExtractedContent(None, None)
         fragment = "\n".join(str(tag) for tag in selected)
@@ -134,8 +177,16 @@ def _extract_selected(
         if tree is None:
             return ExtractedContent(None, None)
         try:
-            nodes = tree.xpath(xpath)
+            nodes = _eval_selector(
+                lambda: tree.xpath(xpath), _EXTRACTION_SELECTOR_TIMEOUT
+            )
         except Exception:  # invalid XPath is caller error, not extraction
+            return ExtractedContent(None, None)
+        if nodes is _EXTRACTION_SELECTOR_SENTINEL:
+            logger.warning(
+                "extraction_selector_timeout",
+                extra={"selector_type": "xpath", "selector": xpath},
+            )
             return ExtractedContent(None, None)
         if not nodes:
             return ExtractedContent(None, None)
