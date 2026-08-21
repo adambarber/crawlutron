@@ -39,7 +39,7 @@ class ContentCache:
         default_ttl: int = 3600,
         namespace: str = "content",
         clock: Callable[[], float] = _default_clock,
-        max_entries: int | None = None,
+        max_entries: int = 10000,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
