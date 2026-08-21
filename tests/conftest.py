@@ -50,15 +50,19 @@ async def _fast_asyncio_sleep(*args, **kwargs):
     return None
 
 
-@pytest.fixture(autouse=True, scope="session")
-def _mock_sleeps():
-    """Patch time.sleep and asyncio.sleep to return instantly for all tests.
+@pytest.fixture(scope="session")
+def fast_sleeps():
+    """Opt-in no-op sleep.
 
-    This eliminates real-time waits for:
-    - Scheduler jitter and cooldowns
-    - Browser lazy-scroll delays
-    - Retry backoffs
-    - Challenge wait loops
+    By default (when this fixture is NOT requested) time.sleep and asyncio.sleep
+    are REAL, so timing-sensitive production behavior -- scheduler per-domain
+    delays, domain cooldowns, browser lazy-scroll waits, retry backoffs -- is
+    actually exercised. Tests that do not care about wall-clock timing may opt
+    in to fast (instant) sleeps to keep the suite snappy.
+
+    Previously this was an autouse session fixture that patched both sleep
+    functions globally, which meant retry backoffs / cooldowns were never
+    actually tested (adversarial review finding).
     """
     with patch("time.sleep", lambda *a, **k: None), \
          patch("asyncio.sleep", _fast_asyncio_sleep):
