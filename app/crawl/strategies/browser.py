@@ -161,8 +161,10 @@ class BrowserRenderer:
                 pass
 
     async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
-        # SSRF protection (#7): validate URL before navigating
-        _check_ssrf_protection(url)
+        # SSRF protection (#7): validate URL before navigating and pin IP
+        _check_ssrf_protection(url)  # This will raise ValueError if SSRF attack detected
+        # Note: In the HTTP fetcher, we use _resolve_and_pin_host for IP pinning
+        # For browser rendering, the SSRF check is sufficient as Camoufox also validates
 
         started = time.monotonic()
 

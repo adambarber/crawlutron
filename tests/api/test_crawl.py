@@ -6,6 +6,7 @@ import json
 import pytest
 import httpx
 from app.main import app, build_unified_crawl_response
+from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
 from app.constants import HTTP_DECLARED_CRAWLER
 
@@ -260,6 +261,7 @@ class TestShadowDomApi:
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
+    @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
     async def test_v1_crawl_shadow_dom_flattened(self):
         resp = await self.client.post("/v1/crawl", json={
             "url": f"{self.base}/shadow",

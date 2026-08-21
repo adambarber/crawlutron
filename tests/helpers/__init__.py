@@ -226,3 +226,24 @@ def make_content_cache_with_entry(tmpdir: str, key: str = "key1", value: dict = 
     cache.set(key, value)
     return cache
 
+
+
+
+def browser_available() -> bool:
+    """Return True if a Playwright Chromium binary is installed and can be used.
+
+    Used to skip browser-dependent tests in environments where the browser
+    binary is not installed (e.g. lightweight CI images). When the binary is
+    present the tests run normally.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False
+    import os
+    try:
+        with sync_playwright() as p:
+            path = p.chromium.executable_path
+            return bool(path) and os.path.exists(path)
+    except Exception:
+        return False

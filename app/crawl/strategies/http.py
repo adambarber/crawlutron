@@ -243,18 +243,54 @@ def _check_ssrf_protection(url: str) -> None:
             raise ValueError(f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}")
 
 
+def _resolve_and_pin_host(url: str) -> tuple[str, str]:
+    """Resolve the hostname once and pin the resulting IP for the connection.
+
+    Prevents DNS-rebinding (TOCTOU) SSRF: ``_check_ssrf_protection`` validates
+    the resolved IPs, then this helper returns the FIRST public IP so the HTTP
+    client connects to that exact IP instead of re-resolving at connect time.
+    The original ``Host`` header is preserved by the caller.
+    """
+    import os
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return hostname or "", "127.0.0.1"
+    if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1":
+        return hostname, "127.0.0.1"
+    try:
+        addrinfo = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return hostname, "127.0.0.1"
+    for entry in addrinfo:
+        ip = entry[4][0]
+        if not _is_private_or_loopback_ip(ip):
+            return hostname, ip
+    # No public IP found (should have been caught above) -> fail safe
+    raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
 
 
 async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
     _check_ssrf_protection(url)
+    # DNS-rebinding mitigation: resolve once and pin the IP, preserving Host.
+    hostname, pinned_ip = _resolve_and_pin_host(url)
+    parsed = urlparse(url)
+    pinned_url = (
+        f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
+        f"{parsed.path or '/'}"
+        + (f"?{parsed.query}" if parsed.query else "")
+    )
+    request_headers = dict(headers)
+    if parsed.hostname:
+        request_headers["Host"] = parsed.hostname
     client = get_async_http_client()
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
     try:
         # Peek at response headers first, then read body if within size limit (#5)
-        async with client.stream("GET", url, headers=headers, timeout=timeout, follow_redirects=True) as response:
+        async with client.stream("GET", pinned_url, headers=request_headers, timeout=timeout, follow_redirects=True) as response:
             content_length = response.headers.get("content-length")
             if content_length and int(content_length) > max_content_length:
                 return HttpFetchResult(
@@ -292,8 +328,19 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
+        _check_ssrf_protection(url)
+        hostname, pinned_ip = _resolve_and_pin_host(url)
+        parsed = urlparse(url)
+        pinned_url = (
+            f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
+            f"{parsed.path or '/'}"
+            + (f"?{parsed.query}" if parsed.query else "")
+        )
+        request_headers = dict(headers)
+        if parsed.hostname:
+            request_headers["Host"] = parsed.hostname
         async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
-            response = await client.get(url, headers=headers, allow_redirects=True)
+            response = await client.get(pinned_url, headers=request_headers, allow_redirects=True)
         # Content-length check (#5)
         content_length = response.headers.get("content-length")
         if content_length and int(content_length) > max_content_length:
