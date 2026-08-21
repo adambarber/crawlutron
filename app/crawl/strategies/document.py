@@ -73,11 +73,20 @@ def _default_document_text_extractor(url: str) -> str:
 
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via
     ``BrowserRenderer(pdf_text_extractor=...)`` for tests.
+
+    SSRF (F2): the target URL is validated against the SSRF blocklist before
+    any fetch, so ``urlopen`` is never pointed at an internal/loopback host.
     """
+    # Fail closed on unsafe targets (internal/loopback/reserved ranges) BEFORE
+    # any heavy import or network access (F2).
+    from app.crawl.strategies.http import _check_ssrf_protection
+
+    _check_ssrf_protection(url)
+
     import pdfplumber
 
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - public crawled URL
+        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - validated above
             pdf_bytes = response.read()
     except Exception:  # extraction failure yields empty text
         return ""

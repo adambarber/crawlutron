@@ -23,11 +23,33 @@ import logging
 from app.classify import classify_page
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
-from app.crawl.strategies.http import CookieJar, _check_ssrf_protection, _classify_error_code
+from app.crawl.strategies.http import CookieJar, _check_ssrf_protection, _classify_error_code, _build_pinned_request
 from app.validation import registrable_domain
 from app.constants import BROWSER_BLOCKED_CLASSIFICATIONS
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_browser_target(url: str) -> tuple[str, dict[str, str]]:
+    """SSRF-check + IP-pin ``url`` for browser navigation (F2).
+
+    Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
+    to the single resolved IP (preventing DNS-rebinding) while preserving the
+    original ``Host`` header. Raises ``ValueError`` if the target is unsafe.
+    """
+    pinned_url, request_headers = _build_pinned_request(url, {})
+    host = request_headers.get("Host")
+    return pinned_url, ({"Host": host} if host else {})
+
+
+def _assert_safe_final_url(final_url: str) -> None:
+    """Re-validate the post-navigation URL (F2/F8).
+
+    The rendered site may have redirected the browser to an internal host. Fail
+    closed (raise ``ValueError``) rather than returning potentially-internal
+    content.
+    """
+    _check_ssrf_protection(final_url)
 
 
 TRANSIENT_CLASSIFICATIONS = {
@@ -161,10 +183,10 @@ class BrowserRenderer:
                 pass
 
     async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
-        # SSRF protection (#7): validate URL before navigating and pin IP
-        _check_ssrf_protection(url)  # This will raise ValueError if SSRF attack detected
-        # Note: In the HTTP fetcher, we use _resolve_and_pin_host for IP pinning
-        # For browser rendering, the SSRF check is sufficient as Camoufox also validates
+        # SSRF protection (F2): validate + IP-pin the target so the browser
+        # connects to a single resolved IP (DNS-rebinding safe) while preserving
+        # the original Host header. Raises ValueError if the target is unsafe.
+        pinned_url, goto_headers = _resolve_browser_target(url)
 
         started = time.monotonic()
 
@@ -181,7 +203,7 @@ class BrowserRenderer:
                 await self._wait_for_ready_state(page)
 
             # Navigate to target URL
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(pinned_url, wait_until="domcontentloaded", extra_http_headers=goto_headers)
             await self._wait_for_ready_state(page)
 
             # Browser action chains (#10): run policy-specified interactions before extraction.
@@ -204,6 +226,9 @@ class BrowserRenderer:
 
             extraction_method = "dom_text"
             final_url = page.url
+            # Re-validate the post-navigation URL (F2/F8): the site may have
+            # redirected the browser to an internal host. Fail closed.
+            _assert_safe_final_url(final_url)
 
             # PDF extraction fallback
             if self._looks_like_pdf(final_url) and not (text or "").strip():

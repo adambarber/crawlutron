@@ -34,7 +34,9 @@ class FakePage:
     def on(self, event, handler):
         self.calls.append(("on", event))
 
-    async def goto(self, url, wait_until="load"):
+    async def goto(self, url, wait_until="load", **kwargs):
+        # Mirror the real Playwright/Camoufox goto signature (accepts
+        # extra_http_headers etc.); the production code passes extra_http_headers.
         self._url = url
         self.calls.append(("goto", url))
 
