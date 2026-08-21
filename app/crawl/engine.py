@@ -390,6 +390,21 @@ def _robots_pattern_to_regex(pattern: str) -> "re.Pattern[str]":
     return re.compile("".join(parts))
 
 
+ROBOTS_CACHE_MAX_ENTRIES = 1000
+
+
+def _cap_robots_cache(cache: dict, max_size: int) -> None:
+    """Evict oldest entries (insertion order) once ``cache`` exceeds ``max_size``.
+
+    The robots cache lives for the duration of a single crawl_request and is
+    normally trimmed by TTL, but a crawl that discovers thousands of unique
+    (still-fresh) domains would otherwise grow it without bound. This bounds
+    memory by evicting the least-recently-inserted origins (LRU by insertion).
+    """
+    while len(cache) > max_size:
+        cache.pop(next(iter(cache)))
+
+
 def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     """Return True if ``target_url`` is allowed by the robots ``rules``.
 
@@ -521,7 +536,7 @@ async def crawl_request(
     async def _fetch_robots_rules(origin: str) -> list[tuple[bool, str]]:
         now = time.monotonic()
         # Periodically purge expired entries to prevent unbounded growth
-        if len(robots_cache) > 1000:
+        if len(robots_cache) > ROBOTS_CACHE_MAX_ENTRIES:
             _purge_robots_cache(now)
         cached = robots_cache.get(origin)
         if cached and cached[0] > now:
@@ -532,6 +547,9 @@ async def crawl_request(
         if body is not None:
             rules = _parse_robots_rules(body)
         robots_cache[origin] = (now + robots_ttl, rules)
+        # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
+        # that discovers thousands of unique, still-fresh domains).
+        _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
         return rules
 
     async def _robots_allows_target(target_url: str) -> bool:
