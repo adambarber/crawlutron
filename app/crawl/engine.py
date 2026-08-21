@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+import functools
 from collections import deque
 import time
 import uuid
@@ -369,6 +370,7 @@ async def _execute_crawl_chain(
     return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
 
 
+@functools.lru_cache(maxsize=1024)
 def _robots_pattern_to_regex(pattern: str) -> "re.Pattern[str]":
     """Translate a robots.txt path pattern to a regex.
 
