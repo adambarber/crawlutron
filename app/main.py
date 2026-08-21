@@ -347,8 +347,24 @@ if FastAPI is not None:
                 logger.warning("webhook_payload_too_large", extra={"size": len(payload_bytes), "limit": max_webhook_size})
                 return
 
+            # DNS-rebinding-safe delivery: resolve once and pin the connection to
+            # that exact IP, preserving the original Host header so virtual-host
+            # routing still works (#3).
+            from urllib.parse import urlparse as _urlparse
+            from app.crawl.strategies.http import _resolve_and_pin_host
+
+            _hostname, pinned_ip = _resolve_and_pin_host(webhook_url)
+            _parsed = _urlparse(webhook_url)
+            pinned_url = (
+                f"{_parsed.scheme}://{pinned_ip}:{_parsed.port or (80 if _parsed.scheme == 'http' else 443)}"
+                f"{_parsed.path or '/'}"
+                + (f"?{_parsed.query}" if _parsed.query else "")
+            )
+            request_headers = {"Content-Type": "application/json"}
+            if _parsed.hostname:
+                request_headers["Host"] = _parsed.hostname
             async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(webhook_url, content=payload_bytes, headers={"Content-Type": "application/json"})
+                await client.post(pinned_url, content=payload_bytes, headers=request_headers)
         except Exception:  # webhook delivery is best-effort
             pass
 
@@ -356,10 +372,13 @@ if FastAPI is not None:
         """Validate webhook URL to prevent SSRF attacks.
 
         Similar to crawl target validation but for outbound webhook callbacks.
+        Resolves the hostname and rejects any that map to a private/loopback
+        address, protecting against attacker-controlled DNS that returns an
+        internal IP (DNS-rebinding class of SSRF).
         """
         import os
         from urllib.parse import urlparse
-        import ipaddress
+        from app.crawl.strategies.http import _check_ssrf_protection
 
         allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1"
         parsed = urlparse(webhook_url)
@@ -368,16 +387,12 @@ if FastAPI is not None:
         hostname = parsed.hostname
         if not hostname:
             raise ValueError("webhook_url missing hostname")
-        if not allow_private:
-            if hostname in {"localhost", "host.docker.internal"}:
-                raise ValueError("webhook_url points to private network target")
-            try:
-                address = ipaddress.ip_address(hostname)
-            except ValueError:
-                pass
-            else:
-                if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
-                    raise ValueError("webhook_url points to private network target")
+        if allow_private:
+            return
+        if hostname in {"localhost", "host.docker.internal"}:
+            raise ValueError("webhook_url points to private network target")
+        # Resolve the hostname and reject private/loopback IPs (DNS-rebinding safe).
+        _check_ssrf_protection(webhook_url)
 
     @app.post(
         "/v1/crawl",
