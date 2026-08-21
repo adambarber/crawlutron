@@ -122,14 +122,43 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
 
 
 
-def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -> EngineCrawlResult:
+# A single user-supplied scope_regex is applied to every discovered link.
+# Bound the work and refuse pathological patterns (ReDoS guard).
+_MAX_SCOPE_PATTERN_LEN = 256
+_MAX_SCOPE_LINKS = 5000
+# A group immediately followed by a quantifier that itself contains a quantifier
+# or alternation is the classic catastrophic-backtracking shape (e.g. "(a+)+$").
+_SCOPE_GROUP_QUANT = re.compile(r"\((?:[^()]|\([^()]*\))*\)\s*[+*?{]")
+
+
+def _compile_scope_regex_safe(scope_regex: str | None):
+    """Compile a user-supplied scope regex, refusing pathological patterns.
+
+    A malicious or careless ``scope_regex`` (e.g. ``(a+)+$``) can trigger
+    catastrophic backtracking and hang the request. We reject patterns that are
+    too long or contain a quantified group (nested quantifier / alternation),
+    which are the classic ReDoS vectors. Invalid patterns (``re.error``) are
+    also rejected, preserving the previous safe-fallback behavior.
+    """
     if not scope_regex:
-        return result
+        return None
+    if len(scope_regex) > _MAX_SCOPE_PATTERN_LEN:
+        return None
+    if _SCOPE_GROUP_QUANT.search(scope_regex):
+        return None
     try:
-        pattern = re.compile(scope_regex)
+        return re.compile(scope_regex)
     except re.error:
+        return None
+
+
+def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -> EngineCrawlResult:
+    pattern = _compile_scope_regex_safe(scope_regex)
+    if pattern is None:
         return result
-    filtered = [link for link in result.discovered_links if pattern.search(link.normalized_url)]
+    # Bound the number of links scanned so a huge link set cannot amplify cost.
+    links = result.discovered_links[:_MAX_SCOPE_LINKS]
+    filtered = [link for link in links if pattern.search(link.normalized_url)]
     return EngineCrawlResult(
         **{
             **asdict(result),
