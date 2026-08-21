@@ -441,98 +441,131 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
     return pinned_url, request_headers
 
 
+_MAX_REDIRECT_HOPS = 5
+
+
 async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
-    granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
-    pinned_url, request_headers = _build_pinned_request(url, headers)
+    granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
+    SSRF-safe manual redirect handling (F1).
+
+    Redirects are followed by hand so every hop is re-validated against the SSRF
+    blocklist and re-pinned to its resolved IP. Automatic httpx following is off
+    because it would connect to a redirect target without re-checking it.
+    """
     client = get_async_http_client()
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
-    try:
-        # Peek at response headers first, then read the body if within size limit (#5)
-        async with client.stream("GET", pinned_url, headers=request_headers, timeout=timeout, follow_redirects=True) as response:
-            content_length = response.headers.get("content-length")
-            if content_length and int(content_length) > max_content_length:
-                return _http_413(url, response, started)
-            # Stream the RAW (still-compressed) bytes, capping the total read so
-            # a chunked response with no Content-Length cannot stream unlimited
-            # data (memory-exhaustion / decompression-bomb guard).
-            raw = b""
-            async for chunk in response.aiter_raw():
-                raw += chunk
-                if len(raw) > max_content_length:
+    current_url = url
+    hops = 0
+    while True:
+        pinned_url, request_headers = _build_pinned_request(current_url, headers)
+        try:
+            # follow_redirects=False: we follow manually so each hop is SSRF-checked.
+            async with client.stream("GET", pinned_url, headers=request_headers, timeout=timeout, follow_redirects=False) as response:
+                content_length = response.headers.get("content-length")
+                if content_length and int(content_length) > max_content_length:
                     return _http_413(url, response, started)
-            encoding = response.headers.get("content-encoding", "")
-            try:
-                body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
-            except DecompressionTooLargeError:
-                return _http_413(url, response, started)
+                status_code = response.status_code
+                location = response.headers.get("location")
+                # SSRF-safe redirect: only follow within the hop budget. The next
+                # loop iteration re-runs _build_pinned_request, which re-validates
+                # (and re-pins) the redirect target against the SSRF blocklist.
+                if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
+                    current_url = urljoin(current_url, location)
+                    hops += 1
+                    continue
+                # Terminal response: stream RAW bytes, capping total read (#5).
+                raw = b""
+                async for chunk in response.aiter_raw():
+                    raw += chunk
+                    if len(raw) > max_content_length:
+                        return _http_413(url, response, started)
+                encoding = response.headers.get("content-encoding", "")
+                try:
+                    body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
+                except DecompressionTooLargeError:
+                    return _http_413(url, response, started)
+                resp_headers = {key.lower(): value for key, value in response.headers.items()}
+                # Already decompressed above; drop header to avoid a second pass.
+                resp_headers.pop("content-encoding", None)
+                final_url = str(response.url)
+        except httpx.HTTPStatusError as error:
+            response = error.response
+            body = response.content
             status_code = response.status_code
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
-            # We already decompressed above; drop the header so downstream code
-            # does not attempt a second (invalid) decompression pass.
-            resp_headers.pop("content-encoding", None)
             final_url = str(response.url)
-    except httpx.HTTPStatusError as error:
-        response = error.response
-        body = response.content
-        status_code = response.status_code
-        resp_headers = {key.lower(): value for key, value in response.headers.items()}
-        final_url = str(response.url)
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-    # Persist Set-Cookie headers into the global jar for subsequent requests (#2)
-    _store_set_cookies(url, resp_headers)
-    return HttpFetchResult(
-        url=url,
-        final_url=final_url,
-        status_code=status_code,
-        headers=resp_headers,
-        body=body,
-        elapsed_ms=elapsed_ms,
-    )
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        _store_set_cookies(url, resp_headers)
+        return HttpFetchResult(
+            url=url,
+            final_url=final_url,
+            status_code=status_code,
+            headers=resp_headers,
+            body=body,
+            elapsed_ms=elapsed_ms,
+        )
 
 
 async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
-    """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi."""
+    """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
+
+    Mirrors _default_http_fetcher, including SSRF-safe manual redirect handling
+    (F1). Falls back to plain httpx on any import/fetch failure.
+    """
     try:
         import curl_cffi.requests as cffi_requests
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
-        pinned_url, request_headers = _build_pinned_request(url, headers)
         async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
-            response = await client.get(pinned_url, headers=request_headers, allow_redirects=True)
-        # Content-length check (#5)
-        content_length = response.headers.get("content-length")
-        if content_length and int(content_length) > max_content_length:
-            return HttpFetchResult(
-                url=url, final_url=str(response.url), status_code=413,
-                headers={key.lower(): value for key, value in response.headers.items()},
-                body=b"", elapsed_ms=int((time.monotonic() - 0) * 1000),
-            )
-        elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
-        # Decompress with a size cap (decompression-bomb guard). curl_cffi may
-        # have already auto-decompressed; _decompress_body is exception-safe
-        # and returns the body unchanged in that case.
-        encoding = response.headers.get("content-encoding", "")
-        try:
-            body = _decompress_body(response.content, encoding, max_output_bytes=max_content_length)
-        except DecompressionTooLargeError:
-            return HttpFetchResult(
-                url=url, final_url=str(response.url), status_code=413,
-                headers={key.lower(): value for key, value in response.headers.items()},
-                body=b"", elapsed_ms=elapsed_ms,
-            )
-        resp_headers = {key.lower(): value for key, value in response.headers.items()}
-        resp_headers.pop("content-encoding", None)
-        return HttpFetchResult(
-            url=url,
-            final_url=str(response.url),
-            status_code=response.status_code,
-            headers=resp_headers,
-            body=body,
-            elapsed_ms=elapsed_ms,
-        )
+            current_url = url
+            hops = 0
+            while True:
+                pinned_url, request_headers = _build_pinned_request(current_url, headers)
+                try:
+                    response = await client.get(pinned_url, headers=request_headers, allow_redirects=False)
+                except Exception:
+                    # Fall back to plain httpx for this request on transport errors.
+                    return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+                # Content-length check (#5)
+                content_length = response.headers.get("content-length")
+                if content_length and int(content_length) > max_content_length:
+                    return HttpFetchResult(
+                        url=url, final_url=str(response.url), status_code=413,
+                        headers={key.lower(): value for key, value in response.headers.items()},
+                        body=b"", elapsed_ms=int((time.monotonic() - 0) * 1000),
+                    )
+                status_code = response.status_code
+                location = response.headers.get("location")
+                # SSRF-safe redirect: only follow within the hop budget; the next
+                # iteration re-validates + re-pins the target via _build_pinned_request.
+                if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
+                    current_url = urljoin(current_url, location)
+                    hops += 1
+                    continue
+                elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
+                # Decompress with a size cap (decompression-bomb guard).
+                encoding = response.headers.get("content-encoding", "")
+                try:
+                    body = _decompress_body(response.content, encoding, max_output_bytes=max_content_length)
+                except DecompressionTooLargeError:
+                    return HttpFetchResult(
+                        url=url, final_url=str(response.url), status_code=413,
+                        headers={key.lower(): value for key, value in response.headers.items()},
+                        body=b"", elapsed_ms=elapsed_ms,
+                    )
+                resp_headers = {key.lower(): value for key, value in response.headers.items()}
+                resp_headers.pop("content-encoding", None)
+                return HttpFetchResult(
+                    url=url,
+                    final_url=str(response.url),
+                    status_code=status_code,
+                    headers=resp_headers,
+                    body=body,
+                    elapsed_ms=elapsed_ms,
+                )
     except Exception:  # any cffi failure falls back to plain httpx
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
 
