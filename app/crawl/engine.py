@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import re
+from collections import deque
 import time
 import uuid
 from urllib.parse import urljoin, urlparse
@@ -559,7 +560,7 @@ async def crawl_request(
     else:
         by_index: dict[int, EngineCrawlResult] = {}
         visited: set[str] = set()
-        frontier: list[tuple[int, CrawlTask]] = [(0, job) for job in jobs]
+        frontier: "deque[tuple[int, CrawlTask]]" = deque([(0, job) for job in jobs])
         next_index = len(jobs)
         page_count = 0
         # bounded recursive BFS (#11) seeded by sitemaps (#13)
@@ -574,7 +575,7 @@ async def crawl_request(
         while frontier and (max_pages == 0 or page_count < max_pages):
             if shutdown_event.is_set():
                 break
-            depth, job = frontier.pop(0)
+            depth, job = frontier.popleft()
             if job.normalized_url in visited:
                 continue
             if respect_robots and not await _robots_allows_target(job.normalized_url):
