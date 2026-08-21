@@ -323,14 +323,33 @@ _GLOBAL_COOKIE_JAR = CookieJar()
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:
-    """Return True if ``ip`` is private, loopback, or link-local (SSRF protection)."""
+    """Return True if ``ip`` is NOT a safe public address (SSRF protection).
+
+    Rejects private, loopback, link-local, reserved, multicast and unspecified
+    ranges, plus carrier-grade NAT (100.64.0.0/10), IPv6 unique-local
+    (fc00::/7) and NAT64 (64:ff9b::/96) which older stdlib ``is_private`` does
+    not always cover (F7).
+    """
     import ipaddress
 
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return True
-    return addr.is_private or addr.is_loopback or addr.is_link_local
+    if addr.is_private or addr.is_loopback or addr.is_link_local:
+        return True
+    if addr.is_reserved or addr.is_multicast or addr.is_unspecified:
+        return True
+    # Carrier-grade NAT (RFC 6598) - shared ISP space, not a public target.
+    if isinstance(addr, ipaddress.IPv4Address) and addr in ipaddress.ip_network("100.64.0.0/10"):
+        return True
+    # IPv6 unique-local (RFC 4193) is functionally private.
+    if isinstance(addr, ipaddress.IPv6Address) and addr in ipaddress.ip_network("fc00::/7"):
+        return True
+    # NAT64 (RFC 6147) well-known prefix.
+    if isinstance(addr, ipaddress.IPv6Address) and addr in ipaddress.ip_network("64:ff9b::/96"):
+        return True
+    return False
 
 
 def _check_ssrf_protection(url: str) -> None:
