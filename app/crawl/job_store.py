@@ -7,15 +7,35 @@ so they can survive process restarts.
 
 from __future__ import annotations
 
+import datetime
 import json
+import logging
 import os
 import sqlite3
 import time
 import uuid
+
+logger = logging.getLogger(__name__)
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+
+
+
+def _json_default(obj):
+    """Fallback serializer so JobStore.save never raises on non-JSON-native
+    result/policy values (datetime, bytes, sets, exceptions, etc.)."""
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", "replace")
+    if isinstance(obj, set):
+        return list(obj)
+    if isinstance(obj, Exception):
+        return f"{type(obj).__name__}: {obj}"
+    return str(obj)
 
 
 class JobStatus(str, Enum):
@@ -141,15 +161,15 @@ class JobStore:
         """, (
             job.job_id,
             job.root_url,
-            json.dumps(job.policy, separators=(",", ":")),
+            json.dumps(job.policy, separators=(",", ":"), default=_json_default),
             job.status.value,
-            json.dumps(job.frontier, separators=(",", ":")),
-            json.dumps(list(job.visited), separators=(",", ":")),
-            json.dumps(job.results, separators=(",", ":")),
+            json.dumps(job.frontier, separators=(",", ":"), default=_json_default),
+            json.dumps(list(job.visited), separators=(",", ":"), default=_json_default),
+            json.dumps(job.results, separators=(",", ":"), default=_json_default),
             job.created_at,
             job.updated_at,
             job.error,
-            json.dumps(job.stats, separators=(",", ":")),
+            json.dumps(job.stats, separators=(",", ":"), default=_json_default),
         ))
         self._conn.commit()
 
@@ -164,7 +184,10 @@ class JobStore:
             return None
         try:
             return self._row_to_job(row)
-        except Exception:
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            # Surface corruption instead of silently returning None so a
+            # broken row is observable in logs rather than masked.
+            logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
             return None
 
     def delete(self, job_id: str) -> bool:
