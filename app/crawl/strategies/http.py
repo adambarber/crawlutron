@@ -335,9 +335,12 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     parsed = urlparse(url)
     hostname = parsed.hostname
     if not hostname:
-        return hostname or "", "127.0.0.1"
+        return hostname or "", hostname or ""
     if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1":
-        return hostname, "127.0.0.1"
+        # Local-dev escape hatch: bypass resolution but connect to the REAL
+        # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
+        # fetch/webhook to loopback and broke virtual-host routing.
+        return hostname, hostname
     try:
         addrinfo = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
