@@ -77,10 +77,14 @@ def _html_without_script_and_style(html: str | None) -> str:
 
     without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html or "", flags=re.IGNORECASE | re.DOTALL)
     without_styles = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
-    # Remove all remaining HTML tags (but preserve comments), leaving only text content
-    # This prevents matching on class="grecaptcha", recaptcha-v3-script="", src="...recaptcha..." etc.
-    # while still allowing detection of signals in HTML comments like <!-- access denied -->
-    text_only = re.sub(r"<(?!\!\-\-)[^>]+>", " ", without_styles)
+    # Strip HTML comments. Comments are not user-visible and are trivially
+    # attacker-controllable, so matching block signatures inside them lets an
+    # attacker spoof a classification (e.g. <!-- access denied -->).
+    without_comments = re.sub(r"<!--.*?-->", " ", without_styles, flags=re.DOTALL)
+    # Remove all remaining HTML tags, leaving only text content. This prevents
+    # matching on class="grecaptcha", recaptcha-v3-script="", src="...recaptcha..."
+    # etc., while still allowing detection of signals in visible text.
+    text_only = re.sub(r"<[^>]+>", " ", without_comments)
     return text_only
 
 
