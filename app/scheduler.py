@@ -239,7 +239,10 @@ class DomainScheduler:
                         self.record_failure(job.domain)
                         raise
 
-        await asyncio.gather(*(run_one(job) for job in jobs))
+        # return_exceptions=True: a single job failure must not cancel the
+        # other in-flight jobs (HIGH #6). Exceptions are captured here and the
+        # failing job is simply dropped from the results list.
+        await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         return [result for result in results if result is not None]  # type: ignore[return-value]
 
     @property
