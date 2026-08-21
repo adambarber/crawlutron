@@ -81,3 +81,34 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
         hostname, ip = _resolve_and_pin_host("http://example.com/")
     assert ip == public_ip
     assert calls == ["example.com"], "hostname should be resolved exactly once"
+
+# Shared fixture for scope-filtering tests: a site with one in-scope ("/keep/")
+# link and one out-of-scope ("/drop/") link.
+SCOPE_KEEP_DROP_PAGES = {
+    "/": (
+        200,
+        '<html><body><a href="/keep/x">k</a><a href="/drop/y">d</a></body></html>',
+        "text/html",
+    ),
+    "/keep/x": (200, "<html>k</html>", "text/html"),
+    "/drop/y": (200, "<html>d</html>", "text/html"),
+}
+
+
+async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
+    """Drive a single-level scoped recursive crawl and return the result URLs.
+
+    Used by scope-filtering tests so the site fixture and crawl invocation live
+    in one place (keeps the suite DRY / jscpd-clean).
+    """
+    from app.crawl.cache import HttpCache
+    from app.crawl.engine import crawl_request
+
+    pages = pages if pages is not None else SCOPE_KEEP_DROP_PAGES
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
+    }
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    return {r["normalized_url"] for r in out["results"]}
+

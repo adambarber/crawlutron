@@ -12,7 +12,7 @@ import pytest
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from _testkit import site_fetcher
+from _testkit import run_scoped_crawl, site_fetcher
 
 CATASTROPHIC = "(a+)+$"
 
@@ -53,20 +53,6 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
 
 async def test_recursive_scope_regex_still_filters_with_valid_pattern(monkeypatch):
     # Valid scope patterns must still filter links, now via the compiled pattern.
-    pages = {
-        "/": (
-            200,
-            '<html><body><a href="/keep/x">k</a><a href="/drop/y">d</a></body></html>',
-            "text/html",
-        ),
-        "/keep/x": (200, "<html>k</html>", "text/html"),
-        "/drop/y": (200, "<html>d</html>", "text/html"),
-    }
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": r"/keep/"},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    urls = {r["normalized_url"] for r in out["results"]}
+    urls = await run_scoped_crawl(r"/keep/")
     assert "http://example.com/keep/x" in urls
     assert "http://example.com/drop/y" not in urls
