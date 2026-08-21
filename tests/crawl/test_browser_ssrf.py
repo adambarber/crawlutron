@@ -5,7 +5,7 @@ import pytest
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
 import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.browser import BrowserRenderer, _resolve_browser_target, _assert_safe_final_url
+from app.crawl.strategies.browser import BrowserRenderer, _resolve_browser_target, _assert_safe_final_url, _is_ssrf_blocked, _make_ssrf_route_handler
 from app.models import RenderOptions
 
 
@@ -76,7 +76,11 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
 class _FakePage:
     def __init__(self):
         self.goto_calls = []
+        self.route_calls = []
         self.url = "http://1.2.3.4/"
+
+    def route(self, pattern, handler):
+        self.route_calls.append((pattern, handler))
 
     def on(self, event, handler):
         pass
@@ -163,3 +167,54 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
+
+
+# --------------------------------------------------------------------------
+# F8: route-level guard aborts SSRF-unsafe requests (subresources + redirects)
+# --------------------------------------------------------------------------
+
+async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    assert _is_ssrf_blocked("http://127.0.0.1:9/") is True
+    assert _is_ssrf_blocked("http://169.254.169.254/latest/") is True
+    assert _is_ssrf_blocked("http://1.2.3.4/") is False
+
+
+async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    handler = _make_ssrf_route_handler()
+
+    class _Route:
+        def __init__(self):
+            self.aborted = False
+            self.continued = False
+
+        async def abort(self):
+            self.aborted = True
+
+        async def continue_(self):
+            self.continued = True
+
+    class _Req:
+        def __init__(self, url):
+            self.url = url
+
+    bad = _Route()
+    await handler(bad, _Req("http://127.0.0.1:9/"))
+    assert bad.aborted and not bad.continued
+
+    good = _Route()
+    await handler(good, _Req("http://1.2.3.4/"))
+    assert good.continued and not good.aborted
+
+
+async def test_render_registers_ssrf_route_guard(monkeypatch):
+    page = _FakePage()
+    renderer = await _build_renderer(monkeypatch, page)
+    monkeypatch.setattr(
+        browser_mod, "_build_pinned_request",
+        lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
+    )
+    await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
+    # The SSRF route guard must be registered on the page.
+    assert any(pattern == "**/*" for pattern, _ in page.route_calls)

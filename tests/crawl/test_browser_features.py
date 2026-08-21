@@ -34,6 +34,10 @@ class FakePage:
     def on(self, event, handler):
         self.calls.append(("on", event))
 
+    def route(self, pattern, handler):
+        # Mirrors the real Playwright page.route (synchronous registration).
+        self.calls.append(("route", pattern))
+
     async def goto(self, url, wait_until="load", **kwargs):
         # Mirror the real Playwright/Camoufox goto signature (accepts
         # extra_http_headers etc.); the production code passes extra_http_headers.

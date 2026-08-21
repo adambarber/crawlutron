@@ -51,6 +51,32 @@ def _assert_safe_final_url(final_url: str) -> None:
     """
     _check_ssrf_protection(final_url)
 
+def _is_ssrf_blocked(url: str) -> bool:
+    """Return ``True`` if ``url`` resolves to an SSRF-unsafe target (F8)."""
+    try:
+        _check_ssrf_protection(url)
+    except ValueError:
+        return True
+    return False
+
+
+def _make_ssrf_route_handler():
+    """Playwright route handler that aborts requests to SSRF-unsafe hosts (F8).
+
+    Registered via ``page.route`` so the main navigation, server-side
+    redirects, and every subresource load (images/scripts/XHR) is checked
+    against the SSRF blocklist. Requests that resolve to internal/loopback/
+    reserved addresses are aborted before the browser connects.
+    """
+
+    async def _handler(route, request):
+        if _is_ssrf_blocked(request.url):
+            await route.abort()
+        else:
+            await route.continue_()
+
+    return _handler
+
 
 TRANSIENT_CLASSIFICATIONS = {
     "navigation_timeout",
@@ -192,6 +218,9 @@ class BrowserRenderer:
 
         browser = await self._acquire_browser(options)
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
+        # F8: abort any request (navigation, redirect, or subresource) that
+        # resolves to an SSRF-unsafe host before the browser connects.
+        page.route("**/*", _make_ssrf_route_handler())
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
