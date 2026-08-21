@@ -40,6 +40,16 @@ _EXTRACTION_SELECTOR_TIMEOUT = float(
     os.environ.get("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", "2.0")
 )
 
+# Wall-clock bound (seconds) for document extraction (markitdown).
+# Override via BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT.
+_EXTRACTION_DOC_TIMEOUT = float(
+    os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0")
+)
+
+# Maximum extracted markdown size (chars) to prevent unbounded output (F5).
+_MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
+
+
 _EXTRACTION_SELECTOR_SENTINEL = object()
 
 
@@ -243,17 +253,39 @@ def _extract_html(
 
 
 def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
+    """Extract markdown from document bytes with a wall-clock timeout (F5).
+
+    The markitdown conversion runs in a worker thread with a hard timeout so
+    a pathological document cannot block the worker indefinitely. Output is
+    also capped to prevent unbounded memory growth.
+    """
     try:
         from markitdown import MarkItDown
     except ImportError:
         return ExtractedContent(None, None)
-    try:
+
+    def _sync_extract():
         res = MarkItDown().convert_stream(io.BytesIO(body))
         md = res.text_content if res is not None else None
+        return md
+
+    try:
+        md = _eval_selector(_sync_extract, _EXTRACTION_DOC_TIMEOUT)
+        if md is _EXTRACTION_SELECTOR_SENTINEL:
+            logger.warning("extraction_document_timeout")
+            return ExtractedContent(None, None)
     except Exception:  # noqa: BLE001
-        md = None
+        return ExtractedContent(None, None)
+
     if not md or not md.strip():
         return ExtractedContent(None, None)
+
+    # Cap output size (F5).
+    if len(md) > _MAX_EXTRACTED_MARKDOWN:
+        md = md[:_MAX_EXTRACTED_MARKDOWN]
+        logger.warning(
+            "extraction_document_truncated", extra={"max_chars": _MAX_EXTRACTED_MARKDOWN}
+        )
     return ExtractedContent(md, md)
 
 
