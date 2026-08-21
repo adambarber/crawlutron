@@ -339,6 +339,59 @@ async def _execute_crawl_chain(
     return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
 
 
+def _robots_pattern_to_regex(pattern: str) -> "re.Pattern[str]":
+    """Translate a robots.txt path pattern to a regex.
+
+    Per RFC 9309 / Google's interpretation: ``*`` matches any sequence of
+    characters and ``$`` anchors the end of the path. Patterns are matched as
+    path prefixes (left-anchored). An empty pattern matches everything.
+    """
+    if pattern == "":
+        return re.compile(r".*")
+    parts: list[str] = ["^"]
+    last = len(pattern) - 1
+    for idx, ch in enumerate(pattern):
+        if ch == "*":
+            parts.append(".*")
+        elif ch == "$" and idx == last:
+            parts.append("$")
+        else:
+            parts.append(re.escape(ch))
+    return re.compile("".join(parts))
+
+
+def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
+    """Return True if ``target_url`` is allowed by the robots ``rules``.
+
+    Implements RFC 9309 path matching: ``*`` wildcards, ``$`` end anchors, and
+    the longest-matching-rule-wins precedence. An empty ``Disallow:`` value
+    means "allow everything" (no restriction) and overrides other rules.
+    """
+    parsed = urlparse(target_url)
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    # RFC 9309: an empty Disallow value permits all URLs for the group.
+    if any((not is_allow) and pattern == "" for is_allow, pattern in rules):
+        return True
+
+    allowed = True
+    best_len = -1
+    for is_allow, pattern in rules:
+        if not pattern:
+            continue
+        if _robots_pattern_to_regex(pattern).match(path):
+            plen = len(pattern)
+            if plen > best_len:
+                best_len = plen
+                allowed = is_allow
+            elif plen == best_len and is_allow:
+                # On a tie, allow wins (Google's robots.txt guidance).
+                allowed = True
+    return allowed
+
+
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -450,24 +503,6 @@ async def crawl_request(
             rules = _parse_robots_rules(body)
         robots_cache[origin] = (now + robots_ttl, rules)
         return rules
-
-    def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
-        parsed = urlparse(target_url)
-        path = parsed.path or "/"
-        if parsed.query:
-            path = f"{path}?{parsed.query}"
-        allowed = True
-        longest = -1
-        for is_allow, pattern in rules:
-            if not pattern:
-                # "Disallow: " (empty) permits everything.
-                if not is_allow and longest < 0:
-                    allowed = True
-                continue
-            if path.startswith(pattern) and len(pattern) > longest:
-                longest = len(pattern)
-                allowed = is_allow
-        return allowed
 
     async def _robots_allows_target(target_url: str) -> bool:
         parsed = urlparse(target_url)
