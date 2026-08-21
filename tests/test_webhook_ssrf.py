@@ -11,23 +11,21 @@ import pytest
 import httpx
 
 from app.main import _validate_webhook_url, _deliver_webhook
+from _testkit import block_private_targets
 
-
-def _block_private(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
 
 
 class TestWebhookUrlValidation:
     def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
-        _block_private(monkeypatch)
+        block_private_targets(monkeypatch)
         with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]):
             with pytest.raises(ValueError):
                 _validate_webhook_url("http://evil.example.com/callback")
 
     def test_allows_public_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a public IP is accepted."""
-        _block_private(monkeypatch)
+        block_private_targets(monkeypatch)
         with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
             _validate_webhook_url("http://public.example.com/callback")
 
@@ -36,16 +34,15 @@ class TestWebhookUrlValidation:
             _validate_webhook_url("ftp://example.com/callback")
 
     def test_rejects_localhost(self, monkeypatch):
-        _block_private(monkeypatch)
+        block_private_targets(monkeypatch)
         with pytest.raises(ValueError):
             _validate_webhook_url("http://localhost:8080/callback")
-
 
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
         """The outbound POST must target the resolved/pinned IP, not the raw
         hostname, and preserve the original Host header (DNS-rebinding safe)."""
-        _block_private(monkeypatch)
+        block_private_targets(monkeypatch)
         captured = {}
 
         class _Client:

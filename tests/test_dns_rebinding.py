@@ -11,34 +11,20 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.crawl.strategies.http import _resolve_and_pin_host, _default_http_fetcher
+from _testkit import block_private_targets, assert_dns_pinning_uses_first_resolution
 
-
-def _block_private(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
 
 
 class TestDNSRebindingFix:
     def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned
         IP (first resolution) is what the connection uses."""
-        _block_private(monkeypatch)
-        calls = []
-
-        def fake_getaddrinfo(host, *a, **k):
-            calls.append(host)
-            if len(calls) == 1:
-                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 80))]
-
-        with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
-            hostname, ip = _resolve_and_pin_host("http://example.com/")
-        assert ip == "93.184.216.34"
-        assert len(calls) == 1
+        assert_dns_pinning_uses_first_resolution(monkeypatch, "169.254.169.254")
 
     async def test_fetcher_connects_to_pinned_ip_with_original_host(self, monkeypatch):
         """The HTTP fetcher must connect to the pinned IP and forward the
         original Host header (so virtual-host routing is preserved)."""
-        _block_private(monkeypatch)
+        block_private_targets(monkeypatch)
         import urllib.parse as up
         captured = {}
 

@@ -8,28 +8,7 @@ import pytest
 
 from app.models import CrawlJob, CrawlStrategyAttempt, EngineCrawlResult
 from app.scheduler import DomainScheduler
-
-
-def make_job(index: int, url: str) -> CrawlJob:
-    return CrawlJob(index=index, url=url, domain=url.split("/")[2], options=None)
-
-
-def _make_result(url: str, domain: str) -> EngineCrawlResult:
-    return EngineCrawlResult(
-        original_url=url, normalized_url=url, final_url=url,
-        status="success", classification="rendered",
-        selected_strategy="HTTP_DECLARED_CRAWLER",
-        attempted_strategies=[CrawlStrategyAttempt(
-            strategy="HTTP_DECLARED_CRAWLER", status="success",
-            classification="rendered", http_status=200,
-            content_type="text/html", elapsed_ms=0, error=None)],
-        http_status=200, headers={}, content_type="text/html",
-        html="<html></html>", text="ok", markdown="ok",
-        extraction_method="http_html", quality_score=1.0,
-        classification_evidence=[], diagnostics={},
-        discovered_link_count=0, discovered_links_truncated=False,
-        discovered_links=[], error=None, next_page_url=None,
-    )
+from _testkit import make_job, make_result
 
 
 class TestSchedulerResilience:
@@ -42,7 +21,7 @@ class TestSchedulerResilience:
         async def failing_worker(job: CrawlJob) -> EngineCrawlResult:
             if job.index == 1:
                 raise RuntimeError("transient failure")
-            return _make_result(job.url, job.domain)
+            return make_result(job.url, job.domain)
 
         results = await scheduler.run(jobs, failing_worker)
         assert len(results) == 2, results

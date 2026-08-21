@@ -357,11 +357,14 @@ def _http_413(url: str, response: Any, started: float) -> HttpFetchResult:
     )
 
 
-async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
-    """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
-    granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
+def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """Resolve + pin the target IP (DNS-rebinding safe) and build the request.
+
+    Returns ``(pinned_url, request_headers)`` where ``pinned_url`` connects to
+    the single resolved IP and ``request_headers`` preserves the original Host
+    header so virtual-host routing still works. Shared by both fetchers.
+    """
     _check_ssrf_protection(url)
-    # DNS-rebinding mitigation: resolve once and pin the IP, preserving Host.
     hostname, pinned_ip = _resolve_and_pin_host(url)
     parsed = urlparse(url)
     pinned_url = (
@@ -372,6 +375,13 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     request_headers = dict(headers)
     if parsed.hostname:
         request_headers["Host"] = parsed.hostname
+    return pinned_url, request_headers
+
+
+async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
+    """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
+    granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
+    pinned_url, request_headers = _build_pinned_request(url, headers)
     client = get_async_http_client()
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
@@ -426,17 +436,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
-        _check_ssrf_protection(url)
-        hostname, pinned_ip = _resolve_and_pin_host(url)
-        parsed = urlparse(url)
-        pinned_url = (
-            f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
-            f"{parsed.path or '/'}"
-            + (f"?{parsed.query}" if parsed.query else "")
-        )
-        request_headers = dict(headers)
-        if parsed.hostname:
-            request_headers["Host"] = parsed.hostname
+        pinned_url, request_headers = _build_pinned_request(url, headers)
         async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
             response = await client.get(pinned_url, headers=request_headers, allow_redirects=True)
         # Content-length check (#5)

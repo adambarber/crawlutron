@@ -1,0 +1,10 @@
+{
+  "threshold": 0,
+  "ignore": [
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/tmp/**",
+    "**/node_modules/**",
+    "**/.git/**"
+  ]
+}

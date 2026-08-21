@@ -10,26 +10,7 @@ import pytest
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import HttpFetchResult
-
-
-def site_fetcher(pages):
-    def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        path = urlparse(url).path or "/"
-        entry = pages.get(path)
-        if entry is None:
-            return HttpFetchResult(
-                url=url, final_url=url, status_code=404,
-                headers={"content-type": "text/html"}, body=b"<html></html>", elapsed_ms=1,
-            )
-        status, body, ctype = entry
-        if isinstance(body, str):
-            body = body.encode("utf-8")
-        return HttpFetchResult(
-            url=url, final_url=url, status_code=status,
-            headers={"content-type": ctype}, body=body, elapsed_ms=1,
-        )
-
-    return fetcher
+from _testkit import site_fetcher
 
 
 def _build_hub(n_leaves: int):
