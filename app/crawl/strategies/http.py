@@ -87,6 +87,7 @@ from urllib.parse import urljoin, urlparse
 
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
 _DEFAULT_HTTP_CLIENT: "httpx.AsyncClient | None" = None
+_HTTP_CLIENT_INIT_LOCK = threading.Lock()  # serializes first-time client construction
 
 
 def _default_settings() -> "CrawlerSettings":
@@ -111,7 +112,7 @@ def _build_async_client(settings: "CrawlerSettings | None" = None) -> "httpx.Asy
         headers={"User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)"},
     )
     try:
-        client._bound_loop = asyncio.get_event_loop()  # type: ignore[attr-defined]
+        client._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
     except RuntimeError:
         client._bound_loop = None  # type: ignore[attr-defined]
     return client
@@ -128,13 +129,16 @@ def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.A
     if settings is None:
         settings = _default_settings()
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-    if _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed:
-        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
-    elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
-        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
+    # Guard construction so concurrent first-time callers cannot both build a
+    # client and leak one (the httpx client is reused across requests).
+    with _HTTP_CLIENT_INIT_LOCK:
+        if _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed:
+            _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
+        elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
+            _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
     return _DEFAULT_HTTP_CLIENT
 
 
