@@ -1,7 +1,11 @@
-"""Adversarial fix (MEDIUM): error responses must not leak raw exception
-text (DNS names, internal paths, stack detail). Raw detail is confined to
-``diagnostics``; user-facing ``error``/``diagnostics`` fields carry stable codes.
+"""Adversarial fix (HIGH): error responses must not leak raw exception
+text (DNS names, internal paths, stack detail) in the API payload.
+
+Raw detail is NEVER returned to the caller. Only a stable error code is exposed
+in ``error``/``diagnostics``, and the raw detail is logged server-side for
+debugging (see app.crawl.strategies.http._http_strategy_result).
 """
+import json
 import socket
 
 import httpx
@@ -49,13 +53,17 @@ async def test_http_strategy_result_hides_raw_dns_error():
     # Stable code, never the raw message.
     assert res.error == "connection_error"
     assert res.error != "[Errno -2] Name or service not known"
-    # Raw detail lives only in diagnostics (not the exposed error field).
-    assert "Name or service not known" in res.diagnostics.get("error_detail", "")
+    # Raw exception text must NOT be returned anywhere in the API diagnostics.
+    assert "error_detail" not in res.diagnostics
+    serialized = json.dumps(res.diagnostics, default=str)
+    assert "Name or service not known" not in serialized
 
 
 async def test_http_strategy_result_hides_arbitrary_exception():
     res = await _run(RuntimeError("internal secret /app/secret/path"))
     assert res.status == "failed"
     assert res.error == "network_error"
-    assert "/app/secret/path" not in res.error
-    assert "/app/secret/path" in res.diagnostics.get("error_detail", "")
+    assert res.error != "/app/secret/path"
+    assert "error_detail" not in res.diagnostics
+    serialized = json.dumps(res.diagnostics, default=str)
+    assert "/app/secret/path" not in serialized

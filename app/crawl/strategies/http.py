@@ -13,6 +13,8 @@ import tempfile
 import hashlib
 from urllib.parse import urlparse
 import json
+import logging
+logger = logging.getLogger(__name__)
 import base64
 from dataclasses import asdict
 from typing import Any
@@ -1026,10 +1028,15 @@ async def _http_strategy_result(
         )
     except Exception as error:  # noqa: BLE001
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        # Never expose raw exception text (it can leak DNS names, internal paths,
-        # or stack detail). Surface a stable code and stash the raw detail in
-        # diagnostics only.
         error_code = _classify_error_code(error)
+        # Never expose raw exception text in the API response (it can leak DNS
+        # names, internal filesystem paths, or stack detail). Surface only a
+        # stable code to the caller; the raw detail is logged server-side for
+        # debugging and is NOT returned in diagnostics.
+        logger.warning(
+            "http_strategy_result_error",
+            extra={"error_code": error_code, "error_detail": str(error)},
+        )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status="failed",
@@ -1058,7 +1065,6 @@ async def _http_strategy_result(
                 "retry": retry_diagnostics,
                 "runtime": {"elapsed_ms": elapsed_ms},
                 "request_profile": policy.get("request_profile") or {},
-                "error_detail": str(error),
             },
             error=error_code,
         )
