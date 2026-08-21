@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import re
 import socket
+import ssl
 import time
 import threading
 import tempfile
@@ -83,6 +84,49 @@ from app.crawl.result_helpers import _binary_no_text_result
 from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult, HttpFetcher
 from app.validation import normalize_public_http_url, registrable_domain
 from urllib.parse import urljoin, urlparse
+
+def _classify_error_code(exc: BaseException) -> str:
+    """Map an internal exception to a stable, non-leaking error code.
+
+    Raw exception text can leak DNS hostnames, internal filesystem paths, or
+    stack detail. Callers must never see ``str(exc)``; these codes are safe to
+    surface in user-facing ``error``/``diagnostics`` fields.
+    """
+    if isinstance(exc, DecompressionTooLargeError):
+        return "payload_too_large"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "too_many_redirects"
+    if isinstance(
+        exc,
+        (
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.ConnectError,
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.RemoteProtocolError,
+            httpx.ProtocolError,
+            socket.gaierror,
+            socket.herror,
+            ConnectionError,
+            ConnectionRefusedError,
+            ConnectionResetError,
+            TimeoutError,
+            asyncio.TimeoutError,
+        ),
+    ):
+        return "connection_error"
+    if isinstance(exc, ssl.SSLError):
+        return "tls_error"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "http_status_error"
+    if isinstance(exc, httpx.HTTPError):
+        return "http_error"
+    if isinstance(exc, ValueError):
+        return "value_error"
+    return "network_error"
+
 
 
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
@@ -650,7 +694,7 @@ async def _fetch_with_retries(
                 response = await response
             return response, {"attempts": attempt, "transient_errors": transient_errors}
         except Exception as error:  # noqa: BLE001
-            transient_errors.append(str(error))
+            transient_errors.append(_classify_error_code(error))
             if attempt >= max_attempts:
                 raise
 
@@ -709,7 +753,7 @@ async def _discovery_diagnostics(
                 "sitemaps": robots_sitemaps,
             }
         except Exception as error:  # noqa: BLE001
-            diagnostics["robots"] = {"url": robots_url, "error": str(error), "sitemaps": []}
+            diagnostics["robots"] = {"url": robots_url, "error": _classify_error_code(error), "sitemaps": []}
     sitemap_urls: list[str] = []
     if discovery.get("sitemaps"):
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
@@ -982,14 +1026,18 @@ async def _http_strategy_result(
         )
     except Exception as error:  # noqa: BLE001
         elapsed_ms = int((time.monotonic() - started) * 1000)
+        # Never expose raw exception text (it can leak DNS names, internal paths,
+        # or stack detail). Surface a stable code and stash the raw detail in
+        # diagnostics only.
+        error_code = _classify_error_code(error)
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status="failed",
-            classification="network_error",
+            classification=error_code,
             http_status=None,
             content_type=None,
             elapsed_ms=elapsed_ms,
-            error=str(error),
+            error=error_code,
         )
         return EngineCrawlResult(
             original_url=original_url,
@@ -1006,8 +1054,13 @@ async def _http_strategy_result(
             text=None,
             extraction_method=None,
             quality_score=0.0,
-            diagnostics={"retry": retry_diagnostics, "runtime": {"elapsed_ms": elapsed_ms}, "request_profile": policy.get("request_profile") or {}},
-            error=str(error),
+            diagnostics={
+                "retry": retry_diagnostics,
+                "runtime": {"elapsed_ms": elapsed_ms},
+                "request_profile": policy.get("request_profile") or {},
+                "error_detail": str(error),
+            },
+            error=error_code,
         )
 
 

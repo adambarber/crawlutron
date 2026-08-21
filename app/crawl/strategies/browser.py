@@ -23,7 +23,7 @@ import logging
 from app.classify import classify_page
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
-from app.crawl.strategies.http import CookieJar, _check_ssrf_protection
+from app.crawl.strategies.http import CookieJar, _check_ssrf_protection, _classify_error_code
 from app.validation import registrable_domain
 from app.constants import BROWSER_BLOCKED_CLASSIFICATIONS
 
@@ -100,13 +100,13 @@ class BrowserRenderer:
                 result = await self._render_with_browser(url, options)
                 return result
             except TimeoutError as error:
-                last_error = str(error)
+                last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "navigation_timeout", attempts, started, last_error)
                 self._sleep(min(2 ** (attempts - 1), 5))
             except Exception as error:  # noqa: BLE001
-                last_error = str(error)
+                last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "unknown_error", attempts, started, last_error)
