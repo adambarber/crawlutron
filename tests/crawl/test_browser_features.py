@@ -121,7 +121,6 @@ class TestActionChain:
             {"type": "scroll_bottom"},
             {"type": "wait", "selector": "#loaded", "timeout": 3000},
             {"type": "wait_seconds", "seconds": 0.0},
-            {"type": "execute_js", "script": "window.x=1"},
         ]
         await renderer._run_action_chain(page, actions)
         called = {(c[0], c[1]) for c in page.calls}

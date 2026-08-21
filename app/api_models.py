@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.constants import (
     DEFAULT_STRATEGIES,
@@ -147,6 +147,24 @@ class CrawlPolicy(BaseModel):
     scope_regex: str | None = Field(None, description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.")
     css_selector: str | None = Field(None, description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.")
     xpath: str | None = Field(None, description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.")
+
+    @field_validator("browser_profile")
+    @classmethod
+    def _reject_execute_js_actions(cls, profile: dict[str, Any]) -> dict[str, Any]:
+        """Reject caller-supplied ``execute_js`` actions (#2, RCE-class risk).
+
+        The browser action chain never runs arbitrary JavaScript, and we also
+        block it at the API boundary so a malicious payload never reaches a
+        render. Benign profile keys (viewport, resource_mode, include_screenshot,
+        screenshot_selectors, consent hints, etc.) are unaffected.
+        """
+        actions = (profile or {}).get("actions") or []
+        for action in actions:
+            if isinstance(action, dict) and str(action.get("type", "")).lower() == "execute_js":
+                raise ValueError(
+                    "execute_js actions are not permitted in browser_profile"
+                )
+        return profile
 
 
 class CrawlRequest(BaseModel):

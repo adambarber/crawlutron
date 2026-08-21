@@ -256,8 +256,13 @@ class BrowserRenderer:
         """Execute a sequence of browser actions before extraction (#10).
 
         Supported action types: ``click``, ``fill``, ``hover``, ``scroll``
-        (into an element), ``scroll_bottom``, ``wait`` (for a selector),
-        ``wait_seconds``, and ``execute_js``.
+        (into an element), ``scroll_bottom``, ``wait`` (for a selector), and
+        ``wait_seconds``.
+
+        Arbitrary JavaScript (``execute_js``) is intentionally NOT supported:
+        running caller-supplied scripts in the browser context is an RCE-class
+        risk (cookie/localStorage theft, requests to internal services with no
+        SSRF guard).
         """
         for action in actions:
             if not isinstance(action, dict):
@@ -281,8 +286,10 @@ class BrowserRenderer:
                     await page.wait_for_selector(selector, timeout=int(action.get("timeout", 5000)))
                 elif action_type == "wait_seconds":
                     self._sleep(float(action.get("seconds", 1)))
-                elif action_type == "execute_js" and "script" in action:
-                    await page.evaluate(action["script"])
+                elif action_type == "execute_js":
+                    # Refuse arbitrary JS execution (RCE-class risk). Callers must
+                    # not be able to run scripts in the browser context.
+                    continue
             except Exception:  # action chains are best-effort
                 continue
 
