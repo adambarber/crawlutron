@@ -586,6 +586,9 @@ async def crawl_request(
     include_html = bool((policy.get("browser_profile") or {}).get("include_html", True))
     discovery = policy.get("discovery") or {}
     scope_regex = policy.get("scope_regex")
+    # Compile the user-supplied scope regex ONCE with the safe guard so the
+    # recursive loop never applies a raw re.search (ReDoS) to every link.
+    scope_pattern = _compile_scope_regex_safe(scope_regex)
     recursive = max_depth > 0
 
     if not recursive:
@@ -639,7 +642,7 @@ async def crawl_request(
             for link in result.discovered_links:
                 if link.normalized_url in visited:
                     continue
-                if scope_regex and not re.search(scope_regex, link.normalized_url):
+                if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
                     continue
                 if respect_robots and not await _robots_allows_target(link.normalized_url):
                     continue

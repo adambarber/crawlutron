@@ -1,0 +1,72 @@
+"""CRITICAL fix: recursive crawl scope filtering must use the safe
+compiled regex, never a raw re.search(scope_regex, link).
+
+A malicious scope_regex like (a+)+$ would hang the recursive loop via
+catastrophic backtracking if applied with re.search on every discovered link.
+The fix compiles the pattern once with _compile_scope_regex_safe (which rejects
+pathological patterns) and uses the compiled pattern's .search() in the loop.
+"""
+import re
+
+import pytest
+
+from app.crawl.cache import HttpCache
+from app.crawl.engine import crawl_request
+from _testkit import site_fetcher
+
+CATASTROPHIC = "(a+)+$"
+
+
+async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
+    # If the recursive loop applied the pattern with re.search(scope_regex, link),
+    # this guard would trigger (the old, ReDoS-prone code path).
+    orig = re.search
+
+    def _guarded(pattern, *args, **kwargs):
+        assert pattern != CATASTROPHIC, (
+            "recursive loop used unsafe re.search with raw scope_regex"
+        )
+        return orig(pattern, *args, **kwargs)
+
+    monkeypatch.setattr(re, "search", _guarded)
+
+    pages = {
+        "/": (
+            200,
+            '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>',
+            "text/html",
+        ),
+        "/a": (200, "<html>a</html>", "text/html"),
+        "/b": (200, "<html>b</html>", "text/html"),
+    }
+    payload = {
+        "url": "http://example.com/",
+        # Catastrophic pattern: the safe compiler rejects it, so it is treated as
+        # "no scope filter" (all links kept) rather than hanging the request.
+        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": CATASTROPHIC},
+    }
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    urls = {r["normalized_url"] for r in out["results"]}
+    assert "http://example.com/a" in urls
+    assert "http://example.com/b" in urls
+
+
+async def test_recursive_scope_regex_still_filters_with_valid_pattern(monkeypatch):
+    # Valid scope patterns must still filter links, now via the compiled pattern.
+    pages = {
+        "/": (
+            200,
+            '<html><body><a href="/keep/x">k</a><a href="/drop/y">d</a></body></html>',
+            "text/html",
+        ),
+        "/keep/x": (200, "<html>k</html>", "text/html"),
+        "/drop/y": (200, "<html>d</html>", "text/html"),
+    }
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": r"/keep/"},
+    }
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    urls = {r["normalized_url"] for r in out["results"]}
+    assert "http://example.com/keep/x" in urls
+    assert "http://example.com/drop/y" not in urls
