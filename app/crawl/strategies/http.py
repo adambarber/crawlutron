@@ -164,6 +164,35 @@ def _build_async_client(settings: "CrawlerSettings | None" = None) -> "httpx.Asy
     return client
 
 
+async def _safe_aclose(client):
+    """Await the client\'s async close, swallowing failures.
+
+    The client is being replaced (its event loop changed); any close error is
+    irrelevant, so we ignore it rather than risk surfacing during shutdown.
+    """
+    try:
+        await client.aclose()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _schedule_client_close(client) -> None:
+    """Best-effort asynchronous close of a superseded pooled HTTP client.
+
+    ``get_async_http_client`` runs within an event loop, so we schedule the
+    async ``aclose`` on the running loop instead of blocking. This prevents
+    leaking the old client\'s sockets/file descriptors when the loop changes
+    (e.g. repeated ``asyncio.run`` calls).
+    """
+    if client is None or getattr(client, "is_closed", True):
+        return
+    try:
+        asyncio.ensure_future(_safe_aclose(client))
+    except RuntimeError:
+        # No running loop available to schedule on; nothing safe to do.
+        pass
+
+
 def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.AsyncClient":
     """Return the pooled ``httpx.AsyncClient`` bound to the current event loop.
 
@@ -184,7 +213,10 @@ def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.A
         if _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed:
             _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
         elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
+            old_client = _DEFAULT_HTTP_CLIENT
             _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
+            # Close the superseded client to avoid leaking its sockets/fds.
+            _schedule_client_close(old_client)
     return _DEFAULT_HTTP_CLIENT
 
 
