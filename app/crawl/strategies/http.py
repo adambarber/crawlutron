@@ -67,7 +67,7 @@ def _rebuild_response(data: dict[str, Any]) -> Any:
     r.elapsed_ms = data.get("elapsed_ms", 0)
     return r
 
-from app.crawl.decompression import decompress_body as _decompress_body
+from app.crawl.decompression import decompress_body as _decompress_body, DecompressionTooLargeError
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
@@ -270,6 +270,15 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
 
 
+def _http_413(url: str, response: Any, started: float) -> HttpFetchResult:
+    """Standard 413 (payload too large) result for size/cap violations."""
+    return HttpFetchResult(
+        url=url, final_url=str(response.url), status_code=413,
+        headers={"content-type": "application/octet-stream"},
+        body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), and content-length limits (#5)."""
@@ -289,18 +298,29 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
     try:
-        # Peek at response headers first, then read body if within size limit (#5)
+        # Peek at response headers first, then read the body if within size limit (#5)
         async with client.stream("GET", pinned_url, headers=request_headers, timeout=timeout, follow_redirects=True) as response:
             content_length = response.headers.get("content-length")
             if content_length and int(content_length) > max_content_length:
-                return HttpFetchResult(
-                    url=url, final_url=str(response.url), status_code=413,
-                    headers={"content-type": "application/octet-stream"},
-                    body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
-                )
-            body = await response.aread()
+                return _http_413(url, response, started)
+            # Stream the RAW (still-compressed) bytes, capping the total read so
+            # a chunked response with no Content-Length cannot stream unlimited
+            # data (memory-exhaustion / decompression-bomb guard).
+            raw = b""
+            async for chunk in response.aiter_raw():
+                raw += chunk
+                if len(raw) > max_content_length:
+                    return _http_413(url, response, started)
+            encoding = response.headers.get("content-encoding", "")
+            try:
+                body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
+            except DecompressionTooLargeError:
+                return _http_413(url, response, started)
             status_code = response.status_code
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
+            # We already decompressed above; drop the header so downstream code
+            # does not attempt a second (invalid) decompression pass.
+            resp_headers.pop("content-encoding", None)
             final_url = str(response.url)
     except httpx.HTTPStatusError as error:
         response = error.response
@@ -350,12 +370,26 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                 body=b"", elapsed_ms=int((time.monotonic() - 0) * 1000),
             )
         elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
+        # Decompress with a size cap (decompression-bomb guard). curl_cffi may
+        # have already auto-decompressed; _decompress_body is exception-safe
+        # and returns the body unchanged in that case.
+        encoding = response.headers.get("content-encoding", "")
+        try:
+            body = _decompress_body(response.content, encoding, max_output_bytes=max_content_length)
+        except DecompressionTooLargeError:
+            return HttpFetchResult(
+                url=url, final_url=str(response.url), status_code=413,
+                headers={key.lower(): value for key, value in response.headers.items()},
+                body=b"", elapsed_ms=elapsed_ms,
+            )
+        resp_headers = {key.lower(): value for key, value in response.headers.items()}
+        resp_headers.pop("content-encoding", None)
         return HttpFetchResult(
             url=url,
             final_url=str(response.url),
             status_code=response.status_code,
-            headers={key.lower(): value for key, value in response.headers.items()},
-            body=response.content,
+            headers=resp_headers,
+            body=body,
             elapsed_ms=elapsed_ms,
         )
     except Exception:  # any cffi failure falls back to plain httpx

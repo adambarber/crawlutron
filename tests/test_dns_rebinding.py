@@ -52,6 +52,8 @@ class TestDNSRebindingFix:
             content = b"<html></html>"
             async def aread(self):
                 return self.content
+            async def aiter_raw(self):
+                yield self.content
 
         class _Stream:
             def __init__(self, resp):
