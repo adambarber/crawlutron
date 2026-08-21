@@ -77,6 +77,7 @@ class _FakePage:
     def __init__(self):
         self.goto_calls = []
         self.route_calls = []
+        self.set_extra_http_headers_calls = []
         self.url = "http://1.2.3.4/"
 
     def route(self, pattern, handler):
@@ -85,7 +86,13 @@ class _FakePage:
     def on(self, event, handler):
         pass
 
-    async def goto(self, url, **kwargs):
+    def set_extra_http_headers(self, headers):
+        self.set_extra_http_headers_calls.append(headers)
+
+    async def goto(self, url, wait_until="load", **kwargs):
+        # Real Playwright goto does NOT accept extra_http_headers
+        if "extra_http_headers" in kwargs:
+            raise TypeError("unexpected keyword argument 'extra_http_headers'")
         self.goto_calls.append((url, kwargs))
 
     async def evaluate(self, *a, **k):
@@ -152,7 +159,8 @@ async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     result = await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
-    assert page.goto_calls[0][1]["extra_http_headers"] == {"Host": "example.com"}
+    # Should use set_extra_http_headers, NOT extra_http_headers param
+    assert page.set_extra_http_headers_calls == [{"Host": "example.com"}]
     assert result.status == "success"
 
 

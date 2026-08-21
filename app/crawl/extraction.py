@@ -33,6 +33,12 @@ from app.validation import normalize_public_http_url
 
 logger = logging.getLogger(__name__)
 
+# Shared thread pool for extraction tasks to avoid thread leaks (Fix 4).
+# Bounded to 4 workers to limit resource consumption.
+_EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
+
+
+
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
 # A pathological selector (or adversarial payload) could otherwise run
 # unbounded and tie up a request worker. Override via env var.
@@ -57,21 +63,15 @@ def _eval_selector(fn, timeout):
     """Run a selector evaluation in a worker thread so it cannot hang a request.
 
     Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
-    exceeded ``timeout`` seconds. The runaway worker is abandoned (not joined)
-    on timeout, which bounds caller latency even though the evaluation keeps
-    running briefly in the background.
+    exceeded ``timeout`` seconds.
 
-    This is the defense for the XPath/CSS DoS finding: user-supplied selectors
-    are evaluated with a hard wall-clock cap.
+    Uses a shared bounded thread pool to avoid thread leaks (Fix 4).
     """
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(fn)
+    fut = _EXTRACTION_EXECUTOR.submit(fn)
     try:
         return fut.result(timeout=timeout)
     except concurrent.futures.TimeoutError:
         return _EXTRACTION_SELECTOR_SENTINEL
-    finally:
-        ex.shutdown(wait=False)
 
 
 _PDF_MAGIC = b"%PDF"

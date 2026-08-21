@@ -67,10 +67,15 @@ def _make_ssrf_route_handler():
     redirects, and every subresource load (images/scripts/XHR) is checked
     against the SSRF blocklist. Requests that resolve to internal/loopback/
     reserved addresses are aborted before the browser connects.
+
+    The SSRF check involves synchronous DNS resolution (socket.getaddrinfo).
+    To avoid blocking the event loop, the check runs in a thread pool via
+    ``asyncio.to_thread``.
     """
 
     async def _handler(route, request):
-        if _is_ssrf_blocked(request.url):
+        is_blocked = await asyncio.to_thread(_is_ssrf_blocked, request.url)
+        if is_blocked:
             await route.abort()
         else:
             await route.continue_()
@@ -226,13 +231,16 @@ class BrowserRenderer:
             intercepted_xhr: list[dict[str, Any]] = []
             page.on("response", self._make_response_handler(intercepted_xhr))
 
-            # Warmup URLs
+            # Warmup URLs (no Host header needed)
             for warmup_url in self._warmup_urls:
                 await page.goto(warmup_url, wait_until="domcontentloaded")
                 await self._wait_for_ready_state(page)
 
-            # Navigate to target URL
-            await page.goto(pinned_url, wait_until="domcontentloaded", extra_http_headers=goto_headers)
+            # Navigate to target URL: set Host header for pinned IP navigation.
+            # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
+            if goto_headers:
+                page.set_extra_http_headers(goto_headers)
+            await page.goto(pinned_url, wait_until="domcontentloaded")
             await self._wait_for_ready_state(page)
 
             # Browser action chains (#10): run policy-specified interactions before extraction.

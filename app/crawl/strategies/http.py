@@ -452,17 +452,21 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     Redirects are followed by hand so every hop is re-validated against the SSRF
     blocklist and re-pinned to its resolved IP. Automatic httpx following is off
     because it would connect to a redirect target without re-checking it.
+    Sensitive headers (Cookie, Authorization) are stripped when crossing host
+    boundaries to prevent credential leakage (Fix 3).
     """
     client = get_async_http_client()
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
     current_url = url
     hops = 0
+    # Work with a copy of headers so we can mutate per-hop
+    request_headers = dict(headers)
     while True:
-        pinned_url, request_headers = _build_pinned_request(current_url, headers)
+        pinned_url, hop_headers = _build_pinned_request(current_url, request_headers)
         try:
             # follow_redirects=False: we follow manually so each hop is SSRF-checked.
-            async with client.stream("GET", pinned_url, headers=request_headers, timeout=timeout, follow_redirects=False) as response:
+            async with client.stream("GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False) as response:
                 content_length = response.headers.get("content-length")
                 if content_length and int(content_length) > max_content_length:
                     return _http_413(url, response, started)
@@ -472,7 +476,16 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
                 # loop iteration re-runs _build_pinned_request, which re-validates
                 # (and re-pins) the redirect target against the SSRF blocklist.
                 if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
-                    current_url = urljoin(current_url, location)
+                    new_url = urljoin(current_url, location)
+                    # Fix 3: Strip sensitive headers when crossing host boundaries.
+                    new_host = urlparse(new_url).hostname
+                    current_host = urlparse(current_url).hostname
+                    if new_host != current_host:
+                        request_headers = {
+                            k: v for k, v in request_headers.items()
+                            if k.lower() not in ("cookie", "authorization")
+                        }
+                    current_url = new_url
                     hops += 1
                     continue
                 # Terminal response: stream RAW bytes, capping total read (#5).
@@ -512,7 +525,8 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
 
     Mirrors _default_http_fetcher, including SSRF-safe manual redirect handling
-    (F1). Falls back to plain httpx on any import/fetch failure.
+    (F1) and sensitive-header stripping on cross-domain redirects (Fix 3).
+    Falls back to plain httpx on any import/fetch failure.
     """
     try:
         import curl_cffi.requests as cffi_requests
@@ -522,10 +536,12 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
         async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
             current_url = url
             hops = 0
+            # Work with a copy of headers so we can mutate per-hop
+            request_headers = dict(headers)
             while True:
-                pinned_url, request_headers = _build_pinned_request(current_url, headers)
+                pinned_url, hop_headers = _build_pinned_request(current_url, request_headers)
                 try:
-                    response = await client.get(pinned_url, headers=request_headers, allow_redirects=False)
+                    response = await client.get(pinned_url, headers=hop_headers, allow_redirects=False)
                 except Exception:
                     # Fall back to plain httpx for this request on transport errors.
                     return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
@@ -542,7 +558,16 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                 # SSRF-safe redirect: only follow within the hop budget; the next
                 # iteration re-validates + re-pins the target via _build_pinned_request.
                 if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
-                    current_url = urljoin(current_url, location)
+                    new_url = urljoin(current_url, location)
+                    # Fix 3: Strip sensitive headers when crossing host boundaries.
+                    new_host = urlparse(new_url).hostname
+                    current_host = urlparse(current_url).hostname
+                    if new_host != current_host:
+                        request_headers = {
+                            k: v for k, v in request_headers.items()
+                            if k.lower() not in ("cookie", "authorization")
+                        }
+                    current_url = new_url
                     hops += 1
                     continue
                 elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0

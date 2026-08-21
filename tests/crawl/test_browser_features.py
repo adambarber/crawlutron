@@ -30,6 +30,7 @@ class FakePage:
         self.calls = []
         self.elements = {}
         self.responses = []
+        self.extra_http_headers = {}
 
     def on(self, event, handler):
         self.calls.append(("on", event))
@@ -38,9 +39,14 @@ class FakePage:
         # Mirrors the real Playwright page.route (synchronous registration).
         self.calls.append(("route", pattern))
 
+    def set_extra_http_headers(self, headers):
+        self.extra_http_headers = headers
+
     async def goto(self, url, wait_until="load", **kwargs):
         # Mirror the real Playwright/Camoufox goto signature (accepts
         # extra_http_headers etc.); the production code passes extra_http_headers.
+        if "extra_http_headers" in kwargs:
+            raise TypeError("unexpected keyword argument 'extra_http_headers'")
         self._url = url
         self.calls.append(("goto", url))
 
