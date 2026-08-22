@@ -583,6 +583,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     )
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 resp_headers.pop("content-encoding", None)
+                _store_set_cookies(url, response.headers)
                 return HttpFetchResult(
                     url=url,
                     final_url=str(response.url),
@@ -616,11 +617,20 @@ def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
     return "; ".join(parts)
 
 
-def _store_set_cookies(url: str, response_headers: dict[str, str]) -> None:
-    """Extract Set-Cookie headers from a response into the global jar (#2)."""
-    for key, value in response_headers.items():
-        if key.lower() == "set-cookie":
-            _GLOBAL_COOKIE_JAR.add_cookie_header(url, value)
+def _store_set_cookies(url: str, response_headers: "httpx.Headers | dict[str, str]") -> None:
+    """Extract Set-Cookie headers from a response into the global jar (#2).
+
+    Uses ``get_list`` to capture all ``Set-Cookie`` headers (httpx 0.28+
+    returns comma-joined values from ``.items()`` for duplicate keys).
+    """
+    # Accept both httpx.Headers (for get_list) and plain dict (for tests)
+    if hasattr(response_headers, "get_list"):
+        set_cookies = response_headers.get_list("set-cookie")
+    else:
+        # Fallback for plain dict (test mocks) - iterate items
+        set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
+    for cookie in set_cookies:
+        _GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie)
 
 
 _BUILTIN_USER_AGENTS = [

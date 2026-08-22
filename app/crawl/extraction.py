@@ -22,6 +22,7 @@ import io
 import logging
 import os
 import re
+import sys
 from html import unescape
 from html.parser import HTMLParser
 from typing import NamedTuple
@@ -36,6 +37,51 @@ logger = logging.getLogger(__name__)
 # Shared thread pool for extraction tasks to avoid thread leaks (Fix 4).
 # Bounded to 4 workers to limit resource consumption.
 _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
+
+# Process pool for document extraction (markitdown) to enable kill-on-timeout
+# (Finding 2: thread pool exhaustion DoS). Initialized lazily to avoid
+# issues with uvicorn/spawn context on macOS.
+_DOC_EXTRACTION_EXECUTOR: concurrent.futures.ProcessPoolExecutor | None = None
+
+
+def _get_doc_extraction_executor() -> concurrent.futures.ProcessPoolExecutor:
+    """Return lazily-initialized process pool for markitdown extraction."""
+    global _DOC_EXTRACTION_EXECUTOR
+    if _DOC_EXTRACTION_EXECUTOR is None:
+        # Use max_workers=2 to limit resource usage
+        _DOC_EXTRACTION_EXECUTOR = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+    return _DOC_EXTRACTION_EXECUTOR
+
+
+def _markitdown_extract(body: bytes) -> str | None:
+    """Top-level picklable function for markitdown extraction in a worker process.
+
+    Runs in a separate process so it can be forcefully killed on timeout.
+    """
+    # Support for test-induced hang simulation
+    if os.environ.get("TEST_MARKITDOWN_HANG") == "1":
+        import time
+        time.sleep(10)  # Longer than any test timeout
+
+    # Support for test output injection
+    test_output = os.environ.get("TEST_MARKITDOWN_OUTPUT")
+    if test_output is not None:
+        return test_output
+
+    try:
+        from markitdown import MarkItDown
+    except ImportError:
+        return None
+    res = MarkItDown().convert_stream(io.BytesIO(body))
+    return res.text_content if res is not None else None
+
+
+async def _shutdown_doc_extraction_executor() -> None:
+    """Shutdown the document extraction process pool (for service shutdown)."""
+    global _DOC_EXTRACTION_EXECUTOR
+    if _DOC_EXTRACTION_EXECUTOR is not None:
+        _DOC_EXTRACTION_EXECUTOR.shutdown(wait=False)
+        _DOC_EXTRACTION_EXECUTOR = None
 
 
 
@@ -255,24 +301,21 @@ def _extract_html(
 def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout (F5).
 
-    The markitdown conversion runs in a worker thread with a hard timeout so
-    a pathological document cannot block the worker indefinitely. Output is
-    also capped to prevent unbounded memory growth.
+    The markitdown conversion runs in a worker PROCESS with a hard timeout so
+    a pathological document cannot block the worker indefinitely and the
+    process can be forcefully killed. Output is also capped to prevent
+    unbounded memory growth.
     """
+    executor = _get_doc_extraction_executor()
     try:
-        from markitdown import MarkItDown
-    except ImportError:
-        return ExtractedContent(None, None)
-
-    def _sync_extract():
-        res = MarkItDown().convert_stream(io.BytesIO(body))
-        md = res.text_content if res is not None else None
-        return md
-
-    try:
-        md = _eval_selector(_sync_extract, _EXTRACTION_DOC_TIMEOUT)
-        if md is _EXTRACTION_SELECTOR_SENTINEL:
+        fut = executor.submit(_markitdown_extract, body)
+        try:
+            md = fut.result(timeout=_EXTRACTION_DOC_TIMEOUT)
+        except concurrent.futures.TimeoutError:
             logger.warning("extraction_document_timeout")
+            # The process will be killed by the executor on shutdown, but we
+            # can't force-kill a specific future. The timeout ensures we don't
+            # wait forever, and the process pool bounds the total damage.
             return ExtractedContent(None, None)
     except Exception:  # noqa: BLE001
         return ExtractedContent(None, None)

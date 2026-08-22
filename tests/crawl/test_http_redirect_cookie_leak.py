@@ -86,3 +86,68 @@ async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
 
 # Need urlparse for the mock
 from urllib.parse import urlparse
+
+
+# ============================================================
+# Finding 3: Multiple Set-Cookie headers must all be captured
+# ============================================================
+
+def test_store_set_cookies_handles_multiple_set_cookie_headers():
+    """_store_set_cookies must capture all Set-Cookie headers, not just one.
+
+    In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
+    keys. Using get_list("set-cookie") gives each header separately.
+    """
+    from app.crawl.strategies.http import _store_set_cookies, _GLOBAL_COOKIE_JAR, CookieJar
+
+    # Use a fresh jar to avoid interference from other tests
+    jar = CookieJar()
+    # Replace global jar temporarily
+    import app.crawl.strategies.http as http_mod
+    old_jar = http_mod._GLOBAL_COOKIE_JAR
+    http_mod._GLOBAL_COOKIE_JAR = jar
+    try:
+        # Simulate httpx response.headers with multiple Set-Cookie
+        # httpx.Headers.get_list returns each cookie separately
+        class MockHeaders:
+            def get_list(self, key):
+                if key.lower() == "set-cookie":
+                    return ["session=abc; Path=/", "csrf=xyz; Path=/"]
+                return []
+            def items(self):
+                return []
+
+        mock_headers = MockHeaders()
+        _store_set_cookies("http://example.com/", mock_headers)
+
+        # Both cookies should be stored
+        cookie_header = jar.cookie_header_for("http://example.com/")
+        assert "session=abc" in cookie_header
+        assert "csrf=xyz" in cookie_header
+    finally:
+        http_mod._GLOBAL_COOKIE_JAR = old_jar
+
+
+def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
+    """CookieJar.add_cookie_header must handle each Set-Cookie individually.
+
+    Passing a comma-joined string (what httpx.items() yields) to SimpleCookie
+    corrupts cookie values (e.g., 'abc,' instead of 'abc').
+    """
+    from app.crawl.strategies.http import CookieJar
+
+    jar = CookieJar()
+
+    # This simulates what happens when httpx items() joins multiple cookies
+    # BAD: comma-joined (what old code would pass)
+    jar.add_cookie_header("http://example.com/", "session=abc, csrf=xyz; Path=/")
+    bad_result = jar.cookie_header_for("http://example.com/")
+    assert "abc," in bad_result  # Trailing comma - CORRUPTED
+
+    # GOOD: call separately for each cookie
+    jar2 = CookieJar()
+    jar2.add_cookie_header("http://example.com/", "session=abc; Path=/")
+    jar2.add_cookie_header("http://example.com/", "csrf=xyz; Path=/")
+    good_result = jar2.cookie_header_for("http://example.com/")
+    assert "session=abc" in good_result and "abc," not in good_result
+    assert "csrf=xyz" in good_result

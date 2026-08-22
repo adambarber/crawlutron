@@ -8,22 +8,22 @@ from app.crawl.strategies.browser import _make_ssrf_route_handler
 
 
 async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
-    """The route handler should run _is_ssrf_blocked via asyncio.to_thread to avoid
-    blocking the event loop with synchronous DNS lookups (Fix 2).
+    """The route handler should run _build_pinned_request via asyncio.to_thread to avoid
+    blocking the event loop with synchronous DNS lookups (Fix 2 + F7/F8 pinning).
 
     ``real_sleeps`` so the blocking sleep is a true delay (not no-op'd).
     """
     # Track which thread the check runs on
     check_thread_id = None
 
-    def blocking_is_ssrf_blocked(url):
+    def blocking_build_pinned_request(url, headers):
         nonlocal check_thread_id
         import threading
         check_thread_id = threading.get_ident()
         time.sleep(0.05)  # Blocking call - would block event loop if run directly
-        return True
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
-    monkeypatch.setattr(browser_mod, "_is_ssrf_blocked", blocking_is_ssrf_blocked)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
 
     handler = _make_ssrf_route_handler()
 
@@ -37,7 +37,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
             self.continued = False
         async def abort(self):
             self.aborted = True
-        async def continue_(self):
+        async def continue_(self, url=None, headers=None):
             self.continued = True
 
     route = MockRoute()
@@ -46,7 +46,8 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     # Run handler - should complete and run the blocking check in a thread
     await handler(route, request)
 
-    assert route.aborted is True
+    assert route.aborted is False
+    assert route.continued is True
     # The check should have run in a different thread (thread pool)
     assert check_thread_id is not None
     # Main thread ID
@@ -62,11 +63,11 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
     start_times = []
     end_times = []
 
-    def slow_is_ssrf_blocked(url):
+    def slow_build_pinned_request(url, headers):
         time.sleep(0.05)
-        return False  # Allow all
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
-    monkeypatch.setattr(browser_mod, "_is_ssrf_blocked", slow_is_ssrf_blocked)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
 
     handler = _make_ssrf_route_handler()
 
@@ -77,7 +78,7 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
     class MockRoute:
         def __init__(self):
             self.continued = False
-        async def continue_(self):
+        async def continue_(self, url=None, headers=None):
             self.continued = True
 
     async def call_handler(i):
@@ -94,4 +95,148 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
     # and total elapsed time should be ~50ms, not 250ms (5 * 50ms)
     total_time = max(end_times) - min(start_times)
     # Allow some overhead, but should be well under 200ms
+    assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
+
+
+# ============================================================
+# Finding 1: Route handler must PIN subresources to validated IP
+# to prevent DNS-rebinding TOCTOU (SSRF)
+# ============================================================
+
+async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
+    """Safe subresource requests should be pinned to validated IP and continued
+    with the pinned URL and original Host header."""
+    handler = _make_ssrf_route_handler()
+
+    # Mock _build_pinned_request (sync - runs in thread pool via asyncio.to_thread)
+    def mock_build_pinned_request(url, headers):
+        # Simulate DNS resolution + pinning
+        return ("http://1.2.3.4:80/path", {"Host": "example.com"})
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
+
+    class MockRequest:
+        def __init__(self, url):
+            self.url = url
+
+    class MockRoute:
+        def __init__(self):
+            self.aborted = False
+            self.continued_url = None
+            self.continued_headers = None
+        async def abort(self):
+            self.aborted = True
+        async def continue_(self, url=None, headers=None):
+            self.continued_url = url
+            self.continued_headers = headers
+
+    route = MockRoute()
+    request = MockRequest("http://example.com/path")
+    await handler(route, request)
+
+    assert route.aborted is False
+    assert route.continued_url == "http://1.2.3.4:80/path"
+    assert route.continued_headers == {"Host": "example.com"}
+
+
+async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
+    """Unsafe subresource requests (resolving to private IP) should be aborted."""
+    handler = _make_ssrf_route_handler()
+
+    # Mock _build_pinned_request (sync) to raise ValueError for unsafe target
+    def mock_build_pinned_request(url, headers):
+        raise ValueError("SSRF protection: hostname resolves to private IP")
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
+
+    class MockRequest:
+        def __init__(self, url):
+            self.url = url
+
+    class MockRoute:
+        def __init__(self):
+            self.aborted = False
+            self.continued = False
+        async def abort(self):
+            self.aborted = True
+        async def continue_(self, **kwargs):
+            self.continued = True
+
+    route = MockRoute()
+    request = MockRequest("http://127.0.0.1:9/")
+    await handler(route, request)
+
+    assert route.aborted is True
+    assert route.continued is False
+
+
+async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch, real_sleeps):
+    """The route handler should run _build_pinned_request via asyncio.to_thread
+    to avoid blocking the event loop with synchronous DNS lookups."""
+    check_thread_id = None
+
+    def blocking_build_pinned_request(url, headers):
+        nonlocal check_thread_id
+        import threading
+        check_thread_id = threading.get_ident()
+        time.sleep(0.05)  # Blocking DNS
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
+
+    handler = _make_ssrf_route_handler()
+
+    class MockRequest:
+        def __init__(self, url):
+            self.url = url
+
+    class MockRoute:
+        def __init__(self):
+            self.continued_url = None
+        async def continue_(self, url=None, headers=None):
+            self.continued_url = url
+
+    route = MockRoute()
+    request = MockRequest("http://example.com/")
+    await handler(route, request)
+
+    assert route.continued_url == "http://1.2.3.4:80/"
+    assert check_thread_id is not None
+    import threading
+    assert check_thread_id != threading.main_thread().ident
+
+
+async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
+    """Multiple concurrent pinning operations should not block each other."""
+    start_times = []
+    end_times = []
+
+    def slow_build_pinned_request(url, headers):
+        time.sleep(0.05)
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
+
+    handler = _make_ssrf_route_handler()
+
+    class MockRequest:
+        def __init__(self, url):
+            self.url = url
+
+    class MockRoute:
+        def __init__(self):
+            self.continued = False
+        async def continue_(self, **kwargs):
+            self.continued = True
+
+    async def call_handler(i):
+        route = MockRoute()
+        request = MockRequest(f"http://example.com/{i}")
+        start_times.append(time.monotonic())
+        await handler(route, request)
+        end_times.append(time.monotonic())
+
+    await asyncio.gather(*[call_handler(i) for i in range(5)])
+
+    total_time = max(end_times) - min(start_times)
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"

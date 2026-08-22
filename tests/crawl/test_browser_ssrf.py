@@ -200,7 +200,7 @@ async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
         async def abort(self):
             self.aborted = True
 
-        async def continue_(self):
+        async def continue_(self, url=None, headers=None):
             self.continued = True
 
     class _Req:

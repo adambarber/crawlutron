@@ -74,11 +74,23 @@ def _make_ssrf_route_handler():
     """
 
     async def _handler(route, request):
-        is_blocked = await asyncio.to_thread(_is_ssrf_blocked, request.url)
-        if is_blocked:
+        # Re-validate and pin the IP for this specific subresource request
+        # to prevent DNS-rebinding TOCTOU (F7/F8). _build_pinned_request
+        # raises ValueError if the target resolves to a private/loopback IP,
+        # and returns (pinned_url, {Host: original_hostname}) so we can
+        # force the browser to connect to the validated IP while preserving
+        # the Host header (virtual-host routing).
+        try:
+            pinned_url, host_headers = await asyncio.to_thread(
+                _build_pinned_request, request.url, {}
+            )
+        except ValueError:
             await route.abort()
-        else:
-            await route.continue_()
+            return
+        overrides = {}
+        if host_headers.get("Host"):
+            overrides["Host"] = host_headers["Host"]
+        await route.continue_(url=pinned_url, headers=overrides)
 
     return _handler
 
