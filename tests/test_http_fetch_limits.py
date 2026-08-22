@@ -38,7 +38,11 @@ def _make_server():
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
                 for _ in range(2000):
-                    self.wfile.write(b"A" * 1000)
+                    try:
+                        self.wfile.write(b"A" * 1000)
+                    except BrokenPipeError:
+                        # Client disconnected early (e.g., hit size cap)
+                        break
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -52,7 +56,8 @@ def _make_server():
 async def test_gzip_bomb_rejected_with_413():
     srv = _make_server()
     port = srv.server_address[1]
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
     try:
         # Cap well below the bomb's expanded size.
         res = await _default_http_fetcher(f"http://127.0.0.1:{port}/bomb", {}, 10, 100_000)
@@ -67,12 +72,15 @@ async def test_gzip_bomb_rejected_with_413():
         assert "content-encoding" not in res2.headers
     finally:
         srv.shutdown()
+        srv.server_close()
+        thread.join(timeout=1.0)
 
 
 async def test_chunked_response_without_content_length_is_capped():
     srv = _make_server()
     port = srv.server_address[1]
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
     try:
         # ~2 MB streamed with no Content-Length; cap at 100 KB -> rejected.
         res = await _default_http_fetcher(
@@ -82,3 +90,5 @@ async def test_chunked_response_without_content_length_is_capped():
         assert res.body == b""
     finally:
         srv.shutdown()
+        srv.server_close()
+        thread.join(timeout=1.0)
