@@ -50,19 +50,14 @@ async def _fast_asyncio_sleep(*args, **kwargs):
     return None
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(autouse=True)
 def fast_sleeps():
-    """Opt-in no-op sleep.
+    """Patch time.sleep and asyncio.sleep to be instant by default.
 
-    By default (when this fixture is NOT requested) time.sleep and asyncio.sleep
-    are REAL, so timing-sensitive production behavior -- scheduler per-domain
-    delays, domain cooldowns, browser lazy-scroll waits, retry backoffs -- is
-    actually exercised. Tests that do not care about wall-clock timing may opt
-    in to fast (instant) sleeps to keep the suite snappy.
-
-    Previously this was an autouse session fixture that patched both sleep
-    functions globally, which meant retry backoffs / cooldowns were never
-    actually tested (adversarial review finding).
+    By default the test suite runs with no-op (instant) sleeps so timing
+    routines (scheduler delays, retry backoffs, browser lazy-scroll waits)
+    do not slow tests down. Tests that need real wall-clock timing must
+    explicitly request the ``real_sleeps`` fixture to undo the patch.
     """
     with patch("time.sleep", lambda *a, **k: None), \
          patch("asyncio.sleep", _fast_asyncio_sleep):
@@ -70,14 +65,15 @@ def fast_sleeps():
 
 
 @pytest.fixture
-def real_sleeps():
-    """Restore real asyncio.sleep for timing-sensitive tests."""
-    original = asyncio.sleep
-    asyncio.sleep = _ORIGINAL_ASYNCIO_SLEEP
-    time.sleep = _ORIGINAL_TIME_SLEEP
+def real_sleeps(monkeypatch):
+    """Restore the real time.sleep / asyncio.sleep for timing-sensitive tests.
+
+    Undoes the autouse ``fast_sleeps`` patch via monkeypatch.setattr so the
+    original functions are restored for the duration of the requesting test.
+    """
+    monkeypatch.setattr(time, "sleep", _ORIGINAL_TIME_SLEEP)
+    monkeypatch.setattr(asyncio, "sleep", _ORIGINAL_ASYNCIO_SLEEP)
     yield
-    asyncio.sleep = original
-    time.sleep = _ORIGINAL_TIME_SLEEP
 
 
 @pytest.fixture(scope="session")

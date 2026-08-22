@@ -7,9 +7,12 @@ import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
 
 
-async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
+async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _is_ssrf_blocked via asyncio.to_thread to avoid
-    blocking the event loop with synchronous DNS lookups (Fix 2)."""
+    blocking the event loop with synchronous DNS lookups (Fix 2).
+
+    ``real_sleeps`` so the blocking sleep is a true delay (not no-op'd).
+    """
     # Track which thread the check runs on
     check_thread_id = None
 
@@ -51,8 +54,11 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
     assert check_thread_id != threading.main_thread().ident
 
 
-async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch):
-    """Multiple concurrent route handler calls should not block each other."""
+async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch, real_sleeps):
+    """Multiple concurrent route handler calls should not block each other.
+
+    ``real_sleeps`` so the concurrency assertion actually measures real timing.
+    """
     start_times = []
     end_times = []
 

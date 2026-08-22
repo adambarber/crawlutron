@@ -6,8 +6,12 @@ import app.crawl.extraction as ext_mod
 from app.crawl.extraction import _extract_document, _EXTRACTION_DOC_TIMEOUT, _MAX_EXTRACTED_MARKDOWN
 
 
-async def test_extract_document_timeout_is_enforced(monkeypatch):
-    """A document extraction exceeding the wall-clock timeout returns None (F5)."""
+async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
+    """A document extraction exceeding the wall-clock timeout returns None (F5).
+
+    Uses ``real_sleeps`` because the slow extraction is simulated with a real
+    ``time.sleep`` which the autouse ``fast_sleeps`` no-ops.
+    """
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
 
     class _SlowMarkItDown:

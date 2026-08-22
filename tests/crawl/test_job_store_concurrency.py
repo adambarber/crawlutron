@@ -3,20 +3,19 @@ worker threads. Without a lock / busy_timeout, concurrent sqlite3 writes raise
 ``database is locked`` (OperationalError) or corrupt reads.
 """
 import sqlite3
-import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from app.crawl.job_store import JobStore, JobStatus
 
 
-def _store(tmp_path):
-    return JobStore(str(Path(tmp_path) / "jobs.db"))
+def _store(tmp_path=None):
+    # Use in-memory SQLite to avoid disk I/O and lock contention (speed).
+    return JobStore(":memory:")
 
 
-def test_jobstore_has_concurrency_guard(tmp_path):
-    store = _store(tmp_path)
+def test_jobstore_has_concurrency_guard():
+    store = _store()
     # A lock must guard all connection use.
     assert hasattr(store, "_lock")
     lock = store._lock
@@ -29,8 +28,8 @@ def test_jobstore_has_concurrency_guard(tmp_path):
     assert timeout and timeout > 0
 
 
-def test_jobstore_concurrent_writes_do_not_raise_locked(tmp_path):
-    store = _store(tmp_path)
+def test_jobstore_concurrent_writes_do_not_raise_locked():
+    store = _store()
     errors = []
 
     def worker(i):

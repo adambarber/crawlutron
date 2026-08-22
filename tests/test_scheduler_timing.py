@@ -1,11 +1,8 @@
-"""LOW fix: scheduler timing must be exercised by DEFAULT (no global sleep patch).
+"""Scheduler timing behavior tests.
 
-Previously an autouse conftest fixture patched time.sleep/asyncio.sleep globally,
-so timing behavior was effectively untested for any test that did not explicitly
-opt into real sleeps. ``fast_sleeps`` is now opt-in; by DEFAULT sleeps are REAL.
-These tests assert that, with no sleep fixture requested, the scheduler actually
-awaits wall-clock time for its per-domain delay and Retry-After domain cooldown,
-and that explicitly opting into ``fast_sleeps`` skips the wait.
+``fast_sleeps`` is autouse by default, so timing tests that need real wall-clock
+sleeps must explicitly request the ``real_sleeps`` fixture to verify the actual
+delay behavior.
 """
 import time
 
@@ -31,14 +28,14 @@ async def _run_two_same_domain(delay: float = 0.1) -> float:
     return time.monotonic() - started
 
 
-async def test_default_real_sleeps_exercise_per_domain_delay():
-    # No sleep fixture requested: relies on the DEFAULT (real) asyncio.sleep.
+async def test_real_sleeps_exercise_per_domain_delay(real_sleeps):
+    # Explicitly request real sleeps to verify the per-domain delay is awaited.
     elapsed = await _run_two_same_domain(delay=0.1)
     # Two same-domain jobs each await the per-domain delay (~0.1s w/ jitter).
     assert elapsed >= 0.05, f"per-domain delay not exercised (got {elapsed:.3f}s)"
 
 
-async def test_default_real_sleeps_exercise_domain_cooldown():
+async def test_real_sleeps_exercise_domain_cooldown(real_sleeps):
     scheduler = DomainScheduler(
         global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False,
     )
@@ -52,7 +49,7 @@ async def test_default_real_sleeps_exercise_domain_cooldown():
     assert elapsed > 0.25, f"cooldown not exercised (got {elapsed:.3f}s)"
 
 
-async def test_fast_sleeps_opt_in_skips_real_delay(fast_sleeps):
+async def test_default_fast_sleeps_skip_delay():
+    # fast_sleeps is autouse by default, so no delay should be awaited.
     elapsed = await _run_two_same_domain(delay=0.1)
-    # Opting into fast_sleeps must skip the real per-domain delay.
     assert elapsed < 0.1, f"fast_sleeps should skip real delay (got {elapsed:.3f}s)"

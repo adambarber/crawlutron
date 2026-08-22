@@ -14,7 +14,7 @@ import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import ExtractedContent, _extract_selected
 
 
-def test_css_selector_slow_must_not_hang(monkeypatch):
+def test_css_selector_slow_must_not_hang(monkeypatch, real_sleeps):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     monkeypatch.setattr(
         bs4.BeautifulSoup, "select",
@@ -42,7 +42,7 @@ class _SlowFakeTree:
         return []
 
 
-def test_xpath_selector_slow_must_not_hang(monkeypatch):
+def test_xpath_selector_slow_must_not_hang(monkeypatch, real_sleeps):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: _SlowFakeTree())
     html = "<html><body><p>x</p></body></html>"
