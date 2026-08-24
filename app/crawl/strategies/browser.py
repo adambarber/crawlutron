@@ -104,6 +104,32 @@ def _make_ssrf_route_handler():
     return _handler
 
 
+def _make_ssrf_websocket_handler():
+    """Playwright websocket-route handler blocking SSRF-unsafe WS targets.
+
+    page.route does not intercept WebSocket upgrades; without this a hostile
+    page could open a WebSocket to an internal host around the route guard.
+    Validation reuses _check_ssrf_protection with ws/wss mapped to http/https.
+    """
+
+    async def _ws_handler(ws):
+        url = getattr(ws, "url", "") or ""
+        scheme = url.split(":", 1)[0].lower()
+        if scheme not in ("ws", "wss"):
+            return  # not a websocket target
+        http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme):]
+        try:
+            await asyncio.to_thread(_check_ssrf_protection, http_equivalent)
+        except Exception:
+            close = getattr(ws, "close", None)
+            if close is not None:
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+
+    return _ws_handler
+
+
 TRANSIENT_CLASSIFICATIONS = {
     "navigation_timeout",
     "browser_crash",
@@ -275,6 +301,12 @@ class BrowserRenderer:
         # F8: abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
         await page.route("**/*", _make_ssrf_route_handler())
+        ws_guard = _make_ssrf_websocket_handler()
+        ws_router = getattr(page, "route_websocket", None)
+        if ws_router is None:
+            logger.warning("websocket_interception_unsupported")
+        else:
+            await ws_router("**/*", ws_guard)
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []

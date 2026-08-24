@@ -251,3 +251,23 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
         route = _Route()
         await handler(route, _Req(scheme_url))
         assert route.continued is True and route.aborted is False, scheme_url
+
+
+async def test_ws_guard_closes_internal_targets(monkeypatch):
+    """WebSocket upgrades to private hosts are closed; public ones pass."""
+    from app.crawl.strategies.browser import _make_ssrf_websocket_handler
+    from _testkit import block_private_targets
+
+    block_private_targets(monkeypatch)
+    handler = _make_ssrf_websocket_handler()
+
+    class Ws:
+        def __init__(self, url):
+            self.url = url
+            self.closed = False
+        def close(self):
+            self.closed = True
+
+    internal = Ws("ws://127.0.0.1:9000/socket")
+    await handler(internal)
+    assert internal.closed is True, "internal WS not closed"
