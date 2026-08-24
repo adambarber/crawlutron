@@ -16,47 +16,43 @@ def _html(body: str) -> str:
     return f"<html><body>{body}</body></html>"
 
 
-async def test_caller_validators_sent_as_conditional_headers():
-    captured = {}
-
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        captured.update(headers)
-        return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
-            headers={"content-type": "text/html", "etag": '"v1"'},
-            body=_html("hello").encode(), elapsed_ms=1,
-        )
-
-    await _http_strategy_result(
+async def _run_http(fetcher, validators=None):
+    """Drive _http_strategy_result with the standard single-page policy."""
+    return await _http_strategy_result(
         original_url="http://example.com/",
         normalized_url="http://example.com/",
         strategy="HTTP_DECLARED_CRAWLER",
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
         http_fetcher=fetcher,
-        caller_validators={"if_none_match": '"v1-old"', "if_modified_since": "Wed, 01 Jan 2025 00:00:00 GMT"},
+        caller_validators=validators,
     )
+
+
+def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        headers_out.update(headers)
+        return HttpFetchResult(
+            url=url, final_url=url, status_code=200,
+            headers={"content-type": "text/html", **(extra_headers or {})},
+            body=_html(body).encode(), elapsed_ms=1,
+        )
+    return fetcher
+
+
+async def test_caller_validators_sent_as_conditional_headers():
+    captured = {}
+    fetcher = _ok_fetcher(captured, extra_headers={"etag": '"v1"'})
+    await _run_http(fetcher, validators={
+        "if_none_match": '"v1-old"',
+        "if_modified_since": "Wed, 01 Jan 2025 00:00:00 GMT",
+    })
     assert captured["If-None-Match"] == '"v1-old"'
     assert captured["If-Modified-Since"] == "Wed, 01 Jan 2025 00:00:00 GMT"
 
 
 async def test_no_validators_means_no_conditional_headers():
     captured = {}
-
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        captured.update(headers)
-        return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
-            headers={"content-type": "text/html"},
-            body=_html("hello").encode(), elapsed_ms=1,
-        )
-
-    await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
-        http_fetcher=fetcher,
-    )
+    await _run_http(_ok_fetcher(captured))
     assert "If-None-Match" not in captured
     assert "If-Modified-Since" not in captured
 
@@ -69,15 +65,7 @@ async def test_caller_validator_304_yields_not_modified():
             headers={}, body=b"", elapsed_ms=1,
         )
 
-    result = await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
-        http_fetcher=fetcher,
-        cache=None,
-        caller_validators={"if_none_match": '"v1"'},
-    )
+    result = await _run_http(fetcher, validators={"if_none_match": '"v1"'})
     assert result.status == "success"
     assert result.classification == "not_modified"
     assert result.http_status == 304
@@ -96,13 +84,7 @@ async def test_success_result_surfaces_origin_validators():
             body=_html("fresh").encode(), elapsed_ms=1,
         )
 
-    result = await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
-        http_fetcher=fetcher,
-    )
+    result = await _run_http(fetcher)
     assert result.validators == {"etag": '"abc123"', "last_modified": "Wed, 01 Jan 2025 00:00:00 GMT"}
 
 

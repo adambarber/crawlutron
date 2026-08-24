@@ -68,7 +68,7 @@ class TestWebhookDeliveryPinning:
 
         # Patch httpx.AsyncClient globally (the import is inside the function)
         with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]),              patch("httpx.AsyncClient", _Client),              patch("app.main.crawl_request", new=AsyncMock(return_value={"results": []})):
-            await _deliver_webhook("http://webhook.example.com/cb", {"results": []}, MagicMock())
+            await _deliver_webhook("http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock())
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured

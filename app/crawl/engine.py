@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
 from app.classify import classify_page_with_evidence
+from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
     BROWSER_HEADLESS,
     BROWSER_HEADED_WARMED,
@@ -126,6 +127,7 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
 # A single user-supplied scope_regex is applied to every discovered link.
 # Bound the work and refuse pathological patterns (ReDoS guard).
 _MAX_SCOPE_PATTERN_LEN = 256
+_MAX_SCOPE_QUANTIFIERS = 10
 _MAX_SCOPE_LINKS = 5000
 # A group immediately followed by a quantifier that itself contains a quantifier
 # or alternation is the classic catastrophic-backtracking shape (e.g. "(a+)+$").
@@ -148,9 +150,18 @@ def _compile_scope_regex_safe(scope_regex: str | None):
     if _SCOPE_GROUP_QUANT.search(scope_regex):
         return None
     try:
-        return re.compile(scope_regex)
+        compiled = re.compile(scope_regex)
     except re.error:
         return None
+    # Ungrouped quantifier chains (e.g. "a?a?a?..." repeated 20+ times) defeat
+    # the grouped-quantifier rule above while still creating exponential
+    # ambiguity on failed matches. Bound the number of quantifier tokens:
+    # legitimate scope regexes need only a handful.
+    quantifier_tokens = len(re.findall(r"(?<!\\)[*+?]", scope_regex))
+    quantifier_tokens += len(re.findall(r"(?<!\\)\{\d+(?:,\d*)?\}", scope_regex))
+    if quantifier_tokens > _MAX_SCOPE_QUANTIFIERS:
+        return None
+    return compiled
 
 
 def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -> EngineCrawlResult:
@@ -529,7 +540,7 @@ async def crawl_request(
     def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
         rules: list[tuple[bool, str]] = []
         active = False
-        for raw in text.splitlines():
+        for raw in text.lstrip("\ufeff").splitlines():
             line = raw.split("#", 1)[0].strip()
             if not line:
                 continue
@@ -580,7 +591,9 @@ async def crawl_request(
 
     async def _sitemap_seed_urls() -> list[str]:
         # Fetch each seed origin's /sitemap.xml concurrently: slow/unreachable
-        # origins must not serialize the others' seeding.
+        # origins must not serialize the others' seeding. Seeds are hostile
+        # input: normalize every <loc> and apply the scope filter before it can
+        # reach the frontier (adversarial review M-5).
         async def seeds_for(job: CrawlTask) -> list[str]:
             parsed = urlparse(job.normalized_url)
             origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -588,7 +601,17 @@ async def crawl_request(
             text = await _fetch_and_decode(fetcher, sitemap_url, {}, policy["limits"]["timeout_seconds"])
             if text is None:
                 return []
-            return re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE)
+            found = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE)
+            normalized_seeds: list[str] = []
+            for seed in found:
+                try:
+                    normalized_seed = normalize_public_http_url(seed)
+                except ValueError:
+                    continue
+                if scope_pattern is not None and not scope_pattern.search(normalized_seed):
+                    continue
+                normalized_seeds.append(normalized_seed)
+            return normalized_seeds
 
         per_job = await asyncio.gather(*[seeds_for(job) for job in jobs])
         return [seed for seeds in per_job for seed in seeds]
@@ -703,7 +726,9 @@ async def crawl_request(
     response = {
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
         "submitted_count": len(urls),
-        "policy_schema_version": policy["schema_version"],
+        # Report the service's own schema version: echoing the caller-supplied
+        # value would let responses claim a contract the service never ran.
+        "policy_schema_version": POLICY_SCHEMA_VERSION,
         "results": [to_dict(result) for result in ordered_results],
     }
     if webhook_url is not None:

@@ -468,6 +468,10 @@ _MAX_REDIRECT_HOPS = 5
 _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
 
 
+# Headers that must never survive a cross-host redirect hop.
+_CREDENTIAL_HEADERS = frozenset({"cookie", "authorization", "proxy-authorization"})
+
+
 def _redirect_target(
     current_url: str,
     request_headers: dict[str, str],
@@ -491,7 +495,7 @@ def _redirect_target(
     if new_host != current_host:
         request_headers = {
             k: v for k, v in request_headers.items()
-            if k.lower() not in ("cookie", "authorization")
+            if k.lower() not in _CREDENTIAL_HEADERS
         }
     return new_url, request_headers
 
@@ -557,7 +561,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
             final_url = str(response.url)
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        _store_set_cookies(url, resp_headers)
+        _store_set_cookies(final_url or url, resp_headers)
         return HttpFetchResult(
             url=url,
             final_url=final_url,
@@ -622,7 +626,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     )
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 resp_headers.pop("content-encoding", None)
-                _store_set_cookies(url, response.headers)
+                _store_set_cookies(str(response.url), response.headers)
                 return HttpFetchResult(
                     url=url,
                     final_url=str(response.url),
@@ -842,7 +846,9 @@ def _retry_after_seconds(headers: dict[str, str]) -> int | None:
     if not value:
         return None
     try:
-        return max(0, int(value.strip()))
+        # Clamp hostile values: an unbounded Retry-After would park scheduler
+        # coroutines in cooldown sleep for years (adversarial review C2/C3).
+        return min(300, max(0, int(value.strip())))
     except ValueError:
         return None
 
@@ -929,11 +935,26 @@ async def _discovery_diagnostics(
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
             try:
-                sitemap_response = http_fetcher(sitemap_url, headers, limits.get("timeout_seconds", 10))
+                # Sitemap entries are attacker-influenced and may point at a
+                # different origin: never send credential headers there (H-2).
+                safe_headers = {
+                    key: value for key, value in headers.items()
+                    if key.lower() not in _CREDENTIAL_HEADERS
+                    or urlparse(sitemap_url).hostname == urlparse(normalized_url).hostname
+                }
+                sitemap_response = http_fetcher(sitemap_url, safe_headers, limits.get("timeout_seconds", 10))
                 if inspect.iscoroutine(sitemap_response):
                     sitemap_response = await sitemap_response
                 sitemap_headers = {key.lower(): value for key, value in sitemap_response.headers.items()}
-                sitemap_text = _decode_body(_decompress_body(sitemap_response.body, sitemap_headers.get("content-encoding", "")), sitemap_headers.get("content-type"))
+                try:
+                    sitemap_body = _decompress_body(
+                        sitemap_response.body,
+                        sitemap_headers.get("content-encoding", ""),
+                        max_output_bytes=8 * 1024 * 1024,
+                    )
+                except DecompressionTooLargeError:
+                    continue
+                sitemap_text = _decode_body(sitemap_body, sitemap_headers.get("content-type"))
                 sitemap_urls.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap_text, flags=re.IGNORECASE))
             except Exception:
                 continue
@@ -1002,6 +1023,10 @@ async def _http_strategy_result(
         cached = content_cache.get(ckey)
         if cached is not None:
             validator = cache.conditional_headers(normalized_url) if cache is not None else {}
+            if not validator and caller_conditional:
+                # Caller-supplied validators must win over serving a cached body:
+                # silently ignoring If-None-Match serves stale content as success.
+                validator = dict(caller_conditional)
             if not validator:
                 # No validator to re-check against -> serve cached payload directly.
                 # Staleness is bounded by the cache TTL (acceptable for etag-less pages).
@@ -1013,6 +1038,7 @@ async def _http_strategy_result(
                 # never serve stale content for an etagged/last-modified URL.
                 reval_headers = dict(base_headers)
                 reval_headers.update(validator)
+                reval_headers.update(caller_conditional)
                 response, retry_diagnostics = await _fetch_with_retries(
                     http_fetcher, normalized_url, reval_headers,
                     timeout_seconds, max_retries, max_content_length,
@@ -1039,13 +1065,19 @@ async def _http_strategy_result(
         #  NOT be reported as not_modified -- we serve the cached content instead.)
         # Caller-supplied validators (freshness monitoring) also produce a
         # not_modified result on 304: no body exists for caller-owned validators.
+        # A 304 we did not negotiate (no If-* header was sent) is honored by the
+        # letter of HTTP but is trivially attacker-controlled content suppression;
+        # treat it as a normal response body instead.
         resp_headers_304 = {key.lower(): value for key, value in response.headers.items()}
         echoed_validators = {
             "etag": resp_headers_304.get("etag") or (caller_conditional.get("If-None-Match") if caller_conditional else None),
             "last_modified": resp_headers_304.get("last-modified") or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
         }
         echoed_validators = {k: v for k, v in echoed_validators.items() if v}
-        if response.status_code == 304 and not revalidated_304 and (cache is not None or caller_conditional):
+        sent_conditional = any(
+            key in request_headers for key in ("If-None-Match", "If-Modified-Since")
+        )
+        if response.status_code == 304 and not revalidated_304 and sent_conditional:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             attempt = CrawlStrategyAttempt(
                 strategy=strategy,  # type: ignore[arg-type]
@@ -1171,8 +1203,17 @@ async def _http_strategy_result(
                 http_fetcher=http_fetcher,
             )
         )
-        diagnostics["js_endpoints"] = extract_js_endpoints(html, normalized_url)
+        # Emitted discovery URLs are attacker-influenced: only http(s) targets
+        # may leave the service (no javascript:, file:, link-local oddities).
+        raw_endpoints = extract_js_endpoints(html, normalized_url)
+        diagnostics["js_endpoints"] = [
+            endpoint
+            for endpoint in raw_endpoints
+            if urlparse(str(endpoint.get("url", ""))).scheme in ("", "http", "https")
+        ]
         next_page_url = _detect_pagination(html, response.final_url)
+        if next_page_url and urlparse(next_page_url).scheme not in ("http", "https"):
+            next_page_url = None
         if next_page_url:
             diagnostics["next_page_url"] = next_page_url
         quality = _quality_score(status, classification, text, html, response.status_code)

@@ -109,6 +109,12 @@ LAZY_SCROLL_STEPS = 3
 LAZY_SCROLL_DELAY_SECONDS = 1
 
 
+# Server-side clamp for caller-supplied action wait durations: a hostile
+# policy must not be able to park a render (or, pre-fix, the event loop)
+# for an arbitrary time.
+_MAX_ACTION_WAIT_SECONDS = 10.0
+
+
 class BrowserRenderer:
     def __init__(
         self,
@@ -142,6 +148,17 @@ class BrowserRenderer:
             max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "3")))
         )
 
+    async def _async_sleep(self, seconds: float) -> None:
+        """Non-blocking sleep for use inside coroutines.
+
+        The default ``time.sleep`` clock (injectable for tests) would block the
+        whole event loop; run it in a thread so one render can never freeze the
+        service (adversarial review C2).
+        """
+        if seconds <= 0:
+            return
+        await asyncio.to_thread(self._sleep, seconds)
+
     async def _reset_browser(self) -> None:
         """Close any cached browser instance so the next render recreates it.
 
@@ -174,13 +191,13 @@ class BrowserRenderer:
                 await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "navigation_timeout", attempts, started, last_error)
-                self._sleep(min(2 ** (attempts - 1), 5))
+                await self._async_sleep(min(2 ** (attempts - 1), 5))
             except Exception as error:  # noqa: BLE001
                 last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(url, "retry_exhausted", "unknown_error", attempts, started, last_error)
-                self._sleep(min(2 ** (attempts - 1), 5))
+                await self._async_sleep(min(2 ** (attempts - 1), 5))
 
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
@@ -370,7 +387,7 @@ class BrowserRenderer:
                 elif action_type == "wait" and selector:
                     await page.wait_for_selector(selector, timeout=int(action.get("timeout", 5000)))
                 elif action_type == "wait_seconds":
-                    self._sleep(float(action.get("seconds", 1)))
+                    await self._async_sleep(min(float(action.get("seconds", 1)), _MAX_ACTION_WAIT_SECONDS))
                 elif action_type == "execute_js":
                     # Refuse arbitrary JS execution (RCE-class risk). Callers must
                     # not be able to run scripts in the browser context.
@@ -426,7 +443,7 @@ class BrowserRenderer:
                 await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
             except Exception:  # scrolling is best-effort
                 return
-            self._sleep(LAZY_SCROLL_DELAY_SECONDS)
+            await self._async_sleep(LAZY_SCROLL_DELAY_SECONDS)
 
     def _get_browser_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
         """Launch-only kwargs for the Camoufox/Playwright browser factory.
@@ -515,7 +532,7 @@ class BrowserRenderer:
             state = await page.evaluate("() => document.readyState")
             if state in {"interactive", "complete"}:
                 return
-            self._sleep(0.1)
+            await self._async_sleep(0.1)
 
     async def _extract_html(self, page: Any) -> str:
         try:
@@ -627,7 +644,7 @@ class BrowserRenderer:
                         is_visible = await element.is_visible()
                         if is_visible:
                             await element.click()
-                            self._sleep(0.5)  # Brief wait for consent to register
+                            await self._async_sleep(0.5)  # Brief wait for consent to register
                             return True
                 except Exception:
                     continue

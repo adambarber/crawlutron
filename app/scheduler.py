@@ -34,6 +34,10 @@ class _TokenBucket:
         return deficit / self.rate
 
 
+# Upper bound on how long any single job will sleep on a domain cooldown.
+_MAX_COOLDOWN_WAIT = 300.0
+
+
 class DomainScheduler:
     def __init__(
         self,
@@ -163,7 +167,10 @@ class DomainScheduler:
             if cooldown_expiry is not None:
                 now = time.time()
                 if now < cooldown_expiry:
-                    await asyncio.sleep(cooldown_expiry - now)
+                    # Cap the wait: a hostile Retry-After must not park this
+                    # coroutine (and the whole gather) for years. Beyond the cap
+                    # the job proceeds and the origin will re-assert its limit.
+                    await asyncio.sleep(min(cooldown_expiry - now, _MAX_COOLDOWN_WAIT))
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):

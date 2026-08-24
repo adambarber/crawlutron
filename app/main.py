@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
@@ -46,6 +48,7 @@ from .service import crawl_request, render_request
 from .output_formats import serialize_results
 from .map import build_site_map
 from .crawl.job_store import JobStore, JobStatus
+from .crawl.result_store import CrawlResultStore
 from .settings import CrawlerSettings
 from .metrics import metrics
 
@@ -73,6 +76,14 @@ settings = CrawlerSettings.from_mapping()
 
 # Job store for resumable crawls (#3+#14)
 job_store = JobStore(settings.cache_dir + "/jobs.db")
+
+# Completed single-request crawl results (fixes the dead status_url promise and
+# makes results recoverable if the HTTP connection drops mid-response).
+result_store = CrawlResultStore(
+    settings.cache_dir + "/results.db",
+    ttl_seconds=float(os.environ.get("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600")),
+    max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
+)
 
 async def _execute_crawl(payload_dict: dict) -> dict:
     """Shared crawl execution for /v1/crawl and /v1/map."""
@@ -321,12 +332,24 @@ if FastAPI is not None:
         finally:
             readiness_state.end_request()
 
-    async def _deliver_webhook(webhook_url: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
+    # Bound webhook-mode background crawls: without a cap, a flood of 202s
+    # spawns unbounded concurrent crawls until the container OOMs.
+    _webhook_crawl_semaphore = asyncio.Semaphore(
+        max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", "4")))
+    )
+
+    async def _deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
         """Run the crawl in the background and POST the result to ``webhook_url`` (#15).
 
         Best-effort delivery: failures are swallowed so a dead callback never
-        crashes the crawler worker.
+        crashes the crawler worker. Concurrency is capped by
+        ``BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY``; excess deliveries wait on
+        the semaphore instead of multiplying resource usage.
         """
+        async with _webhook_crawl_semaphore:
+            await _run_and_deliver_webhook(webhook_url, request_id, payload_dict, crawl_settings)
+
+    async def _run_and_deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
         # SSRF protection for webhook URL (#P0)
         _validate_webhook_url(webhook_url)
         result = await crawl_request(
@@ -335,7 +358,16 @@ if FastAPI is not None:
             browser_worker=lambda job: renderer.render(job.url, job.options),
             shutdown_event=shutdown_event,
         )
+        result["request_id"] = request_id
         metrics.observe_crawl(results=result.get("results", []))
+        unified_results = [_build_unified_result(item) for item in result.get("results", [])]
+        response_payload = UnifiedCrawlResponse(
+            request_id=request_id,
+            submitted_count=result.get("submitted_count", len(unified_results)),
+            policy_schema_version=result.get("policy_schema_version", ""),
+            success=True,
+            results=unified_results,
+        ).model_dump()
         try:
             import httpx
             import json
@@ -343,7 +375,7 @@ if FastAPI is not None:
 
             # Limit webhook payload size to prevent OOM/DoS (default 10MB)
             max_webhook_size = int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
-            payload_bytes = json.dumps(result, separators=(",", ":")).encode("utf-8")
+            payload_bytes = json.dumps(response_payload, separators=(",", ":")).encode("utf-8")
             if len(payload_bytes) > max_webhook_size:
                 logger.warning("webhook_payload_too_large", extra={"size": len(payload_bytes), "limit": max_webhook_size})
                 return
@@ -465,6 +497,16 @@ if FastAPI is not None:
     ) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
+            # Reject unsupported output formats BEFORE burning crawl resources
+            # (adversarial review: validation used to happen only after the crawl).
+            if payload.output_format:
+                try:
+                    serialize_results([], payload.output_format)
+                except ValueError as error:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"code": "validation_error", "message": str(error), "details": {}},
+                    ) from error
             payload_dict = payload.model_dump(exclude_none=True)
             webhook_url = payload.webhook_url
             if webhook_url:
@@ -474,9 +516,14 @@ if FastAPI is not None:
                         status_code=422,
                         detail={"code": "validation_error", "message": "Invalid webhook_url", "details": {}},
                     )
-                background_tasks.add_task(_deliver_webhook, webhook_url, payload_dict, settings)
-                metrics.observe_crawl(accepted=True)
+                # Validate the webhook URL at accept time: failing silently in
+                # the background task means an accepted crawl is never delivered.
+                _validate_webhook_url(webhook_url)
                 request_id = f"crawl_{uuid.uuid4().hex[:12]}"
+                background_tasks.add_task(
+                    _deliver_webhook, webhook_url, request_id, payload_dict, settings
+                )
+                metrics.observe_crawl(accepted=True)
                 return JSONResponse(
                     status_code=202,
                     content={
@@ -486,10 +533,25 @@ if FastAPI is not None:
                         "webhook_url": webhook_url,
                     },
                 )
+            _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)
-            metrics.observe_crawl(results=result.get("results", []))
+            metrics.observe_crawl(
+                results=result.get("results", []),
+                elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
+            )
             logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
             unified = [_build_unified_result(item) for item in result.get("results", [])]
+            response_model = UnifiedCrawlResponse(
+                request_id=result["request_id"],
+                submitted_count=result["submitted_count"],
+                policy_schema_version=result["policy_schema_version"],
+                success=True,
+                results=unified,
+            )
+            try:
+                result_store.put(result["request_id"], response_model.model_dump())
+            except Exception:  # noqa: BLE001 - retrieval is best-effort
+                logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
             output_format = payload.output_format
             if output_format and output_format.lower() != "json":
                 # #17: emit the results in the requested wire format instead of the
@@ -542,8 +604,12 @@ if FastAPI is not None:
             limits = dict(policy.get("limits") or {})
             limits.setdefault("max_discovered_links", 2000)
             policy["limits"] = limits
+            _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)
-            metrics.observe_crawl(results=result.get("results", []))
+            metrics.observe_crawl(
+                results=result.get("results", []),
+                elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
+            )
             logger.info("map_request_completed", extra={"url_count": len(result.get("results", []))})
             return build_site_map(result)
         except ValueError as error:
@@ -555,6 +621,25 @@ if FastAPI is not None:
         finally:
             readiness_state.end_request()
 
+
+    @app.get(
+        "/v1/crawl/{request_id}",
+        summary="Retrieve a completed crawl response",
+        description=(
+            "Return the stored UnifiedCrawlResponse for a previously completed "
+            "/v1/crawl request (see status_url in the 202 webhook response). "
+            "Results are retained for BROWSER_CRAWLER_RESULT_TTL_SECONDS "
+            "(default 1h, capped at BROWSER_CRAWLER_RESULT_MAX_ENTRIES entries)."
+        ),
+    )
+    async def get_crawl_result(request_id: str) -> UnifiedCrawlResponse:
+        stored = result_store.get(request_id)
+        if stored is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Unknown or expired request_id: {request_id}", "details": {}},
+            )
+        return UnifiedCrawlResponse(**stored)
 
     @app.post(
         "/v1/jobs",

@@ -69,7 +69,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "frame_discovery": True,
             "form_discovery": True,
             "conditional_fetch": True,
-            "recursive_frontier": False,
+            "recursive_frontier": True,
             "warmup": True,
             "request_profiles": True,
             "browser_profiles": True,
@@ -77,7 +77,9 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "proxy_rotation": False,
             "identity_rotation": False,
             "credential_bypass": False,
-            "cloudflare_bypass": True,
+            # The service passively waits out challenges (challenge_wait_seconds);
+            # it does NOT solve or bypass them, so do not advertise bypass.
+            "cloudflare_bypass": False,
             "robots_diagnostics": True,
             "sitemap_discovery": True,
             "feed_discovery": True,
