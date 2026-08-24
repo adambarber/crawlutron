@@ -174,6 +174,19 @@ def etag_server():
 
 
 @pytest.fixture(autouse=True)
+def _reset_sitemap_cache():
+    """Clear the module-level sitemap TTL cache between tests.
+
+    Tests inject fake fetchers serving different content for the same
+    sitemap URLs; without this the shared cache leaks across tests.
+    """
+    import app.crawl.fetch_helpers as fh
+    fh._SITEMAP_CACHE.clear()
+    yield
+    fh._SITEMAP_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_global_http_state():
     """Reset crawler global singletons after each test.
 

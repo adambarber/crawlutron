@@ -572,8 +572,14 @@ async def crawl_request(
         return len(expired)
 
     def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
-        rules: list[tuple[bool, str]] = []
-        active = False
+        """RFC 9309 group selection: parse discrete user-agent groups and apply
+        only the most-specific group matching our product token (falling back to
+        the ``*`` group). Previously rules were unioned across ALL groups, so a
+        Baiduspider ``Disallow: /`` blocked our crawler site-wide."""
+        our_token = "dev-stack-browser-crawler"
+        groups: list[tuple[list[str], list[tuple[bool, str]]]] = []
+        last_agents: list[str] = []
+        current: tuple[list[str], list[tuple[bool, str]]] | None = None
         for raw in text.lstrip("\ufeff").splitlines():
             line = raw.split("#", 1)[0].strip()
             if not line:
@@ -582,12 +588,35 @@ async def crawl_request(
             key = key.strip().lower()
             value = value.strip()
             if key == "user-agent":
-                active = value.lower() in ("*", "dev-stack-browser-crawler")
-            elif key == "disallow" and active:
-                rules.append((False, value))
-            elif key == "allow" and active:
-                rules.append((True, value))
-        return rules
+                if current is not None:
+                    groups.append(current)
+                    current = None
+                last_agents.append(value.lower())
+            elif key in ("disallow", "allow") and value is not None:
+                if current is None:
+                    current = (list(last_agents), [])
+                    last_agents = []
+                current[1].append((key == "allow", value))
+        if current is not None:
+            groups.append(current)
+
+        ua_full = "dev-stack-browser-crawler/0.2 +https://local.dev-stack/crawler"
+        best_rules: list[tuple[bool, str]] | None = None
+        best_len = -1
+        star_rules: list[tuple[bool, str]] | None = None
+        for agents, grules in groups:
+            for agent in agents:
+                if agent == "*":
+                    if star_rules is None:
+                        star_rules = grules
+                    break
+                if agent and agent in ua_full and len(agent) > best_len:
+                    best_len = len(agent)
+                    best_rules = grules
+                    break
+        if best_rules is not None:
+            return best_rules
+        return star_rules if star_rules is not None else []
 
     async def _fetch_robots_rules(origin: str) -> list[tuple[bool, str]]:
         now = time.monotonic()

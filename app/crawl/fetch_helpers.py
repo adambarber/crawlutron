@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from typing import Any
 
 from app.crawl.strategies.http import _decode_body, _decompress_body
@@ -48,6 +49,8 @@ async def _fetch_and_decode(
 
 
 _MAX_SITEMAP_DEPTH = 3
+_SITEMAP_CACHE_TTL = 3600.0
+_SITEMAP_CACHE: "dict[str, tuple[float, set]]" = {}
 _MAX_SITEMAP_URLS = 10_000
 
 
@@ -82,14 +85,28 @@ async def fetch_sitemap_urls(
         if "<sitemapindex" in text.lower():
             # Fan out: fetch all child sitemaps of an index concurrently.
             children = [c for c in locs if c not in visited]
-            pending = [recurse(child, depth + 1) for child in children]
+            pending = [asyncio.create_task(recurse(child, depth + 1)) for child in children]
             if pending:
-                await asyncio.gather(*pending)
+                # Bounded fan-out: stragglers are cancelled so one slow server
+                # cannot gate the entire resolution.
+                done, _ = await asyncio.wait(pending, timeout=45)
+                for t in pending:
+                    if t not in done:
+                        t.cancel()
             return
         page_urls.update(locs)
 
+    cached = _SITEMAP_CACHE.get(sitemap_url)
+    now = time.monotonic()
+    if cached and now - cached[0] < _SITEMAP_CACHE_TTL:
+        return set(cached[1])
     try:
-        await recurse(sitemap_url, 0)
+        await asyncio.gather(*[recurse(sitemap_url, 0)])
     except Exception:
         pass
+    _SITEMAP_CACHE[sitemap_url] = (now, set(page_urls))
+    if len(_SITEMAP_CACHE) > 1000:
+        oldest = sorted(_SITEMAP_CACHE.items(), key=lambda x: x[1][0])[:200]
+        for k, _v in oldest:
+            _SITEMAP_CACHE.pop(k, None)
     return page_urls
