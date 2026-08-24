@@ -410,8 +410,11 @@ class BrowserRenderer:
                     if header:
                         from app.validation import registrable_domain as _rd
                         _BROWSER_COOKIES_BY_DOMAIN[_rd(url)] = header
-            except Exception:
-                pass
+                        logger.info("browser_cookies_harvested", extra={"domain": _rd(url), "count": len(cookies)})
+                    else:
+                        logger.warning("cookie_harvest_empty", extra={"url": url})
+            except Exception as harvest_error:
+                logger.warning("cookie_harvest_failed", extra={"error_detail": str(harvest_error)})
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
             self._render_count += 1
