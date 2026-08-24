@@ -93,20 +93,33 @@ def decompress_body(body: bytes, content_encoding: str, *, max_output_bytes: int
                 return brotli.decompress(body)
             except Exception:
                 return body
-        # Best-effort bounded brotli decompression; fall back to returning the
-        # raw body if the streaming API is unavailable or the payload is invalid.
+        # Bounded brotli decompression. The brotli ecosystem has two
+        # incompatible streaming APIs (google-brotli exposes .process(),
+        # brotlicffi exposes .decompress(data, cap)) -- detect and use whichever
+        # exists. Fall back to full decompress + post-hoc cap check.
+        d = None
         try:
             d = brotli.Decompressor()
-            out = d.decompress(body, max_output_bytes + 1)
-            if len(out) > max_output_bytes:
-                raise DecompressionTooLargeError(
-                    f"decompressed body exceeds {max_output_bytes} bytes"
-                )
-            return bytes(out)
-        except DecompressionTooLargeError:
-            raise
+        except Exception:
+            d = None
+
+        try:
+            if d is not None and hasattr(d, "decompress"):
+                # brotlicffi-style bounded API
+                out = d.decompress(body, max_output_bytes + 1)
+            elif d is not None and hasattr(d, "process"):
+                # google-brotli streaming API
+                out = bytes(d.process(body))
+            else:
+                out = brotli.decompress(body)
         except Exception:
             return body
+
+        if len(out) > max_output_bytes:
+            raise DecompressionTooLargeError(
+                f"decompressed body exceeds {max_output_bytes} bytes"
+            )
+        return bytes(out)
 
     return body
 
