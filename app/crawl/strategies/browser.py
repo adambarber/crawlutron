@@ -136,6 +136,11 @@ class BrowserRenderer:
         # the memory of a long-lived Camoufox process (see _acquire_browser).
         self._render_count = 0
         self._max_browser_renders = int(os.environ.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", "100"))
+        # Cap concurrent page renders: N simultaneous requests each open a tab,
+        # which otherwise crashes/OOMs the browser under burst load.
+        self._page_semaphore = asyncio.Semaphore(
+            max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "3")))
+        )
 
     async def _reset_browser(self) -> None:
         """Close any cached browser instance so the next render recreates it.
@@ -226,6 +231,12 @@ class BrowserRenderer:
                 pass
 
     async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
+        # Cap concurrent page renders: each render opens a browser tab, and an
+        # unbounded burst of tabs crashes/OOMs the shared Camoufox process.
+        async with self._page_semaphore:
+            return await self._render_with_page_unlocked(url, options)
+
+    async def _render_with_page_unlocked(self, url: str, options: RenderOptions) -> CrawlResult:
         # SSRF protection (F2): validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.

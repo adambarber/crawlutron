@@ -132,9 +132,9 @@ class ExtractedContent(NamedTuple):
     markdown: str | None
 
 
-def _decode(body: bytes | str) -> str:
-    if isinstance(body, bytes):
-        return body.decode("utf-8", "replace")
+def _decode(body: bytes | bytearray | str) -> str:
+    if isinstance(body, (bytes, bytearray)):
+        return bytes(body).decode("utf-8", "replace")
     return body
 
 

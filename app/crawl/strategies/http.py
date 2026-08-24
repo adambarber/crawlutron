@@ -512,14 +512,16 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
                     hops += 1
                     continue
                 # Terminal response: stream RAW bytes, capping total read (#5).
-                raw = b""
+                # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
+                # bytes re-allocates and copies the whole buffer per chunk.
+                raw = bytearray()
                 async for chunk in response.aiter_raw():
-                    raw += chunk
+                    raw.extend(chunk)
                     if len(raw) > max_content_length:
                         return _http_413(url, response, started)
                 encoding = response.headers.get("content-encoding", "")
                 try:
-                    body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
+                    body = _decompress_body(bytes(raw), encoding, max_output_bytes=max_content_length)
                 except DecompressionTooLargeError:
                     return _http_413(url, response, started)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}

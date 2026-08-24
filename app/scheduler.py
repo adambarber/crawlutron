@@ -212,12 +212,15 @@ class DomainScheduler:
                 if wait_seconds > 0:
                     await asyncio.sleep(wait_seconds)
 
-            async with global_gate:
-                async with domain_gates[job.domain]:
-                    # Apply jitter to the (possibly adaptive) per-domain delay
-                    base_delay = self.current_delay(job.domain)
-                    delay_sleep = base_delay * random.uniform(0.8, 1.2) if base_delay > 0 else 0
-                    await asyncio.sleep(delay_sleep)
+            async with domain_gates[job.domain]:
+                # Apply jitter to the (possibly adaptive) per-domain delay while
+                # holding ONLY the per-domain gate. Sleeping inside global_gate
+                # would burn a global concurrency slot on pure waiting and starve
+                # every other domain (throughput fix).
+                base_delay = self.current_delay(job.domain)
+                delay_sleep = base_delay * random.uniform(0.8, 1.2) if base_delay > 0 else 0
+                await asyncio.sleep(delay_sleep)
+                async with global_gate:
                     try:
                         result = await worker(job)
                         if result.status == "success":

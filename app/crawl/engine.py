@@ -596,6 +596,10 @@ async def crawl_request(
     scope_pattern = _compile_scope_regex_safe(scope_regex)
     recursive = max_depth > 0
 
+    async def _worker(job: CrawlTask) -> EngineCrawlResult:
+        _, result = await run_job(job)
+        return result
+
     if not recursive:
         by_index: dict[int, EngineCrawlResult] = {}
         allowed_jobs: list[CrawlTask] = []
@@ -604,10 +608,6 @@ async def crawl_request(
                 by_index[job.index] = _robots_disallowed_result(job)
             else:
                 allowed_jobs.append(job)
-
-        async def _worker(job: CrawlTask) -> EngineCrawlResult:
-            _, result = await run_job(job)
-            return result
 
         scheduled_results = await scheduler.run(allowed_jobs, _worker) if allowed_jobs else []
         for job, result in zip(allowed_jobs, scheduled_results):
@@ -630,36 +630,56 @@ async def crawl_request(
         while frontier and page_count < max_pages:
             if shutdown_event.is_set():
                 break
-            depth, job = frontier.popleft()
-            if job.normalized_url in visited:
-                continue
-            if respect_robots and not await _robots_allows_target(job.normalized_url):
-                by_index[job.index] = _robots_disallowed_result(job)
+            # Pull a batch sized to the configured concurrency (and the remaining
+            # page budget) so discovered links are fetched *through the scheduler*
+            # concurrently instead of strictly one-by-one. Without this the
+            # recursive crawl ignores global_concurrency entirely.
+            batch_size = min(
+                len(frontier),
+                max(1, active_settings.global_concurrency * 2),
+                max(1, max_pages - page_count),
+            )
+            batch = [frontier.popleft() for _ in range(batch_size)]
+
+            allowed_jobs: list[tuple[int, CrawlTask]] = []
+            for depth, job in batch:
+                if job.normalized_url in visited:
+                    continue
+                if respect_robots and not await _robots_allows_target(job.normalized_url):
+                    by_index[job.index] = _robots_disallowed_result(job)
+                    visited.add(job.normalized_url)
+                    page_count += 1
+                    continue
+                allowed_jobs.append((depth, job))
                 visited.add(job.normalized_url)
+
+            scheduled_results = (
+                await scheduler.run([job for _, job in allowed_jobs], _worker)
+                if allowed_jobs
+                else []
+            )
+
+            for (depth, job), result in zip(allowed_jobs, scheduled_results):
+                by_index[job.index] = result
                 page_count += 1
-                continue
-            visited.add(job.normalized_url)
-            _, result = await run_job(job)
-            by_index[job.index] = result
-            page_count += 1
-            if depth >= max_depth:
-                continue
-            for link in result.discovered_links:
-                if link.normalized_url in visited:
+                if depth >= max_depth:
                     continue
-                if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
-                    continue
-                if respect_robots and not await _robots_allows_target(link.normalized_url):
-                    continue
-                if max_pages and page_count + len(frontier) >= max_pages:
-                    break
-                frontier.append(
-                    (
-                        depth + 1,
-                        CrawlTask(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
+                for link in result.discovered_links:
+                    if link.normalized_url in visited:
+                        continue
+                    if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
+                        continue
+                    if respect_robots and not await _robots_allows_target(link.normalized_url):
+                        continue
+                    if max_pages and page_count + len(frontier) >= max_pages:
+                        break
+                    frontier.append(
+                        (
+                            depth + 1,
+                            CrawlTask(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
+                        )
                     )
-                )
-                next_index += 1
+                    next_index += 1
 
     # memory-efficient recursive crawls (#8): strip heavy payloads when not requested
     if not include_html:
