@@ -158,6 +158,7 @@ def _build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
         discovered_links_truncated=item.get("discovered_links_truncated", False),
         discovered_links=item.get("discovered_links", []),
         next_page_url=item.get("next_page_url"),
+        validators=item.get("validators") or None,
     )
 
 
