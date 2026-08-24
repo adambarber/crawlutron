@@ -150,6 +150,15 @@ LAZY_SCROLL_DELAY_SECONDS = 1
 _MAX_ACTION_WAIT_SECONDS = 10.0
 
 
+# Session cookies harvested from browser renders, keyed by registrable domain.
+# Lets HTTP_CFFI_IMPERSONATE replay a browser-minted session on retry.
+_BROWSER_COOKIES_BY_DOMAIN: dict[str, str] = {}
+
+
+def get_browser_cookies_for(domain: str) -> str | None:
+    return _BROWSER_COOKIES_BY_DOMAIN.get(domain)
+
+
 class BrowserRenderer:
     def __init__(
         self,
@@ -391,6 +400,18 @@ class BrowserRenderer:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
             await self._safe_close_page(page)
+            # Harvest session cookies for this domain so later HTTP/cffi
+            # attempts can replay the browser-established session (#cffi-cookie-bootstrap).
+            try:
+                contexts = getattr(self._browser, "contexts", None) or []
+                if contexts:
+                    cookies = await contexts[0].cookies(url)
+                    header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
+                    if header:
+                        from app.validation import registrable_domain as _rd
+                        _BROWSER_COOKIES_BY_DOMAIN[_rd(url)] = header
+            except Exception:
+                pass
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
             self._render_count += 1

@@ -304,6 +304,8 @@ async def _execute_crawl_chain(
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: EngineCrawlResult | None = None
+    cffi_was_blocked = False
+    cffi_retry_done = False
     for strategy in policy["strategies"]:
         if strategy in HTTP_STRATEGIES:
             strategy_fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
@@ -348,6 +350,8 @@ async def _execute_crawl_chain(
             )
         attempts.extend(result.attempted_strategies)
         last_result = result
+        if strategy == HTTP_CFFI_IMPERSONATE and result.status != "success":
+            cffi_was_blocked = True
         if result.classification == "rate_limited" and scheduler is not None:
             cooldown = result.diagnostics.get("cooldown") or {}
             retry_after = cooldown.get("retry_after_seconds")
@@ -361,6 +365,35 @@ async def _execute_crawl_chain(
             continue
         # not_modified is terminal: the caller's validators proved freshness, so
         # escalating to the next strategy would just re-fetch the page.
+        # Cookie bootstrap: after a successful render on a domain where cffi
+        # was blocked, retry cffi once with browser-minted session cookies.
+        from app.crawl.strategies.browser import get_browser_cookies_for
+        if (
+            result.status == "success"
+            and result.classification == "rendered"
+            and strategy in BROWSER_STRATEGIES
+            and cffi_was_blocked
+            and not cffi_retry_done
+        ):
+            cffi_retry_done = True
+            cookie_header = get_browser_cookies_for(registrable_domain(original_url))
+            if cookie_header:
+                retry_policy = dict(policy)
+                retry_headers = dict(retry_policy.get("headers") or {})
+                retry_headers["Cookie"] = cookie_header
+                retry_policy["headers"] = retry_headers
+                retry_result = await _http_strategy_result(
+                    original_url=original_url, normalized_url=normalized_url,
+                    strategy=HTTP_CFFI_IMPERSONATE, policy=retry_policy,
+                    http_fetcher=cffi_fetcher, cache=cache,
+                    content_cache=content_cache, caller_validators=caller_validators,
+                )
+                attempts.extend(retry_result.attempted_strategies)
+                if retry_result.status == "success" and retry_result.quality_score > 0:
+                    scoped = _filter_links_by_scope(retry_result, policy.get("scope_regex"))
+                    return EngineCrawlResult(**{f.name: getattr(scoped, f.name) for f in fields(EngineCrawlResult) if f.name != "attempted_strategies"}, attempted_strategies=attempts)
+                last_result = result
+
         if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
             scoped = _filter_links_by_scope(result, policy.get("scope_regex"))
             return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
