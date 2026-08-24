@@ -6,6 +6,24 @@ import app.crawl.extraction as ext_mod
 from app.crawl.extraction import _extract_document, _EXTRACTION_DOC_TIMEOUT, _MAX_EXTRACTED_MARKDOWN
 
 
+@pytest.fixture(autouse=True)
+def _reset_doc_extraction_pool():
+    """Reset the markitdown process pool around each test in this module.
+
+    These tests inject env vars (TEST_MARKITDOWN_HANG / TEST_MARKITDOWN_OUTPUT)
+    that pool workers inherit at spawn, so every test needs a fresh pool. This
+    is deliberately scoped here instead of an autouse conftest fixture: tearing
+    the pool down for every test in the suite made it dramatically slower.
+    """
+    if ext_mod._DOC_EXTRACTION_EXECUTOR is not None:
+        ext_mod._DOC_EXTRACTION_EXECUTOR.shutdown(wait=False)
+        ext_mod._DOC_EXTRACTION_EXECUTOR = None
+    yield
+    if ext_mod._DOC_EXTRACTION_EXECUTOR is not None:
+        ext_mod._DOC_EXTRACTION_EXECUTOR.shutdown(wait=False)
+        ext_mod._DOC_EXTRACTION_EXECUTOR = None
+
+
 async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
     """A document extraction exceeding the wall-clock timeout returns None (F5).
 
@@ -14,14 +32,10 @@ async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
     """
     # Use env var to signal test hang to subprocess (inherited by process pool)
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
-    # Set short timeout
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "0.01")
-
-    # Need to reload module so timeout and env var are picked up
-    import importlib
-    import app.crawl.extraction as ext_mod_reload
-    importlib.reload(ext_mod_reload)
-    from app.crawl.extraction import _extract_document
+    # Set short timeout - patch the module variable directly
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
+    # Reset the process pool to pick up new timeout
+    ext_mod._DOC_EXTRACTION_EXECUTOR = None
 
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.text is None
@@ -29,7 +43,6 @@ async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
 
     # Clean up
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
-    monkeypatch.delenv("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", raising=False)
 
 
 async def test_extract_document_output_capped_at_5mb(monkeypatch):
@@ -40,16 +53,10 @@ async def test_extract_document_output_capped_at_5mb(monkeypatch):
 
     # Use env var to inject test data into subprocess
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", huge)
-
-    # Need to reload module AND create fresh process pool to pick up new behavior
-    import importlib
-    import app.crawl.extraction as ext_mod_reload
-    importlib.reload(ext_mod_reload)
-    # Also reset the process pool
-    ext_mod_reload._DOC_EXTRACTION_EXECUTOR = None
-    # Set the cap AFTER reload
-    monkeypatch.setattr(ext_mod_reload, "_MAX_EXTRACTED_MARKDOWN", test_cap)
-    from app.crawl.extraction import _extract_document
+    # Set the cap directly
+    monkeypatch.setattr(ext_mod, "_MAX_EXTRACTED_MARKDOWN", test_cap)
+    # Reset the process pool
+    ext_mod._DOC_EXTRACTION_EXECUTOR = None
 
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.markdown is not None
@@ -62,12 +69,8 @@ async def test_extract_document_normal_works(monkeypatch):
     """Normal extraction returns the markdown content."""
     # Use env var to inject test data into subprocess
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
-
-    # Need to reload module to pick up new behavior
-    import importlib
-    import app.crawl.extraction as ext_mod
-    importlib.reload(ext_mod)
-    from app.crawl.extraction import _extract_document
+    # Reset the process pool
+    ext_mod._DOC_EXTRACTION_EXECUTOR = None
 
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.markdown == "## Hello Markdown"
@@ -86,13 +89,11 @@ async def test_extract_document_process_pool_isolation(monkeypatch, real_sleeps)
     """Document extraction runs in a separate process so a hang can be killed
     and does not degrade the shared thread pool.
     """
-    # Use a very short timeout
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "0.01")
-    # Reload the timeout value
-    import importlib
-    import app.crawl.extraction as ext_mod
-    importlib.reload(ext_mod)
-    from app.crawl.extraction import _extract_document, _EXTRACTION_DOC_TIMEOUT
+    # Use a very short timeout - patch the module variable directly
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
+    # Reset the process pool
+    ext_mod._DOC_EXTRACTION_EXECUTOR = None
+    from app.crawl.extraction import _EXTRACTION_DOC_TIMEOUT
 
     assert _EXTRACTION_DOC_TIMEOUT == 0.01
 
@@ -110,11 +111,10 @@ async def test_extract_document_process_pool_isolation(monkeypatch, real_sleeps)
 
 async def test_extract_document_process_pool_normal_works(monkeypatch):
     """Normal document extraction still works with process pool."""
-    # Use normal timeout
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0")
-    import importlib
-    import app.crawl.extraction as ext_mod
-    importlib.reload(ext_mod)
+    # Use normal timeout - patch the module variable directly
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
+    # Reset the process pool
+    ext_mod._DOC_EXTRACTION_EXECUTOR = None
     from app.crawl.extraction import _extract_document
 
     # Don't set TEST_MARKITDOWN_HANG - normal operation

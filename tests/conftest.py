@@ -25,11 +25,15 @@ for candidate in (str(ROOT), str(SHARED), str(HERE)):
 os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = os.environ.get(
     "BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1"
 )
-os.environ["BROWSER_CRAWLER_LOG_FILE"] = os.environ.get(
-    "BROWSER_CRAWLER_LOG_FILE", "/tmp/browser_crawler_test.log"
+# Per-xdist-worker paths: when running under pytest-xdist each worker gets its
+# own log/cache files so parallel workers cannot clobber shared state.
+_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
+_WORKER_SUFFIX = f"-{_XDIST_WORKER}" if _XDIST_WORKER else ""
+os.environ.setdefault(
+    "BROWSER_CRAWLER_LOG_FILE", f"/tmp/browser_crawler_test{_WORKER_SUFFIX}.log"
 )
-os.environ["BROWSER_CRAWLER_CACHE_DIR"] = os.environ.get(
-    "BROWSER_CRAWLER_CACHE_DIR", "/tmp/browser_crawler_test_cache"
+os.environ.setdefault(
+    "BROWSER_CRAWLER_CACHE_DIR", f"/tmp/browser_crawler_test_cache{_WORKER_SUFFIX}"
 )
 os.environ["BROWSER_CRAWLER_CACHE_TTL_SECONDS"] = os.environ.get(
     "BROWSER_CRAWLER_CACHE_TTL_SECONDS", "3600"
@@ -170,36 +174,30 @@ def etag_server():
 
 
 @pytest.fixture(autouse=True)
-def _close_pooled_http_client():
-    """Close the pooled httpx.AsyncClient after each test.
+def _reset_global_http_state():
+    """Reset crawler global singletons after each test.
 
     Tests drive many short-lived ``asyncio.run`` loops; without this the pooled
-    client keeps sockets bound to dead loops and pytest's unraisable-warning
-    plugin fails a random later test with ResourceWarning.
+    httpx client keeps sockets bound to dead loops (pytest's unraisable-warning
+    plugin then fails a random later test with ResourceWarning) and the global
+    cookie jar leaks Set-Cookie state across tests. Resetting both here keeps
+    tests order-independent and is a prerequisite for pytest-xdist safety.
     """
     yield
     import asyncio
-    from app.crawl.strategies.http import close_async_http_client
+    from app.crawl.strategies import http as http_mod
     try:
-        asyncio.run(close_async_http_client())
+        http_mod._GLOBAL_COOKIE_JAR.clear()
+    except Exception:  # noqa: BLE001 - best-effort cleanup only
+        pass
+    try:
+        if http_mod._DEFAULT_HTTP_CLIENT is not None:
+            asyncio.run(http_mod.close_async_http_client())
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
 
 
-@pytest.fixture(autouse=True)
-def _ensure_clean_extraction_pool():
-    """Ensure the extraction process pool is clean before each test.
-
-    If test env vars were set by a previous test (e.g., test_extraction_bounds),
-    the process pool workers might have inherited them. This fixture resets the
-    pool before each test to ensure isolation.
-    """
-    # Before each test, reset the process pool to ensure clean state
-    import app.crawl.extraction as ext_mod
-    if ext_mod._DOC_EXTRACTION_EXECUTOR is not None:
-        ext_mod._DOC_EXTRACTION_EXECUTOR.shutdown(wait=False)
-        ext_mod._DOC_EXTRACTION_EXECUTOR = None
-    # Also clear any test env vars that might have leaked
-    os.environ.pop("TEST_MARKITDOWN_HANG", None)
-    os.environ.pop("TEST_MARKITDOWN_OUTPUT", None)
-    yield
+# NOTE: there is deliberately no autouse extraction-process-pool reset here.
+# Tearing down the ProcessPoolExecutor around every test made the suite slow;
+# the reset now lives as a scoped fixture in crawl/test_extraction_bounds.py,
+# the only module that needs it (it injects env vars into pool workers).

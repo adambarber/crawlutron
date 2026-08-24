@@ -1263,9 +1263,6 @@ class TestResultHelpersCoverageGaps:
         assert result.content_type == "application/octet-stream"
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class TestAdditionalCoverage:
     """Additional targeted tests to close coverage gaps."""
