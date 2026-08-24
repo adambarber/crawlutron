@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
 from .models import CrawlJob, CrawlResult, EngineCrawlResult, CrawlStrategyAttempt
+from .crawl.result_helpers import _failed_engine_result
 
 SchedulerWorker = Callable[[CrawlJob], Awaitable[EngineCrawlResult]]
 
@@ -166,38 +167,13 @@ class DomainScheduler:
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
-                results[job.index] = EngineCrawlResult(
+                results[job.index] = _failed_engine_result(
                     original_url=job.url,
                     normalized_url=job.normalized_url,
-                    final_url=None,
-                    status="failed",
+                    strategy="",
                     classification="network_error",
-                    selected_strategy=None,
-                    attempted_strategies=[
-                        CrawlStrategyAttempt(
-                            strategy="",  # type: ignore[arg-type]
-                            status="failed",
-                            classification="network_error",
-                            http_status=None,
-                            content_type=None,
-                            elapsed_ms=0,
-                            error="circuit_breaker_open",
-                        )
-                    ],
-                    http_status=None,
-                    headers={},
-                    content_type=None,
-                    html=None,
-                    text=None,
-                    markdown=None,
-                    extraction_method=None,
-                    quality_score=0.0,
-                    classification_evidence=[],
-                    diagnostics={"circuit_breaker": True, "error": "circuit_breaker_open"},
-                    discovered_link_count=0,
-                    discovered_links_truncated=False,
-                    discovered_links=[],
                     error="circuit_breaker_open",
+                    diagnostics={"circuit_breaker": True, "error": "circuit_breaker_open"},
                     next_page_url=None,
                 )
                 return

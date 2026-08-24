@@ -305,33 +305,16 @@ async def _execute_crawl_chain(
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
-                result = EngineCrawlResult(
+                result = _failed_engine_result(
                     original_url=original_url,
                     normalized_url=normalized_url,
-                    final_url=None,
-                    status="failed",
+                    strategy=strategy,
                     classification="browser_crash",
-                    selected_strategy=None,
-                    attempted_strategies=[
-                        CrawlStrategyAttempt(
-                            strategy=strategy,  # type: ignore[arg-type]
-                            status="failed",
-                            classification="browser_crash",
-                            http_status=None,
-                            content_type=None,
-                            elapsed_ms=0,
-                            error="browser_worker_unavailable",
-                        )
-                    ],
-                    http_status=None,
-                    headers={},
-                    content_type=None,
-                    html=None,
-                    text=None,
-                    extraction_method=None,
-                    quality_score=0.0,
-                    diagnostics={"browser_profile": policy.get("browser_profile") or {}, "runtime": {"error": "browser_worker_unavailable"}},
                     error="browser_worker_unavailable",
+                    diagnostics={
+                        "browser_profile": policy.get("browser_profile") or {},
+                        "runtime": {"error": "browser_worker_unavailable"},
+                    },
                 )
             else:
                 result = await _browser_strategy_result(
@@ -570,15 +553,19 @@ async def crawl_request(
         )
 
     async def _sitemap_seed_urls() -> list[str]:
-        seeds: list[str] = []
-        for job in jobs:
+        # Fetch each seed origin's /sitemap.xml concurrently: slow/unreachable
+        # origins must not serialize the others' seeding.
+        async def seeds_for(job: CrawlTask) -> list[str]:
             parsed = urlparse(job.normalized_url)
             origin = f"{parsed.scheme}://{parsed.netloc}"
             sitemap_url = urljoin(origin, "/sitemap.xml")
             text = await _fetch_and_decode(fetcher, sitemap_url, {}, policy["limits"]["timeout_seconds"])
-            if text is not None:
-                seeds.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE))
-        return seeds
+            if text is None:
+                return []
+            return re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE)
+
+        per_job = await asyncio.gather(*[seeds_for(job) for job in jobs])
+        return [seed for seeds in per_job for seed in seeds]
 
     # --- crawl orchestration ---
     limits = policy["limits"]

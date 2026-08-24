@@ -44,12 +44,32 @@ _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thre
 _DOC_EXTRACTION_EXECUTOR: concurrent.futures.ProcessPoolExecutor | None = None
 
 
+# Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
+# production container runs with a 2g mem limit. Raise via
+# BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office throughput is
+# needed and the memory budget allows it.
+_DEFAULT_DOC_EXTRACTION_WORKERS = 2
+
+
+def _doc_extraction_worker_count() -> int:
+    """Configured process-pool size for markitdown extraction."""
+    try:
+        return max(1, int(os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", str(_DEFAULT_DOC_EXTRACTION_WORKERS))))
+    except ValueError:
+        return _DEFAULT_DOC_EXTRACTION_WORKERS
+
+
 def _get_doc_extraction_executor() -> concurrent.futures.ProcessPoolExecutor:
-    """Return lazily-initialized process pool for markitdown extraction."""
+    """Return lazily-initialized process pool for markitdown extraction.
+
+    Pool size is configurable via ``BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS``
+    (read once at pool creation).
+    """
     global _DOC_EXTRACTION_EXECUTOR
     if _DOC_EXTRACTION_EXECUTOR is None:
-        # Use max_workers=2 to limit resource usage
-        _DOC_EXTRACTION_EXECUTOR = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+        _DOC_EXTRACTION_EXECUTOR = concurrent.futures.ProcessPoolExecutor(
+            max_workers=_doc_extraction_worker_count()
+        )
     return _DOC_EXTRACTION_EXECUTOR
 
 

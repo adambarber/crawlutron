@@ -82,7 +82,7 @@ from app.crawl.extraction import (
     extract_js_endpoints,
     extract_content,
 )
-from app.crawl.result_helpers import _binary_no_text_result
+from app.crawl.result_helpers import _binary_no_text_result, _make_engine_result
 from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult, HttpFetcher
 from app.validation import normalize_public_http_url, registrable_domain
 from urllib.parse import urljoin, urlparse
@@ -465,6 +465,36 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
 
 _MAX_REDIRECT_HOPS = 5
 
+_REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
+
+
+def _redirect_target(
+    current_url: str,
+    request_headers: dict[str, str],
+    status_code: int,
+    location: str | None,
+    hops: int,
+) -> tuple[str, dict[str, str]] | None:
+    """Decide the next hop of a manual redirect loop (shared by both fetchers).
+
+    Returns ``(new_url, updated_headers)`` when the response is an in-budget
+    redirect, else ``None`` (terminal response). The caller must re-run
+    ``_build_pinned_request`` for ``new_url`` so every hop re-validates against
+    the SSRF blocklist and re-pins DNS (F1). Sensitive headers (Cookie,
+    Authorization) are stripped when crossing host boundaries (Fix 3).
+    """
+    if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
+        return None
+    new_url = urljoin(current_url, location)
+    new_host = urlparse(new_url).hostname
+    current_host = urlparse(current_url).hostname
+    if new_host != current_host:
+        request_headers = {
+            k: v for k, v in request_headers.items()
+            if k.lower() not in ("cookie", "authorization")
+        }
+    return new_url, request_headers
+
 
 async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
@@ -498,17 +528,9 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
                 # SSRF-safe redirect: only follow within the hop budget. The next
                 # loop iteration re-runs _build_pinned_request, which re-validates
                 # (and re-pins) the redirect target against the SSRF blocklist.
-                if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
-                    new_url = urljoin(current_url, location)
-                    # Fix 3: Strip sensitive headers when crossing host boundaries.
-                    new_host = urlparse(new_url).hostname
-                    current_host = urlparse(current_url).hostname
-                    if new_host != current_host:
-                        request_headers = {
-                            k: v for k, v in request_headers.items()
-                            if k.lower() not in ("cookie", "authorization")
-                        }
-                    current_url = new_url
+                redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
+                if redirect is not None:
+                    current_url, request_headers = redirect
                     hops += 1
                     continue
                 # Terminal response: stream RAW bytes, capping total read (#5).
@@ -582,17 +604,9 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                 location = response.headers.get("location")
                 # SSRF-safe redirect: only follow within the hop budget; the next
                 # iteration re-validates + re-pins the target via _build_pinned_request.
-                if status_code in (301, 302, 303, 307, 308) and location and hops < _MAX_REDIRECT_HOPS:
-                    new_url = urljoin(current_url, location)
-                    # Fix 3: Strip sensitive headers when crossing host boundaries.
-                    new_host = urlparse(new_url).hostname
-                    current_host = urlparse(current_url).hostname
-                    if new_host != current_host:
-                        request_headers = {
-                            k: v for k, v in request_headers.items()
-                            if k.lower() not in ("cookie", "authorization")
-                        }
-                    current_url = new_url
+                redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
+                if redirect is not None:
+                    current_url, request_headers = redirect
                     hops += 1
                     continue
                 elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
@@ -1023,21 +1037,16 @@ async def _http_strategy_result(
                 elapsed_ms=elapsed_ms,
                 error=None,
             )
-            return EngineCrawlResult(
+            return _make_engine_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
                 final_url=response.final_url,
                 status="success",
                 classification="not_modified",
                 selected_strategy=strategy,  # type: ignore[arg-type]
-                attempted_strategies=[attempt],
+                attempt=attempt,
                 http_status=304,
                 headers=response.headers,
-                content_type=None,
-                html=None,
-                text=None,
-                extraction_method=None,
-                quality_score=0.0,
                 diagnostics={"retry": retry_diagnostics, "cache": "not_modified"},
                 error=None,
             )
@@ -1156,14 +1165,14 @@ async def _http_strategy_result(
             elapsed_ms=response.elapsed_ms,
             error=None if status == "success" else classification,
         )
-        return EngineCrawlResult(
+        return _make_engine_result(
             original_url=original_url,
             normalized_url=normalized_url,
             final_url=response.final_url,
             status=status,  # type: ignore[arg-type]
             classification=classification,  # type: ignore[arg-type]
             selected_strategy=strategy if status == "success" else None,  # type: ignore[arg-type]
-            attempted_strategies=[attempt],
+            attempt=attempt,
             http_status=response.status_code,
             headers=headers,
             content_type=content_type,
@@ -1200,21 +1209,14 @@ async def _http_strategy_result(
             elapsed_ms=elapsed_ms,
             error=error_code,
         )
-        return EngineCrawlResult(
+        return _make_engine_result(
             original_url=original_url,
             normalized_url=normalized_url,
             final_url=None,
             status="failed",
             classification="network_error",
-            selected_strategy=None,
-            attempted_strategies=[attempt],
+            attempt=attempt,
             http_status=None,
-            headers={},
-            content_type=None,
-            html=None,
-            text=None,
-            extraction_method=None,
-            quality_score=0.0,
             diagnostics={
                 "retry": retry_diagnostics,
                 "runtime": {"elapsed_ms": elapsed_ms},
