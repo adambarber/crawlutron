@@ -55,7 +55,7 @@ from app.crawl.extraction import (
     _html_diagnostics,
     extract_content,
 )
-from app.crawl.fetch_helpers import _fetch_and_decode
+from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.payload_helpers import _payload_policy, _payload_urls, SUPPORTED_EXTRACTION_METHODS
 from app.crawl.result_helpers import (
     _binary_no_text_result,
@@ -632,10 +632,8 @@ async def crawl_request(
             parsed = urlparse(job.normalized_url)
             origin = f"{parsed.scheme}://{parsed.netloc}"
             sitemap_url = urljoin(origin, "/sitemap.xml")
-            text = await _fetch_and_decode(fetcher, sitemap_url, {}, policy["limits"]["timeout_seconds"])
-            if text is None:
-                return []
-            found = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", text, flags=re.IGNORECASE)
+            # Recursive: follows sitemap indexes down to page URLs.
+            found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
             normalized_seeds: list[str] = []
             for seed in found:
                 try:

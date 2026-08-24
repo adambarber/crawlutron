@@ -6,6 +6,7 @@ robots.txt/sitemap.xml responses used in engine.py.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any
 
@@ -44,3 +45,51 @@ async def _fetch_and_decode(
     except Exception:  # noqa: BLE001
         pass
     return None
+
+
+_MAX_SITEMAP_DEPTH = 3
+_MAX_SITEMAP_URLS = 10_000
+
+
+async def fetch_sitemap_urls(
+    fetcher: Any,
+    sitemap_url: str,
+    timeout_seconds: int,
+    *,
+    max_depth: int = _MAX_SITEMAP_DEPTH,
+    max_urls: int = _MAX_SITEMAP_URLS,
+) -> set[str]:
+    """Recursively resolve a sitemap URL into page URLs.
+
+    Handles sitemap indexes (``<sitemapindex>`` pointing at child sitemaps) up
+    to ``max_depth`` levels, and caps total collected URLs at ``max_urls`` so a
+    hostile or enormous index cannot run away.
+    """
+    import re as _re
+
+    loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
+    visited: set[str] = set()
+    page_urls: set[str] = set()
+
+    async def recurse(current_url: str, depth: int) -> None:
+        if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
+            return
+        visited.add(current_url)
+        text = await _fetch_and_decode(fetcher, current_url, {}, timeout_seconds)
+        if not text:
+            return
+        locs = loc_pattern.findall(text)
+        if "<sitemapindex" in text.lower():
+            # Fan out: fetch all child sitemaps of an index concurrently.
+            children = [c for c in locs if c not in visited]
+            pending = [recurse(child, depth + 1) for child in children]
+            if pending:
+                await asyncio.gather(*pending)
+            return
+        page_urls.update(locs)
+
+    try:
+        await recurse(sitemap_url, 0)
+    except Exception:
+        pass
+    return page_urls

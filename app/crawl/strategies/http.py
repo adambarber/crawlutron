@@ -963,29 +963,12 @@ async def _discovery_diagnostics(
     sitemap_urls: list[str] = []
     if discovery.get("sitemaps"):
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
+        from app.crawl.fetch_helpers import fetch_sitemap_urls
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
             try:
-                # Sitemap entries are attacker-influenced and may point at a
-                # different origin: never send credential headers there (H-2).
-                safe_headers = {
-                    key: value for key, value in headers.items()
-                    if key.lower() not in _CREDENTIAL_HEADERS
-                    or urlparse(sitemap_url).hostname == urlparse(normalized_url).hostname
-                }
-                sitemap_response = http_fetcher(sitemap_url, safe_headers, limits.get("timeout_seconds", 10))
-                if inspect.iscoroutine(sitemap_response):
-                    sitemap_response = await sitemap_response
-                sitemap_headers = {key.lower(): value for key, value in sitemap_response.headers.items()}
-                try:
-                    sitemap_body = _decompress_body(
-                        sitemap_response.body,
-                        sitemap_headers.get("content-encoding", ""),
-                        max_output_bytes=8 * 1024 * 1024,
-                    )
-                except DecompressionTooLargeError:
-                    continue
-                sitemap_text = _decode_body(sitemap_body, sitemap_headers.get("content-type"))
-                sitemap_urls.extend(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sitemap_text, flags=re.IGNORECASE))
+                # Recursively resolves sitemap indexes down to page URLs.
+                found_locs = await fetch_sitemap_urls(http_fetcher, sitemap_url, limits.get("timeout_seconds", 10))
+                sitemap_urls.extend(found_locs)
             except Exception:
                 continue
     feeds: list[str] = []
