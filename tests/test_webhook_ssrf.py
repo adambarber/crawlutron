@@ -45,21 +45,28 @@ class TestWebhookDeliveryPinning:
         block_private_targets(monkeypatch)
         captured = {}
 
+        class _MockResponse:
+            def __init__(self):
+                self.status_code = 200
+
         class _Client:
             def __init__(self, *args, **kwargs):
+                # Store args to verify timeout etc.
                 pass
 
             async def __aenter__(self):
                 return self
 
-            async def __aexit__(self, *exc):
-                return False
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                # Properly clean up - return True to suppress any exceptions
+                return True
 
             async def post(self, url, content=None, headers=None):
                 captured["url"] = url
                 captured["headers"] = headers
-                return MagicMock()
+                return _MockResponse()
 
+        # Patch httpx.AsyncClient globally (the import is inside the function)
         with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]),              patch("httpx.AsyncClient", _Client),              patch("app.main.crawl_request", new=AsyncMock(return_value={"results": []})):
             await _deliver_webhook("http://webhook.example.com/cb", {"results": []}, MagicMock())
 
