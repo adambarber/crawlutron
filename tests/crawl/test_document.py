@@ -1,6 +1,5 @@
 """PDF/Office extraction behavior with a real PDF fixture (no mocks)."""
 
-import unittest
 from pathlib import Path
 
 from app.crawl.strategies.document import (
@@ -9,44 +8,38 @@ from app.crawl.strategies.document import (
     _format_table,
     _pdf_to_markdown,
 )
-from helpers import ServerTestCase
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
 
 
-class PdfTablePreservationTest(ServerTestCase):
-    def test_format_table_renders_markdown(self) -> None:
+class TestPdfTablePreservation:
+    def test_format_table_renders_markdown(self):
         md = _format_table([["Name", "Department", "Salary"], ["Alice", "Engineering", "120000"]])
-        self.assertIn("Name", md)
-        self.assertIn("Department", md)
-        self.assertIn("Alice", md)
-        self.assertIn("Engineering", md)
+        assert "Name" in md
+        assert "Department" in md
+        assert "Alice" in md
+        assert "Engineering" in md
 
-    def test_pdf_bytes_to_markdown_extracts_table(self) -> None:
-        with open(FIXTURE, "rb") as handle:
-            pdf_bytes = handle.read()
+    def test_pdf_bytes_to_markdown_extracts_table(self):
+        pdf_bytes = FIXTURE.read_bytes()
         md = _extract_pdf_bytes_to_markdown(pdf_bytes)
-        self.assertIn("Name", md)
-        self.assertIn("Salary", md)
-        self.assertIn("Alice", md)
-        self.assertIn("Engineering", md)
-        self.assertIn("|", md)
+        assert "Name" in md
+        assert "Salary" in md
+        assert "Alice" in md
+        assert "Engineering" in md
+        assert "|" in md
 
-    def test_pdf_to_markdown_with_real_pdfplumber(self) -> None:
+    def test_pdf_to_markdown_with_real_pdfplumber(self):
         import pdfplumber
 
         with pdfplumber.open(FIXTURE) as pdf:
             md = _pdf_to_markdown(pdf)
-        self.assertIn("Alice", md)
-        self.assertIn("|", md)
+        assert "Alice" in md
+        assert "|" in md
 
-    def test_default_document_text_extractor_fetches_real_pdf_url(self) -> None:
-        url = f"{self.base}/sample_table.pdf"
+    async def test_default_document_text_extractor_fetches_real_pdf_url(self, base_url):
+        url = f"{base_url}/sample_table.pdf"
         md = _default_document_text_extractor(url)
-        self.assertIn("Alice", md)
-        self.assertIn("Department", md)
-        self.assertIn("|", md)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert "Alice" in md
+        assert "Department" in md
+        assert "|" in md

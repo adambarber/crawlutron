@@ -10,12 +10,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import threading
-import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
-import pytest
+
+from helpers.server import EtagHandler
 
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -86,33 +84,6 @@ def test_prune_removes_only_expired(tmp_path):
 
 # --------------------------- integration: real server, no mocks ---------------------------
 
-class _CounterHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.server.hits += 1  # type: ignore[attr-defined]
-        body = b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>"
-        self.send_response(200)
-        self.send_header("content-type", "text/html; charset=utf-8")
-        self.send_header("content-length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):  # silence
-        pass
-
-
-@pytest.fixture
-def counting_server():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _CounterHandler)
-    server.hits = 0
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
 async def _fetch_via_cache(url: str, cache: ContentCache):
     key = cache.make_key(url)
     hit = cache.get(key)
@@ -164,46 +135,6 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
     assert calls["n"] == 1  # cache prevented the second real fetch
 
 
-class _EtagHandler(BaseHTTPRequestHandler):
-    """Serves one page with a fixed etag and honors If-None-Match."""
-
-    body = b"<html><body>etagged content</body></html>"
-    etag = "v1"
-
-    def log_message(self, *args):  # silence
-        pass
-
-    def do_GET(self):  # noqa: N802
-        server = self.server
-        if_none = self.headers.get("If-None-Match")
-        if if_none == self.etag:
-            server.hits += 1
-            self.send_response(304)
-            self.send_header("ETag", self.etag)
-            self.end_headers()
-            return
-        server.hits += 1
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("ETag", self.etag)
-        self.send_header("Content-Length", str(len(self.body)))
-        self.end_headers()
-        self.wfile.write(self.body)
-
-
-@pytest.fixture
-def etag_server():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _EtagHandler)
-    server.hits = 0
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield server
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
     from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
@@ -234,14 +165,18 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
         policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
     )
     # Simulate the upstream page changing its etag + body.
-    _EtagHandler.etag = "v2"
-    _EtagHandler.body = b"<html><body>changed content</body></html>"
-    r2 = await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
-    )
-    assert r2.status == "success"
-    assert "changed content" in (r2.markdown or "")
+    try:
+        EtagHandler.etag = "v2"
+        EtagHandler.body = b"<html><body>changed content</body></html>"
+        r2 = await _http_strategy_result(
+            original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
+            policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
+        )
+        assert r2.status == "success"
+        assert "changed content" in (r2.markdown or "")
+    finally:
+        EtagHandler.etag = "v1"
+        EtagHandler.body = b"<html><body>etagged content</body></html>"
 
 
 async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path):

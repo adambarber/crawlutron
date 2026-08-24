@@ -8,6 +8,7 @@ duplication.
 from typing import Any
 from urllib.parse import urlparse
 
+from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.strategies.http import HttpFetchResult
 
 
@@ -112,3 +113,52 @@ async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
     return {r["normalized_url"] for r in out["results"]}
 
+
+
+# --- Shared fetcher mocks (single source of truth) ---
+
+def make_fetch(status=200, body=b"<html><body>hello</body></html>", ctype="text/html; charset=utf-8",
+               final_url="http://example.com/", url="http://example.com/"):
+    return HttpFetchResult(url=url, final_url=final_url, status_code=status,
+                           headers={"content-type": ctype}, body=body, elapsed_ms=1)
+
+
+def ok_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    return make_fetch(url=url)
+
+
+def raise_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    raise ConnectionError("network down")
+
+
+# --- Shared minimal crawl policy ---
+
+def make_base_policy(strategies=None) -> dict:
+    """Fresh copy of the minimal crawl policy used across suites.
+
+    Returns a new dict each call so tests can mutate it without leaking
+    state into sibling tests.
+    """
+    return {
+        "schema_version": "2026-06-23",
+        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
+        "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
+        "headers": {},
+        "request_profile": {},
+        "browser_profile": {},
+        "discovery": {},
+    }
+
+
+# --- EngineCrawlResult assertion helpers ("matchers") ---
+
+def assert_result_success(result, classification: str = "rendered") -> None:
+    """Assert an ``EngineCrawlResult`` succeeded with the expected classification."""
+    assert result.status == "success"
+    assert result.classification == classification
+
+
+def assert_result_failed(result, classification: str) -> None:
+    """Assert an ``EngineCrawlResult`` failed with the expected classification."""
+    assert result.status == "failed"
+    assert result.classification == classification

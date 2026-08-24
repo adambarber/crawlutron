@@ -6,17 +6,16 @@ preserved comments in the ``html_without_script_style`` haystack. Comments are
 not user-visible and are trivially attacker-controllable, so they must never
 influence classification.
 """
-import unittest
 
 from app.classify import classify_page
 
 
-class TestClassifyHtmlComments(unittest.TestCase):
+class TestClassifyHtmlComments:
     def test_comment_only_signal_is_not_classified(self):
         html = "<html><!-- access denied --></html>"
         # The signature lives ONLY inside an HTML comment (not user-visible).
         # It must NOT force a block classification.
-        self.assertEqual(classify_page(html, "clean visible text"), "rendered")
+        assert classify_page(html, "clean visible text") == "rendered"
 
     def test_html_comment_cannot_spoof_any_signature(self):
         # A comment containing every block signature must still yield "rendered"
@@ -28,9 +27,9 @@ class TestClassifyHtmlComments(unittest.TestCase):
             "service unavailable forbidden"
         ) + " -->"
         html = f"<html>{comment}<body>Welcome to our site</body></html>"
-        self.assertEqual(classify_page(html, "Welcome to our site"), "rendered")
+        assert classify_page(html, "Welcome to our site") == "rendered"
 
     def test_visible_signal_still_classified(self):
         # Regression guard: signals in VISIBLE text must still be detected.
         html = "<html><body>access denied</body></html>"
-        self.assertEqual(classify_page(html, "access denied"), "access_denied")
+        assert classify_page(html, "access denied") == "access_denied"

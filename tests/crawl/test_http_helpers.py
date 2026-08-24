@@ -6,6 +6,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
 
 from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult  # noqa: E402
@@ -49,54 +51,33 @@ from app.service import (  # noqa: E402
 )
 from app.settings import CrawlerSettings  # noqa: E402
 from app.crawl.strategies.http import _select_fingerprint, _rotating_index  # noqa: E402
+from _testkit import (  # noqa: E402
+    assert_result_failed,
+    assert_result_success,
+    make_base_policy,
+    make_fetch,
+    ok_fetcher,
+    raise_fetcher,
+)
 
-def make_fetch(status=200, body=b"<html><body>hello</body></html>", ctype="text/html; charset=utf-8",
-               final_url="http://example.com/", url="http://example.com/"):
-    return HttpFetchResult(url=url, final_url=final_url, status_code=status,
-                           headers={"content-type": ctype}, body=body, elapsed_ms=1)
-
-def ok_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    return make_fetch(url=url)
-
-def raise_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    raise ConnectionError("network down")
 
 def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
     if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
         raise ConnectionError("discovery failed")
     return make_fetch()
 
-BASE_POLICY = {
-    "schema_version": "2026-06-23",
-    "strategies": [HTTP_DECLARED_CRAWLER],
-    "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-    "headers": {},
-    "request_profile": {},
-    "browser_profile": {},
-    "discovery": {},
-}
-
 class TestValidationHelpers:
     def test_payload_urls_errors(self) -> None:
-        try:
+        with pytest.raises(ValueError, match=r"^invalid_urls$"):
             _payload_urls({"urls": "notalist"})
-            assert False, "expected ValueError"
-        except ValueError as exc:
-            assert str(exc) == "invalid_urls"
-        try:
+        with pytest.raises(ValueError, match=r"^missing_url$"):
             _payload_urls({})
-            assert False, "expected ValueError"
-        except ValueError as exc:
-            assert str(exc) == "missing_url"
         assert _payload_urls({"url": "http://x/"}) == ["http://x/"]
         assert _payload_urls({"urls": ["http://x/", "http://y/"]}) == ["http://x/", "http://y/"]
 
     def test_render_options_error(self) -> None:
-        try:
+        with pytest.raises(ValueError, match=r"^invalid_options$"):
             _render_options({"options": "bad"}, CrawlerSettings.from_mapping())
-            assert False, "expected ValueError"
-        except ValueError as exc:
-            assert str(exc) == "invalid_options"
 
     def test_payload_policy_errors(self) -> None:
         s = CrawlerSettings.from_mapping()
@@ -109,11 +90,8 @@ class TestValidationHelpers:
             ({"policy": {"extraction": "bogus"}}, "invalid_policy_extraction"),
         ]
         for payload, expected in cases:
-            try:
+            with pytest.raises(ValueError, match=rf"^{expected}$"):
                 _payload_policy(payload, s)
-                assert False, f"expected ValueError for {payload}"
-            except ValueError as exc:
-                assert str(exc) == expected
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert _retry_after_seconds({"retry-after": "notanint"}) is None
@@ -132,11 +110,8 @@ class TestHeaderHelpers:
 
 class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
-        try:
+        with pytest.raises(ConnectionError):
             await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
-            assert False, "expected re-raise"
-        except ConnectionError:
-            pass
 
 class TestPureParsing:
     def test_document_item_range_branches(self) -> None:
@@ -194,7 +169,7 @@ class TestHttpStrategyResult:
         if fetcher is None:
             def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):  # noqa: F811
                 return make_fetch(status=status, ctype=ctype, body=body, final_url=final_url, url=url)
-        pol = dict(BASE_POLICY)
+        pol = make_base_policy()
         if policy:
             pol.update(policy)
         return await _http_strategy_result(
@@ -206,7 +181,7 @@ class TestHttpStrategyResult:
         )
 
     async def test_success_html(self) -> None:
-        assert (await self._run()).status == "success"
+        assert_result_success(await self._run())
 
     async def test_status_classification_overrides(self) -> None:
         for status, classification in [(403, "access_denied"), (404, "not_found"),
@@ -214,9 +189,7 @@ class TestHttpStrategyResult:
             assert (await self._run(status=status)).classification == classification, status
 
     async def test_network_error_handler(self) -> None:
-        result = await self._run(fetcher=raise_fetcher)
-        assert result.status == "failed"
-        assert result.classification == "network_error"
+        assert_result_failed(await self._run(fetcher=raise_fetcher), "network_error")
 
     async def test_binary_body_short_circuits(self) -> None:
         result = await self._run(
@@ -258,7 +231,7 @@ class TestExecuteCrawlChain:
         return await _execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
-            policy=dict(BASE_POLICY, strategies=[strategy]),
+            policy=dict(make_base_policy(), strategies=[strategy]),
             http_fetcher=ok_fetcher,
             cffi_fetcher=ok_fetcher,
             browser_worker=None,
@@ -266,7 +239,7 @@ class TestExecuteCrawlChain:
         )
 
     async def test_http_strategy_runs(self) -> None:
-        assert (await self._run_chain(HTTP_DECLARED_CRAWLER)).status == "success"
+        assert_result_success(await self._run_chain(HTTP_DECLARED_CRAWLER))
 
     async def test_browser_strategy_without_worker(self) -> None:
         assert (await self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
@@ -279,21 +252,15 @@ class TestCrawlRequest:
         settings = CrawlerSettings.from_mapping()
         payload = {"urls": ["http://example.com/"] * (settings.max_batch_size + 1),
                    "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
-        try:
+        with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
  browser_worker=None)
-            assert False, "expected ValueError"
-        except ValueError as exc:
-            assert str(exc) == "batch_size_exceeded"
 
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
-        try:
+        with pytest.raises(ValueError, match=r"^invalid_url"):
             await crawl_request(payload, http_fetcher=ok_fetcher,
  browser_worker=None)
-            assert False, "expected ValueError"
-        except ValueError as exc:
-            assert str(exc).startswith("invalid_url")
 
     async def test_success_with_injected_fetcher(self) -> None:
         payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}

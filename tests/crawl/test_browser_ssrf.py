@@ -80,13 +80,14 @@ class _FakePage:
         self.set_extra_http_headers_calls = []
         self.url = "http://1.2.3.4/"
 
-    def route(self, pattern, handler):
+    async def route(self, pattern, handler):
+        # Real (async) Playwright page.route is a coroutine.
         self.route_calls.append((pattern, handler))
 
     def on(self, event, handler):
         pass
 
-    def set_extra_http_headers(self, headers):
+    async def set_extra_http_headers(self, headers):
         self.set_extra_http_headers_calls.append(headers)
 
     async def goto(self, url, wait_until="load", **kwargs):

@@ -237,7 +237,7 @@ class BrowserRenderer:
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
         # F8: abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
-        page.route("**/*", _make_ssrf_route_handler())
+        await page.route("**/*", _make_ssrf_route_handler())
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
@@ -251,7 +251,7 @@ class BrowserRenderer:
             # Navigate to target URL: set Host header for pinned IP navigation.
             # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
             if goto_headers:
-                page.set_extra_http_headers(goto_headers)
+                await page.set_extra_http_headers(goto_headers)
             await page.goto(pinned_url, wait_until="domcontentloaded")
             await self._wait_for_ready_state(page)
 

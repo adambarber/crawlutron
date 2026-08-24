@@ -35,11 +35,11 @@ class FakePage:
     def on(self, event, handler):
         self.calls.append(("on", event))
 
-    def route(self, pattern, handler):
-        # Mirrors the real Playwright page.route (synchronous registration).
+    async def route(self, pattern, handler):
+        # Mirrors the real (async) Playwright page.route coroutine.
         self.calls.append(("route", pattern))
 
-    def set_extra_http_headers(self, headers):
+    async def set_extra_http_headers(self, headers):
         self.extra_http_headers = headers
 
     async def goto(self, url, wait_until="load", **kwargs):

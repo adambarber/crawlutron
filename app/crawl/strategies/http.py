@@ -176,6 +176,23 @@ async def _safe_aclose(client):
         pass
 
 
+# Superseded pooled clients awaiting a live event loop to be closed on.
+_PENDING_CLIENT_CLOSE: "list[httpx.AsyncClient]" = []
+
+
+async def _drain_pending_client_closes() -> None:
+    """Close any superseded pooled clients on the current (live) loop.
+
+    ``_schedule_client_close`` fires on the *dying* loop, where the scheduled
+    task is cancelled before ``aclose`` completes (every ``asyncio.run`` exit).
+    Draining here, inside a fetch that is already running on a live loop,
+    actually releases those sockets instead of leaking them.
+    """
+    while _PENDING_CLIENT_CLOSE:
+        client = _PENDING_CLIENT_CLOSE.pop(0)
+        await _safe_aclose(client)
+
+
 def _schedule_client_close(client) -> None:
     """Best-effort asynchronous close of a superseded pooled HTTP client.
 
@@ -215,7 +232,11 @@ def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.A
         elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
             old_client = _DEFAULT_HTTP_CLIENT
             _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
-            # Close the superseded client to avoid leaking its sockets/fds.
+            # Close the superseded client to avoid leaking its sockets/fds:
+            # queue it for a guaranteed close on the next live-loop fetch, and
+            # also try the immediate best-effort schedule.
+            if old_client not in _PENDING_CLIENT_CLOSE:
+                _PENDING_CLIENT_CLOSE.append(old_client)
             _schedule_client_close(old_client)
     return _DEFAULT_HTTP_CLIENT
 
@@ -223,6 +244,7 @@ def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.A
 async def close_async_http_client() -> None:
     """Close the shared async client on service shutdown."""
     global _DEFAULT_HTTP_CLIENT
+    await _drain_pending_client_closes()
     client = _DEFAULT_HTTP_CLIENT
     _DEFAULT_HTTP_CLIENT = None
     if client is not None and not client.is_closed:
@@ -455,6 +477,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     Sensitive headers (Cookie, Authorization) are stripped when crossing host
     boundaries to prevent credential leakage (Fix 3).
     """
+    await _drain_pending_client_closes()
     client = get_async_http_client()
     started = time.monotonic()
     timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)

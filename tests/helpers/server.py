@@ -329,3 +329,65 @@ class TestServer:
 
 def spawn_server() -> TestServer:
     return TestServer().start()
+
+
+# --- Special-purpose handlers for cache/revalidation fixtures (conftest.py) ---
+
+
+class CountingHandler(BaseHTTPRequestHandler):
+    """Serves one cacheable page and counts hits on ``server.hits``."""
+
+    def do_GET(self):  # noqa: N802
+        self.server.hits += 1  # type: ignore[attr-defined]
+        body = b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>"
+        self.send_response(200)
+        self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: Any) -> None:  # silence
+        return
+
+
+class EtagHandler(BaseHTTPRequestHandler):
+    """Serves one page with a fixed etag and honors If-None-Match.
+
+    Tests may temporarily mutate the ``etag`` / ``body`` class attributes
+    to simulate an upstream content change.
+    """
+
+    etag = "v1"
+    body = b"<html><body>etagged content</body></html>"
+
+    def do_GET(self):  # noqa: N802
+        server = self.server
+        if_none = self.headers.get("If-None-Match")
+        if if_none == self.etag:
+            server.hits += 1  # type: ignore[attr-defined]
+            self.send_response(304)
+            self.send_header("ETag", self.etag)
+            self.end_headers()
+            return
+        server.hits += 1  # type: ignore[attr-defined]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("ETag", self.etag)
+        self.send_header("Content-Length", str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *args: Any) -> None:  # silence
+        return
+
+
+def spawn_threaded_server(handler_cls) -> ThreadingHTTPServer:
+    """Start a daemon-served ThreadingHTTPServer on an ephemeral port.
+
+    The caller owns teardown (``server.shutdown()`` + ``server.server_close()``);
+    the ``counting_server`` / ``etag_server`` conftest fixtures do this.
+    """
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    server.hits = 0
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
