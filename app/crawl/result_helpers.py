@@ -31,6 +31,7 @@ def _make_engine_result(
     discovered_links_truncated: bool = False,
     discovered_links: list | None = None,
     next_page_url: str | None = None,
+    validators: dict[str, str] | None = None,
 ) -> EngineCrawlResult:
     """Construct an EngineCrawlResult from a pre-built attempt.
 
@@ -67,6 +68,7 @@ def _make_engine_result(
         discovered_links=discovered_links,
         error=error,
         next_page_url=next_page_url,
+        validators=validators or {},
     )
 
 

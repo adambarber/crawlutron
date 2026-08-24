@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import (
     DEFAULT_STRATEGIES,
@@ -110,6 +110,29 @@ class DiscoveryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FetchValidators(BaseModel):
+    """Caller-supplied cached validators for cheap conditional revalidation.
+
+    Supply the ETag / Last-Modified you received from a previous crawl of the
+    same URL; matching URLs are revalidated with If-None-Match /
+    If-Modified-Since instead of fully re-fetched. A 304 yields a
+    ``not_modified`` result (no content) so freshness monitors avoid paying
+    full-fetch cost on unchanged pages.
+    """
+    if_none_match: str | None = Field(None, description="ETag from a previous crawl result; sent as If-None-Match.")
+    if_modified_since: str | None = Field(None, description="Last-Modified date from a previous crawl result; sent as If-Modified-Since.")
+
+
+class ContentValidators(BaseModel):
+    """Validators returned by the origin for the delivered representation.
+
+    Feed ``etag`` / ``last_modified`` back as ``if_none_match`` /
+    ``if_modified_since`` on a later request to revalidate cheaply.
+    """
+    etag: str | None = Field(None, description="Origin ETag for the final representation, if provided.")
+    last_modified: str | None = Field(None, description="Origin Last-Modified date, if provided.")
+
+
 class CrawlPolicyLimits(BaseModel):
     timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
     max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
@@ -171,6 +194,30 @@ class CrawlRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
+    validators: dict[str, FetchValidators] = Field(
+        default_factory=dict,
+        description="Optional map of submitted URL -> cached validators for conditional revalidation. "
+                    "Keys may be the original or normalized URL. Matching URLs are fetched with "
+                    "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",
+    )
+
+    @model_validator(mode="after")
+    def _reject_duplicate_conditional_headers(self):
+        """Conditional headers must come from ``validators``, not raw policy headers.
+
+        Silently overriding a caller-supplied If-None-Match inside policy.headers
+        would make freshness polling unreliable; fail fast instead.
+        """
+        if not self.validators:
+            return self
+        banned = {"if-none-match", "if-modified-since"}
+        for key in self.policy.headers:
+            if key.strip().lower() in banned:
+                raise ValueError(
+                    f"header '{key}' conflicts with the validators map; "
+                    "supply conditional validators only via 'validators'"
+                )
+        return self
     webhook_url: str | None = Field(None, description="Optional callback URL. When provided, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
     output_format: str | None = Field(
         None,
@@ -296,6 +343,7 @@ class UnifiedCrawlResult(BaseModel):
     discovered_links_truncated: bool = Field(False)
     discovered_links: list[DiscoveredLink] = Field(default_factory=list)
     next_page_url: str | None = Field(None, description="Auto-detected pagination URL, if found.")
+    validators: ContentValidators | None = Field(None, description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified result.")
 
 
 class UnifiedCrawlResponse(BaseModel):

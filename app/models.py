@@ -149,6 +149,10 @@ class EngineCrawlResult:
     error: str | None = None
     markdown: str | None = None
     next_page_url: str | None = None
+    # Origin validators for the delivered representation ("etag"/"last_modified").
+    # Empty when the origin supplied none; surfaced so callers can revalidate
+    # conditionally on later requests (freshness monitoring).
+    validators: dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

@@ -960,9 +960,18 @@ async def _http_strategy_result(
     http_fetcher: Any,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
+    caller_validators: dict[str, str] | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
+    # Caller-supplied conditional validators (freshness monitoring): sent as
+    # If-None-Match / If-Modified-Since so an unchanged page returns 304.
+    caller_conditional: dict[str, str] = {}
+    if caller_validators:
+        if caller_validators.get("if_none_match"):
+            caller_conditional["If-None-Match"] = caller_validators["if_none_match"]
+        if caller_validators.get("if_modified_since"):
+            caller_conditional["If-Modified-Since"] = caller_validators["if_modified_since"]
     # Provide default limits for backward compatibility with tests
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
@@ -972,6 +981,8 @@ async def _http_strategy_result(
     request_headers = dict(base_headers)
     if cache is not None:
         request_headers.update(cache.conditional_headers(normalized_url))
+    if caller_conditional:
+        request_headers.update(caller_conditional)
 
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
 
@@ -1026,7 +1037,15 @@ async def _http_strategy_result(
         # HTTP conditional caching: a 304 from a real fetch means the page is unchanged.
         # (A revalidation-304 already had its cached body restored above, so it must
         #  NOT be reported as not_modified -- we serve the cached content instead.)
-        if cache is not None and response.status_code == 304 and not revalidated_304:
+        # Caller-supplied validators (freshness monitoring) also produce a
+        # not_modified result on 304: no body exists for caller-owned validators.
+        resp_headers_304 = {key.lower(): value for key, value in response.headers.items()}
+        echoed_validators = {
+            "etag": resp_headers_304.get("etag") or (caller_conditional.get("If-None-Match") if caller_conditional else None),
+            "last_modified": resp_headers_304.get("last-modified") or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
+        }
+        echoed_validators = {k: v for k, v in echoed_validators.items() if v}
+        if response.status_code == 304 and not revalidated_304 and (cache is not None or caller_conditional):
             elapsed_ms = int((time.monotonic() - started) * 1000)
             attempt = CrawlStrategyAttempt(
                 strategy=strategy,  # type: ignore[arg-type]
@@ -1037,6 +1056,11 @@ async def _http_strategy_result(
                 elapsed_ms=elapsed_ms,
                 error=None,
             )
+            diagnostics_304: dict[str, Any] = {"retry": retry_diagnostics}
+            if cache is not None:
+                diagnostics_304["cache"] = "not_modified"
+            if caller_conditional:
+                diagnostics_304["conditional"] = dict(caller_conditional)
             return _make_engine_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
@@ -1047,8 +1071,9 @@ async def _http_strategy_result(
                 attempt=attempt,
                 http_status=304,
                 headers=response.headers,
-                diagnostics={"retry": retry_diagnostics, "cache": "not_modified"},
+                diagnostics=diagnostics_304,
                 error=None,
+                validators=echoed_validators,
             )
 
         if cache is not None:
@@ -1151,6 +1176,15 @@ async def _http_strategy_result(
         if next_page_url:
             diagnostics["next_page_url"] = next_page_url
         quality = _quality_score(status, classification, text, html, response.status_code)
+        # Surface origin validators so callers can revalidate cheaply later.
+        origin_validators = {
+            key: value
+            for key, value in (
+                ("etag", headers.get("etag")),
+                ("last_modified", headers.get("last-modified")),
+            )
+            if value
+        }
         if status == "success" and diagnostics["content_metrics"]["visible_text_length"] >= 40:
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
@@ -1188,6 +1222,7 @@ async def _http_strategy_result(
             discovered_links=discovered_links,
             error=None if status == "success" else classification,
             next_page_url=next_page_url,
+            validators=origin_validators,
         )
     except Exception as error:  # noqa: BLE001
         elapsed_ms = int((time.monotonic() - started) * 1000)

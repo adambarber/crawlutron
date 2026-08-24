@@ -68,6 +68,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "discovered_links": True,
             "frame_discovery": True,
             "form_discovery": True,
+            "conditional_fetch": True,
             "recursive_frontier": False,
             "warmup": True,
             "request_profiles": True,

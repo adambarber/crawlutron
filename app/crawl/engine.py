@@ -288,6 +288,7 @@ async def _execute_crawl_chain(
     content_cache: ContentCache | None = None,
     scheduler: DomainScheduler | None = None,
     domain: str = "",
+    caller_validators: dict[str, str] | None = None,
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: EngineCrawlResult | None = None
@@ -302,6 +303,7 @@ async def _execute_crawl_chain(
                 http_fetcher=strategy_fetcher,
                 cache=cache,
                 content_cache=content_cache,
+                caller_validators=caller_validators,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -345,7 +347,9 @@ async def _execute_crawl_chain(
             # HTTP -> curl_cffi TLS impersonation -> headless browser) before giving up (#7).
             # The final fallback keeps the last (blocked) result.
             continue
-        if result.status == "success" and result.quality_score > 0:
+        # not_modified is terminal: the caller's validators proved freshness, so
+        # escalating to the next strategy would just re-fetch the page.
+        if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
             scoped = _filter_links_by_scope(result, policy.get("scope_regex"))
             return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
     assert last_result is not None
@@ -465,6 +469,27 @@ async def crawl_request(
         adaptive_latency_factor=active_settings.adaptive_latency_factor,
     )
 
+    # Conditional revalidation (freshness): caller-supplied validators keyed by
+    # URL (original or normalized form both accepted).
+    validators_raw = payload.get("validators") or {}
+    validators_by_url: dict[str, dict[str, str]] = {}
+    for v_url, v in validators_raw.items():
+        entry = {"if_none_match": v.get("if_none_match"), "if_modified_since": v.get("if_modified_since")}
+        entry = {k: val for k, val in entry.items() if val}
+        if not entry:
+            continue
+        validators_by_url[v_url] = entry
+        try:
+            validators_by_url.setdefault(normalize_public_http_url(v_url), entry)
+        except ValueError:
+            pass
+
+    def _validators_for(job: CrawlTask) -> dict[str, str] | None:
+        return (
+            validators_by_url.get(job.normalized_url)
+            or validators_by_url.get(job.original_url)
+        )
+
     async def run_job(job: CrawlTask) -> tuple[int, EngineCrawlResult]:
         index = job.index
         original_url = job.original_url
@@ -484,6 +509,7 @@ async def crawl_request(
             or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
             scheduler=scheduler,
             domain=job.domain,
+            caller_validators=_validators_for(job),
         )
         return index, result
 
