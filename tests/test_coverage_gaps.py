@@ -241,7 +241,10 @@ class TestHttpHelperGaps:
             HTTP_CFFI_IMPERSONATE, {"request_profile": {}, "headers": {}}, "http://e.com/",
         )
         assert "User-Agent" in headers
-        assert "sec-ch-ua" in {k.lower() for k in headers}
+        # Firefox identity (matching the firefox135 impersonation) sends no
+        # Sec-CH-UA client hints -- those are Chromium-only.
+        assert "sec-ch-ua" not in {k.lower() for k in headers}
+        assert "Firefox" in headers["User-Agent"]
 
     def test_headers_cookie_added(self):
         headers = _headers_for_strategy(

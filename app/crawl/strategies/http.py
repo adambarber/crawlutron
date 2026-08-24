@@ -596,7 +596,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
-        async with cffi_requests.AsyncClient(impersonate="chrome124", timeout=float(timeout_seconds)) as client:
+        async with cffi_requests.AsyncClient(impersonate="firefox135", timeout=float(timeout_seconds)) as client:
             current_url = url
             hops = 0
             # Work with a copy of headers so we can mutate per-hop
@@ -760,16 +760,32 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
     elif is_browser_like:
-        headers["User-Agent"] = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        )
-        headers["Referer"] = "https://www.google.com/"
-        headers["Sec-Fetch-Site"] = "cross-site"
-        headers["Sec-CH-UA"] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
-        headers["Sec-CH-UA-Mobile"] = "?0"
-        headers["Sec-CH-UA-Platform"] = '"Windows"'
-        headers["Sec-Fetch-User"] = "?1"
+        # Firefox identity: must match the curl_cffi firefox135 impersonation
+        # AND the Camoufox browser strategy so cookie-bootstrap sessions carry
+        # a consistent User-Agent across strategies.
+        if strategy == HTTP_CFFI_IMPERSONATE:
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) "
+                "Gecko/20100101 Firefox/135.0"
+            )
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            headers["Referer"] = "https://www.google.com/"
+            headers["Upgrade-Insecure-Requests"] = "1"
+            headers["Sec-Fetch-Dest"] = "document"
+            headers["Sec-Fetch-Mode"] = "navigate"
+            headers["Sec-Fetch-Site"] = "cross-site"
+            headers["Sec-Fetch-User"] = "?1"
+        else:
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            headers["Referer"] = "https://www.google.com/"
+            headers["Sec-Fetch-Site"] = "cross-site"
+            headers["Sec-CH-UA"] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+            headers["Sec-CH-UA-Mobile"] = "?0"
+            headers["Sec-CH-UA-Platform"] = '"Windows"'
+            headers["Sec-Fetch-User"] = "?1"
     elif user_agent_family == "mobile_safari":
         headers["User-Agent"] = (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
