@@ -210,3 +210,44 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
 
     total_time = max(end_times) - min(start_times)
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
+
+
+class _Req:
+    def __init__(self, url):
+        self.url = url
+
+
+class _Route:
+    def __init__(self):
+        self.aborted = False
+        self.continued = False
+
+    async def abort(self):
+        self.aborted = True
+
+    async def continue_(self, **k):
+        self.continued = True
+
+
+async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
+    """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
+    handler = _make_ssrf_route_handler()
+
+    def boom(url, headers):
+        raise TimeoutError("dns lookup timed out")
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", boom)
+
+    route = _Route()
+    await handler(route, _Req("http://example.com/"))
+    assert route.aborted is True and route.continued is False
+
+
+async def test_ssrf_route_handler_allows_non_network_schemes():
+    """data:/blob:/about: requests never touch DNS; they must pass through."""
+    handler = _make_ssrf_route_handler()
+
+    for scheme_url in ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"):
+        route = _Route()
+        await handler(route, _Req(scheme_url))
+        assert route.continued is True and route.aborted is False, scheme_url

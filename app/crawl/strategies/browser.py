@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import re
 import time
@@ -80,11 +81,19 @@ def _make_ssrf_route_handler():
         # and returns (pinned_url, {Host: original_hostname}) so we can
         # force the browser to connect to the validated IP while preserving
         # the Host header (virtual-host routing).
+        request_scheme = request.url.split(":", 1)[0].lower()
+        if request_scheme not in ("http", "https", ""):
+            # data:, blob:, about:, javascript: never touch the network via DNS;
+            # let the browser handle them locally instead of aborting.
+            await route.continue_()
+            return
         try:
             pinned_url, host_headers = await asyncio.to_thread(
                 _build_pinned_request, request.url, {}
             )
-        except ValueError:
+        except Exception:
+            # Fail closed: DNS timeout, resolver errors, anything unexpected ->
+            # abort rather than let an unchecked connection proceed.
             await route.abort()
             return
         overrides = {}
@@ -411,7 +420,12 @@ class BrowserRenderer:
 
     @staticmethod
     def _make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
+        max_entries = 50
+        max_payload_chars = 64_000
+
         async def on_response(response: Any) -> None:
+            if len(collected) >= max_entries:
+                return  # hostile pages can fire thousands of JSON responses
             headers = response.headers or {}
             content_type = ""
             if isinstance(headers, dict):
@@ -429,9 +443,12 @@ class BrowserRenderer:
             }
             try:
                 payload = await response.json()
-                entry["payload"] = payload
             except Exception:  # payload capture is best-effort
-                entry["payload"] = None
+                payload = None
+            if payload is not None and len(json.dumps(payload, default=str)) > max_payload_chars:
+                entry["payload_truncated"] = True
+            else:
+                entry["payload"] = payload
             collected.append(entry)
 
         return on_response
