@@ -203,6 +203,30 @@ class BrowserRenderer:
             return
         await asyncio.to_thread(self._sleep, seconds)
 
+    def _harvest_session_cookies(self, page: Any, url: str) -> None:
+        """Capture the page's cookies into the per-domain bootstrap store.
+
+        Must run BEFORE the page/context is closed -- Camoufox destroys the
+        context with the last page, leaving ``browser.contexts`` empty.
+        Schedules the async cookie read on the running loop.
+        """
+        async def _collect() -> None:
+            from app.validation import registrable_domain as _rd
+            context = getattr(page, "context", None)
+            if context is None:
+                return
+            cookies = await context.cookies(url)
+            header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
+            if header:
+                _BROWSER_COOKIES_BY_DOMAIN[_rd(url)] = header
+                logger.info("browser_cookies_harvested",
+                            extra={"domain": _rd(url), "count": len(cookies)})
+
+        try:
+            asyncio.get_running_loop().create_task(_collect())
+        except RuntimeError:
+            pass
+
     async def _reset_browser(self) -> None:
         """Close any cached browser instance so the next render recreates it.
 
@@ -315,7 +339,11 @@ class BrowserRenderer:
         if ws_router is None:
             logger.warning("websocket_interception_unsupported")
         else:
-            await ws_router("**/*", ws_guard)
+            # route_websocket is sync in Playwright (unlike page.route); accept
+            # both sync and async implementations for test doubles.
+            outcome = ws_router("**/*", ws_guard)
+            if asyncio.iscoroutine(outcome):
+                await outcome
         try:
             # Katana-style XHR/fetch interception.
             intercepted_xhr: list[dict[str, Any]] = []
@@ -399,22 +427,8 @@ class BrowserRenderer:
         finally:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
+            self._harvest_session_cookies(page, url)
             await self._safe_close_page(page)
-            # Harvest session cookies for this domain so later HTTP/cffi
-            # attempts can replay the browser-established session (#cffi-cookie-bootstrap).
-            try:
-                contexts = getattr(self._browser, "contexts", None) or []
-                if contexts:
-                    cookies = await contexts[0].cookies(url)
-                    header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
-                    if header:
-                        from app.validation import registrable_domain as _rd
-                        _BROWSER_COOKIES_BY_DOMAIN[_rd(url)] = header
-                        logger.info("browser_cookies_harvested", extra={"domain": _rd(url), "count": len(cookies)})
-                    else:
-                        logger.warning("cookie_harvest_empty", extra={"url": url})
-            except Exception as harvest_error:
-                logger.warning("cookie_harvest_failed", extra={"error_detail": str(harvest_error)})
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
             self._render_count += 1
