@@ -124,4 +124,7 @@ def detect_decompression_failure(
     """
     if not encoding:
         return False
+    codec = encoding.lower().strip()
+    if codec in {"identity", "none", ""}:
+        return False
     return bool(body) and decoded == body

@@ -157,8 +157,9 @@ def _compile_scope_regex_safe(scope_regex: str | None):
     # the grouped-quantifier rule above while still creating exponential
     # ambiguity on failed matches. Bound the number of quantifier tokens:
     # legitimate scope regexes need only a handful.
-    quantifier_tokens = len(re.findall(r"(?<!\\)[*+?]", scope_regex))
-    quantifier_tokens += len(re.findall(r"(?<!\\)\{\d+(?:,\d*)?\}", scope_regex))
+    # Brace forms include leading-comma variants ({,n}) which are valid Python
+    # regex quantifiers -- verified event-loop-hang bypass if uncounted.
+    quantifier_tokens = len(re.findall(r"(?<!\\)(?:[*+?]|\{\d*(?:,\d*)?\})", scope_regex))
     if quantifier_tokens > _MAX_SCOPE_QUANTIFIERS:
         return None
     return compiled
