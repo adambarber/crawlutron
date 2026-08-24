@@ -444,17 +444,28 @@ def _http_413(url: str, response: Any, started: float) -> HttpFetchResult:
 
 
 def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """Resolve + pin the target IP (DNS-rebinding safe) and build the request.
+    """Resolve + validate the target (DNS-rebinding safe) and build the request.
 
-    Returns ``(pinned_url, request_headers)`` where ``pinned_url`` connects to
-    the single resolved IP and ``request_headers`` preserves the original Host
-    header so virtual-host routing still works. Shared by both fetchers.
+    Returns ``(request_url, request_headers)`` shared by both fetchers.
+
+    The target's DNS is resolved once and the resulting IP is validated against
+    the SSRF blocklist *before* connecting. For plain HTTP the connection is
+    additionally pinned to that exact IP. For HTTPS the original URL is kept:
+    TLS SNI/hostname verification is performed against the real hostname
+    (CDN/edge certificates do not carry IP SANs, so rewriting the URL to the IP
+    breaks every properly-configured HTTPS site). The rebinding window on HTTPS
+    is therefore bounded by CA validation plus the pre-connect IP check instead
+    of raw pinning.
     """
     _check_ssrf_protection(url)
-    hostname, pinned_ip = _resolve_and_pin_host(url)
     parsed = urlparse(url)
+    if parsed.scheme == "https":
+        # Validate resolved IPs, but keep the hostname for correct TLS.
+        _resolve_and_pin_host(url)
+        return url, dict(headers)
+    hostname, pinned_ip = _resolve_and_pin_host(url)
     pinned_url = (
-        f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
+        f"{parsed.scheme}://{pinned_ip}:{parsed.port or 80}"
         f"{parsed.path or '/'}"
         + (f"?{parsed.query}" if parsed.query else "")
     )
