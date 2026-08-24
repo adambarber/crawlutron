@@ -36,12 +36,12 @@ def test_build_site_map_aggregates_and_dedupes():
 def test_build_site_map_handles_dataclass_links():
     from app.models import DiscoveredLink
     link = DiscoveredLink(
-        url="u", normalized_url="n", text="", rel=[], source_url="s", host="h", is_same_host=True
+        url="https://r/page", normalized_url="https://r/page", text="", rel=[], source_url="https://r/", host="r", is_same_host=True
     )
     crawl_response = {"results": [{"final_url": "http://r/", "discovered_links": [link], "diagnostics": {}}]}
     m = build_site_map(crawl_response)
-    assert m["links"] == ["n"]
-    assert m["all_urls"] == ["n"]
+    assert m["links"] == ["https://r/page"]
+    assert m["all_urls"] == ["https://r/page"]
 
 
 def test_build_site_map_empty():

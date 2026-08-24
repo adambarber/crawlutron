@@ -38,15 +38,39 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
     robots = diagnostics.get("robots") or {}
     discovery = diagnostics.get("discovery") or {}
 
+    def _normalize(u: str | None) -> str | None:
+        """Canonicalize every emitted URL (sorts query params, strips
+        fragments/default ports). Origin-relative paths are kept verbatim;
+        un-normalizable absolute URLs are dropped rather than leaked raw."""
+        if not u:
+            return None
+        from app.validation import normalize_public_http_url
+        try:
+            return normalize_public_http_url(u)
+        except ValueError:
+            return u if u.startswith("/") else None
+
     links: list[str] = []
     for link in result.get("discovered_links", []) or []:
-        url = _link_url(link)
+        url = _normalize(_link_url(link))
         if url:
             links.append(url)
 
-    sitemaps = list(robots.get("sitemaps", []) or [])
-    sitemap_urls = list(discovery.get("sitemap_urls", []) or [])
-    feeds = list(discovery.get("feeds", []) or [])
+    sitemaps: list[str] = []
+    sitemap_urls: list[str] = []
+    feeds: list[str] = []
+    for u in robots.get("sitemaps", []) or []:
+        n = _normalize(u)
+        if n:
+            sitemaps.append(n)
+    for u in discovery.get("sitemap_urls", []) or []:
+        n = _normalize(u)
+        if n:
+            sitemap_urls.append(n)
+    for u in discovery.get("feeds", []) or []:
+        n = _normalize(u)
+        if n:
+            feeds.append(n)
 
     all_urls: list[str] = []
     seen: set[str] = set()
