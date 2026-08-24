@@ -162,3 +162,87 @@ def assert_result_failed(result, classification: str) -> None:
     """Assert an ``EngineCrawlResult`` failed with the expected classification."""
     assert result.status == "failed"
     assert result.classification == classification
+
+
+# --- Shared browser-render test doubles ---
+
+class BrowserFakePage:
+    """Strict Playwright-like fake: rejects extra_http_headers kwarg in goto
+    (real API raises TypeError) and records route/header/goto calls."""
+
+    def __init__(self):
+        self.goto_calls = []
+        self.route_calls = []
+        self.set_extra_http_headers_calls = []
+        self.url = "http://1.2.3.4/"
+
+    async def route(self, pattern, handler):
+        # Real (async) Playwright page.route is a coroutine.
+        self.route_calls.append((pattern, handler))
+
+    def on(self, event, handler):
+        pass
+
+    async def goto(self, url, wait_until="load", **kwargs):
+        if "extra_http_headers" in kwargs:
+            raise TypeError("unexpected keyword argument 'extra_http_headers'")
+        self.goto_calls.append((url, kwargs))
+
+    async def set_extra_http_headers(self, headers):
+        self.set_extra_http_headers_calls.append(headers)
+
+    async def evaluate(self, *a, **k):
+        return ""
+
+    async def close(self):
+        pass
+
+    async def screenshot(self, **k):
+        return b""
+
+    async def query_selector(self, *a, **k):
+        return None
+
+
+class BrowserFakeBrowser:
+    def __init__(self, page):
+        self._page = page
+
+    async def new_page(self, **kwargs):
+        return self._page
+
+
+async def _browser_noop(self, *a, **k):
+    return None
+
+
+def _async_return(value):
+    async def coro():
+        return value
+    return coro()
+
+
+def build_pinned_renderer(monkeypatch, page):
+    """BrowserRenderer whose transport is replaced by ``page`` (no browser)."""
+    from app.crawl.strategies.browser import BrowserRenderer
+
+    renderer = BrowserRenderer(warmup_urls=[])
+
+    async def fake_acquire(self, options):
+        return BrowserFakeBrowser(page)
+
+    monkeypatch.setattr(BrowserRenderer, "_acquire_browser", fake_acquire)
+    monkeypatch.setattr(BrowserRenderer, "_get_page_kwargs", lambda self, prof: {})
+    monkeypatch.setattr(BrowserRenderer, "_wait_for_ready_state", _browser_noop)
+    monkeypatch.setattr(BrowserRenderer, "_run_action_chain", _browser_noop)
+    monkeypatch.setattr(BrowserRenderer, "_lazy_load_scroll", _browser_noop)
+    monkeypatch.setattr(BrowserRenderer, "_flatten_shadow_dom", _browser_noop)
+    monkeypatch.setattr(BrowserRenderer, "_auto_accept_cookie_consent", _browser_noop)
+    monkeypatch.setattr(BrowserRenderer, "_safe_close_page", _browser_noop)
+    monkeypatch.setattr(
+        BrowserRenderer, "_extract_with_challenge_wait",
+        lambda self, page, options: (_async_return(("<html>hi</html>", "hi", "ok", False))),
+    )
+    monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: False)
+    monkeypatch.setattr(BrowserRenderer, "_status_for_classification", lambda self, c: "success")
+    return renderer

@@ -1,5 +1,5 @@
 import pytest
-from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.http import _default_http_fetcher, _build_pinned_request, _MAX_REDIRECT_HOPS
@@ -36,26 +36,40 @@ class MockClient:
         return resp
 
 
-async def test_http_fetcher_strips_cookie_on_cross_domain_redirect(monkeypatch):
-    """HTTP fetcher should strip Cookie and Authorization headers when redirecting
-    to a different hostname (Fix 3)."""
-    # First response: 302 redirect to different domain
-    # Second response: final page
-    responses = [
-        MockResponse(302, {"location": "http://attacker.com/steal"}, b""),
-        MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
-    ]
+def _patch_fetch_transport(monkeypatch, responses):
+    """Route _default_http_fetcher through a scripted mock client."""
     mock_client = MockClient(responses)
     monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
     monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(http_mod, "_resolve_and_pin_host", lambda url: (urlparse(url).hostname, "1.2.3.4"))
+    monkeypatch.setattr(
+        http_mod, "_resolve_and_pin_host",
+        lambda url: (urlparse(url).hostname, "1.2.3.4"),
+    )
+    return mock_client
 
-    headers = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
-    result = await _default_http_fetcher("http://example.com/", headers, 30)
+
+SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
+
+
+async def _fetch_with_redirect(monkeypatch, redirect_location):
+    """302-redirect the fetcher via ``redirect_location`` and capture per-hop headers."""
+    responses = [
+        MockResponse(302, {"location": redirect_location}, b""),
+        MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
+    ]
+    mock_client = _patch_fetch_transport(monkeypatch, responses)
+    result = await _default_http_fetcher("http://example.com/", dict(SENSITIVE_HEADERS), 30)
+    return mock_client, result
+
+
+async def test_http_fetcher_strips_cookie_on_cross_domain_redirect(monkeypatch):
+    """HTTP fetcher should strip Cookie and Authorization headers when redirecting
+    to a different hostname (Fix 3)."""
+    mock_client, _ = await _fetch_with_redirect(monkeypatch, "http://attacker.com/steal")
 
     # First request should have the sensitive headers
-    assert mock_client.captured_headers[0].get("Cookie") == "session=secret123"
-    assert mock_client.captured_headers[0].get("Authorization") == "Bearer token456"
+    assert mock_client.captured_headers[0].get("Cookie") == SENSITIVE_HEADERS["Cookie"]
+    assert mock_client.captured_headers[0].get("Authorization") == SENSITIVE_HEADERS["Authorization"]
 
     # Second request (to attacker.com) should NOT have sensitive headers
     assert mock_client.captured_headers[1].get("Cookie") is None
@@ -65,32 +79,14 @@ async def test_http_fetcher_strips_cookie_on_cross_domain_redirect(monkeypatch):
 async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
     """HTTP fetcher should keep Cookie/Authorization headers when redirecting
     within the same hostname (Fix 3)."""
-    responses = [
-        MockResponse(302, {"location": "/new-path"}, b""),
-        MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
-    ]
-    mock_client = MockClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
-    monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(http_mod, "_resolve_and_pin_host", lambda url: (urlparse(url).hostname, "1.2.3.4"))
-
-    headers = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
-    result = await _default_http_fetcher("http://example.com/", headers, 30)
+    mock_client, _ = await _fetch_with_redirect(monkeypatch, "/new-path")
 
     # Both requests should have the sensitive headers (same host)
-    assert mock_client.captured_headers[0].get("Cookie") == "session=secret123"
-    assert mock_client.captured_headers[1].get("Cookie") == "session=secret123"
-    assert mock_client.captured_headers[0].get("Authorization") == "Bearer token456"
-    assert mock_client.captured_headers[1].get("Authorization") == "Bearer token456"
+    for captured in mock_client.captured_headers:
+        assert captured.get("Cookie") == SENSITIVE_HEADERS["Cookie"]
+        assert captured.get("Authorization") == SENSITIVE_HEADERS["Authorization"]
 
 
-# Need urlparse for the mock
-from urllib.parse import urlparse
-
-
-# ============================================================
-# Finding 3: Multiple Set-Cookie headers must all be captured
-# ============================================================
 
 def test_store_set_cookies_handles_multiple_set_cookie_headers():
     """_store_set_cookies must capture all Set-Cookie headers, not just one.
@@ -98,17 +94,14 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
     keys. Using get_list("set-cookie") gives each header separately.
     """
-    from app.crawl.strategies.http import _store_set_cookies, _GLOBAL_COOKIE_JAR, CookieJar
+    from app.crawl.strategies.http import _store_set_cookies, CookieJar
 
     # Use a fresh jar to avoid interference from other tests
     jar = CookieJar()
-    # Replace global jar temporarily
     import app.crawl.strategies.http as http_mod
     old_jar = http_mod._GLOBAL_COOKIE_JAR
     http_mod._GLOBAL_COOKIE_JAR = jar
     try:
-        # Simulate httpx response.headers with multiple Set-Cookie
-        # httpx.Headers.get_list returns each cookie separately
         class MockHeaders:
             def get_list(self, key):
                 if key.lower() == "set-cookie":
@@ -117,10 +110,8 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
             def items(self):
                 return []
 
-        mock_headers = MockHeaders()
-        _store_set_cookies("http://example.com/", mock_headers)
+        _store_set_cookies("http://example.com/", MockHeaders())
 
-        # Both cookies should be stored
         cookie_header = jar.cookie_header_for("http://example.com/")
         assert "session=abc" in cookie_header
         assert "csrf=xyz" in cookie_header
@@ -138,7 +129,6 @@ def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
 
     jar = CookieJar()
 
-    # This simulates what happens when httpx items() joins multiple cookies
     # BAD: comma-joined (what old code would pass)
     jar.add_cookie_header("http://example.com/", "session=abc, csrf=xyz; Path=/")
     bad_result = jar.cookie_header_for("http://example.com/")

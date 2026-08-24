@@ -5,6 +5,7 @@
     "**/.pytest_cache/**",
     "**/tmp/**",
     "**/node_modules/**",
-    "**/.git/**"
+    "**/.git/**",
+    "**/fixtures/**"
   ]
 }

@@ -7,6 +7,30 @@ import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
 
 
+class MockRequest:
+    def __init__(self, url):
+        self.url = url
+
+
+class MockRoute:
+    def __init__(self):
+        self.aborted = False
+        self.continued = False
+        self.continued_url = None
+
+    async def abort(self):
+        self.aborted = True
+
+    async def continue_(self, url=None, headers=None):
+        self.continued = True
+        self.continued_url = url
+
+
+def slow_build_pinned_request(url, headers):
+    time.sleep(0.05)  # Blocking call - would block event loop if run directly
+    return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+
 async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread to avoid
     blocking the event loop with synchronous DNS lookups (Fix 2 + F7/F8 pinning).
@@ -26,19 +50,6 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
 
     handler = _make_ssrf_route_handler()
-
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.aborted = False
-            self.continued = False
-        async def abort(self):
-            self.aborted = True
-        async def continue_(self, url=None, headers=None):
-            self.continued = True
 
     route = MockRoute()
     request = MockRequest("http://example.com/")
@@ -63,23 +74,9 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
     start_times = []
     end_times = []
 
-    def slow_build_pinned_request(url, headers):
-        time.sleep(0.05)
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
-
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
 
     handler = _make_ssrf_route_handler()
-
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.continued = False
-        async def continue_(self, url=None, headers=None):
-            self.continued = True
 
     async def call_handler(i):
         route = MockRoute()
@@ -149,19 +146,6 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
 
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.aborted = False
-            self.continued = False
-        async def abort(self):
-            self.aborted = True
-        async def continue_(self, **kwargs):
-            self.continued = True
-
     route = MockRoute()
     request = MockRequest("http://127.0.0.1:9/")
     await handler(route, request)
@@ -186,16 +170,6 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
 
     handler = _make_ssrf_route_handler()
 
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.continued_url = None
-        async def continue_(self, url=None, headers=None):
-            self.continued_url = url
-
     route = MockRoute()
     request = MockRequest("http://example.com/")
     await handler(route, request)
@@ -210,10 +184,6 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
     """Multiple concurrent pinning operations should not block each other."""
     start_times = []
     end_times = []
-
-    def slow_build_pinned_request(url, headers):
-        time.sleep(0.05)
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
 

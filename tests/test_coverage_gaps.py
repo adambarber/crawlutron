@@ -354,14 +354,7 @@ def _fake_browser(html=None, text="doc", metadata=None):
 
 
 class TestEngineGaps:
-    def _fake_browser(self, html=None, text="doc", metadata=None):
-        def worker(job):
-            return CrawlResult(
-                url=job.url, status="success", classification="rendered",
-                final_url=job.url, html=html, text=text, attempts=1,
-                elapsed_ms=1, domain="x", metadata=metadata or {},
-            )
-        return worker
+    # Uses the module-level _fake_browser worker factory.
 
     def test_result_dict(self):
         d = to_dict(CrawlResult(url="http://x/", status="success", classification="rendered",
@@ -463,14 +456,7 @@ def _worker(status="success", classification="rendered"):
 
 
 class TestServiceRenderRequest:
-    def _worker(self, status="success", classification="rendered"):
-        def worker(job):
-            return CrawlResult(
-                url=job.url, status=status, classification=classification,
-                final_url=job.url, html="<html></html>", text="t", attempts=1,
-                elapsed_ms=1, domain="x", metadata={},
-            )
-        return worker
+    # Uses the module-level _worker factory.
 
     async def test_render_request_success(self):
         from app.settings import CrawlerSettings
