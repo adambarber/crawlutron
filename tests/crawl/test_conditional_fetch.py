@@ -167,3 +167,27 @@ def test_validators_conflict_with_policy_headers_rejected():
         policy={"headers": {"Accept": "text/html"}},
     )
     assert request.validators["http://example.com/"].if_none_match == '"v1"'
+
+
+async def test_decompression_failure_flagged_and_downgraded():
+    """A Content-Encoding that fails to decompress yields garbage; it must be
+    flagged in diagnostics and must not score as high-quality content."""
+    import gzip
+
+    compressed = bytearray(gzip.compress(_html("real content").encode()))
+    for i in range(2, 12):  # corrupt the deflate stream itself
+        compressed[i] ^= 0xFF
+    real_body = bytes(compressed)
+
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        return HttpFetchResult(
+            url=url, final_url=url, status_code=200,
+            # Advertise gzip but deliver corrupt stream (decompressor will
+            # silently pass bytes through).
+            headers={"content-type": "text/html", "content-encoding": "gzip"},
+            body=real_body, elapsed_ms=1,
+        )
+
+    result = await _run_http(fetcher)
+    assert result.diagnostics["decompression_failed"] is True
+    assert result.quality_score <= 0.25

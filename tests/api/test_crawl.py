@@ -422,5 +422,5 @@ class TestJobApi:
 
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
-        assert "invalid_action" in resp_bad.json()["detail"]["code"]
+        assert "invalid_action" in resp_bad.json()["code"]
 

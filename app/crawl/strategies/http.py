@@ -73,6 +73,7 @@ def _rebuild_response(data: dict[str, Any]) -> Any:
     return r
 
 from app.crawl.decompression import decompress_body as _decompress_body, DecompressionTooLargeError
+from app.crawl.decompression import detect_decompression_failure
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
@@ -624,6 +625,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                         headers={key.lower(): value for key, value in response.headers.items()},
                         body=b"", elapsed_ms=elapsed_ms,
                     )
+                cffi_decompression_failed = detect_decompression_failure(response.content, encoding, body)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 resp_headers.pop("content-encoding", None)
                 _store_set_cookies(str(response.url), response.headers)
@@ -634,6 +636,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     headers=resp_headers,
                     body=body,
                     elapsed_ms=elapsed_ms,
+                    decompression_failed=cffi_decompression_failed,
                 )
     except Exception:  # any cffi failure falls back to plain httpx
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
@@ -987,6 +990,7 @@ async def _http_strategy_result(
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
     # Caller-supplied conditional validators (freshness monitoring): sent as
     # If-None-Match / If-Modified-Since so an unchanged page returns 304.
+    decompression_failed = False
     caller_conditional: dict[str, str] = {}
     if caller_validators:
         if caller_validators.get("if_none_match"):
@@ -1135,7 +1139,17 @@ async def _http_strategy_result(
                 elapsed_ms=response.elapsed_ms,
             )
             return EngineCrawlResult(**{**asdict(result), "diagnostics": {"retry": retry_diagnostics}})
-        decompressed = _decompress_body(response.body, headers.get("content-encoding", ""))
+        content_encoding_header = headers.get("content-encoding", "")
+        if content_encoding_header:
+            # The fetcher normally decompresses and strips this header; if it is
+            # still present the body was not verified -- detect silent failure.
+            decompressed = _decompress_body(response.body, content_encoding_header)
+            strategy_decompression_failed = detect_decompression_failure(
+                response.body, content_encoding_header, decompressed
+            )
+        else:
+            decompressed = response.body
+            strategy_decompression_failed = bool(getattr(response, "decompression_failed", False))
         body_text = _decode_body(decompressed, content_type)
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
@@ -1182,6 +1196,7 @@ async def _http_strategy_result(
             classification_evidence = [{"classification": EXTRACTION_METHOD_BINARY_NO_TEXT, "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
         status = _status_for_classification(classification)
         diagnostics: dict[str, Any] = {
+            "decompression_failed": bool(strategy_decompression_failed or getattr(response, "decompression_failed", False)),
             "request_profile": {
                 "user_agent_family": str(policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")),
                 "cookie_jar": str(policy.get("request_profile", {}).get("cookie_jar", "none")),
@@ -1218,6 +1233,9 @@ async def _http_strategy_result(
             diagnostics["next_page_url"] = next_page_url
         quality = _quality_score(status, classification, text, html, response.status_code)
         # Surface origin validators so callers can revalidate cheaply later.
+        if strategy_decompression_failed or getattr(response, "decompression_failed", False):
+            # Garbage compressed bytes must not masquerade as high-quality content.
+            quality = min(quality, 0.25)
         origin_validators = {
             key: value
             for key, value in (
@@ -1226,7 +1244,13 @@ async def _http_strategy_result(
             )
             if value
         }
-        if status == "success" and diagnostics["content_metrics"]["visible_text_length"] >= 40:
+        if (
+            status == "success"
+            and not strategy_decompression_failed
+            and diagnostics["content_metrics"]["visible_text_length"] >= 40
+        ):
+            # Boost only trustworthy content: garbage from failed decompression
+            # can easily exceed the length threshold.
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
             _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 250)) if status == "success" else ([], 0, False)

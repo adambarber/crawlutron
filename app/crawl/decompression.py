@@ -109,3 +109,19 @@ def decompress_body(body: bytes, content_encoding: str, *, max_output_bytes: int
             return body
 
     return body
+
+
+def detect_decompression_failure(
+    body: bytes,
+    encoding: str,
+    decoded: bytes,
+) -> bool:
+    """Return True when ``decoded`` is just ``body`` passed through unchanged.
+
+    ``decompress_body`` swallows decoder failures and returns the input bytes.
+    When a Content-Encoding was advertised but the output equals the raw
+    compressed input, the body is garbage and must not be trusted as content.
+    """
+    if not encoding:
+        return False
+    return bool(body) and decoded == body

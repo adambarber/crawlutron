@@ -37,6 +37,42 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
     return classification
 
 
+# Structural markers that are effectively unforgeable by accident: a benign
+# municipal page never contains Cloudflare/captcha plumbing. Adapted from the
+# marker-tuple approach used by maigret (MIT) and cloudscraper (MIT); a single
+# marker hit is sufficient evidence.
+STRONG_CLASSIFICATION_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("bot_challenge_detected", (
+        "_cf_chl_opt",
+        "cf_chl_prog",
+        "jschl-answer",
+        "jschl_vc",
+        "challenges.cloudflare.com",
+        "/cdn-cgi/challenge-platform/",
+        "cf-mitigated",
+        "checking your browser before you access",
+        "attention required! | cloudflare",
+    )),
+    ("captcha_detected", (
+        "g-recaptcha",
+        "grecaptcha.render",
+        "hcaptcha",
+        "cf-turnstile",
+        "data-sitekey",
+    )),
+)
+
+# Classifications whose prose signatures are common English phrases ("too many
+# requests", "we value your privacy"). A single phrase match must be
+# corroborated by a second independent block signal, otherwise benign pages are
+# misclassified and the engine escalates through every strategy for nothing.
+SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset({
+    "rate_limited",
+    "cookie_consent_required",
+    "paywall_detected",
+})
+
+
 def classify_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = _html_without_script_and_style(html).lower()
@@ -49,15 +85,61 @@ def classify_page_with_evidence(html: str | None, text: str | None, *, title: st
                 "context": "",
             }
         ]
-    for classification, signatures in CLASSIFICATION_SIGNATURES:
+
+    # Pass 0: structural markers win immediately (single hit suffices).
+    # NOTE: scan the RAW html too -- challenge plumbing (_cf_chl_opt etc.)
+    # lives inside <script> tags which html_haystack strips.
+    raw_haystack = (html or "").lower()
+    for classification, markers in STRONG_CLASSIFICATION_MARKERS:
+        for marker in markers:
+            index = raw_haystack.find(marker)
+            if index < 0:
+                index = html_haystack.find(marker)
+            if index >= 0:
+                return classification, [_evidence(classification, marker, "structural_marker", raw_haystack, index)]
+
+    # Pass 1: prose signatures. Record every distinct match; soft
+    # classifications additionally require corroboration (>= 2 distinct
+    # matched signatures anywhere on the page) so a stray phrase cannot flip
+    # an otherwise-benign result into strategy escalation.
+    # Each entry: priority order, classification name, first evidence found.
+    matches: list[dict[str, Any]] = []
+    for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
-            visible_index = visible_haystack.find(signature)
-            if visible_index >= 0:
-                return classification, [_evidence(classification, signature, "visible_text", visible_haystack, visible_index)]
-            html_index = html_haystack.find(signature)
-            if html_index >= 0:
-                return classification, [_evidence(classification, signature, "html_without_script_style", html_haystack, html_index)]
-    return "rendered", []
+            for source, haystack in (("visible_text", visible_haystack), ("html_without_script_style", html_haystack)):
+                index = haystack.find(signature)
+                if index >= 0:
+                    matches.append({
+                        "priority": priority,
+                        "classification": classification,
+                        "signature": signature,
+                        "source": source,
+                        "haystack": haystack,
+                        "index": index,
+                    })
+                    break  # earliest source is enough for this signature
+    if not matches:
+        return "rendered", []
+
+    distinct_classifications = {m["classification"] for m in matches}
+    best_priority = min(m["priority"] for m in matches)
+    chosen = min((m for m in matches if m["priority"] == best_priority),
+                 key=lambda m: m["index"])
+    classification = chosen["classification"]
+
+    # Corroboration: >= 2 independent signals anywhere on the page (either two
+    # different block classifications, or two distinct phrases of the same one).
+    corroborated = len(distinct_classifications) >= 2 or len(matches) >= 2
+    if classification in SOFT_SINGLE_SIGNAL_CLASSIFICATIONS and not corroborated:
+        return "rendered", []
+
+    return classification, [_evidence(
+        classification,
+        chosen["signature"],
+        chosen["source"],
+        chosen["haystack"],
+        chosen["index"],
+    )]
 
 
 def _evidence(classification: str, signature: str, source: str, haystack: str, index: int) -> dict[str, str]:
