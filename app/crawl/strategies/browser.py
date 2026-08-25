@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -211,11 +212,25 @@ _MAX_ACTION_WAIT_SECONDS = 10.0
 
 # Session cookies harvested from browser renders, keyed by registrable domain.
 # Lets HTTP_CFFI_IMPERSONATE replay a browser-minted session on retry.
-_BROWSER_COOKIES_BY_DOMAIN: dict[str, str] = {}
+# Bounded with an LRU so a long-lived process crawling many domains cannot
+# grow this dict without bound (#6).
+_BROWSER_COOKIES_MAX = 500
+_BROWSER_COOKIES_BY_DOMAIN: "OrderedDict[str, str]" = OrderedDict()
+
+
+def _store_browser_cookies(domain: str, header: str) -> None:
+    """Record a harvested cookie header, evicting the LRU entry past the cap."""
+    _BROWSER_COOKIES_BY_DOMAIN[domain] = header
+    while len(_BROWSER_COOKIES_BY_DOMAIN) > _BROWSER_COOKIES_MAX:
+        _BROWSER_COOKIES_BY_DOMAIN.popitem(last=False)
 
 
 def get_browser_cookies_for(domain: str) -> str | None:
-    return _BROWSER_COOKIES_BY_DOMAIN.get(domain)
+    val = _BROWSER_COOKIES_BY_DOMAIN.get(domain)
+    if val is not None:
+        # Touch for LRU: most-recently-used stays warmest.
+        _BROWSER_COOKIES_BY_DOMAIN.move_to_end(domain)
+    return val
 
 
 class BrowserRenderer:
@@ -277,7 +292,7 @@ class BrowserRenderer:
             cookies = await context.cookies(url)
             header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
             if header:
-                _BROWSER_COOKIES_BY_DOMAIN[_rd(url)] = header
+                _store_browser_cookies(_rd(url), header)
                 logger.info("browser_cookies_harvested",
                             extra={"domain": _rd(url), "count": len(cookies)})
 
@@ -549,8 +564,12 @@ class BrowserRenderer:
 
     @staticmethod
     def _make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
-        max_entries = 50
-        max_payload_chars = 64_000
+        # Bounds on intercepted XHR (#4): a hostile page can fire thousands of
+        # JSON responses. Cap at 10 entries x 8KB payload (was 50 x 64KB =
+        # ~3.2MB held per page in result metadata); feed/API discovery does not
+        # need more than a small sample.
+        max_entries = 10
+        max_payload_chars = 8192
 
         async def on_response(response: Any) -> None:
             if len(collected) >= max_entries:
