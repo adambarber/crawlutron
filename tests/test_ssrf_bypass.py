@@ -41,8 +41,16 @@ class TestSSRFProtection:
                 normalize_public_http_url(target)
 
     def test_hostname_resolved_only_once(self, monkeypatch):
-        """The SSRF check must resolve the hostname exactly once."""
+        """The SSRF check must resolve the hostname exactly once.
+
+        Clears the process-global DNS cache first: the resolution cache (#3)
+        persists across tests, so without isolation a prior test that resolved
+        the same host would serve this call from cache (0 getaddrinfo calls).
+        """
+        from app.crawl.strategies.http import _DNS_CACHE
+
         block_private_targets(monkeypatch)
+        _DNS_CACHE.clear()
         calls = {"n": 0}
 
         def mock_getaddrinfo(*args, **kwargs):
