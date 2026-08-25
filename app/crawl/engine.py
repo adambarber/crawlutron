@@ -762,6 +762,10 @@ async def crawl_request(
 
         scheduled_results = await scheduler.run(allowed_jobs, _worker) if allowed_jobs else []
         for job, result in zip(allowed_jobs, scheduled_results):
+            # Strip heavy payloads inside the loop so they are not retained for
+            # the whole crawl when the caller did not ask for them (#1).
+            if not include_html:
+                result = replace(result, html=None, text=None)
             by_index[job.index] = result
     else:
         by_index: dict[int, EngineCrawlResult] = {}
@@ -811,6 +815,10 @@ async def crawl_request(
             )
 
             for (depth, job), result in zip(allowed_jobs, scheduled_results):
+                # Strip heavy payloads inside the loop so they are not retained
+                # for the whole crawl when the caller did not ask for them (#1).
+                if not include_html:
+                    result = replace(result, html=None, text=None)
                 by_index[job.index] = result
                 page_count += 1
                 if depth >= max_depth:
@@ -831,11 +839,6 @@ async def crawl_request(
                         )
                     )
                     next_index += 1
-
-    # memory-efficient recursive crawls (#8): strip heavy payloads when not requested
-    if not include_html:
-        for index, res in by_index.items():
-            by_index[index] = replace(res, html=None, text=None)
 
     ordered_results = [by_index[index] for index in sorted(by_index)]
     response = {

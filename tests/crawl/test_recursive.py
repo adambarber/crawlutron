@@ -126,3 +126,28 @@ class TestRecursiveCrawlServer:
         urls = {r["normalized_url"] for r in response["results"]}
         assert base_url in urls
         assert base_url + "/page2" in urls
+
+    async def test_memory_strip_both_modes_include_html_false(self):
+        # html/text must be stripped inside the loop for both the recursive and
+        # non-recursive branches (#1), not retained for the whole crawl.
+        pages = {
+            "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
+            "/a": (200, "<html><body>hello</body></html>", "text/html"),
+        }
+
+        async def run(max_depth):
+            payload = {
+                "url": "http://example.com/",
+                "policy": {
+                    "limits": {"max_depth": max_depth, "max_pages": 10},
+                    "browser_profile": {"include_html": False},
+                },
+            }
+            return await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+
+        for max_depth in (0, 1):
+            out = await run(max_depth)
+            for result in out["results"]:
+                assert result["html"] is None
+                assert result["text"] is None
+                assert result["markdown"] is not None
