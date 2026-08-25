@@ -1011,7 +1011,7 @@ async def _http_strategy_result(
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
-    max_content_length = limits.get("max_content_length_bytes", 50 * 1024 * 1024)
+    max_content_length = limits.get("max_content_length_bytes", 10 * 1024 * 1024)
     base_headers = _headers_for_strategy(strategy, policy, normalized_url)
     request_headers = dict(base_headers)
     if cache is not None:
