@@ -28,8 +28,8 @@ class _FakeRequest:
         self.resource_type = resource_type
 
 
-def _handler_for(resource_mode):
-    return _make_ssrf_route_handler(resource_mode)
+def _handler_for(resource_mode=None, *, include_screenshot=False):
+    return _make_ssrf_route_handler(resource_mode, include_screenshot=include_screenshot)
 
 
 async def test_analytics_aborted_regardless_of_mode():
@@ -39,16 +39,21 @@ async def test_analytics_aborted_regardless_of_mode():
     assert route.decision() == "abort"
 
 
-async def test_image_blocked_only_in_reduced_mode():
-    # reduced mode -> abort
+async def test_image_blocked_by_default_unless_screenshot():
+    # default (no screenshot requested) -> abort unconditionally (#4)
+    route = _FakeRoute()
+    await _handler_for(None)(route, _FakeRequest("https://x.test/logo.png", "image"))
+    assert route.decision() == "abort"
+
+    # reduced mode -> also abort
     route = _FakeRoute()
     await _handler_for("reduced")(route, _FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision() == "abort"
 
-    # full mode -> not aborted (still goes through SSRF + continue)
+    # screenshot explicitly requested -> continue (renders need images/fonts)
     route = _FakeRoute()
     with patch.object(browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {})):
-        await _handler_for(None)(route, _FakeRequest("https://x.test/logo.png", "image"))
+        await _handler_for(None, include_screenshot=True)(route, _FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision() == "continue"
 
 

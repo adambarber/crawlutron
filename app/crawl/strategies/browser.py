@@ -105,7 +105,7 @@ def _is_analytics_url(url: str) -> bool:
     return any(host == s or host.endswith("." + s) for s in _ANALYTICS_HOST_SUFFIXES)
 
 
-def _make_ssrf_route_handler(resource_mode: str | None = None):
+def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screenshot: bool = False):
     """Playwright route handler that aborts requests to SSRF-unsafe hosts (F8).
 
     Registered via ``page.route`` so the main navigation, server-side
@@ -137,13 +137,13 @@ def _make_ssrf_route_handler(resource_mode: str | None = None):
         if _is_analytics_url(request.url):
             await route.abort()
             return
-        # In reduced resource mode, skip pure presentation subresources: the
-        # crawler needs only document/script/xhr/stylesheet to extract content
-        # (#2). This is gated on the explicit "reduced" mode so default renders
-        # preserve prior behavior.
+        # Abort non-essential presentation subresources unconditionally: a
+        # text-extraction crawler never needs images/fonts/media, and blocking
+        # them cuts ~70% of rendered-page bandwidth. They are only permitted
+        # when an explicit screenshot is requested (#4).
         if (
-            resource_mode == "reduced"
-            and getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES
+            getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES
+            and not include_screenshot
         ):
             await route.abort()
             return
@@ -407,7 +407,13 @@ class BrowserRenderer:
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
         # F8: abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
-        await page.route("**/*", _make_ssrf_route_handler((options.browser_profile or {}).get("resource_mode")))
+        await page.route(
+            "**/*",
+            _make_ssrf_route_handler(
+                (options.browser_profile or {}).get("resource_mode"),
+                include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
+            ),
+        )
         ws_guard = _make_ssrf_websocket_handler()
         ws_router = getattr(page, "route_websocket", None)
         if ws_router is None:
