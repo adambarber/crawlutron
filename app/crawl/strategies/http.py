@@ -1365,6 +1365,14 @@ async def _http_strategy_result(
                     http_fetcher=http_fetcher,
                 )
             )
+        if _max_depth > 0:
+            # Site-wide discovery lists are frontier seeds, not per-page
+            # payload: returning them on every page of a recursive crawl
+            # wastes memory across thousands of pages (#13-fix).
+            discovery_diag = diagnostics.get("discovery")
+            if discovery_diag:
+                discovery_diag.pop("sitemap_urls", None)
+                discovery_diag.pop("feeds", None)
         # Emitted discovery URLs are attacker-influenced: only http(s) targets
         # may leave the service (no javascript:, file:, link-local oddities).
         # JS-endpoint extraction is discovery-oriented; skip it for

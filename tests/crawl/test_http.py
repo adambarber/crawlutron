@@ -233,3 +233,35 @@ class TestHttpStrategy:
         assert isinstance(r2.diagnostics["js_endpoints"], list)
         assert r2.diagnostics["js_endpoints"]  # non-empty: HTML contains a fetch() endpoint
         assert "robots" in r2.diagnostics
+
+
+async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkeypatch):
+    # #13-fix: during recursive crawls, site-wide sitemap/feed URL lists are
+    # frontier seeds, not per-page payload -- returning them on every page's
+    # diagnostics wastes memory across thousands of pages.
+    import app.crawl.strategies.http as http_mod
+
+    async def fake_diag(**kwargs):
+        return {"discovery": {"sitemap_urls": ["https://x.test/sitemap.xml"], "feeds": ["https://x.test/feed"]}}
+
+    monkeypatch.setattr(http_mod, "_discovery_diagnostics", fake_diag)
+
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        return HttpFetchResult(
+            url=url, final_url=url, status_code=200,
+            headers={"content-type": "text/html"}, body=b"<html><body>x</body></html>", elapsed_ms=1,
+        )
+
+    kwargs = dict(
+        original_url="http://x.test/", normalized_url="http://x.test/",
+        strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
+        cache=HttpCache(), content_cache=None,
+    )
+    r_rec = await _run(policy=http_policy(discovery={"sitemaps": True}, limits={"timeout_seconds": 10, "max_retries": 0, "max_depth": 1}), **kwargs)
+    r_flat = await _run(policy=http_policy(discovery={"sitemaps": True}), **kwargs)
+
+    rec_disc = r_rec.diagnostics.get("discovery") or {}
+    assert "sitemap_urls" not in rec_disc and "feeds" not in rec_disc
+    flat_disc = r_flat.diagnostics.get("discovery") or {}
+    assert flat_disc.get("sitemap_urls") == ["https://x.test/sitemap.xml"]
+    assert flat_disc.get("feeds") == ["https://x.test/feed"]

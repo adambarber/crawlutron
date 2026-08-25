@@ -543,20 +543,17 @@ def _extract_discovered_links(
         tree = _parse_html_tree(html)
     if tree is None:
         return [], 0, False
-    anchors: list[dict[str, Any]] = []
+    # Single pass: normalize/dedupe inline instead of materializing an
+    # intermediate per-anchor dict list (memory on link-heavy pages).
+    links: list[Any] = []
+    seen: set[str] = set()
+    total_count = 0
     for el in tree.iter("a"):
         # Skip anchors nested inside another anchor to avoid double counting.
         parent = el.getparent()
         if parent is not None and str(parent.tag) == "a":
             continue
         attrs = {key.lower(): value for key, value in el.attrib.items()}
-        text = re.sub(r"\s+", " ", unescape("".join(el.itertext()))).strip()
-        anchors.append({"attrs": attrs, "text": [text]})
-    links: list[Any] = []
-    seen: set[str] = set()
-    total_count = 0
-    for anchor in anchors:
-        attrs = anchor["attrs"]
         href = unescape(str(attrs.get("href", "")).strip())
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
@@ -571,7 +568,7 @@ def _extract_discovered_links(
         if len(links) >= max_links:
             continue
         parsed = urlparse(normalized_url)
-        text = re.sub(r"\s+", " ", unescape(" ".join(anchor["text"]))).strip()
+        text = re.sub(r"\s+", " ", unescape("".join(el.itertext()))).strip()
         links.append(
             DiscoveredLink(
                 url=href,

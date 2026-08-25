@@ -387,13 +387,13 @@ async def _execute_crawl_chain(
                 )
                 attempts.extend(retry_result.attempted_strategies)
                 if retry_result.status == "success" and retry_result.quality_score > 0:
-                    return EngineCrawlResult(**{f.name: getattr(retry_result, f.name) for f in fields(EngineCrawlResult) if f.name != "attempted_strategies"}, attempted_strategies=attempts)
+                    return replace(retry_result, attempted_strategies=attempts)
                 last_result = result
 
         if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
-            return EngineCrawlResult(**{field.name: getattr(result, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+            return replace(result, attempted_strategies=attempts)
     assert last_result is not None
-    return EngineCrawlResult(**{field.name: getattr(last_result, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+    return replace(last_result, attempted_strategies=attempts)
 
 
 @functools.lru_cache(maxsize=1024)
