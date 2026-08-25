@@ -906,19 +906,26 @@ def _quality_score(status: str, classification: str, text: str | None, html: str
     return min(score, 1.0)
 
 
+# Single compiled pattern so _content_metrics counts every tag of interest
+# in ONE linear scan of the HTML instead of four separate re.findall/re.search
+# passes (#13). Each group is tallied as we walk the string once.
+_CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE)
+
+
 def _content_metrics(text: str | None, html: str | None) -> dict[str, int | float | bool]:
     visible_text_length = len((text or "").strip())
     html_length = len((html or "").strip())
-    link_count = len(re.findall(r"<a\b", html or "", flags=re.IGNORECASE))
-    frame_count = len(re.findall(r"<iframe\b|<frame\b", html or "", flags=re.IGNORECASE))
-    form_count = len(re.findall(r"<form\b", html or "", flags=re.IGNORECASE))
+    counts = {"a": 0, "iframe": 0, "frame": 0, "frameset": 0, "form": 0}
+    for match in _CONTENT_TAG_RE.finditer(html or ""):
+        counts[match.group(1).lower()] += 1
     return {
         "visible_text_length": visible_text_length,
         "html_length": html_length,
-        "link_count": link_count,
-        "frame_count": frame_count,
-        "form_count": form_count,
-        "has_frameset": bool(re.search(r"<frameset\b", html or "", flags=re.IGNORECASE)),
+        "link_count": counts["a"],
+        # frame_count historically combines <iframe> and <frame>.
+        "frame_count": counts["iframe"] + counts["frame"],
+        "form_count": counts["form"],
+        "has_frameset": counts["frameset"] > 0,
         "text_to_html_ratio": round(visible_text_length / html_length, 4) if html_length else 0.0,
     }
 
