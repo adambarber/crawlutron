@@ -17,6 +17,13 @@ from typing import Any
 class HttpCache:
     """Tiny per-service HTTP metadata cache backed by SQLite."""
 
+    # Commit cadence for store(): committing on every write serializes all
+    # cache writes through the SQLite connection (a bottleneck under high
+    # concurrency, #12). Batch commits every N writes instead; uncommitted
+    # rows are still visible to this connection's own reads (get), so
+    # conditional-request correctness is unaffected within a process.
+    _COMMIT_EVERY = 50
+
     def __init__(self, db_path: str = ":memory:") -> None:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute(
@@ -28,6 +35,7 @@ class HttpCache:
             ")"
         )
         self._conn.commit()
+        self._pending_writes = 0
 
     def get(self, url: str) -> tuple[str | None, str | None]:
         row = self._conn.execute(
@@ -53,7 +61,11 @@ class HttpCache:
             "last_modified=excluded.last_modified, stored_at=excluded.stored_at",
             (url, etag, last_modified, time.time()),
         )
-        self._conn.commit()
+        # Batch commits: only flush to disk every _COMMIT_EVERY writes (#12).
+        self._pending_writes += 1
+        if self._pending_writes >= self._COMMIT_EVERY:
+            self._conn.commit()
+            self._pending_writes = 0
 
     def conditional_headers(self, url: str) -> dict[str, str]:
         etag, last_modified = self.get(url)
