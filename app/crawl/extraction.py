@@ -118,6 +118,16 @@ _EXTRACTION_DOC_TIMEOUT = float(
     os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0")
 )
 
+# #mem-guard: a markitdown worker process shares the container cgroup; an
+# unbounded document can balloon it past the memory ceiling. Cap the input
+# size and allow deployments to disable subprocess extraction entirely.
+_EXTRACTION_DOC_MAX_INPUT_BYTES = int(
+    os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", str(20 * 1024 * 1024))
+)
+_EXTRACTION_DOC_ENABLED = os.environ.get(
+    "BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "true"
+).lower() not in ("0", "false", "no")
+
 # Maximum extracted markdown size (chars) to prevent unbounded output (F5).
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
 
@@ -326,6 +336,15 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     process can be forcefully killed. Output is also capped to prevent
     unbounded memory growth.
     """
+    if not _EXTRACTION_DOC_ENABLED:
+        return ExtractedContent(None, None)
+    if len(body) > _EXTRACTION_DOC_MAX_INPUT_BYTES:
+        logger.warning(
+            "extraction_document_too_large",
+            extra={"size_bytes": len(body), "max_bytes": _EXTRACTION_DOC_MAX_INPUT_BYTES},
+        )
+        return ExtractedContent(None, None)
+
     executor = _get_doc_extraction_executor()
     try:
         fut = executor.submit(_markitdown_extract, body)

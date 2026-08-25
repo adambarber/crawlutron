@@ -1,5 +1,7 @@
 """Content extraction pipeline + Katana-inspired discovery (js_endpoints, pagination)."""
 
+import asyncio
+
 from app.crawl.extraction import (
     _detect_pagination,
     extract_content,
@@ -148,3 +150,37 @@ class TestKatanaDiscovery:
     def test_detect_pagination_none_without_hint(self):
         html = '<a href="/page2">Next</a>'
         assert _detect_pagination(html, "https://example.com/") is None
+
+
+async def test_extract_document_skips_oversized_input(monkeypatch):
+    """#mem-guard: markitdown workers must never receive unbounded input."""
+    import app.crawl.extraction as ex
+
+    called = False
+    class _FakeExecutor:
+        def submit(self, *a, **k):
+            nonlocal called
+            called = True
+    monkeypatch.setattr(ex, "_get_doc_extraction_executor", lambda: _FakeExecutor())
+    monkeypatch.setattr(ex, "_EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
+
+    out = await asyncio.to_thread(ex._extract_document, b"x" * 101, "http://x.test/big.pdf")
+    assert out.text is None and out.markdown is None
+    assert not called
+
+
+async def test_extract_document_kill_switch(monkeypatch):
+    """Env kill-switch lets deployments disable subprocess doc extraction."""
+    import app.crawl.extraction as ex
+
+    called = False
+    class _FakeExecutor:
+        def submit(self, *a, **k):
+            nonlocal called
+            called = True
+    monkeypatch.setattr(ex, "_get_doc_extraction_executor", lambda: _FakeExecutor())
+    monkeypatch.setattr(ex, "_EXTRACTION_DOC_ENABLED", False)
+
+    out = await asyncio.to_thread(ex._extract_document, b"tiny", None)
+    assert out.text is None and out.markdown is None
+    assert not called
