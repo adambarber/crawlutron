@@ -409,11 +409,14 @@ class _FrameCollector:
             )
 
 
-def _extract_frames(html: str | None, source_url: str | None) -> list[dict[str, Any]]:
+def _extract_frames(
+    html: str | None, source_url: str | None, *, tree: Any | None = None
+) -> list[dict[str, Any]]:
     if not html or not source_url:
         return []
     source_host = (urlparse(source_url).hostname or "").lower()
-    tree = _parse_html_tree(html)
+    if tree is None:
+        tree = _parse_html_tree(html)
     if tree is None:
         return []
     frames: list[dict[str, Any]] = []
@@ -446,10 +449,13 @@ def _extract_frames(html: str | None, source_url: str | None) -> list[dict[str, 
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def _extract_forms(html: str | None, source_url: str | None) -> list[dict[str, Any]]:
+def _extract_forms(
+    html: str | None, source_url: str | None, *, tree: Any | None = None
+) -> list[dict[str, Any]]:
     if not html or not source_url:
         return []
-    tree = _parse_html_tree(html)
+    if tree is None:
+        tree = _parse_html_tree(html)
     if tree is None:
         return []
     forms: list[dict[str, Any]] = []
@@ -485,10 +491,16 @@ def _extract_forms(html: str | None, source_url: str | None) -> list[dict[str, A
     return forms
 
 
-def _html_diagnostics(html: str | None, source_url: str | None) -> dict[str, Any]:
+def _html_diagnostics(
+    html: str | None, source_url: str | None, *, tree: Any | None = None
+) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
-    frames = _extract_frames(html, source_url)
-    forms = _extract_forms(html, source_url)
+    # #11: parse the HTML once and share the single lxml tree across the
+    # frames/forms passes instead of reparsing per pass.
+    if tree is None:
+        tree = _parse_html_tree(html)
+    frames = _extract_frames(html, source_url, tree=tree)
+    forms = _extract_forms(html, source_url, tree=tree)
     if frames:
         diagnostics["frames"] = frames
     if forms:
@@ -499,7 +511,7 @@ def _html_diagnostics(html: str | None, source_url: str | None) -> dict[str, Any
 
 
 def _extract_discovered_links(
-    html: str | None, source_url: str | None, *, max_links: int = 250
+    html: str | None, source_url: str | None, *, max_links: int = 250, tree: Any | None = None
 ) -> tuple[list[Any], int, bool]:
     if not html or not source_url:
         return [], 0, False
@@ -508,7 +520,8 @@ def _extract_discovered_links(
     except ValueError:
         norm_source = source_url
     source_host = (urlparse(norm_source).hostname or "").lower()
-    tree = _parse_html_tree(html)
+    if tree is None:
+        tree = _parse_html_tree(html)
     if tree is None:
         return [], 0, False
     anchors: list[dict[str, Any]] = []

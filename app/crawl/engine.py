@@ -49,6 +49,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
+    _parse_html_tree,
     _extract_document,
     _extract_html,
     extract_js_endpoints,
@@ -229,11 +230,15 @@ async def _browser_strategy_result(
         extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
 
     # Surface browser-captured dynamic discovery (XHR/fetch) into diagnostics.
+    # #11: parse the page HTML once and reuse the single lxml tree for the
+    # frames/forms diagnostics AND the discovered-link extraction instead of
+    # reparsing the same bytes in each pass.
+    tree = _parse_html_tree(result.html)
     diagnostics: dict[str, Any] = {
         "browser_profile": policy.get("browser_profile") or {},
         "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
         "content_metrics": {"visible_text_length": len((text or "").strip()), "html_length": len((result.html or "").strip())},
-        **_html_diagnostics(result.html, result.final_url),
+        **_html_diagnostics(result.html, result.final_url, tree=tree),
     }
     intercepted = result.metadata.get("intercepted_xhr")
     if intercepted:
@@ -244,7 +249,7 @@ async def _browser_strategy_result(
 
     quality = _quality_score(result.status, result.classification, text, result.html, None)
     discovered_links, discovered_link_count, discovered_links_truncated = (
-        _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"]) if result.status == "success" else ([], 0, False)
+        _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"], tree=tree) if result.status == "success" else ([], 0, False)
     )
     next_page_url = _detect_pagination(result.html, result.final_url)
     if next_page_url:

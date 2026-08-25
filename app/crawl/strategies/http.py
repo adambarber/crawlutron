@@ -78,6 +78,7 @@ from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
     _extract_document,
+    _parse_html_tree,
     _extract_html,
     _html_diagnostics,
     extract_js_endpoints,
@@ -1292,11 +1293,17 @@ async def _http_strategy_result(
             "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
             "content_metrics": _content_metrics(text, html),
         }
+        # #11: parse the page HTML at most once and reuse the single lxml tree
+        # for both the frames/forms diagnostics and the link extraction below
+        # instead of reparsing the same bytes in each pass. Only parse when a
+        # pass actually needs it (discovery requested or a successful page whose
+        # links we will extract).
+        tree = _parse_html_tree(html) if (policy.get("discovery") or status == "success") and html else None
         # #2: _html_diagnostics (frames/forms via an lxml parse) is only needed
         # for structural discovery. Skip it when discovery is not requested so
         # content-only crawls avoid a redundant HTML parse per page.
         if policy.get("discovery"):
-            diagnostics.update(_html_diagnostics(html, response.final_url))
+            diagnostics.update(_html_diagnostics(html, response.final_url, tree=tree))
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
@@ -1345,7 +1352,7 @@ async def _http_strategy_result(
             # can easily exceed the length threshold.
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
-            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 100)) if status == "success" else ([], 0, False)
+            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 100), tree=tree) if status == "success" else ([], 0, False)
         )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
