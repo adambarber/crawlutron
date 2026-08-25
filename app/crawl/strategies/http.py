@@ -847,8 +847,13 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
 
 
 def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None, headers: dict[str, str] | None = None) -> str:
-    """Decode response body, using charset-normalizer to detect encoding when
-    the declared charset produces replacement characters or is missing (#3).
+    """Decode a response body to text.
+
+    Try the declared (or UTF-8) charset strictly first; fall back to
+    charset-normalizer when that fails, then to a lossy UTF-8 decode. This
+    avoids scanning/rewriting the whole body with ``errors='replace'`` (and
+    the resulting replacement-character check) on the common valid-UTF-8 path
+    (#5).
 
     ``body`` may be a bytearray/memoryview when the streamed fetcher returns an
     uncompressed buffer without converting to immutable bytes; ``bytes`` is
@@ -858,22 +863,28 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None,
         body = bytes(body)
     if headers:
         body = _decompress_body(body, headers.get("content-encoding", ""))
+
     charset = "utf-8"
     if content_type:
         match = re.search(r"charset=([^;]+)", content_type, flags=re.IGNORECASE)
         if match:
             charset = match.group(1).strip()
+
+    # Fast path: strict decode with the declared (or default UTF-8) charset.
     try:
-        text = body.decode(charset, errors="replace")
-    except (LookupError, UnicodeDecodeError):
-        text = body.decode("utf-8", errors="replace")
-    # If the declared charset produced replacement chars, sniff with charset-normalizer
-    if "\ufffd" in text and _charset_from_bytes is not None:
+        return body.decode(charset)
+    except (UnicodeDecodeError, LookupError):
+        pass
+
+    # Fallback to charset-normalizer if the strict decode failed.
+    if _charset_from_bytes is not None:
         detected = _charset_from_bytes(body)
         best = detected.best()
         if best is not None and best.encoding:
-            text = str(best)
-    return text
+            return str(best)
+
+    # Final fallback: lossy UTF-8 decode so we always return a string.
+    return body.decode("utf-8", errors="replace")
 
 
 def _status_for_classification(classification: str) -> str:
