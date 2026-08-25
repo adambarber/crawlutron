@@ -208,6 +208,15 @@ def _reset_global_http_state():
             asyncio.run(http_mod.close_async_http_client())
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
+    # robots_cache was promoted to module-level and shared across crawl_request
+    # calls (#9). Tests reuse origins with different robots.txt bodies, so
+    # clear it between tests for isolation. Production keeps it shared (a given
+    # origin always serves the same robots.txt).
+    try:
+        from app.crawl import engine as _engine_mod
+        _engine_mod.robots_cache.clear()
+    except Exception:  # noqa: BLE001 - best-effort cleanup only
+        pass
 
 
 # NOTE: there is deliberately no autouse extraction-process-pool reset here.

@@ -430,6 +430,13 @@ def _robots_pattern_to_regex(pattern: str) -> "re.Pattern[str]":
 
 ROBOTS_CACHE_MAX_ENTRIES = 1000
 
+# Module-level robots cache shared across all crawl_request calls in the
+# process (#9). Previously each crawl_request built its own cache, so two
+# separate API calls to the same domain each re-fetched /robots.txt. Promoting
+# it here lets the TTL cache be reused across requests; it is bounded by
+# ROBOTS_CACHE_MAX_ENTRIES via _cap_robots_cache.
+robots_cache: "dict[str, tuple[float, list[tuple[bool, str]], list[str]]]" = {}
+
 
 def _cap_robots_cache(cache: dict, max_size: int) -> None:
     """Evict oldest entries (insertion order) once ``cache`` exceeds ``max_size``.
@@ -567,7 +574,8 @@ async def crawl_request(
         return index, result
 
     # --- robots.txt parsing + filtering helpers (#12) ---
-    robots_cache: dict[str, tuple[float, list[tuple[bool, str]], list[str]]] = {}
+    # robots_cache is module-level (shared across requests, #9); we reference it
+    # directly from the nested helpers below.
     robots_ttl = 600.0
 
     def _purge_robots_cache(now: float | None = None) -> int:
