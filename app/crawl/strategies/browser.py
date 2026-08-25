@@ -61,7 +61,50 @@ def _is_ssrf_blocked(url: str) -> bool:
     return False
 
 
-def _make_ssrf_route_handler():
+# Subresource types that carry no crawlable text content. When the
+# browser profile runs in "reduced" resource mode, these are aborted at the
+# route layer to cut render bandwidth (#2); the crawler only needs
+# document/script/xhr/stylesheet to extract content.
+_REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
+
+# Tracking/analytics hosts: never fetch them -- they return no crawlable
+# content and only add network load. Aborted unconditionally (#2).
+_ANALYTICS_HOST_SUFFIXES = frozenset(
+    {
+        "google-analytics.com",
+        "googletagmanager.com",
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "adservice.google.com",
+        "facebook.net",
+        "connect.facebook.net",
+        "analytics.twitter.com",
+        "hotjar.com",
+        "scorecardresearch.com",
+        "mixpanel.com",
+        "amplitude.com",
+        "segment.io",
+        "segment.com",
+        "criteo.com",
+        "pubmatic.com",
+        "rubiconproject.com",
+        "adroll.com",
+    }
+)
+
+
+def _is_analytics_url(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == s or host.endswith("." + s) for s in _ANALYTICS_HOST_SUFFIXES)
+
+
+def _make_ssrf_route_handler(resource_mode: str | None = None):
     """Playwright route handler that aborts requests to SSRF-unsafe hosts (F8).
 
     Registered via ``page.route`` so the main navigation, server-side
@@ -86,6 +129,22 @@ def _make_ssrf_route_handler():
             # data:, blob:, about:, javascript: never touch the network via DNS;
             # let the browser handle them locally instead of aborting.
             await route.continue_()
+            return
+        # Tracking/analytics requests carry no crawlable content; drop them
+        # unconditionally so they never consume bandwidth or trigger their own
+        # SSRF resolution (#2).
+        if _is_analytics_url(request.url):
+            await route.abort()
+            return
+        # In reduced resource mode, skip pure presentation subresources: the
+        # crawler needs only document/script/xhr/stylesheet to extract content
+        # (#2). This is gated on the explicit "reduced" mode so default renders
+        # preserve prior behavior.
+        if (
+            resource_mode == "reduced"
+            and getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES
+        ):
+            await route.abort()
             return
         try:
             pinned_url, host_headers = await asyncio.to_thread(
@@ -333,7 +392,7 @@ class BrowserRenderer:
         page = await browser.new_page(**self._get_page_kwargs(options.browser_profile))
         # F8: abort any request (navigation, redirect, or subresource) that
         # resolves to an SSRF-unsafe host before the browser connects.
-        await page.route("**/*", _make_ssrf_route_handler())
+        await page.route("**/*", _make_ssrf_route_handler((options.browser_profile or {}).get("resource_mode")))
         ws_guard = _make_ssrf_websocket_handler()
         ws_router = getattr(page, "route_websocket", None)
         if ws_router is None:
