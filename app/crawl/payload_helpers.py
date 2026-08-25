@@ -80,7 +80,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
             "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
             "challenge_wait_seconds": int(limits.get("challenge_wait_seconds", 15)),
-            "max_discovered_links": int(limits.get("max_discovered_links", 250)),
+            "max_discovered_links": int(limits.get("max_discovered_links", 100)),
             "respect_robots": respect_robots,
             "max_depth": max_depth,
             "max_pages": max_pages,

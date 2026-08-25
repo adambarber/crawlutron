@@ -17,7 +17,7 @@ BROWSER_FALLBACK_POLICY = {
     "limits": {
         "timeout_seconds": 30,
         "max_retries": 2,
-        "max_discovered_links": 250,
+        "max_discovered_links": 100,
     },
 }
 
