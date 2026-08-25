@@ -23,6 +23,15 @@ def _recording_fetcher(pages):
     return fetcher, fetched
 
 
+def _doc_pages():
+    """Town page advertising a PDF alongside an HTML subpage."""
+    return {
+        "/": (200, '<html><body><a href="/local">l</a>'
+                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
+        "/local": (200, "<html>l</html>", "text/html"),
+    }
+
+
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     pages = {
         "/": (200, '<html><body><a href="/keep/x">k</a>'
@@ -71,12 +80,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
 async def test_document_urls_recorded_but_not_fetched_by_default():
     # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
     # but never spend bandwidth downloading them during URL discovery.
-    pages = {
-        "/": (200, '<html><body><a href="/local">l</a>'
-                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
-        "/local": (200, "<html>l</html>", "text/html"),
-    }
-    fetcher, fetched = _recording_fetcher(pages)
+    fetcher, fetched = _recording_fetcher(_doc_pages())
     payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
     out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
     crawled = {r["normalized_url"] for r in out["results"]}
@@ -89,13 +93,9 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
 
 async def test_document_urls_fetched_when_extraction_document_requested():
     """Callers who explicitly want document contents still get them."""
-    pages = {
-        "/": (200, '<html><body><a href="/local">l</a>'
-                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
-        "/local": (200, "<html>l</html>", "text/html"),
-        "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf"),
-    }
-    fetcher, fetched = _recording_fetcher(pages)
+    fetcher, fetched = _recording_fetcher(
+        {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")}
+    )
     payload = {
         "url": "http://example.com/",
         "policy": {"limits": {"max_depth": 2, "max_pages": 10}, "extraction": "document"},
