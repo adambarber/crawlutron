@@ -1062,6 +1062,31 @@ async def _discovery_diagnostics(
     return diagnostics
 
 
+def _content_cache_key(
+    normalized_url: str,
+    strategy: str,
+    base_headers: dict[str, str],
+    extraction: str | None,
+    css_selector: str | None,
+    xpath: str | None,
+) -> str:
+    """Stable content-cache key mirroring what http.py stores under.
+
+    Kept as a shared helper so engine.py can reconstruct the exact key a future
+    fetch of ``normalized_url`` would use (for sitemap lastmod freshness checks,
+    #3) without duplicating the key composition.
+    """
+    return ContentCache.make_key(
+        "http",
+        normalized_url,
+        strategy,
+        json.dumps(sorted(base_headers.items()), separators=(",", ":")),
+        extraction,
+        css_selector,
+        xpath,
+    )
+
+
 async def _http_strategy_result(
     *,
     original_url: str,
@@ -1107,10 +1132,9 @@ async def _http_strategy_result(
     content_hit = False
     revalidated_304 = False
     if content_cache is not None:
-        ckey = content_cache.make_key(
-            "http", normalized_url, strategy,
-            json.dumps(sorted(base_headers.items()), separators=(",", ":")),
-            extraction, policy.get("css_selector"), policy.get("xpath"),
+        ckey = _content_cache_key(
+            normalized_url, strategy, base_headers, extraction,
+            policy.get("css_selector"), policy.get("xpath"),
         )
         cached = content_cache.get(ckey)
         if cached is not None:

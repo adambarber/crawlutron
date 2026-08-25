@@ -84,8 +84,13 @@ class ContentCache:
                     pass
 
     # -- public API ---------------------------------------------------------
-    def get(self, key: str, ttl: int | None = None) -> Any | None:
-        """Return the cached value if present and unexpired, else ``None``."""
+    def _read_envelope(self, key: str) -> dict[str, Any] | None:
+        """Return the unexpired envelope for ``key`` (registering it in the LRU
+        index), or ``None`` if missing, expired, or unreadable.
+
+        Shared by :meth:`get` and :meth:`cached_at_of` so the envelope-read +
+        TTL-expiry logic lives in exactly one place.
+        """
         path = self._path_for(key)
         with self._lock:
             if key in self._index:
@@ -113,7 +118,22 @@ class ContentCache:
                 return None
             # Mark recently used (LRU) by moving to the end of the ordered index.
             self._index.move_to_end(key)
-            return envelope.get("value")
+            return envelope
+
+    def get(self, key: str, ttl: int | None = None) -> Any | None:
+        """Return the cached value if present and unexpired, else ``None``."""
+        envelope = self._read_envelope(key)
+        return envelope.get("value") if envelope is not None else None
+
+    def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:
+        """Return the ``cached_at`` timestamp for a valid (unexpired) entry.
+
+        Returns ``None`` if the key is missing, expired, or unreadable. Used by
+        sitemap lastmod freshness checks to decide whether a cached page is
+        newer than the sitemap's advertised last-modified time (#3).
+        """
+        envelope = self._read_envelope(key)
+        return envelope.get("cached_at") if envelope is not None else None
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Store ``value`` (must be JSON-serializable) with a TTL in seconds.
@@ -122,7 +142,9 @@ class ContentCache:
         """
         effective_ttl = self.default_ttl if ttl is None else ttl
         expires = None if effective_ttl <= 0 else self.clock() + effective_ttl
-        envelope = {"expires": expires, "value": value}
+        # cached_at records when this entry was written so callers can compare a
+        # remote "last modified" signal against our local fetch time (#3).
+        envelope = {"expires": expires, "value": value, "cached_at": self.clock()}
         path = self._path_for(key)
         with self._lock:
             path.write_text(json.dumps(envelope))

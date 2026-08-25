@@ -14,6 +14,7 @@ import re
 import functools
 from collections import deque
 import time
+from datetime import datetime, timezone
 import uuid
 from urllib.parse import urljoin, urlparse
 from dataclasses import dataclass, fields, replace
@@ -487,6 +488,60 @@ def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     return allowed
 
 
+def _parse_lastmod(lastmod: str | None) -> float | None:
+    """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds."""
+    if not lastmod:
+        return None
+    s = lastmod.strip()
+    try:
+        from email.utils import parsedate_to_datetime
+
+        dt = parsedate_to_datetime(s)
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+    except (TypeError, ValueError):
+        pass
+    iso = s.replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+def _seed_is_fresh(
+    url: str, lastmod: str | None, content_cache: Any, policy: dict[str, Any]
+) -> bool:
+    """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
+    our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
+    re-fetching it (#3).
+    """
+    if content_cache is None or not lastmod:
+        return False
+    lastmod_ts = _parse_lastmod(lastmod)
+    if lastmod_ts is None:
+        return False
+    extraction = policy.get("extraction") or DEFAULT_EXTRACTION
+    css = policy.get("css_selector")
+    xp = policy.get("xpath")
+    # Lazy import avoids a module cycle (engine <-> http).
+    from app.crawl.strategies.http import _content_cache_key, _headers_for_strategy
+
+    for strategy in policy.get("strategies", ["HTTP"]):
+        key = _content_cache_key(
+            url, strategy, _headers_for_strategy(strategy, policy, url),
+            extraction, css, xp,
+        )
+        cached_at = content_cache.cached_at_of(key)
+        if cached_at is not None and lastmod_ts <= cached_at:
+            return True
+    return False
+
+
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -718,12 +773,16 @@ async def crawl_request(
             # Recursive: follows sitemap indexes down to page URLs.
             found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
             normalized_seeds: list[str] = []
-            for loc, _lastmod in found:
+            for loc, lastmod in found:
                 try:
                     normalized_seed = normalize_public_http_url(loc)
                 except ValueError:
                     continue
                 if scope_pattern is not None and not scope_pattern.search(normalized_seed):
+                    continue
+                # #3: skip URLs whose content we already cache and that the
+                # sitemap says have not changed since we cached them.
+                if _seed_is_fresh(normalized_seed, lastmod, content_cache, policy):
                     continue
                 normalized_seeds.append(normalized_seed)
             return normalized_seeds
