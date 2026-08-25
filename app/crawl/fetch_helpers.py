@@ -50,7 +50,7 @@ async def _fetch_and_decode(
 
 _MAX_SITEMAP_DEPTH = 3
 _SITEMAP_CACHE_TTL = 3600.0
-_SITEMAP_CACHE: "dict[str, tuple[float, set]]" = {}
+_SITEMAP_CACHE: "dict[str, tuple[float, list, str | None, str | None]]" = {}
 _MAX_SITEMAP_URLS = 10_000
 
 
@@ -61,6 +61,7 @@ async def fetch_sitemap_urls(
     *,
     max_depth: int = _MAX_SITEMAP_DEPTH,
     max_urls: int = _MAX_SITEMAP_URLS,
+    conditional: dict[str, str] | None = None,
 ) -> set[tuple[str, str | None]]:
     """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
 
@@ -71,21 +72,59 @@ async def fetch_sitemap_urls(
     Each collected entry is a ``(url, lastmod)`` tuple where ``lastmod`` is the
     sitemap ``<lastmod>`` for that URL when present (used to skip re-fetching
     unchanged pages, #1); it is ``None`` when the entry has no ``<lastmod>``.
+
+    If a previous resolution cached an ETag/Last-Modified (or the caller passes
+    ``conditional``), the root sitemap is fetched with a conditional request
+    (#5). A 304 reuses the cached URLs without re-parsing the body, which
+    avoids re-downloading unchanged sitemaps on every crawl.
     """
     import re as _re
+    from app.crawl.decompression import DecompressionTooLargeError
 
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
     lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
     visited: set[str] = set()
     page_urls: set[tuple[str, str | None]] = set()
 
-    async def recurse(current_url: str, depth: int) -> None:
+    async def _fetch_text(url: str, cond_headers: dict[str, str] | None):
+        """Fetch + decode a sitemap body, returning (text, etag, last_modified, not_modified)."""
+        try:
+            resp = fetcher(url, cond_headers or {}, timeout_seconds)
+            if inspect.iscoroutine(resp):
+                resp = await resp
+            rh = {key.lower(): value for key, value in resp.headers.items()}
+            if resp.status_code == 304:
+                return None, rh.get("etag"), rh.get("last-modified"), True
+            if resp.status_code == 200:
+                try:
+                    body = _decompress_body(
+                        resp.body,
+                        rh.get("content-encoding", ""),
+                        max_output_bytes=_MAX_DISCOVERY_BODY_BYTES,
+                    )
+                except DecompressionTooLargeError:
+                    return None, rh.get("etag"), rh.get("last-modified"), False
+                return _decode_body(body, rh.get("content-type")), rh.get("etag"), rh.get("last-modified"), False
+        except Exception:  # noqa: BLE001
+            pass
+        return None, None, None, False
+
+    async def recurse(current_url: str, depth: int, cond_headers: dict[str, str] | None = None):
+        etag: str | None = None
+        last_modified: str | None = None
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
-            return
+            return etag, last_modified
         visited.add(current_url)
-        text = await _fetch_and_decode(fetcher, current_url, {}, timeout_seconds)
-        if not text:
-            return
+        text, etag, last_modified, not_modified = await _fetch_text(current_url, cond_headers)
+        if not_modified:
+            # 304: reuse the previously resolved URLs for this exact URL.
+            prev = _SITEMAP_CACHE.get(current_url)
+            if prev:
+                for entry in prev[1]:
+                    page_urls.add(entry)
+            return etag, last_modified
+        if text is None:
+            return etag, last_modified
         locs = loc_pattern.findall(text)
         if "<sitemapindex" in text.lower():
             # Fan out: fetch all child sitemaps of an index concurrently.
@@ -98,7 +137,7 @@ async def fetch_sitemap_urls(
                 for t in pending:
                     if t not in done:
                         t.cancel()
-            return
+            return etag, last_modified
         # Page sitemap: associate each <loc> with its neighboring <lastmod>.
         # Use byte offsets so this works whether entries are wrapped in <url>
         # blocks or listed as bare <loc> elements (some CMS emit the latter).
@@ -108,16 +147,25 @@ async def fetch_sitemap_urls(
             next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
             lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
             page_urls.add((loc, lastmod))
+        return etag, last_modified
 
     cached = _SITEMAP_CACHE.get(sitemap_url)
     now = time.monotonic()
     if cached and now - cached[0] < _SITEMAP_CACHE_TTL:
         return set(cached[1])
+    # On a cache expiry, replay the prior ETag/Last-Modified as a conditional
+    # request unless the caller supplied their own headers.
+    if conditional is None and cached:
+        if cached[2]:
+            conditional = {"If-None-Match": cached[2]}
+        elif cached[3]:
+            conditional = {"If-Modified-Since": cached[3]}
     try:
-        await asyncio.gather(*[recurse(sitemap_url, 0)])
-    except Exception:
-        pass
-    _SITEMAP_CACHE[sitemap_url] = (now, list(page_urls))
+        results = await asyncio.gather(*[recurse(sitemap_url, 0, conditional)])
+        root_etag, root_lm = results[0]
+    except Exception:  # noqa: BLE001
+        root_etag, root_lm = (cached[2] if cached else None), (cached[3] if cached else None)
+    _SITEMAP_CACHE[sitemap_url] = (now, list(page_urls), root_etag, root_lm)
     if len(_SITEMAP_CACHE) > 1000:
         oldest = sorted(_SITEMAP_CACHE.items(), key=lambda x: x[1][0])[:200]
         for k, _v in oldest:
