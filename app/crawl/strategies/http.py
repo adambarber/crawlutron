@@ -1330,38 +1330,52 @@ async def _http_strategy_result(
             "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
             "content_metrics": _content_metrics(text, html),
         }
+        # Discovery is only requested when the caller opts in; recursive crawls
+        # (max_depth > 0) also need discovered links to expand the frontier.
+        discovery = policy.get("discovery") or {}
+        _max_depth = int((policy.get("limits") or {}).get("max_depth") or 0)
+        _want_discovery_links = bool(discovery) or _max_depth > 0
         # #11: parse the page HTML at most once and reuse the single lxml tree
-        # for both the frames/forms diagnostics and the link extraction below
-        # instead of reparsing the same bytes in each pass. Only parse when a
-        # pass actually needs it (discovery requested or a successful page whose
-        # links we will extract).
-        tree = _parse_html_tree(html) if (policy.get("discovery") or status == "success") and html else None
+        # for the frames/forms diagnostics and the link extraction below.
+        # Only parse when discovery is requested or this is a recursive crawl
+        # that expands the frontier from the extracted links (B1).
+        tree = _parse_html_tree(html) if _want_discovery_links and html else None
         # #2: _html_diagnostics (frames/forms via an lxml parse) is only needed
         # for structural discovery. Skip it when discovery is not requested so
         # content-only crawls avoid a redundant HTML parse per page.
-        if policy.get("discovery"):
+        if discovery:
             diagnostics.update(_html_diagnostics(html, response.final_url, tree=tree))
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
-        diagnostics.update(
-            await _discovery_diagnostics(
-                normalized_url=normalized_url,
-                engine_robots_sitemaps=robots_sitemaps,
-                html=html,
-                policy=policy,
-                headers=request_headers,
-                http_fetcher=http_fetcher,
+        # Sitemap/feed discovery is only performed when discovery is requested
+        # (the /v1/map path forces discovery, so maps are unaffected). Skipping
+        # it for content-only crawls avoids the discovery fetches (B1).
+        if discovery:
+            diagnostics.update(
+                await _discovery_diagnostics(
+                    normalized_url=normalized_url,
+                    engine_robots_sitemaps=robots_sitemaps,
+                    html=html,
+                    policy=policy,
+                    headers=request_headers,
+                    http_fetcher=http_fetcher,
+                )
             )
-        )
         # Emitted discovery URLs are attacker-influenced: only http(s) targets
         # may leave the service (no javascript:, file:, link-local oddities).
-        raw_endpoints = extract_js_endpoints(html, normalized_url)
+        # JS-endpoint extraction is discovery-oriented; skip it for
+        # content-only crawls (B1).
+        raw_endpoints = extract_js_endpoints(html, normalized_url) if discovery else []
         diagnostics["js_endpoints"] = [
             endpoint
             for endpoint in raw_endpoints
             if urlparse(str(endpoint.get("url", ""))).scheme in ("", "http", "https")
         ]
+        # Pagination detection stays on for all crawls: next_page_url is a
+        # standard result field (returned even without discovery mode), so it is
+        # always computed. Only the heavier discovery-only extras below are
+        # gated on `discovery` (B1).
         next_page_url = _detect_pagination(html, response.final_url)
         if next_page_url and urlparse(next_page_url).scheme not in ("http", "https"):
             next_page_url = None
@@ -1388,6 +1402,10 @@ async def _http_strategy_result(
             # Boost only trustworthy content: garbage from failed decompression
             # can easily exceed the length threshold.
             quality = max(quality, 0.95)
+        # discovered_links is a standard result field (returned for every
+        # successful page, discovery requested or not), so it is always computed
+        # here. The heavier discovery-only extras (js_endpoints, pagination,
+        # sitemap/feed discovery) are gated on `discovery` below (B1).
         discovered_links, discovered_link_count, discovered_links_truncated = (
             _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS), tree=tree) if status == "success" else ([], 0, False)
         )

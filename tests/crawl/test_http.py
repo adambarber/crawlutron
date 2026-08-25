@@ -17,6 +17,24 @@ async def _run(**kwargs):
     return await _http_strategy_result(**kwargs)
 
 
+def _html_fetcher(html: str):
+    # Returns an async fetcher that serves a fixed HTML body for any URL.
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        return HttpFetchResult(
+            url=url, final_url=url, status_code=200,
+            headers={"content-type": "text/html"}, body=html.encode("utf-8"), elapsed_ms=1,
+        )
+    return fetcher
+
+
+def _run_kwargs(fetcher):
+    return dict(
+        original_url="http://x.test/", normalized_url="http://x.test/",
+        strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
+        cache=HttpCache(), content_cache=None,
+    )
+
+
 def http_policy(**overrides):
     policy = {
         "strategies": [HTTP_DECLARED_CRAWLER],
@@ -39,17 +57,8 @@ class TestHttpStrategy:
         # every page of a content-only crawl.
         html = "<html><body><iframe src='/x'></iframe></body></html>"
 
-        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            return HttpFetchResult(
-                url=url, final_url=url, status_code=200,
-                headers={"content-type": "text/html"}, body=html.encode("utf-8"), elapsed_ms=1,
-            )
-
-        kwargs = dict(
-            original_url="http://x.test/", normalized_url="http://x.test/",
-            strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
-            cache=HttpCache(), content_cache=None,
-        )
+        fetcher = _html_fetcher(html)
+        kwargs = _run_kwargs(fetcher)
         # discovery omitted -> no frames in diagnostics
         r1 = await _run(policy=http_policy(discovery=None), **kwargs)
         assert "frames" not in r1.diagnostics
@@ -157,3 +166,37 @@ class TestHttpStrategy:
         assert response["submitted_count"] == 1
         assert len(response["results"]) == 1
         assert "Example Org" in response["results"][0]["markdown"]
+
+
+    async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
+        # B1: the heavier discovery-only extras -- JS-endpoint extraction and the
+        # remote sitemap/feed discovery fetches -- must be skipped when discovery
+        # is not requested, to avoid per-page regex scans and extra HTTP requests
+        # on content-only crawls. discovered_links / next_page_url stay on (they
+        # are standard result fields).
+        html = (
+            "<html><body>"
+            "<a href='/page2'>next</a>"
+            "<script>fetch('https://api.example.com/data')</script>"
+            "</body></html>"
+        )
+
+        fetcher = _html_fetcher(html)
+        kwargs = _run_kwargs(fetcher)
+        # discovery omitted -> js_endpoints empty, no discovery diagnostics block
+        r1 = await _run(policy=http_policy(discovery=None), **kwargs)
+        assert r1.diagnostics["js_endpoints"] == []
+        assert "discovery" not in r1.diagnostics
+        # discovered_links remains a standard field (not gated)
+        assert r1.discovered_link_count >= 1
+        # next_page_url is always computed (standard field, proven by
+        # test_http_strategy_extracts_html_markdown_and_links); it must not be
+        # gated behind discovery.
+        assert r1.next_page_url is None or isinstance(r1.next_page_url, str)
+        # discovery requested -> js_endpoints extracted; the (remote)
+        # sitemap/feed discovery is performed, so the robots diagnostics block
+        # is populated (proving the gated function ran for this crawl).
+        r2 = await _run(policy=http_policy(discovery={"robots": True, "sitemaps": True, "feeds": True}), **kwargs)
+        assert isinstance(r2.diagnostics["js_endpoints"], list)
+        assert r2.diagnostics["js_endpoints"]  # non-empty: HTML contains a fetch() endpoint
+        assert "robots" in r2.diagnostics
