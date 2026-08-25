@@ -800,9 +800,16 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     return headers
 
 
-def _decode_body(body: bytes, content_type: str | None, headers: dict[str, str] | None = None) -> str:
+def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None, headers: dict[str, str] | None = None) -> str:
     """Decode response body, using charset-normalizer to detect encoding when
-    the declared charset produces replacement characters or is missing (#3)."""
+    the declared charset produces replacement characters or is missing (#3).
+
+    ``body`` may be a bytearray/memoryview when the streamed fetcher returns an
+    uncompressed buffer without converting to immutable bytes; ``bytes`` is
+    required for the ``.decode()`` calls below, so normalize here exactly once.
+    """
+    if not isinstance(body, bytes):
+        body = bytes(body)
     if headers:
         body = _decompress_body(body, headers.get("content-encoding", ""))
     charset = "utf-8"

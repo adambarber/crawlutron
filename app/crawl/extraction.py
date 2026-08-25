@@ -195,7 +195,7 @@ def extract_content(
     if _is_html(content_type, content):
         return _extract_html(_decode(content), url)
     if _looks_like_document(content_type, content, url):
-        body = content if isinstance(content, bytes) else content.encode("utf-8", "replace")
+        body = bytes(content) if isinstance(content, (bytes, bytearray, memoryview)) else content.encode("utf-8", "replace")
         return _extract_document(body, url)
     text = _decode(content).strip()
     return ExtractedContent(text or None, text or None)
