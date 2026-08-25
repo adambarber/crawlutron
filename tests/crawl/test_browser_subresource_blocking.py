@@ -39,6 +39,13 @@ async def test_analytics_aborted_regardless_of_mode():
     assert route.decision() == "abort"
 
 
+async def test_pinterest_aborted_with_and_without_www():
+    for url in ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"):
+        route = _FakeRoute()
+        await _handler_for(None)(route, _FakeRequest(url, "document"))
+        assert route.decision() == "abort", url
+
+
 async def test_cdcgov_aborted_with_and_without_www():
     # suffix match covers apex and subdomains alike
     for url in ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"):

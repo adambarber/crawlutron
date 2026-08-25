@@ -89,6 +89,7 @@ _ANALYTICS_HOST_SUFFIXES = frozenset(
         "analytics.twitter.com",
         "x.com",
         "cdc.gov",
+        "pinterest.com",
         "hotjar.com",
         "scorecardresearch.com",
         "mixpanel.com",
