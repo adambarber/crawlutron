@@ -979,6 +979,7 @@ async def _discovery_diagnostics(
     policy: dict[str, Any],
     headers: dict[str, str],
     http_fetcher: Any,
+    engine_robots_sitemaps: list[str] | None = None,
 ) -> dict[str, Any]:
     discovery = policy.get("discovery") or {}
     limits = policy.get("limits", {})
@@ -986,7 +987,20 @@ async def _discovery_diagnostics(
     parsed = urlparse(normalized_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     robots_sitemaps: list[str] = []
-    if discovery.get("robots"):
+    if engine_robots_sitemaps is not None:
+        # The engine already fetched /robots.txt (for allow/deny checks) and
+        # extracted its Sitemap directives; reuse them instead of hitting the
+        # network a second time (#4). An empty list is a valid signal (robots
+        # fetched, no Sitemap lines) and still means "do not re-fetch".
+        robots_sitemaps = list(engine_robots_sitemaps)
+        diagnostics["robots"] = {
+            "url": None,
+            "allowed": True,
+            "crawl_delay_seconds": None,
+            "sitemaps": robots_sitemaps,
+            "reused_from_engine": True,
+        }
+    elif discovery.get("robots"):
         robots_url = urljoin(origin, "/robots.txt")
         try:
             robots_response = http_fetcher(robots_url, headers, limits.get("timeout_seconds", 10))
@@ -1047,6 +1061,7 @@ async def _http_strategy_result(
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
+    robots_sitemaps: list[str] | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
@@ -1274,6 +1289,7 @@ async def _http_strategy_result(
         diagnostics.update(
             await _discovery_diagnostics(
                 normalized_url=normalized_url,
+                engine_robots_sitemaps=robots_sitemaps,
                 html=html,
                 policy=policy,
                 headers=request_headers,

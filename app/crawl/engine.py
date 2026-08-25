@@ -301,6 +301,7 @@ async def _execute_crawl_chain(
     scheduler: DomainScheduler | None = None,
     domain: str = "",
     caller_validators: dict[str, str] | None = None,
+    robots_sitemaps: list[str] | None = None,
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: EngineCrawlResult | None = None
@@ -318,6 +319,7 @@ async def _execute_crawl_chain(
                 cache=cache,
                 content_cache=content_cache,
                 caller_validators=caller_validators,
+                robots_sitemaps=robots_sitemaps,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -387,6 +389,7 @@ async def _execute_crawl_chain(
                     strategy=HTTP_CFFI_IMPERSONATE, policy=retry_policy,
                     http_fetcher=cffi_fetcher, cache=cache,
                     content_cache=content_cache, caller_validators=caller_validators,
+                    robots_sitemaps=robots_sitemaps,
                 )
                 attempts.extend(retry_result.attempted_strategies)
                 if retry_result.status == "success" and retry_result.quality_score > 0:
@@ -539,6 +542,9 @@ async def crawl_request(
         index = job.index
         original_url = job.original_url
         normalized_url = job.normalized_url
+        robots_sitemaps = _robots_sitemaps_for(
+            f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}"
+        )
         result = await _execute_crawl_chain(
             original_url=original_url,
             normalized_url=normalized_url,
@@ -554,19 +560,20 @@ async def crawl_request(
             or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
             scheduler=scheduler,
             domain=job.domain,
+            robots_sitemaps=robots_sitemaps,
             caller_validators=_validators_for(job),
         )
         return index, result
 
     # --- robots.txt parsing + filtering helpers (#12) ---
-    robots_cache: dict[str, tuple[float, list[tuple[bool, str]]]] = {}
+    robots_cache: dict[str, tuple[float, list[tuple[bool, str]], list[str]]] = {}
     robots_ttl = 600.0
 
     def _purge_robots_cache(now: float | None = None) -> int:
         """Remove expired entries from robots cache; return number removed."""
         if now is None:
             now = time.monotonic()
-        expired = [origin for origin, (expires, _) in robots_cache.items() if expires <= now]
+        expired = [origin for origin, (expires, _, _) in robots_cache.items() if expires <= now]
         for origin in expired:
             del robots_cache[origin]
         return len(expired)
@@ -618,29 +625,62 @@ async def crawl_request(
             return best_rules
         return star_rules if star_rules is not None else []
 
-    async def _fetch_robots_rules(origin: str) -> list[tuple[bool, str]]:
+    def _parse_robots_sitemaps(text: str) -> list[str]:
+        """Extract ``Sitemap:`` directive URLs from a robots.txt body (#4).
+
+        These are the sitemap locations discovery diagnostics would otherwise
+        re-fetch from /robots.txt; caching them here lets the engine pass them
+        down so discovery skips its own robots fetch.
+        """
+        out: list[str] = []
+        for raw in text.lstrip("\ufeff").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            key, _, value = line.partition(":")
+            if key.strip().lower() == "sitemap" and value.strip():
+                out.append(value.strip())
+        return out
+
+    async def _fetch_robots_rules(origin: str) -> tuple[list[tuple[bool, str]], list[str]]:
         now = time.monotonic()
         # Periodically purge expired entries to prevent unbounded growth
         if len(robots_cache) > ROBOTS_CACHE_MAX_ENTRIES:
             _purge_robots_cache(now)
         cached = robots_cache.get(origin)
         if cached and cached[0] > now:
-            return cached[1]
+            return cached[1], cached[2]
         rules: list[tuple[bool, str]] = []
+        sitemaps: list[str] = []
         robots_url = urljoin(origin, "/robots.txt")
         body = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
         if body is not None:
             rules = _parse_robots_rules(body)
-        robots_cache[origin] = (now + robots_ttl, rules)
+            sitemaps = _parse_robots_sitemaps(body)
+        robots_cache[origin] = (now + robots_ttl, rules, sitemaps)
         # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
         # that discovers thousands of unique, still-fresh domains).
         _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
-        return rules
+        return rules, sitemaps
 
     async def _robots_allows_target(target_url: str) -> bool:
         parsed = urlparse(target_url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        return _robots_allows(target_url, await _fetch_robots_rules(origin))
+        rules, _sitemaps = await _fetch_robots_rules(origin)
+        return _robots_allows(target_url, rules)
+
+    def _robots_sitemaps_for(origin: str) -> list[str] | None:
+        """Return cached robots Sitemap URLs for an origin, or ``None`` if the
+        engine never fetched robots.txt for it (e.g. respect_robots=False).
+
+        Returning ``None`` (not ``[]``) matters: an empty list would tell
+        discovery "robots was fetched, no sitemaps", preventing its own fetch,
+        while ``None`` lets discovery fetch robots itself when needed (#4).
+        """
+        cached = robots_cache.get(origin)
+        if cached and cached[0] > time.monotonic():
+            return list(cached[2])
+        return None
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
         return _skipped_engine_result(
