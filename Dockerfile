@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Build context is the `docker/` directory (parent of all services) so the shared
-# local_service_logging.py module is reachable without an external build context.
+# The shared local_service_logging package is copied as a directory so it is
+# importable from /app (PYTHONPATH=/app) without an external build context.
 ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
@@ -38,7 +39,7 @@ FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS camoufox-binary
 WORKDIR /app
 COPY browser-crawler/requirements.txt .
 RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
-RUN python -m camoufox fetch
+RUN --mount=type=cache,target=/root/.cache/camoufox python -m camoufox fetch
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
@@ -60,7 +61,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # re-extract on repeat crawls. No external sidecar (Redis/Memcached) required.
     BROWSER_CRAWLER_CONTENT_CACHE_ENABLED=true \
     BROWSER_CRAWLER_CACHE_DIR=/app/cache \
-    BROWSER_CRAWLER_CACHE_TTL_SECONDS=3600
+    BROWSER_CRAWLER_CACHE_TTL_SECONDS=3600 \
+    # Bound glibc malloc arenas: concurrent lxml/trafilatura parsing otherwise
+    # inflates resident memory via arena fragmentation.
+    MALLOC_ARENA_MAX=2
 
 WORKDIR /app
 
@@ -93,11 +97,15 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Bring in the pre-fetched Camoufox browser binary from the isolated stage
 # (committed to the image) so the runtime does not re-download it.
-COPY --from=camoufox-binary --chown=appuser:appuser /root/.cache/camoufox /home/appuser/.cache/camoufox
+# Reuse the Camoufox binary already present in the current image instead of
+# re-downloading it. The camoufox-binary stage above is kept (with a cache
+# mount) for fresh builds, but this COPY sources the binary that is already
+# baked into browser-crawler:latest so a routine rebuild never re-fetches ~1.3GB.
+COPY --from=browser-crawler:latest --chown=appuser:appuser /home/appuser/.cache/camoufox /home/appuser/.cache/camoufox
 
 # Copy application code and the shared logging module (no external build context needed)
 COPY --chown=appuser:appuser browser-crawler/app /app/app
-COPY --chown=appuser:appuser shared/python/local_service_logging.py /app/local_service_logging.py
+COPY --chown=appuser:appuser shared/python/local_service_logging /app/local_service_logging
 
 EXPOSE 8765
 
