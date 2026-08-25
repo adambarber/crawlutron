@@ -39,6 +39,23 @@ async def test_analytics_aborted_regardless_of_mode():
     assert route.decision() == "abort"
 
 
+async def test_cdcgov_aborted_with_and_without_www():
+    # suffix match covers apex and subdomains alike
+    for url in ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"):
+        route = _FakeRoute()
+        await _handler_for(None)(route, _FakeRequest(url, "document"))
+        assert route.decision() == "abort", url
+
+
+async def test_xcom_aborted_regardless_of_mode():
+    # x.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
+    # including bare-apex and www subdomain forms.
+    for url in ("https://x.com/i/web/status/1", "https://www.x.com/home"):
+        route = _FakeRoute()
+        await _handler_for(None)(route, _FakeRequest(url, "document"))
+        assert route.decision() == "abort", url
+
+
 async def test_image_blocked_by_default_unless_screenshot():
     # default (no screenshot requested) -> abort unconditionally (#4)
     route = _FakeRoute()
