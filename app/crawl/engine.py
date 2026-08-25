@@ -51,6 +51,9 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
+from app.memory_pressure import MemoryGate
+
+_memory_gate = MemoryGate()
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
@@ -912,11 +915,18 @@ async def crawl_request(
             # page budget) so discovered links are fetched *through the scheduler*
             # concurrently instead of strictly one-by-one. Without this the
             # recursive crawl ignores global_concurrency entirely.
+            # #self-tuning: ride at the memory target instead of OOMing.
+            # Above the hard ceiling dispatch pauses until usage drains; in the
+            # soft zone batches shrink proportionally.
+            await _memory_gate.wait_while_saturated()
+            mem_scale = _memory_gate.batch_scale_factor()
             batch_size = min(
                 len(frontier),
                 max(1, active_settings.global_concurrency * ENGINE_BATCH_CONCURRENCY_MULTIPLIER),
                 max(1, max_pages - page_count),
             )
+            if mem_scale < 1.0:
+                batch_size = max(1, int(batch_size * mem_scale))
             batch = [frontier.popleft() for _ in range(batch_size)]
 
             allowed_jobs: list[tuple[int, CrawlTask]] = []
