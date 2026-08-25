@@ -50,6 +50,19 @@ class TestScopeFilter:
         links = [DiscoveredLink(url="https://a.com/x", normalized_url="https://a.com/x", text="x", rel=[], source_url="https://a.com/", host="a.com", is_same_host=True)]
         assert _filter_links_by_scope(make_result(links), r"([invalid").discovered_link_count == 1
 
+    def test_replace_keeps_field_references(self):
+        # #17: scope filtering must use dataclasses.replace (field references
+        # shared, no deep copy) rather than asdict, which deep-copies every
+        # field (html/text/markdown) on every successful result in a crawl.
+        links = [
+            DiscoveredLink(url="https://example.com/x", normalized_url="https://example.com/x", text="x", rel=[], source_url="https://example.com/", host="example.com", is_same_host=True),
+        ]
+        res = make_result(links)
+        filtered = _filter_links_by_scope(res, r"^https://example\.com")
+        assert filtered.html is res.html
+        assert filtered.text is res.text
+        assert filtered.discovered_links[0] is res.discovered_links[0]
+
 
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):

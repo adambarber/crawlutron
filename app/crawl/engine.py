@@ -16,7 +16,7 @@ from collections import deque
 import time
 import uuid
 from urllib.parse import urljoin, urlparse
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 from app.classify import classify_page_with_evidence
@@ -172,14 +172,15 @@ def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -
     # Bound the number of links scanned so a huge link set cannot amplify cost.
     links = result.discovered_links[:_MAX_SCOPE_LINKS]
     filtered = [link for link in links if pattern.search(link.normalized_url)]
-    return EngineCrawlResult(
-        **{
-            **asdict(result),
-            "discovered_links": filtered,
-            "discovered_link_count": len(filtered),
-            "discovered_links_truncated": result.discovered_links_truncated
-            and len(filtered) < result.discovered_link_count,
-        }
+    # #17: use dataclasses.replace (shares field references) instead of asdict,
+    # which deep-copies every field (html/text/markdown + the full link list)
+    # on every successful result in a crawl.
+    return replace(
+        result,
+        discovered_links=filtered,
+        discovered_link_count=len(filtered),
+        discovered_links_truncated=result.discovered_links_truncated
+        and len(filtered) < result.discovered_link_count,
     )
 
 
