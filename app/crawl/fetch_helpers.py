@@ -61,18 +61,23 @@ async def fetch_sitemap_urls(
     *,
     max_depth: int = _MAX_SITEMAP_DEPTH,
     max_urls: int = _MAX_SITEMAP_URLS,
-) -> set[str]:
-    """Recursively resolve a sitemap URL into page URLs.
+) -> set[tuple[str, str | None]]:
+    """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
 
     Handles sitemap indexes (``<sitemapindex>`` pointing at child sitemaps) up
     to ``max_depth`` levels, and caps total collected URLs at ``max_urls`` so a
     hostile or enormous index cannot run away.
+
+    Each collected entry is a ``(url, lastmod)`` tuple where ``lastmod`` is the
+    sitemap ``<lastmod>`` for that URL when present (used to skip re-fetching
+    unchanged pages, #1); it is ``None`` when the entry has no ``<lastmod>``.
     """
     import re as _re
 
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
+    lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
     visited: set[str] = set()
-    page_urls: set[str] = set()
+    page_urls: set[tuple[str, str | None]] = set()
 
     async def recurse(current_url: str, depth: int) -> None:
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
@@ -94,7 +99,15 @@ async def fetch_sitemap_urls(
                     if t not in done:
                         t.cancel()
             return
-        page_urls.update(locs)
+        # Page sitemap: associate each <loc> with its neighboring <lastmod>.
+        # Use byte offsets so this works whether entries are wrapped in <url>
+        # blocks or listed as bare <loc> elements (some CMS emit the latter).
+        loc_items = [(m.start(), m.group(1)) for m in loc_pattern.finditer(text)]
+        lastmod_items = [(m.start(), m.group(1).strip()) for m in lastmod_re.finditer(text)]
+        for idx, (pos, loc) in enumerate(loc_items):
+            next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
+            lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
+            page_urls.add((loc, lastmod))
 
     cached = _SITEMAP_CACHE.get(sitemap_url)
     now = time.monotonic()
@@ -104,7 +117,7 @@ async def fetch_sitemap_urls(
         await asyncio.gather(*[recurse(sitemap_url, 0)])
     except Exception:
         pass
-    _SITEMAP_CACHE[sitemap_url] = (now, set(page_urls))
+    _SITEMAP_CACHE[sitemap_url] = (now, list(page_urls))
     if len(_SITEMAP_CACHE) > 1000:
         oldest = sorted(_SITEMAP_CACHE.items(), key=lambda x: x[1][0])[:200]
         for k, _v in oldest:

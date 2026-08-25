@@ -1032,9 +1032,12 @@ async def _discovery_diagnostics(
         from app.crawl.fetch_helpers import fetch_sitemap_urls
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
             try:
-                # Recursively resolves sitemap indexes down to page URLs.
+                # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
                 found_locs = await fetch_sitemap_urls(http_fetcher, sitemap_url, limits.get("timeout_seconds", 10))
-                sitemap_urls.extend(found_locs)
+                for loc, lastmod in found_locs:
+                    sitemap_urls.append(loc)
+                    if lastmod:
+                        diagnostics.setdefault("sitemap_lastmod", {})[loc] = lastmod
             except Exception:
                 continue
     feeds: list[str] = []

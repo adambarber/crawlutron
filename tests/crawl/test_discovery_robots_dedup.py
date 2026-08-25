@@ -17,7 +17,7 @@ async def _fake_fetcher(calls, url, headers, timeout, max_content_length=50 * 10
     if url.endswith("/robots.txt"):
         return _resp(url, "User-agent: *\nDisallow: /secret\n", "text/plain")
     if "sitemap" in url:
-        return _resp(url, "<urlset><loc>https://x.test/p1</loc></urlset>", "application/xml")
+        return _resp(url, "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>", "application/xml")
     return _resp(url, "<html></html>", "text/html")
 
 
@@ -40,6 +40,8 @@ async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
     # sitemap still fetched + parsed
     assert "https://x.test/sitemap.xml" in calls
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
+    # lastmod is surfaced for downstream skip-if-unchanged logic (#1)
+    assert diag.get("sitemap_lastmod") == {"https://x.test/p1": "2024-05-05"}
 
 
 async def test_discovery_fetches_robots_when_no_sitemaps_passed():

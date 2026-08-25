@@ -704,9 +704,9 @@ async def crawl_request(
             # Recursive: follows sitemap indexes down to page URLs.
             found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
             normalized_seeds: list[str] = []
-            for seed in found:
+            for loc, _lastmod in found:
                 try:
-                    normalized_seed = normalize_public_http_url(seed)
+                    normalized_seed = normalize_public_http_url(loc)
                 except ValueError:
                     continue
                 if scope_pattern is not None and not scope_pattern.search(normalized_seed):
