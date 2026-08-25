@@ -559,7 +559,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
                         return _http_413(url, response, started)
                 encoding = response.headers.get("content-encoding", "")
                 try:
-                    body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
+                    body = _decompress_body(bytes(raw), encoding, max_output_bytes=max_content_length)
                 except DecompressionTooLargeError:
                     return _http_413(url, response, started)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}

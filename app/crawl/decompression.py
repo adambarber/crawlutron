@@ -29,7 +29,7 @@ def _decompress_streaming(make_fileobj, compressed: bytes, max_output_bytes: int
     return bytes(out)
 
 
-def decompress_body(body: bytes | bytearray | memoryview, content_encoding: str, *, max_output_bytes: int | None = None) -> bytes:
+def decompress_body(body: bytes, content_encoding: str, *, max_output_bytes: int | None = None) -> bytes:
     """Decompress response body based on Content-Encoding header.
 
     Exception-safe: if a decoder is unavailable or the body was already
