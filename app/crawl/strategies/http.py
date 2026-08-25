@@ -375,6 +375,50 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
     return False
 
 
+# Per-host DNS resolution cache (#3). Crawling a single host thousands of times
+# would otherwise issue a blocking socket.getaddrinfo per fetch. The TTL is
+# deliberately short so DNS changes (and the rebinding window for SSRF) stay
+# bounded; the SSRF path re-validates resolved IPs on every fresh resolution.
+_DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
+_DNS_TTL = 60.0
+_DNS_CACHE_MAX = 4096
+
+
+def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
+    """Resolve a hostname to its IPs with a short TTL cache.
+
+    Returns the raw IP list from socket.getaddrinfo (may include IPv6). Raises
+    socket.gaierror on resolution failure.
+
+    Caching avoids a blocking resolver call on every fetch in high-concurrency
+    batches. The pinning path (``_resolve_and_pin_host``) passes
+    ``use_cache=False`` so the connection always pins a *freshly* resolved,
+    freshly re-validated public IP -- a cached pin would let a DNS rebind
+    inside the TTL window bypass the SSRF check (TOCTOU). The validation-only
+    path (``_check_ssrf_protection``) may use the cache: it only needs to know
+    the host is safe to connect to, and the actual connection re-validates.
+    """
+    if use_cache:
+        now = time.monotonic()
+        cached = _DNS_CACHE.get(hostname)
+        if cached and (now - cached[0]) < _DNS_TTL:
+            return cached[1]
+    addrinfo = socket.getaddrinfo(hostname, None)
+    ips = [entry[4][0] for entry in addrinfo]
+    if use_cache:
+        # Only the validation path populates the cache. The pinning path
+        # resolves fresh and must never persist an IP here -- otherwise a
+        # private/rebound IP seen during pinning would poison the shared
+        # validation cache and let the check later treat it as safe.
+        _DNS_CACHE[hostname] = (time.monotonic(), ips)
+        if len(_DNS_CACHE) > _DNS_CACHE_MAX:
+            # Soft cap: drop the whole cache rather than letting it grow
+            # unbounded across a crawl that touches many unique hosts. A brief
+            # re-resolution burst is acceptable and keeps memory predictable.
+            _DNS_CACHE.clear()
+    return ips
+
+
 def _check_ssrf_protection(url: str) -> None:
     """Resolve the URL hostname and abort if any IP is private/loopback.
 
@@ -388,15 +432,14 @@ def _check_ssrf_protection(url: str) -> None:
     if not hostname:
         return
     try:
-        addrinfo = socket.getaddrinfo(hostname, None)
+        ips = _resolve_ips(hostname)
     except socket.gaierror:
         # An unresolvable hostname is not a valid public target; fail closed
         # rather than silently allowing it. Previously this let unresolvable
         # hostnames bypass the private-IP block and reach loopback via the pin
         # fallback in _resolve_and_pin_host.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}")
-    for entry in addrinfo:
-        ip = entry[4][0]
+    for ip in ips:
         if _is_private_or_loopback_ip(ip):
             raise ValueError(f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}")
 
@@ -420,14 +463,16 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
         # fetch/webhook to loopback and broke virtual-host routing.
         return hostname, hostname
     try:
-        addrinfo = socket.getaddrinfo(hostname, None)
+        # Resolve FRESH (no cache): the pinned IP governs the actual connection
+        # and must be re-validated against the SSRF blocklist on every call so a
+        # DNS rebind inside the cache TTL cannot bypass the check (TOCTOU).
+        ips = _resolve_ips(hostname, use_cache=False)
     except socket.gaierror:
         # Do NOT fall back to loopback. Returning the original hostname makes
         # the HTTP client attempt resolution itself and fail with a connection
         # error instead of silently connecting to 127.0.0.1 (SSRF bypass, F9).
         return hostname, hostname
-    for entry in addrinfo:
-        ip = entry[4][0]
+    for ip in ips:
         if not _is_private_or_loopback_ip(ip):
             return hostname, ip
     # No public IP found (should have been caught above) -> fail safe
