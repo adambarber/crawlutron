@@ -1292,7 +1292,11 @@ async def _http_strategy_result(
             "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
             "content_metrics": _content_metrics(text, html),
         }
-        diagnostics.update(_html_diagnostics(html, response.final_url))
+        # #2: _html_diagnostics (frames/forms via an lxml parse) is only needed
+        # for structural discovery. Skip it when discovery is not requested so
+        # content-only crawls avoid a redundant HTML parse per page.
+        if policy.get("discovery"):
+            diagnostics.update(_html_diagnostics(html, response.final_url))
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
@@ -1341,7 +1345,7 @@ async def _http_strategy_result(
             # can easily exceed the length threshold.
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
-            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 250)) if status == "success" else ([], 0, False)
+            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 100)) if status == "success" else ([], 0, False)
         )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]

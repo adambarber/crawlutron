@@ -3,6 +3,7 @@
 import pytest
 
 from app.crawl.cache import HttpCache
+from app.models import HttpFetchResult
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import (
     _default_http_fetcher,
@@ -32,6 +33,30 @@ def http_policy(**overrides):
 
 
 class TestHttpStrategy:
+    async def test_html_diagnostics_skipped_without_discovery(self):
+        # #2: _html_diagnostics (frames/forms via lxml parse) must be skipped
+        # when discovery is not requested, to avoid a redundant HTML parse on
+        # every page of a content-only crawl.
+        html = "<html><body><iframe src='/x'></iframe></body></html>"
+
+        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+            return HttpFetchResult(
+                url=url, final_url=url, status_code=200,
+                headers={"content-type": "text/html"}, body=html.encode("utf-8"), elapsed_ms=1,
+            )
+
+        kwargs = dict(
+            original_url="http://x.test/", normalized_url="http://x.test/",
+            strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
+            cache=HttpCache(), content_cache=None,
+        )
+        # discovery omitted -> no frames in diagnostics
+        r1 = await _run(policy=http_policy(discovery=None), **kwargs)
+        assert "frames" not in r1.diagnostics
+        # discovery requested -> frames computed
+        r2 = await _run(policy=http_policy(discovery={"sitemaps": True}), **kwargs)
+        assert "frames" in r2.diagnostics
+
     async def test_http_strategy_extracts_html_markdown_and_links(self, base_url):
         result = await _run(
             original_url=f"{base_url}/",
