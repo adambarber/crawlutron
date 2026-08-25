@@ -12,6 +12,9 @@ import asyncio
 import inspect
 import re
 import functools
+import json
+import os
+import tempfile
 from collections import deque
 import time
 from datetime import datetime, timezone
@@ -523,6 +526,77 @@ def _seed_is_fresh(
     return False
 
 
+_SPILL_PREFIX = "bc-spill-"
+
+
+class _ResultSpill:
+    """Append-only NDJSON spill of page results (#2-stream).
+
+    Each completed page is serialized to disk the moment its batch finishes, so
+    peak RSS scales with batch size instead of total pages. RAM keeps only the
+    running count; the response is reassembled by reading the file back in
+    index order. Auto-created files are deleted on close; stale spills from
+    killed runs are garbage-collected when the next crawl starts.
+    """
+
+    def __init__(self, path: str | None = None, *, gc_age_seconds: float = 3600):
+        self._own = path is None
+        if self._own:
+            fd, path = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
+            self._fh = os.fdopen(fd, "w", encoding="utf-8")
+        else:
+            self._fh = open(path, "w", encoding="utf-8")
+        self.path = path
+        self.count = 0
+        self._gc_stale_spills(gc_age_seconds)
+
+    def _gc_stale_spills(self, max_age: float) -> None:
+        now = time.time()
+        try:
+            names = os.listdir(tempfile.gettempdir())
+        except OSError:
+            return
+        for name in names:
+            if not name.startswith(_SPILL_PREFIX):
+                continue
+            candidate = os.path.join(tempfile.gettempdir(), name)
+            try:
+                if now - os.path.getmtime(candidate) > max_age:
+                    os.unlink(candidate)
+            except OSError:
+                continue
+
+    def write(self, index: int, result: EngineCrawlResult) -> None:
+        self._fh.write(json.dumps({"i": index, "r": to_dict(result)}) + "\n")
+        self.count += 1
+
+    def load_ordered(self) -> list[dict[str, Any]]:
+        """Reassemble all spilled results in submission order."""
+        self._fh.flush()
+        rows: list[tuple[int, dict[str, Any]]] = []
+        with open(self.path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    entry = json.loads(line)
+                    rows.append((entry["i"], entry["r"]))
+        rows.sort(key=lambda pair: pair[0])
+        return [payload for _, payload in rows]
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            pass
+        if self._own:
+            try:
+                os.unlink(self.path)
+            except OSError:
+                pass
+
+
+
+
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -534,6 +608,7 @@ async def crawl_request(
     content_cache: ContentCache | None = None,
     webhook_url: str | None = None,
     shutdown_event: asyncio.Event | None = None,
+    spill_path: str | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
@@ -791,12 +866,16 @@ async def crawl_request(
         _, result = await run_job(job)
         return result
 
+    # #2-stream: serialize each page result to disk as its batch completes so
+    # peak memory scales with batch size, not total pages. RAM never holds the
+    # full result set; the response is reassembled from the spill at the end.
+    spill = _ResultSpill(spill_path)
+
     if not recursive:
-        by_index: dict[int, EngineCrawlResult] = {}
         allowed_jobs: list[CrawlTask] = []
         for job in jobs:
             if respect_robots and not await _robots_allows_target(job.normalized_url):
-                by_index[job.index] = _robots_disallowed_result(job)
+                spill.write(job.index, _robots_disallowed_result(job))
             else:
                 allowed_jobs.append(job)
 
@@ -806,9 +885,8 @@ async def crawl_request(
             # the whole crawl when the caller did not ask for them (#1).
             if not include_html:
                 result = replace(result, html=None, text=None)
-            by_index[job.index] = result
+            spill.write(job.index, result)
     else:
-        by_index: dict[int, EngineCrawlResult] = {}
         visited: set[str] = set()
         frontier: "deque[tuple[int, CrawlTask]]" = deque([(0, job) for job in jobs])
         next_index = len(jobs)
@@ -841,7 +919,7 @@ async def crawl_request(
                 if job.normalized_url in visited:
                     continue
                 if respect_robots and not await _robots_allows_target(job.normalized_url):
-                    by_index[job.index] = _robots_disallowed_result(job)
+                    spill.write(job.index, _robots_disallowed_result(job))
                     visited.add(job.normalized_url)
                     page_count += 1
                     continue
@@ -859,7 +937,7 @@ async def crawl_request(
                 # for the whole crawl when the caller did not ask for them (#1).
                 if not include_html:
                     result = replace(result, html=None, text=None)
-                by_index[job.index] = result
+                spill.write(job.index, result)
                 page_count += 1
                 if depth >= max_depth:
                     continue
@@ -883,15 +961,16 @@ async def crawl_request(
                     )
                     next_index += 1
 
-    ordered_results = [by_index[index] for index in sorted(by_index)]
     response = {
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
         "submitted_count": len(urls),
         # Report the service's own schema version: echoing the caller-supplied
         # value would let responses claim a contract the service never ran.
         "policy_schema_version": POLICY_SCHEMA_VERSION,
-        "results": [to_dict(result) for result in ordered_results],
+        # #2-stream: reassembled from the on-disk spill in submission order.
+        "results": spill.load_ordered(),
     }
     if webhook_url is not None:
         response["webhook_url"] = webhook_url
+    spill.close()
     return response
