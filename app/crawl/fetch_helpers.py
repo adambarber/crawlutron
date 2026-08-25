@@ -9,14 +9,23 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
+from collections import OrderedDict
 from typing import Any
 
+from app.constants import (
+    DISCOVERY_BODY_MAX_BYTES,
+    SITEMAP_CACHE_EVICT_BATCH,
+    SITEMAP_CACHE_MAX_ENTRIES,
+    SITEMAP_CACHE_TTL_SECONDS,
+    SITEMAP_FANOUT_TIMEOUT_SECONDS,
+    SITEMAP_MAX_DEPTH,
+    SITEMAP_MAX_URLS,
+)
 from app.crawl.strategies.http import _decode_body, _decompress_body
 
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
-_MAX_DISCOVERY_BODY_BYTES = 8 * 1024 * 1024
 
 
 async def _fetch_and_decode(
@@ -38,7 +47,7 @@ async def _fetch_and_decode(
                 body = _decompress_body(
                     resp.body,
                     resp_headers.get("content-encoding", ""),
-                    max_output_bytes=_MAX_DISCOVERY_BODY_BYTES,
+                    max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
                 )
             except DecompressionTooLargeError:
                 return None
@@ -48,10 +57,7 @@ async def _fetch_and_decode(
     return None
 
 
-_MAX_SITEMAP_DEPTH = 3
-_SITEMAP_CACHE_TTL = 3600.0
-_SITEMAP_CACHE: "dict[str, tuple[float, list, str | None, str | None]]" = {}
-_MAX_SITEMAP_URLS = 10_000
+_SITEMAP_CACHE: "OrderedDict[str, tuple[float, list, str | None, str | None]]" = OrderedDict()
 
 
 async def fetch_sitemap_urls(
@@ -59,8 +65,8 @@ async def fetch_sitemap_urls(
     sitemap_url: str,
     timeout_seconds: int,
     *,
-    max_depth: int = _MAX_SITEMAP_DEPTH,
-    max_urls: int = _MAX_SITEMAP_URLS,
+    max_depth: int = SITEMAP_MAX_DEPTH,
+    max_urls: int = SITEMAP_MAX_URLS,
     conditional: dict[str, str] | None = None,
 ) -> set[tuple[str, str | None]]:
     """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
@@ -100,7 +106,7 @@ async def fetch_sitemap_urls(
                     body = _decompress_body(
                         resp.body,
                         rh.get("content-encoding", ""),
-                        max_output_bytes=_MAX_DISCOVERY_BODY_BYTES,
+                        max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
                     )
                 except DecompressionTooLargeError:
                     return None, rh.get("etag"), rh.get("last-modified"), False
@@ -120,6 +126,7 @@ async def fetch_sitemap_urls(
             # 304: reuse the previously resolved URLs for this exact URL.
             prev = _SITEMAP_CACHE.get(current_url)
             if prev:
+                _SITEMAP_CACHE.move_to_end(current_url)
                 for entry in prev[1]:
                     page_urls.add(entry)
             return etag, last_modified
@@ -133,7 +140,7 @@ async def fetch_sitemap_urls(
             if pending:
                 # Bounded fan-out: stragglers are cancelled so one slow server
                 # cannot gate the entire resolution.
-                done, _ = await asyncio.wait(pending, timeout=45)
+                done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
                 for t in pending:
                     if t not in done:
                         t.cancel()
@@ -151,8 +158,13 @@ async def fetch_sitemap_urls(
 
     cached = _SITEMAP_CACHE.get(sitemap_url)
     now = time.monotonic()
-    if cached and now - cached[0] < _SITEMAP_CACHE_TTL:
+    if cached is not None and now - cached[0] < SITEMAP_CACHE_TTL_SECONDS:
+        # Fresh: serve directly and mark recently used (LRU).
+        _SITEMAP_CACHE.move_to_end(sitemap_url)
         return set(cached[1])
+    # Expired (or absent): fall through and re-fetch. Leave the entry in the
+    # cache so a 304 response in recurse() can still reuse its URLs (do NOT pop
+    # it here, or the conditional 304 reuse below would lose the cached set).
     # On a cache expiry, replay the prior ETag/Last-Modified as a conditional
     # request unless the caller supplied their own headers.
     if conditional is None and cached:
@@ -165,9 +177,11 @@ async def fetch_sitemap_urls(
         root_etag, root_lm = results[0]
     except Exception:  # noqa: BLE001
         root_etag, root_lm = (cached[2] if cached else None), (cached[3] if cached else None)
+    # Store with LRU recency and evict the least-recently-used entries
+    # past the cap. OrderedDict gives O(1) move-to-end on access and
+    # O(overflow) eviction without the previous full sort of the whole
+    # cache on every overflow (B4/B5).
     _SITEMAP_CACHE[sitemap_url] = (now, list(page_urls), root_etag, root_lm)
-    if len(_SITEMAP_CACHE) > 1000:
-        oldest = sorted(_SITEMAP_CACHE.items(), key=lambda x: x[1][0])[:200]
-        for k, _v in oldest:
-            _SITEMAP_CACHE.pop(k, None)
+    while len(_SITEMAP_CACHE) > SITEMAP_CACHE_MAX_ENTRIES:
+        _SITEMAP_CACHE.popitem(last=False)
     return page_urls
