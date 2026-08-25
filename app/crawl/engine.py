@@ -49,6 +49,7 @@ from app.constants import (
     HTTP_STRATEGIES,
     BROWSER_STRATEGIES,
     is_analytics_host,
+    is_document_url,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -861,6 +862,10 @@ async def crawl_request(
     # recursive loop never applies a raw re.search (ReDoS) to every link.
     scope_pattern = _compile_scope_regex_safe(scope_regex)
     recursive = max_depth > 0
+    # Document bodies (PDFs etc.) yield no further HTML links: unless the
+    # caller explicitly wants file contents, expansion records their URLs but
+    # never downloads them.
+    want_document_bodies = policy.get("extraction", DEFAULT_EXTRACTION) == EXTRACTION_DOCUMENT
 
     async def _worker(job: CrawlTask) -> EngineCrawlResult:
         _, result = await run_job(job)
@@ -946,6 +951,8 @@ async def crawl_request(
                         continue
                     if is_analytics_host(link.normalized_url):
                         # Hard-skip hosts are recorded on pages but never crawled.
+                        continue
+                    if not want_document_bodies and is_document_url(link.normalized_url):
                         continue
                     if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
                         continue

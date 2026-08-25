@@ -66,3 +66,40 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
     recorded = {l["normalized_url"] for l in root["discovered_links"]}
     assert "https://www.pinterest.com/pin/1" in recorded
     assert "https://x.com/mayor" in recorded
+
+
+async def test_document_urls_recorded_but_not_fetched_by_default():
+    # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
+    # but never spend bandwidth downloading them during URL discovery.
+    pages = {
+        "/": (200, '<html><body><a href="/local">l</a>'
+                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
+        "/local": (200, "<html>l</html>", "text/html"),
+    }
+    fetcher, fetched = _recording_fetcher(pages)
+    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
+    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    crawled = {r["normalized_url"] for r in out["results"]}
+    assert crawled == {"http://example.com", "http://example.com/local"}
+    assert not any(u.endswith(".pdf") for u in fetched)
+    root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
+    recorded = {l["normalized_url"] for l in root["discovered_links"]}
+    assert "http://example.com/reports/2024-minutes.pdf" in recorded
+
+
+async def test_document_urls_fetched_when_extraction_document_requested():
+    """Callers who explicitly want document contents still get them."""
+    pages = {
+        "/": (200, '<html><body><a href="/local">l</a>'
+                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
+        "/local": (200, "<html>l</html>", "text/html"),
+        "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf"),
+    }
+    fetcher, fetched = _recording_fetcher(pages)
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": 2, "max_pages": 10}, "extraction": "document"},
+    }
+    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    crawled = {r["normalized_url"] for r in out["results"]}
+    assert "http://example.com/reports/2024-minutes.pdf" in crawled

@@ -187,3 +187,23 @@ def is_analytics_host(url: str) -> bool:
     except Exception:
         return False
     return any(host == s or host.endswith("." + s) for s in ANALYTICS_HOST_SUFFIXES)
+
+
+# --- Non-HTML resource extensions ---
+# Documents yield no further HTML links, so URL-discovery crawls record their
+# URLs but skip downloading them. Callers requesting EXTRACTION_DOCUMENT opt
+# back in to fetching file contents.
+DOCUMENT_URL_EXTENSIONS = frozenset(
+    {".pdf", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".rtf"}
+)
+
+
+def is_document_url(url: str) -> bool:
+    """True when ``url``'s path ends with a known document extension."""
+    from urllib.parse import urlparse
+
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        return False
+    return path.endswith(tuple(DOCUMENT_URL_EXTENSIONS))
