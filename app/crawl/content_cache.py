@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -55,6 +56,14 @@ class ContentCache:
         # (A warm restart with pre-existing files repopulates the index lazily
         # on first get/set of each key; prune() reconciles disk vs index.)
         self._index: "OrderedDict[str, Path]" = OrderedDict()
+        # In-memory value cache: keep small values resident so repeated reads
+        # of a hot URL never touch disk. Bounded LRU (max 100 entries) of
+        # entries whose shallow size is < 1MB. The on-disk file remains the
+        # source of truth; this is purely a read accelerator. Entries store a
+        # (expires, value) tuple so get() can honor TTL without a disk read.
+        self._memory_cache: "OrderedDict[str, tuple[float | None, Any]]" = OrderedDict()
+        self._MEMORY_CACHE_MAX = 100
+        self._MEMORY_CACHE_MAX_SIZE = 1024 * 1024
 
     # -- key handling -------------------------------------------------------
     @staticmethod
@@ -82,6 +91,8 @@ class ContentCache:
                     old_path.unlink()
                 except OSError:
                     pass
+                # Keep the memory value cache consistent with evicted disk keys.
+                self._memory_cache.pop(_key, None)
 
     # -- public API ---------------------------------------------------------
     def _read_envelope(self, key: str) -> dict[str, Any] | None:
@@ -121,7 +132,23 @@ class ContentCache:
             return envelope
 
     def get(self, key: str, ttl: int | None = None) -> Any | None:
-        """Return the cached value if present and unexpired, else ``None``."""
+        """Return the cached value if present and unexpired, else ``None``.
+
+        Checks the in-memory value cache first; on a miss (or an expired memory
+        entry) it falls back to the on-disk envelope (#7).
+        """
+        with self._lock:
+            if key in self._memory_cache:
+                expires, value = self._memory_cache[key]
+                if expires is not None and self.clock() > expires:
+                    self._memory_cache.pop(key, None)
+                else:
+                    self._memory_cache.move_to_end(key)
+                    # Keep disk-index LRU recency in sync so eviction still
+                    # protects recently used entries even when served from RAM.
+                    if key in self._index:
+                        self._index.move_to_end(key)
+                    return value
         envelope = self._read_envelope(key)
         return envelope.get("value") if envelope is not None else None
 
@@ -150,6 +177,15 @@ class ContentCache:
             path.write_text(json.dumps(envelope))
             self._index[key] = path
             self._index.move_to_end(key)
+            # Mirror small values into the in-memory value cache (#7).
+            if sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+                self._memory_cache[key] = (expires, value)
+                self._memory_cache.move_to_end(key)
+                if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
+                    self._memory_cache.popitem(last=False)
+            else:
+                # A large value must not linger in the small-value cache.
+                self._memory_cache.pop(key, None)
         # Enforce size limit after write, using the in-memory index (no glob).
         self._enforce_max_entries()
 
@@ -171,6 +207,13 @@ class ContentCache:
             self._index = OrderedDict(
                 (k, v) for k, v in self._index.items() if v.exists()
             )
+            # Drop expired in-memory value entries (TTL honored even in RAM).
+            for _k in [
+                k
+                for k, (exp, _v) in self._memory_cache.items()
+                if exp is not None and now > exp
+            ]:
+                self._memory_cache.pop(_k, None)
         return removed
 
     def clear(self) -> int:
@@ -185,4 +228,6 @@ class ContentCache:
                     continue
             # Drop the in-memory index so stale paths are not reused.
             self._index.clear()
+            # Drop the in-memory value cache too.
+            self._memory_cache.clear()
         return removed
