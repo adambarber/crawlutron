@@ -35,6 +35,7 @@ from .api_models import (
 from .api.main_helpers import _build_job_status, _raise_not_found
 from .api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.constants import (
+    MAX_DISCOVERED_LINKS,
     BROWSER_HEADLESS,
     EXTRACTION_DOCUMENT,
     EXTRACTION_FULL,
@@ -102,7 +103,7 @@ logger = configure_service_logging(
     log_file_max_bytes=settings.log_file_max_bytes,
     log_file_backup_count=settings.log_file_backup_count,
 )
-renderer = BrowserRenderer()
+renderer = BrowserRenderer(settings=settings)
 shutdown_event = asyncio.Event()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
@@ -628,7 +629,7 @@ if FastAPI is not None:
             disc["feeds"] = True
             policy["discovery"] = disc
             limits = dict(policy.get("limits") or {})
-            limits.setdefault("max_discovered_links", 2000)
+            limits.setdefault("max_discovered_links", MAX_DISCOVERED_LINKS)
             policy["limits"] = limits
             _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)

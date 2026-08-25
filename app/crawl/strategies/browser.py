@@ -27,7 +27,13 @@ from app.crawl.strategies.document import _default_document_text_extractor
 from app.models import CrawlResult, RenderOptions
 from app.crawl.strategies.http import CookieJar, _check_ssrf_protection, _classify_error_code, _build_pinned_request
 from app.validation import registrable_domain
-from app.constants import BROWSER_BLOCKED_CLASSIFICATIONS
+from app.constants import (
+    BROWSER_BLOCKED_CLASSIFICATIONS,
+    DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_MAX_BROWSER_RENDERS,
+    DEFAULT_MAX_CONCURRENT_PAGES,
+)
+from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -242,14 +248,23 @@ class BrowserRenderer:
         challenge_wait_seconds: float | None = None,
         pdf_text_extractor: Callable[[str], str] | None = None,
         warmup_urls: list[str] | None = None,
+        settings: "CrawlerSettings | None" = None,
     ) -> None:
         self._browser_factory = browser_factory or self._create_camoufox_browser
         self._sleep = sleep
-        self._challenge_wait_seconds = (
-            float(os.environ.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", "15"))
-            if challenge_wait_seconds is None
-            else challenge_wait_seconds
-        )
+        # Prefer the passed policy limit, then the centralized settings field,
+        # then the raw env var (falling back to the canonical default). This
+        # keeps the default in one place (app.constants) instead of a bare
+        # literal here.
+        if challenge_wait_seconds is None:
+            if settings is not None:
+                self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
+            else:
+                self._challenge_wait_seconds = float(
+                    os.environ.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", str(DEFAULT_CHALLENGE_WAIT_SECONDS))
+                )
+        else:
+            self._challenge_wait_seconds = challenge_wait_seconds
         self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
         # Reusable browser instance (#6): one browser per BrowserRenderer lifecycle.
@@ -259,12 +274,19 @@ class BrowserRenderer:
         # Recycle the reused browser after this many successful renders to bound
         # the memory of a long-lived Camoufox process (see _acquire_browser).
         self._render_count = 0
-        self._max_browser_renders = int(os.environ.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", "100"))
+        self._max_browser_renders = (
+            settings.max_browser_renders
+            if settings is not None
+            else int(os.environ.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", str(DEFAULT_MAX_BROWSER_RENDERS)))
+        )
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
-        self._page_semaphore = asyncio.Semaphore(
-            max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "3")))
+        _concurrent_pages = (
+            settings.max_concurrent_pages
+            if settings is not None
+            else int(os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", str(DEFAULT_MAX_CONCURRENT_PAGES)))
         )
+        self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
 
     async def _async_sleep(self, seconds: float) -> None:
         """Non-blocking sleep for use inside coroutines.

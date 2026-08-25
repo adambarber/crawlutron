@@ -4,6 +4,12 @@ import os
 from dataclasses import dataclass
 from typing import Mapping
 
+from app.constants import (
+    DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_MAX_BROWSER_RENDERS,
+    DEFAULT_MAX_CONCURRENT_PAGES,
+)
+
 
 def _parse_bool_env_value(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -41,6 +47,12 @@ class CrawlerSettings:
     http_max_connections: int = 100
     http_max_keepalive: int = 20
     http_keepalive_expiry: float = 60.0
+    # Browser runtime limits (previously read from raw BROWSER_CRAWLER_*
+    # env vars inside browser.py; centralized here so they share the env
+    # mapping and are visible in /v1/capabilities-style config).
+    max_browser_renders: int = DEFAULT_MAX_BROWSER_RENDERS
+    max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
+    challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -78,4 +90,7 @@ class CrawlerSettings:
             http_max_connections=int(source.get("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections)),
             http_max_keepalive=int(source.get("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive)),
             http_keepalive_expiry=float(source.get("BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry)),
+            max_browser_renders=int(source.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", cls.max_browser_renders)),
+            max_concurrent_pages=int(source.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages)),
+            challenge_wait_seconds=int(source.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds)),
         )
