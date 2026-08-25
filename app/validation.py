@@ -8,6 +8,24 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
+# Attribution/tracking query parameters that carry no content-identity
+# information. Dropping them lets URLs that differ only by UTM/tracking tags
+# canonicalize to the same key, preventing duplicate fetches of the same page
+# (#6). Bare ``ref`` is intentionally excluded: it is ambiguous and frequently
+# a legitimate content parameter, so stripping it could collapse distinct pages.
+_TRACKING_PARAM_EXACT = frozenset(
+    {
+        "gclid", "gclsrc", "fbclid", "gbraid", "wbraid",
+        "mc_cid", "mc_eid", "mkt_tok", "igshid",
+        "_hsenc", "_hsmi", "hsctat",
+    }
+)
+
+
+def _is_tracking_param(key: str) -> bool:
+    k = key.lower()
+    return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
+
 
 def normalize_public_http_url(url: str) -> str:
     """Canonicalize a public HTTP(S) URL into a single normalized form.
@@ -49,9 +67,15 @@ def normalize_public_http_url(url: str) -> str:
     path = _strip_trailing_colon(parsed.path or "").rstrip("/")
     query = _strip_trailing_colon(parsed.query)
     if query:
-        # Sort query parameters so that URLs differing only in parameter order
-        # canonicalize to the same string (Katana-style deep normalization).
-        pairs = parse_qsl(query, keep_blank_values=True)
+        # Drop known tracking/attribution parameters so URLs that differ only
+        # by UTM/tracking tags canonicalize to the same key and are not fetched
+        # as duplicate pages (#6). Remaining params are sorted so URLs differing
+        # only in parameter order also canonicalize identically.
+        pairs = [
+            (k, v)
+            for (k, v) in parse_qsl(query, keep_blank_values=True)
+            if not _is_tracking_param(k)
+        ]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
     return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
