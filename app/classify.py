@@ -74,8 +74,10 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset({
 
 
 def classify_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
+    stripped_html = _strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
-    html_haystack = _html_without_script_and_style(html).lower()
+    html_haystack = stripped_html
+    raw_haystack = (html or "").lower()
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return "binary_no_text", [
             {
@@ -152,6 +154,27 @@ def _evidence(classification: str, signature: str, source: str, haystack: str, i
         "source": source,
         "context": context,
     }
+
+
+_HTML_NOISE_RE = None
+
+
+def _strip_html_noise(html: str | None) -> str:
+    """Remove scripts, styles, and comments in a SINGLE regex pass.
+
+    Replaces the previous 4 sequential re.sub calls, each of which produced a
+    full copy of the HTML (~6x page size in intermediate strings).
+    """
+    global _TAGS_RE, _HTML_NOISE_RE
+    import re
+    if _HTML_NOISE_RE is None:
+        _TAGS_RE = re.compile(r"<[^>]+>")
+        _HTML_NOISE_RE = re.compile(
+            r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<!--[\s\S]*?-->",
+            re.IGNORECASE | re.DOTALL,
+        )
+    without_noise = _HTML_NOISE_RE.sub(" ", html or "")
+    return _TAGS_RE.sub(" ", without_noise)
 
 
 def _html_without_script_and_style(html: str | None) -> str:
