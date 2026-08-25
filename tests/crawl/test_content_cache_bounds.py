@@ -49,3 +49,22 @@ def test_explicit_max_entries_zero_disables_limit():
         # All should be present (no eviction)
         assert c.get("k0") == 0
         assert c.get("k14999") == 14999
+
+
+def test_lru_keeps_recently_used_entries():
+    """Accessing an entry protects it from next eviction (#5)."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        c = ContentCache(cache_dir=d, default_ttl=3600, max_entries=3)
+        c.set("a", 1)
+        c.set("b", 2)
+        c.set("c", 3)
+        # Touch "a" so it becomes most-recently-used.
+        assert c.get("a") == 1
+        # Push past the cap twice; "a" must survive both evictions.
+        c.set("d", 4)
+        c.set("e", 5)
+        assert c.get("a") == 1
+        # And the newest entries are present.
+        assert c.get("e") == 5

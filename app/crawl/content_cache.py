@@ -21,6 +21,7 @@ import hashlib
 import json
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -48,6 +49,12 @@ class ContentCache:
         self.max_entries = max_entries
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
+        # In-memory LRU index (key -> path) so eviction never globs/stats the
+        # whole cache directory on the hot path (#5). The on-disk file remains
+        # the source of truth for values; this index only tracks recency/order.
+        # (A warm restart with pre-existing files repopulates the index lazily
+        # on first get/set of each key; prune() reconciles disk vs index.)
+        self._index: "OrderedDict[str, Path]" = OrderedDict()
 
     # -- key handling -------------------------------------------------------
     @staticmethod
@@ -59,27 +66,20 @@ class ContentCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
 
-    def _touch_access_time(self, path: Path) -> None:
-        """Update file mtime for LRU tracking."""
-        try:
-            path.touch(exist_ok=True)
-        except OSError:
-            pass
-
     def _enforce_max_entries(self) -> None:
-        """Evict least recently used entries if over max_entries."""
+        """Evict least-recently-used entries using the in-memory index.
+
+        Runs in O(overflow) unlinks with no directory glob/stat, unlike the
+        previous implementation that listed and stat() every cache file on each
+        write (#5).
+        """
         if self.max_entries is None or self.max_entries <= 0:
             return
         with self._lock:
-            entries = list(self.cache_dir.glob(f"{self.namespace}.*.json"))
-            if len(entries) <= self.max_entries:
-                return
-            # Sort by mtime (oldest first) and remove excess
-            entries.sort(key=lambda p: p.stat().st_mtime)
-            to_remove = len(entries) - self.max_entries
-            for path in entries[:to_remove]:
+            while len(self._index) > self.max_entries:
+                _key, old_path = self._index.popitem(last=False)
                 try:
-                    path.unlink()
+                    old_path.unlink()
                 except OSError:
                     pass
 
@@ -88,18 +88,32 @@ class ContentCache:
         """Return the cached value if present and unexpired, else ``None``."""
         path = self._path_for(key)
         with self._lock:
-            if not path.exists():
+            if key in self._index:
+                try:
+                    envelope = json.loads(path.read_text())
+                except (ValueError, OSError):
+                    self._index.pop(key, None)
+                    return None
+            else:
+                if not path.exists():
+                    return None
+                try:
+                    envelope = json.loads(path.read_text())
+                except (ValueError, OSError):
+                    return None
+                # Lazily register a cold on-disk entry into the index.
+                self._index[key] = path
+            expires = envelope.get("expires")
+            if expires is not None and self.clock() > expires:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                self._index.pop(key, None)
                 return None
-            try:
-                envelope = json.loads(path.read_text())
-            except (ValueError, OSError):
-                return None
-        expires = envelope.get("expires")
-        if expires is not None and self.clock() > expires:
-            return None
-        # Update access time for LRU
-        self._touch_access_time(path)
-        return envelope.get("value")
+            # Mark recently used (LRU) by moving to the end of the ordered index.
+            self._index.move_to_end(key)
+            return envelope.get("value")
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Store ``value`` (must be JSON-serializable) with a TTL in seconds.
@@ -112,7 +126,9 @@ class ContentCache:
         path = self._path_for(key)
         with self._lock:
             path.write_text(json.dumps(envelope))
-        # Enforce size limit after write
+            self._index[key] = path
+            self._index.move_to_end(key)
+        # Enforce size limit after write, using the in-memory index (no glob).
         self._enforce_max_entries()
 
     def prune(self) -> int:
@@ -129,6 +145,10 @@ class ContentCache:
                 if expires is not None and now > expires:
                     path.unlink()
                     removed += 1
+            # Reconcile the index with what remains on disk.
+            self._index = OrderedDict(
+                (k, v) for k, v in self._index.items() if v.exists()
+            )
         return removed
 
     def clear(self) -> int:
@@ -141,4 +161,6 @@ class ContentCache:
                     removed += 1
                 except OSError:
                     continue
+            # Drop the in-memory index so stale paths are not reused.
+            self._index.clear()
         return removed
