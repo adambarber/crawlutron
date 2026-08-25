@@ -6,50 +6,61 @@ from html import unescape
 from typing import Any
 
 
+_META_MAP = {
+    "description": "description",
+    "og:title": "og_title",
+    "og:description": "og_description",
+    "og:image": "og_image",
+    "og:url": "og_url",
+    "og:type": "og_type",
+    "og:site_name": "og_site_name",
+    "twitter:card": "twitter_card",
+    "twitter:title": "twitter_title",
+    "twitter:description": "twitter_description",
+    "twitter:image": "twitter_image",
+}
+
+
 def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
-    """Extract Firecrawl-style metadata from HTML meta tags."""
+    """Extract Firecrawl-style metadata from HTML meta tags.
+
+    #15: parse the HTML once with lxml and read every field (title, meta
+    og/twitter tags, JSON-LD, canonical, favicon, language) from the single
+    tree instead of running 8+ independent regex scans over the raw string.
+    """
     metadata: dict[str, Any] = {"source_url": url}
+    # Lazy import avoids a circular import: extraction.py imports this module.
+    from app.crawl.extraction import _parse_html_tree
+
+    tree = _parse_html_tree(html)
+    if tree is None:
+        return metadata
 
     # title
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
-    if title_match:
-        metadata["title"] = re.sub(r"\s+", " ", title_match.group(1)).strip()
+    title = tree.findtext(".//title")
+    if title:
+        metadata["title"] = re.sub(r"\s+", " ", title).strip()
 
-    # meta tags
-    for match in re.finditer(r'<meta\s+([^>]+)>', html, flags=re.IGNORECASE):
-        attrs = match.group(1)
-        name_match = re.search(r'(?:name|property)\s*=\s*["\']([^"\']+)["\']', attrs, flags=re.IGNORECASE)
-        content_match = re.search(r'content\s*=\s*["\']([^"\']*)["\']', attrs, flags=re.IGNORECASE)
-        if not name_match or not content_match:
+    # meta tags (name / property -> content)
+    for el in tree.iter("meta"):
+        name = (el.get("name") or el.get("property") or "").lower().strip()
+        if not name:
             continue
-        name = name_match.group(1).lower().strip()
-        value = content_match.group(1).strip()
+        value = (el.get("content") or "").strip()
         if not value:
             continue
-        mapped = {
-            "description": "description",
-            "og:title": "og_title",
-            "og:description": "og_description",
-            "og:image": "og_image",
-            "og:url": "og_url",
-            "og:type": "og_type",
-            "og:site_name": "og_site_name",
-            "twitter:card": "twitter_card",
-            "twitter:title": "twitter_title",
-            "twitter:description": "twitter_description",
-            "twitter:image": "twitter_image",
-        }.get(name)
+        mapped = _META_MAP.get(name)
         if mapped:
             metadata[mapped] = value
 
     # JSON-LD structured data
-    json_ld_blocks = re.findall(
-        r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        html,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
     parsed_json_ld: list[Any] = []
-    for block in json_ld_blocks:
+    for script in tree.iter("script"):
+        if (script.get("type") or "").lower() != "application/ld+json":
+            continue
+        block = script.text
+        if not block:
+            continue
         try:
             parsed_json_ld.append(json.loads(block))
         except Exception:  # malformed JSON-LD is skipped
@@ -57,24 +68,23 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
     if parsed_json_ld:
         metadata["json_ld"] = parsed_json_ld[0] if len(parsed_json_ld) == 1 else parsed_json_ld
 
-    # canonical URL
-    canonical_match = re.search(r'<link\s+[^>]*rel\s*=\s*["\'][^"\']*canonical["\'][^>]*href\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if not canonical_match:
-        canonical_match = re.search(r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\'][^"\']*canonical["\']', html, flags=re.IGNORECASE)
-    if canonical_match:
-        metadata["canonical_url"] = canonical_match.group(1).strip()
+    # canonical URL + favicon from <link rel=...>
+    for el in tree.iter("link"):
+        rel = (el.get("rel") or "").lower()
+        href = (el.get("href") or "").strip()
+        if not href:
+            continue
+        if "canonical" in rel and "canonical_url" not in metadata:
+            metadata["canonical_url"] = href
+        elif any(k in rel for k in ("icon", "shortcut icon", "apple-touch-icon")) and "favicon" not in metadata:
+            metadata["favicon"] = href
 
-    # favicon
-    favicon_match = re.search(r'<link\s+[^>]*rel\s*=\s*["\'][^"\']*(?:icon|shortcut icon|apple-touch-icon)["\'][^>]*href\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if not favicon_match:
-        favicon_match = re.search(r'<link\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*rel\s*=\s*["\'][^"\']*(?:icon|shortcut icon|apple-touch-icon)["\']', html, flags=re.IGNORECASE)
-    if favicon_match:
-        metadata["favicon"] = favicon_match.group(1).strip()
-
-    # language
-    lang_match = re.search(r'<html\s+[^>]*lang\s*=\s*["\']([^"\']*)["\']', html, flags=re.IGNORECASE)
-    if lang_match:
-        metadata["language"] = lang_match.group(1).strip()
+    # language from <html lang=...>
+    lang = tree.xpath("//html/@lang")
+    if lang:
+        metadata["language"] = lang[0].strip()
+    elif tree.tag == "html" and tree.get("lang"):
+        metadata["language"] = tree.get("lang").strip()
 
     return metadata
 

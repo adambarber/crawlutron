@@ -49,3 +49,30 @@ class TestJsonLdExtraction:
     def test_json_ld_absent_when_no_script(self):
         meta = _extract_firecrawl_metadata("<html><body>x</body></html>", "https://example.com")
         assert "json_ld" not in meta
+
+    def test_single_parse_per_html(self, monkeypatch):
+        import app.crawl.extraction as extraction
+        calls = {"n": 0}
+        real = extraction._parse_html_tree
+
+        def spy(h):
+            calls["n"] += 1
+            return real(h)
+
+        monkeypatch.setattr(extraction, "_parse_html_tree", spy)
+        html = (
+            '<html lang="en"><head><title>Test Page</title>'
+            '<meta name="description" content="A test page">'
+            '<meta property="og:title" content="OG Title">'
+            '<link rel="canonical" href="https://example.com/c">'
+            '<link rel="icon" href="https://example.com/f.ico">'
+            '<script type="application/ld+json">{"@type":"WebSite"}</script>'
+            "</head><body><p>x</p></body></html>"
+        )
+        meta = _extract_firecrawl_metadata(html, "https://example.com")
+        # #15: title, meta, JSON-LD, canonical, favicon, language all read from
+        # ONE lxml parse instead of 8+ independent regex scans.
+        assert calls["n"] == 1
+        assert meta["title"] == "Test Page"
+        assert meta["canonical_url"] == "https://example.com/c"
+        assert meta["favicon"] == "https://example.com/f.ico"
