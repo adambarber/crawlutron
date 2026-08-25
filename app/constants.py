@@ -96,3 +96,50 @@ BROWSER_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
         "rate_limited",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Crawl policy limit defaults and hard caps.
+#
+# Single source of truth for the numeric limits that previously lived as bare
+# literals / inline os.environ reads across api_models, payload_helpers,
+# http.py, main.py, discovery/* and browser.py. Change a limit HERE, not in N
+# places. The api_models pydantic Fields reference these so the advertised
+# contract (``/v1/capabilities``) and the runtime defaults cannot drift.
+# ---------------------------------------------------------------------------
+# Discovered links returned per selected page.
+DEFAULT_MAX_DISCOVERED_LINKS: int = 100
+# Hard cap on the field AND the default for the extreme /v1/map whole-site
+# discovery path (intentionally the maximum, not the conservative 100).
+MAX_DISCOVERED_LINKS: int = 2000
+
+# Passive browser challenge observation budget (seconds).
+DEFAULT_CHALLENGE_WAIT_SECONDS: int = 15
+
+# Per-response body size bound.
+DEFAULT_MAX_CONTENT_LENGTH_BYTES: int = 10 * 1024 * 1024
+DISCOVERY_BODY_MAX_BYTES: int = 8 * 1024 * 1024
+
+# Per-strategy timeout / retry budgets.
+DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
+DEFAULT_MAX_RETRIES: int = 2
+MAX_RETRIES: int = 5
+
+# Cache TTLs (seconds).
+DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
+
+# Sitemap discovery tuning.
+SITEMAP_MAX_DEPTH: int = 3
+SITEMAP_MAX_URLS: int = 10_000
+SITEMAP_CACHE_TTL_SECONDS: float = DEFAULT_CACHE_TTL_SECONDS
+SITEMAP_CACHE_MAX_ENTRIES: int = 1000
+SITEMAP_CACHE_EVICT_BATCH: int = 200
+SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
+
+# Engine scheduling: a recursive-crawl batch pulls global_concurrency * this.
+ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
+
+# Browser runtime limits (also exposed as CrawlerSettings fields with
+# BROWSER_CRAWLER_* env mappings).
+DEFAULT_MAX_BROWSER_RENDERS: int = 100
+DEFAULT_MAX_CONCURRENT_PAGES: int = 3

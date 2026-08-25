@@ -11,7 +11,12 @@ from app.api_models import (
     CrawlStrategy,
 )
 from app.settings import CrawlerSettings
-from app.constants import SUPPORTED_STRATEGIES, SUPPORTED_EXTRACTIONS
+from app.constants import (
+    DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_MAX_DISCOVERED_LINKS,
+    SUPPORTED_STRATEGIES,
+    SUPPORTED_EXTRACTIONS,
+)
 
 
 from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
@@ -54,8 +59,8 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "max_batch_size": settings.max_batch_size,
             "timeout_seconds": settings.default_timeout_seconds,
             "max_retries": settings.default_max_retries,
-            "challenge_wait_seconds": 15,
-            "max_discovered_links": 250,
+            "challenge_wait_seconds": DEFAULT_CHALLENGE_WAIT_SECONDS,
+            "max_discovered_links": DEFAULT_MAX_DISCOVERED_LINKS,
             "global_concurrency": settings.global_concurrency,
             "per_domain_concurrency": settings.per_domain_concurrency,
             "per_domain_delay_ms": settings.per_domain_delay_ms,

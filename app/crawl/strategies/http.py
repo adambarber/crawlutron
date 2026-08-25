@@ -30,6 +30,8 @@ import urllib.request
 
 from app.classify import classify_page_with_evidence
 from app.constants import (
+    DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_EXTRACTION,
     EXTRACTION_DOCUMENT,
     EXTRACTION_FULL,
@@ -558,7 +560,7 @@ def _redirect_target(
     return new_url, request_headers
 
 
-async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
+async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
     SSRF-safe manual redirect handling (F1).
@@ -630,7 +632,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
         )
 
 
-async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = 50 * 1024 * 1024) -> HttpFetchResult:
+async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES) -> HttpFetchResult:
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
 
     Mirrors _default_http_fetcher, including SSRF-safe manual redirect handling
@@ -960,7 +962,7 @@ async def _fetch_with_retries(
     headers: dict[str, str],
     timeout_seconds: int,
     max_retries: int,
-    max_content_length: int = 50 * 1024 * 1024,
+    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
 ) -> tuple[Any, dict[str, Any]]:
     transient_errors: list[str] = []
     max_attempts = max(1, max_retries + 1)
@@ -1125,7 +1127,7 @@ async def _http_strategy_result(
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
-    max_content_length = limits.get("max_content_length_bytes", 10 * 1024 * 1024)
+    max_content_length = limits.get("max_content_length_bytes", DEFAULT_MAX_CONTENT_LENGTH_BYTES)
     base_headers = _headers_for_strategy(strategy, policy, normalized_url)
     request_headers = dict(base_headers)
     if cache is not None:
@@ -1387,7 +1389,7 @@ async def _http_strategy_result(
             # can easily exceed the length threshold.
             quality = max(quality, 0.95)
         discovered_links, discovered_link_count, discovered_links_truncated = (
-            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", 100), tree=tree) if status == "success" else ([], 0, False)
+            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS), tree=tree) if status == "success" else ([], 0, False)
         )
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]

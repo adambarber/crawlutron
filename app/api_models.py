@@ -6,6 +6,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import (
+    DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    DEFAULT_MAX_DISCOVERED_LINKS,
+    DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    MAX_DISCOVERED_LINKS,
+    MAX_RETRIES,
     DEFAULT_STRATEGIES,
     EXTRACTION_DOCUMENT,
     EXTRACTION_DOM,
@@ -137,15 +144,15 @@ class ContentValidators(BaseModel):
 
 
 class CrawlPolicyLimits(BaseModel):
-    timeout_seconds: int = Field(30, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
-    max_retries: int = Field(2, ge=0, le=5, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
-    challenge_wait_seconds: int = Field(15, ge=0, le=120, description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.")
-    max_discovered_links: int = Field(100, ge=0, le=2000, description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.")
+    timeout_seconds: int = Field(DEFAULT_HTTP_TIMEOUT_SECONDS, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
+    max_retries: int = Field(DEFAULT_MAX_RETRIES, ge=0, le=MAX_RETRIES, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
+    challenge_wait_seconds: int = Field(DEFAULT_CHALLENGE_WAIT_SECONDS, ge=0, le=120, description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.")
+    max_discovered_links: int = Field(DEFAULT_MAX_DISCOVERED_LINKS, ge=0, le=MAX_DISCOVERED_LINKS, description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.")
     respect_robots: bool = Field(True, description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.")
     max_depth: int = Field(0, ge=0, le=20, description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.")
     max_pages: int = Field(0, ge=0, le=2000, description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).")
     max_rps: float = Field(0.0, ge=0.0, le=100.0, description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.")
-    max_content_length_bytes: int = Field(10 * 1024 * 1024, ge=0, description="Maximum content size in bytes per response. 10MB default bounds memory under parallel crawling (2GB budget); raise for large-document workloads.")
+    max_content_length_bytes: int = Field(DEFAULT_MAX_CONTENT_LENGTH_BYTES, ge=0, description="Maximum content size in bytes per response. 10MB default bounds memory under parallel crawling (2GB budget); raise for large-document workloads.")
 
 
 
