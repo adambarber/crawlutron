@@ -111,6 +111,7 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
             return 0.99
 
     gate = PinnedGate(target=0.92)
+    gate.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
     waits = []
 
     async def fake_sleep(seconds):

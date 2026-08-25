@@ -93,10 +93,12 @@ class MemoryGate:
         target: float | None = None,
         *,
         poll_seconds: float = 0.1,
+        max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
         self.target = _DEFAULT_TARGET if target is None else target
         self.poll_seconds = poll_seconds
+        self.max_wait_seconds = max_wait_seconds
         self.cgroup_root = cgroup_root
 
     def _usage_ratio(self) -> float:
@@ -109,9 +111,10 @@ class MemoryGate:
         stats = read_memory_stats(cgroup_root=self.cgroup_root)
         return batch_scale(stats.used_bytes, stats.total_bytes, self.target)
 
-    async def wait_while_saturated(self, max_wait_seconds: float = 30.0) -> None:
+    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         """Block while at/above the hard ceiling; release below it."""
-        deadline = time.monotonic() + max_wait_seconds
+        budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        deadline = time.monotonic() + budget
         while self._usage_ratio() >= min(0.999, self.target + 0.05):
             if time.monotonic() >= deadline:
                 return
