@@ -49,7 +49,10 @@ class TestCrawlApi:
         assert result["classification"] == "rendered"
         assert result["http_status"] == 200
         assert result["metadata"].get("json_ld") is not None
-        assert result["discovered_link_count"] >= 1
+        # #2-fix: plain single-page crawl skips link extraction entirely
+        assert result["discovered_link_count"] == 0
+        assert result["discovered_links"] == []
+        # next_page_url stays a standard field regardless
         assert result["next_page_url"] == f"{self.base}/page2"
 
     async def test_v1_crawl_batch_returns_one_result_per_url(self):
@@ -97,7 +100,7 @@ class TestCrawlApi:
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
                 "scope_regex": r"^https://example\.com",
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 100},
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 100, "max_depth": 1},
             },
         )
         resp = await self.client.post("/v1/crawl", json=payload)
