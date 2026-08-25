@@ -75,43 +75,11 @@ def _is_ssrf_blocked(url: str) -> bool:
 _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
 # Tracking/analytics hosts: never fetch them -- they return no crawlable
-# content and only add network load. Aborted unconditionally (#2).
-_ANALYTICS_HOST_SUFFIXES = frozenset(
-    {
-        "google-analytics.com",
-        "googletagmanager.com",
-        "doubleclick.net",
-        "googlesyndication.com",
-        "googletagservices.com",
-        "adservice.google.com",
-        "facebook.net",
-        "connect.facebook.net",
-        "analytics.twitter.com",
-        "x.com",
-        "cdc.gov",
-        "pinterest.com",
-        "hotjar.com",
-        "scorecardresearch.com",
-        "mixpanel.com",
-        "amplitude.com",
-        "segment.io",
-        "segment.com",
-        "criteo.com",
-        "pubmatic.com",
-        "rubiconproject.com",
-        "adroll.com",
-    }
-)
-
-
-def _is_analytics_url(url: str) -> bool:
-    from urllib.parse import urlparse
-
-    try:
-        host = (urlparse(url).hostname or "").lower()
-    except Exception:
-        return False
-    return any(host == s or host.endswith("." + s) for s in _ANALYTICS_HOST_SUFFIXES)
+# content and only add network load. The canonical list lives in
+# app.constants (single source of truth) so the engine can also refuse to
+# enqueue these hosts as jobs.
+from app.constants import ANALYTICS_HOST_SUFFIXES as _ANALYTICS_HOST_SUFFIXES  # noqa: E402
+from app.constants import is_analytics_host as _is_analytics_url  # noqa: E402
 
 
 def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screenshot: bool = False):

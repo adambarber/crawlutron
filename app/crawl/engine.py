@@ -45,6 +45,7 @@ from app.constants import (
     SUPPORTED_STRATEGIES,
     HTTP_STRATEGIES,
     BROWSER_STRATEGIES,
+    is_analytics_host,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -167,24 +168,6 @@ def _compile_scope_regex_safe(scope_regex: str | None):
         return None
     return compiled
 
-
-def _filter_links_by_scope(result: EngineCrawlResult, scope_regex: str | None) -> EngineCrawlResult:
-    pattern = _compile_scope_regex_safe(scope_regex)
-    if pattern is None:
-        return result
-    # Bound the number of links scanned so a huge link set cannot amplify cost.
-    links = result.discovered_links[:_MAX_SCOPE_LINKS]
-    filtered = [link for link in links if pattern.search(link.normalized_url)]
-    # #17: use dataclasses.replace (shares field references) instead of asdict,
-    # which deep-copies every field (html/text/markdown + the full link list)
-    # on every successful result in a crawl.
-    return replace(
-        result,
-        discovered_links=filtered,
-        discovered_link_count=len(filtered),
-        discovered_links_truncated=result.discovered_links_truncated
-        and len(filtered) < result.discovered_link_count,
-    )
 
 
 async def _browser_strategy_result(
@@ -401,16 +384,13 @@ async def _execute_crawl_chain(
                 )
                 attempts.extend(retry_result.attempted_strategies)
                 if retry_result.status == "success" and retry_result.quality_score > 0:
-                    scoped = _filter_links_by_scope(retry_result, policy.get("scope_regex"))
-                    return EngineCrawlResult(**{f.name: getattr(scoped, f.name) for f in fields(EngineCrawlResult) if f.name != "attempted_strategies"}, attempted_strategies=attempts)
+                    return EngineCrawlResult(**{f.name: getattr(retry_result, f.name) for f in fields(EngineCrawlResult) if f.name != "attempted_strategies"}, attempted_strategies=attempts)
                 last_result = result
 
         if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
-            scoped = _filter_links_by_scope(result, policy.get("scope_regex"))
-            return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+            return EngineCrawlResult(**{field.name: getattr(result, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
     assert last_result is not None
-    scoped = _filter_links_by_scope(last_result, policy.get("scope_regex"))
-    return EngineCrawlResult(**{field.name: getattr(scoped, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
+    return EngineCrawlResult(**{field.name: getattr(last_result, field.name) for field in fields(EngineCrawlResult) if field.name != "attempted_strategies"}, attempted_strategies=attempts)
 
 
 @functools.lru_cache(maxsize=1024)
@@ -885,6 +865,9 @@ async def crawl_request(
                     continue
                 for link in result.discovered_links:
                     if link.normalized_url in visited:
+                        continue
+                    if is_analytics_host(link.normalized_url):
+                        # Hard-skip hosts are recorded on pages but never crawled.
                         continue
                     if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
                         continue

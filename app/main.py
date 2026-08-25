@@ -108,6 +108,11 @@ shutdown_event = asyncio.Event()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
 
+# Third-party extraction libraries log per-element WARNINGs that are expected
+# parser noise (e.g. trafilatura on <a> elements without href) and cannot be
+# acted on. Keep ERROR+ visible, drop the chatter.
+logging.getLogger("trafilatura").setLevel(logging.ERROR)
+
 def _format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     """Unified output formatter: produce ``(markdown, metadata_dict)`` for any result.
 

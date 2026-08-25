@@ -90,7 +90,9 @@ class TestCrawlApi:
         resp = await self.client.post("/v1/crawl", json={"policy": {"strategies": [HTTP_DECLARED_CRAWLER]}})
         assert resp.status_code == 422
 
-    async def test_v1_crawl_scope_regex_limits_discovered_links(self):
+    async def test_v1_crawl_scope_regex_records_out_of_scope_links(self):
+        # Scope gates frontier expansion only; advertised links outside the
+        # scope still come back in discovered_links (collect-not-crawl).
         payload = self._crawl_payload(
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
@@ -101,8 +103,10 @@ class TestCrawlApi:
         resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 200
         result = resp.json()["results"][0]
-        assert result["discovered_link_count"] == 0
-        assert result["discovered_links"] == []
+        assert result["discovered_link_count"] >= 1
+        for link in result["discovered_links"]:
+            normalized = link["normalized_url"] if isinstance(link, dict) else link
+            assert not normalized.startswith("https://example.com")
 
     async def test_v1_crawl_webhook_returns_202_and_delivers(self):
         payload = {

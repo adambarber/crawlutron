@@ -143,3 +143,47 @@ ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
 # BROWSER_CRAWLER_* env mappings).
 DEFAULT_MAX_BROWSER_RENDERS: int = 100
 DEFAULT_MAX_CONCURRENT_PAGES: int = 3
+
+
+# --- Universal non-content hosts (hard-skip) ---
+# Hosts that never carry crawlable municipal content: tracking/ad/social-feed
+# infrastructure. Advertised links to them are still RECORDED on pages, but
+# they are never enqueued as crawl jobs (any strategy) and the browser route
+# handler aborts their requests unconditionally.
+ANALYTICS_HOST_SUFFIXES = frozenset(
+    {
+        "google-analytics.com",
+        "googletagmanager.com",
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googletagservices.com",
+        "adservice.google.com",
+        "facebook.net",
+        "connect.facebook.net",
+        "analytics.twitter.com",
+        "x.com",
+        "cdc.gov",
+        "pinterest.com",
+        "hotjar.com",
+        "scorecardresearch.com",
+        "mixpanel.com",
+        "amplitude.com",
+        "segment.io",
+        "segment.com",
+        "criteo.com",
+        "pubmatic.com",
+        "rubiconproject.com",
+        "adroll.com",
+    }
+)
+
+
+def is_analytics_host(url: str) -> bool:
+    """True when ``url`` points at a hard-skip host (apex or any subdomain)."""
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == s or host.endswith("." + s) for s in ANALYTICS_HOST_SUFFIXES)

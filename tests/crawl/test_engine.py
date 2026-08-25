@@ -4,7 +4,7 @@ import urllib.error
 
 import pytest
 from app.crawl.cache import HttpCache
-from app.crawl.engine import _filter_links_by_scope, crawl_request
+from app.crawl.engine import crawl_request
 from helpers import browser_available
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import CrawlStrategyAttempt, DiscoveredLink, EngineCrawlResult
@@ -30,38 +30,6 @@ def make_result(links):
         discovered_link_count=len(links),
         discovered_links=links,
     )
-
-
-class TestScopeFilter:
-    def test_scope_regex_filters_discovered_links(self):
-        links = [
-            DiscoveredLink(url="https://example.com/x", normalized_url="https://example.com/x", text="x", rel=[], source_url="https://example.com/", host="example.com", is_same_host=True),
-            DiscoveredLink(url="https://other.com/y", normalized_url="https://other.com/y", text="y", rel=[], source_url="https://example.com/", host="other.com", is_same_host=False),
-        ]
-        filtered = _filter_links_by_scope(make_result(links), r"^https://example\.com")
-        assert len(filtered.discovered_links) == 1
-        assert filtered.discovered_links[0].url == "https://example.com/x"
-
-    def test_none_scope_keeps_all(self):
-        links = [DiscoveredLink(url="https://a.com/x", normalized_url="https://a.com/x", text="x", rel=[], source_url="https://a.com/", host="a.com", is_same_host=True)]
-        assert _filter_links_by_scope(make_result(links), None).discovered_link_count == 1
-
-    def test_invalid_scope_regex_keeps_all(self):
-        links = [DiscoveredLink(url="https://a.com/x", normalized_url="https://a.com/x", text="x", rel=[], source_url="https://a.com/", host="a.com", is_same_host=True)]
-        assert _filter_links_by_scope(make_result(links), r"([invalid").discovered_link_count == 1
-
-    def test_replace_keeps_field_references(self):
-        # #17: scope filtering must use dataclasses.replace (field references
-        # shared, no deep copy) rather than asdict, which deep-copies every
-        # field (html/text/markdown) on every successful result in a crawl.
-        links = [
-            DiscoveredLink(url="https://example.com/x", normalized_url="https://example.com/x", text="x", rel=[], source_url="https://example.com/", host="example.com", is_same_host=True),
-        ]
-        res = make_result(links)
-        filtered = _filter_links_by_scope(res, r"^https://example\.com")
-        assert filtered.html is res.html
-        assert filtered.text is res.text
-        assert filtered.discovered_links[0] is res.discovered_links[0]
 
 
 class TestEngineCrawlRequest:
