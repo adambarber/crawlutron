@@ -13,8 +13,8 @@ def _parse_bool_env_value(value: str) -> bool:
 class CrawlerSettings:
     host_port: int = 8765
     global_concurrency: int = 4
-    per_domain_concurrency: int = 1
-    per_domain_delay_ms: int = 1000
+    per_domain_concurrency: int = 2
+    per_domain_delay_ms: int = 500
     max_batch_size: int = 50
     default_timeout_seconds: int = 30
     default_max_retries: int = 2
@@ -33,7 +33,7 @@ class CrawlerSettings:
     # Adaptive throttling (#6): per-domain delay is driven by observed latency.
     adaptive_throttling: bool = True
     adaptive_min_delay: float = 0.5
-    adaptive_max_delay: float = 30.0
+    adaptive_max_delay: float = 10.0
     adaptive_latency_factor: float = 1.0
     cookie_persistence_enabled: bool = False
     cookie_jar_path: str = "/app/cache/cookie_jar.json"
