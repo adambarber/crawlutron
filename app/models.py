@@ -186,10 +186,32 @@ def to_dict(result: Any) -> dict[str, Any]:
 
 
 def _to_jsonable(value: Any) -> Any:
+    return _to_jsonable_impl(value, set())
+
+
+def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
+    # Guard against cyclic dataclass graphs (e.g. a DiscoveredLink whose
+    # parent/children point back to an ancestor). Without this, a cycle would
+    # recurse forever and raise RecursionError during result serialization (B2).
+    # Only mutable containers can participate in a reference cycle, so we track
+    # those by id; primitives (str/int/bytes) are returned as-is and must never
+    # be flagged (small strings may be interned and share an id across the tree).
     if is_dataclass(value) and not isinstance(value, type):
-        return {f.name: _to_jsonable(getattr(value, f.name)) for f in fields(value)}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
+        oid = id(value)
+        if oid in seen:
+            return None
+        seen = seen | {oid}
+        return {f.name: _to_jsonable_impl(getattr(value, f.name), seen) for f in fields(value)}
     if isinstance(value, dict):
-        return {k: _to_jsonable(v) for k, v in value.items()}
+        oid = id(value)
+        if oid in seen:
+            return None
+        seen = seen | {oid}
+        return {k: _to_jsonable_impl(v, seen) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        oid = id(value)
+        if oid in seen:
+            return None
+        seen = seen | {oid}
+        return [_to_jsonable_impl(v, seen) for v in value]
     return value

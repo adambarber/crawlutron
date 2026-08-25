@@ -1,5 +1,7 @@
 """#2: to_dict must be JSON-serializable and must not deep-copy leaf values."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import dataclass, field
 
@@ -42,3 +44,27 @@ def test_to_dict_json_safe_and_no_deepcopy():
 def test_to_dict_non_dataclass_passthrough():
     assert to_dict({"a": 1}) == {"a": 1}
     assert to_dict(5) == 5
+
+
+def test_to_dict_handles_cyclic_link_graph():
+    # A DiscoveredLink-style graph where a node's parent points back to an
+    # ancestor must serialize without infinite recursion (B2).
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class _Node:
+        name: str
+        parent: "_Node | None" = None
+        children: list = field(default_factory=list)
+
+    a = _Node("a")
+    b = _Node("b", parent=a)
+    a.children.append(b)
+    b.children.append(a)  # cycle: a -> b -> a
+
+    d = to_dict(a)
+    assert isinstance(d, dict)
+    # Must terminate and be JSON-serializable.
+    json.dumps(d)
+    # The cyclic reference is broken (rendered as None) rather than recursing.
+    assert d["children"][0]["children"] == [None]
