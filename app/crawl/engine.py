@@ -23,6 +23,7 @@ from typing import Any
 from app.classify import classify_page_with_evidence
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
+    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     BROWSER_HEADLESS,
     BROWSER_HEADED_WARMED,
     BROWSER_BLOCKED_CLASSIFICATIONS,
@@ -850,7 +851,7 @@ async def crawl_request(
             # recursive crawl ignores global_concurrency entirely.
             batch_size = min(
                 len(frontier),
-                max(1, active_settings.global_concurrency * 2),
+                max(1, active_settings.global_concurrency * ENGINE_BATCH_CONCURRENCY_MULTIPLIER),
                 max(1, max_pages - page_count),
             )
             batch = [frontier.popleft() for _ in range(batch_size)]

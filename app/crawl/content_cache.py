@@ -26,6 +26,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
+from app.constants import DEFAULT_CACHE_TTL_SECONDS
+
 
 def _default_clock() -> float:
     return time.time()
@@ -38,7 +40,7 @@ class ContentCache:
         self,
         cache_dir: str | Path,
         *,
-        default_ttl: int = 3600,
+        default_ttl: float = DEFAULT_CACHE_TTL_SECONDS,
         namespace: str = "content",
         clock: Callable[[], float] = _default_clock,
         max_entries: int = 10000,
