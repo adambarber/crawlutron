@@ -1358,7 +1358,10 @@ async def _http_strategy_result(
                     engine_robots_sitemaps=robots_sitemaps,
                     html=html,
                     policy=policy,
-                    headers=request_headers,
+                    # Base headers only: page-level If-None-Match /
+                    # If-Modified-Since must never reach robots.txt or
+                    # sitemap fetches (false 304s / missed sitemaps).
+                    headers=base_headers,
                     http_fetcher=http_fetcher,
                 )
             )
@@ -1402,13 +1405,15 @@ async def _http_strategy_result(
             # Boost only trustworthy content: garbage from failed decompression
             # can easily exceed the length threshold.
             quality = max(quality, 0.95)
-        # discovered_links is a standard result field (returned for every
-        # successful page, discovery requested or not), so it is always computed
-        # here. The heavier discovery-only extras (js_endpoints, pagination,
-        # sitemap/feed discovery) are gated on `discovery` below (B1).
-        discovered_links, discovered_link_count, discovered_links_truncated = (
-            _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS), tree=tree) if status == "success" else ([], 0, False)
-        )
+        # discovered_links is consumed by frontier expansion and by discovery
+        # consumers; content-only crawls (no discovery, depth 0) skip the
+        # extraction entirely and return empty links (#2-fix).
+        if status == "success" and _want_discovery_links:
+            discovered_links, discovered_link_count, discovered_links_truncated = (
+                _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS), tree=tree)
+            )
+        else:
+            discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]

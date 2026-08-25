@@ -51,6 +51,35 @@ def http_policy(**overrides):
 
 
 class TestHttpStrategy:
+    async def test_discovery_fetch_omits_page_conditional_headers(self):
+        # #1-fix: If-None-Match / If-Modified-Since belong to the HTML page
+        # request. Forwarding them to robots.txt/sitemap fetches invites false
+        # 304s -- discovery fetches get base headers only.
+        recorded: list[tuple[str, dict]] = []
+
+        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+            recorded.append((url, headers))
+            return HttpFetchResult(
+                url=url, final_url=url, status_code=200,
+                headers={"content-type": "text/html"},
+                body=b"<html><body><a href='/p'>p</a></body></html>", elapsed_ms=1,
+            )
+
+        cache = HttpCache()
+        cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
+        await _run(
+            policy=http_policy(discovery={"robots": True}),
+            original_url="http://x.test/", normalized_url="http://x.test/",
+            strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
+            cache=cache, content_cache=None,
+        )
+        robot_calls = [h for u, h in recorded if u.endswith("/robots.txt")]
+        assert robot_calls, "discovery never fetched robots.txt"
+        for headers in robot_calls:
+            lower = {k.lower() for k in headers}
+            assert "if-none-match" not in lower
+            assert "if-modified-since" not in lower
+
     async def test_html_diagnostics_skipped_without_discovery(self):
         # #2: _html_diagnostics (frames/forms via lxml parse) must be skipped
         # when discovery is not requested, to avoid a redundant HTML parse on
@@ -66,7 +95,10 @@ class TestHttpStrategy:
         r2 = await _run(policy=http_policy(discovery={"sitemaps": True}), **kwargs)
         assert "frames" in r2.diagnostics
 
-    async def test_http_strategy_extracts_html_markdown_and_links(self, base_url):
+    async def test_http_strategy_extracts_html_markdown_content_only(self, base_url):
+        # #2-fix: content-only crawl (no discovery, depth 0) skips link
+        # extraction entirely -- discovered_links comes back empty instead of
+        # paying an HTML parse per page nobody consumes.
         result = await _run(
             original_url=f"{base_url}/",
             normalized_url=f"{base_url}/",
@@ -78,7 +110,8 @@ class TestHttpStrategy:
         assert result.classification == "rendered"
         assert "Example Org" in (result.text or "")
         assert "Example Org" in (result.markdown or "")
-        assert result.discovered_link_count >= 1
+        assert result.discovered_link_count == 0
+        assert result.discovered_links == []
         assert result.next_page_url == f"{base_url}/page2"
         assert result.http_status == 200
 
@@ -187,8 +220,8 @@ class TestHttpStrategy:
         r1 = await _run(policy=http_policy(discovery=None), **kwargs)
         assert r1.diagnostics["js_endpoints"] == []
         assert "discovery" not in r1.diagnostics
-        # discovered_links remains a standard field (not gated)
-        assert r1.discovered_link_count >= 1
+        # content-only crawl: link extraction skipped entirely (#2-fix)
+        assert r1.discovered_link_count == 0
         # next_page_url is always computed (standard field, proven by
         # test_http_strategy_extracts_html_markdown_and_links); it must not be
         # gated behind discovery.
