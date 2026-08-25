@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, is_dataclass, fields
 from typing import Any, Literal
 
 from app.constants import (
@@ -173,5 +173,23 @@ HttpFetcher = Callable[[str, dict[str, str], int], Any]
 
 
 def to_dict(result: Any) -> dict[str, Any]:
-    """Return a JSON-serializable dict for any frozen-dataclass crawl result."""
-    return asdict(result)
+    """Return a JSON-serializable dict for any frozen-dataclass crawl result.
+
+    Unlike ``dataclasses.asdict``, this does NOT ``deepcopy`` leaf values. The
+    heavy fields (``html``/``text`` strings, ``metadata``/``diagnostics``
+    dicts) are shared by reference, and only nested dataclasses (e.g.
+    ``DiscoveredLink``) are converted to dicts -- so the output stays
+    JSON-serializable without paying asdict's full recursive deep-copy cost on
+    every field of every result in a large batch (#2).
+    """
+    return _to_jsonable(result)
+
+
+def _to_jsonable(value: Any) -> Any:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _to_jsonable(getattr(value, f.name)) for f in fields(value)}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    return value
