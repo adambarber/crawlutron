@@ -45,9 +45,9 @@ _DOC_EXTRACTION_EXECUTOR: concurrent.futures.ProcessPoolExecutor | None = None
 
 
 # Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
-# production container runs with a 2g mem limit. Raise via
-# BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office throughput is
-# needed and the memory budget allows it.
+# production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
+# Raise via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office
+# throughput is needed and the memory budget allows it.
 _DEFAULT_DOC_EXTRACTION_WORKERS = 2
 
 
