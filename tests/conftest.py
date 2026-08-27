@@ -54,6 +54,23 @@ async def _fast_asyncio_sleep(*args, **kwargs):
     return None
 
 
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip browser-marked tests when no real browser is installed.
+
+    Keeps ``pytest -m browser`` (and the full run) green on machines without
+    Camoufox/Playwright instead of failing mid-suite. When a browser is present
+    the marker is left intact so the tests actually execute.
+    """
+    from helpers import browser_available
+
+    if browser_available():
+        return
+    skip_no_browser = pytest.mark.skip(reason="browser not available in this environment")
+    for item in items:
+        if "browser" in item.keywords:
+            item.add_marker(skip_no_browser)
+
+
 @pytest.fixture(autouse=True)
 def fast_sleeps():
     """Patch time.sleep and asyncio.sleep to be instant by default.
@@ -192,9 +209,15 @@ def _reset_global_http_state():
 
     Tests drive many short-lived ``asyncio.run`` loops; without this the pooled
     httpx client keeps sockets bound to dead loops (pytest's unraisable-warning
-    plugin then fails a random later test with ResourceWarning) and the global
-    cookie jar leaks Set-Cookie state across tests. Resetting both here keeps
-    tests order-independent and is a prerequisite for pytest-xdist safety.
+    plugin then fails a random later test with ResourceWarning), the global
+    cookie jar leaks Set-Cookie state, and the shared HTTP cache / admission
+    gate leak crawl state across tests. Resetting here keeps tests
+    order-independent and is a prerequisite for pytest-xdist safety.
+
+    The http client close is loop-aware: if an event loop is already running
+    (async tests) we drop the reference and let GC reclaim it rather than
+    calling ``asyncio.run`` from inside a running loop (which raises and was
+    previously swallowed, leaving the client un-reset).
     """
     yield
     import asyncio
@@ -205,7 +228,16 @@ def _reset_global_http_state():
         pass
     try:
         if http_mod._DEFAULT_HTTP_CLIENT is not None:
-            asyncio.run(http_mod.close_async_http_client())
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Inside an async test's loop: drop the reference so GC
+                    # reclaims the client instead of awaiting across loops.
+                    http_mod._DEFAULT_HTTP_CLIENT = None
+                else:
+                    loop.run_until_complete(http_mod.close_async_http_client())
+            except RuntimeError:
+                http_mod._DEFAULT_HTTP_CLIENT = None
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
     # robots_cache was promoted to module-level and shared across crawl_request
@@ -215,9 +247,28 @@ def _reset_global_http_state():
     try:
         from app.crawl import engine as _engine_mod
         _engine_mod.robots_cache.clear()
+        # Fresh shared cache + admission gate so crawl state never leaks across
+        # tests (the gate caches its CPU-quota reading and CPU sampling state).
+        _engine_mod._SHARED_HTTP_CACHE = _engine_mod.HttpCache()
+        _engine_mod._resource_gate = _engine_mod.ResourceGate()
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
 
+
+@pytest.fixture(autouse=True)
+def _reset_metrics():
+    """Reset the process-local metrics store between tests.
+
+    ``get_metrics()`` returns the module-level singleton accumulated by
+    crawl_request / the engine. Without a reset, metric assertions become
+    order-dependent (e.g. a later test could observe non-zero utilization left
+    by an earlier recursive crawl). Resetting in place keeps every test hermetic
+    while preserving the object identity that ``engine``/``main`` obtain via ``get_metrics()``.
+    """
+    from app.metrics import get_metrics
+    get_metrics().reset()
+    yield
+    get_metrics().reset()
 
 # NOTE: there is deliberately no autouse extraction-process-pool reset here.
 # Tearing down the ProcessPoolExecutor around every test made the suite slow;

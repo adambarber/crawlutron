@@ -144,6 +144,12 @@ ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
 DEFAULT_MAX_BROWSER_RENDERS: int = 100
 DEFAULT_MAX_CONCURRENT_PAGES: int = 3
 
+# Browser pool: number of persistent browser instances to keep warm PER WORKER.
+# Each browser uses ~300MB (200MB binary + ~100MB WebExtensions).
+# With 4 uvicorn workers, default 1 per worker = 4 browsers total (~1.2GB,
+# leaves ~1.8GB for HTTP + orchestrator). Override via BROWSER_CRAWLER_BROWSER_POOL_SIZE.
+DEFAULT_BROWSER_POOL_SIZE: int = 1
+
 
 # --- Universal non-content hosts (hard-skip) ---
 # Hosts that never carry crawlable municipal content: tracking/ad/social-feed

@@ -56,7 +56,7 @@ are available at `/docs` and the machine-readable schema at `/openapi.json`.
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | `GET`  | `/health` | Liveness probe (always `200` if the process is up). |
-| `GET`  | `/ready` | Readiness probe; returns `503` when the global concurrency semaphore is saturated. |
+| `GET`  | `/ready` | Readiness probe; returns `503` when the self-managed resource guard is saturated (memory or CPU at the gate target). |
 | `POST` | `/v1/crawl` | Submit one URL (or a batch of URLs) for crawling. |
 | `POST` | `/v1/render` | Render a URL with the browser engine and return structured output. |
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
@@ -141,6 +141,21 @@ Every crawl result carries a `classification` from a fixed enum of **27 values**
   returns `202 Accepted` immediately).
 - **Conditional GETs**: `HTTP_DECLARED_CRAWLER` sends `If-None-Match` /
   `If-Modified-Since` when prior ETags are known, returning `not_modified` on a `304`.
+- **Resource self-tuning** (`#self-tuning`): the engine senses its own cgroup
+  memory/CPU ceiling and throttles recursive-batch dispatch to ride at the
+  targets instead of OOMing or tripping the kernel CPU throttle. No operator
+  tuning is required.
+- **HTTP-aware admission (item 7)**: browser crawls are the memory hog (one
+  ~300&thinsp;MB browser process each), and when browser processes hold memory
+  the whole batch used to be throttled — even cheap HTTP work. Today, when the
+  upcoming batch is predominantly domains *pinned* to an HTTP strategy (they've
+  already proven they fetch without a browser) and CPU has spare headroom, the
+  dispatcher uses the **HTTP-aware scale** (`ResourceGate.http_scale_factor`),
+  which rides the CPU-implied rate and is *not* dragged down by memory held by
+  browser processes of other domains. Browser-bound and cold (unpinned) batches
+  keep the conservative combined memory+CPU gate, so the extra concurrency is
+  always ramp-bounded (≤ `RECURSIVE_RAMP_MAX × multiplier`) and cannot overshoot
+  memory.
 
 ---
 
@@ -152,7 +167,7 @@ defaults shown):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port. |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | `4` | Max concurrent crawl tasks. |
+| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; not operator-wired)_ | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
 | `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `1` | Max concurrent tasks per host. |
 | `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `1000` | Delay between requests to the same host. |
 | `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |

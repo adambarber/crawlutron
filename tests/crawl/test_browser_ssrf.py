@@ -1,6 +1,8 @@
-import urllib.request
-
 import pytest
+
+pytestmark = pytest.mark.browser
+
+import urllib.request
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
@@ -8,6 +10,7 @@ import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.browser import _resolve_browser_target, _assert_safe_final_url, _is_ssrf_blocked, _make_ssrf_route_handler
 from _testkit import BrowserFakePage, build_pinned_renderer
 from app.models import RenderOptions
+
 
 
 # --------------------------------------------------------------------------
@@ -19,7 +22,6 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf")
-
 
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     seen = {}
@@ -46,7 +48,6 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
     doc_mod._default_document_text_extractor("http://example.com/x.pdf")
     assert seen.get("url") == "http://example.com/x.pdf"
 
-
 # --------------------------------------------------------------------------
 # browser.py helpers (F2): pinning + post-navigation re-validation
 # --------------------------------------------------------------------------
@@ -60,14 +61,12 @@ async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
     assert pinned_url == "http://1.2.3.4:80/path"
     assert headers == {"Host": "example.com"}
 
-
 async def test_assert_safe_final_url_blocks_internal(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         _assert_safe_final_url("http://127.0.0.1:9/")
     # A public IP literal is allowed.
     _assert_safe_final_url("http://1.2.3.4/")
-
 
 # --------------------------------------------------------------------------
 # browser.py integration: _render_with_browser navigates to the pinned IP and
@@ -88,7 +87,6 @@ async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     assert page.set_extra_http_headers_calls == [{"Host": "example.com"}]
     assert result.status == "success"
 
-
 async def test_render_rejects_internal_redirect_target(monkeypatch):
     page = BrowserFakePage()
     page.url = "http://127.0.0.1:9/"  # site redirected the browser to loopback
@@ -101,7 +99,6 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
     with pytest.raises(ValueError):
         await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
 
-
 # --------------------------------------------------------------------------
 # F8: route-level guard aborts SSRF-unsafe requests (subresources + redirects)
 # --------------------------------------------------------------------------
@@ -111,7 +108,6 @@ async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
     assert _is_ssrf_blocked("http://127.0.0.1:9/") is True
     assert _is_ssrf_blocked("http://169.254.169.254/latest/") is True
     assert _is_ssrf_blocked("http://1.2.3.4/") is False
-
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
@@ -140,7 +136,6 @@ async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
     await handler(good, _Req("http://1.2.3.4/"))
     assert good.continued and not good.aborted
 
-
 async def test_render_registers_ssrf_route_guard(monkeypatch):
     page = BrowserFakePage()
     renderer = build_pinned_renderer(monkeypatch, page)
@@ -151,3 +146,4 @@ async def test_render_registers_ssrf_route_guard(monkeypatch):
     await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
     # The SSRF route guard must be registered on the page.
     assert any(pattern == "**/*" for pattern, _ in page.route_calls)
+

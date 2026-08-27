@@ -69,6 +69,7 @@ class TestEngineCrawlRequest:
         assert result["status"] == "failed"
         assert result["classification"] == "browser_crash"
 
+    @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
         from helpers import run_crawl_async

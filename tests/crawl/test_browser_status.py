@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Tests for browser.py module."""
 
 from app.browser import (
@@ -39,6 +43,7 @@ class TestBrowserRendererStatus:
 
     def test_headless_enabled_false_values(self):
         import os
+
         for val in ["0", "false", "no", "off", "FALSE"]:
             os.environ["BROWSER_CRAWLER_HEADLESS"] = val
             try:
@@ -46,3 +51,4 @@ class TestBrowserRendererStatus:
                 assert renderer._headless_enabled() is False
             finally:
                 del os.environ["BROWSER_CRAWLER_HEADLESS"]
+

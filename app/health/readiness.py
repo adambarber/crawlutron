@@ -1,21 +1,32 @@
-"""Health and readiness endpoints."""
+"""Health and readiness endpoints (self-managed; no external config)."""
 
 import threading
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.api_models import ReadinessResponse
-from app.settings import CrawlerSettings
+from app.metrics import get_metrics
+
+# Self-managed saturation thresholds. These mirror the resource-gate ride
+# targets (app.memory_pressure._DEFAULT_TARGET / app.resource_pressure._DEFAULT_CPU_TARGET).
+# The service reports saturated (HTTP 503) when its own guard is riding its
+# ceiling, instead of a removed external concurrency knob.
+_MEMORY_SATURATION = 0.92
+_CPU_SATURATION = 0.90
 
 
 class ReadinessState:
-    """Thread-safe readiness state tracker."""
+    """Thread-safe readiness state tracker.
 
-    def __init__(self, *, max_active_requests: int) -> None:
-        self._max_active_requests = max(1, max_active_requests)
+    Saturation is derived from the service's own resource-guard utilization
+    (memory/CPU fraction of the discovered cgroup limit), not a fixed external
+    concurrency cap. The active-request count is tracked for visibility only.
+    """
+
+    def __init__(self) -> None:
         self._active_requests = 0
         self._lock = threading.Lock()
 
@@ -27,22 +38,26 @@ class ReadinessState:
         with self._lock:
             self._active_requests = max(0, self._active_requests - 1)
 
-    def snapshot(self) -> dict[str, int | bool | str]:
+    def snapshot(self) -> dict[str, int | int | bool | str]:
         with self._lock:
             active_requests = self._active_requests
-        saturated = active_requests >= self._max_active_requests
+        metrics = get_metrics()
+        mem_util = float(getattr(metrics, "resource_memory_utilization", 0.0) or 0.0)
+        cpu_util = float(getattr(metrics, "resource_cpu_utilization", 0.0) or 0.0)
+        saturated = mem_util >= _MEMORY_SATURATION or cpu_util >= _CPU_SATURATION
         return {
             "status": "saturated" if saturated else "ready",
             "active_requests": active_requests,
-            "max_active_requests": self._max_active_requests,
+            # Self-managed: no fixed request cap. Saturation is resource-driven.
+            "max_active_requests": 0,
             "saturated": saturated,
         }
 
 
-def create_health_router(settings: CrawlerSettings) -> APIRouter:
-    """Create health and readiness router."""
+def create_health_router() -> "tuple[APIRouter, ReadinessState]":
+    """Create health and readiness router (self-managed; no external config)."""
     router = APIRouter(tags=["Health"])
-    readiness_state = ReadinessState(max_active_requests=settings.global_concurrency)
+    readiness_state = ReadinessState()
 
     class HealthResponse(BaseModel):
         status: str = Field(description="Always 'ok' for liveness check.")
@@ -51,7 +66,10 @@ def create_health_router(settings: CrawlerSettings) -> APIRouter:
         "/health",
         response_model=HealthResponse,
         summary="Service liveness check",
-        description="Lightweight process liveness endpoint used by Docker healthchecks. It does not inspect crawl saturation or start a browser."
+        description=(
+            "Lightweight process liveness endpoint used by Docker healthchecks. "
+            "It does not inspect crawl saturation or start a browser."
+        ),
     )
     async def health() -> HealthResponse:
         """Liveness check - always returns ok."""
@@ -61,16 +79,20 @@ def create_health_router(settings: CrawlerSettings) -> APIRouter:
         "/ready",
         response_model=ReadinessResponse,
         summary="Service readiness check",
-        description="Reports active crawl saturation without implying process death. Returns 503 if saturated. Enables backpressure signaling for callers.",
+        description=(
+            "Reports resource saturation using the service's own self-managed guard "
+            "(memory/CPU utilization at the gate target). Returns 503 when saturated so "
+            "callers can apply backpressure. Unrelated to a fixed request cap."
+        ),
         responses={
             503: {
-                "description": "Service saturated - too many active crawl requests",
+                "description": "Service saturated - resource guard at capacity (memory or CPU at target).",
                 "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}},
             }
         },
     )
     async def ready() -> JSONResponse:
-        """Readiness check - returns HTTP 503 when saturated."""
+        """Readiness check - returns HTTP 503 when the self-managed guard is saturated."""
         snap = readiness_state.snapshot()
         return JSONResponse(
             status_code=503 if snap["saturated"] else 200,

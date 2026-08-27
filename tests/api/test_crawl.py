@@ -268,6 +268,7 @@ class TestShadowDomApi:
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
+    @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
     async def test_v1_crawl_shadow_dom_flattened(self):
         resp = await self.client.post("/v1/crawl", json={

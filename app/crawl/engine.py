@@ -17,6 +17,7 @@ import os
 import tempfile
 from collections import deque
 import time
+import logging
 from datetime import datetime, timezone
 import uuid
 from urllib.parse import urljoin, urlparse
@@ -51,9 +52,10 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
-from app.memory_pressure import MemoryGate
+from app.resource_pressure import ResourceGate
+logger = logging.getLogger(__name__)
 
-_memory_gate = MemoryGate()
+_resource_gate = ResourceGate()
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
@@ -83,6 +85,7 @@ from app.crawl.strategies.http import (
 )
 from app.models import (
     CrawlJob,
+    CrawlTask,
     CrawlResult,
     CrawlStrategyAttempt,
     RenderOptions,
@@ -91,18 +94,10 @@ from app.models import (
     HttpFetcher,
     to_dict,
 )
+from app.crawl.recursive import run_recursive_crawl
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
-
-
-@dataclass(frozen=True)
-class CrawlTask:
-    index: int
-    original_url: str
-    normalized_url: str
-    domain: str
-
 
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
@@ -305,7 +300,18 @@ async def _execute_crawl_chain(
     last_result: EngineCrawlResult | None = None
     cffi_was_blocked = False
     cffi_retry_done = False
-    for strategy in policy["strategies"]:
+
+    # Strategy pinning: if this domain has a pinned strategy from a prior
+    # successful fetch in this job, start the chain at that strategy (skip
+    # cheaper strategies that already failed for this domain).
+    strategies = policy["strategies"]
+    if scheduler is not None:
+        pinned = scheduler.get_pinned_strategy(domain)
+        if pinned is not None and pinned in strategies:
+            start_idx = strategies.index(pinned)
+            strategies = strategies[start_idx:]
+
+    for strategy in strategies:
         if strategy in HTTP_STRATEGIES:
             strategy_fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
             result = await _http_strategy_result(
@@ -395,6 +401,10 @@ async def _execute_crawl_chain(
                 last_result = result
 
         if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
+            # Pin the successful strategy for this domain so subsequent fetches
+            # in the same job start here instead of re-climbing the ladder.
+            if scheduler is not None:
+                scheduler.set_pinned_strategy(domain, strategy)
             return replace(result, attempted_strategies=attempts)
     assert last_result is not None
     return replace(last_result, attempted_strategies=attempts)
@@ -635,7 +645,12 @@ async def crawl_request(
     # Limits are the same for all jobs; extract once for scheduler config
     limits = policy.get("limits", {})
     scheduler = DomainScheduler(
-        global_limit=active_settings.global_concurrency,
+        # No fixed external concurrency cap: let the recursive dispatcher's
+        # self-tuning ramp (RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+        # = 32) size real concurrency to the cgroup budget; the resource gate is
+        # the sole authority. This limit just keeps a single scheduler batch
+        # from exceeding that ceiling.
+        global_limit=32,
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
         max_rps=float(limits.get("max_rps", 0) or 0),
@@ -895,89 +910,25 @@ async def crawl_request(
                 result = replace(result, html=None, text=None)
             spill.write(job.index, result)
     else:
-        visited: set[str] = set()
-        frontier: "deque[tuple[int, CrawlTask]]" = deque([(0, job) for job in jobs])
-        next_index = len(jobs)
-        page_count = 0
-        # bounded recursive BFS (#11) seeded by sitemaps (#13)
-        if discovery.get("sitemaps"):
-            for seed in await _sitemap_seed_urls():
-                if seed in visited:
-                    continue
-                frontier.append(
-                    (0, CrawlTask(index=next_index, original_url=seed, normalized_url=seed, domain=registrable_domain(seed)))
-                )
-                next_index += 1
-        while frontier and page_count < max_pages:
-            if shutdown_event.is_set():
-                break
-            # Pull a batch sized to the configured concurrency (and the remaining
-            # page budget) so discovered links are fetched *through the scheduler*
-            # concurrently instead of strictly one-by-one. Without this the
-            # recursive crawl ignores global_concurrency entirely.
-            # #self-tuning: ride at the memory target instead of OOMing.
-            # Above the hard ceiling dispatch pauses until usage drains; in the
-            # soft zone batches shrink proportionally.
-            await _memory_gate.wait_while_saturated()
-            mem_scale = _memory_gate.batch_scale_factor()
-            batch_size = min(
-                len(frontier),
-                max(1, active_settings.global_concurrency * ENGINE_BATCH_CONCURRENCY_MULTIPLIER),
-                max(1, max_pages - page_count),
-            )
-            if mem_scale < 1.0:
-                batch_size = max(1, int(batch_size * mem_scale))
-            batch = [frontier.popleft() for _ in range(batch_size)]
-
-            allowed_jobs: list[tuple[int, CrawlTask]] = []
-            for depth, job in batch:
-                if job.normalized_url in visited:
-                    continue
-                if respect_robots and not await _robots_allows_target(job.normalized_url):
-                    spill.write(job.index, _robots_disallowed_result(job))
-                    visited.add(job.normalized_url)
-                    page_count += 1
-                    continue
-                allowed_jobs.append((depth, job))
-                visited.add(job.normalized_url)
-
-            scheduled_results = (
-                await scheduler.run([job for _, job in allowed_jobs], _worker)
-                if allowed_jobs
-                else []
-            )
-
-            for (depth, job), result in zip(allowed_jobs, scheduled_results):
-                # Strip heavy payloads inside the loop so they are not retained
-                # for the whole crawl when the caller did not ask for them (#1).
-                if not include_html:
-                    result = replace(result, html=None, text=None)
-                spill.write(job.index, result)
-                page_count += 1
-                if depth >= max_depth:
-                    continue
-                for link in result.discovered_links:
-                    if link.normalized_url in visited:
-                        continue
-                    if is_analytics_host(link.normalized_url):
-                        # Hard-skip hosts are recorded on pages but never crawled.
-                        continue
-                    if not want_document_bodies and is_document_url(link.normalized_url):
-                        continue
-                    if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
-                        continue
-                    if respect_robots and not await _robots_allows_target(link.normalized_url):
-                        continue
-                    if max_pages and page_count + len(frontier) >= max_pages:
-                        break
-                    frontier.append(
-                        (
-                            depth + 1,
-                            CrawlTask(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
-                        )
-                    )
-                    next_index += 1
-
+        await run_recursive_crawl(
+            jobs=jobs,
+            scheduler=scheduler,
+            worker=_worker,
+            robots_allows=_robots_allows_target,
+            robots_disallowed=_robots_disallowed_result,
+            sitemap_seeds=_sitemap_seed_urls,
+            spill=spill,
+            shutdown_event=shutdown_event,
+            max_depth=max_depth,
+            max_pages=max_pages,
+            respect_robots=respect_robots,
+            include_html=include_html,
+            want_document_bodies=want_document_bodies,
+            scope_pattern=scope_pattern,
+            global_concurrency=active_settings.global_concurrency,
+            seed_sitemaps=bool(discovery.get("sitemaps")),
+            resource_gate=_resource_gate,
+        )
     response = {
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
         "submitted_count": len(urls),

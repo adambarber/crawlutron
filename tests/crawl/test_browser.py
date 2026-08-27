@@ -1,13 +1,18 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Real headless-browser behavior via Camoufox (no mocks)."""
+
 
 import base64
 
-import pytest
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 from app.constants import BROWSER_HEADLESS
+
 
 
 class TestBrowserRenderer:
@@ -71,3 +76,4 @@ class TestBrowserRenderer:
         )
         assert response["submitted_count"] == 1
         assert "Example Org" in response["results"][0]["markdown"]
+

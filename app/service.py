@@ -42,16 +42,18 @@ from app.crawl.strategies.http import (
     _cookie_header_for_url,
     _default_cffi_fetcher,
     _default_http_fetcher,
-    _document_item_range,
     _fetch_with_retries,
-    _format_extracted_document_text,
     _headers_for_strategy,
     _http_strategy_result,
     _looks_like_binary_body,
-    _next_non_empty_document_line,
     _retry_after_seconds,
-    _should_join_document_paragraph,
+)
+from app.crawl.document_text import (
     _collect_document_item_lines,
+    _document_item_range,
+    _format_extracted_document_text,
+    _next_non_empty_document_line,
+    _should_join_document_paragraph,
 )
 from app.models import (
     CrawlJob,

@@ -10,13 +10,21 @@ batches pause until usage drains.
 
 from __future__ import annotations
 
+from app.cgroup_sense import _read_int
+
 import asyncio
 import os
 import time
 from dataclasses import dataclass
 
-_DEFAULT_TARGET = float(os.environ.get("BROWSER_CRAWLER_MEMORY_TARGET", "0.92"))
-_DEFAULT_HARD = float(os.environ.get("BROWSER_CRAWLER_MEMORY_HARD", "0.97"))
+# Self-managed memory admission targets (no operator knob): the gate rides
+# at TARGET and pauses at HARD against the cgroup memory limit it discovers
+# itself. Removing the external override lets the app manage its own ceiling.
+# Lowered from 0.92/0.97 to prevent first-batch burst overshoot (was spiking
+# to ~0.96 of 3GB). Target 0.85 leaves ~0.45 GiB headroom; hard 0.92 still
+# provides ~0.24 GiB safety margin before OOM.
+_DEFAULT_TARGET = 0.85
+_DEFAULT_HARD = 0.92
 
 
 @dataclass(frozen=True)
@@ -31,20 +39,6 @@ def _total_system_ram() -> int:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (ValueError, OSError):
         return 0
-
-
-def _read_int(path: str) -> int | None:
-    try:
-        with open(path) as fh:
-            value = fh.read().strip()
-    except OSError:
-        return None
-    if not value or value == "max":
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        return None
 
 
 def read_memory_stats(cgroup_root: str = "/sys/fs/cgroup") -> MemoryStats:
@@ -85,7 +79,74 @@ def batch_scale(used: float, total: float, target: float, hard: float | None = N
     return max(0.0, 1.0 - (ratio - target) / span)
 
 
-class MemoryGate:
+
+class ResourceGauge:
+    """Base admission gauge for one bounded resource.
+
+    A gauge senses a single resource's pressure as a fraction of its ceiling
+    via :meth:`_usage_ratio` (subclass-defined) and turns that one signal into
+    both the batch-scale factor and the saturation wait. Centralizing the
+    derived logic here guarantees the two never drift apart -- the exact bug
+    class that previously let a gate's ``batch_scale_factor`` bypass
+    ``_usage_ratio``.
+    """
+
+    def __init__(
+        self,
+        target: float | None,
+        *,
+        poll_seconds: float = 0.1,
+        max_wait_seconds: float = 30.0,
+        cgroup_root: str = "/sys/fs/cgroup",
+    ):
+        self.target = target
+        self.poll_seconds = poll_seconds
+        self.max_wait_seconds = max_wait_seconds
+        self.cgroup_root = cgroup_root
+
+    def _usage_ratio(self) -> float:
+        """Current pressure as a fraction of the resource ceiling.
+
+        Subclasses override this. Return 0.0 when there is no measured ceiling
+        to defend (e.g. an unbounded cgroup) so the gate stays open.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def _hard(target: float) -> float:
+        return min(0.999, target + 0.05)
+
+    def batch_scale_factor(self) -> float:
+        # Both wait_while_saturated and scale read the same _usage_ratio signal.
+        return batch_scale(self._usage_ratio(), 1.0, self.target)
+
+    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
+        """Block while at/above the hard ceiling; release below it."""
+        budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
+        deadline = time.monotonic() + budget
+        hard = self._hard(self.target)
+        while self._usage_ratio() >= hard:
+            if time.monotonic() >= deadline:
+                return
+            await asyncio.sleep(self.poll_seconds)
+
+    def headroom_fraction(self) -> float:
+        """Fraction of the resource ceiling still available before hard limit.
+
+        Returns 1.0 when unbounded (no ceiling to defend). At the hard ceiling
+        returns 0.0. Between target and hard, returns the linear fraction
+        remaining. Below target returns 1.0 (full headroom).
+        """
+        usage = self._usage_ratio()
+        hard = self._hard(self.target)
+        if usage >= hard:
+            return 0.0
+        if usage <= self.target:
+            return 1.0
+        return max(0.0, 1.0 - (usage - self.target) / (hard - self.target))
+
+
+class MemoryGate(ResourceGauge):
     """Global admission gate consulted before each crawl batch dispatch."""
 
     def __init__(
@@ -96,26 +157,15 @@ class MemoryGate:
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
-        self.target = _DEFAULT_TARGET if target is None else target
-        self.poll_seconds = poll_seconds
-        self.max_wait_seconds = max_wait_seconds
-        self.cgroup_root = cgroup_root
+        super().__init__(
+            target=(_DEFAULT_TARGET if target is None else target),
+            poll_seconds=poll_seconds,
+            max_wait_seconds=max_wait_seconds,
+            cgroup_root=cgroup_root,
+        )
 
     def _usage_ratio(self) -> float:
         stats = read_memory_stats(cgroup_root=self.cgroup_root)
         if stats.total_bytes <= 0:
             return 0.0
         return stats.used_bytes / stats.total_bytes
-
-    def batch_scale_factor(self) -> float:
-        stats = read_memory_stats(cgroup_root=self.cgroup_root)
-        return batch_scale(stats.used_bytes, stats.total_bytes, self.target)
-
-    async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while at/above the hard ceiling; release below it."""
-        budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = time.monotonic() + budget
-        while self._usage_ratio() >= min(0.999, self.target + 0.05):
-            if time.monotonic() >= deadline:
-                return
-            await asyncio.sleep(self.poll_seconds)

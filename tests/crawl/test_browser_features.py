@@ -1,13 +1,19 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Browser feature tests (reuse, action chains, targeted screenshots).
 
 Uses a hand-rolled fake Playwright-compatible page (no real browser, no
 unittest.mock) so the orchestration logic is exercised deterministically.
 """
 
+
 import base64
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
+
 
 
 class FakeElement:
@@ -22,7 +28,6 @@ class FakeElement:
     async def screenshot(self):
         self.screenshots += 1
         return b"elementpng"
-
 
 class FakePage:
     def __init__(self):
@@ -94,7 +99,6 @@ class FakePage:
     def is_closed(self):
         return False
 
-
 class FakeBrowser:
     def __init__(self):
         self.pages = 0
@@ -107,7 +111,6 @@ class FakeBrowser:
     def is_closed(self):
         return False
 
-
 class FakeBrowserCM:
     def __init__(self, browser):
         self.browser = browser
@@ -119,7 +122,6 @@ class FakeBrowserCM:
 
     async def __aexit__(self, *exc):
         return False
-
 
 class TestActionChain:
     async def test_action_chain_dispatches_correctly(self):
@@ -152,7 +154,6 @@ class TestActionChain:
         renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
         await renderer._run_action_chain(page, [{"type": "click", "selector": "#x"}])
 
-
 class TestElementScreenshot:
     async def test_capture_element_screenshots(self):
         page = FakePage()
@@ -164,7 +165,6 @@ class TestElementScreenshot:
         for s in shots:
             decoded = base64.b64decode(s["screenshot"])
             assert decoded == b"elementpng"
-
 
 class TestBrowserReuse:
     async def test_single_browser_reused_across_renders(self):
@@ -195,3 +195,4 @@ class TestBrowserReuse:
         result = await renderer.render("http://example.com/", RenderOptions(browser_profile={}))
         assert result.status == "success"
         assert "Visible body text" in (result.text or "")
+

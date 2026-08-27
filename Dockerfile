@@ -55,7 +55,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BROWSER_CRAWLER_LOG_LEVEL=info \
     # Set workers to 1 by default for browser automation to prevent memory exhaustion.
     # Scale horizontally via containers if more concurrency is needed.
-    BROWSER_CRAWLER_WORKERS=1 \
+    BROWSER_CRAWLER_WORKERS=4 \
     # Opt-in in-container disk content cache (#5): cache successful HTTP/Browser
     # responses on disk (under BROWSER_CRAWLER_CACHE_DIR) to avoid re-download/
     # re-extract on repeat crawls. No external sidecar (Redis/Memcached) required.
@@ -95,12 +95,10 @@ ENV HOME=/home/appuser
 # Copy installed Python packages from builder stage to the appuser's local directory
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
-# Bring in the pre-fetched Camoufox browser binary from the isolated stage
-# (committed to the image) so the runtime does not re-download it.
-# Reuse the Camoufox binary already present in the current image instead of
-# re-downloading it. The camoufox-binary stage above is kept (with a cache
-# mount) for fresh builds, but this COPY sources the binary that is already
-# baked into browser-crawler:latest so a routine rebuild never re-fetches ~1.3GB.
+# Bring in the pre-fetched Camoufox browser binary. It is baked into the
+# local browser-crawler:latest image (built once, with the ~1.3 GB download),
+# so routine rebuilds reuse it instead of re-fetching. A from-scratch build can
+# instead source the isolated camoufox-binary stage if that image is absent.
 COPY --from=browser-crawler:latest --chown=appuser:appuser /home/appuser/.cache/camoufox /home/appuser/.cache/camoufox
 
 # Copy application code and the shared logging module (no external build context needed)

@@ -44,6 +44,7 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from .crawl.strategies.browser import BrowserRenderer
+from .crawl.strategies.browser_pool import BrowserPool, PooledBrowserWorker, initialize_browser_pool, close_browser_pool, get_browser_pool
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .output_formats import serialize_results
@@ -51,7 +52,7 @@ from .map import build_site_map
 from .crawl.job_store import JobStore, JobStatus
 from .crawl.result_store import CrawlResultStore
 from .settings import CrawlerSettings
-from .metrics import metrics
+from .metrics import get_metrics
 
 try:
     from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
@@ -86,12 +87,17 @@ result_store = CrawlResultStore(
     max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
 )
 
+# Global browser pool instance (initialized in lifespan)
+browser_pool: BrowserPool | None = None
+
+
 async def _execute_crawl(payload_dict: dict) -> dict:
     """Shared crawl execution for /v1/crawl and /v1/map."""
+    pooled_worker = PooledBrowserWorker(browser_pool)  # type: ignore[arg-type]
     return await crawl_request(
         payload_dict,
         settings=settings,
-        browser_worker=lambda job: renderer.render(job.url, job.options),
+        browser_worker=pooled_worker,
         shutdown_event=shutdown_event,
     )
 
@@ -103,7 +109,8 @@ logger = configure_service_logging(
     log_file_max_bytes=settings.log_file_max_bytes,
     log_file_backup_count=settings.log_file_backup_count,
 )
-renderer = BrowserRenderer(settings=settings)
+# browser_pool is initialized in lifespan via initialize_browser_pool()
+# and accessed via get_browser_pool() from browser_pool module
 shutdown_event = asyncio.Event()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
@@ -246,15 +253,17 @@ def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlR
 if FastAPI is not None:
     def _lifespan(app: FastAPI):
         @asynccontextmanager
-        async def lifespan_context(allow_concurrency: bool, *args, **kwargs):
-            # Startup: load cookie jar if persistence enabled
+        async def lifespan_context(_app: FastAPI):
+            # Startup: initialize browser pool, load cookie jar if persistence enabled
+            global browser_pool
+            browser_pool = await initialize_browser_pool(settings)
             if settings.cookie_persistence_enabled:
                 from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
                 _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
 
             yield
 
-            # Shutdown: save cookie jar if persistence enabled, then close clients
+            # Shutdown: save cookie jar if persistence enabled, then close clients and browser pool
             if settings.cookie_persistence_enabled:
                 from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
                 _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
@@ -263,7 +272,7 @@ if FastAPI is not None:
 
             shutdown_event.set()
             await close_async_http_client()
-            await renderer.close()
+            await close_browser_pool()
 
         return lifespan_context
 
@@ -291,7 +300,7 @@ if FastAPI is not None:
     )
 
     # Include modular routers
-    health_router, readiness_state = create_health_router(settings)
+    health_router, readiness_state = create_health_router()
     app.include_router(health_router)
 
     app.include_router(create_capabilities_router(settings))
@@ -345,10 +354,11 @@ if FastAPI is not None:
     async def render(payload: RenderRequest) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
+            pooled_worker = PooledBrowserWorker(browser_pool)
             result = await render_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
-                worker=lambda job: renderer.render(job.url, job.options),
+                worker=pooled_worker,
             )
             logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
             return UnifiedCrawlResponse(
@@ -384,14 +394,15 @@ if FastAPI is not None:
     async def _run_and_deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
         # SSRF protection for webhook URL (#P0)
         _validate_webhook_url(webhook_url)
+        pooled_worker = PooledBrowserWorker(browser_pool)
         result = await crawl_request(
             payload_dict,
             settings=crawl_settings,
-            browser_worker=lambda job: renderer.render(job.url, job.options),
+            browser_worker=pooled_worker,
             shutdown_event=shutdown_event,
         )
         result["request_id"] = request_id
-        metrics.observe_crawl(results=result.get("results", []))
+        get_metrics().observe_crawl(results=result.get("results", []))
         unified_results = [_build_unified_result(item) for item in result.get("results", [])]
         response_payload = UnifiedCrawlResponse(
             request_id=request_id,
@@ -555,7 +566,7 @@ if FastAPI is not None:
                 background_tasks.add_task(
                     _deliver_webhook, webhook_url, request_id, payload_dict, settings
                 )
-                metrics.observe_crawl(accepted=True)
+                get_metrics().observe_crawl(accepted=True)
                 return JSONResponse(
                     status_code=202,
                     content={
@@ -567,7 +578,7 @@ if FastAPI is not None:
                 )
             _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)
-            metrics.observe_crawl(
+            get_metrics().observe_crawl(
                 results=result.get("results", []),
                 elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
             )
@@ -604,7 +615,7 @@ if FastAPI is not None:
                 results=unified,
             )
         except ValueError as error:
-            metrics.observe_crawl(errors=1)
+            get_metrics().observe_crawl(errors=1)
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
             raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
         finally:
@@ -638,7 +649,7 @@ if FastAPI is not None:
             policy["limits"] = limits
             _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)
-            metrics.observe_crawl(
+            get_metrics().observe_crawl(
                 results=result.get("results", []),
                 elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
             )
@@ -776,7 +787,7 @@ if FastAPI is not None:
 
     @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
     async def metrics_endpoint() -> "Response":
-        return Response(metrics.as_prometheus(), media_type="text/plain; version=0.0.4")
+        return Response(get_metrics().as_prometheus(), media_type="text/plain; version=0.0.4")
 
 else:
     app = None

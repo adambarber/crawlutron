@@ -132,6 +132,21 @@ class DiscoveredLink:
     is_same_host: bool
 
 
+@dataclass
+class CrawlTask:
+    """A single URL scheduled for crawling within a crawl_request.
+
+    Carries the per-job bookkeeping the engine/recursive dispatcher needs
+    (submission index for result ordering, original + normalized URL, and the
+    registrable domain used for per-domain scheduling/robots scoping).
+    """
+
+    index: int
+    original_url: str
+    normalized_url: str
+    domain: str
+
+
 @dataclass(frozen=True)
 class EngineCrawlResult:
     original_url: str

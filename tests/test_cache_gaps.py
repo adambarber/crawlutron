@@ -1,0 +1,19 @@
+"""TestCacheGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+
+from coverage_helpers import *  # noqa: F401,F403
+
+class TestCacheGaps:
+    def test_conditional_headers_include_last_modified(self):
+        c = HttpCache()
+        c.store("http://x/1", {"etag": "v1", "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"})
+        headers = c.conditional_headers("http://x/1")
+        assert headers["If-None-Match"] == "v1"
+        assert headers["If-Modified-Since"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+        c.close()
+
+    def test_close_idempotent(self):
+        c = HttpCache()
+        c.close()
+        c.close()
+
+

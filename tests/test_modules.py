@@ -4,6 +4,7 @@ from app.crawl.decompression import decompress_body
 from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
 from app.crawl.extraction import extract_content
 from app.health.readiness import ReadinessState, create_health_router
+from app.metrics import get_metrics
 from app.discovery.capabilities import capabilities_payload, create_capabilities_router
 from app.discovery.agent_hints import agent_hints_payload, create_agent_hints_router, EXAMPLE_POLICIES, STRATEGY_DESCRIPTIONS
 from app.discovery.well_known import discovery_payload, create_well_known_router
@@ -48,14 +49,14 @@ class TestFirecrawlFormat:
 
 class TestReadinessState:
     def test_initial_state_is_ready(self):
-        state = ReadinessState(max_active_requests=2)
+        state = ReadinessState()
         snap = state.snapshot()
         assert snap["status"] == "ready"
         assert snap["active_requests"] == 0
         assert snap["saturated"] is False
 
     def test_begin_end_request(self):
-        state = ReadinessState(max_active_requests=2)
+        state = ReadinessState()
         state.begin_request()
         snap = state.snapshot()
         assert snap["active_requests"] == 1
@@ -64,15 +65,29 @@ class TestReadinessState:
         snap = state.snapshot()
         assert snap["active_requests"] == 0
 
-    def test_saturation(self):
-        state = ReadinessState(max_active_requests=1)
-        state.begin_request()
+    def test_saturated_when_memory_at_ceiling(self):
+        metrics = get_metrics()
+        metrics.resource_memory_utilization = 0.0
+        metrics.resource_cpu_utilization = 0.0
+        state = ReadinessState()
+        assert state.snapshot()["saturated"] is False
+        # Memory gate rides at 0.92; at/above target the service is saturated.
+        metrics.resource_memory_utilization = 0.95
         snap = state.snapshot()
         assert snap["saturated"] is True
         assert snap["status"] == "saturated"
 
+    def test_saturated_when_cpu_at_ceiling(self):
+        metrics = get_metrics()
+        metrics.resource_memory_utilization = 0.0
+        metrics.resource_cpu_utilization = 0.0
+        state = ReadinessState()
+        # CPU gate rides at 0.90; at/above target the service is saturated.
+        metrics.resource_cpu_utilization = 0.93
+        assert state.snapshot()["saturated"] is True
+
     def test_end_request_does_not_go_negative(self):
-        state = ReadinessState(max_active_requests=1)
+        state = ReadinessState()
         state.end_request()
         snap = state.snapshot()
         assert snap["active_requests"] == 0

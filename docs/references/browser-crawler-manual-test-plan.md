@@ -39,7 +39,7 @@ exposed via the API contract.
 |---|---|---|
 | `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port |
 | `BROWSER_CRAWLER_WORKERS` | 1 | uvicorn workers (Dockerfile) |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | `4` | Max concurrent crawls cluster-wide |
+| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; not operator-wired)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
 | `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `1` | Per-host parallel crawls |
 | `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `1000` | Delay between same-domain jobs |
 | `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per request |
@@ -103,7 +103,7 @@ done
 `GET /ready` → `200`, JSON with `status`, `active_requests`, `max_active_requests`, `saturated`. `status` ∈ {`ready`, `saturated`}.
 
 ### TC-READY-02 — Readiness saturation
-Under concurrent load (`max_active_requests` derived from `global_concurrency`), `saturated` becomes `true` and the service returns HTTP `503` for new crawl requests (backpressure, not death). (Observe via parallel `TC-CRAWL` runs.)
+Under load, `saturated` becomes `true` when the self-managed resource guard rides at its target (memory >= 0.92 or CPU >= 0.90) and the service returns HTTP `503` (backpressure, not death). `max_active_requests` is reported as `0` (unbounded); saturation is resource-driven, not a fixed request cap. (Observe via parallel `TC-CRAWL` runs or by driving memory/CPU to the gate target.)
 
 ### TC-METRICS-01 — Prometheus metrics
 `GET /metrics` → `200`, `text/plain; version=0.0.4`. Contains counters:

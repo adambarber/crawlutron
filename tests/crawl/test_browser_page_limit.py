@@ -1,8 +1,13 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Throughput regression test: concurrent browser renders are capped.
 
 Each render opens a browser tab; without a cap a burst of N requests opens N
 tabs and crashes/OOMs the shared Camoufox process.
 """
+
 
 import asyncio
 
@@ -10,10 +15,10 @@ from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
 
+
 class _FakeElement:
     def __init__(self, selector):
         self.selector = selector
-
 
 class _FakePage:
     def __init__(self, tracker):
@@ -49,7 +54,6 @@ class _FakePage:
     async def close(self):
         return None
 
-
 class _FakeBrowser:
     def __init__(self, tracker):
         self._tracker = tracker
@@ -61,7 +65,6 @@ class _FakeBrowser:
     def is_closed(self):
         return False
 
-
 class _FakeBrowserCM:
     def __init__(self, tracker):
         self.browser = _FakeBrowser(tracker)
@@ -71,7 +74,6 @@ class _FakeBrowserCM:
 
     async def __aexit__(self, *exc):
         return False
-
 
 async def test_concurrent_page_renders_capped(monkeypatch, real_sleeps):
     monkeypatch.setenv("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "2")
@@ -86,3 +88,4 @@ async def test_concurrent_page_renders_capped(monkeypatch, real_sleeps):
         await renderer.close()
     assert tracker["max"] <= 2, f"page cap ignored: {tracker}"
     assert tracker["max"] >= 2, f"cap serialized renders entirely: {tracker}"
+

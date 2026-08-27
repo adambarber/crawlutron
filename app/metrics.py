@@ -18,9 +18,26 @@ class MetricsStore:
     crawl_success_total: int = 0
     crawl_failure_total: int = 0
     crawl_errors_total: int = 0
+    # Resource admission control (#self-tuning): live utilization vs the cgroup
+    # ceiling and throttle/pause counters, so operators can monitor the guard.
+    resource_memory_utilization: float = 0.0
+    resource_cpu_utilization: float = 0.0
+    resource_throttle_batches_total: int = 0
+    resource_pause_seconds_total: float = 0.0
     strategy_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     classification_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     total_elapsed_ms: float = 0.0
+
+    def reset(self) -> None:
+        """Reinitialize every field in place to its default.
+
+        Used between tests so the process-local store (a module-level singleton)
+        does not leak counters/gauges across tests and make metric assertions
+        order-dependent. Resets in place so existing ``from app.metrics import
+        metrics`` references keep pointing at the same object.
+        """
+        fresh = MetricsStore()
+        self.__dict__.update(fresh.__dict__)
 
     def observe_crawl(
         self,
@@ -74,7 +91,41 @@ class MetricsStore:
             lines.append(f'crawler_strategy_results_total{{strategy="{strategy}"}} {count}')
         for classification, count in sorted(self.classification_counts.items()):
             lines.append(f'crawler_result_classification_total{{classification="{classification}"}} {count}')
+        lines.append(
+            "# HELP crawler_resource_memory_utilization Current memory usage as a fraction of the "
+            "cgroup memory limit (or host RAM). >1 means over the hard ceiling."
+        )
+        lines.append("# TYPE crawler_resource_memory_utilization gauge")
+        lines.append(f"crawler_resource_memory_utilization {self.resource_memory_utilization:.4f}")
+        lines.append(
+            "# HELP crawler_resource_cpu_utilization Current CPU utilization as a fraction of the "
+            "cgroup CPU quota (or manual budget). >1 means over budget / being throttled."
+        )
+        lines.append("# TYPE crawler_resource_cpu_utilization gauge")
+        lines.append(f"crawler_resource_cpu_utilization {self.resource_cpu_utilization:.4f}")
+        lines.append(
+            "# HELP crawler_resource_throttle_batches_total Crawl batches shrunk by resource admission "
+            "control (memory and/or CPU pressure)."
+        )
+        lines.append("# TYPE crawler_resource_throttle_batches_total counter")
+        lines.append(f"crawler_resource_throttle_batches_total {self.resource_throttle_batches_total}")
+        lines.append(
+            "# HELP crawler_resource_pause_seconds_total Wall-clock seconds dispatch was paused waiting "
+            "for a saturated resource to drain."
+        )
+        lines.append("# TYPE crawler_resource_pause_seconds_total counter")
+        lines.append(f"crawler_resource_pause_seconds_total {self.resource_pause_seconds_total:.3f}")
         return "\n".join(lines) + "\n"
 
 
 metrics = MetricsStore()
+
+
+def get_metrics() -> "MetricsStore":
+    """Return the process-local metrics singleton.
+
+    Callers should use this accessor instead of ``from app.metrics import
+    metrics`` so they always observe the current store -- including if a test
+    or harness swaps the singleton -- rather than a name bound at import time.
+    """
+    return metrics

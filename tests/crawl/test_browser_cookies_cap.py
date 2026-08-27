@@ -1,7 +1,13 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Browser cookie cache must be bounded (#6)."""
+
 
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import _BROWSER_COOKIES_MAX, _store_browser_cookies, get_browser_cookies_for
+
 
 
 def _with_clean_cache(fn):
@@ -12,7 +18,6 @@ def _with_clean_cache(fn):
     finally:
         browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
         browser_mod._BROWSER_COOKIES_BY_DOMAIN.update(saved)
-
 
 def test_cookie_cache_capped():
     def run():
@@ -25,7 +30,6 @@ def test_cookie_cache_capped():
 
     _with_clean_cache(run)
 
-
 def test_lru_keeps_recently_used():
     def run():
         for i in range(_BROWSER_COOKIES_MAX + 50):
@@ -36,3 +40,4 @@ def test_lru_keeps_recently_used():
         assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
 
     _with_clean_cache(run)
+

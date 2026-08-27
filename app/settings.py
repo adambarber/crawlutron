@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from app.constants import (
+    DEFAULT_BROWSER_POOL_SIZE,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
@@ -52,6 +53,7 @@ class CrawlerSettings:
     # mapping and are visible in /v1/capabilities-style config).
     max_browser_renders: int = DEFAULT_MAX_BROWSER_RENDERS
     max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
+    browser_pool_size: int = DEFAULT_BROWSER_POOL_SIZE
     challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
 
     @classmethod
@@ -92,5 +94,6 @@ class CrawlerSettings:
             http_keepalive_expiry=float(source.get("BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry)),
             max_browser_renders=int(source.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", cls.max_browser_renders)),
             max_concurrent_pages=int(source.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages)),
+            browser_pool_size=int(source.get("BROWSER_CRAWLER_BROWSER_POOL_SIZE", cls.browser_pool_size)),
             challenge_wait_seconds=int(source.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds)),
         )

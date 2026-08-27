@@ -1,6 +1,12 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """XHR/fetch interception must be bounded (hostile pages fire endless JSON)."""
 
+
 from app.crawl.strategies.browser import BrowserRenderer
+
 
 
 class _FakeResponse:
@@ -12,7 +18,6 @@ class _FakeResponse:
 
     async def json(self):
         return self._payload
-
 
 async def test_response_handler_caps_entries_and_payload_size():
     collected = []
@@ -35,3 +40,4 @@ async def test_response_handler_caps_entries_and_payload_size():
     # Oversized payloads are truncated out rather than stored whole.
     assert all(len((e.get("payload") or {}).get("blob", "")) <= 200_000 for e in collected)
     assert any(e.get("payload_truncated") for e in collected)
+

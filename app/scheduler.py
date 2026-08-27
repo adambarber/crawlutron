@@ -81,6 +81,12 @@ class DomainScheduler:
         # Adaptive throttling state: EMA of observed latency (ms) per domain.
         self._domain_latency_ema: dict[str, float] = {}
 
+        # Per-job per-domain strategy pinning: once a domain proves it needs a
+        # particular strategy (e.g., browser), subsequent fetches for that
+        # domain in the same job start at the pinned strategy instead of
+        # re-climbing the ladder from the cheapest strategy.
+        self._domain_strategy_pins: dict[str, str] = {}
+
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
         """Set a cooldown period for a domain after a rate limit (429) response.
 
@@ -122,6 +128,15 @@ class DomainScheduler:
         self._domain_latency_ema[domain] = (
             latency_ms if prev is None else prev * (1.0 - alpha) + latency_ms * alpha
         )
+
+    def get_pinned_strategy(self, domain: str) -> str | None:
+        """Return the strategy pinned for ``domain`` within this job, or None."""
+        return self._domain_strategy_pins.get(domain)
+
+    def set_pinned_strategy(self, domain: str, strategy: str) -> None:
+        """Record the strategy that succeeded for ``domain`` so future fetches
+        in this job start at this strategy instead of re-climbing the ladder."""
+        self._domain_strategy_pins[domain] = strategy
 
     def _recompute_delay(self, domain: str) -> float:
         """Target per-domain delay (seconds) from the latency EMA (#6)."""

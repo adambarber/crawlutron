@@ -9,3 +9,4 @@ brotli>=1.1.0
 pdfplumber>=0.11.0
 charset-normalizer>=3.3.0
 h2>=4.1.0
+httpx>=0.27.0

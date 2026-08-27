@@ -101,24 +101,26 @@ async def test_gate_returns_immediately_under_target():
 
 
 async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypatch):
-    """Integration: with the sampler pinned at 99% usage, the engine pauses
-    dispatch (gate waits) yet the crawl still completes."""
+    """Integration: with the memory sampler pinned at 99% usage, the engine pauses
+    dispatch (gate waits) yet the crawl still completes. The combined ResourceGate
+    is exercised; CPU is pinned idle so only memory drives the throttle."""
     import app.crawl.engine as engine_mod
+    from app.resource_pressure import ResourceGate
     from _testkit import site_fetcher
 
-    class PinnedGate(MemoryGate):
-        def _usage_ratio(self):
-            return 0.99
-
-    gate = PinnedGate(target=0.92)
-    gate.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
+    gate = ResourceGate()
+    gate.memory.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
+    gate.cpu.max_wait_seconds = 0.05
+    # Pin memory saturated, CPU idle, so the throttle is attributable to memory.
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.99)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
     waits = []
 
     async def fake_sleep(seconds):
         waits.append(seconds)
 
-    monkeypatch.setattr("app.memory_pressure.asyncio.sleep", fake_sleep)
-    monkeypatch.setattr(engine_mod, "_memory_gate", gate)
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(engine_mod, "_resource_gate", gate)
 
     pages = {
         "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
@@ -133,4 +135,41 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
         "http://example.com",
         "http://example.com/a",
     }
-    assert waits, "engine dispatched without consulting the memory gate"
+    assert waits, "engine dispatched without consulting the resource gate"
+
+
+async def test_engine_throttles_batches_under_cpu_pressure(tmp_path, monkeypatch):
+    """Integration: with the CPU sampler pinned at 99% of quota, the engine pauses
+    dispatch (gate waits) yet the crawl still completes. Mirrors the memory test."""
+    import app.crawl.engine as engine_mod
+    from app.resource_pressure import ResourceGate
+    from _testkit import site_fetcher
+
+    gate = ResourceGate()
+    gate.memory.max_wait_seconds = 0.05
+    gate.cpu.max_wait_seconds = 0.05
+    # Pin CPU saturated, memory idle, so the throttle is attributable to CPU.
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.99)
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
+    waits = []
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(engine_mod, "_resource_gate", gate)
+
+    pages = {
+        "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
+        "/a": (200, "<html>a</html>", "text/html"),
+    }
+    out = await engine_mod.crawl_request(
+        {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}},
+        http_fetcher=site_fetcher(pages),
+        cache=__import__("app.crawl.cache", fromlist=["HttpCache"]).HttpCache(),
+    )
+    assert {r["normalized_url"] for r in out["results"]} == {
+        "http://example.com",
+        "http://example.com/a",
+    }
+    assert waits, "engine dispatched without consulting the resource gate under CPU pressure"

@@ -1,4 +1,9 @@
+import pytest
+
+pytestmark = pytest.mark.browser
+
 """Real tests for browser.py logic (no browser; inject failing factories)."""
+
 
 import os
 import sys
@@ -9,6 +14,7 @@ os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()
 
 from app.browser import BrowserRenderer  # noqa: E402
 from app.models import RenderOptions  # noqa: E402
+
 
 def _raise_timeout(**kwargs: object):
     raise TimeoutError("navigation timeout")
@@ -50,3 +56,4 @@ class TestBrowserKwargs:
         assert renderer._get_browser_kwargs({"resource_mode": "reduced"})["args"] == [
             "--blink-settings=imagesEnabled=false"
         ]
+
