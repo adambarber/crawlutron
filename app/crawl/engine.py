@@ -94,7 +94,7 @@ from app.models import (
     HttpFetcher,
     to_dict,
 )
-from app.crawl.recursive import run_recursive_crawl
+from app.crawl.recursive import RECURSIVE_RAMP_MAX, run_recursive_crawl
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
@@ -647,10 +647,10 @@ async def crawl_request(
     scheduler = DomainScheduler(
         # No fixed external concurrency cap: let the recursive dispatcher's
         # self-tuning ramp (RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-        # = 32) size real concurrency to the cgroup budget; the resource gate is
-        # the sole authority. This limit just keeps a single scheduler batch
-        # from exceeding that ceiling.
-        global_limit=32,
+        # = 8 * 2 = 16) size real concurrency to the cgroup budget; the resource
+        # gate is the sole authority. This limit mirrors that real ceiling so a
+        # single scheduler batch cannot exceed the dispatcher's own ramp bound.
+        global_limit=RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
         max_rps=float(limits.get("max_rps", 0) or 0),
