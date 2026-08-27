@@ -127,6 +127,7 @@ class CpuGate(ResourceGauge):
         self,
         target: float | None = None,
         *,
+        hard: float | None = None,
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
@@ -134,8 +135,15 @@ class CpuGate(ResourceGauge):
         min_window_seconds: float = 0.05,
         cpu_budget: float | None = None,
     ):
+        use_default_target = target is None
+        target = _DEFAULT_CPU_TARGET if target is None else target
+        if hard is None:
+            # Only the self-managed default uses the explicit _DEFAULT_CPU_HARD;
+            # an explicit target keeps the derived target+0.05 behavior.
+            hard = _DEFAULT_CPU_HARD if use_default_target else None
         super().__init__(
-            target=(_DEFAULT_CPU_TARGET if target is None else target),
+            target=target,
+            hard=hard,
             poll_seconds=poll_seconds,
             max_wait_seconds=max_wait_seconds,
             cgroup_root=cgroup_root,
@@ -260,12 +268,10 @@ class ResourceGate:
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = time.monotonic() + budget
-        mem_hard = min(0.999, self.memory.target + 0.05)
-        cpu_hard = min(0.999, self.cpu.target + 0.05)
         while True:
             mem_r = self.memory._usage_ratio()
             cpu_r = self.cpu._usage_ratio()
-            if mem_r < mem_hard and cpu_r < cpu_hard:
+            if mem_r < self.memory.hard and cpu_r < self.cpu.hard:
                 return
             if time.monotonic() >= deadline:
                 return

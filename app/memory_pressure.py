@@ -95,11 +95,13 @@ class ResourceGauge:
         self,
         target: float | None,
         *,
+        hard: float | None = None,
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
         self.target = target
+        self.hard = self._hard(target) if hard is None else hard
         self.poll_seconds = poll_seconds
         self.max_wait_seconds = max_wait_seconds
         self.cgroup_root = cgroup_root
@@ -118,14 +120,13 @@ class ResourceGauge:
 
     def batch_scale_factor(self) -> float:
         # Both wait_while_saturated and scale read the same _usage_ratio signal.
-        return batch_scale(self._usage_ratio(), 1.0, self.target)
+        return batch_scale(self._usage_ratio(), 1.0, self.target, hard=self.hard)
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         """Block while at/above the hard ceiling; release below it."""
         budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
         deadline = time.monotonic() + budget
-        hard = self._hard(self.target)
-        while self._usage_ratio() >= hard:
+        while self._usage_ratio() >= self.hard:
             if time.monotonic() >= deadline:
                 return
             await asyncio.sleep(self.poll_seconds)
@@ -138,12 +139,11 @@ class ResourceGauge:
         remaining. Below target returns 1.0 (full headroom).
         """
         usage = self._usage_ratio()
-        hard = self._hard(self.target)
-        if usage >= hard:
+        if usage >= self.hard:
             return 0.0
         if usage <= self.target:
             return 1.0
-        return max(0.0, 1.0 - (usage - self.target) / (hard - self.target))
+        return max(0.0, 1.0 - (usage - self.target) / (self.hard - self.target))
 
 
 class MemoryGate(ResourceGauge):
@@ -153,12 +153,20 @@ class MemoryGate(ResourceGauge):
         self,
         target: float | None = None,
         *,
+        hard: float | None = None,
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
+        use_default_target = target is None
+        target = _DEFAULT_TARGET if target is None else target
+        if hard is None:
+            # Only the self-managed default uses the explicit _DEFAULT_HARD; an
+            # explicit target keeps the derived target+0.05 behavior.
+            hard = _DEFAULT_HARD if use_default_target else None
         super().__init__(
-            target=(_DEFAULT_TARGET if target is None else target),
+            target=target,
+            hard=hard,
             poll_seconds=poll_seconds,
             max_wait_seconds=max_wait_seconds,
             cgroup_root=cgroup_root,
