@@ -210,6 +210,12 @@ class CrawlRequest(BaseModel):
                     "Keys may be the original or normalized URL. Matching URLs are fetched with "
                     "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",
     )
+    async_mode: bool = Field(False, description="When true, accept immediately (202) and run the crawl in the background. Results are persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result is delivered there on completion.")
+    webhook_url: str | None = Field(None, description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
+    output_format: str | None = Field(
+        None,
+        description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
+    )
 
     @model_validator(mode="after")
     def _reject_duplicate_conditional_headers(self):
@@ -228,11 +234,6 @@ class CrawlRequest(BaseModel):
                     "supply conditional validators only via 'validators'"
                 )
         return self
-    webhook_url: str | None = Field(None, description="Optional callback URL. When provided, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
-    output_format: str | None = Field(
-        None,
-        description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
-    )
 
 
 class MapRequest(BaseModel):

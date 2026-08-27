@@ -49,7 +49,7 @@ from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .output_formats import serialize_results
 from .map import build_site_map
-from .crawl.job_store import JobStore, JobStatus
+from .crawl.job_store import JobStore, JobStatus, JobKind
 from .crawl.result_store import CrawlResultStore
 from .settings import CrawlerSettings
 from .metrics import get_metrics
@@ -376,6 +376,106 @@ if FastAPI is not None:
         max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", "4")))
     )
 
+    # Bound async single-shot crawls (Option 3): reuse the same concurrency limit
+    # to prevent unbounded background crawls.
+    _async_crawl_semaphore = _webhook_crawl_semaphore
+
+    async def _run_async_crawl(
+        request_id: str,
+        payload_dict: dict[str, Any],
+        webhook_url: str | None,
+        crawl_settings: CrawlerSettings,
+    ) -> None:
+        """Run a single-shot crawl in the background, persisting results to job_store.
+
+        Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED.
+        If webhook_url is provided, POSTs the result on completion.
+        """
+        # Load job and mark RUNNING
+        job = job_store.load(request_id)
+        if job is None:
+            logger.error("async_crawl_job_missing", extra={"request_id": request_id})
+            return
+        job.status = JobStatus.RUNNING
+        job_store.save(job)
+
+        try:
+            async with _async_crawl_semaphore:
+                pooled_worker = PooledBrowserWorker(get_browser_pool())
+                result = await crawl_request(
+                    payload_dict,
+                    settings=crawl_settings,
+                    browser_worker=pooled_worker,
+                    shutdown_event=shutdown_event,
+                )
+                result["request_id"] = request_id
+                get_metrics().observe_crawl(results=result.get("results", []))
+                unified_results = [_build_unified_result(item) for item in result.get("results", [])]
+                response_payload = UnifiedCrawlResponse(
+                    request_id=request_id,
+                    submitted_count=result.get("submitted_count", len(unified_results)),
+                    policy_schema_version=result.get("policy_schema_version", ""),
+                    success=True,
+                    results=unified_results,
+                ).model_dump()
+
+                # Store results in job_store (single source of truth for async jobs)
+                job.results = [response_payload]
+                job.status = JobStatus.COMPLETED
+                job.stats = {
+                    "total_discovered": len(unified_results),
+                    "total_crawled": len(unified_results),
+                    "total_failed": 0,
+                }
+                job_store.save(job)
+
+                # Also store in result_store for backward compat (sync path reads from here)
+                try:
+                    result_store.put(request_id, response_payload)
+                except Exception:  # noqa: BLE001
+                    logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
+
+                # Deliver webhook if provided
+                if webhook_url:
+                    await _post_webhook(webhook_url, response_payload)
+
+        except Exception as exc:  # noqa: BLE001 - background task must not crash
+            logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
+            job = job_store.load(request_id)
+            if job is not None:
+                job.status = JobStatus.FAILED
+                job.error = str(exc)
+                job_store.save(job)
+            if webhook_url:
+                try:
+                    import httpx
+                    error_payload = UnifiedCrawlResponse(
+                        request_id=request_id,
+                        submitted_count=0,
+                        policy_schema_version="",
+                        success=False,
+                        results=[],
+                    ).model_dump()
+                    await _post_webhook(webhook_url, error_payload)
+                except Exception:
+                    pass
+
+    async def _post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
+        """POST payload to webhook URL with size limit and timeout."""
+        import httpx
+        import json
+        import os
+        max_webhook_size = int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        if len(payload_bytes) > max_webhook_size:
+            logger.warning("webhook_payload_too_large", extra={"url": webhook_url, "size": len(payload_bytes)})
+            return
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                await client.post(webhook_url, json=payload)
+        except Exception as exc:  # noqa: BLE001 - best-effort delivery
+            logger.warning("webhook_delivery_failed", extra={"url": webhook_url, "error": str(exc)})
+
     async def _deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
         """Run the crawl in the background and POST the result to ``webhook_url`` (#15).
 
@@ -548,19 +648,24 @@ if FastAPI is not None:
                     ) from error
             payload_dict = payload.model_dump(exclude_none=True)
             webhook_url = payload.webhook_url
-            if webhook_url:
-                # #15: accept immediately (202) and deliver the result out-of-band.
-                if not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://")):
+            async_mode = payload.async_mode
+            # If async_mode is set (or webhook_url provided for backward compat),
+            # create a single-shot job and run in background.
+            if async_mode or webhook_url:
+                if webhook_url and (not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))):
                     raise HTTPException(
                         status_code=422,
                         detail={"code": "validation_error", "message": "Invalid webhook_url", "details": {}},
                     )
-                # Validate the webhook URL at accept time: failing silently in
-                # the background task means an accepted crawl is never delivered.
-                _validate_webhook_url(webhook_url)
+                if webhook_url:
+                    _validate_webhook_url(webhook_url)
+                # Use a stable request_id (also used as job_id for single-shot)
                 request_id = f"crawl_{uuid.uuid4().hex[:12]}"
+                # Create single-shot job in job_store (durable, resumable)
+                job = job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
+                # Dispatch background task
                 background_tasks.add_task(
-                    _deliver_webhook, webhook_url, request_id, payload_dict, settings
+                    _run_async_crawl, request_id, payload_dict, webhook_url, settings
                 )
                 get_metrics().observe_crawl(accepted=True)
                 return JSONResponse(
@@ -572,6 +677,7 @@ if FastAPI is not None:
                         "webhook_url": webhook_url,
                     },
                 )
+            # Synchronous execution (default)
             _crawl_started = time.monotonic()
             result = await _execute_crawl(payload_dict)
             get_metrics().observe_crawl(
@@ -667,18 +773,30 @@ if FastAPI is not None:
         description=(
             "Return the stored UnifiedCrawlResponse for a previously completed "
             "/v1/crawl request (see status_url in the 202 webhook response). "
+            "For async single-shot jobs, reads from the durable job store. "
             "Results are retained for BROWSER_CRAWLER_RESULT_TTL_SECONDS "
             "(default 1h, capped at BROWSER_CRAWLER_RESULT_MAX_ENTRIES entries)."
         ),
     )
     async def get_crawl_result(request_id: str) -> UnifiedCrawlResponse:
+        # First check result_store (sync crawls)
         stored = result_store.get(request_id)
-        if stored is None:
+        if stored is not None:
+            return UnifiedCrawlResponse(**stored)
+        # Then check job_store for async single-shot jobs
+        job = job_store.load(request_id)
+        if job is not None and job.kind == JobKind.SINGLE_SHOT:
+            if job.results:
+                return UnifiedCrawlResponse(**job.results[0])
+            # Job exists but not yet completed
             raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": f"Unknown or expired request_id: {request_id}", "details": {}},
+                status_code=202,
+                detail={"code": "pending", "message": f"Job {request_id} is still {job.status.value}", "details": {"status": job.status.value}},
             )
-        return UnifiedCrawlResponse(**stored)
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Unknown or expired request_id: {request_id}", "details": {}},
+        )
 
     @app.post(
         "/v1/jobs",
