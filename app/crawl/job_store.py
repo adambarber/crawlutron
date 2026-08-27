@@ -39,25 +39,35 @@ def _json_default(obj):
     return str(obj)
 
 
+class JobKind(str, Enum):
+    """Kind of crawl job."""
+    WHOLE_SITE = "whole_site"     # Recursive crawl with frontier/visited
+    SINGLE_SHOT = "single_shot"   # Single async crawl (no frontier/visited)
+
+
 class JobStatus(str, Enum):
     """Lifecycle status of a crawl job."""
     PENDING = "pending"       # Created, not yet started
     RUNNING = "running"       # Actively crawling
     PAUSED = "paused"         # Paused by user
-    COMPLETED = "completed"   # Frontier exhausted
+    COMPLETED = "completed"   # Frontier exhausted / crawl finished
     FAILED = "failed"         # Fatal error
     CANCELLED = "cancelled"   # Explicitly cancelled
 
 
 @dataclass
 class CrawlJobState:
-    """Persistent state of a whole-site crawl job."""
+    """Persistent state of a crawl job (whole-site or single-shot)."""
     job_id: str
-    root_url: str
-    policy: dict[str, Any]
+    kind: JobKind = JobKind.WHOLE_SITE
+    root_url: str = ""
+    policy: dict[str, Any] = field(default_factory=dict)
     status: JobStatus = JobStatus.PENDING
+    # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[str] = field(default_factory=list)   # URLs pending crawl
     visited: set[str] = field(default_factory=set)      # URLs already crawled
+    # Single-shot fields (used when kind == SINGLE_SHOT)
+    # root_url holds the first URL (or "" for batch); results holds completed crawl results
     results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -73,6 +83,7 @@ class CrawlJobState:
         data = asdict(self)
         data["visited"] = list(self.visited)
         data["status"] = self.status.value
+        data["kind"] = self.kind.value
         return data
 
     @classmethod
@@ -81,6 +92,7 @@ class CrawlJobState:
         data = dict(data)
         data["visited"] = set(data.get("visited", []))
         data["status"] = JobStatus(data["status"])
+        data["kind"] = JobKind(data.get("kind", JobKind.WHOLE_SITE.value))
         return cls(**data)
 
 
@@ -105,45 +117,68 @@ class JobStore:
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS crawl_jobs (
                 job_id TEXT PRIMARY KEY,
-                root_url TEXT NOT NULL,
-                policy TEXT NOT NULL,           -- JSON
+                kind TEXT NOT NULL DEFAULT 'whole_site',  -- JobKind enum value
+                root_url TEXT NOT NULL DEFAULT '',
+                policy TEXT NOT NULL DEFAULT '{}',        -- JSON
                 status TEXT NOT NULL,           -- JobStatus enum value
-                frontier TEXT NOT NULL,         -- JSON array of URLs
-                visited TEXT NOT NULL,          -- JSON array of URLs
-                results TEXT NOT NULL,          -- JSON array of result objects
+                frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of URLs
+                visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of URLs
+                results TEXT NOT NULL DEFAULT '[]',       -- JSON array of result objects
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 error TEXT,
-                stats TEXT NOT NULL             -- JSON dict
+                stats TEXT NOT NULL DEFAULT '{}'            -- JSON dict
             )
         """)
+        # Migration: add kind column if table was created before this column existed
+        try:
+            self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'whole_site'")
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists; ignore
+            pass
         self._conn.commit()
 
     def _row_to_job(self, row) -> CrawlJobState:
         return CrawlJobState(
             job_id=row[0],
-            root_url=row[1],
-            policy=json.loads(row[2]),
-            status=JobStatus(row[3]),
-            frontier=json.loads(row[4]),
-            visited=set(json.loads(row[5])),
-            results=json.loads(row[6]),
-            created_at=row[7],
-            updated_at=row[8],
-            error=row[9],
-            stats=json.loads(row[10]),
+            kind=JobKind(row[1]),
+            root_url=row[2],
+            policy=json.loads(row[3]),
+            status=JobStatus(row[4]),
+            frontier=json.loads(row[5]),
+            visited=set(json.loads(row[6])),
+            results=json.loads(row[7]),
+            created_at=row[8],
+            updated_at=row[9],
+            error=row[10],
+            stats=json.loads(row[11]),
         )
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
-        """Create a new crawl job with initial frontier containing root_url."""
+        """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
         job_id = uuid.uuid4().hex
         job = CrawlJobState(
             job_id=job_id,
+            kind=JobKind.WHOLE_SITE,
             root_url=root_url,
             policy=policy,
             status=JobStatus.PENDING,
             frontier=[root_url],
+        )
+        with self._lock:
+            self._persist(job)
+        return job
+
+    def create_single_shot(self, job_id: str, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
+        """Create a new single-shot async crawl job with the given job_id (request_id)."""
+        job = CrawlJobState(
+            job_id=job_id,
+            kind=JobKind.SINGLE_SHOT,
+            root_url=root_url,
+            policy=policy,
+            status=JobStatus.PENDING,
         )
         with self._lock:
             self._persist(job)
@@ -158,10 +193,11 @@ class JobStore:
         """Write job state to SQLite. Caller must hold ``self._lock``."""
         job.updated_at = time.time()
         self._conn.execute("""
-            INSERT INTO crawl_jobs (job_id, root_url, policy, status, frontier, visited, results,
+            INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
                                     created_at, updated_at, error, stats)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(job_id) DO UPDATE SET
+                kind=excluded.kind,
                 root_url=excluded.root_url,
                 policy=excluded.policy,
                 status=excluded.status,
@@ -173,6 +209,7 @@ class JobStore:
                 stats=excluded.stats
         """, (
             job.job_id,
+            job.kind.value,
             job.root_url,
             json.dumps(job.policy, separators=(",", ":"), default=_json_default),
             job.status.value,
@@ -190,7 +227,7 @@ class JobStore:
         """Load job state from SQLite. Returns None if not found."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT job_id, root_url, policy, status, frontier, visited, results, "
+                "SELECT job_id, kind, root_url, policy, status, frontier, visited, results, "
                 "created_at, updated_at, error, stats FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
