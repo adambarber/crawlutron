@@ -98,11 +98,15 @@ class PooledBrowserWorker:
 _pool: Optional[BrowserPool] = None
 
 
-def get_browser_pool() -> BrowserPool:
-    """Get the global browser pool, creating it if needed."""
-    global _pool
-    if _pool is None:
-        _pool = BrowserPool()
+def get_browser_pool() -> BrowserPool | None:
+    """Get the global browser pool (the one set up during lifespan).
+
+    Returns None until ``initialize_browser_pool`` has run (or after
+    ``close_browser_pool``), never lazily constructing a divergent,
+    wrongly-sized pool -- the pool size is derived from settings at startup,
+    not re-derived here. Callers that need the pool before startup (i.e. only
+    browser strategies) must ensure startup ordering.
+    """
     return _pool
 
 

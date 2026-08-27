@@ -44,7 +44,7 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from .crawl.strategies.browser import BrowserRenderer
-from .crawl.strategies.browser_pool import BrowserPool, PooledBrowserWorker, initialize_browser_pool, close_browser_pool, get_browser_pool
+from .crawl.strategies.browser_pool import PooledBrowserWorker, initialize_browser_pool, close_browser_pool, get_browser_pool
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
 from .service import crawl_request, render_request
 from .output_formats import serialize_results
@@ -87,13 +87,9 @@ result_store = CrawlResultStore(
     max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
 )
 
-# Global browser pool instance (initialized in lifespan)
-browser_pool: BrowserPool | None = None
-
-
 async def _execute_crawl(payload_dict: dict) -> dict:
     """Shared crawl execution for /v1/crawl and /v1/map."""
-    pooled_worker = PooledBrowserWorker(browser_pool)  # type: ignore[arg-type]
+    pooled_worker = PooledBrowserWorker(get_browser_pool())
     return await crawl_request(
         payload_dict,
         settings=settings,
@@ -109,8 +105,9 @@ logger = configure_service_logging(
     log_file_max_bytes=settings.log_file_max_bytes,
     log_file_backup_count=settings.log_file_backup_count,
 )
-# browser_pool is initialized in lifespan via initialize_browser_pool()
-# and accessed via get_browser_pool() from browser_pool module
+# The single browser pool lives in the browser_pool module (set up in lifespan
+# via initialize_browser_pool); request handlers reach it through
+# get_browser_pool(). There is intentionally no second pool global here.
 shutdown_event = asyncio.Event()
 uvicorn_access_logger = logging.getLogger("uvicorn.access")
 uvicorn_access_logger.setLevel(logger.level)
@@ -255,8 +252,7 @@ if FastAPI is not None:
         @asynccontextmanager
         async def lifespan_context(_app: FastAPI):
             # Startup: initialize browser pool, load cookie jar if persistence enabled
-            global browser_pool
-            browser_pool = await initialize_browser_pool(settings)
+            await initialize_browser_pool(settings)
             if settings.cookie_persistence_enabled:
                 from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
                 _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
@@ -354,7 +350,7 @@ if FastAPI is not None:
     async def render(payload: RenderRequest) -> UnifiedCrawlResponse:
         readiness_state.begin_request()
         try:
-            pooled_worker = PooledBrowserWorker(browser_pool)
+            pooled_worker = PooledBrowserWorker(get_browser_pool())
             result = await render_request(
                 payload.model_dump(exclude_none=True),
                 settings=settings,
@@ -394,7 +390,7 @@ if FastAPI is not None:
     async def _run_and_deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
         # SSRF protection for webhook URL (#P0)
         _validate_webhook_url(webhook_url)
-        pooled_worker = PooledBrowserWorker(browser_pool)
+        pooled_worker = PooledBrowserWorker(get_browser_pool())
         result = await crawl_request(
             payload_dict,
             settings=crawl_settings,
