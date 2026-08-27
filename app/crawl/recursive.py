@@ -15,6 +15,7 @@ import re
 import time
 from collections import deque
 from dataclasses import replace
+from itertools import islice
 from typing import Any, Awaitable, Callable
 
 from app.constants import (
@@ -66,7 +67,9 @@ def _batch_is_http_heavy(
     get_pin = getattr(scheduler, "get_pinned_strategy", None)
     counted = 0
     http_count = 0
-    for _, task in list(frontier)[:sample]:
+    # Slice the deque without materializing the whole frontier (islice avoids an
+    # O(n) copy per batch on large crawls).
+    for _, task in islice(frontier, sample):
         if task.domain is None:
             continue
         counted += 1
