@@ -1,22 +1,28 @@
 """Memory guardrails: conservative default response size cap."""
 
+import sys
+from pathlib import Path
+
+# Resolve the app root from this file's location so the tests are independent of
+# the CWD they are launched from (`cd docker/browser-crawler` or repo root both
+# work). tests/crawl -> docker/browser-crawler.
+_APP_ROOT = Path(__file__).resolve().parents[2]
+
 
 def test_default_max_content_length_is_10mb():
-    import sys
-    sys.path.insert(0, ".")
+    sys.path.insert(0, str(_APP_ROOT))
     from app.api_models import CrawlPolicyLimits
     limits = CrawlPolicyLimits()
     assert limits.max_content_length_bytes == 10 * 1024 * 1024
 
 
 def test_engine_fallback_limit_matches():
-    import sys
-    sys.path.insert(0, "docker/browser-crawler")
+    sys.path.insert(0, str(_APP_ROOT))
     from app.api_models import CrawlPolicyLimits
     from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 
     # The 10MB default lives in ONE place (app.constants) and is referenced by
     # the http strategy instead of being hard-coded a second time.
     assert DEFAULT_MAX_CONTENT_LENGTH_BYTES == 10 * 1024 * 1024
-    src = open("docker/browser-crawler/app/crawl/strategies/http.py").read()
+    src = (_APP_ROOT / "app/crawl/strategies/http.py").read_text()
     assert "DEFAULT_MAX_CONTENT_LENGTH_BYTES" in src
