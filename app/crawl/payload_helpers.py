@@ -9,6 +9,7 @@ from __future__ import annotations
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_EXTRACTION,
     DEFAULT_STRATEGIES,
@@ -86,6 +87,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             "respect_robots": respect_robots,
             "max_depth": max_depth,
             "max_pages": max_pages,
+            "total_url_budget_seconds": max(0.1, min(900, float(limits.get("total_url_budget_seconds", DEFAULT_TOTAL_URL_BUDGET_SECONDS)))),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},
         "request_profile": dict(request_profile),

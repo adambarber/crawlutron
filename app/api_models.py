@@ -11,6 +11,8 @@ from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    MAX_TOTAL_URL_BUDGET_SECONDS,
     MAX_DISCOVERED_LINKS,
     MAX_RETRIES,
     DEFAULT_STRATEGIES,
@@ -153,6 +155,7 @@ class CrawlPolicyLimits(BaseModel):
     max_pages: int = Field(0, ge=0, le=2000, description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).")
     max_rps: float = Field(0.0, ge=0.0, le=100.0, description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.")
     max_content_length_bytes: int = Field(DEFAULT_MAX_CONTENT_LENGTH_BYTES, ge=0, description="Maximum content size in bytes per response. 10MB default bounds memory under parallel crawling (2GB budget); raise for large-document workloads.")
+    total_url_budget_seconds: float = Field(DEFAULT_TOTAL_URL_BUDGET_SECONDS, ge=0.1, le=MAX_TOTAL_URL_BUDGET_SECONDS, description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit URL that exceeds this is failed as network_error instead of holding a concurrency slot. Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs should keep this generous).")
 
 
 

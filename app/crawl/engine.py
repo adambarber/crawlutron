@@ -45,6 +45,7 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
     HTTP_STRATEGIES,
@@ -688,24 +689,46 @@ async def crawl_request(
         robots_sitemaps = _robots_sitemaps_for(
             f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}"
         )
-        result = await _execute_crawl_chain(
-            original_url=original_url,
-            normalized_url=normalized_url,
-            policy=policy,
-            http_fetcher=fetcher,
-            cffi_fetcher=cffi,
-            browser_worker=browser_worker,
-            cache=cache or _SHARED_HTTP_CACHE,
-            # Content cache is opt-in (#5): only use the shared instance when explicitly
-            # enabled via settings, so test suites that fake per-test content for the
-            # same URL stay isolated. Callers may still pass an explicit ``content_cache``.
-            content_cache=content_cache
-            or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
-            scheduler=scheduler,
-            domain=job.domain,
-            robots_sitemaps=robots_sitemaps,
-            caller_validators=_validators_for(job),
+        # Hard per-URL deadline over the WHOLE strategy chain (#adversarial 2.2):
+        # a poisoned/tarpit URL must not hold its global concurrency slot for
+        # (strategies x retries x timeout + browser challenge waits) ~ minutes
+        # while the resource gate reports idle capacity. If the chain blows the
+        # budget we fail the URL as network_error and free the slot.
+        budget = float(
+            (policy.get("limits") or {}).get("total_url_budget_seconds")
+            or DEFAULT_TOTAL_URL_BUDGET_SECONDS
         )
+        try:
+            result = await asyncio.wait_for(
+                _execute_crawl_chain(
+                    original_url=original_url,
+                    normalized_url=normalized_url,
+                    policy=policy,
+                    http_fetcher=fetcher,
+                    cffi_fetcher=cffi,
+                    browser_worker=browser_worker,
+                    cache=cache or _SHARED_HTTP_CACHE,
+                    # Content cache is opt-in (#5): only use the shared instance when explicitly
+                    # enabled via settings, so test suites that fake per-test content for the
+                    # same URL stay isolated. Callers may still pass an explicit ``content_cache``.
+                    content_cache=content_cache
+                    or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
+                    scheduler=scheduler,
+                    domain=job.domain,
+                    robots_sitemaps=robots_sitemaps,
+                    caller_validators=_validators_for(job),
+                ),
+                timeout=budget,
+            )
+        except (asyncio.TimeoutError, TimeoutError):
+            result = _failed_engine_result(
+                original_url=original_url,
+                normalized_url=normalized_url,
+                strategy="",
+                classification="network_error",
+                error="url_budget_exceeded",
+                diagnostics={"url_budget_seconds": budget, "error": "url_budget_exceeded"},
+            )
         return index, result
 
     # --- robots.txt parsing + filtering helpers (#12) ---

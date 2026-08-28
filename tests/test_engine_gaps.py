@@ -58,6 +58,38 @@ class TestEngineGaps:
         assert "screenshot" in diag
 
 
+    async def test_per_url_budget_fails_slow_chain(self):
+        """Adversarial perf #2.2: a URL that blows its total_url_budget_seconds
+        must be failed as network_error instead of holding a slot."""
+        import asyncio
+
+        async def slow_fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
+            # True tarpit: never returns until the caller's deadline cancels us.
+            # (A time-based sleep is monkeypatched to return instantly in this
+            # suite's fast mode, so model the poisoned-URL hang with an
+            # ever-pending future instead.)
+            await asyncio.Future()
+
+        policy = {
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "extraction": "dom",
+            "limits": {"timeout_seconds": 30, "max_retries": 0,
+                       "max_discovered_links": 10,
+                       "respect_robots": False,
+                       "total_url_budget_seconds": 0.1},
+            "headers": {},
+            "request_profile": {},
+        }
+        response = await crawl_request(
+            {"url": "http://example.com/slow", "policy": policy},
+            http_fetcher=slow_fetcher,
+            cache=HttpCache(),
+        )
+        result = response["results"][0]
+        assert result["status"] == "failed"
+        assert result["classification"] == "network_error"
+        assert result["error"] == "url_budget_exceeded"
+
     async def test_rate_limited_sets_domain_cooldown(self):
         from app.scheduler import DomainScheduler
 

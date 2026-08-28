@@ -127,6 +127,13 @@ DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
 DEFAULT_MAX_RETRIES: int = 2
 MAX_RETRIES: int = 5
 
+# Hard per-URL ceiling over the ENTIRE strategy chain (all strategies x retries
+# plus browser challenge waits). Guards against poisoned/tarpit URLs that would
+# otherwise hold a concurrency slot for many minutes while the resource gate
+# reports idle capacity. Generous so it never trips on healthy targets.
+DEFAULT_TOTAL_URL_BUDGET_SECONDS: float = 180.0
+MAX_TOTAL_URL_BUDGET_SECONDS: float = 900.0
+
 # Cache TTLs (seconds).
 DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
 
