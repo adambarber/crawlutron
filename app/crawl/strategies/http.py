@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import inspect
+import os
 import re
 import socket
 import ssl
@@ -539,6 +541,26 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
     return pinned_url, request_headers
 
 
+# Dedicated thread pool for blocking DNS resolution so hundreds of concurrent
+# fetches never block the event loop or contend with the default asyncio executor
+# (used for extraction and other blocking work). The pinning path resolves FRESH
+# on every call for SSRF safety, so without this the loop would stall on each
+# resolver call (adversarial perf #1.1).
+_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="dns-resolve"
+)
+
+
+async def _build_pinned_request_async(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+    """Offload SSRF-safe request building (incl. the blocking ``socket.getaddrinfo``
+    call) to a worker thread so the event loop is never stalled by a resolver
+    lookup (adversarial perf #1.1). Mirrors the browser route handler, which
+    already runs ``_build_pinned_request`` via ``asyncio.to_thread``.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_DNS_EXECUTOR, _build_pinned_request, url, headers)
+
+
 _MAX_REDIRECT_HOPS = 5
 
 _REDIRECT_STATUSES = frozenset((301, 302, 303, 307, 308))
@@ -596,7 +618,7 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
     # Work with a copy of headers so we can mutate per-hop
     request_headers = dict(headers)
     while True:
-        pinned_url, hop_headers = _build_pinned_request(current_url, request_headers)
+        pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
         try:
             # follow_redirects=False: we follow manually so each hop is SSRF-checked.
             async with client.stream("GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False) as response:
@@ -666,7 +688,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
             # Work with a copy of headers so we can mutate per-hop
             request_headers = dict(headers)
             while True:
-                pinned_url, hop_headers = _build_pinned_request(current_url, request_headers)
+                pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
                 try:
                     response = await client.get(pinned_url, headers=hop_headers, allow_redirects=False)
                 except Exception:
@@ -1116,6 +1138,45 @@ def _content_cache_key(
     )
 
 
+# Adversarial perf #2.1: bound the RAM consumed by in-flight page bodies. At high
+# global_concurrency the per-page cap shrinks so the whole active set cannot
+# exhaust the budget. Operators with known RAM headroom can override the budget.
+_RAM_SAFETY_BYTES = int(
+    os.environ.get("BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES", str(1 * 1024 * 1024 * 1024))
+)
+_MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
+
+
+def _default_global_concurrency() -> int:
+    from app.settings import CrawlerSettings
+
+    try:
+        return max(1, int(CrawlerSettings.from_mapping().global_concurrency))
+    except Exception:  # pragma: no cover - settings should always parse
+        return 4
+
+
+def _effective_max_content_length(
+    limits: dict[str, Any], global_concurrency: int | None = None
+) -> int:
+    """Per-page body cap, scaled down as concurrency rises (adversarial perf #2.1).
+
+    An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
+    the cap is ``min(DEFAULT, RAM_BUDGET / concurrency)`` so the in-flight page
+    set stays within budget even when hundreds of pages run concurrently. At the
+    default concurrency (4) this resolves to the unchanged 10 MiB default.
+    """
+    explicit = limits.get("max_content_length_bytes")
+    if isinstance(explicit, (int, float)) and explicit > 0:
+        return int(explicit)
+    conc = global_concurrency or _default_global_concurrency()
+    scaled = min(
+        DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+        max(_MIN_PER_PAGE_BYTES, _RAM_SAFETY_BYTES // max(conc, 1)),
+    )
+    return int(scaled)
+
+
 async def _http_strategy_result(
     *,
     original_url: str,
@@ -1143,7 +1204,7 @@ async def _http_strategy_result(
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
-    max_content_length = limits.get("max_content_length_bytes", DEFAULT_MAX_CONTENT_LENGTH_BYTES)
+    max_content_length = _effective_max_content_length(limits)
     base_headers = _headers_for_strategy(strategy, policy, normalized_url)
     request_headers = dict(base_headers)
     if cache is not None:
@@ -1152,6 +1213,9 @@ async def _http_strategy_result(
         request_headers.update(caller_conditional)
 
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
+    # Drop the raw HTML as early as possible when the caller did not ask for it
+    # so the decoded string + lxml tree are not retained in the result (T3/#2.1).
+    include_html = bool((policy.get("browser_profile") or {}).get("include_html", True))
 
     # Disk content cache (#5): serve an unchanged URL from local disk instead of
     # re-downloading. The key is derived from the *base* request headers (excluding
@@ -1447,6 +1511,10 @@ async def _http_strategy_result(
             elapsed_ms=response.elapsed_ms,
             error=None if status == "success" else classification,
         )
+        # T3/#2.1: release the large raw-HTML string before the result is built
+        # when the caller did not request it (engine also strips at spill time).
+        if not include_html:
+            html = None
         return _make_engine_result(
             original_url=original_url,
             normalized_url=normalized_url,

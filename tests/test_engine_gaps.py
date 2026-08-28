@@ -162,3 +162,47 @@ class TestEngineGaps:
             http_fetcher=fetcher, cache=HttpCache(),
         )
         assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
+
+
+    def test_effective_max_content_length_scales(self):
+        """Adversarial perf #2.1: per-page cap shrinks as concurrency rises, floor
+        respected, explicit policy value wins."""
+        from app.crawl.strategies.http import _effective_max_content_length
+        from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+
+        # Explicit value always wins.
+        assert _effective_max_content_length({"max_content_length_bytes": 123}) == 123
+        # Default concurrency (4) -> unchanged 10 MiB default.
+        assert _effective_max_content_length({}) == DEFAULT_MAX_CONTENT_LENGTH_BYTES
+        # High concurrency shrinks the cap.
+        small = _effective_max_content_length({}, global_concurrency=400)
+        assert small < DEFAULT_MAX_CONTENT_LENGTH_BYTES
+        # Floor is respected even at absurd concurrency.
+        assert small >= 256 * 1024
+        assert _effective_max_content_length({}, global_concurrency=100000) == 256 * 1024
+
+    async def test_include_html_false_drops_html(self, monkeypatch):
+        """When include_html is False the raw HTML is not retained in the result."""
+        from app.crawl import engine as engine_mod
+        from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import HttpFetchResult
+
+        def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
+            body = b"<html><body>some page content</body></html>"
+            return HttpFetchResult(
+                url=url, final_url=url, status_code=200,
+                headers={"content-type": "text/html"}, body=body, elapsed_ms=1,
+            )
+
+        policy = {
+            "strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "dom",
+            "browser_profile": {"include_html": False},
+            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        }
+        out = await engine_mod.crawl_request(
+            {"url": "http://example.com/", "policy": policy},
+            http_fetcher=fetcher, cache=HttpCache(),
+        )
+        res = out["results"][0]
+        assert res["html"] is None
+        assert res["markdown"]

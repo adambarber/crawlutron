@@ -999,13 +999,16 @@ async def crawl_request(
                     scheduler.set_domain_min_delay(job.domain, crawl_delay)
             allowed_jobs.append(job)
 
-        scheduled_results = await scheduler.run(allowed_jobs, _worker) if allowed_jobs else []
-        for job, result in zip(allowed_jobs, scheduled_results):
-            # Strip heavy payloads inside the loop so they are not retained for
-            # the whole crawl when the caller did not ask for them (#1).
+        # #3.1: stream each completed result to disk immediately so peak RAM tracks
+        # the in-flight set, not the whole batch. Heavy payloads are stripped
+        # before spilling when the caller did not request them (#1).
+        def _spill_one(index: int, result: EngineCrawlResult) -> None:
             if not include_html:
                 result = replace(result, html=None, text=None)
-            spill.write(job.index, result)
+            spill.write(index, result)
+
+        if allowed_jobs:
+            await scheduler.run(allowed_jobs, _worker, on_result=_spill_one)
     else:
         await run_recursive_crawl(
             jobs=jobs,

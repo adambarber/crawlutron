@@ -108,3 +108,56 @@ class TestSchedulerCoverageGaps:
     def test_parse_robots_crawl_delay_absent(self):
         from app.crawl.engine import _parse_robots_crawl_delay
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
+
+
+    async def test_run_streams_results_via_on_result(self):
+        """Adversarial perf #3.1: with ``on_result`` set, each completed result is
+        delivered immediately (a fast job is delivered before a slow one) and
+        ``run`` returns None (nothing accumulated in memory).
+
+        Uses an ``asyncio.Event`` (not ``asyncio.sleep``) to force ordering,
+        because the test environment patches ``sleep`` to be instant.
+        """
+        from app.scheduler import DomainScheduler
+        from tests._testkit import make_job, make_result
+
+        on_result_order: list[int] = []
+        release_slow = asyncio.Event()
+        sched = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+
+        async def worker(job: CrawlJob):
+            # Make index 0 wait until job 1 has been delivered, so streaming
+            # order is observable without a real sleep.
+            if job.index == 0:
+                await release_slow.wait()
+            return make_result(job.url, job.domain)
+
+        def _on_result(idx: int, _r) -> None:
+            on_result_order.append(idx)
+            if idx == 1:
+                release_slow.set()
+
+        jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(6)]
+        ret = await sched.run(jobs, worker, on_result=_on_result)
+        # Streaming mode returns None; the caller owns persistence (spill).
+        assert ret is None
+        # Every job was delivered exactly once.
+        assert sorted(on_result_order) == list(range(6))
+        # A fast job is delivered before the (gated) slow job -> results stream
+        # as they complete rather than being held until the whole batch finishes.
+        assert on_result_order.index(1) < on_result_order.index(0)
+
+    async def test_run_returns_ordered_list_without_on_result(self):
+        """Backward-compatible path (recursive frontier) still returns results."""
+        from app.scheduler import DomainScheduler
+        from tests._testkit import make_job, make_result
+
+        sched = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+
+        async def worker(job: CrawlJob):
+            return make_result(job.url, job.domain)
+
+        jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
+        ret = await sched.run(jobs, worker)
+        assert ret is not None
+        assert [r.normalized_url for r in ret] == [f"http://h{i}.example.com/" for i in range(4)]

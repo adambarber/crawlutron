@@ -198,7 +198,21 @@ class DomainScheduler:
         now_mono = time.monotonic()
         self._circuit_open_until = {d: exp for d, exp in self._circuit_open_until.items() if exp > now_mono}
 
-    async def run(self, jobs: list[CrawlJob], worker: SchedulerWorker) -> list[EngineCrawlResult]:
+    async def run(
+        self,
+        jobs: list[CrawlJob],
+        worker: SchedulerWorker,
+        on_result: "Callable[[int, EngineCrawlResult], None] | None" = None,
+    ) -> "list[EngineCrawlResult] | None":
+        """Run ``jobs`` through ``worker``.
+
+        When ``on_result`` is provided, each completed result is handed to it
+        immediately (e.g. streamed to the on-disk result spill) and is NOT
+        retained in memory -- peak RAM then tracks the in-flight set rather than
+        the whole batch (adversarial perf #3.1). In that mode ``run`` returns
+        ``None``; otherwise it returns the ordered list of results (used by the
+        recursive frontier expansion).
+        """
         # Purge stale state up front so dicts cannot grow without bound.
         self._purge_expired()
         global_gate = asyncio.Semaphore(self._global_limit)
@@ -206,7 +220,10 @@ class DomainScheduler:
             lambda: asyncio.Semaphore(self._per_domain_limit),
         )
         result_count = max((job.index for job in jobs), default=-1) + 1
-        results: list[EngineCrawlResult | None] = [None] * result_count
+        # Retain results in memory only when the caller needs them back
+        # (recursive frontier expansion). With on_result set, results are spilled
+        # per-job and never accumulated here, bounding batch RAM (#3.1).
+        results: "list[EngineCrawlResult | None] | None" = None if on_result else [None] * result_count
 
         async def run_one(job: CrawlJob) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global
@@ -269,7 +286,11 @@ class DomainScheduler:
                                 self.record_latency(job.domain, latency)
                         elif result.status in ("failed", "network_error"):
                             self.record_failure(job.domain)
-                        results[job.index] = result
+                        if on_result is not None:
+                            # Stream to the caller immediately; do not retain.
+                            on_result(job.index, result)
+                        else:
+                            results[job.index] = result
                     except Exception:
                         self.record_failure(job.domain)
                         raise
@@ -278,6 +299,8 @@ class DomainScheduler:
         # other in-flight jobs (HIGH #6). Exceptions are captured here and the
         # failing job is simply dropped from the results list.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
+        if on_result is not None:
+            return None
         return [result for result in results if result is not None]  # type: ignore[return-value]
 
     @property
