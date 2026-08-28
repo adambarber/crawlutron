@@ -76,3 +76,35 @@ class TestSchedulerCoverageGaps:
         assert 599 <= open_after(40) <= 601
         s.record_success("x")
         assert s._circuit_trip_count["x"] == 0
+
+
+    def test_scheduler_set_domain_min_delay(self):
+        """Adversarial perf #2.6: a robots Crawl-delay is enforced as a floor
+        on top of the global/adaptive delay."""
+        from app.scheduler import DomainScheduler
+        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
+        assert s.current_delay("a.com") == 0.0
+        s.set_domain_min_delay("a.com", 2.0)
+        assert s.current_delay("a.com") == 2.0
+        # Star group uses 0; a longer Crawl-delay wins (max semantics).
+        s.set_domain_min_delay("a.com", 5.0)
+        assert s.current_delay("a.com") == 5.0
+
+    def test_parse_robots_crawl_delay_specific_group_wins(self):
+        from app.crawl.engine import _parse_robots_crawl_delay
+        text = (
+            "User-agent: *\n"
+            "Crawl-delay: 1\n"
+            "User-agent: dev-stack-browser-crawler\n"
+            "Crawl-delay: 4\n"
+        )
+        assert _parse_robots_crawl_delay(text) == 4.0
+
+    def test_parse_robots_crawl_delay_star_only(self):
+        from app.crawl.engine import _parse_robots_crawl_delay
+        text = "User-agent: *\nCrawl-delay: 3\n"
+        assert _parse_robots_crawl_delay(text) == 3.0
+
+    def test_parse_robots_crawl_delay_absent(self):
+        from app.crawl.engine import _parse_robots_crawl_delay
+        assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None

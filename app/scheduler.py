@@ -58,6 +58,10 @@ class DomainScheduler:
         self._global_limit = max(1, global_limit)
         self._per_domain_limit = max(1, per_domain_limit)
         self._delay_seconds = max(0.0, delay_seconds)
+        # Per-domain minimum delay (e.g. a robots.txt Crawl-delay directive),
+        # applied in addition to the global/adaptive delay so a host's stated
+        # politeness floor is always respected (adversarial perf #2.6).
+        self._domain_min_delay: dict[str, float] = defaultdict(float)
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
         # Circuit breaker cooldown is now exponential: the first trip waits
@@ -173,12 +177,19 @@ class DomainScheduler:
         """Delay (seconds) to apply before the next request to ``domain`` (#6).
 
         When adaptive throttling is enabled this is latency-driven; otherwise the
-        fixed ``delay_seconds`` is used. Domain cooldowns (Retry-After) are applied
-        separately on top of this in ``run``.
+        fixed ``delay_seconds`` is used. A per-domain robots Crawl-delay floor
+        (set via :meth:`set_domain_min_delay`) is always respected on top of the
+        adaptive/global delay (adversarial perf #2.6).
         """
-        if not self._adaptive:
-            return self._delay_seconds
-        return self._recompute_delay(domain)
+        base = self._delay_seconds if not self._adaptive else self._recompute_delay(domain)
+        return max(base, self._domain_min_delay.get(domain, 0.0))
+
+    def set_domain_min_delay(self, domain: str, seconds: float) -> None:
+        """Enforce a minimum inter-request delay for a domain (robots Crawl-delay)."""
+        if seconds and seconds > 0:
+            self._domain_min_delay[domain] = max(
+                self._domain_min_delay.get(domain, 0.0), float(seconds)
+            )
 
     def _purge_expired(self) -> None:
         """Drop cooldown and circuit-breaker entries that have already elapsed."""

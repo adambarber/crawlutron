@@ -85,6 +85,7 @@ async def run_recursive_crawl(
     scheduler: DomainScheduler,
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     robots_allows: Callable[[str], Awaitable[bool]],
+    robots_crawl_delay: "Callable[[str], Awaitable[float | None]] | None" = None,
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
     sitemap_seeds: Callable[[], Awaitable[list[str]]],
     spill: Any,
@@ -206,6 +207,13 @@ async def run_recursive_crawl(
                 visited.add(job.normalized_url)
                 page_count += 1
                 continue
+            # Honor a host's robots Crawl-delay as a per-domain minimum delay
+            # (adversarial perf #2.6). Applied on top of the scheduler's global/
+            # adaptive pacing.
+            if respect_robots and robots_crawl_delay is not None:
+                delay = await robots_crawl_delay(job.normalized_url)
+                if delay and delay > 0:
+                    scheduler.set_domain_min_delay(job.domain, delay)
             allowed_jobs.append((depth, job))
             visited.add(job.normalized_url)
 
@@ -235,6 +243,10 @@ async def run_recursive_crawl(
                     continue
                 if respect_robots and not await robots_allows(link.normalized_url):
                     continue
+                if respect_robots and robots_crawl_delay is not None:
+                    delay = await robots_crawl_delay(link.normalized_url)
+                    if delay and delay > 0:
+                        scheduler.set_domain_min_delay(link.host, delay)
                 if max_pages and page_count + len(frontier) >= max_pages:
                     break
                 frontier.append(

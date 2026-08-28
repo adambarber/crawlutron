@@ -612,6 +612,62 @@ class _ResultSpill:
 
 
 
+
+def _parse_robots_crawl_delay(text: str) -> float | None:
+    """Extract the Crawl-delay (seconds) for our user-agent group, if any.
+
+    Mirrors :func:`_parse_robots_rules` group selection (the most-specific
+    group matching our product token wins, else the ``*`` group). A host's
+    Crawl-delay is a politeness floor the scheduler must honor (adversarial
+    perf #2.6). Returns None when no group declares one.
+    """
+    our_token = "dev-stack-browser-crawler"
+    groups: list[list] = []
+    last_agents: list[str] = []
+    current: list | None = None
+    for raw in text.lstrip("\ufeff").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "user-agent":
+            if current is not None:
+                groups.append(current)
+                current = None
+            last_agents.append(value.lower())
+        elif key == "crawl-delay" and value:
+            if current is None:
+                current = [list(last_agents), None]
+                last_agents = []
+            try:
+                delay = float(value)
+            except ValueError:
+                delay = None
+            if delay is not None and delay >= 0:
+                current[1] = delay
+    if current is not None:
+        groups.append(current)
+
+    best_delay: float | None = None
+    best_len = -1
+    star_delay: float | None = None
+    for agents, delay in groups:
+        for agent in agents:
+            if agent == "*":
+                if star_delay is None:
+                    star_delay = delay
+                break
+            if agent and agent in our_token and len(agent) > best_len:
+                best_len = len(agent)
+                best_delay = delay
+                break
+    if best_delay is not None:
+        return best_delay
+    return star_delay
+
+
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -816,25 +872,36 @@ async def crawl_request(
             _purge_robots_cache(now)
         cached = robots_cache.get(origin)
         if cached and cached[0] > now:
-            return cached[1], cached[2]
+            return cached[1], cached[2], cached[3]
         rules: list[tuple[bool, str]] = []
         sitemaps: list[str] = []
+        crawl_delay: float | None = None
         robots_url = urljoin(origin, "/robots.txt")
         body = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
         if body is not None:
             rules = _parse_robots_rules(body)
             sitemaps = _parse_robots_sitemaps(body)
-        robots_cache[origin] = (now + robots_ttl, rules, sitemaps)
+            crawl_delay = _parse_robots_crawl_delay(body)
+        robots_cache[origin] = (now + robots_ttl, rules, sitemaps, crawl_delay)
         # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
         # that discovers thousands of unique, still-fresh domains).
         _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
-        return rules, sitemaps
+        return rules, sitemaps, crawl_delay
 
     async def _robots_allows_target(target_url: str) -> bool:
         parsed = urlparse(target_url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
-        rules, _sitemaps = await _fetch_robots_rules(origin)
+        rules, _sitemaps, _crawl_delay = await _fetch_robots_rules(origin)
         return _robots_allows(target_url, rules)
+
+    async def _robots_crawl_delay_for(target_url: str) -> float | None:
+        """Return the Crawl-delay (seconds) declared by the target's origin, or
+        None. Uses the shared robots cache so the value is fetched at most once
+        per origin per TTL window (adversarial perf #2.6)."""
+        parsed = urlparse(target_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        _rules, _sitemaps, crawl_delay = await _fetch_robots_rules(origin)
+        return crawl_delay
 
     def _robots_sitemaps_for(origin: str) -> list[str] | None:
         """Return cached robots Sitemap URLs for an origin, or ``None`` if the
@@ -920,10 +987,17 @@ async def crawl_request(
     if not recursive:
         allowed_jobs: list[CrawlTask] = []
         for job in jobs:
-            if respect_robots and not await _robots_allows_target(job.normalized_url):
-                spill.write(job.index, _robots_disallowed_result(job))
-            else:
-                allowed_jobs.append(job)
+            if respect_robots:
+                if not await _robots_allows_target(job.normalized_url):
+                    spill.write(job.index, _robots_disallowed_result(job))
+                    continue
+                # Honor a host's robots Crawl-delay as a per-domain minimum
+                # inter-request delay (adversarial perf #2.6). Applied on top of
+                # the global/adaptive pacing inside the scheduler.
+                crawl_delay = await _robots_crawl_delay_for(job.normalized_url)
+                if crawl_delay and crawl_delay > 0:
+                    scheduler.set_domain_min_delay(job.domain, crawl_delay)
+            allowed_jobs.append(job)
 
         scheduled_results = await scheduler.run(allowed_jobs, _worker) if allowed_jobs else []
         for job, result in zip(allowed_jobs, scheduled_results):
@@ -938,6 +1012,7 @@ async def crawl_request(
             scheduler=scheduler,
             worker=_worker,
             robots_allows=_robots_allows_target,
+            robots_crawl_delay=_robots_crawl_delay_for,
             robots_disallowed=_robots_disallowed_result,
             sitemap_seeds=_sitemap_seed_urls,
             spill=spill,

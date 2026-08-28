@@ -126,3 +126,39 @@ class TestEngineGaps:
         import time as _time
         assert abs(scheduler._domain_cooldowns["example.com"] - (_time.time() + 30)) <= 5
 
+
+
+    async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
+        """Adversarial perf #2.6: a host's robots Crawl-delay is honored as a
+        per-domain minimum delay during the crawl."""
+        from app.crawl import engine as engine_mod
+        from app.scheduler import DomainScheduler
+        from app.crawl.cache import HttpCache
+
+        calls = []
+        orig = DomainScheduler.set_domain_min_delay
+
+        def spy(self, domain, seconds):
+            calls.append((domain, seconds))
+            return orig(self, domain, seconds)
+
+        monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", spy)
+
+        def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
+            from app.crawl.strategies.http import HttpFetchResult
+            if url.endswith("/robots.txt"):
+                body = b"User-agent: *\nCrawl-delay: 2\n"
+            else:
+                body = b"<html><body>ok</body></html>"
+            return HttpFetchResult(
+                url=url, final_url=url, status_code=200,
+                headers={"content-type": "text/html"}, body=body, elapsed_ms=1,
+            )
+
+        policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "dom",
+                  "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}}
+        await engine_mod.crawl_request(
+            {"url": "http://example.com/", "policy": policy},
+            http_fetcher=fetcher, cache=HttpCache(),
+        )
+        assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
