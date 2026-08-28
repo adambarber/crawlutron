@@ -53,9 +53,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=UTC \
     PATH=/home/appuser/.local/bin:$PATH \
     BROWSER_CRAWLER_LOG_LEVEL=info \
-    # Set workers to 1 by default for browser automation to prevent memory exhaustion.
-    # Scale horizontally via containers if more concurrency is needed.
-    BROWSER_CRAWLER_WORKERS=4 \
+    # Single worker so the browser pool is one GLOBAL pool (per-worker pools would
+    # multiply the browser count by the worker count and blow the RAM budget).
+    # The pool size is then derived from the cgroup memory limit at startup.
+    # Scale horizontally via containers if more browser concurrency is needed.
+    BROWSER_CRAWLER_WORKERS=1 \
     # Opt-in in-container disk content cache (#5): cache successful HTTP/Browser
     # responses on disk (under BROWSER_CRAWLER_CACHE_DIR) to avoid re-download/
     # re-extract on repeat crawls. No external sidecar (Redis/Memcached) required.
