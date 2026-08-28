@@ -9,7 +9,7 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   for JS-heavy, anti-bot, or challenge pages.
 - **Document extraction** — PDF/DOCX/PPTX/XLSX/TXT via markitdown, plus main-text
   extraction via trafilatura.
-- **Content classification** — 27 crawl classifications (success, blocked,
+- **Content classification** — 30 crawl classifications (success, blocked,
   network_error, robots_disallowed, challenge_detected, etc.) so callers can branch
   on outcome rather than guessing.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
@@ -116,7 +116,7 @@ exhausted.
 
 ## Classifications
 
-Every crawl result carries a `classification` from a fixed enum of **27 values**
+Every crawl result carries a `classification` from a fixed enum of **30 values**
 (returned by `GET /v1/capabilities` under `supported_classifications`). Examples:
 `success`, `rendered`, `not_modified`, `network_error`, `http_error`,
 `robots_disallowed`, `challenge_detected`, `ssrf_blocked`, `hard_error`,
@@ -146,7 +146,7 @@ Every crawl result carries a `classification` from a fixed enum of **27 values**
   targets instead of OOMing or tripping the kernel CPU throttle. No operator
   tuning is required.
 - **HTTP-aware admission (item 7)**: browser crawls are the memory hog (one
-  ~300&thinsp;MB browser process each), and when browser processes hold memory
+  ≈700 MiB (≈600–900 MiB RSS) browser process each), and when browser processes hold memory
   the whole batch used to be throttled — even cheap HTTP work. Today, when the
   upcoming batch is predominantly domains *pinned* to an HTTP strategy (they've
   already proven they fetch without a browser) and CPU has spare headroom, the
@@ -167,9 +167,12 @@ defaults shown):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port. |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; not operator-wired)_ | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
-| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `1` | Max concurrent tasks per host. |
-| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `1000` | Delay between requests to the same host. |
+| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | `4` (env-overridable floor) | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
+| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `2` | Max concurrent tasks per host. |
+| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `500` | Delay between requests to the same host. |
+| `BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS` | _(RAM-derived; ~139 at 3 GiB)_ | Max concurrent HTTP connections. Derived from the cgroup memory limit and capped at 512; override only to shrink. Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
+| `BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE` | _(RAM-derived; ~69 at 3 GiB)_ | Max idle keep-alive connections (≈ half of the connection ceiling). |
+| `BROWSER_CRAWLER_BROWSER_POOL_SIZE` | _(RAM-derived; 2 at 3 GiB)_ | Explicit browser-pool size override. Default is derived from the cgroup limit (reserves ≤50% of RAM for browsers); raising it multiplies RAM use and risks OOM. |
 | `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
 | `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
 | `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
@@ -181,7 +184,7 @@ defaults shown):
 | `BROWSER_CRAWLER_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `BROWSER_CRAWLER_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 
-> The container's production command also reads `BROWSER_CRAWLER_WORKERS` (uvicorn worker count).
+> The container's production command also reads `BROWSER_CRAWLER_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 
 > **Secrets & logs:** Logs and prompt JSONL can contain full page content and
 > request metadata. Do not commit generated logs under `logs/`.
@@ -236,7 +239,7 @@ Behavior tests run against the real stack (a local `http.server`, a real Camoufo
 browser, and real fixtures — no mocks). Use the dedicated venv:
 
 ```bash
-/private/tmp/bc-venv/bin/python -m pytest docker/browser-crawler/tests -q
+python3 -m pytest docker/browser-crawler/tests -q
 ```
 
 The manual test plan lives at `docs/references/browser-crawler-manual-test-plan.md`

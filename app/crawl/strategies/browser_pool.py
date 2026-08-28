@@ -1,6 +1,6 @@
 """Browser pool: manages N persistent BrowserRenderer instances.
 
-Each renderer owns a Camoufox browser process (~300MB). The pool reuses these
+Each renderer owns a Camoufox browser process (≈700 MiB reserved; ≈600–900 MiB RSS). The pool reuses these
 across crawl requests so we don't spawn/destroy browsers per-site.
 """
 

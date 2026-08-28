@@ -39,9 +39,9 @@ exposed via the API contract.
 |---|---|---|
 | `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port |
 | `BROWSER_CRAWLER_WORKERS` | 1 | uvicorn workers (Dockerfile) |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; not operator-wired)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
-| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `1` | Per-host parallel crawls |
-| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `1000` | Delay between same-domain jobs |
+| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; env-overridable floor)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
+| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `2` | Per-host parallel crawls |
+| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `500` | Delay between same-domain jobs |
 | `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per request |
 | `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Per-strategy timeout |
 | `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Retries inside a strategy |
@@ -247,7 +247,7 @@ Mapping to test cases (representative, not all require live hostile targets):
 | TC-CLS-TIMEOUT-01 | `navigation_timeout` | Browser nav exceeds budget. |
 | TC-CLS-CHALLENGE-01 | `waf_challenge_detected`/`bot_challenge_detected`/`captcha_detected` | Targets exhibiting challenge markers (observed/classified, NOT solved). |
 
-All 27 values appear in `supported_classifications` (TC-CAP-01) and counters
+All 30 values appear in `supported_classifications` (TC-CAP-01) and counters
 (`crawler_result_classification_total`) after relevant runs.
 
 ---
@@ -260,7 +260,7 @@ All 27 values appear in `supported_classifications` (TC-CAP-01) and counters
 | TC-VAL-01 | `url` xor `urls` | Neither `url` nor `urls` → `422 missing_url`. Both provided → `200` (lenient: service uses `urls`, ignores `url`). Enforcing a strict xor is deferred hardening. |
 | TC-VAL-02 | `batch_size_exceeded` | `> max_batch_size` (50) URLs → `422`. |
 | TC-VAL-03 | schema/field validation | Invalid policy field → `422` with `details.errors`. |
-| TC-CONC-01 | Global + per-domain concurrency | Many parallel requests; scheduler enforces `global_concurrency=4`, `per_domain_concurrency=1`, `per_domain_delay_ms`. |
+| TC-CONC-01 | Global + per-domain concurrency | Many parallel requests; scheduler enforces `global_concurrency=4`, `per_domain_concurrency=2`, `per_domain_delay_ms=500`. |
 | TC-RATE-01 | `max_rps` | Sustained ≤ configured RPS per domain. |
 | TC-LOG-01 | Structured logging | `/app/logs/browser-crawler.jsonl` receives redacted, structured log lines (no secret leakage). |
 | TC-LIFECYCLE-01 | Graceful shutdown | `SIGTERM` → browser renderer closed, in-flight crawls finish/abort cleanly via `shutdown_event`. |
