@@ -17,6 +17,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sys
@@ -188,6 +189,60 @@ class ContentCache:
             else:
                 # A large value must not linger in the small-value cache.
                 self._memory_cache.pop(key, None)
+        # Enforce size limit after write, using the in-memory index (no glob).
+        self._enforce_max_entries()
+
+    def _write_envelope(self, path: "Path", envelope: dict[str, Any]) -> None:
+        """Persist the envelope to disk (json.dumps of large HTML-sized values)."""
+        path.write_text(json.dumps(envelope))
+
+    async def aget(self, key: str, ttl: int | None = None) -> Any | None:
+        """Async ``get``: offload the (potentially large) on-disk envelope read
+        and JSON parse to a worker thread so the event loop is never stalled
+        (adversarial perf #1.2 / #2.2)."""
+        with self._lock:
+            if key in self._memory_cache:
+                expires, value = self._memory_cache[key]
+                if expires is not None and self.clock() > expires:
+                    self._memory_cache.pop(key, None)
+                else:
+                    self._memory_cache.move_to_end(key)
+                    if key in self._index:
+                        self._index.move_to_end(key)
+                    return value
+        # Disk read + JSON parse off the loop.
+        envelope = await asyncio.to_thread(self._read_envelope, key)
+        if envelope is None:
+            return None
+        value = envelope.get("value")
+        expires = envelope.get("expires")
+        if value is not None and sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+            with self._lock:
+                self._memory_cache[key] = (expires, value)
+                self._memory_cache.move_to_end(key)
+        return value
+
+    async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Async ``set``: index/RAM updates are synchronous (fast), the large
+        json.dumps + disk write is offloaded to a worker thread so the event
+        loop is never stalled (adversarial perf #1.2 / #2.2)."""
+        effective_ttl = self.default_ttl if ttl is None else ttl
+        expires = None if effective_ttl <= 0 else self.clock() + effective_ttl
+        envelope = {"expires": expires, "value": value, "cached_at": self.clock()}
+        path = self._path_for(key)
+        with self._lock:
+            self._index[key] = path
+            self._index.move_to_end(key)
+            if sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+                self._memory_cache[key] = (expires, value)
+                self._memory_cache.move_to_end(key)
+                if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
+                    self._memory_cache.popitem(last=False)
+            else:
+                # A large value must not linger in the small-value cache.
+                self._memory_cache.pop(key, None)
+        # Offload the (potentially large) json.dumps + disk write off the loop.
+        await asyncio.to_thread(self._write_envelope, path, envelope)
         # Enforce size limit after write, using the in-memory index (no glob).
         self._enforce_max_entries()
 

@@ -50,3 +50,37 @@ class TestContentCacheCoverageGaps:
             assert (cache.get("key2")) is None
 
 
+
+
+    async def test_aset_aget_roundtrip(self):
+        """Adversarial perf #1.2/#2.2: async disk cache stores and retrieves,
+        including a large (HTML-sized) value that hits the on-disk path."""
+        import tempfile, asyncio as _asyncio, threading, pathlib
+        from app.crawl.content_cache import ContentCache
+
+        d = tempfile.mkdtemp()
+        cache = ContentCache(cache_dir=pathlib.Path(d), default_ttl=60)
+        big = "<html>" + ("x" * 2_000_000) + "</html>"
+        await cache.aset("k1", big)
+        # RAM mirror only keeps <1MiB, so this exercises the disk read path.
+        got = await cache.aget("k1")
+        assert got == big
+
+    async def test_aset_writes_off_event_loop(self):
+        """The disk write (json.dumps of a large value) runs in a worker thread."""
+        import tempfile, asyncio as _asyncio, threading, pathlib
+        from app.crawl.content_cache import ContentCache
+
+        d = tempfile.mkdtemp()
+        cache = ContentCache(cache_dir=pathlib.Path(d), default_ttl=60)
+        seen = {}
+
+        def spy_write(path, envelope):
+            seen["thread"] = threading.current_thread()
+            path.write_text(__import__("json").dumps(envelope))
+
+        cache._write_envelope = spy_write
+        big = "y" * 2_000_000
+        await cache.aset("k2", big)
+        assert seen, "write never happened"
+        assert seen["thread"] is not threading.current_thread()
