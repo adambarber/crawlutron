@@ -47,7 +47,8 @@ class DomainScheduler:
         delay_seconds: float,
         max_rps: float = 0.0,
         circuit_threshold: int = 5,
-        circuit_cooldown: float = 60.0,
+        circuit_cooldown: float = 600.0,
+        circuit_cooldown_base: float = 30.0,
         adaptive: bool = True,
         adaptive_min_delay: float = 0.5,
         adaptive_max_delay: float = 30.0,
@@ -59,7 +60,12 @@ class DomainScheduler:
         self._delay_seconds = max(0.0, delay_seconds)
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
-        self._circuit_cooldown = max(1.0, circuit_cooldown)
+        # Circuit breaker cooldown is now exponential: the first trip waits
+        # ``base`` seconds, each subsequent consecutive trip doubles (capped at
+        # ``circuit_cooldown``). A poisoned/tarpit domain is thus parked for
+        # progressively longer without a manual reset (adversarial perf #2.1).
+        self._circuit_cooldown_base = max(1.0, circuit_cooldown_base)
+        self._circuit_cooldown_max = max(self._circuit_cooldown_base, circuit_cooldown)
         # Adaptive throttling (AutoThrottle-style, #6): per-domain delay is driven by
         # observed response latency rather than a single fixed value.
         self._adaptive = adaptive
@@ -70,6 +76,9 @@ class DomainScheduler:
 
         # Track when domains are allowed to be hit again to implement domain-level cooldowns
         self._domain_cooldowns: dict[str, float] = {}
+
+        # Consecutive circuit-breaker trips per domain (drives exponential backoff).
+        self._circuit_trip_count: dict[str, int] = defaultdict(int)
 
         # Token buckets per domain for RPS rate limiting
         self._token_buckets: dict[str, _TokenBucket] = {}
@@ -98,14 +107,25 @@ class DomainScheduler:
         self._purge_expired()
 
     def record_success(self, domain: str) -> None:
-        """Reset the failure counter for a domain after a successful crawl."""
+        """Reset the failure counter (and exponential backoff) for a domain."""
         self._domain_failures[domain] = 0
+        self._circuit_trip_count[domain] = 0
 
     def record_failure(self, domain: str) -> None:
-        """Increment the failure counter; trip the circuit breaker if threshold reached."""
+        """Increment the failure counter; escalate the circuit-breaker cooldown
+        exponentially with each threshold-crossing batch of failures."""
         self._domain_failures[domain] += 1
-        if self._domain_failures[domain] >= self._circuit_threshold:
-            self._circuit_open_until[domain] = time.monotonic() + self._circuit_cooldown
+        # Each completed batch of ``threshold`` failures escalates one step:
+        # trip 1 -> base, trip 2 -> base*2, trip 3 -> base*4, ... capped. A
+        # domain that fails 40 times in a row is parked for the max cooldown.
+        n = self._domain_failures[domain] // self._circuit_threshold
+        if n >= 1 and n > self._circuit_trip_count.get(domain, 0):
+            self._circuit_trip_count[domain] = n
+            cooldown = min(
+                self._circuit_cooldown_base * (2 ** (n - 1)),
+                self._circuit_cooldown_max,
+            )
+            self._circuit_open_until[domain] = time.monotonic() + cooldown
 
     def is_circuit_open(self, domain: str) -> bool:
         """Check if the circuit breaker is open for a domain."""
@@ -114,8 +134,11 @@ class DomainScheduler:
             return False
         if time.monotonic() >= expiry:
             # Cooldown elapsed — half-open; reset counters and allow retry.
+            # Resetting the trip count restarts the exponential backoff so a
+            # recovered domain is not penalised by a stale escalation.
             del self._circuit_open_until[domain]
             self._domain_failures[domain] = 0
+            self._circuit_trip_count[domain] = 0
             return False
         return True
 

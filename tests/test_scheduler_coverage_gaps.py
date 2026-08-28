@@ -51,3 +51,28 @@ class TestSchedulerCoverageGaps:
         assert scheduler._max_rps > 0
 
 
+
+
+    def test_circuit_breaker_exponential_backoff(self):
+        """Adversarial perf #2.1: consecutive trips escalate the cooldown
+        exponentially (base -> doubled -> ... -> cap)."""
+        from app.scheduler import DomainScheduler
+        import time
+
+        s = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0,
+            circuit_threshold=5, circuit_cooldown_base=30.0, circuit_cooldown=600.0,
+        )
+
+        def open_after(failures: int) -> float:
+            s._domain_failures.clear(); s._circuit_trip_count.clear(); s._circuit_open_until.clear()
+            for _ in range(failures):
+                s.record_failure("x")
+            return s._circuit_open_until["x"] - time.monotonic()
+
+        assert 29 <= open_after(5) <= 31
+        assert 59 <= open_after(10) <= 61
+        assert 119 <= open_after(15) <= 121
+        assert 599 <= open_after(40) <= 601
+        s.record_success("x")
+        assert s._circuit_trip_count["x"] == 0
