@@ -10,6 +10,7 @@ closures (worker, robots checks, sitemap seeding) and the dispatch knobs.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -77,6 +78,20 @@ def _batch_is_http_heavy(
         if pinned is not None and pinned in HTTP_STRATEGIES:
             http_count += 1
     return counted > 0 and http_count >= counted / 2
+
+
+async def _spill_write(spill: Any, index: int, result: Any) -> None:
+    """Write a result to ``spill`` if present, tolerating sync or async ``write``.
+
+    ``_ResultSpill.write`` is async (offloaded off the event loop, adversarial
+    perf #1.3), but callers/tests may supply a sync spill object, so accept
+    either. A ``None`` spill is a no-op (in-memory caller).
+    """
+    if spill is None:
+        return
+    res = spill.write(index, result)
+    if inspect.isawaitable(res):
+        await res
 
 
 async def run_recursive_crawl(
@@ -203,7 +218,7 @@ async def run_recursive_crawl(
             if job.normalized_url in visited:
                 continue
             if respect_robots and not await robots_allows(job.normalized_url):
-                spill.write(job.index, robots_disallowed(job))
+                await _spill_write(spill, job.index, robots_disallowed(job))
                 visited.add(job.normalized_url)
                 page_count += 1
                 continue
@@ -228,7 +243,7 @@ async def run_recursive_crawl(
             # for the whole crawl when the caller did not ask for them (#1).
             if not include_html:
                 result = replace(result, html=None, text=None)
-            spill.write(job.index, result)
+            await _spill_write(spill, job.index, result)
             page_count += 1
             if depth >= max_depth:
                 continue

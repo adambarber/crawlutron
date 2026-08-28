@@ -202,7 +202,7 @@ class DomainScheduler:
         self,
         jobs: list[CrawlJob],
         worker: SchedulerWorker,
-        on_result: "Callable[[int, EngineCrawlResult], None] | None" = None,
+        on_result: "Callable[[int, EngineCrawlResult], Awaitable[None]] | None" = None,
     ) -> "list[EngineCrawlResult] | None":
         """Run ``jobs`` through ``worker``.
 
@@ -288,7 +288,7 @@ class DomainScheduler:
                             self.record_failure(job.domain)
                         if on_result is not None:
                             # Stream to the caller immediately; do not retain.
-                            on_result(job.index, result)
+                            await on_result(job.index, result)
                         else:
                             results[job.index] = result
                     except Exception:

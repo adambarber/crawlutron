@@ -95,7 +95,7 @@ from app.models import (
     HttpFetcher,
     to_dict,
 )
-from app.crawl.recursive import RECURSIVE_RAMP_MAX, run_recursive_crawl
+from app.crawl.recursive import RECURSIVE_RAMP_MAX, run_recursive_crawl, _spill_write
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
@@ -195,7 +195,8 @@ async def _browser_strategy_result(
     content = result.html if result.html else result.text
     if content:
         if extraction == EXTRACTION_DOCUMENT:
-            extracted = _extract_document(
+            extracted = await asyncio.to_thread(
+                _extract_document,
                 content.encode("utf-8", "replace") if isinstance(content, str) else content,
                 result.final_url,
             )
@@ -208,7 +209,7 @@ async def _browser_strategy_result(
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_TRAFILATURA
         else:
-            extracted = extract_content(content, None, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+            extracted = await asyncio.to_thread(extract_content, content, None, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
@@ -563,6 +564,9 @@ class _ResultSpill:
             self._fh = open(path, "w", encoding="utf-8")
         self.path = path
         self.count = 0
+        # Serialize writes (the file handle is shared) while the (potentially
+        # large) json.dumps is offloaded off the event loop (adversarial #1.3).
+        self._write_lock = asyncio.Lock()
         self._gc_stale_spills(gc_age_seconds)
 
     def _gc_stale_spills(self, max_age: float) -> None:
@@ -581,9 +585,13 @@ class _ResultSpill:
             except OSError:
                 continue
 
-    def write(self, index: int, result: EngineCrawlResult) -> None:
-        self._fh.write(json.dumps({"i": index, "r": to_dict(result)}) + "\n")
-        self.count += 1
+    async def write(self, index: int, result: EngineCrawlResult) -> None:
+        # Offload the (potentially large) json.dumps to a worker thread so the
+        # event loop is never stalled serializing results (adversarial #1.3).
+        line = await asyncio.to_thread(json.dumps, {"i": index, "r": to_dict(result)})
+        async with self._write_lock:
+            self._fh.write(line + "\n")
+            self.count += 1
 
     def load_ordered(self) -> list[dict[str, Any]]:
         """Reassemble all spilled results in submission order."""
@@ -989,7 +997,7 @@ async def crawl_request(
         for job in jobs:
             if respect_robots:
                 if not await _robots_allows_target(job.normalized_url):
-                    spill.write(job.index, _robots_disallowed_result(job))
+                    await _spill_write(spill, job.index, _robots_disallowed_result(job))
                     continue
                 # Honor a host's robots Crawl-delay as a per-domain minimum
                 # inter-request delay (adversarial perf #2.6). Applied on top of
@@ -1002,10 +1010,10 @@ async def crawl_request(
         # #3.1: stream each completed result to disk immediately so peak RAM tracks
         # the in-flight set, not the whole batch. Heavy payloads are stripped
         # before spilling when the caller did not request them (#1).
-        def _spill_one(index: int, result: EngineCrawlResult) -> None:
+        async def _spill_one(index: int, result: EngineCrawlResult) -> None:
             if not include_html:
                 result = replace(result, html=None, text=None)
-            spill.write(index, result)
+            await _spill_write(spill, index, result)
 
         if allowed_jobs:
             await scheduler.run(allowed_jobs, _worker, on_result=_spill_one)

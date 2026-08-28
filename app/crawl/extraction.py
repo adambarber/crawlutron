@@ -20,9 +20,11 @@ from __future__ import annotations
 import concurrent.futures
 import io
 import logging
+import multiprocessing
 import os
 import re
 import sys
+import threading
 from html import unescape
 from html.parser import HTMLParser
 from typing import NamedTuple
@@ -38,12 +40,6 @@ logger = logging.getLogger(__name__)
 # Bounded to 4 workers to limit resource consumption.
 _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="extraction")
 
-# Process pool for document extraction (markitdown) to enable kill-on-timeout
-# (Finding 2: thread pool exhaustion DoS). Initialized lazily to avoid
-# issues with uvicorn/spawn context on macOS.
-_DOC_EXTRACTION_EXECUTOR: concurrent.futures.ProcessPoolExecutor | None = None
-
-
 # Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
 # production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
 # Raise via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office
@@ -52,25 +48,45 @@ _DEFAULT_DOC_EXTRACTION_WORKERS = 2
 
 
 def _doc_extraction_worker_count() -> int:
-    """Configured process-pool size for markitdown extraction."""
+    """Configured concurrency for markitdown extraction (process semaphore size)."""
     try:
         return max(1, int(os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", str(_DEFAULT_DOC_EXTRACTION_WORKERS))))
     except ValueError:
         return _DEFAULT_DOC_EXTRACTION_WORKERS
 
 
-def _get_doc_extraction_executor() -> concurrent.futures.ProcessPoolExecutor:
-    """Return lazily-initialized process pool for markitdown extraction.
+# Document extraction (markitdown) runs in a SEPARATE PROCESS that is forcefully
+# killed on timeout (adversarial perf #3.2). A persistent process pool cannot
+# target a single timed-out future for termination, so each call spawns its own
+# short-lived process; a semaphore bounds how many run at once so memory stays
+# within the container ceiling. Defined after the worker-count helper above.
+_DOC_SEM = threading.Semaphore(_doc_extraction_worker_count())
 
-    Pool size is configurable via ``BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS``
-    (read once at pool creation).
-    """
-    global _DOC_EXTRACTION_EXECUTOR
-    if _DOC_EXTRACTION_EXECUTOR is None:
-        _DOC_EXTRACTION_EXECUTOR = concurrent.futures.ProcessPoolExecutor(
-            max_workers=_doc_extraction_worker_count()
-        )
-    return _DOC_EXTRACTION_EXECUTOR
+
+def _run_markitdown_in_process(body: bytes, conn) -> None:
+    """Worker-process entry: run markitdown and ship the result over ``conn``."""
+    try:
+        res = _markitdown_extract(body)
+        conn.send(("ok", res))
+    except Exception:  # noqa: BLE001
+        conn.send(("err", None))
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _terminate_doc_process(proc) -> None:
+    """Force-kill a runaway document-extraction process and reap it."""
+    try:
+        proc.terminate()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        proc.join(timeout=5)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _markitdown_extract(body: bytes) -> str | None:
@@ -97,12 +113,12 @@ def _markitdown_extract(body: bytes) -> str | None:
 
 
 async def _shutdown_doc_extraction_executor() -> None:
-    """Shutdown the document extraction process pool (for service shutdown)."""
-    global _DOC_EXTRACTION_EXECUTOR
-    if _DOC_EXTRACTION_EXECUTOR is not None:
-        _DOC_EXTRACTION_EXECUTOR.shutdown(wait=False)
-        _DOC_EXTRACTION_EXECUTOR = None
+    """No persistent document-extraction pool to shut down.
 
+    Each extraction spawns its own short-lived process (reaped on completion or
+    timeout), so nothing needs tearing down on service shutdown. Kept as a
+    no-op so any (future) shutdown caller stays valid.
+    """
 
 
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
@@ -345,19 +361,33 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
         )
         return ExtractedContent(None, None)
 
-    executor = _get_doc_extraction_executor()
+    # Run markitdown in a worker process with a hard wall-clock timeout; on
+    # timeout the runaway process is forcefully terminated so it cannot linger
+    # as a zombie and starve the (bounded) extraction concurrency
+    # (adversarial perf #3.2). A semaphore bounds concurrent processes so memory
+    # stays within the container ceiling.
+    _DOC_SEM.acquire()
     try:
-        fut = executor.submit(_markitdown_extract, body)
+        parent_conn, child_conn = multiprocessing.Pipe()
+        proc = multiprocessing.Process(
+            target=_run_markitdown_in_process, args=(body, child_conn)
+        )
+        proc.start()
+        child_conn.close()  # parent keeps only its end of the pipe
+        md = None
         try:
-            md = fut.result(timeout=_EXTRACTION_DOC_TIMEOUT)
-        except concurrent.futures.TimeoutError:
-            logger.warning("extraction_document_timeout")
-            # The process will be killed by the executor on shutdown, but we
-            # can't force-kill a specific future. The timeout ensures we don't
-            # wait forever, and the process pool bounds the total damage.
-            return ExtractedContent(None, None)
-    except Exception:  # noqa: BLE001
-        return ExtractedContent(None, None)
+            if parent_conn.poll(_EXTRACTION_DOC_TIMEOUT):
+                _, md = parent_conn.recv()
+            else:
+                logger.warning("extraction_document_timeout")
+                _terminate_doc_process(proc)
+                return ExtractedContent(None, None)
+        finally:
+            if proc.is_alive():
+                proc.join(timeout=2)
+            parent_conn.close()
+    finally:
+        _DOC_SEM.release()
 
     if not md or not md.strip():
         return ExtractedContent(None, None)

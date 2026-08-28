@@ -1229,7 +1229,7 @@ async def _http_strategy_result(
             normalized_url, strategy, base_headers, extraction,
             policy.get("css_selector"), policy.get("xpath"),
         )
-        cached = content_cache.get(ckey)
+        cached = await content_cache.aget(ckey)
         if cached is not None:
             validator = cache.conditional_headers(normalized_url) if cache is not None else {}
             if not validator and caller_conditional:
@@ -1326,7 +1326,7 @@ async def _http_strategy_result(
         if content_cache is not None and ckey is not None and not content_hit:
             if response.status_code < 300 and response.status_code != 304:
                 try:
-                    content_cache.set(ckey, _serialize_response(response))
+                    await content_cache.aset(ckey, _serialize_response(response))
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -1359,7 +1359,7 @@ async def _http_strategy_result(
         is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
         html = body_text if is_html else None
         if extraction == EXTRACTION_DOCUMENT:
-            extracted = _extract_document(decompressed, response.final_url)
+            extracted = await asyncio.to_thread(_extract_document, decompressed, response.final_url)
             text = extracted.text or ""
             markdown = extracted.markdown
             if (content_type or "").lower().startswith("text/"):
@@ -1376,7 +1376,7 @@ async def _http_strategy_result(
                 markdown = None
             extraction_method = EXTRACTION_METHOD_TRAFILATURA
         else:
-            extracted = extract_content(decompressed, content_type, response.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+            extracted = await asyncio.to_thread(extract_content, decompressed, content_type, response.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY

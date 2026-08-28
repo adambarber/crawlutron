@@ -132,7 +132,7 @@ class TestSchedulerCoverageGaps:
                 await release_slow.wait()
             return make_result(job.url, job.domain)
 
-        def _on_result(idx: int, _r) -> None:
+        async def _on_result(idx: int, _r) -> None:
             on_result_order.append(idx)
             if idx == 1:
                 release_slow.set()
