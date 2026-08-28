@@ -39,6 +39,88 @@ _DEFAULT_CPU_HARD = 0.95
 # cgroup CPU quota (or stays open when unbounded). The app manages itself.
 _DEFAULT_CPU_BUDGET = None
 
+# Opt-in event-loop lag probe (adversarial perf #2.3: feed loop-lag into
+# admission). Disabled by default so test suites and minimal deployments pay no
+# background-task cost; enable with BROWSER_CRAWLER_LOOP_LAG_PROBE=1 in the
+# container. When disabled the probe reports zero lag and the gate is unaffected.
+_LOOP_LAG_PROBE_ENABLED = os.environ.get("BROWSER_CRAWLER_LOOP_LAG_PROBE", "0") == "1"
+_LOOP_LAG_SAMPLE_INTERVAL = 0.05
+_LOOP_LAG_OK_THRESHOLD = 0.05      # below this lag (s) -> full speed
+_LOOP_LAG_HARD_THRESHOLD = 0.30    # at/above this lag (s) -> full throttle
+_LOOP_LAG_SMOOTHING = 0.25
+
+
+class LoopLagProbe:
+    """Best-effort event-loop lag sensor.
+
+    Runs a lightweight background tick that measures how far the loop falls
+    behind its scheduled cadence. A saturated loop (too many concurrent
+    coroutines, blocking callbacks) lags, which is an independent pressure
+    signal from CPU/memory: the cgroup CPU quota can look fine while the single
+    event loop is the bottleneck. The gate multiplies its scale by
+    :meth:`factor` so lag alone can shed load.
+    """
+
+    def __init__(
+        self,
+        *,
+        interval: float = _LOOP_LAG_SAMPLE_INTERVAL,
+        ok_threshold: float = _LOOP_LAG_OK_THRESHOLD,
+        hard_threshold: float = _LOOP_LAG_HARD_THRESHOLD,
+        smoothing: float = _LOOP_LAG_SMOOTHING,
+    ):
+        self._interval = interval
+        self._ok = ok_threshold
+        self._hard = hard_threshold
+        self._smoothing = smoothing
+        self._lag = 0.0
+        self._task: "asyncio.Task | None" = None
+        self._loop: "asyncio.AbstractEventLoop | None" = None
+
+    def start(self) -> None:
+        """Begin sampling on the current running loop (idempotent)."""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            return
+        if loop is None or not loop.is_running():
+            return
+        if self._task is not None and not self._task.done():
+            return
+        self._loop = loop
+        self._task = loop.create_task(self._run())
+
+    def stop(self) -> None:
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+        self._task = None
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                t0 = time.monotonic()
+                await asyncio.sleep(self._interval)
+                elapsed = time.monotonic() - t0
+                lag = max(0.0, elapsed - self._interval)
+                self._lag = self._lag * (1.0 - self._smoothing) + lag * self._smoothing
+        except asyncio.CancelledError:
+            return
+        except (RuntimeError, Exception):
+            # Loop closed or other failure: stop sampling, report zero lag.
+            self._lag = 0.0
+            return
+
+    def get(self) -> float:
+        return self._lag
+
+    def factor(self) -> float:
+        """Scale multiplier from current lag: 1.0 below ``ok``, 0.0 at/above ``hard``."""
+        if self._lag <= self._ok:
+            return 1.0
+        if self._lag >= self._hard:
+            return 0.0
+        return max(0.0, 1.0 - (self._lag - self._ok) / (self._hard - self._ok))
+
 
 # ---------------------------------------------------------------------------
 # CPU sensing (cgroup v2 -> v1 -> unbounded)
@@ -255,6 +337,13 @@ class ResourceGate:
             cpu_budget=cpu_budget,
         )
         self._poll_seconds = poll_seconds
+        # Event-loop lag is an independent throttle signal (adversarial perf
+        # #2.3). The probe is opt-in (BROWSER_CRAWLER_LOOP_LAG_PROBE) so tests
+        # and minimal deployments do not pay for a background task; when off it
+        # reports zero lag and leaves the gate untouched.
+        self._lag_probe = LoopLagProbe()
+        if _LOOP_LAG_PROBE_ENABLED:
+            self._lag_probe.start()
 
     def memory_ratio(self) -> float:
         return self.memory._usage_ratio()
@@ -262,8 +351,19 @@ class ResourceGate:
     def cpu_ratio(self) -> float:
         return self.cpu._usage_ratio()
 
+    def loop_lag(self) -> float:
+        """Current measured event-loop lag in seconds (0.0 when probe disabled)."""
+        return self._lag_probe.get()
+
+    def close(self) -> None:
+        """Stop the optional loop-lag probe (call on shutdown)."""
+        self._lag_probe.stop()
+
     def batch_scale_factor(self) -> float:
-        return min(self.memory.batch_scale_factor(), self.cpu.batch_scale_factor())
+        base = min(self.memory.batch_scale_factor(), self.cpu.batch_scale_factor())
+        # A lagging event loop is its own bottleneck regardless of cgroup CPU;
+        # shed load proportionally when it falls behind its scheduled cadence.
+        return base * self._lag_probe.factor()
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
         budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds

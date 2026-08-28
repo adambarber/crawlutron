@@ -251,6 +251,10 @@ def _reset_global_http_state():
         # tests (the gate caches its CPU-quota reading and CPU sampling state).
         _engine_mod._SHARED_HTTP_CACHE = _engine_mod.HttpCache()
         _engine_mod._resource_gate = _engine_mod.ResourceGate()
+        # Drop any memoized cgroup reads so a test that asserts fresh sensing
+        # (e.g. writes a new fake cgroup file) is not served a stale value.
+        from app.cgroup_sense import _invalidate_cgroup_cache
+        _invalidate_cgroup_cache()
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
 

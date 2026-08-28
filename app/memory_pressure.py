@@ -147,7 +147,18 @@ class ResourceGauge:
 
 
 class MemoryGate(ResourceGauge):
-    """Global admission gate consulted before each crawl batch dispatch."""
+    """Global admission gate consulted before each crawl batch dispatch.
+
+    Beyond the trailing ``memory.current`` fraction, the gate also tracks the
+    *rate of change* of usage (adversarial perf #2.3: ``memory.current`` is a
+    trailing signal). When usage is climbing fast it anticipates the imminent
+    pressure and throttles slightly early, so a sudden allocation spike cannot
+    blow past the hard ceiling between samples. The raw fraction still drives
+    the hard-ceiling wait; only the dispatch scale uses the leading estimate.
+    """
+
+    # How much of a fast climb to fold into the leading estimate (capped).
+    _MAX_ANTICIPATION = 0.15
 
     def __init__(
         self,
@@ -171,9 +182,41 @@ class MemoryGate(ResourceGauge):
             max_wait_seconds=max_wait_seconds,
             cgroup_root=cgroup_root,
         )
+        self._prev_ratio: float | None = None
+        self._prev_time: float = 0.0
+        self._slope: float = 0.0
 
     def _usage_ratio(self) -> float:
         stats = read_memory_stats(cgroup_root=self.cgroup_root)
         if stats.total_bytes <= 0:
             return 0.0
-        return stats.used_bytes / stats.total_bytes
+        ratio = stats.used_bytes / stats.total_bytes
+        # Track the slope for the leading estimate (no throttling effect here).
+        now = time.monotonic()
+        if self._prev_ratio is not None:
+            dt = now - self._prev_time
+            if dt > 0:
+                # per-second change; clamp so a single noisy sample cannot spike it.
+                self._slope = max(-1.0, min(1.0, (ratio - self._prev_ratio) / dt))
+        else:
+            self._slope = 0.0
+        self._prev_ratio = ratio
+        self._prev_time = now
+        return ratio
+
+    def leading_usage_ratio(self) -> float:
+        """Trailing fraction plus a capped anticipation of the climb rate.
+
+        Only used by the dispatch scale factor, never by the hard-ceiling wait.
+        """
+        raw = self._usage_ratio()
+        if raw >= self.hard:
+            return raw
+        # If usage is rising, add up to _MAX_ANTICIPATION so we throttle early.
+        anticipation = max(0.0, self._slope) * 0.5  # half-life-ish damping
+        return min(self.hard, raw + min(self._MAX_ANTICIPATION, anticipation))
+
+    def batch_scale_factor(self) -> float:
+        # Use the leading estimate (trailing + climb anticipation) so a fast
+        # memory climb throttles dispatch before it reaches the hard ceiling.
+        return batch_scale(self.leading_usage_ratio(), 1.0, self.target, hard=self.hard)
