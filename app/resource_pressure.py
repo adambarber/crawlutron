@@ -393,3 +393,104 @@ class ResourceGate:
             return self.cpu.batch_scale_factor()
         # CPU is tight -> HTTP tasks respect combined pressure
         return self.batch_scale_factor()
+
+
+# ---------------------------------------------------------------------------
+# Two-tier weighted admission (replaces the stop-the-world pause)
+# ---------------------------------------------------------------------------
+# HTTP crawls are cheap (a few MiB of page + extraction state per in-flight
+# task); browser crawls are expensive (dominated by the persistent
+# browser-pool processes, which hold most of the cgroup RAM). The old
+# dispatcher called ``wait_while_saturated()`` and parked the ENTIRE crawl
+# while any resource was saturated -- which, with a fixed browser pool, meant
+# the cheap HTTP path was throttled to zero whenever browsers held memory.
+#
+# :class:`WeightedAdmission` instead grants, per batch, as many HTTP tasks as
+# fit the live RAM/CPU headroom, then up to a small browser-tier cap. If nothing
+# fits it yields briefly (backpressure) instead of parking the whole crawl, so
+# the HTTP path can scale to hundreds of concurrent pages while the browser tier
+# stays RAM-budgeted.
+
+_HTTP_TASK_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", str(12 * 1024 * 1024)))
+_BROWSER_TASK_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", str(700 * 1024 * 1024)))
+_ADMIT_YIELD_SECONDS = float(os.environ.get("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", "0.05"))
+_MAX_HTTP_CONCURRENCY = int(os.environ.get("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", "512"))
+
+
+@dataclass
+class AdmissionPolicy:
+    """Sizing inputs for :class:`WeightedAdmission` (all in bytes / counts)."""
+
+    http_task_bytes: int
+    browser_task_bytes: int
+    browser_pool_reserve_bytes: int
+    max_http_concurrency: int
+    max_browser_concurrency: int
+
+
+def _build_admission_policy(
+    limit_bytes: int,
+    *,
+    pool_size: int,
+    max_concurrent_pages: int,
+    http_task_bytes: int = _HTTP_TASK_RAM_BYTES,
+    browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES,
+) -> AdmissionPolicy:
+    """Derive an admission policy from the cgroup memory limit + browser pool.
+
+    The browser pool's fixed RAM is reserved up front; the remaining RAM is
+    divided by the per-HTTP-task estimate to get the HTTP concurrency ceiling.
+    """
+    limit = max(limit_bytes, 256 * 1024 * 1024)
+    browser_pool_reserve_bytes = pool_size * browser_task_bytes
+    free_for_http = max(0, limit - browser_pool_reserve_bytes)
+    max_http = max(1, min(_MAX_HTTP_CONCURRENCY, free_for_http // max(1, http_task_bytes)))
+    return AdmissionPolicy(
+        http_task_bytes=http_task_bytes,
+        browser_task_bytes=browser_task_bytes,
+        browser_pool_reserve_bytes=browser_pool_reserve_bytes,
+        max_http_concurrency=max_http,
+        max_browser_concurrency=max(1, pool_size * max_concurrent_pages),
+    )
+
+
+def default_admission_policy(gate: "ResourceGate") -> "WeightedAdmission":
+    """A conservative policy used when the caller does not supply one.
+
+    Assumes a 2-process browser pool (the 3 GiB default) so tests / minimal
+    deployments stay safe; production passes a policy built from the real pool.
+    """
+    stats = read_memory_stats()
+    limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)
+    return WeightedAdmission(gate, _build_admission_policy(limit, pool_size=2, max_concurrent_pages=3))
+
+
+class WeightedAdmission:
+    """RAM/CPU-weighted, two-tier batch admission.
+
+    HTTP tasks are admitted up to ``max_http_concurrency * headroom``; browser
+    tasks up to the (small) browser-tier cap. ``admit`` never blocks for long:
+    when nothing fits it yields :data:`_ADMIT_YIELD_SECONDS` of backpressure.
+    """
+
+    def __init__(self, gate: "ResourceGate", policy: AdmissionPolicy) -> None:
+        self._gate = gate
+        self._p = policy
+
+    def headroom_fraction(self) -> float:
+        return min(1.0 - self._gate.memory_ratio(), 1.0 - self._gate.cpu_ratio())
+
+    def http_capacity(self) -> int:
+        return max(0, int(self._p.max_http_concurrency * self.headroom_fraction()))
+
+    def browser_capacity(self) -> int:
+        # Browsers hold most of the cgroup RAM, so the browser tier also shrinks
+        # with headroom -- never admit new browser renders when saturated.
+        return max(0, int(self._p.max_browser_concurrency * self.headroom_fraction()))
+
+    async def admit(self, want_http: int, want_browser: int) -> "tuple[int, int]":
+        h = min(want_http, self.http_capacity())
+        b = min(want_browser, self.browser_capacity())
+        if h + b == 0 and (want_http + want_browser) > 0:
+            await asyncio.sleep(_ADMIT_YIELD_SECONDS)
+        return h, b

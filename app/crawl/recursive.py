@@ -20,6 +20,7 @@ from itertools import islice
 from typing import Any, Awaitable, Callable
 
 from app.constants import (
+    BROWSER_STRATEGIES,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     HTTP_STRATEGIES,
     is_analytics_host,
@@ -28,7 +29,7 @@ from app.constants import (
 from app.scheduler import DomainScheduler
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
-from app.resource_pressure import ResourceGate
+from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.validation import registrable_domain
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 # replaces a fixed operator-configured concurrency cap with automatic sizing to
 # the cgroup budget. Kept modest so a single batch cannot overshoot the hard
 # headroom before the next saturation check.
-RECURSIVE_RAMP_MAX: int = 8
+RECURSIVE_RAMP_MAX: int = 128
 
 # How far into the frontier we look to decide whether the next batch is
 # predominantly cheap HTTP work (item 7). Matches the max achievable batch size
@@ -94,6 +95,57 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
         await res
 
 
+
+
+def _count_strategy_tiers(scheduler, frontier, n):
+    """Count HTTP vs browser tasks among the next ``n`` frontier entries.
+
+    A task whose domain is pinned to a browser strategy is counted as browser;
+    everything else (HTTP-pinned or cold/unpinned) is counted as HTTP -- we are
+    optimistic that cold domains fetch without a browser and escalate later.
+    """
+    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
+    http = browser = 0
+    for _, task in islice(frontier, n):
+        if get_pinned is None:
+            http += 1
+            continue
+        pinned = get_pinned(task.domain)
+        if pinned is not None and pinned in BROWSER_STRATEGIES:
+            browser += 1
+        else:
+            http += 1
+    return http, browser
+
+
+def _pop_admitted(frontier, admit_h, admit_b, scheduler):
+    """Pop up to ``admit_h + admit_b`` tasks, HTTP-first, capping browser tasks.
+
+    Excess (not admitted this batch) is returned to the front of the frontier so
+    it is retried on the next batch rather than dropped.
+    """
+    if admit_h + admit_b == 0:
+        return []
+    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
+    taken = []
+    while frontier and len(taken) < admit_h + admit_b:
+        taken.append(frontier.popleft())
+    http_tasks: list = []
+    browser_tasks: list = []
+    for item in taken:
+        _, task = item
+        is_browser = False
+        if get_pinned is not None:
+            pinned = get_pinned(task.domain)
+            is_browser = pinned is not None and pinned in BROWSER_STRATEGIES
+        (browser_tasks if is_browser else http_tasks).append(item)
+    selected = http_tasks[:admit_h] + browser_tasks[:admit_b]
+    excess = http_tasks[admit_h:] + browser_tasks[admit_b:]
+    for item in reversed(excess):
+        frontier.appendleft(item)
+    return selected
+
+
 async def run_recursive_crawl(
     *,
     jobs: list[CrawlTask],
@@ -114,6 +166,7 @@ async def run_recursive_crawl(
     global_concurrency: int,
     seed_sitemaps: bool,
     resource_gate: ResourceGate,
+    admission: WeightedAdmission | None = None,
 ) -> None:
     """Bounded recursive BFS with self-tuning resource admission control.
 
@@ -122,6 +175,8 @@ async def run_recursive_crawl(
     closures so this stays a pure dispatch function.
     """
     metrics = get_metrics()
+
+    admission = admission or default_admission_policy(resource_gate)
 
     visited: set[str] = set()
     frontier: "deque[tuple[int, CrawlTask]]" = deque([(0, job) for job in jobs])
@@ -148,47 +203,31 @@ async def run_recursive_crawl(
         # or tripping the kernel CPU throttle (CPU). Above either hard ceiling
         # dispatch pauses until usage drains; in the soft zone batches shrink
         # proportionally to the most-contended resource.
-        _gate_wait_start = time.monotonic()
-        await resource_gate.wait_while_saturated()
-        _gate_waited = time.monotonic() - _gate_wait_start
-        if _gate_waited > 1e-3:
-            metrics.resource_pause_seconds_total += _gate_waited
+        # Resource signals (kept for metrics + the HTTP-aware two-tier scale).
         scale = resource_gate.batch_scale_factor()
         metrics.resource_memory_utilization = resource_gate.memory_ratio()
         metrics.resource_cpu_utilization = resource_gate.cpu_ratio()
         # #self-tuning HTTP-aware admission (item 7): browser crawls are the
-        # memory hog (each ~300MB, only a few fit in the cgroup limit), which
-        # throttles the whole batch even when the batch is mostly cheap HTTP
-        # work and CPU has spare headroom. When the upcoming batch is
-        # predominantly HTTP-pinned (domains proven to fetch without a browser),
-        # consult the HTTP-aware scale so it rides spare CPU instead of being
-        # dragged down by memory held by browser processes. Browser-bound and
-        # cold (unpinned) batches keep the conservative combined gate.
+        # memory hog, which would otherwise throttle the whole batch. When the
+        # upcoming batch is predominantly HTTP-pinned, ride the CPU-aware HTTP
+        # scale instead of the memory-held-by-browsers combined gate.
         _http_scale = getattr(resource_gate, "http_scale_factor", None)
         if (
             _http_scale is not None
             and _batch_is_http_heavy(scheduler, frontier, _HTTP_HEAVY_LOOKAHEAD)
         ):
             scale = _http_scale()
-        # #self-tuning first-batch warmup: the CPU gate has no real sample until
-        # the first batch has actually run, so on a cold start it reports 0% and
-        # would otherwise let the first batch launch global_concurrency *
-        # multiplier parallel fetches -- which can briefly exceed a tight CPU
-        # quota before admission engages. Until the gate is warm (or there is no
-        # CPU ceiling to defend) cap the first batch at base concurrency; later
-        # batches ramp to the multiplier under gate control.
+        # #self-tuning first-batch warmup: until the CPU gate has a sample, cap
+        # the first batch at base concurrency.
         _cpu = getattr(resource_gate, "cpu", None)
         _concurrency_mult = ENGINE_BATCH_CONCURRENCY_MULTIPLIER
         if _cpu is not None and not _cpu.is_warm():
             _concurrency_mult = 1
-        # Self-managing concurrency: the gate reports a single utilization
-        # signal but cannot *create* work beyond the configured baseline, so we
-        # ramp per-batch concurrency up while the gate is open (scale == 1.0,
-        # i.e. under target) and let the gate's scale shrink it back under
-        # pressure. The app thus sizes itself to the cgroup budget with no
-        # operator-configured concurrency cap -- it rides up to the gate target
-        # on its own. global_concurrency is the floor; RECURSIVE_RAMP_MAX the
-        # ceiling (bounded so one batch cannot overshoot the hard headroom).
+        # Self-managing concurrency: ramp per-batch concurrency up while the gate
+        # is open, let the gate's scale shrink it under pressure. global_concurrency
+        # is the floor; RECURSIVE_RAMP_MAX the ceiling (bounded so one batch
+        # cannot overshoot the hard headroom). The weighted admission below is
+        # the real RAM/CPU backstop.
         if scale >= 1.0:
             _ramp = min(float(RECURSIVE_RAMP_MAX), _ramp * 1.10)
         else:
@@ -211,7 +250,17 @@ async def run_recursive_crawl(
             )
             batch_size = max(1, int(batch_size * scale))
             metrics.resource_throttle_batches_total += 1
-        batch = [frontier.popleft() for _ in range(batch_size)]
+        # Two-tier weighted admission (replaces the stop-the-world pause): grant
+        # as many HTTP tasks as fit the live RAM/CPU headroom, then up to the
+        # browser-tier cap. If nothing fits we yield briefly (backpressure)
+        # rather than parking the whole crawl, so the cheap HTTP path scales to
+        # hundreds of concurrent pages while the browser tier stays RAM-budgeted.
+        _want_http, _want_browser = _count_strategy_tiers(scheduler, frontier, batch_size)
+        _admit_h, _admit_b = await admission.admit(_want_http, _want_browser)
+        if _admit_h + _admit_b < batch_size:
+            metrics.resource_throttle_batches_total += 1
+            batch_size = _admit_h + _admit_b
+        batch = _pop_admitted(frontier, _admit_h, _admit_b, scheduler)
 
         allowed_jobs: list[tuple[int, CrawlTask]] = []
         for depth, job in batch:

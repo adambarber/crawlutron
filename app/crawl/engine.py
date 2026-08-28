@@ -53,7 +53,8 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
-from app.resource_pressure import ResourceGate
+from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
+from app.memory_pressure import read_memory_stats
 logger = logging.getLogger(__name__)
 
 _resource_gate = ResourceGate()
@@ -78,6 +79,7 @@ from app.crawl.result_helpers import (
     _skipped_engine_result,
 )
 from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_pool import _derive_browser_pool_size
 from app.crawl.strategies.http import (
     _default_cffi_fetcher,
     _default_http_fetcher,
@@ -1018,6 +1020,18 @@ async def crawl_request(
         if allowed_jobs:
             await scheduler.run(allowed_jobs, _worker, on_result=_spill_one)
     else:
+        # Two-tier weighted admission: size HTTP concurrency to the live RAM/CPU
+        # headroom (RAM-derived from the cgroup limit and browser-pool reserve)
+        # so the cheap HTTP path scales wide while the browser tier stays
+        # RAM-budgeted. Replaces the old stop-the-world pause.
+        _admission = WeightedAdmission(
+            _resource_gate,
+            _build_admission_policy(
+                read_memory_stats().total_bytes or 0,
+                pool_size=_derive_browser_pool_size(),
+                max_concurrent_pages=active_settings.max_concurrent_pages,
+            ),
+        )
         await run_recursive_crawl(
             jobs=jobs,
             scheduler=scheduler,
@@ -1037,6 +1051,7 @@ async def crawl_request(
             global_concurrency=active_settings.global_concurrency,
             seed_sitemaps=bool(discovery.get("sitemaps")),
             resource_gate=_resource_gate,
+            admission=_admission,
         )
     response = {
         "request_id": f"crawl_{uuid.uuid4().hex[:12]}",

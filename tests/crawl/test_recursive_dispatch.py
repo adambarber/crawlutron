@@ -118,7 +118,7 @@ async def test_dispatches_single_page_and_consults_gate():
     spill, scheduler, gate = await _run(jobs, worker)
     assert len(spill.writes) == 1
     assert scheduler.runs == 1
-    assert gate.waits == 1  # wait_while_saturated called once per batch
+    assert gate.waits == 0  # stop-the-world pause removed; admission is now per-batch weighted
 
 
 async def test_expands_frontier_from_discovered_links():
