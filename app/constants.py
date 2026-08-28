@@ -8,6 +8,8 @@ import the constant instead of typing the string literal.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse as _urlparse
+
 # ---------------------------------------------------------------------------
 # Fetch strategies (how bytes are retrieved). Orthogonal to extraction.
 # ---------------------------------------------------------------------------
@@ -183,16 +185,22 @@ ANALYTICS_HOST_SUFFIXES = frozenset(
     }
 )
 
+# Precomputed forms for the is_analytics_host / is_document_url hot paths
+# (both run once per discovered link, up to thousands per page).
+# ``is_analytics_host`` is true iff the host *is* a suffix (apex) or ends with
+# "." + a suffix (subdomain). The apex-membership test uses the set directly;
+# the per-subdomain dotted suffixes are precomputed to a tuple so ``endswith``
+# takes a single C-level call instead of allocating ``"." + s`` per suffix.
+_ANALYTICS_DOTTED = tuple("." + s for s in ANALYTICS_HOST_SUFFIXES)
+
 
 def is_analytics_host(url: str) -> bool:
     """True when ``url`` points at a hard-skip host (apex or any subdomain)."""
-    from urllib.parse import urlparse
-
     try:
-        host = (urlparse(url).hostname or "").lower()
+        host = (_urlparse(url).hostname or "").lower()
     except Exception:
         return False
-    return any(host == s or host.endswith("." + s) for s in ANALYTICS_HOST_SUFFIXES)
+    return host in ANALYTICS_HOST_SUFFIXES or host.endswith(_ANALYTICS_DOTTED)
 
 
 # --- Non-HTML resource extensions ---
@@ -203,13 +211,16 @@ DOCUMENT_URL_EXTENSIONS = frozenset(
     {".pdf", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".zip", ".rtf"}
 )
 
+# Precomputed extension tuple for the is_document_url hot path: ``str.endswith``
+# accepts a tuple and does a single C-level pass instead of re-building the
+# tuple from the frozenset on every call.
+_DOCUMENT_URL_EXTENSIONS = tuple(sorted(DOCUMENT_URL_EXTENSIONS))
+
 
 def is_document_url(url: str) -> bool:
     """True when ``url``'s path ends with a known document extension."""
-    from urllib.parse import urlparse
-
     try:
-        path = urlparse(url).path.lower()
+        path = _urlparse(url).path.lower()
     except Exception:
         return False
-    return path.endswith(tuple(DOCUMENT_URL_EXTENSIONS))
+    return path.endswith(_DOCUMENT_URL_EXTENSIONS)

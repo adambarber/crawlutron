@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -77,7 +78,6 @@ def classify_page_with_evidence(html: str | None, text: str | None, *, title: st
     stripped_html = _strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
-    raw_haystack = (html or "").lower()
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
         return "binary_no_text", [
             {
@@ -156,7 +156,15 @@ def _evidence(classification: str, signature: str, source: str, haystack: str, i
     }
 
 
-_HTML_NOISE_RE = None
+# Compiled once at module import: the hot path calls _strip_html_noise per page
+# on every strategy attempt, so the previous lazy-global compile (which also had
+# a benign double-compile race under threads) is replaced with two module-level
+# compiled patterns.
+_TAGS_RE = re.compile(r"<[^>]+>")
+_HTML_NOISE_RE = re.compile(
+    r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<!--[\s\S]*?-->",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _strip_html_noise(html: str | None) -> str:
@@ -165,32 +173,8 @@ def _strip_html_noise(html: str | None) -> str:
     Replaces the previous 4 sequential re.sub calls, each of which produced a
     full copy of the HTML (~6x page size in intermediate strings).
     """
-    global _TAGS_RE, _HTML_NOISE_RE
-    import re
-    if _HTML_NOISE_RE is None:
-        _TAGS_RE = re.compile(r"<[^>]+>")
-        _HTML_NOISE_RE = re.compile(
-            r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<!--[\s\S]*?-->",
-            re.IGNORECASE | re.DOTALL,
-        )
     without_noise = _HTML_NOISE_RE.sub(" ", html or "")
     return _TAGS_RE.sub(" ", without_noise)
-
-
-def _html_without_script_and_style(html: str | None) -> str:
-    import re
-
-    without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html or "", flags=re.IGNORECASE | re.DOTALL)
-    without_styles = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
-    # Strip HTML comments. Comments are not user-visible and are trivially
-    # attacker-controllable, so matching block signatures inside them lets an
-    # attacker spoof a classification (e.g. <!-- access denied -->).
-    without_comments = re.sub(r"<!--.*?-->", " ", without_styles, flags=re.DOTALL)
-    # Remove all remaining HTML tags, leaving only text content. This prevents
-    # matching on class="grecaptcha", recaptcha-v3-script="", src="...recaptcha..."
-    # etc., while still allowing detection of signals in visible text.
-    text_only = re.sub(r"<[^>]+>", " ", without_comments)
-    return text_only
 
 
 def _html_has_no_user_visible_content(html: str | None) -> bool:

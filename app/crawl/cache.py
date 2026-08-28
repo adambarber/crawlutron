@@ -1,49 +1,86 @@
-"""SQLite-backed HTTP conditional cache (ETag / Last-Modified).
+"""In-memory HTTP conditional cache (ETag / Last-Modified).
 
 Supports :rfc:`7232` conditional requests: a previously cached response's
 ``ETag`` and ``Last-Modified`` are replayed as ``If-None-Match`` /
 ``If-Modified-Since`` headers, and a ``304 Not Modified`` short-circuits
 parsing. This lets repeated crawls of unchanged pages avoid re-downloading and
 re-extracting content.
+
+Design notes:
+
+* Conditional-request metadata is tiny (two short strings per normalized URL)
+  and process-local, so an in-process ``dict`` with TTL + LRU eviction is both
+  strictly faster and free of blocking SQL/disk on the event loop. The previous
+  SQLite-backed store serialized all cache writes through one ``check_same_thread
+  =False`` connection with no lock -- a crash-under-load hazard on the async
+  loop. A plain dict guarded by a lock is correct under the GIL for this
+  access pattern.
+* ``db_path`` is accepted for backward compatibility but ignored: the cache is
+  intentionally in-memory. Persistence across restarts is out of scope here
+  (conditional revalidation is a within-session fast path); content caching
+  belongs to :class:`app.crawl.content_cache.ContentCache`.
 """
 
 from __future__ import annotations
 
-import sqlite3
+import threading
 import time
-from typing import Any
+from collections.abc import Callable
+
+_DEFAULT_TTL_SECONDS = 3600.0
+_MAX_ENTRIES = 100_000
 
 
 class HttpCache:
-    """Tiny per-service HTTP metadata cache backed by SQLite."""
+    """Tiny in-process HTTP metadata cache (ETag / Last-Modified) with TTL."""
 
-    # Commit cadence for store(): committing on every write serializes all
-    # cache writes through the SQLite connection (a bottleneck under high
-    # concurrency, #12). Batch commits every N writes instead; uncommitted
-    # rows are still visible to this connection's own reads (get), so
-    # conditional-request correctness is unaffected within a process.
-    _COMMIT_EVERY = 50
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        *,
+        ttl_seconds: float = _DEFAULT_TTL_SECONDS,
+        max_entries: int = _MAX_ENTRIES,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        # ``db_path`` retained for backward compatibility with legacy callers;
+        # this implementation is in-memory regardless.
+        del db_path
+        self._ttl_seconds = max(0.0, ttl_seconds)
+        self._max_entries = max(1, max_entries)
+        self._clock = clock
+        self._lock = threading.Lock()
+        # url -> (etag, last_modified, expires_at); OrderedDict insertion order
+        # gives FIFO eviction for the LRU bound.
+        self._data: dict[str, tuple[str, str, float]] = {}
+        self._closed = False
 
-    def __init__(self, db_path: str = ":memory:") -> None:
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.execute(
-            "CREATE TABLE IF NOT EXISTS http_cache ("
-            " url TEXT PRIMARY KEY,"
-            " etag TEXT,"
-            " last_modified TEXT,"
-            " stored_at REAL"
-            ")"
-        )
-        self._conn.commit()
-        self._pending_writes = 0
+    def _purge_expired(self, now: float) -> None:
+        """Drop expired entries (called while holding ``_lock``)."""
+        if not self._ttl_seconds:
+            return
+        expired = [url for url, (_, _, exp) in self._data.items() if exp <= now]
+        for url in expired:
+            self._data.pop(url, None)
+
+    def _evict_if_needed(self) -> None:
+        if len(self._data) > self._max_entries:
+            # Fork/insert order is the same as this dict's iteration order, so
+            # drop the earliest-inserted entries (FIFO) to bound memory.
+            over = len(self._data) - self._max_entries
+            for url in list(self._data)[:over]:
+                self._data.pop(url, None)
 
     def get(self, url: str) -> tuple[str | None, str | None]:
-        row = self._conn.execute(
-            "SELECT etag, last_modified FROM http_cache WHERE url = ?", (url,)
-        ).fetchone()
-        if row is None:
-            return None, None
-        return row[0], row[1]
+        now = self._clock()
+        with self._lock:
+            entry = self._data.get(url)
+            if entry is None:
+                return None, None
+            etag, last_modified, expires = entry
+            if self._ttl_seconds and expires <= now:
+                self._data.pop(url, None)
+                return None, None
+            return etag, last_modified
 
     def store(self, url: str, headers: dict[str, str]) -> None:
         """Record conditional-request metadata for ``url`` from response ``headers``.
@@ -55,17 +92,13 @@ class HttpCache:
         lowered = {str(key).lower(): value for key, value in (headers or {}).items()}
         etag = lowered.get("etag")
         last_modified = lowered.get("last-modified")
-        self._conn.execute(
-            "INSERT INTO http_cache(url, etag, last_modified, stored_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(url) DO UPDATE SET etag=excluded.etag, "
-            "last_modified=excluded.last_modified, stored_at=excluded.stored_at",
-            (url, etag, last_modified, time.time()),
-        )
-        # Batch commits: only flush to disk every _COMMIT_EVERY writes (#12).
-        self._pending_writes += 1
-        if self._pending_writes >= self._COMMIT_EVERY:
-            self._conn.commit()
-            self._pending_writes = 0
+        now = self._clock()
+        expires = now + self._ttl_seconds if self._ttl_seconds else 0.0
+        with self._lock:
+            # Re-insert so a refreshed entry moves to the back of the FIFO order.
+            self._data.pop(url, None)
+            self._data[url] = (etag, last_modified, expires)
+            self._evict_if_needed()
 
     def conditional_headers(self, url: str) -> dict[str, str]:
         etag, last_modified = self.get(url)
@@ -77,4 +110,9 @@ class HttpCache:
         return headers
 
     def close(self) -> None:
-        self._conn.close()
+        """No-op: the cache is in-memory and shares no external resources."""
+        self._closed = True
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
