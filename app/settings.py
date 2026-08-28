@@ -11,15 +11,15 @@ from app.constants import (
     DEFAULT_MAX_CONCURRENT_PAGES,
 )
 from app.memory_pressure import read_memory_stats
+from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
 
 
-# Connection-pool sizing (T7): scale the HTTP pool with the cgroup memory limit
-# instead of a fixed cap, but size it to the ACTUAL RAM-derived HTTP concurrency
-# (not an over-provisioned value). ~22 MiB per limit byte approximates the
-# browser-pool reserve plus ~12 MiB per in-flight HTTP task, so 3 GiB -> ~139
-# connections -- matching what the weighted admission actually allows. A larger
-# pool only buffers more fetched-but-unextracted pages in RAM and triggers
-# admission throttling without raising throughput (the crawler is CPU-bound).
+# Connection-pool sizing (T7): bind the HTTP pool to the SAME RAM-derived HTTP
+# concurrency the weighted admission allows, so the two can never diverge as RAM
+# scales. max_http_concurrency_for() reserves the browser pool's RAM then divides
+# the remainder by the per-HTTP-task estimate -- identical to the admission's
+# ceiling. A larger pool would only buffer more fetched-but-unextracted pages in
+# RAM and trigger admission throttling without raising throughput (CPU-bound).
 _DEF_MB = 1024 * 1024
 
 
@@ -28,17 +28,14 @@ def _default_http_max_connections() -> int:
         limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
     except Exception:
         limit = 4 * _DEF_MB * 1024
-    # ~22 MiB/limit -> 3 GiB ~= 139, capped so a single container never opens
-    # an unbounded number.
-    return max(100, min(512, int(limit // (22 * _DEF_MB))))
+    # Floor of 100 keeps a usable pool on tiny/unlimited boxes; the derived value
+    # (3 GiB -> 139) is the admission's real HTTP concurrency.
+    return max(100, max_http_concurrency_for(limit, derive_browser_pool_size(limit)))
 
 
 def _default_http_keepalive() -> int:
-    try:
-        limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
-    except Exception:
-        limit = 4 * _DEF_MB * 1024
-    return max(20, min(128, int(limit // (64 * _DEF_MB))))
+    # Keepalive tracks the connection ceiling (half), bounded for sanity.
+    return max(20, min(128, _default_http_max_connections() // 2))
 
 
 def _parse_bool_env_value(value: str) -> bool:

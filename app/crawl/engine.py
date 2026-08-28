@@ -79,7 +79,7 @@ from app.crawl.result_helpers import (
     _skipped_engine_result,
 )
 from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategies.browser_pool import _derive_browser_pool_size
+from app.resource_pressure import derive_browser_pool_size
 from app.crawl.strategies.http import (
     _default_cffi_fetcher,
     _default_http_fetcher,
@@ -1028,7 +1028,7 @@ async def crawl_request(
             _resource_gate,
             _build_admission_policy(
                 read_memory_stats().total_bytes or 0,
-                pool_size=_derive_browser_pool_size(),
+                pool_size=derive_browser_pool_size(),
                 max_concurrent_pages=active_settings.max_concurrent_pages,
             ),
         )

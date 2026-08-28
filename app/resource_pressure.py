@@ -417,6 +417,56 @@ _ADMIT_YIELD_SECONDS = float(os.environ.get("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS
 _MAX_HTTP_CONCURRENCY = int(os.environ.get("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", "512"))
 
 
+# --- Shared RAM-budget sizing (browser pool + httpx pool derive from this) ---
+# Both the browser pool and the HTTP connection pool size themselves from the cgroup
+# memory limit, centralized here (import-safe from settings) as the single source of
+# truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
+_BROWSER_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_BROWSER_RAM_BYTES", str(700 * 1024 * 1024)))
+_BROWSER_RAM_FRACTION = float(os.environ.get("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", "0.5"))
+_MAX_DERIVED_POOL_SIZE = int(os.environ.get("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", "4"))
+
+
+def derive_browser_pool_size(limit_bytes: "int | None" = None) -> int:
+    """Single global browser-pool size from the cgroup memory limit.
+
+    Honors ``BROWSER_CRAWLER_BROWSER_POOL_SIZE``; else derives so the pool uses at
+    most ``_BROWSER_RAM_FRACTION`` of RAM; falls back to 1 when no limit is
+    discoverable. Shared by ``app.crawl.strategies.browser_pool`` and the httpx
+    pool sizing so the connection ceiling tracks the admission's HTTP concurrency.
+    """
+    explicit = os.environ.get("BROWSER_CRAWLER_BROWSER_POOL_SIZE")
+    if explicit:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes
+    if limit and limit > 0:
+        budget = int(limit * _BROWSER_RAM_FRACTION)
+        size = max(1, budget // _BROWSER_RAM_BYTES)
+        return min(size, _MAX_DERIVED_POOL_SIZE)
+    return 1
+
+
+def max_http_concurrency_for(
+    limit_bytes: int,
+    pool_size: int,
+    *,
+    http_task_bytes: int = _HTTP_TASK_RAM_BYTES,
+    browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES,
+) -> int:
+    """Admission's HTTP concurrency ceiling for a given RAM limit + browser pool.
+
+    Reserves the browser pool's fixed RAM, then divides the remainder by the
+    per-HTTP-task estimate. This is exactly the ceiling ``WeightedAdmission`` uses,
+    so the httpx connection pool can be bound to it with zero drift as RAM scales.
+    """
+    limit = max(limit_bytes, 256 * 1024 * 1024)
+    reserve = pool_size * browser_task_bytes
+    free = max(0, limit - reserve)
+    return max(1, min(_MAX_HTTP_CONCURRENCY, free // max(1, http_task_bytes)))
+
+
 @dataclass
 class AdmissionPolicy:
     """Sizing inputs for :class:`WeightedAdmission` (all in bytes / counts)."""
@@ -443,8 +493,7 @@ def _build_admission_policy(
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
     browser_pool_reserve_bytes = pool_size * browser_task_bytes
-    free_for_http = max(0, limit - browser_pool_reserve_bytes)
-    max_http = max(1, min(_MAX_HTTP_CONCURRENCY, free_for_http // max(1, http_task_bytes)))
+    max_http = max_http_concurrency_for(limit, pool_size, http_task_bytes=http_task_bytes, browser_task_bytes=browser_task_bytes)
     return AdmissionPolicy(
         http_task_bytes=http_task_bytes,
         browser_task_bytes=browser_task_bytes,
