@@ -10,6 +10,30 @@ from app.constants import (
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
 )
+from app.memory_pressure import read_memory_stats
+
+
+# Connection-pool sizing (T7): scale the HTTP pool with the cgroup memory limit
+# instead of a fixed cap, so high-concurrency crawls never serialize sockets.
+# Roughly one connection per 8 MiB of limit (3 GiB -> ~384), capped so a single
+# container never opens an unbounded number; keepalive scales alongside.
+_DEF_MB = 1024 * 1024
+
+
+def _default_http_max_connections() -> int:
+    try:
+        limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
+    except Exception:
+        limit = 4 * _DEF_MB * 1024
+    return max(100, min(512, int(limit // (8 * _DEF_MB))))
+
+
+def _default_http_keepalive() -> int:
+    try:
+        limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
+    except Exception:
+        limit = 4 * _DEF_MB * 1024
+    return max(20, min(128, int(limit // (32 * _DEF_MB))))
 
 
 def _parse_bool_env_value(value: str) -> bool:
@@ -45,8 +69,8 @@ class CrawlerSettings:
     cookie_persistence_enabled: bool = False
     cookie_jar_path: str = "/app/cache/cookie_jar.json"
     # HTTP client connection pool tuning
-    http_max_connections: int = 100
-    http_max_keepalive: int = 20
+    http_max_connections: int = _default_http_max_connections()
+    http_max_keepalive: int = _default_http_keepalive()
     http_keepalive_expiry: float = 60.0
     # Browser runtime limits (previously read from raw BROWSER_CRAWLER_*
     # env vars inside browser.py; centralized here so they share the env
