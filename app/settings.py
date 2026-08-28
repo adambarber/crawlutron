@@ -14,9 +14,12 @@ from app.memory_pressure import read_memory_stats
 
 
 # Connection-pool sizing (T7): scale the HTTP pool with the cgroup memory limit
-# instead of a fixed cap, so high-concurrency crawls never serialize sockets.
-# Roughly one connection per 8 MiB of limit (3 GiB -> ~384), capped so a single
-# container never opens an unbounded number; keepalive scales alongside.
+# instead of a fixed cap, but size it to the ACTUAL RAM-derived HTTP concurrency
+# (not an over-provisioned value). ~22 MiB per limit byte approximates the
+# browser-pool reserve plus ~12 MiB per in-flight HTTP task, so 3 GiB -> ~139
+# connections -- matching what the weighted admission actually allows. A larger
+# pool only buffers more fetched-but-unextracted pages in RAM and triggers
+# admission throttling without raising throughput (the crawler is CPU-bound).
 _DEF_MB = 1024 * 1024
 
 
@@ -25,7 +28,9 @@ def _default_http_max_connections() -> int:
         limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
     except Exception:
         limit = 4 * _DEF_MB * 1024
-    return max(100, min(512, int(limit // (8 * _DEF_MB))))
+    # ~22 MiB/limit -> 3 GiB ~= 139, capped so a single container never opens
+    # an unbounded number.
+    return max(100, min(512, int(limit // (22 * _DEF_MB))))
 
 
 def _default_http_keepalive() -> int:
@@ -33,7 +38,7 @@ def _default_http_keepalive() -> int:
         limit = read_memory_stats().total_bytes or (4 * _DEF_MB * 1024)
     except Exception:
         limit = 4 * _DEF_MB * 1024
-    return max(20, min(128, int(limit // (32 * _DEF_MB))))
+    return max(20, min(128, int(limit // (64 * _DEF_MB))))
 
 
 def _parse_bool_env_value(value: str) -> bool:

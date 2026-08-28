@@ -18,8 +18,8 @@ def test_small_limit_hits_floor():
 
 def test_3gib_limit_scales_up():
     with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(3 * 1024 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 384
-        assert settings_mod._default_http_keepalive() == 96
+        assert settings_mod._default_http_max_connections() == 139
+        assert settings_mod._default_http_keepalive() == 48
 
 
 def test_huge_limit_is_capped():
