@@ -3,7 +3,7 @@
 Usage:
     python scripts/e2e_verify.py [base_url] [target_url]
 
-Defaults: base_url=http://127.0.0.1:8765 target=https://www.worcesterma.gov/
+Defaults: base_url=http://127.0.0.1:8765 target=https://example.com/
 Exercises every public feature against a real target and exits non-zero on any
 failure. Requires the service to be running (e.g. via Docker) with outbound
 network access.
@@ -14,7 +14,7 @@ import time
 import httpx
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765"
-TARGET = sys.argv[2] if len(sys.argv) > 2 else "https://www.worcesterma.gov/"
+TARGET = sys.argv[2] if len(sys.argv) > 2 else "https://example.com/"
 results = []
 
 

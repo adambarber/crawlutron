@@ -6,13 +6,12 @@ pytestmark = pytest.mark.browser
 
 
 import os
-import sys
 import tempfile
 from pathlib import Path
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
 
-from app.browser import BrowserRenderer  # noqa: E402
+from app.crawl.strategies.browser import BrowserRenderer  # noqa: E402
 from app.models import RenderOptions  # noqa: E402
 
 

@@ -4,11 +4,12 @@ pytestmark = pytest.mark.browser
 
 """Tests for browser.py module."""
 
-from app.browser import (
+from app.crawl.strategies.browser import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     BrowserRenderer,
 )
+
 
 class TestBrowserRendererStatus:
     def test_status_for_classification_rendered(self):

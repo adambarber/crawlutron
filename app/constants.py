@@ -1,6 +1,6 @@
 """Single source of truth for policy/strategy/extraction magic strings.
 
-These literals are consumed by ``app.service``, ``app.api_models``,
+These literals are consumed by ``app.api_models``,
 ``app.discovery`` and the test suite so that spelling drift (or a stray
 non-ASCII look-alike character) cannot desynchronize comparisons. Always
 import the constant instead of typing the string literal.
@@ -16,6 +16,13 @@ from urllib.parse import urlparse as _urlparse
 HTTP_DECLARED_CRAWLER: str = "HTTP_DECLARED_CRAWLER"
 HTTP_CFFI_IMPERSONATE: str = "HTTP_CFFI_IMPERSONATE"
 BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
+
+# Public-facing identity strings. Kept here so the same UA appears in both the
+# declared-crawler header and the synthetic ``User-Agent:`` line we attach
+# to outbound requests, and so the package version is sourced from a single
+# place instead of being duplicated across files.
+DEFAULT_USER_AGENT: str = "browser-crawler/0.2 (+https://github.com/dev-stack/browser-crawler)"
+USER_AGENT_TOKEN: str = "browser-crawler"
 BROWSER_HEADED_WARMED: str = "BROWSER_HEADED_WARMED"
 
 # Strategy ordering / registries (imported by service.py)

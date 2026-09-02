@@ -4,7 +4,6 @@ import ipaddress
 import os
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
 
@@ -47,7 +46,10 @@ def normalize_public_http_url(url: str) -> str:
     # Local dev/test escape hatch: the crawler is a localhost dev service and
     # tests run a real in-process server on loopback. Allow opting out of the
     # private-network guard via env var rather than relaxing it by default.
-    allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "") not in {"", "0", "false", "no"}
+    # Inverted-by-default: any value not explicitly recognized as truthy keeps
+    # the SSRF guard ON, mirroring ``settings._parse_bool_env_value`` so the
+    # two paths agree on what counts as "on".
+    allow_private = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
     if not allow_private:
         if host in PRIVATE_HOSTS:
             raise ValueError("private_network_target")
@@ -83,6 +85,20 @@ def normalize_public_http_url(url: str) -> str:
 
 def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
+
+
+def parse_bool_env(name: str, default: bool = False) -> bool:
+    """Read an env var and return a boolean.
+
+    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
+    Anything else (including unset) is treated as the default. Centralized so
+    every SSRF / feature-flag check agrees on what "on" means (adversarial
+    review F-ssrf-env-var-parsing).
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def registrable_domain(url: str) -> str:

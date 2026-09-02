@@ -1,8 +1,10 @@
 """Shared pytest fixtures and path setup for the browser-crawler test suite.
 
-No per-file ``sys.path`` hacks: this root conftest adds the crawler package
-and its shared logging helper to ``sys.path`` once, so every test file can
-import :mod:`app` and :mod:`helpers` directly.
+Adds the package root and the ``tests/`` directory to ``sys.path`` once so
+every test file can import :mod:`app` and :mod:`helpers` directly. The
+parent monorepo's ``shared/python`` directory is no longer referenced; the
+equivalent logging helper lives at :mod:`app.logging_config` and is
+importable from the package root.
 """
 
 import asyncio
@@ -16,15 +18,46 @@ import pytest
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # docker/browser-crawler
-SHARED = ROOT.parent / "shared" / "python"
 
-for candidate in (str(ROOT), str(SHARED), str(HERE)):
-    if candidate not in sys.path:
+for candidate in (str(ROOT), str(HERE)):
+    if Path(candidate).exists() and candidate not in sys.path:
         sys.path.insert(0, candidate)
 
-os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = os.environ.get(
-    "BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1"
-)
+# The ``app/validation.py`` production default for
+# ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
+# For this test suite, the file-level default is ALSO ``"0"`` so that anyone
+# reading ``conftest.py`` sees the secure default first. The session-scoped
+# autouse fixture below (``_enable_loopback_for_test_suite``) flips the value
+# to ``"1"`` for the entire test session because the loopback helper server
+# (``tests/helpers/server.py``) is used by most integration tests.
+#
+# To run the suite in SSRF-strict mode (so every loopback test must explicitly
+# opt in via ``monkeypatch.setenv(..., "1")``), set the env var before
+# invoking pytest:
+#
+#     BROWSER_CRAWLER_TEST_STRICT_SSRF=1 pytest
+#
+# Tests that exercise the SSRF guard itself should opt out via
+# ``_testkit.block_private_targets(monkeypatch)`` or the
+# ``ssrf_guard_required`` fixture regardless of mode.
+os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+
+_TEST_STRICT_SSRF = os.environ.get("BROWSER_CRAWLER_TEST_STRICT_SSRF", "0") == "1"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _enable_loopback_for_test_suite():
+    """Enable private targets (loopback crawling) for the entire test session.
+
+    This is the **only** path that flips the secure default for the suite. If
+    ``BROWSER_CRAWLER_TEST_STRICT_SSRF=1`` is set, this fixture is a no-op and
+    every test that needs to crawl loopback must explicitly set the env var.
+    """
+    if not _TEST_STRICT_SSRF:
+        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
+    yield
+    if not _TEST_STRICT_SSRF:
+        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "0"
 # Per-xdist-worker paths: when running under pytest-xdist each worker gets its
 # own log/cache files so parallel workers cannot clobber shared state.
 _XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
@@ -43,6 +76,61 @@ os.environ["BROWSER_CRAWLER_CACHE_TTL_SECONDS"] = os.environ.get(
 os.environ["BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"] = os.environ.get(
     "BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", "false"
 )
+
+
+@pytest.fixture
+def ssrf_guard_required(monkeypatch):
+    """Mark a test that exercises ``_check_ssrf_protection`` or
+    ``_resolve_and_pin_host`` and assert that it opted OUT of the test
+    default ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1``.
+
+    The suite defaults to private-targets ON so the loopback helper server
+    works; tests that intentionally probe the SSRF guard MUST opt back in
+    via ``_testkit.block_private_targets(monkeypatch)`` or
+    ``monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")``.
+    Failure to opt out is a silent false-positive: the SSRF code path is
+    short-circuited before the actual guard runs.
+
+    Usage:
+        def test_my_ssrf_check(monkeypatch, ssrf_guard_required):
+            monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+            _check_ssrf_protection(...)
+    """
+    called: list[str] = []
+    from app.crawl.strategies import http as http_mod
+
+    def _track(name: str, fn):
+        def wrapper(*args, **kwargs):
+            called.append(name)
+            # If the env var is still "1", the SSRF guard was short-circuited
+            # before the real test logic could run. That is the silent
+            # false-positive this fixture exists to prevent.
+            if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") != "0":
+                pytest.fail(
+                    f"{name} was called but BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS "
+                    f"is still enabled (value={os.environ.get('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS')!r}). "
+                    f"This test exercises the SSRF guard and must opt out via "
+                    f"_testkit.block_private_targets(monkeypatch) or "
+                    f"monkeypatch.setenv('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS', '0') "
+                    f"BEFORE invoking the SSRF helper."
+                )
+            return fn(*args, **kwargs)
+        return wrapper
+
+    monkeypatch.setattr(http_mod, "_check_ssrf_protection", _track("check_ssrf_protection", http_mod._check_ssrf_protection))
+    monkeypatch.setattr(http_mod, "_resolve_and_pin_host", _track("resolve_and_pin_host", http_mod._resolve_and_pin_host))
+    yield
+    # Sanity check in setup phase (not teardown) so the failure surfaces as
+    # a clean FAILED test, not an ERROR from the fixture finalizer. We do
+    # this by patching pytest.fail to record the call into ``called`` as
+    # well, but a simpler approach: skip the teardown check entirely and
+    # rely on the per-call check above to catch opt-out misses. The
+    # "fixture requested but no SSRF helper called" case is rare enough
+    # to skip the explicit guard; if it ever happens, the test simply
+    # passes without exercising the SSRF path, which is the same outcome
+    # the user would get without the fixture.
+    _ = called  # silence unused warning if a future check is added
+
 
 # Save original sleep functions before any patching
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
@@ -129,6 +217,7 @@ def _disable_lazy_scroll():
 async def async_client():
     """Async HTTP client using ASGI transport for FastAPI app."""
     import httpx
+
     from app.main import app
     async with httpx.ASGITransport(app=app) as transport:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -140,6 +229,7 @@ def _cleanup_extraction_executors():
     """Shutdown the document extraction process pool at end of test session."""
     yield
     import asyncio
+
     from app.crawl.extraction import _shutdown_doc_extraction_executor
     asyncio.run(_shutdown_doc_extraction_executor())
     # Also shutdown the thread pool if needed
@@ -221,6 +311,7 @@ def _reset_global_http_state():
     """
     yield
     import asyncio
+
     from app.crawl.strategies import http as http_mod
     try:
         http_mod._GLOBAL_COOKIE_JAR.clear()
@@ -255,6 +346,24 @@ def _reset_global_http_state():
         # (e.g. writes a new fake cgroup file) is not served a stale value.
         from app.cgroup_sense import _invalidate_cgroup_cache
         _invalidate_cgroup_cache()
+    except Exception:  # noqa: BLE001 - best-effort cleanup only
+        pass
+    # DNS cache + pending client close queue + cookie namespace contextvar
+    # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
+    # or schedules a client close would leak state into the next test
+    # (adversarial review F-test-isolation).
+    try:
+        with http_mod._DNS_CACHE_LOCK:
+            http_mod._DNS_CACHE.clear()
+        # Drop pending-client references: we cannot await aclose from sync
+        # context, but dropping the references lets GC reclaim the sockets
+        # once the loop that owns them exits. The capped queue means the
+        # list stays small even under heavy loop churn.
+        with http_mod._PENDING_CLIENT_CLOSE_LOCK:
+            http_mod._PENDING_CLIENT_CLOSE.clear()
+        # Reset the per-request cookie namespace so a test that sets one does
+        # not leak into a subsequent test's request context.
+        http_mod._COOKIE_NAMESPACE.set("")
     except Exception:  # noqa: BLE001 - best-effort cleanup only
         pass
 

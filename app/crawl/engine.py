@@ -9,52 +9,42 @@ FastAPI layer (``app.main``) calls into.
 from __future__ import annotations
 
 import asyncio
-import inspect
-import re
 import functools
+import inspect
 import json
-import os
-import tempfile
-from collections import deque
-import time
 import logging
-from datetime import datetime, timezone
+import os
+import re
+import tempfile
+import threading
+import time
 import uuid
-from urllib.parse import urljoin, urlparse
-from dataclasses import dataclass, fields, replace
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
-from app.classify import classify_page_with_evidence
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
-    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-    BROWSER_HEADLESS,
-    BROWSER_HEADED_WARMED,
     BROWSER_BLOCKED_CLASSIFICATIONS,
-    HTTP_BLOCKED_CLASSIFICATIONS,
+    BROWSER_STRATEGIES,
     DEFAULT_EXTRACTION,
-    DEFAULT_STRATEGIES,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    DEFAULT_USER_AGENT,
+    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     EXTRACTION_DOCUMENT,
-    EXTRACTION_FULL,
-    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    USER_AGENT_TOKEN,
     EXTRACTION_METHOD_DOCUMENT,
     EXTRACTION_METHOD_DOM_TEXT,
-    EXTRACTION_METHOD_HTTP_BODY,
-    EXTRACTION_METHOD_HTTP_HTML,
     EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
+    HTTP_BLOCKED_CLASSIFICATIONS,
     HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    SUPPORTED_EXTRACTIONS,
-    SUPPORTED_STRATEGIES,
     HTTP_STRATEGIES,
-    BROWSER_STRATEGIES,
-    is_analytics_host,
-    is_document_url,
 )
-from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
 from app.memory_pressure import read_memory_stats
+from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
+
 logger = logging.getLogger(__name__)
 
 _resource_gate = ResourceGate()
@@ -63,23 +53,20 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
-    _parse_html_tree,
     _extract_document,
     _extract_html,
-    extract_js_endpoints,
     _html_diagnostics,
+    _parse_html_tree,
     extract_content,
+    extract_js_endpoints,
 )
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
-from app.crawl.payload_helpers import _payload_policy, _payload_urls, SUPPORTED_EXTRACTION_METHODS
+from app.crawl.payload_helpers import _payload_policy, _payload_urls
+from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.result_helpers import (
-    _binary_no_text_result,
-    _blocked_engine_result,
     _failed_engine_result,
     _skipped_engine_result,
 )
-from app.crawl.strategies.browser import BrowserRenderer
-from app.resource_pressure import derive_browser_pool_size
 from app.crawl.strategies.http import (
     _default_cffi_fetcher,
     _default_http_fetcher,
@@ -88,20 +75,19 @@ from app.crawl.strategies.http import (
 )
 from app.models import (
     CrawlJob,
-    CrawlTask,
     CrawlResult,
     CrawlStrategyAttempt,
-    RenderOptions,
-    EngineCrawlResult,
+    CrawlTask,
     CrawlWorker,
+    EngineCrawlResult,
     HttpFetcher,
+    RenderOptions,
     to_dict,
 )
-from app.crawl.recursive import RECURSIVE_RAMP_MAX, run_recursive_crawl, _spill_write
+from app.resource_pressure import derive_browser_pool_size
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
-
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -415,7 +401,7 @@ async def _execute_crawl_chain(
 
 
 @functools.lru_cache(maxsize=1024)
-def _robots_pattern_to_regex(pattern: str) -> "re.Pattern[str]":
+def _robots_pattern_to_regex(pattern: str) -> re.Pattern[str]:
     """Translate a robots.txt path pattern to a regex.
 
     Per RFC 9309 / Google's interpretation: ``*`` matches any sequence of
@@ -443,7 +429,13 @@ ROBOTS_CACHE_MAX_ENTRIES = 1000
 # separate API calls to the same domain each re-fetched /robots.txt. Promoting
 # it here lets the TTL cache be reused across requests; it is bounded by
 # ROBOTS_CACHE_MAX_ENTRIES via _cap_robots_cache.
-robots_cache: "dict[str, tuple[float, list[tuple[bool, str]], list[str]]]" = {}
+robots_cache: dict[str, tuple[float, list[tuple[bool, str]], list[str], float | None]] = {}
+# Concurrent crawl_requests can race on robots_cache (the dict is mutated from
+# the async event loop, but _cap_robots_cache is also reachable from worker
+# threads when paired with the to_thread offload). A plain dict.get/dict[]
+# sequence is not atomic under concurrent mutation (adversarial review
+# F-thread-safety); the lock makes the read-modify-write sequence atomic.
+_ROBOTS_CACHE_LOCK = threading.Lock()
 
 
 def _cap_robots_cache(cache: dict, max_size: int) -> None:
@@ -501,7 +493,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
         dt = parsedate_to_datetime(s)
         if dt is not None:
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt.timestamp()
     except (TypeError, ValueError):
         pass
@@ -509,7 +501,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     try:
         dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt.timestamp()
     except ValueError:
         return None
@@ -561,7 +553,21 @@ class _ResultSpill:
         self._own = path is None
         if self._own:
             fd, path = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
-            self._fh = os.fdopen(fd, "w", encoding="utf-8")
+            # An exception between mkstemp and fdopen would leak the raw fd
+            # AND the on-disk file. Close the fd if fdopen fails (adversarial
+            # review F-result-spill-fd-leak).
+            try:
+                self._fh = os.fdopen(fd, "w", encoding="utf-8")
+            except Exception:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                raise
         else:
             self._fh = open(path, "w", encoding="utf-8")
         self.path = path
@@ -569,9 +575,26 @@ class _ResultSpill:
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop (adversarial #1.3).
         self._write_lock = asyncio.Lock()
-        self._gc_stale_spills(gc_age_seconds)
+        try:
+            self._gc_stale_spills(gc_age_seconds)
+        except Exception:
+            # GC failure must not abort the spill (adversarial #result-spill
+            # review). The next spill instance will retry.
+            pass
 
     def _gc_stale_spills(self, max_age: float) -> None:
+        """Delete spill files older than ``max_age`` from the system temp dir.
+
+        Race window (low risk in practice): if another worker still holds the
+        file open via ``os.fdopen`` (which we own for the lifetime of the
+        ``_ResultSpill`` instance), the unlink will remove the directory entry
+        but the inode stays alive until the last fd closes. Linux/Unix
+        semantics mean the file is fully reclaimed on close; on Windows the
+        unlink would fail with PermissionError and we silently skip it. No
+        data loss occurs because the file is owned by a single worker at a
+        time and the worst-case is "delete a still-active spill" which only
+        loses that worker's local checkpoint, not the active crawl result.
+        """
         now = time.time()
         try:
             names = os.listdir(tempfile.gettempdir())
@@ -613,7 +636,10 @@ class _ResultSpill:
             self._fh.close()
         except Exception:
             pass
-        if self._own:
+        # Auto-cleanup of owned files: when this spill was created without
+        # an explicit path (caller-owned spills retain their file), drop the
+        # backing temp file so a happy-path close never orphans it.
+        if getattr(self, "_own", False):
             try:
                 os.unlink(self.path)
             except OSError:
@@ -631,7 +657,7 @@ def _parse_robots_crawl_delay(text: str) -> float | None:
     Crawl-delay is a politeness floor the scheduler must honor (adversarial
     perf #2.6). Returns None when no group declares one.
     """
-    our_token = "dev-stack-browser-crawler"
+    our_token = USER_AGENT_TOKEN
     groups: list[list] = []
     last_agents: list[str] = []
     current: list | None = None
@@ -699,6 +725,41 @@ async def crawl_request(
     fetcher = http_fetcher or _default_http_fetcher
     cffi = cffi_fetcher or _default_cffi_fetcher
     shutdown_event = shutdown_event or asyncio.Event()
+    # Bind the cookie namespace for the lifetime of this crawl so concurrent
+    # multi-tenant calls cannot leak cookies through the shared
+    # ``_GLOBAL_COOKIE_JAR``. Defaults to "" (legacy shared behavior) so
+    # single-tenant callers and tests see no change (adversarial review
+    # F-cookie-cross-contamination).
+    from app.crawl.strategies.http import (
+        _COOKIE_NAMESPACE,
+        cookie_namespace_for,
+    )
+    _cookie_token = _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
+    try:
+        return await _crawl_request_impl(
+            payload, active_settings, urls, policy, fetcher, cffi, shutdown_event,
+            browser_worker=browser_worker, cache=cache, content_cache=content_cache,
+            webhook_url=webhook_url, spill_path=spill_path,
+        )
+    finally:
+        _COOKIE_NAMESPACE.reset(_cookie_token)
+
+
+async def _crawl_request_impl(
+    payload: dict[str, Any],
+    active_settings: CrawlerSettings,
+    urls: list[str],
+    policy: dict[str, Any],
+    fetcher: Any,
+    cffi: Any,
+    shutdown_event: asyncio.Event,
+    *,
+    browser_worker: CrawlWorker | None,
+    cache: HttpCache | None,
+    content_cache: ContentCache | None,
+    webhook_url: str | None,
+    spill_path: str | None,
+) -> dict[str, Any]:
 
     jobs: list[CrawlTask] = []
     for index, original_url in enumerate(urls):
@@ -786,7 +847,7 @@ async def crawl_request(
                 ),
                 timeout=budget,
             )
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             result = _failed_engine_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
@@ -806,9 +867,10 @@ async def crawl_request(
         """Remove expired entries from robots cache; return number removed."""
         if now is None:
             now = time.monotonic()
-        expired = [origin for origin, (expires, _, _) in robots_cache.items() if expires <= now]
-        for origin in expired:
-            del robots_cache[origin]
+        with _ROBOTS_CACHE_LOCK:
+            expired = [origin for origin, (expires, _, _) in robots_cache.items() if expires <= now]
+            for origin in expired:
+                del robots_cache[origin]
         return len(expired)
 
     def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
@@ -816,7 +878,7 @@ async def crawl_request(
         only the most-specific group matching our product token (falling back to
         the ``*`` group). Previously rules were unioned across ALL groups, so a
         Baiduspider ``Disallow: /`` blocked our crawler site-wide."""
-        our_token = "dev-stack-browser-crawler"
+        our_token = USER_AGENT_TOKEN
         groups: list[tuple[list[str], list[tuple[bool, str]]]] = []
         last_agents: list[str] = []
         current: tuple[list[str], list[tuple[bool, str]]] | None = None
@@ -840,7 +902,7 @@ async def crawl_request(
         if current is not None:
             groups.append(current)
 
-        ua_full = "dev-stack-browser-crawler/0.2 +https://local.dev-stack/crawler"
+        ua_full = DEFAULT_USER_AGENT
         best_rules: list[tuple[bool, str]] | None = None
         best_len = -1
         star_rules: list[tuple[bool, str]] | None = None
@@ -877,25 +939,36 @@ async def crawl_request(
 
     async def _fetch_robots_rules(origin: str) -> tuple[list[tuple[bool, str]], list[str]]:
         now = time.monotonic()
-        # Periodically purge expired entries to prevent unbounded growth
-        if len(robots_cache) > ROBOTS_CACHE_MAX_ENTRIES:
+        # Periodically purge expired entries to prevent unbounded growth.
+        # The len() read is intentionally outside the lock: it is a cheap
+        # pre-check that avoids a lock acquisition on the hot path. The
+        # purge + insert below acquire the lock so the actual mutation is
+        # atomic; the worst-case race is one extra purge per origin, never
+        # a corruption of the dict (adversarial review F-robots-cache-race).
+        with _ROBOTS_CACHE_LOCK:
+            cache_size = len(robots_cache)
+        if cache_size > ROBOTS_CACHE_MAX_ENTRIES:
             _purge_robots_cache(now)
-        cached = robots_cache.get(origin)
-        if cached and cached[0] > now:
-            return cached[1], cached[2], cached[3]
+        with _ROBOTS_CACHE_LOCK:
+            cached = robots_cache.get(origin)
+            if cached and cached[0] > now:
+                return cached[1], cached[2], cached[3]
         rules: list[tuple[bool, str]] = []
         sitemaps: list[str] = []
         crawl_delay: float | None = None
         robots_url = urljoin(origin, "/robots.txt")
+        # Lock released before the blocking network call so concurrent
+        # crawls for different origins do not serialize on the lock.
         body = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
         if body is not None:
             rules = _parse_robots_rules(body)
             sitemaps = _parse_robots_sitemaps(body)
             crawl_delay = _parse_robots_crawl_delay(body)
-        robots_cache[origin] = (now + robots_ttl, rules, sitemaps, crawl_delay)
-        # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
-        # that discovers thousands of unique, still-fresh domains).
-        _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
+        with _ROBOTS_CACHE_LOCK:
+            robots_cache[origin] = (now + robots_ttl, rules, sitemaps, crawl_delay)
+            # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
+            # that discovers thousands of unique, still-fresh domains).
+            _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
         return rules, sitemaps, crawl_delay
 
     async def _robots_allows_target(target_url: str) -> bool:
@@ -921,7 +994,8 @@ async def crawl_request(
         discovery "robots was fetched, no sitemaps", preventing its own fetch,
         while ``None`` lets discovery fetch robots itself when needed (#4).
         """
-        cached = robots_cache.get(origin)
+        with _ROBOTS_CACHE_LOCK:
+            cached = robots_cache.get(origin)
         if cached and cached[0] > time.monotonic():
             return list(cached[2])
         return None

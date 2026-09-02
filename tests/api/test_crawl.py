@@ -1,14 +1,14 @@
-import os
 """End-to-end /v1/crawl behavior against a real local HTTP server (no mocks)."""
 
 import json
 
 import pytest
-import httpx
-from app.main import app, build_unified_crawl_response
+from _testkit import poll_until as _poll_until  # noqa: F401  (used inside async test method)
 from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
+
 from app.constants import HTTP_DECLARED_CRAWLER
+from app.main import app, build_unified_crawl_response
 
 
 class TestCrawlApi:
@@ -94,8 +94,15 @@ class TestCrawlApi:
         assert resp.status_code == 422
 
     async def test_v1_crawl_scope_regex_records_out_of_scope_links(self):
-        # Scope gates frontier expansion only; advertised links outside the
-        # scope still come back in discovered_links (collect-not-crawl).
+        # The scope regex restricts frontier expansion only. The crawler still
+        # EXTRACTS every advertised link it sees on the page (collect-not-crawl),
+        # and the discovered_links list may contain links that fail the scope
+        # check. Callers downstream use the scope to decide whether to enqueue
+        # a discovered link; the service does NOT silently drop them.
+        #
+        # Here the fixture serves on 127.0.0.1 (loopback), so the in-page
+        # links cannot match ``^https://example\.com``; every discovered link
+        # is therefore out of scope and is still reported back to the caller.
         payload = self._crawl_payload(
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
@@ -109,7 +116,9 @@ class TestCrawlApi:
         assert result["discovered_link_count"] >= 1
         for link in result["discovered_links"]:
             normalized = link["normalized_url"] if isinstance(link, dict) else link
-            assert not normalized.startswith("https://example.com")
+            assert not normalized.startswith("https://example.com"), (
+                f"discovered link {normalized!r} matches the scope; fixture is on loopback"
+            )
 
     async def test_v1_crawl_webhook_returns_202_and_delivers(self):
         payload = {

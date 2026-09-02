@@ -167,13 +167,28 @@ _HTML_NOISE_RE = re.compile(
 )
 
 
+# Cap the input size passed to the noise-stripping regex. The pattern uses
+# ``.*?`` with ``re.DOTALL`` and alternation across three branches, which can
+# exhibit quadratic backtracking on inputs with many unclosed script/style
+# tags. Anything above a few MB is overwhelmingly likely to be a hostile
+# payload; truncate before stripping so we never feed the regex a
+# pathological input (adversarial review F-html-noise-re-quadratic).
+_MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024
+
+
 def _strip_html_noise(html: str | None) -> str:
     """Remove scripts, styles, and comments in a SINGLE regex pass.
 
     Replaces the previous 4 sequential re.sub calls, each of which produced a
-    full copy of the HTML (~6x page size in intermediate strings).
+    full copy of the HTML (~6x page size in intermediate strings). Truncates
+    ``html`` to ``_MAX_HTML_NOISE_INPUT_BYTES`` before the regex pass so a
+    pathological input (many unclosed tags triggering alternation
+    backtracking) cannot pin a worker (adversarial F-html-noise-re-quadratic).
     """
-    without_noise = _HTML_NOISE_RE.sub(" ", html or "")
+    body = html or ""
+    if len(body) > _MAX_HTML_NOISE_INPUT_BYTES:
+        body = body[:_MAX_HTML_NOISE_INPUT_BYTES]
+    without_noise = _HTML_NOISE_RE.sub(" ", body)
     return _TAGS_RE.sub(" ", without_noise)
 
 

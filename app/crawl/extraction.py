@@ -434,7 +434,7 @@ def _parse_html_tree(html: str | None):
 class _FrameCollector:
     """Back-compat collector: parse once with lxml and collect frame/iframe srcs.
 
-    Kept because :mod:`app.service` and the test-suite build it directly via
+    Kept because the test-suite builds it directly via
     ``feed()``; internally it now shares the single lxml parse.
     """
 

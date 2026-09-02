@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install ruff
+        run: pip install "ruff>=0.5"
+      - name: Run ruff
+        run: ruff check app tests
+
+  test-fast:
+    name: Test suite (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install package + dev dependencies
+        run: pip install -e ".[dev]"
+      - name: Install shared logging helper
+        # local_service_logging lives at docker/shared/python in the parent
+        # monorepo. In a standalone clone, install it from the matching
+        # package (or stub the import) before running the test suite.
+        run: |
+          if [ -d "../shared/python/local_service_logging" ]; then
+            pip install "../shared/python/local_service_logging"
+          else
+            echo "::warning::shared/local_service_logging not vendored; suite may fail to import app.main"
+          fi
+      - name: Run pytest (fast)
+        run: python3 -m pytest
+
+  test-browser:
+    name: Test suite (browser, opt-in)
+    runs-on: ubuntu-latest
+    # Default to skip; set the workflow_dispatch / run workflow UI to
+    # trigger this job explicitly when the Camoufox binary is available.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install package + dev dependencies
+        run: pip install -e ".[dev]"
+      - name: Install Camoufox browser binary
+        run: python3 -m camoufox fetch
+      - name: Run pytest (full)
+        run: python3 -m pytest -o addopts=

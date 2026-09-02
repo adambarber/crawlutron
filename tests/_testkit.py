@@ -70,6 +70,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
     second resolution would rebound to ``rebound_ip`` (DNS-rebinding / TOCTOU guard)."""
     import socket
     from unittest.mock import patch
+
     from app.crawl.strategies.http import _resolve_and_pin_host
     block_private_targets(monkeypatch)
     calls = []
@@ -246,3 +247,37 @@ def build_pinned_renderer(monkeypatch, page):
     monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: False)
     monkeypatch.setattr(BrowserRenderer, "_status_for_classification", lambda self, c: "success")
     return renderer
+
+
+
+async def poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1,
+                     message: str | None = None):
+    """Poll ``predicate`` until truthy or ``timeout`` expires.
+
+    Async-only (the test suite runs everything under asyncio). On timeout,
+    ``pytest.fail`` with an optional ``message`` so the test names the
+    failing condition in its traceback.
+    """
+    import asyncio
+
+    import pytest
+
+    async def _runner() -> bool:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            value = predicate()
+            if asyncio.iscoroutine(value):
+                value = await value
+            if value:
+                return True
+            if asyncio.get_event_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(interval)
+
+    try:
+        ok = await asyncio.wait_for(_runner(), timeout=timeout + 1.0)
+    except TimeoutError:
+        ok = False
+    if not ok:
+        pytest.fail(message or f"poll_until timed out after {timeout}s")
+    return True

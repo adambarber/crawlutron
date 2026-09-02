@@ -8,19 +8,35 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from local_service_logging import configure_service_logging
+from app.constants import (
+    BROWSER_STRATEGIES,
+    MAX_DISCOVERED_LINKS,
+)
+from app.crawl.engine import crawl_request
 
+# Standalone JSON-line logging configuration. The previous version of this
+# module imported ``local_service_logging`` from the parent monorepo's
+# ``shared/python`` tree. The standalone equivalent now lives at
+# ``app/logging_config.py``; integration deployments that want richer
+# logging can override ``configure_service_logging`` in their own
+# integration layer.
+from app.logging_config import configure_service_logging
+
+from .api.main_helpers import _build_job_status, _raise_not_found
+from .api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
+from .api.render import render_request
+from .api.webhooks import (
+    deliver_pinned_webhook as _deliver_pinned_webhook,
+    deliver_webhook as _deliver_webhook,
+    post_webhook as _post_webhook,
+    validate_webhook_url as _validate_webhook_url,
+)
 from .api_models import (
     API_VERSION,
     POLICY_SCHEMA_VERSION,
-    AgentHintsResponse,
-    CapabilitiesResponse,
-    UnifiedCrawlResponse,
-    UnifiedCrawlResult,
-    CrawlClassification,
     CrawlerError,
     CrawlRequest,
-    CrawlStrategy,
+    FirecrawlMetadata,
     JobControlRequest,
     JobCreateRequest,
     JobCreateResponse,
@@ -28,31 +44,22 @@ from .api_models import (
     JobStatusResponse,
     MapRequest,
     RenderRequest,
-    DiscoveryResponse,
-    FirecrawlMetadata,
-    ReadinessResponse,
+    UnifiedCrawlResponse,
+    UnifiedCrawlResult,
 )
-from .api.main_helpers import _build_job_status, _raise_not_found
-from .api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from app.constants import (
-    MAX_DISCOVERED_LINKS,
-    BROWSER_HEADLESS,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_FULL,
-    EXTRACTION_TRAFILATURA,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
-from .crawl.strategies.browser import BrowserRenderer
-from .crawl.strategies.browser_pool import PooledBrowserWorker, initialize_browser_pool, close_browser_pool, get_browser_pool
 from .crawl.firecrawl_format import _extract_firecrawl_metadata
-from .service import crawl_request, render_request
-from .output_formats import serialize_results
-from .map import build_site_map
-from .crawl.job_store import JobStore, JobStatus, JobKind
+from .crawl.job_store import JobKind, JobStatus, JobStore
 from .crawl.result_store import CrawlResultStore
-from .settings import CrawlerSettings
+from .crawl.strategies.browser_pool import (
+    PooledBrowserWorker,
+    close_browser_pool,
+    get_browser_pool,
+    initialize_browser_pool,
+)
+from .map import build_site_map
 from .metrics import get_metrics
+from .output_formats import serialize_results
+from .settings import CrawlerSettings
 
 try:
     from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Request
@@ -68,11 +75,10 @@ except ImportError:
 
 
 # Import modular routers
-from .health.readiness import create_health_router
-from .discovery.capabilities import create_capabilities_router
 from .discovery.agent_hints import create_agent_hints_router
+from .discovery.capabilities import create_capabilities_router
 from .discovery.well_known import create_well_known_router
-
+from .health.readiness import create_health_router
 
 settings = CrawlerSettings.from_mapping()
 
@@ -87,9 +93,55 @@ result_store = CrawlResultStore(
     max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
 )
 
+def _request_needs_browser(payload_dict: dict) -> bool:
+    """Return True when the request's strategy chain includes a browser step.
+
+    Used to defer the ``browser_pool_unavailable`` 503 to only requests that
+    actually need the browser pool, so HTTP-only crawls can succeed during
+    lifespan startup or after a pool-init failure (adversarial review
+    F-browser-pool-none).
+    """
+    try:
+        policy = payload_dict.get("policy") or {}
+        strategies = policy.get("strategies") or []
+    except (AttributeError, TypeError):
+        return False
+    return any(strategy in BROWSER_STRATEGIES for strategy in strategies)
+
+
 async def _execute_crawl(payload_dict: dict) -> dict:
     """Shared crawl execution for /v1/crawl and /v1/map."""
-    pooled_worker = PooledBrowserWorker(get_browser_pool())
+    # Validate the URL up front so an invalid URL surfaces as a 422 (via the
+    # downstream ``except ValueError`` in the caller) instead of a misleading
+    # 503 from the pool-unavailable guard below.
+    target_url = payload_dict.get("url")
+    if isinstance(target_url, str):
+        # Reuse the canonical normalizer; it raises ValueError on bad input.
+        # The caller's ``except ValueError`` then converts to 422 cleanly.
+        from app.validation import normalize_public_http_url
+        try:
+            normalize_public_http_url(target_url)
+        except ValueError:
+            # Let the downstream path handle it for the right error shape.
+            return await crawl_request(
+                payload_dict,
+                settings=settings,
+                browser_worker=None,
+                shutdown_event=shutdown_event,
+            )
+    pool = get_browser_pool()
+    if pool is None and _request_needs_browser(payload_dict):
+        # The lifespan startup either failed or hasn't completed; surface a
+        # clear service-unavailable error instead of letting PooledBrowserWorker
+        # crash on ``None.acquire()`` (adversarial review F-browser-pool-none).
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "browser_pool_unavailable",
+                "message": "Browser pool is not initialized; the service is starting up or shutting down.",
+            },
+        )
+    pooled_worker = PooledBrowserWorker(pool) if pool is not None else None
     return await crawl_request(
         payload_dict,
         settings=settings,
@@ -98,6 +150,10 @@ async def _execute_crawl(payload_dict: dict) -> dict:
     )
 
 
+# Ensure the parent directory of the log file exists before the logger tries
+# to open it; standalone checkouts default to ./logs which may not exist.
+if settings.log_file_path:
+    os.makedirs(os.path.dirname(settings.log_file_path) or ".", exist_ok=True)
 logger = configure_service_logging(
     service_name="browser-crawler",
     log_level=settings.log_level,
@@ -248,33 +304,46 @@ def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlR
 
 
 if FastAPI is not None:
-    def _lifespan(app: FastAPI):
-        @asynccontextmanager
-        async def lifespan_context(_app: FastAPI):
-            # Startup: initialize browser pool, load cookie jar if persistence enabled
-            await initialize_browser_pool(settings)
-            if settings.cookie_persistence_enabled:
-                from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
-                _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        # Startup: wire webhook helpers, initialize browser pool, load cookie jar.
+        from .api.webhooks import set_webhook_dependencies
+        set_webhook_dependencies(
+            webhook_semaphore=_webhook_crawl_semaphore,
+            shutdown_event=shutdown_event,
+            crawl_request_fn=crawl_request,
+            pool_getter=get_browser_pool,
+            unified_response_cls=UnifiedCrawlResponse,
+            build_unified_result=_build_unified_result,
+            get_metrics=get_metrics,
+        )
+        await initialize_browser_pool(settings)
+        if settings.cookie_persistence_enabled:
+            # Create the parent directory before the cookie jar tries to read
+            # from it; standalone checkouts default to ./cache which may not
+            # exist on first run.
+            os.makedirs(os.path.dirname(settings.cookie_jar_path) or ".", exist_ok=True)
+            from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+            _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
 
-            yield
+        yield
 
-            # Shutdown: save cookie jar if persistence enabled, then close clients and browser pool
-            if settings.cookie_persistence_enabled:
-                from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
-                _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
+        # Shutdown: save cookie jar if persistence enabled, then close clients and browser pool
+        from .api.webhooks import clear_webhook_dependencies
+        clear_webhook_dependencies()
+        if settings.cookie_persistence_enabled:
+            from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+            _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
 
-            from app.crawl.strategies.http import close_async_http_client
+        from app.crawl.strategies.http import close_async_http_client
 
-            shutdown_event.set()
-            await close_async_http_client()
-            await close_browser_pool()
-
-        return lifespan_context
+        shutdown_event.set()
+        await close_async_http_client()
+        await close_browser_pool()
 
     app = FastAPI(
         title="Browser Crawler Execution Service",
-        lifespan=_lifespan(None),
+        lifespan=_lifespan,
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
@@ -286,14 +355,95 @@ if FastAPI is not None:
             "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
         version=API_VERSION,
-        contact={"name": "dev-stack local services"},
-        license_info={"name": "Local development service"},
+        contact={"name": "browser-crawler"},
+        license_info={"name": "MIT License"},
         openapi_tags=[
             {"name": "Health", "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration."},
             {"name": "Discovery", "description": "Machine-readable service capabilities and AI agent guidance."},
             {"name": "Crawler", "description": "Browser render and universal policy-driven crawl execution endpoints."},
         ],
     )
+
+    # Body-size guard: cap request bodies to a sane upper bound so a malicious
+    # caller cannot exhaust memory with a 1GB JSON before pydantic validation
+    # even runs (adversarial review F-no-body-size-limit). 16 MiB is well
+    # above any legitimate crawl request (URLs + policy + recursive metadata)
+    # while still bounding the per-request RAM exposure. The middleware
+    # caps the inbound byte stream at the ASGI receive layer so FastAPI's
+    # downstream body handling still works without us buffering the body.
+    _MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
+
+    @app.middleware("http")
+    async def _limit_request_body(request: Request, call_next):
+        # Read Content-Length up front when present (no body read yet).
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > _MAX_REQUEST_BODY_BYTES:
+                    return JSONResponse(
+                        status_code=413,
+                        content={
+                            "code": "request_too_large",
+                            "message": "Request body exceeds the maximum allowed size",
+                            "details": {"max_bytes": _MAX_REQUEST_BODY_BYTES},
+                        },
+                    )
+            except ValueError:
+                pass
+        # Cap any chunked / lying-CL request by wrapping receive() so we
+        # never deliver more than the cap to downstream consumers. Bytes
+        # beyond the cap are silently dropped (the downstream parse will
+        # then fail with a clean validation error rather than OOM).
+        original_receive = request.receive
+        bytes_delivered = 0
+        truncated = False
+        # When the cap is exceeded, we keep draining original_receive() so
+        # the ASGI server's keep-alive socket buffer is not poisoned for the
+        # next request on the same connection
+        # (adversarial review F-no-body-size-limit C1).
+        drain_after_truncate = False
+        already_drained = False
+
+        async def _capped_receive() -> dict[str, object]:
+            nonlocal bytes_delivered, truncated, drain_after_truncate, already_drained
+            message = await original_receive()
+            if message.get("type") != "http.request":
+                return message
+            body = message.get("body", b"") or b""
+            if not body:
+                return message
+            if drain_after_truncate and not already_drained:
+                # Drop the body but keep draining until more_body=False so
+                # the ASGI server's receive buffer is exhausted and the next
+                # request on this connection can be parsed cleanly.
+                already_drained = not message.get("more_body", False)
+                return {**message, "body": b"", "more_body": False}
+            remaining = _MAX_REQUEST_BODY_BYTES - bytes_delivered
+            if remaining <= 0:
+                truncated = True
+                drain_after_truncate = True
+                already_drained = not message.get("more_body", False)
+                return {**message, "body": b"", "more_body": False}
+            if len(body) > remaining:
+                truncated = True
+                drain_after_truncate = True
+                already_drained = not message.get("more_body", False)
+                # Preserve the original message keys (per-chunk ``headers``
+                # for HTTP/1.1 trailers) rather than ``dict(message)`` which
+                # would drop them (adversarial review F-no-body-size-limit C3).
+                return {**message, "body": body[:remaining], "more_body": False}
+            bytes_delivered += len(body)
+            return message
+
+        request._receive = _capped_receive  # type: ignore[attr-defined]
+        response = await call_next(request)
+        # Truncated requests must NOT be allowed to keep-alive the
+        # connection: the underlying socket buffer may still hold data the
+        # server expects the app to consume, and reusing the connection
+        # would either hang or corrupt the next request (C1 / C4).
+        if truncated:
+            response.headers["Connection"] = "close"
+        return response
 
     # Include modular routers
     health_router, readiness_state = create_health_router()
@@ -448,7 +598,6 @@ if FastAPI is not None:
                 job_store.save(job)
             if webhook_url:
                 try:
-                    import httpx
                     error_payload = UnifiedCrawlResponse(
                         request_id=request_id,
                         submitted_count=0,
@@ -460,111 +609,6 @@ if FastAPI is not None:
                 except Exception:
                     pass
 
-    async def _post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
-        """POST payload to webhook URL with size limit and timeout."""
-        import httpx
-        import json
-        import os
-        max_webhook_size = int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
-        payload_bytes = json.dumps(payload).encode("utf-8")
-        if len(payload_bytes) > max_webhook_size:
-            logger.warning("webhook_payload_too_large", extra={"url": webhook_url, "size": len(payload_bytes)})
-            return
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(webhook_url, json=payload)
-        except Exception as exc:  # noqa: BLE001 - best-effort delivery
-            logger.warning("webhook_delivery_failed", extra={"url": webhook_url, "error": str(exc)})
-
-    async def _deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
-        """Run the crawl in the background and POST the result to ``webhook_url`` (#15).
-
-        Best-effort delivery: failures are swallowed so a dead callback never
-        crashes the crawler worker. Concurrency is capped by
-        ``BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY``; excess deliveries wait on
-        the semaphore instead of multiplying resource usage.
-        """
-        async with _webhook_crawl_semaphore:
-            await _run_and_deliver_webhook(webhook_url, request_id, payload_dict, crawl_settings)
-
-    async def _run_and_deliver_webhook(webhook_url: str, request_id: str, payload_dict: dict[str, Any], crawl_settings: CrawlerSettings) -> None:
-        # SSRF protection for webhook URL (#P0)
-        _validate_webhook_url(webhook_url)
-        pooled_worker = PooledBrowserWorker(get_browser_pool())
-        result = await crawl_request(
-            payload_dict,
-            settings=crawl_settings,
-            browser_worker=pooled_worker,
-            shutdown_event=shutdown_event,
-        )
-        result["request_id"] = request_id
-        get_metrics().observe_crawl(results=result.get("results", []))
-        unified_results = [_build_unified_result(item) for item in result.get("results", [])]
-        response_payload = UnifiedCrawlResponse(
-            request_id=request_id,
-            submitted_count=result.get("submitted_count", len(unified_results)),
-            policy_schema_version=result.get("policy_schema_version", ""),
-            success=True,
-            results=unified_results,
-        ).model_dump()
-        try:
-            import httpx
-            import json
-            import os
-
-            # Limit webhook payload size to prevent OOM/DoS (default 10MB)
-            max_webhook_size = int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
-            payload_bytes = json.dumps(response_payload, separators=(",", ":")).encode("utf-8")
-            if len(payload_bytes) > max_webhook_size:
-                logger.warning("webhook_payload_too_large", extra={"size": len(payload_bytes), "limit": max_webhook_size})
-                return
-
-            # DNS-rebinding-safe delivery: resolve once and pin the connection to
-            # that exact IP, preserving the original Host header so virtual-host
-            # routing still works (#3).
-            from urllib.parse import urlparse as _urlparse
-            from app.crawl.strategies.http import _resolve_and_pin_host
-
-            _hostname, pinned_ip = _resolve_and_pin_host(webhook_url)
-            _parsed = _urlparse(webhook_url)
-            pinned_url = (
-                f"{_parsed.scheme}://{pinned_ip}:{_parsed.port or (80 if _parsed.scheme == 'http' else 443)}"
-                f"{_parsed.path or '/'}"
-                + (f"?{_parsed.query}" if _parsed.query else "")
-            )
-            request_headers = {"Content-Type": "application/json"}
-            if _parsed.hostname:
-                request_headers["Host"] = _parsed.hostname
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                await client.post(pinned_url, content=payload_bytes, headers=request_headers)
-        except Exception:  # webhook delivery is best-effort
-            pass
-
-    def _validate_webhook_url(webhook_url: str) -> None:
-        """Validate webhook URL to prevent SSRF attacks.
-
-        Similar to crawl target validation but for outbound webhook callbacks.
-        Resolves the hostname and rejects any that map to a private/loopback
-        address, protecting against attacker-controlled DNS that returns an
-        internal IP (DNS-rebinding class of SSRF).
-        """
-        import os
-        from urllib.parse import urlparse
-        from app.crawl.strategies.http import _check_ssrf_protection
-
-        allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1"
-        parsed = urlparse(webhook_url)
-        if parsed.scheme not in {"http", "https"}:
-            raise ValueError("webhook_url must use http or https scheme")
-        hostname = parsed.hostname
-        if not hostname:
-            raise ValueError("webhook_url missing hostname")
-        if allow_private:
-            return
-        if hostname in {"localhost", "host.docker.internal"}:
-            raise ValueError("webhook_url points to private network target")
-        # Resolve the hostname and reject private/loopback IPs (DNS-rebinding safe).
-        _check_ssrf_protection(webhook_url)
 
     @app.post(
         "/v1/crawl",
@@ -900,7 +944,7 @@ if FastAPI is not None:
         return {"status": "deleted", "job_id": job_id}
 
     @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
-    async def metrics_endpoint() -> "Response":
+    async def metrics_endpoint() -> Response:
         return Response(get_metrics().as_prometheus(), media_type="text/plain; version=0.0.4")
 
 else:

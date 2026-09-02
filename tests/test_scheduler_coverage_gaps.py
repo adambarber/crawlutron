@@ -95,7 +95,7 @@ class TestSchedulerCoverageGaps:
         text = (
             "User-agent: *\n"
             "Crawl-delay: 1\n"
-            "User-agent: dev-stack-browser-crawler\n"
+            "User-agent: browser-crawler\n"
             "Crawl-delay: 4\n"
         )
         assert _parse_robots_crawl_delay(text) == 4.0

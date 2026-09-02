@@ -1,11 +1,39 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
 import asyncio
+
 import pytest
-import httpx
-from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
+
 from app.constants import HTTP_DECLARED_CRAWLER
+
+
+async def _poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1):
+    """Poll ``predicate`` until it returns truthy or ``timeout`` expires.
+
+    Replaces the previous ``for _ in range(20): await asyncio.sleep(0.5)``
+    pattern: faster minimum polling, real timeout via ``asyncio.wait_for``,
+    and a single ``pytest.fail`` site that names the failing condition.
+    Predicates can be sync or async; async predicates are awaited.
+    """
+
+    async def _runner() -> bool:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            value = predicate()
+            if asyncio.iscoroutine(value):
+                value = await value
+            if value:
+                return True
+            if asyncio.get_event_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(interval)
+
+    try:
+        ok = await asyncio.wait_for(_runner(), timeout=timeout + 1.0)
+    except TimeoutError:
+        ok = False
+    return ok
 
 
 class TestAsyncCrawlApi:
@@ -46,25 +74,23 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 202
         request_id = resp.json()["request_id"]
 
-        # Poll until completed
-        for _ in range(20):
-            await asyncio.sleep(0.5)
+        async def _poll_status() -> bool:
             status_resp = await self.client.get(f"/v1/crawl/{request_id}")
             if status_resp.status_code == 200:
                 body = status_resp.json()
                 assert body["success"] is True
                 assert len(body["results"]) == 1
                 assert body["results"][0]["status"] == "success"
-                break
-            elif status_resp.status_code == 202:
-                # Still pending
-                data = status_resp.json()
-                assert data["code"] == "pending"
-                assert "status" in data["details"]
-            else:
-                pytest.fail(f"Unexpected status: {status_resp.status_code} - {status_resp.text}")
-        else:
-            pytest.fail("Timed out waiting for async crawl to complete")
+                return True
+            assert status_resp.status_code == 202, f"unexpected status {status_resp.status_code}: {status_resp.text}"
+            data = status_resp.json()
+            assert data["code"] == "pending"
+            assert "status" in data["details"]
+            return False
+
+        assert await _poll_until(_poll_status, timeout=10.0, interval=0.1), (
+            "Timed out waiting for async crawl to complete"
+        )
 
     async def test_v1_crawl_async_mode_with_webhook_delivers(self):
         """async_mode with webhook_url delivers result to webhook on completion."""
@@ -76,12 +102,10 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 202, resp.text
         request_id = resp.json()["request_id"]
 
-        # Wait for webhook delivery
-        for _ in range(20):
-            await asyncio.sleep(0.5)
-            if len(WEBHOOK_RECEIVED) == 1:
-                break
-        assert len(WEBHOOK_RECEIVED) == 1, "Webhook not delivered in time"
+        # Wait for webhook delivery (faster polling, real timeout).
+        assert await _poll_until(lambda: len(WEBHOOK_RECEIVED) == 1, timeout=10.0, interval=0.1), (
+            "Webhook not delivered in time"
+        )
 
         delivered = delivered = __import__('json').loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["request_id"] == request_id
@@ -100,12 +124,14 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 202
         request_id = resp.json()["request_id"]
 
-        # Wait for completion
-        for _ in range(20):
-            await asyncio.sleep(0.5)
+        # Wait for completion (faster polling, real timeout).
+        async def _wait_done() -> bool:
             status_resp = await self.client.get(f"/v1/crawl/{request_id}")
-            if status_resp.status_code == 200:
-                break
+            return status_resp.status_code == 200
+
+        assert await _poll_until(_wait_done, timeout=10.0, interval=0.1), (
+            "Async crawl did not complete in time"
+        )
 
         # Verify job exists in job_store with SINGLE_SHOT kind
         from app.main import job_store
@@ -142,17 +168,22 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 202, resp.text
         request_id = resp.json()["request_id"]
 
-        # Poll until completed
-        for _ in range(30):
-            await asyncio.sleep(0.5)
+        # Poll until completed.
+        async def _wait_done() -> bool:
             status_resp = await self.client.get(f"/v1/crawl/{request_id}")
             if status_resp.status_code == 200:
                 body = status_resp.json()
                 assert body["submitted_count"] == 2
                 assert len(body["results"]) == 2
-                break
-            elif status_resp.status_code != 202:
-                pytest.fail(f"Unexpected status: {status_resp.status_code}")
+                return True
+            assert status_resp.status_code == 202, (
+                f"Unexpected status: {status_resp.status_code}"
+            )
+            return False
+
+        assert await _poll_until(_wait_done, timeout=15.0, interval=0.1), (
+            "Timed out waiting for async batch crawl to complete"
+        )
 
     async def test_v1_crawl_webhook_backward_compat(self):
         """webhook_url without async_mode still works (backward compat)."""
@@ -165,12 +196,10 @@ class TestAsyncCrawlApi:
         assert body["status"] == "accepted"
         assert "request_id" in body
 
-        # Wait for webhook
-        for _ in range(20):
-            await asyncio.sleep(0.5)
-            if len(WEBHOOK_RECEIVED) == 1:
-                break
-        assert len(WEBHOOK_RECEIVED) == 1
+        # Wait for webhook.
+        assert await _poll_until(lambda: len(WEBHOOK_RECEIVED) == 1, timeout=10.0, interval=0.1), (
+            "Webhook not delivered in time"
+        )
 
         delivered = __import__('json').loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["success"] is True
@@ -194,17 +223,22 @@ class TestAsyncCrawlApi:
             assert resp.status_code == 202
             request_ids.append(resp.json()["request_id"])
 
-        # All should eventually complete
-        for request_id in request_ids:
-            for _ in range(30):
-                await asyncio.sleep(0.5)
+        # All should eventually complete.
+        async def _wait_all() -> bool:
+            for request_id in request_ids:
                 status_resp = await self.client.get(f"/v1/crawl/{request_id}")
                 if status_resp.status_code == 200:
                     body = status_resp.json()
                     assert body["success"] is True
-                    break
-                elif status_resp.status_code != 202:
+                    continue
+                if status_resp.status_code != 202:
                     pytest.fail(f"Unexpected status: {status_resp.status_code}")
+                return False
+            return True
+
+        assert await _poll_until(_wait_all, timeout=15.0, interval=0.1), (
+            "Async concurrent-limit test did not complete in time"
+        )
 
 
 class TestAsyncCrawlJobStoreIntegration:
@@ -217,8 +251,9 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_kind(self):
         """job_store.create_single_shot creates job with SINGLE_SHOT kind."""
-        from app.crawl.job_store import JobStore, JobKind, JobStatus
         import tempfile
+
+        from app.crawl.job_store import JobKind, JobStatus, JobStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = JobStore(f"{tmpdir}/test.db")
@@ -233,9 +268,10 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_persists_results(self):
         """Results are stored in job.results for SINGLE_SHOT jobs."""
-        from app.crawl.job_store import JobStore, JobKind, JobStatus
-        from app.api_models import UnifiedCrawlResponse, UnifiedCrawlResult, CrawlStatus, CrawlClassification
         import tempfile
+
+        from app.api_models import CrawlClassification, CrawlStatus, UnifiedCrawlResponse, UnifiedCrawlResult
+        from app.crawl.job_store import JobKind, JobStatus, JobStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = JobStore(f"{tmpdir}/test.db")

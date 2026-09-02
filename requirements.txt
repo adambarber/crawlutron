@@ -1,12 +1,19 @@
-fastapi==0.124.2
-uvicorn[standard]==0.38.0
+fastapi>=0.124
+uvicorn[standard]>=0.38
 camoufox[asyncio]>=0.3.0
 curl_cffi>=0.7.0
-trafilatura==2.0.0
+trafilatura>=2.0
 markitdown[pdf,docx,pptx,xlsx]>=0.1.0
-setuptools==80.9.0
 brotli>=1.1.0
 pdfplumber>=0.11.0
 charset-normalizer>=3.3.0
 h2>=4.1.0
 httpx>=0.27.0
+# Imported by app/crawl/extraction.py and app/crawl/firecrawl_format.py
+# (silent dependency before this entry; explicitly listed to keep fresh
+# installs green).
+lxml>=5.0
+beautifulsoup4>=4.12
+markdownify>=0.13
+# Required by FastAPI request/response models.
+pydantic>=2.0

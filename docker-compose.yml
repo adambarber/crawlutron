@@ -1,0 +1,41 @@
+# Standalone docker-compose for local browser-crawler development.
+#
+# This file is intentionally minimal: it builds the local Dockerfile, exposes
+# the service on loopback only, and mounts ./logs and ./cache so a development
+# iteration survives container restarts. Production deployments should add an
+# authenticated reverse proxy (e.g. Caddy) and persistent volumes.
+
+services:
+  browser-crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: browser-crawler:local
+    container_name: browser-crawler
+    restart: unless-stopped
+    ports:
+      # Bind to loopback only; the service has no caller authentication by
+      # design and must not be exposed to the network without a reverse
+      # proxy in front of it.
+      - "127.0.0.1:8765:8765"
+    environment:
+      # Keep defaults out of the container; override per-deployment.
+      BROWSER_CRAWLER_LOG_LEVEL: "info"
+      BROWSER_CRAWLER_WORKERS: "1"
+      BROWSER_CRAWLER_CACHE_DIR: "/app/cache"
+      BROWSER_CRAWLER_LOG_FILE: "/app/logs/browser-crawler.jsonl"
+      # Opt-in: enable the on-disk content cache for repeatable crawls.
+      BROWSER_CRAWLER_CONTENT_CACHE_ENABLED: "true"
+      # Local-dev escape hatch for the SSRF guard so the loopback fixtures
+      # used in the integration tests work. Remove this in production and
+      # rely on the default SSRF guard.
+      BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS: "0"
+    volumes:
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3

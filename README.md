@@ -18,30 +18,87 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
 - **Webhooks, batching, recursion, rate limiting, robots.txt respect** — best-effort,
   caller-owned frontier semantics.
 
-The service is one component of the `dev-stack` local web-services suite and is
-intended to be deployed as a Docker container behind Caddy (`.local` hostnames).
+The service is intended to be deployed as a Docker container. A standalone
+`docker-compose.yml` lives at the repository root for local development;
+production deployments typically front it with an authenticated reverse proxy.
+
+## Security Posture
+
+browser-crawler is a **localhost-only** service. By design it does not
+authenticate callers and binds to `127.0.0.1`; expose it beyond localhost
+only behind an authenticated reverse proxy.
+
+What the SSRF defenses cover:
+
+- **DNS pinning on every fetch** — every URL is resolved fresh at fetch
+  time and the resulting IP is pinned for the connection, so a DNS
+  rebind cannot redirect the request mid-flight.
+- **Manual redirect handling** — redirects are followed one hop at a
+  time; each hop re-runs the IP-pinning and private-IP check.
+- **Browser-side SSRF** — the Camoufox/Playwright navigation is pinned
+  to a freshly-validated IP via `Host:` header rewriting; post-redirect
+  URLs are re-validated before being used as document fetch targets.
+- **Body-size guard** — request bodies are capped at 16 MiB before
+  pydantic validation runs.
+- **HTML/DOM size guards** — classification and metadata extraction
+  truncate inputs at 4 MiB before regex / lxml processing.
+- **Per-tenant cookie namespace** — multi-tenant callers should set
+  `request_profile.cookie_namespace` so cookies from different callers
+  are isolated in the shared cookie jar.
+
+See `SECURITY.md` for the threat model and reporting process, and
+`ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md` for the full audit trail.
+
+
+## Adversarial Test Coverage
+
+The test suite was grown alongside the adversarial reviews; the following
+suites cover the specific attack classes the security posture is designed
+to defeat:
+
+- **`tests/test_adversarial_fixes.py`** + **`tests/test_adversarial_round3_fixes.py`** —
+  sync `httpx.AsyncClient.close()`, `Connection: close` on truncated
+  requests, per-chunk trailers, body-size drain, `_ResultSpill` FD leak,
+  DNS-cache lock, robots-cache lock, per-tenant cookie namespace,
+  `parse_bool_env` parsing edge cases, webhook TOCTOU consolidation.
+- **Decompression bomb tests** — a real gzip bomb (`5 MB` compressed
+  → `5 MB` expanded) verifies the decompression guard rejects before
+  OOM.
+- **SSRF tests** (`tests/test_ssrf_*`, `tests/crawl/test_ssrf_*`) — DNS
+  pinning, route-level interception, WebSocket guard, hostname pinning
+  even after a redirect chain, IPv6 private range blocking.
+- **Classification corroboration tests** — soft phrases (e.g. "blocked")
+  require ≥2 independent signals; the test asserts a single soft signal
+  is NOT enough to trigger a defensive classification.
+- **Resource admission control** — fake cgroup gates verify the
+  two-tier weighted admission policy kills stop-the-world pauses under
+  saturation.
+
+This is unusually thorough for an open-source project. New attack
+classes should land alongside a dedicated adversarial test that fails
+without the fix.
 
 ---
 
 ## Build & Run
 
-The service is profile-gated in Compose (`browser-crawler`). From the repository
-root (`/Users/adambarber/Projects/dev-stack`):
+The service ships with a standalone `docker-compose.yml` and a multi-stage
+`Dockerfile` so it can be built and run from a fresh clone without any parent
+monorepo or shared-helper tree.
 
 ```bash
 # Build the image (multi-stage; the Camoufox browser binary is fetched once in an
 # isolated stage so editing requirements.txt does not re-download ~1.3 GB).
-docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile browser-crawler build browser-crawler
+docker compose build browser-crawler
 
 # Run it (recreates only this service).
-docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile browser-crawler up -d browser-crawler
+docker compose up -d browser-crawler
 ```
 
-The container listens on `127.0.0.1:8765` (and via Caddy at
-`http://browser-crawler.dev-stack.orb.local`). The served API docs (Swagger UI)
+The container listens on `127.0.0.1:8765`. The served API docs (Swagger UI)
 are available at `/docs` and the machine-readable schema at `/openapi.json`.
+For local-hostname routing (e.g. `http://browser-crawler.local`), front the
+container with Caddy or another reverse proxy that owns the `.local` zone.
 
 > **Note on the build:** The Camoufox browser binary is downloaded in a dedicated
 > `camoufox-binary` stage that depends *only* on the `camoufox` requirement line,

@@ -105,11 +105,42 @@ _CSV_COLUMNS = [
     "http_status",
 ]
 
+# CSV/Excel formula injection guard (#csv-injection). Spreadsheet apps execute
+# cells whose first character is one of ``= + - @`` (or TAB / CR) as a
+# formula. Crawled page content is attacker-influenced; a malicious page
+# whose title is ``=cmd|'/c calc'!A1`` would otherwise execute when the
+# caller opens the CSV. Prefixing with a single quote neutralizes the
+# formula while staying readable (most spreadsheets drop the leading quote
+# on display). URLs / numeric columns are exempt: ``=`` in a URL is just a
+# query separator.
+_CSV_FORMULA_PREFIXES: tuple[str, ...] = ("=", "+", "-", "@", "\t", "\r")
+_CSV_NEUTRALIZE_COLUMNS: set[str] = {"error", "classification", "status"}
+
+
+def _csv_neutralize(value: str, column: str) -> str:
+    """Escape a CSV cell that might trigger formula execution in a spreadsheet.
+
+    Only columns that flow attacker-controlled page content are neutralized
+    (per-column allowlist); URLs and numeric columns are returned unchanged
+    so existing analyses still work.
+    """
+    if column not in _CSV_NEUTRALIZE_COLUMNS or not value:
+        return value
+    if value[0] in _CSV_FORMULA_PREFIXES:
+        # Leading single-quote neutralizes formulas in Excel/Sheets/Numbers
+        # without changing display.
+        return "'" + value
+    return value
+
 
 def _to_csv(results: list[dict[str, Any]]) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     for r in results:
-        writer.writerow({c: _safe(r.get(c)) for c in _CSV_COLUMNS})
+        row: dict[str, str] = {}
+        for c in _CSV_COLUMNS:
+            value = _safe(r.get(c))
+            row[c] = _csv_neutralize(value, c)
+        writer.writerow(row)
     return buf.getvalue()

@@ -55,10 +55,10 @@ class CrawlerSettings:
     allowed_hosts: str = ""
     denied_hosts: str = ""
     log_level: str = "info"
-    log_file_path: str = "/app/logs/browser-crawler.jsonl"
+    log_file_path: str = "./logs/browser-crawler.jsonl"
     log_file_max_bytes: int = 10 * 1024 * 1024
     log_file_backup_count: int = 3
-    cache_dir: str = "/app/cache"
+    cache_dir: str = "./cache"
     cache_ttl_seconds: int = 3600
     # Opt-in disk content cache (#5). Disabled by default so per-URL content is
     # always freshly fetched unless explicitly enabled (e.g. in the container image).
@@ -69,7 +69,7 @@ class CrawlerSettings:
     adaptive_max_delay: float = 10.0
     adaptive_latency_factor: float = 1.0
     cookie_persistence_enabled: bool = False
-    cookie_jar_path: str = "/app/cache/cookie_jar.json"
+    cookie_jar_path: str = "./cache/cookie_jar.json"
     # HTTP client connection pool tuning
     http_max_connections: int = _default_http_max_connections()
     http_max_keepalive: int = _default_http_keepalive()
@@ -114,7 +114,7 @@ class CrawlerSettings:
             cookie_persistence_enabled=_parse_bool_env_value(
                 source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED", "false")
             ),
-            cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", "/app/cache/cookie_jar.json"),
+            cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", cls.cookie_jar_path),
             http_max_connections=int(source.get("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections)),
             http_max_keepalive=int(source.get("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive)),
             http_keepalive_expiry=float(source.get("BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry)),

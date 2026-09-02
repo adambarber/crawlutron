@@ -3,18 +3,18 @@ successful result; the engine must try the next strategy in the chain
 (e.g. direct HTTP -> curl_cffi TLS impersonation -> headless browser)."""
 
 import os
-import sys
 import tempfile
 from pathlib import Path
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "bc-block-test.jsonl"))
 
-from app.service import _execute_crawl_chain  # noqa: E402
+from _testkit import assert_result_success, make_fetch  # noqa: E402
+
 from app.constants import (  # noqa: E402
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from _testkit import assert_result_success, make_fetch  # noqa: E402
+from app.crawl.engine import _execute_crawl_chain  # noqa: E402
 
 
 class TestBlockAutoEscalation:

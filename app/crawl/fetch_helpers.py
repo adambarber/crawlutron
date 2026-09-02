@@ -57,6 +57,15 @@ async def _fetch_and_decode(
     return None
 
 
+# Sitemap cache (LRU via OrderedDict.move_to_end + popitem).
+#
+# Thread-safety: under CPython this is safe in practice because the GIL
+# serializes Python bytecode for OrderedDict mutations. The cache is only
+# read/written from the asyncio event loop (no threads), so even a GIL-free
+# runtime (PyPy, GraalPy) would see single-threaded access. If a future
+# change moves sitemap parsing to ``asyncio.to_thread``, this cache will
+# need an explicit ``threading.Lock`` (mirroring ``_DNS_CACHE_LOCK`` in
+# ``app/crawl/strategies/http.py``).
 _SITEMAP_CACHE: "OrderedDict[str, tuple[float, list, str | None, str | None]]" = OrderedDict()
 
 

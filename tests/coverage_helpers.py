@@ -24,12 +24,14 @@ from app.classify import classify_page_with_evidence
 from app.crawl.cache import HttpCache
 from app.crawl.decompression import decompress_body
 from app.crawl.engine import (
-    BROWSER_HEADLESS,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_TRAFILATURA,
     _execute_crawl_chain,
     _payload_policy,
     crawl_request,
+)
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_TRAFILATURA,
 )
 from app.crawl.extraction import (
     _extract_discovered_links,
@@ -62,7 +64,7 @@ from app.crawl.document_text import (
 )
 from app.constants import HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
-from app.service import render_request
+from app.api.render import render_request
 from app.validation import normalize_public_http_url, registrable_domain
 from helpers import (
     make_async_client,

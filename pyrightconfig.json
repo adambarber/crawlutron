@@ -1,0 +1,19 @@
+{
+    "include": ["app"],
+    "exclude": [
+        "tests",
+        "scripts",
+        "**/__pycache__",
+        "**/.pytest_cache"
+    ],
+    "pythonVersion": "3.11",
+    "typeCheckingMode": "basic",
+    "reportUnusedImport": "error",
+    "reportMissingTypeStubs": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none",
+    "reportUnknownArgumentType": "none",
+    "reportUnknownParameterType": "none",
+    "reportUnknownLambdaType": "none",
+    "reportMissingTypeArgument": "none"
+}

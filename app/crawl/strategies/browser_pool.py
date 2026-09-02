@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from typing import Any, Optional
+from typing import Any
 
 from app.crawl.strategies.browser import BrowserRenderer
+from app.resource_pressure import (
+    _BROWSER_RAM_FRACTION,
+)
+from app.resource_pressure import (
+    derive_browser_pool_size as _derive_browser_pool_size,
+)
 from app.settings import CrawlerSettings
-from app.resource_pressure import derive_browser_pool_size as _derive_browser_pool_size
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +111,7 @@ class PooledBrowserWorker:
 
 
 # Global pool instance (initialized at startup)
-_pool: Optional[BrowserPool] = None
+_pool: BrowserPool | None = None
 
 
 def get_browser_pool() -> BrowserPool | None:
@@ -122,7 +126,7 @@ def get_browser_pool() -> BrowserPool | None:
     return _pool
 
 
-def set_browser_pool(pool: Optional[BrowserPool]) -> Optional[BrowserPool]:
+def set_browser_pool(pool: BrowserPool | None) -> BrowserPool | None:
     """Set the global browser pool (for testing). Returns previous pool."""
     global _pool
     old = _pool

@@ -4,67 +4,71 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
+import hashlib
 import inspect
+import json
+import logging
 import os
 import re
 import socket
 import ssl
-import time
-import threading
 import tempfile
-import hashlib
+import threading
+import time
 from urllib.parse import urlparse
-import json
-import logging
+
 logger = logging.getLogger(__name__)
 import base64
 from dataclasses import asdict
 from typing import Any
 
 import httpx
-import urllib.error
 
 try:
     from charset_normalizer import from_bytes as _charset_from_bytes
 except ImportError:
     _charset_from_bytes = None  # type: ignore[assignment]
-import urllib.request
+
+# Per-request cookie namespace: set by ``crawl_request`` so concurrent crawls
+# from different tenants cannot leak cookies through the shared
+# ``_GLOBAL_COOKIE_JAR``.
+#
+# IMPORTANT: the default namespace is ``""`` (empty string), which keeps the
+# legacy single-jar behavior: every crawl that does NOT explicitly set
+# ``request_profile.cookie_namespace`` shares the same jar. This is the
+# sensible default for the common single-tenant deployment, but a
+# multi-tenant deployment MUST set ``request_profile.cookie_namespace`` to a
+# unique tenant id on every crawl, otherwise cookies WILL leak between
+# tenants. The legacy shared behavior is intentionally NOT opt-in because
+# silently switching to per-tenant isolation would break deployments that
+# depend on cross-request cookie persistence for a single user
+# (adversarial review F-cookie-cross-contamination).
+_COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "browser_crawler_cookie_namespace", default=""
+)
 
 from app.classify import classify_page_with_evidence
 from app.constants import (
+    DEFAULT_EXTRACTION,
     DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     DEFAULT_MAX_DISCOVERED_LINKS,
-    DEFAULT_EXTRACTION,
+    DEFAULT_USER_AGENT,
     EXTRACTION_DOCUMENT,
-    EXTRACTION_FULL,
     EXTRACTION_METHOD_BINARY_NO_TEXT,
     EXTRACTION_METHOD_DOCUMENT,
-    EXTRACTION_METHOD_DOM_TEXT,
     EXTRACTION_METHOD_HTTP_BODY,
     EXTRACTION_METHOD_HTTP_HTML,
     EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
+    HTTP_BLOCKED_CLASSIFICATIONS,
     HTTP_CFFI_IMPERSONATE,
     SUCCESS_CLASSIFICATIONS,
-    HTTP_BLOCKED_CLASSIFICATIONS,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.document_text import (
     _format_extracted_document_text,
-    _merge_document_paragraph_records,
-    _should_join_document_paragraph,
-    _join_document_paragraph_lines,
-    _looks_like_document_prose,
-    _looks_like_document_heading,
-    _is_numbered_document_record,
-    _clean_document_line,
-    _next_non_empty_document_line,
-    _is_document_item_marker,
-    _is_document_record_boundary,
-    _is_document_non_item_section,
-    _collect_document_item_lines,
-    _document_item_range,
 )
 
 
@@ -92,22 +96,23 @@ def _rebuild_response(data: dict[str, Any]) -> Any:
     r.elapsed_ms = data.get("elapsed_ms", 0)
     return r
 
-from app.crawl.decompression import decompress_body as _decompress_body, DecompressionTooLargeError
-from app.crawl.decompression import detect_decompression_failure
+from urllib.parse import urljoin
+
+from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
+from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
     _detect_pagination,
     _extract_discovered_links,
     _extract_document,
-    _parse_html_tree,
     _extract_html,
     _html_diagnostics,
-    extract_js_endpoints,
+    _parse_html_tree,
     extract_content,
+    extract_js_endpoints,
 )
 from app.crawl.result_helpers import _binary_no_text_result, _make_engine_result
-from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult, HttpFetcher
-from app.validation import normalize_public_http_url, registrable_domain
-from urllib.parse import urljoin, urlparse
+from app.models import CrawlStrategyAttempt, EngineCrawlResult, HttpFetchResult
+
 
 def _classify_error_code(exc: BaseException) -> str:
     """Map an internal exception to a stable, non-leaking error code.
@@ -154,17 +159,17 @@ def _classify_error_code(exc: BaseException) -> str:
 
 
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
-_DEFAULT_HTTP_CLIENT: "httpx.AsyncClient | None" = None
+_DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 _HTTP_CLIENT_INIT_LOCK = threading.Lock()  # serializes first-time client construction
 
 
-def _default_settings() -> "CrawlerSettings":
+def _default_settings() -> CrawlerSettings:
     """Get default crawler settings for HTTP client configuration."""
     from app.settings import CrawlerSettings
     return CrawlerSettings.from_mapping()
 
 
-def _build_async_client(settings: "CrawlerSettings | None" = None) -> "httpx.AsyncClient":
+def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient with configurable connection pool."""
     if settings is None:
         settings = _default_settings()
@@ -177,7 +182,7 @@ def _build_async_client(settings: "CrawlerSettings | None" = None) -> "httpx.Asy
             max_keepalive_connections=settings.http_max_keepalive,
             keepalive_expiry=settings.http_keepalive_expiry,
         ),
-        headers={"User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)"},
+        headers={"User-Agent": DEFAULT_USER_AGENT},
     )
     try:
         client._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
@@ -199,7 +204,11 @@ async def _safe_aclose(client):
 
 
 # Superseded pooled clients awaiting a live event loop to be closed on.
-_PENDING_CLIENT_CLOSE: "list[httpx.AsyncClient]" = []
+# Bounded so a stream of superseded clients cannot grow the list without
+# bound if drains are delayed (adversarial review F-pending-client-close).
+_PENDING_CLIENT_CLOSE: list[httpx.AsyncClient] = []
+_PENDING_CLIENT_CLOSE_MAX = 32
+_PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
 
 
 async def _drain_pending_client_closes() -> None:
@@ -208,10 +217,15 @@ async def _drain_pending_client_closes() -> None:
     ``_schedule_client_close`` fires on the *dying* loop, where the scheduled
     task is cancelled before ``aclose`` completes (every ``asyncio.run`` exit).
     Draining here, inside a fetch that is already running on a live loop,
-    actually releases those sockets instead of leaking them.
+    actually releases those sockets instead of leaking them. A bounded
+    queue with cap-on-enqueue keeps the list from growing unboundedly under
+    a stream of rapid loop changes (adversarial F-pending-client-close).
     """
-    while _PENDING_CLIENT_CLOSE:
-        client = _PENDING_CLIENT_CLOSE.pop(0)
+    while True:
+        with _PENDING_CLIENT_CLOSE_LOCK:
+            if not _PENDING_CLIENT_CLOSE:
+                return
+            client = _PENDING_CLIENT_CLOSE.pop(0)
         await _safe_aclose(client)
 
 
@@ -232,7 +246,7 @@ def _schedule_client_close(client) -> None:
         pass
 
 
-def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.AsyncClient":
+def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
     """Return the pooled ``httpx.AsyncClient`` bound to the current event loop.
 
     The client is reused while the running event loop is unchanged (HTTP/2
@@ -257,8 +271,34 @@ def get_async_http_client(settings: "CrawlerSettings | None" = None) -> "httpx.A
             # Close the superseded client to avoid leaking its sockets/fds:
             # queue it for a guaranteed close on the next live-loop fetch, and
             # also try the immediate best-effort schedule.
-            if old_client not in _PENDING_CLIENT_CLOSE:
-                _PENDING_CLIENT_CLOSE.append(old_client)
+            stale_to_release: object | None = None
+            with _PENDING_CLIENT_CLOSE_LOCK:
+                # Dedupe check inside the cap branch so a re-entrant
+                # append+pop race cannot pop two distinct entries
+                # (adversarial review F-pending-client-close B3).
+                already_queued = old_client in _PENDING_CLIENT_CLOSE
+                if not already_queued:
+                    if len(_PENDING_CLIENT_CLOSE) >= _PENDING_CLIENT_CLOSE_MAX:
+                        # Cap reached: drop the oldest pending reference and
+                        # release the lock BEFORE calling sync ``close()`` so
+                        # the (potentially slow) socket-close path cannot
+                        # block other clients trying to enter this critical
+                        # section (adversarial review F-pending-client-close
+                        # B-minor lock-held-during-close).
+                        stale_to_release = _PENDING_CLIENT_CLOSE.pop(0)
+                    _PENDING_CLIENT_CLOSE.append(old_client)
+            # Outside the lock: ``httpx.AsyncClient.close()`` is synchronous
+            # and releases the underlying httpcore connection pool without
+            # awaiting the async teardown path. We can release sockets even
+            # from sync contexts and from inside a dying loop. Falling back
+            # to a no-op when ``close`` raises (e.g. on a half-constructed
+            # client) lets GC reclaim the rest
+            # (adversarial review F-pending-client-close B1/B2).
+            if stale_to_release is not None:
+                try:
+                    stale_to_release.close()
+                except Exception:  # noqa: BLE001
+                    pass
             _schedule_client_close(old_client)
     return _DEFAULT_HTTP_CLIENT
 
@@ -280,14 +320,34 @@ class CookieJar:
     headers / ``Cookie`` request headers across recursive page loads. All
     access is guarded by a lock because the jar is shared across concurrent
     requests (a single global instance).
+
+    A caller-supplied ``namespace`` string (e.g. a tenant id, a request id,
+    or a logical ``cookie_jar`` profile name) is accepted by the public API
+    and used to namespace stored cookies so concurrent calls from different
+    namespaces cannot read each other's cookies. Passing ``namespace=""``
+    (or omitting it) preserves the legacy shared behavior; the documented
+    mitigation for multi-tenant deployments is to pass a per-tenant id.
     """
 
     def __init__(self) -> None:
-        self._cookies: dict[str, dict[str, str]] = {}
+        self._cookies: dict[str, dict[str, dict[str, str]]] = {}
+        # No per-namespace isolation is enforced here -- callers opt in by
+        # passing a non-empty ``namespace``. The shared default is preserved
+        # so existing single-tenant callers see no change.
         self._lock = threading.Lock()
 
-    def add_cookie_header(self, url: str, set_cookie_header: str) -> None:
-        """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain."""
+    @staticmethod
+    def _ns_key(namespace: str, host: str) -> tuple[str, str]:
+        return (namespace or "", host)
+
+    def add_cookie_header(
+        self, url: str, set_cookie_header: str, *, namespace: str = ""
+    ) -> None:
+        """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.
+
+        ``namespace`` isolates cookies between concurrent callers (e.g. per
+        tenant id). An empty namespace shares the legacy global slot.
+        """
         from http.cookies import SimpleCookie
 
         host = (urlparse(url).hostname or "").lower()
@@ -296,23 +356,35 @@ class CookieJar:
             jar.load(set_cookie_header)
         except Exception:
             return
+        ns_key = self._ns_key(namespace, host)
         with self._lock:
-            target = self._cookies.setdefault(host, {})
+            target = self._cookies.setdefault(ns_key, {})
             for cookie in jar.values():
                 target[cookie.key] = cookie.value
 
-    def cookie_header_for(self, url: str) -> str:
-        """Return a ``Cookie`` header string for the given URL's domain."""
+    def cookie_header_for(self, url: str, *, namespace: str = "") -> str:
+        """Return a ``Cookie`` header string for the given URL's domain.
+
+        ``namespace`` mirrors :meth:`add_cookie_header`. Empty namespace is
+        the shared default and preserves single-tenant behavior.
+        """
         host = (urlparse(url).hostname or "").lower()
+        ns_key = self._ns_key(namespace, host)
         with self._lock:
-            domain_cookies = dict(self._cookies.get(host, {}))
+            domain_cookies = dict(self._cookies.get(ns_key, {}))
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
 
-    def clear(self) -> None:
+    def clear(self, *, namespace: str = "") -> None:
+        """Clear cookies. With a ``namespace``, only that namespace is cleared."""
         with self._lock:
-            self._cookies.clear()
+            if not namespace:
+                self._cookies.clear()
+                return
+            stale = [key for key in self._cookies if key[0] == namespace]
+            for key in stale:
+                del self._cookies[key]
 
     def save_to_file(self, path: str) -> None:
         """Persist the cookie jar to a JSON file atomically.
@@ -325,7 +397,14 @@ class CookieJar:
         import os
 
         with self._lock:
-            data = {domain: dict(cookies) for domain, cookies in self._cookies.items()}
+            # Persist only the legacy shared namespace ("") for backward
+            # compatibility; per-namespace cookies are caller-managed and
+            # intentionally not persisted to disk.
+            data: dict[str, dict[str, str]] = {}
+            for (ns, host), cookies in self._cookies.items():
+                if ns:
+                    continue
+                data[host] = dict(cookies)
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         directory = os.path.dirname(path) or "."
         fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".cookiejar.", suffix=".tmp")
@@ -343,21 +422,27 @@ class CookieJar:
             raise
 
     @classmethod
-    def load_from_file(cls, path: str) -> "CookieJar":
+    def load_from_file(cls, path: str) -> CookieJar:
         """Load a cookie jar from a JSON file. Returns empty jar if file missing/invalid."""
-        import json, os
+        import json
+        import os
 
         jar = cls()
         if not os.path.exists(path):
             return jar
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 with jar._lock:
                     for domain, cookies in data.items():
                         if isinstance(cookies, dict):
-                            jar._cookies[domain] = cookies
+                            # Persisted cookies live in the legacy shared
+                            # namespace ("") so single-tenant / pre-namespace
+                            # deployments keep working. Per-namespace cookies
+                            # are caller-managed and intentionally not
+                            # persisted.
+                            jar._cookies[("", domain)] = cookies
         except Exception:
             pass  # corrupted file -> empty jar
         return jar
@@ -403,6 +488,12 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
 _DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
 _DNS_TTL = 60.0
 _DNS_CACHE_MAX = 4096
+# Guard for concurrent reads/writes to _DNS_CACHE. _resolve_ips is called from
+# both the async event loop and worker threads (asyncio.to_thread) so the cache
+# mutation path needs explicit synchronization -- a plain dict.get/dict[]
+# sequence can corrupt state or drop entries under concurrent access
+# (adversarial review F-thread-safety).
+_DNS_CACHE_LOCK = threading.Lock()
 
 
 def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
@@ -421,7 +512,8 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     """
     if use_cache:
         now = time.monotonic()
-        cached = _DNS_CACHE.get(hostname)
+        with _DNS_CACHE_LOCK:
+            cached = _DNS_CACHE.get(hostname)
         if cached and (now - cached[0]) < _DNS_TTL:
             return cached[1]
     addrinfo = socket.getaddrinfo(hostname, None)
@@ -431,22 +523,24 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         # resolves fresh and must never persist an IP here -- otherwise a
         # private/rebound IP seen during pinning would poison the shared
         # validation cache and let the check later treat it as safe.
-        _DNS_CACHE[hostname] = (time.monotonic(), ips)
-        if len(_DNS_CACHE) > _DNS_CACHE_MAX:
-            # Soft cap: drop the whole cache rather than letting it grow
-            # unbounded across a crawl that touches many unique hosts. A brief
-            # re-resolution burst is acceptable and keeps memory predictable.
-            _DNS_CACHE.clear()
+        with _DNS_CACHE_LOCK:
+            _DNS_CACHE[hostname] = (time.monotonic(), ips)
+            if len(_DNS_CACHE) > _DNS_CACHE_MAX:
+                # Soft cap: drop the whole cache rather than letting it grow
+                # unbounded across a crawl that touches many unique hosts. A brief
+                # re-resolution burst is acceptable and keeps memory predictable.
+                _DNS_CACHE.clear()
     return ips
 
 
 def _check_ssrf_protection(url: str) -> None:
     """Resolve the URL hostname and abort if any IP is private/loopback.
 
-    Set BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1 to disable for local testing.
+    Set ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
+    to disable for local testing.
     """
-    import os
-    if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1":
+    from app.validation import parse_bool_env
+    if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
         return
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -478,7 +572,8 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     hostname = parsed.hostname
     if not hostname:
         return hostname or "", hostname or ""
-    if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") == "1":
+    from app.validation import parse_bool_env
+    if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
         # Local-dev escape hatch: bypass resolution but connect to the REAL
         # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
         # fetch/webhook to loopback and broke virtual-host routing.
@@ -739,8 +834,21 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
 
 
+def cookie_namespace_for(profile: dict[str, Any]) -> str:
+    """Return a per-request cookie namespace, or ``""`` for the shared default.
+
+    Callers running multi-tenant crawls should set
+    ``request_profile.cookie_namespace`` to a tenant id so cookies from
+    different callers cannot leak into each other's sessions. Empty / unset
+    preserves the legacy shared behavior so single-tenant callers and the
+    test suite see no change.
+    """
+    value = profile.get("cookie_namespace")
+    return str(value).strip() if isinstance(value, str) else ""
+
+
 def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
-    """Build a Cookie header from both policy cookies and the global persistent jar (#2)."""
+    """Build a Cookie header from policy cookies and the persistent jar (#2)."""
     host = (urlparse(url).hostname or "").lower()
     parts: list[str] = []
 
@@ -752,20 +860,31 @@ def _cookie_header_for_url(profile: dict[str, Any], url: str) -> str:
             if isinstance(host_cookies, dict):
                 parts.extend(f"{key}={value}" for key, value in host_cookies.items())
 
-    # Persistent cookies from prior responses
-    jar_header = _GLOBAL_COOKIE_JAR.cookie_header_for(url)
+    # Persistent cookies from prior responses (optionally namespaced via the
+    # profile or the per-request cookie namespace contextvar).
+    namespace = cookie_namespace_for(profile) or _COOKIE_NAMESPACE.get()
+    jar_header = _GLOBAL_COOKIE_JAR.cookie_header_for(url, namespace=namespace)
     if jar_header:
         parts.append(jar_header)
 
     return "; ".join(parts)
 
 
-def _store_set_cookies(url: str, response_headers: "httpx.Headers | dict[str, str]") -> None:
-    """Extract Set-Cookie headers from a response into the global jar (#2).
+def _store_set_cookies(
+    url: str,
+    response_headers: httpx.Headers | dict[str, str],
+    *,
+    namespace: str | None = None,
+) -> None:
+    """Extract Set-Cookie headers from a response into the persistent jar (#2).
 
     Uses ``get_list`` to capture all ``Set-Cookie`` headers (httpx 0.28+
     returns comma-joined values from ``.items()`` for duplicate keys).
+    ``namespace`` isolates cookies for multi-tenant callers; when not
+    provided, the per-request cookie namespace contextvar is used.
     """
+    if namespace is None:
+        namespace = _COOKIE_NAMESPACE.get()
     # Accept both httpx.Headers (for get_list) and plain dict (for tests)
     if hasattr(response_headers, "get_list"):
         set_cookies = response_headers.get_list("set-cookie")
@@ -773,7 +892,7 @@ def _store_set_cookies(url: str, response_headers: "httpx.Headers | dict[str, st
         # Fallback for plain dict (test mocks) - iterate items
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
     for cookie in set_cookies:
-        _GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie)
+        _GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie, namespace=namespace)
 
 
 _BUILTIN_USER_AGENTS = [
@@ -803,7 +922,7 @@ def _rotating_index(profile: dict[str, Any], domain: str, pool_size: int) -> int
     """Deterministic per-host pool index so repeated crawls of the same host keep a
     stable fingerprint (the disk content-cache key stays consistent) while different
     hosts rotate through the pool (#11)."""
-    seed = f"{profile.get('fingerprint_seed', '')}:{domain}".encode("utf-8")
+    seed = f"{profile.get('fingerprint_seed', '')}:{domain}".encode()
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
@@ -829,7 +948,7 @@ def _select_fingerprint(profile: dict[str, Any], domain: str) -> dict[str, str]:
 def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
     profile = policy.get("request_profile") or {}
     headers = {
-        "User-Agent": "dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)",
+        "User-Agent": DEFAULT_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",

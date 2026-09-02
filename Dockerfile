@@ -1,7 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Build context is the `docker/` directory (parent of all services) so the shared
-# The shared local_service_logging package is copied as a directory so it is
-# importable from /app (PYTHONPATH=/app) without an external build context.
+# Build context is the ``docker/`` directory (parent of all services).
 ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
@@ -97,15 +95,17 @@ ENV HOME=/home/appuser
 # Copy installed Python packages from builder stage to the appuser's local directory
 COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
-# Bring in the pre-fetched Camoufox browser binary. It is baked into the
-# local browser-crawler:latest image (built once, with the ~1.3 GB download),
-# so routine rebuilds reuse it instead of re-fetching. A from-scratch build can
-# instead source the isolated camoufox-binary stage if that image is absent.
-COPY --from=browser-crawler:latest --chown=appuser:appuser /home/appuser/.cache/camoufox /home/appuser/.cache/camoufox
+# Bring in the pre-fetched Camoufox browser binary from the earlier
+# ``camoufox-binary`` build stage. This avoids the circular ``--from=
+# browser-crawler:latest`` reference that previously broke fresh-clone builds
+# (the source image had not been tagged yet). The isolated stage depends only
+# on the camoufox package line, so editing other requirements cannot
+# invalidate the browser download cache.
+COPY --from=camoufox-binary --chown=appuser:appuser /home/appuser/.cache/camoufox /home/appuser/.cache/camoufox
 
-# Copy application code and the shared logging module (no external build context needed)
+# Copy application code. The logging helper is in-tree at
+# ``app/logging_config.py`` (no external shared-tree copy is needed).
 COPY --chown=appuser:appuser browser-crawler/app /app/app
-COPY --chown=appuser:appuser shared/python/local_service_logging /app/local_service_logging
 
 EXPOSE 8765
 

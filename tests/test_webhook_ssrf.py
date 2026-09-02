@@ -10,8 +10,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import httpx
 
-from app.main import _validate_webhook_url, _deliver_webhook
+from app.api import webhooks as _webhook_module
+from app.api.webhooks import (
+    set_webhook_dependencies,
+    clear_webhook_dependencies,
+    validate_webhook_url as _validate_webhook_url,
+    deliver_webhook as _deliver_webhook,
+)
 from _testkit import block_private_targets
+
+
+class _FakeUnifiedResponse:
+    """Stub for ``UnifiedCrawlResponse`` that returns a JSON-serializable dict."""
+
+    def __init__(self, **_kwargs):
+        self.kwargs = _kwargs
+
+    def model_dump(self):
+        return {
+            "request_id": self.kwargs.get("request_id", "test"),
+            "results": self.kwargs.get("results", []),
+        }
 
 
 
@@ -66,9 +85,29 @@ class TestWebhookDeliveryPinning:
                 captured["headers"] = headers
                 return _MockResponse()
 
-        # Patch httpx.AsyncClient globally (the import is inside the function)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]),              patch("httpx.AsyncClient", _Client),              patch("app.main.crawl_request", new=AsyncMock(return_value={"results": []})):
-            await _deliver_webhook("http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock())
+        # httpx.AsyncClient is imported lazily inside deliver_pinned_webhook, so
+        # monkeypatching the module-level httpx module covers all entry points.
+        import asyncio
+        _original_async_client = httpx.AsyncClient
+        httpx.AsyncClient = _Client
+        try:
+            with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+                # Initialize webhook module-level state with a fake crawl_request.
+                set_webhook_dependencies(
+                    webhook_semaphore=asyncio.Semaphore(1),
+                    shutdown_event=asyncio.Event(),
+                    crawl_request_fn=AsyncMock(return_value={"results": []}),
+                    pool_getter=lambda: MagicMock(),
+                    unified_response_cls=_FakeUnifiedResponse,
+                    build_unified_result=lambda x: x,
+                    get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
+                )
+                try:
+                    await _deliver_webhook("http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock())
+                finally:
+                    clear_webhook_dependencies()
+        finally:
+            httpx.AsyncClient = _original_async_client
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured

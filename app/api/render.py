@@ -1,69 +1,21 @@
-"""Service orchestration entry points.
+"""Browser-render request orchestration (the ``/v1/render`` path).
 
-The crawl-execution logic has been modularized into ``app.crawl``:
-
-* :mod:`app.crawl.engine`  - ``crawl_request`` / ``_execute_crawl_chain`` / ``_call_worker``
-* :mod:`app.crawl.strategies.http`    - HTTP fetch strategy + helpers
-* :mod:`app.crawl.strategies.browser` - browser render strategy (``BrowserRenderer``)
-* :mod:`app.crawl.strategies.document`- PDF/Office extraction
-* :mod:`app.crawl.extraction` - unified content extraction + discovery diagnostics
-
-This module re-exports those symbols so existing callers/tests that import
-from ``app.service`` keep working, and additionally owns the browser-only
-``/v1/render`` path (``render_request``).
+Extracted from the previous ``app.service`` shim so the canonical entry point
+for browser-render orchestration lives in ``app.api``. ``app.service`` is
+deleted; existing callers import from ``app.api.render``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
-import urllib.error
 import uuid
 from typing import Any
 
-from app.validation import normalize_public_http_url, registrable_domain
-
-from app.crawl.engine import (
-    CrawlTask,
-    _call_worker,
-    _execute_crawl_chain,
-    _payload_policy,
-    _payload_urls,
-    crawl_request,
-)
-from app.crawl.extraction import (
-    _extract_discovered_links,
-    _extract_forms,
-    _extract_frames,
-    _FrameCollector,
-    _html_diagnostics,
-)
-from app.crawl.strategies.http import (
-    _cookie_header_for_url,
-    _default_cffi_fetcher,
-    _default_http_fetcher,
-    _fetch_with_retries,
-    _headers_for_strategy,
-    _http_strategy_result,
-    _looks_like_binary_body,
-    _retry_after_seconds,
-)
-from app.crawl.document_text import (
-    _collect_document_item_lines,
-    _document_item_range,
-    _format_extracted_document_text,
-    _next_non_empty_document_line,
-    _should_join_document_paragraph,
-)
-from app.models import (
-    CrawlJob,
-    CrawlResult,
-    RenderOptions,
-    CrawlWorker,
-    to_dict,
-)
+from app.crawl.engine import _call_worker, _payload_urls
+from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
+from app.validation import normalize_public_http_url, registrable_domain
 
 
 def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
@@ -102,6 +54,7 @@ async def render_request(
     settings: CrawlerSettings | None = None,
     worker: CrawlWorker,
 ) -> dict[str, Any]:
+    """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
     urls = _payload_urls(payload)
     if len(urls) > active_settings.max_batch_size:
@@ -141,3 +94,4 @@ async def render_request(
     }
 
 
+__all__ = ["render_request", "_render_options", "_disallowed_result"]

@@ -240,6 +240,12 @@ class BrowserRenderer:
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
         # Reusable browser instance (#6): one browser per BrowserRenderer lifecycle.
         self._browser_cm: Any = None
+        # Cache dir for safe storage_state validation. Defaults to /tmp if no
+        # settings were passed (single-tenant local-mode usage), but when
+        # settings are available the operator-controlled cache_dir is used so
+        # a malicious storage_state path cannot piggy-back on the world-
+        # readable /tmp (adversarial review F-storage-state-path-traversal).
+        self._cache_dir = settings.cache_dir if settings is not None else None
         self._browser: Any = None
         self._browser_reused = False
         # Recycle the reused browser after this many successful renders to bound
@@ -636,7 +642,14 @@ class BrowserRenderer:
         return kwargs
 
     def _validate_storage_state_path(self, storage_state: str) -> str | None:
-        """Validate storage_state path is safe (no traversal, under allowed dirs)."""
+        """Validate storage_state path is safe (no traversal, under allowed dirs).
+
+        When the operator has supplied a ``cache_dir`` via settings, only that
+        directory is accepted. ``/tmp`` is intentionally NOT in the default
+        allowlist: it is world-readable on most hosts and would let any user
+        on the box read another tenant's session tokens
+        (adversarial review F-storage-state-path-traversal).
+        """
         import os
         from pathlib import Path
 
@@ -644,11 +657,16 @@ class BrowserRenderer:
         if storage_state in {"default", "session", "persistent"}:
             return storage_state
 
-        # For file paths, ensure they're under an allowed directory
+        # For file paths, ensure they live under an operator-controlled dir.
         try:
             path = Path(storage_state).resolve()
-            # Allow paths under /app/cache or /tmp
-            allowed_dirs = [Path("/app/cache").resolve(), Path("/tmp").resolve()]
+            allowed_dirs: list[Path] = []
+            if self._cache_dir:
+                allowed_dirs.append(Path(self._cache_dir).resolve())
+            else:
+                # No settings -> local-mode dev usage. Use /tmp as the only
+                # fallback (and document the trade-off via the log line).
+                allowed_dirs.append(Path("/tmp").resolve())
             for allowed in allowed_dirs:
                 try:
                     path.relative_to(allowed)

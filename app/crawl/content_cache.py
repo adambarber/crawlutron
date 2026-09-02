@@ -190,6 +190,11 @@ class ContentCache:
                 # A large value must not linger in the small-value cache.
                 self._memory_cache.pop(key, None)
         # Enforce size limit after write, using the in-memory index (no glob).
+        # NOTE: this call briefly releases ``self._lock`` between the write
+        # and the eviction (re-acquired inside ``_enforce_max_entries``).
+        # During that window another thread can read the just-written entry
+        # and observe an over-sized index. This is benign — the entry is
+        # valid and consistent; only the eviction is one step behind.
         self._enforce_max_entries()
 
     def _write_envelope(self, path: "Path", envelope: dict[str, Any]) -> None:
@@ -244,6 +249,11 @@ class ContentCache:
         # Offload the (potentially large) json.dumps + disk write off the loop.
         await asyncio.to_thread(self._write_envelope, path, envelope)
         # Enforce size limit after write, using the in-memory index (no glob).
+        # NOTE: this call briefly releases ``self._lock`` between the write
+        # and the eviction (re-acquired inside ``_enforce_max_entries``).
+        # During that window another thread can read the just-written entry
+        # and observe an over-sized index. This is benign — the entry is
+        # valid and consistent; only the eviction is one step behind.
         self._enforce_max_entries()
 
     def prune(self) -> int:

@@ -1,8 +1,6 @@
 """Real tests for service.py logic (no mocks; inject fakes for network)."""
 
-import asyncio
 import os
-import sys
 import tempfile
 from pathlib import Path
 
@@ -10,47 +8,6 @@ import pytest
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
 
-from app.models import CrawlStrategyAttempt, HttpFetchResult, EngineCrawlResult  # noqa: E402
-from app.constants import (
-    BROWSER_HEADLESS,
-    BROWSER_HEADED_WARMED,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_FULL,
-    EXTRACTION_METHOD_BINARY_NO_TEXT,
-    EXTRACTION_METHOD_DOCUMENT,
-    EXTRACTION_METHOD_DOM_TEXT,
-    EXTRACTION_METHOD_HTTP_BODY,
-    EXTRACTION_METHOD_HTTP_HTML,
-    EXTRACTION_METHOD_TRAFILATURA,
-    EXTRACTION_TRAFILATURA,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-)
-from app.service import (  # noqa: E402
-    _collect_document_item_lines,
-    _cookie_header_for_url,
-    _document_item_range,
-    _execute_crawl_chain,
-    _call_worker,
-    _extract_discovered_links,
-    _extract_forms,
-    _extract_frames,
-    _fetch_with_retries,
-    _format_extracted_document_text,
-    _FrameCollector,
-    _headers_for_strategy,
-    _http_strategy_result,
-    _looks_like_binary_body,
-    _next_non_empty_document_line,
-    _payload_policy,
-    _payload_urls,
-    _render_options,
-    _retry_after_seconds,
-    _should_join_document_paragraph,
-    crawl_request,
-)
-from app.settings import CrawlerSettings  # noqa: E402
-from app.crawl.strategies.http import _select_fingerprint, _rotating_index  # noqa: E402
 from _testkit import (  # noqa: E402
     assert_result_failed,
     assert_result_success,
@@ -59,6 +16,45 @@ from _testkit import (  # noqa: E402
     ok_fetcher,
     raise_fetcher,
 )
+
+from app.api.render import _render_options  # noqa: E402
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_METHOD_BINARY_NO_TEXT,
+    EXTRACTION_TRAFILATURA,
+    HTTP_DECLARED_CRAWLER,
+)
+from app.crawl.document_text import (  # noqa: E402
+    _collect_document_item_lines,
+    _document_item_range,
+    _format_extracted_document_text,
+    _next_non_empty_document_line,
+    _should_join_document_paragraph,
+)
+from app.crawl.engine import (  # noqa: E402
+    _call_worker,
+    _execute_crawl_chain,
+    _payload_policy,
+    _payload_urls,
+    crawl_request,
+)
+from app.crawl.extraction import (  # noqa: E402
+    _extract_discovered_links,
+    _extract_forms,
+    _extract_frames,
+    _FrameCollector,
+)
+from app.crawl.strategies.http import (  # noqa: E402
+    _cookie_header_for_url,
+    _fetch_with_retries,
+    _headers_for_strategy,
+    _http_strategy_result,
+    _looks_like_binary_body,
+    _retry_after_seconds,
+    _select_fingerprint,  # noqa: E402
+)
+from app.settings import CrawlerSettings  # noqa: E402
 
 
 def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
