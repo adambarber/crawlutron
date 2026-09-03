@@ -266,26 +266,37 @@ with `422`.
 ## Project layout
 
 ```
-docker/browser-crawler/
-├── Dockerfile            # Multi-stage build; isolated camoufox-binary stage
+.  # repository root (clone of browser-crawler)
+├── Dockerfile            # Multi-stage build; isolated camoufox-binary stage (context: .)
+├── docker-compose.yml    # Standalone local stack (loopback-only)
+├── pyproject.toml        # Package metadata + ruff config
 ├── requirements.txt      # Runtime deps (camoufox, fastapi, trafilatura, markitdown, ...)
 ├── requirements-dev.txt  # Dev/test deps
 ├── app/
-│   ├── main.py           # FastAPI app, lifespan, route wiring
-│   ├── engine.py         # Crawl orchestration + fallback-chain scheduling
-│   ├── scheduler.py      # Strategy worker scheduling/semaphores
-│   ├── service.py        # Request → job mapping, webhook delivery, recursion
-│   ├── classify.py       # Outcome classification + signatures
-│   ├── constants.py      # Strategies, classification sets, signatures
-│   ├── models.py         # Internal + API (Pydantic) models
-│   ├── settings.py       # BROWSER_CRAWLER_* configuration
-│   ├── api_models.py     # Request/response schemas (RenderRequest, etc.)
-│   ├── validation.py     # URL/SSRF validation, request validation
-│   ├── crawl/            # strategy implementations (http, browser, document, dom)
-│   ├── health/           # /health, /ready
-│   └── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known
+│   ├── main.py           # Thin FastAPI factory (≈218 lines) — lifespan + app.state + router wiring only
+│   ├── api/              # Router/endpoint split (one file per concern)
+│   │   ├── crawl_endpoint.py / crawl_router.py   # POST /v1/crawl + GET /v1/crawl/{id}
+│   │   ├── render.py / render_endpoint.py / render_router.py  # POST /v1/render
+│   │   ├── map_endpoint.py / map_router.py       # POST /v1/map
+│   │   ├── jobs_router.py                        # POST/GET /v1/jobs*
+│   │   ├── metrics_router.py                     # GET /metrics
+│   │   ├── crawl_executor.py / async_crawl_runner.py / response_shaping.py
+│   │   ├── middleware.py / exceptions.py / dependencies.py
+│   │   └── webhooks.py                           # SSRF-safe webhook delivery
+│   ├── crawl/            # Strategy implementations (http, browser, document, dom)
+│   │   ├── engine.py     # Orchestration + fallback-chain scheduling (1142 lines)
+│   │   ├── strategies/http.py / browser.py / document.py / browser_pool.py
+│   │   ├── extraction.py / decompression.py / firecrawl_format.py / ...
+│   │   └── job_store.py / result_store.py / cache.py / content_cache.py
+│   ├── health/           # /health, /ready (READINESS_STATE singleton)
+│   ├── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known
+│   ├── classify.py / constants.py / models.py / api_models.py / validation.py
+│   ├── scheduler.py / settings.py / metrics.py / output_formats.py / logging_config.py
+│   └── ...
 ├── tests/                # Behavior tests (no mocks; real HTTP + real Camoufox)
-└── docs/references/      # Manual test plan + agent contract
+├── docs/references/      # Manual test plan + agent contract
+├── scripts/run-tests.sh  # `make test` entrypoint
+└── .github/workflows/ci.yml  # ruff + pytest (fast)
 ```
 
 ---
@@ -296,7 +307,10 @@ Behavior tests run against the real stack (a local `http.server`, a real Camoufo
 browser, and real fixtures — no mocks). Use the dedicated venv:
 
 ```bash
-python3 -m pytest docker/browser-crawler/tests -q
+pip install -e ".[dev]"
+make test          # fast hermetic suite (default)
+# or
+python3 -m pytest -q
 ```
 
 The manual test plan lives at `docs/references/browser-crawler-manual-test-plan.md`

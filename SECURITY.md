@@ -12,7 +12,7 @@
 
 Please **do not file public issues** for suspected security vulnerabilities.
 
-Email `security@dev-stack.local` with:
+Email `security@browser-crawler.local` (or open a private security advisory on GitHub) with:
 
 - A description of the vulnerability and the affected component.
 - Reproduction steps (a minimal request payload is ideal).

@@ -21,7 +21,9 @@ BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
 # to outbound requests, and so the package version is sourced from a single
 # place instead of being duplicated across files.
-DEFAULT_USER_AGENT: str = "browser-crawler/0.2 (+https://github.com/dev-stack/browser-crawler)"
+# Overridable via BROWSER_CRAWLER_USER_AGENT; update before publishing
+# to the final GitHub org (replace the placeholder URL below).
+DEFAULT_USER_AGENT: str = "browser-crawler/0.2 (+https://github.com/browser-crawler/browser-crawler)"
 USER_AGENT_TOKEN: str = "browser-crawler"
 BROWSER_HEADED_WARMED: str = "BROWSER_HEADED_WARMED"
 

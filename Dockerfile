@@ -1,5 +1,9 @@
 # syntax=docker/dockerfile:1.7
-# Build context is the ``docker/`` directory (parent of all services).
+# Build context is the repository root (where this Dockerfile lives).
+# For the legacy dev-stack monorepo where this service lived at
+# ``docker/browser-crawler/``, build with:
+#   docker build -f docker/browser-crawler/Dockerfile docker/browser-crawler
+# or set ``context: ./docker/browser-crawler`` in the parent compose.
 ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
@@ -21,7 +25,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies to a standard local directory
-COPY browser-crawler/requirements.txt .
+COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --user -r requirements.txt
 
@@ -35,7 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS camoufox-binary
 
 WORKDIR /app
-COPY browser-crawler/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
 RUN --mount=type=cache,target=/root/.cache/camoufox python -m camoufox fetch
 
@@ -105,7 +109,7 @@ COPY --from=camoufox-binary --chown=appuser:appuser /home/appuser/.cache/camoufo
 
 # Copy application code. The logging helper is in-tree at
 # ``app/logging_config.py`` (no external shared-tree copy is needed).
-COPY --chown=appuser:appuser browser-crawler/app /app/app
+COPY --chown=appuser:appuser app /app/app
 
 EXPOSE 8765
 
@@ -125,7 +129,7 @@ FROM runtime AS development
 USER root
 
 # Install development tools (pytest, pytest-asyncio, ruff, etc.)
-COPY browser-crawler/requirements-dev.txt .
+COPY requirements-dev.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-dev.txt
 

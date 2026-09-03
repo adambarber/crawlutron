@@ -62,10 +62,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dev-stack/browser-crawler"
-Issues = "https://github.com/dev-stack/browser-crawler/issues"
-Changelog = "https://github.com/dev-stack/browser-crawler/blob/main/CHANGELOG.md"
-Security = "https://github.com/dev-stack/browser-crawler/blob/main/SECURITY.md"
+# TODO: replace placeholder org before publishing (currently dev-stack private).
+Homepage = "https://github.com/browser-crawler/browser-crawler"
+Issues = "https://github.com/browser-crawler/browser-crawler/issues"
+Changelog = "https://github.com/browser-crawler/browser-crawler/blob/main/CHANGELOG.md"
+Security = "https://github.com/browser-crawler/browser-crawler/blob/main/SECURITY.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

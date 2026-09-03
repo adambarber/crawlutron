@@ -7,7 +7,8 @@ mechanics of submitting a change.
 
 ```bash
 # Clone + enter the repository
-git clone https://github.com/dev-stack/browser-crawler.git
+# (replace org before publishing; currently placeholder)
+git clone https://github.com/browser-crawler/browser-crawler.git
 cd browser-crawler
 
 # Install dependencies in a virtualenv (Python 3.11+)
