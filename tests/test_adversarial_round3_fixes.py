@@ -74,7 +74,7 @@ def test_pending_client_close_dedupe_and_cap_are_atomic():
 
 # ---- C1 ----
 def test_body_size_middleware_sets_connection_close_on_truncation():
-    src_path = "app/main.py"
+    src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
     assert 'response.headers["Connection"] = "close"' in source
@@ -82,7 +82,7 @@ def test_body_size_middleware_sets_connection_close_on_truncation():
 
 
 def test_body_size_middleware_drains_after_truncation():
-    src_path = "app/main.py"
+    src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
     assert "drain_after_truncate" in source
@@ -91,7 +91,7 @@ def test_body_size_middleware_drains_after_truncation():
 
 # ---- C3 ----
 def test_body_size_middleware_preserves_per_chunk_headers():
-    src_path = "app/main.py"
+    src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
     body = _extract_function_body(source, "_capped_receive")
@@ -103,7 +103,7 @@ def test_body_size_middleware_preserves_per_chunk_headers():
 
 
 def test_body_size_middleware_truncation_keeps_more_body_false():
-    src_path = "app/main.py"
+    src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
     body = _extract_function_body(source, "_capped_receive")

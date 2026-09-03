@@ -18,18 +18,29 @@ def _read_main_source() -> str:
 
 def test_body_size_cap_is_16_mib():
     """The ASGI body cap must be 16 MiB."""
-    src = _read_main_source()
+    import inspect
+
+    from app.api import middleware as mw_mod
+
+    src = inspect.getsource(mw_mod)
     assert "_MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024" in src
 
 
 def test_body_size_middleware_registered():
     """The middleware must be installed on the FastAPI app."""
     src = _read_main_source()
-    assert '@app.middleware("http")' in src
-    assert "async def _limit_request_body" in src
+    # Registration lives in main.py; implementation lives in app/api/middleware.py
+    assert 'limit_request_body' in src
+    assert 'app.middleware("http")(limit_request_body)' in src or '@app.middleware("http")' in src
+    import inspect
+
+    from app.api import middleware as mw_mod
+
+    mw_src = inspect.getsource(mw_mod)
+    assert "async def limit_request_body" in mw_src or "async def _limit_request_body" in mw_src
     # Must wrap the ASGI receive() rather than buffer-and-replay
-    assert "original_receive" in src
-    assert "request._receive = _capped_receive" in src
+    assert "original_receive" in mw_src
+    assert "request._receive = _capped_receive" in mw_src
 
 
 # ---- storage_state path validation ----

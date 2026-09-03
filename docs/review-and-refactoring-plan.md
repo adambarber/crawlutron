@@ -1,21 +1,27 @@
 # Browser Crawler Code Review & Refactoring Plan
 
-## Architecture Overview
+> **Status 2026-09-03: ARCHIVED — main.py thin-out complete.** The `app/service.py` / `app/browser.py` / `app/robots.py`
+> monolith referenced below no longer exists. Current topology is `app/main.py` (~218 lines, app factory only) +
+> `app/api/*` routers + `app/crawl/*` engine. 744 tests, `ruff check app` green for `app/api` + `app/main.py`.
+> Bugs 1–4 below are resolved. This document is retained as historical context; see `app/main.py`
+> and `app/api/` for the current contract.
+
+## Architecture Overview (HISTORICAL — see `app/` for current)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `app/main.py` | ~500 | FastAPI app, routes, readiness, exception handlers |
-| `app/service.py` | ~1300 | Crawl orchestration, strategies, link extraction, Firecrawl compat |
-| `app/browser.py` | ~200 | Camoufox browser wrapper |
+| `app/main.py` | ~500 | FastAPI app, routes, readiness, exception handlers — **now 218 lines, routers extracted to `app/api/*`** |
+| `app/service.py` | ~1300 | Crawl orchestration, strategies, link extraction, Firecrawl compat — **deleted; now `app/crawl/engine.py` (1142) + `app/crawl/strategies/http.py` (1703) + `app/crawl/strategies/browser.py` (902)** |
+| `app/browser.py` | ~200 | Camoufox browser wrapper — **now `app/crawl/strategies/browser_pool.py` (150) + `app/crawl/strategies/browser.py`** |
 | `app/models.py` | ~180 | Dataclasses |
 | `app/api_models.py` | 224 | Pydantic models, enums |
 | `app/settings.py` | ~60 | Env config |
 | `app/classify.py` | ~300 | Classification logic |
 | `app/validation.py` | ~80 | URL validation |
 | `app/scheduler.py` | ~120 | DomainScheduler |
-| `app/robots.py` | ~50 | robots.txt parsing |
+| `app/robots.py` | ~50 | robots.txt parsing — **now `app/crawl/fetch_helpers.py` + `app/crawl/engine.py` robots cache** |
 
-Tests: 67 total (14 API + 46 core + 4 decomp + 2 scheduler), 65% coverage.
+Tests: 67 total (historical) → **744 passed (fast suite, 2026-09-03), `app/api/*` + `app/crawl/*` covered**.
 
 ## Smoke Test Results
 
@@ -71,7 +77,32 @@ ReadinessState class, configure_app(), 7 route handlers, exception handlers, sta
 
 ## Refactoring Plan
 
-### New module structure:
+### Current module structure (post-refactor, 2026-09-03):
+```
+app/
+  main.py               # THIN (~218) — FastAPI factory + lifespan + app.state wiring only
+  api/
+    crawl_endpoint.py / crawl_router.py   # POST /v1/crawl + GET /v1/crawl/{id}
+    render.py / render_endpoint.py / render_router.py  # POST /v1/render
+    map_endpoint.py / map_router.py       # POST /v1/map
+    jobs_router.py                        # POST/GET /v1/jobs*
+    metrics_router.py                     # GET /metrics
+    crawl_executor.py                     # shared crawl path (browser-pool guard)
+    async_crawl_runner.py                 # bounded background webhook crawl
+    response_shaping.py                   # unified formatters
+    middleware.py                         # 16 MiB body-size guard (C1/C3 fixes)
+    exceptions.py                         # CrawlerError normalization
+    dependencies.py                       # app.state → Depends providers
+    policy_defaults.py / main_helpers.py  # shared constants/helpers
+    webhooks.py                           # SSRF-safe webhook delivery
+  health/readiness.py   # ReadinessState + /health + /ready (now singleton READINESS_STATE)
+  discovery/capabilities.py, agent_hints.py, well_known.py
+  crawl/
+    engine.py (1142) • strategies/http.py (1703) • strategies/browser.py (902)
+    strategies/browser_pool.py • extraction.py • decompression.py • ... etc
+```
+
+### Historical planned structure (pre-refactor, retained for traceability):
 ```
 app/
   health/
