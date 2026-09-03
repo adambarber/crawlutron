@@ -91,6 +91,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B"]
+"app/api/**" = ["B008"]
+"app/main.py" = ["B008"]
 "**/__pycache__/**" = ["ALL"]
 
 [tool.pytest.ini_options]

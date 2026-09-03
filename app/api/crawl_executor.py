@@ -1,0 +1,81 @@
+"""Shared crawl execution path used by ``/v1/crawl`` and ``/v1/map``.
+
+Extracted from ``app/main.py`` so the crawl-execution logic and the
+endpoint handlers live in different modules. The executor takes the
+caller-supplied ``settings`` and ``shutdown_event`` explicitly (no
+module-level globals) so it can be invoked from any router.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from fastapi import HTTPException
+
+from app.constants import BROWSER_STRATEGIES
+from app.crawl.engine import crawl_request
+from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
+
+
+def _request_needs_browser(payload_dict: dict) -> bool:
+    """Return True when the request's strategy chain includes a browser step.
+
+    Used to defer the ``browser_pool_unavailable`` 503 to only requests that
+    actually need the browser pool, so HTTP-only crawls can succeed during
+    lifespan startup or after a pool-init failure (adversarial review
+    F-browser-pool-none).
+    """
+    try:
+        policy = payload_dict.get("policy") or {}
+        strategies = policy.get("strategies") or []
+    except (AttributeError, TypeError):
+        return False
+    return any(strategy in BROWSER_STRATEGIES for strategy in strategies)
+
+
+async def execute_crawl(
+    payload_dict: dict[str, Any],
+    *,
+    settings,
+    shutdown_event: asyncio.Event,
+) -> dict[str, Any]:
+    """Run a crawl shared by ``/v1/crawl`` and ``/v1/map``.
+
+    URL pre-validation: an invalid URL surfaces as a 422 (via the caller's
+    ``except ValueError``) instead of a misleading 503 from the pool guard.
+
+    Pool guard: only raises ``browser_pool_unavailable`` 503 when the pool
+    is None AND the request actually needs a browser strategy.
+    """
+    target_url = payload_dict.get("url")
+    if isinstance(target_url, str):
+        from app.validation import normalize_public_http_url
+        try:
+            normalize_public_http_url(target_url)
+        except ValueError:
+            return await crawl_request(
+                payload_dict,
+                settings=settings,
+                browser_worker=None,
+                shutdown_event=shutdown_event,
+            )
+    pool = get_browser_pool()
+    if pool is None and _request_needs_browser(payload_dict):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "browser_pool_unavailable",
+                "message": "Browser pool is not initialized; the service is starting up or shutting down.",
+            },
+        )
+    pooled_worker = PooledBrowserWorker(pool) if pool is not None else None
+    return await crawl_request(
+        payload_dict,
+        settings=settings,
+        browser_worker=pooled_worker,
+        shutdown_event=shutdown_event,
+    )
+
+
+__all__ = ["_request_needs_browser", "execute_crawl"]

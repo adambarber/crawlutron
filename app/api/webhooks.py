@@ -96,8 +96,7 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     parsed = urlparse(webhook_url)
     pinned_url = (
         f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
-        f"{parsed.path or '/'}"
-        + (f"?{parsed.query}" if parsed.query else "")
+        f"{parsed.path or '/'}" + (f"?{parsed.query}" if parsed.query else "")
     )
     request_headers = {"Content-Type": "application/json"}
     if parsed.hostname:
@@ -177,14 +176,19 @@ async def run_and_deliver_webhook(
     from app.crawl.strategies.browser_pool import PooledBrowserWorker
 
     if any(
-        x is None for x in (
-            _webhook_semaphore, _shutdown_event, _crawl_request_fn, _pool_getter,
-            _unified_response_cls, _build_unified_result_fn, _get_metrics_fn,
+        x is None
+        for x in (
+            _webhook_semaphore,
+            _shutdown_event,
+            _crawl_request_fn,
+            _pool_getter,
+            _unified_response_cls,
+            _build_unified_result_fn,
+            _get_metrics_fn,
         )
     ):
         raise RuntimeError(
-            "Webhook dependencies not initialized. Call "
-            "set_webhook_dependencies() from the FastAPI lifespan."
+            "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
         )
     validate_webhook_url(webhook_url)
     pooled_worker = PooledBrowserWorker(_pool_getter())
@@ -213,7 +217,7 @@ async def run_and_deliver_webhook(
             )
             return
         await deliver_pinned_webhook(webhook_url, payload_bytes)
-    except Exception:  # webhook delivery is best-effort
+    except Exception:  # noqa: BLE001, S110 - webhook delivery is best-effort
         pass
 
 
@@ -231,8 +235,7 @@ async def deliver_webhook(
     """
     if _webhook_semaphore is None:
         raise RuntimeError(
-            "Webhook dependencies not initialized. Call "
-            "set_webhook_dependencies() from the FastAPI lifespan."
+            "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
         )
     async with _webhook_semaphore:
         await run_and_deliver_webhook(webhook_url, request_id, payload_dict, crawl_settings)

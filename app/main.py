@@ -8,10 +8,6 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from app.constants import (
-    BROWSER_STRATEGIES,
-    MAX_DISCOVERED_LINKS,
-)
 from app.crawl.engine import crawl_request
 
 # Standalone JSON-line logging configuration. The previous version of this
@@ -22,13 +18,12 @@ from app.crawl.engine import crawl_request
 # integration layer.
 from app.logging_config import configure_service_logging
 
-from .api.main_helpers import _build_job_status, _raise_not_found
+from .api.crawl_executor import execute_crawl as _execute_crawl
 from .api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
-from .api.render import render_request
+from .api.response_shaping import (
+    build_unified_result as _build_unified_result,
+)
 from .api.webhooks import (
-    deliver_pinned_webhook as _deliver_pinned_webhook,
-    deliver_webhook as _deliver_webhook,
-    post_webhook as _post_webhook,
     validate_webhook_url as _validate_webhook_url,
 )
 from .api_models import (
@@ -36,27 +31,15 @@ from .api_models import (
     POLICY_SCHEMA_VERSION,
     CrawlerError,
     CrawlRequest,
-    FirecrawlMetadata,
-    JobControlRequest,
-    JobCreateRequest,
-    JobCreateResponse,
-    JobListResponse,
-    JobStatusResponse,
-    MapRequest,
-    RenderRequest,
     UnifiedCrawlResponse,
-    UnifiedCrawlResult,
 )
-from .crawl.firecrawl_format import _extract_firecrawl_metadata
-from .crawl.job_store import JobKind, JobStatus, JobStore
+from .crawl.job_store import JobKind, JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (
-    PooledBrowserWorker,
     close_browser_pool,
     get_browser_pool,
     initialize_browser_pool,
 )
-from .map import build_site_map
 from .metrics import get_metrics
 from .output_formats import serialize_results
 from .settings import CrawlerSettings
@@ -93,63 +76,6 @@ result_store = CrawlResultStore(
     max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
 )
 
-def _request_needs_browser(payload_dict: dict) -> bool:
-    """Return True when the request's strategy chain includes a browser step.
-
-    Used to defer the ``browser_pool_unavailable`` 503 to only requests that
-    actually need the browser pool, so HTTP-only crawls can succeed during
-    lifespan startup or after a pool-init failure (adversarial review
-    F-browser-pool-none).
-    """
-    try:
-        policy = payload_dict.get("policy") or {}
-        strategies = policy.get("strategies") or []
-    except (AttributeError, TypeError):
-        return False
-    return any(strategy in BROWSER_STRATEGIES for strategy in strategies)
-
-
-async def _execute_crawl(payload_dict: dict) -> dict:
-    """Shared crawl execution for /v1/crawl and /v1/map."""
-    # Validate the URL up front so an invalid URL surfaces as a 422 (via the
-    # downstream ``except ValueError`` in the caller) instead of a misleading
-    # 503 from the pool-unavailable guard below.
-    target_url = payload_dict.get("url")
-    if isinstance(target_url, str):
-        # Reuse the canonical normalizer; it raises ValueError on bad input.
-        # The caller's ``except ValueError`` then converts to 422 cleanly.
-        from app.validation import normalize_public_http_url
-        try:
-            normalize_public_http_url(target_url)
-        except ValueError:
-            # Let the downstream path handle it for the right error shape.
-            return await crawl_request(
-                payload_dict,
-                settings=settings,
-                browser_worker=None,
-                shutdown_event=shutdown_event,
-            )
-    pool = get_browser_pool()
-    if pool is None and _request_needs_browser(payload_dict):
-        # The lifespan startup either failed or hasn't completed; surface a
-        # clear service-unavailable error instead of letting PooledBrowserWorker
-        # crash on ``None.acquire()`` (adversarial review F-browser-pool-none).
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "browser_pool_unavailable",
-                "message": "Browser pool is not initialized; the service is starting up or shutting down.",
-            },
-        )
-    pooled_worker = PooledBrowserWorker(pool) if pool is not None else None
-    return await crawl_request(
-        payload_dict,
-        settings=settings,
-        browser_worker=pooled_worker,
-        shutdown_event=shutdown_event,
-    )
-
-
 # Ensure the parent directory of the log file exists before the logger tries
 # to open it; standalone checkouts default to ./logs which may not exist.
 if settings.log_file_path:
@@ -173,124 +99,6 @@ uvicorn_access_logger.setLevel(logger.level)
 # acted on. Keep ERROR+ visible, drop the chatter.
 logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
-def _format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    """Unified output formatter: produce ``(markdown, metadata_dict)`` for any result.
-
-    Every access strategy (HTTP, browser, document/PDF, Trafilatura) funnels through
-    this single path. The ``markdown`` field is populated by the unified extraction
-    pipeline (trafilatura for web HTML, markitdown for documents, pass-through for plain
-    text). For HTML pages the HTML metadata is extracted from the raw markup; results
-    without HTML fall back to the strategy's extracted ``text`` so the consumer always
-    receives a consistent Markdown payload regardless of how the content was acquired.
-    """
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    html = item.get("html")
-    markdown = item.get("markdown")
-    if markdown:
-        if html and url:
-            return markdown, _extract_firecrawl_metadata(html, url)
-        return markdown, {}
-    text = item.get("text")
-    if not text:
-        return None, {}
-    return text, {}
-
-
-def _build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
-    """Map an internal engine result into the unified API response model.
-
-    The unified response carries both the LLM-friendly ``markdown`` and the
-    full ``diagnostics`` payload. Firecrawl-style metadata is produced by the
-    shared Firecrawl metadata extractor (``extract_firecrawl_format``) from the
-    raw HTML when available.
-    """
-    markdown, metadata_dict = _format_crawl_item(item)
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    metadata = FirecrawlMetadata(
-        **{key: value for key, value in metadata_dict.items() if key in FirecrawlMetadata.model_fields}
-    )
-    if metadata.source_url is None:
-        metadata.source_url = url
-    return UnifiedCrawlResult(
-        original_url=item["original_url"],
-        normalized_url=item.get("normalized_url"),
-        final_url=item.get("final_url"),
-        status=item["status"],
-        classification=item["classification"],
-        selected_strategy=item.get("selected_strategy"),
-        attempted_strategies=item.get("attempted_strategies", []),
-        error=item.get("error"),
-        markdown=markdown,
-        metadata=metadata,
-        html=item.get("html"),
-        text=item.get("text"),
-        quality_score=item.get("quality_score", 0.0),
-        classification_evidence=item.get("classification_evidence", []),
-        http_status=item.get("http_status"),
-        headers=item.get("headers", {}),
-        content_type=item.get("content_type"),
-        extraction_method=item.get("extraction_method"),
-        diagnostics=item.get("diagnostics", {}),
-        discovered_link_count=item.get("discovered_link_count", 0),
-        discovered_links_truncated=item.get("discovered_links_truncated", False),
-        discovered_links=item.get("discovered_links", []),
-        next_page_url=item.get("next_page_url"),
-        validators=item.get("validators") or None,
-    )
-
-
-def _render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
-    """Adapt a browser ``CrawlResult`` dict into the unified result shape.
-
-    ``/v1/render`` reuses the same browser worker as the universal crawl path,
-    so its output is normalized through the identical ``_build_unified_result``
-    pipeline. Browser-specific discovery (intercepted XHR, screenshots) lives in
-    the result ``metadata`` dict and is carried into ``diagnostics`` so the
-    unified schema stays the single source of truth for both endpoints.
-    """
-    metadata = item.get("metadata") or {}
-    diagnostics: dict[str, Any] = {
-        key: value
-        for key, value in metadata.items()
-        if key not in {"title", "content_length", "browser_reused", "challenge_resolved", "extraction_method"}
-    }
-    diagnostics.setdefault("browser_profile", {})
-    return {
-        "original_url": item["url"],
-        "normalized_url": item["url"],
-        "final_url": item.get("final_url"),
-        "status": item["status"],
-        "classification": item["classification"],
-        "selected_strategy": None,
-        "attempted_strategies": [
-            {
-                "strategy": "BROWSER_HEADLESS",
-                "status": item["status"],
-                "classification": item["classification"],
-                "http_status": None,
-                "content_type": None,
-                "elapsed_ms": int(item.get("elapsed_ms", 0)),
-                "error": item.get("error"),
-            }
-        ],
-        "error": item.get("error"),
-        "markdown": None,
-        "metadata": {},
-        "html": item.get("html"),
-        "text": item.get("text"),
-        "quality_score": 1.0 if item["status"] == "success" else 0.0,
-        "classification_evidence": [],
-        "http_status": None,
-        "headers": {},
-        "content_type": None,
-        "extraction_method": metadata.get("extraction_method"),
-        "diagnostics": diagnostics,
-        "discovered_link_count": 0,
-        "discovered_links_truncated": False,
-        "discovered_links": [],
-        "next_page_url": None,
-    }
-
 
 def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlResponse:
     """Backward-compatible alias: build the unified response (was CondensedCrawlResponse)."""
@@ -304,12 +112,15 @@ def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlR
 
 
 if FastAPI is not None:
+
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
         # Startup: wire webhook helpers, initialize browser pool, load cookie jar.
+        from .api.async_crawl_runner import _get_async_crawl_semaphore
         from .api.webhooks import set_webhook_dependencies
+
         set_webhook_dependencies(
-            webhook_semaphore=_webhook_crawl_semaphore,
+            webhook_semaphore=_get_async_crawl_semaphore(),
             shutdown_event=shutdown_event,
             crawl_request_fn=crawl_request,
             pool_getter=get_browser_pool,
@@ -324,15 +135,18 @@ if FastAPI is not None:
             # exist on first run.
             os.makedirs(os.path.dirname(settings.cookie_jar_path) or ".", exist_ok=True)
             from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+
             _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
 
         yield
 
         # Shutdown: save cookie jar if persistence enabled, then close clients and browser pool
         from .api.webhooks import clear_webhook_dependencies
+
         clear_webhook_dependencies()
         if settings.cookie_persistence_enabled:
             from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+
             _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
 
         from app.crawl.strategies.http import close_async_http_client
@@ -358,11 +172,27 @@ if FastAPI is not None:
         contact={"name": "browser-crawler"},
         license_info={"name": "MIT License"},
         openapi_tags=[
-            {"name": "Health", "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration."},
-            {"name": "Discovery", "description": "Machine-readable service capabilities and AI agent guidance."},
-            {"name": "Crawler", "description": "Browser render and universal policy-driven crawl execution endpoints."},
+            {
+                "name": "Health",
+                "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",
+            },
+            {
+                "name": "Discovery",
+                "description": "Machine-readable service capabilities and AI agent guidance.",
+            },
+            {
+                "name": "Crawler",
+                "description": "Browser render and universal policy-driven crawl execution endpoints.",
+            },
         ],
     )
+    # Stash shared dependencies on ``app.state`` so router handlers outside
+    # this module can fetch them via :func:`get_settings` /
+    # :func:`get_shutdown_event` FastAPI dependencies.
+    app.state.crawler_settings = settings
+    app.state.shutdown_event = shutdown_event
+    app.state.job_store = job_store
+    app.state.result_store = result_store
 
     # Body-size guard: cap request bodies to a sane upper bound so a malicious
     # caller cannot exhaust memory with a 1GB JSON before pydantic validation
@@ -452,15 +282,21 @@ if FastAPI is not None:
     app.include_router(create_capabilities_router(settings))
     app.include_router(create_agent_hints_router(settings))
     app.include_router(create_well_known_router(settings))
+    from .api.jobs_router import router as jobs_router
+    from .api.map_router import router as map_router
+    from .api.metrics_router import router as metrics_router
+    from .api.render_router import router as render_router
+
+    app.include_router(metrics_router)
+    app.include_router(render_router)
+    app.include_router(map_router)
+    app.include_router(jobs_router)
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         # Standardize on the documented CrawlerError shape and strip pydantic
         # error internals (input/ctx echo caller-supplied values back at them).
-        sanitized = [
-            {"loc": err.get("loc"), "msg": err.get("msg")}
-            for err in exc.errors()
-        ]
+        sanitized = [{"loc": err.get("loc"), "msg": err.get("msg")} for err in exc.errors()]
         return JSONResponse(
             status_code=422,
             content={
@@ -491,126 +327,6 @@ if FastAPI is not None:
         return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
     @app.post(
-        "/v1/render",
-        tags=["Crawler"],
-        summary="Render pages with the browser worker",
-        description="Backward-compatible browser-render endpoint. Prefer POST /v1/crawl for policy-driven universal crawling.",
-        responses={400: {"model": CrawlerError, "description": "Invalid render request."}},
-    )
-    async def render(payload: RenderRequest) -> UnifiedCrawlResponse:
-        readiness_state.begin_request()
-        try:
-            pooled_worker = PooledBrowserWorker(get_browser_pool())
-            result = await render_request(
-                payload.model_dump(exclude_none=True),
-                settings=settings,
-                worker=pooled_worker,
-            )
-            logger.info("render_request_completed", extra={"url_count": len(result.get("results", []))})
-            return UnifiedCrawlResponse(
-                request_id=result["request_id"],
-                submitted_count=result["submitted_count"],
-                policy_schema_version=POLICY_SCHEMA_VERSION,
-                success=True,
-                results=[_build_unified_result(_render_result_to_unified(item)) for item in result.get("results", [])],
-            )
-        except ValueError as error:
-            logger.warning("render_request_rejected", extra={"error": str(error)})
-            raise HTTPException(status_code=400, detail={"code": str(error), "message": str(error), "details": {}}) from error
-        finally:
-            readiness_state.end_request()
-
-    # Bound webhook-mode background crawls: without a cap, a flood of 202s
-    # spawns unbounded concurrent crawls until the container OOMs.
-    _webhook_crawl_semaphore = asyncio.Semaphore(
-        max(1, int(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", "4")))
-    )
-
-    # Bound async single-shot crawls (Option 3): reuse the same concurrency limit
-    # to prevent unbounded background crawls.
-    _async_crawl_semaphore = _webhook_crawl_semaphore
-
-    async def _run_async_crawl(
-        request_id: str,
-        payload_dict: dict[str, Any],
-        webhook_url: str | None,
-        crawl_settings: CrawlerSettings,
-    ) -> None:
-        """Run a single-shot crawl in the background, persisting results to job_store.
-
-        Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED.
-        If webhook_url is provided, POSTs the result on completion.
-        """
-        # Load job and mark RUNNING
-        job = job_store.load(request_id)
-        if job is None:
-            logger.error("async_crawl_job_missing", extra={"request_id": request_id})
-            return
-        job.status = JobStatus.RUNNING
-        job_store.save(job)
-
-        try:
-            async with _async_crawl_semaphore:
-                pooled_worker = PooledBrowserWorker(get_browser_pool())
-                result = await crawl_request(
-                    payload_dict,
-                    settings=crawl_settings,
-                    browser_worker=pooled_worker,
-                    shutdown_event=shutdown_event,
-                )
-                result["request_id"] = request_id
-                get_metrics().observe_crawl(results=result.get("results", []))
-                unified_results = [_build_unified_result(item) for item in result.get("results", [])]
-                response_payload = UnifiedCrawlResponse(
-                    request_id=request_id,
-                    submitted_count=result.get("submitted_count", len(unified_results)),
-                    policy_schema_version=result.get("policy_schema_version", ""),
-                    success=True,
-                    results=unified_results,
-                ).model_dump()
-
-                # Store results in job_store (single source of truth for async jobs)
-                job.results = [response_payload]
-                job.status = JobStatus.COMPLETED
-                job.stats = {
-                    "total_discovered": len(unified_results),
-                    "total_crawled": len(unified_results),
-                    "total_failed": 0,
-                }
-                job_store.save(job)
-
-                # Also store in result_store for backward compat (sync path reads from here)
-                try:
-                    result_store.put(request_id, response_payload)
-                except Exception:  # noqa: BLE001
-                    logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
-
-                # Deliver webhook if provided
-                if webhook_url:
-                    await _post_webhook(webhook_url, response_payload)
-
-        except Exception as exc:  # noqa: BLE001 - background task must not crash
-            logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
-            job = job_store.load(request_id)
-            if job is not None:
-                job.status = JobStatus.FAILED
-                job.error = str(exc)
-                job_store.save(job)
-            if webhook_url:
-                try:
-                    error_payload = UnifiedCrawlResponse(
-                        request_id=request_id,
-                        submitted_count=0,
-                        policy_schema_version="",
-                        success=False,
-                        results=[],
-                    ).model_dump()
-                    await _post_webhook(webhook_url, error_payload)
-                except Exception:
-                    pass
-
-
-    @app.post(
         "/v1/crawl",
         response_model=None,
         tags=["Crawler"],
@@ -637,9 +353,18 @@ if FastAPI is not None:
             "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
         ),
         responses={
-            200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
-            202: {"model": CrawlerError, "description": "Accepted for async webhook delivery; check status_url."},
-            422: {"model": CrawlerError, "description": "Invalid crawl request or unsupported output format."},
+            200: {
+                "model": UnifiedCrawlResponse,
+                "description": "Successful crawl results (JSON output format).",
+            },
+            202: {
+                "model": CrawlerError,
+                "description": "Accepted for async webhook delivery; check status_url.",
+            },
+            422: {
+                "model": CrawlerError,
+                "description": "Invalid crawl request or unsupported output format.",
+            },
         },
         openapi_extra={
             "requestBody": {
@@ -696,7 +421,9 @@ if FastAPI is not None:
             # If async_mode is set (or webhook_url provided for backward compat),
             # create a single-shot job and run in background.
             if async_mode or webhook_url:
-                if webhook_url and (not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))):
+                if webhook_url and (
+                    not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
+                ):
                     raise HTTPException(
                         status_code=422,
                         detail={"code": "validation_error", "message": "Invalid webhook_url", "details": {}},
@@ -706,10 +433,19 @@ if FastAPI is not None:
                 # Use a stable request_id (also used as job_id for single-shot)
                 request_id = f"crawl_{uuid.uuid4().hex[:12]}"
                 # Create single-shot job in job_store (durable, resumable)
-                job = job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
+                job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
                 # Dispatch background task
+                from app.api.async_crawl_runner import run_async_crawl
+
                 background_tasks.add_task(
-                    _run_async_crawl, request_id, payload_dict, webhook_url, settings
+                    run_async_crawl,
+                    request_id,
+                    payload_dict,
+                    webhook_url,
+                    settings,
+                    job_store,
+                    result_store,
+                    shutdown_event,
                 )
                 get_metrics().observe_crawl(accepted=True)
                 return JSONResponse(
@@ -723,7 +459,7 @@ if FastAPI is not None:
                 )
             # Synchronous execution (default)
             _crawl_started = time.monotonic()
-            result = await _execute_crawl(payload_dict)
+            result = await _execute_crawl(payload_dict, settings=settings, shutdown_event=shutdown_event)
             get_metrics().observe_crawl(
                 results=result.get("results", []),
                 elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
@@ -763,53 +499,16 @@ if FastAPI is not None:
         except ValueError as error:
             get_metrics().observe_crawl(errors=1)
             logger.warning("crawl_request_rejected", extra={"error": str(error)})
-            raise HTTPException(status_code=422, detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}}) from error
-        finally:
-            readiness_state.end_request()
-    @app.post(
-        "/v1/map",
-        tags=["Crawler"],
-        summary="Discover the URL frontier for a root URL (#2)",
-        description=(
-            "Map a root URL to the URLs reachable from it: in-page discovered links plus the "
-            "URLs advertised via robots.txt sitemaps and feeds. Discovery is always enabled; the "
-            "caller controls the fetch policy (strategies, limits, scope_regex). The service returns "
-            "the de-duplicated frontier but does not recursively enqueue it; callers own recursion, "
-            "dedupe, persistence, and host-policy decisions."
-        ),
-        responses={400: {"model": CrawlerError, "description": "Invalid map request."}},
-    )
-    async def map_site(payload: MapRequest) -> dict:
-        readiness_state.begin_request()
-        try:
-            payload_dict = payload.model_dump(exclude_none=True)
-            # #2: mapping is a discovery operation; force discovery on regardless of caller input.
-            policy = payload_dict.setdefault("policy", {})
-            disc = dict(policy.get("discovery") or {})
-            disc["robots"] = True
-            disc["sitemaps"] = True
-            disc["feeds"] = True
-            policy["discovery"] = disc
-            limits = dict(policy.get("limits") or {})
-            limits.setdefault("max_discovered_links", MAX_DISCOVERED_LINKS)
-            policy["limits"] = limits
-            _crawl_started = time.monotonic()
-            result = await _execute_crawl(payload_dict)
-            get_metrics().observe_crawl(
-                results=result.get("results", []),
-                elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
-            )
-            logger.info("map_request_completed", extra={"url_count": len(result.get("results", []))})
-            return build_site_map(result)
-        except ValueError as error:
-            logger.warning("map_request_rejected", extra={"error": str(error)})
             raise HTTPException(
                 status_code=422,
-                detail={"code": "validation_error", "message": "Request validation failed", "details": {"errors": [{"msg": str(error)}]}},
+                detail={
+                    "code": "validation_error",
+                    "message": "Request validation failed",
+                    "details": {"errors": [{"msg": str(error)}]},
+                },
             ) from error
         finally:
             readiness_state.end_request()
-
 
     @app.get(
         "/v1/crawl/{request_id}",
@@ -835,117 +534,20 @@ if FastAPI is not None:
             # Job exists but not yet completed
             raise HTTPException(
                 status_code=202,
-                detail={"code": "pending", "message": f"Job {request_id} is still {job.status.value}", "details": {"status": job.status.value}},
+                detail={
+                    "code": "pending",
+                    "message": f"Job {request_id} is still {job.status.value}",
+                    "details": {"status": job.status.value},
+                },
             )
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Unknown or expired request_id: {request_id}", "details": {}},
+            detail={
+                "code": "not_found",
+                "message": f"Unknown or expired request_id: {request_id}",
+                "details": {},
+            },
         )
-
-    @app.post(
-        "/v1/jobs",
-        tags=["Crawler"],
-        summary="Create a new resumable whole-site crawl job (#3+#14)",
-        description=(
-            "Create a crawl job that recursively discovers and crawls URLs from a root URL. "
-            "The job persists its state (frontier, visited, results) to disk and can be "
-            "paused, resumed, and inspected across restarts. Callers own the job lifecycle."
-        ),
-        responses={422: {"model": CrawlerError, "description": "Invalid job request."}},
-    )
-    async def create_job(payload: JobCreateRequest) -> JobCreateResponse:
-        job = job_store.create(payload.root_url, payload.policy.model_dump(exclude_none=True))
-        return JobCreateResponse(
-            job_id=job.job_id,
-            status=job.status.value,
-            root_url=job.root_url,
-            created_at=job.created_at,
-        )
-
-    @app.get(
-        "/v1/jobs",
-        tags=["Crawler"],
-        summary="List all crawl jobs (#3+#14)",
-        description="Return a list of all crawl jobs with basic status info.",
-    )
-    async def list_jobs() -> JobListResponse:
-        jobs = job_store.list_jobs()
-        return JobListResponse(
-            jobs=[JobStatusResponse(**j) for j in jobs]
-        )
-
-    @app.get(
-        "/v1/jobs/{job_id}",
-        tags=["Crawler"],
-        summary="Get crawl job status and results (#3+#14)",
-        description="Return the full job state including frontier, visited URLs, and results.",
-        responses={404: {"model": CrawlerError, "description": "Job not found."}},
-    )
-    async def get_job(job_id: str) -> JobStatusResponse:
-        job = job_store.load(job_id)
-        if job is None:
-            _raise_not_found(job_id)
-        return _build_job_status(job)
-
-    @app.post(
-        "/v1/jobs/{job_id}/control",
-        tags=["Crawler"],
-        summary="Control a crawl job (pause/resume/cancel) (#3+#14)",
-        description="Pause, resume, or cancel a running crawl job.",
-        responses={404: {"model": CrawlerError, "description": "Job not found."},
-                   422: {"model": CrawlerError, "description": "Invalid action."}},
-    )
-    async def control_job(job_id: str, payload: JobControlRequest) -> JobStatusResponse:
-        job = job_store.load(job_id)
-        if job is None:
-            _raise_not_found(job_id)
-
-        action = payload.action.lower()
-        if action == "pause":
-            if job.status != JobStatus.RUNNING:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "invalid_state", "message": "Can only pause a running job"},
-                )
-            job.status = JobStatus.PAUSED
-        elif action == "resume":
-            if job.status != JobStatus.PAUSED:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "invalid_state", "message": "Can only resume a paused job"},
-                )
-            job.status = JobStatus.RUNNING
-        elif action == "cancel":
-            if job.status in {JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED}:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "invalid_state", "message": "Job already terminal"},
-                )
-            job.status = JobStatus.CANCELLED
-        else:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "invalid_action", "message": f"Unknown action: {action}"},
-            )
-
-        job_store.save(job)
-        return _build_job_status(job)
-
-    @app.delete(
-        "/v1/jobs/{job_id}",
-        tags=["Crawler"],
-        summary="Delete a crawl job (#3+#14)",
-        description="Permanently remove a crawl job and its data.",
-        responses={404: {"model": CrawlerError, "description": "Job not found."}},
-    )
-    async def delete_job(job_id: str) -> dict[str, str]:
-        if not job_store.delete(job_id):
-            _raise_not_found(job_id)
-        return {"status": "deleted", "job_id": job_id}
-
-    @app.get("/metrics", tags=["Health"], summary="Prometheus metrics endpoint (#16)")
-    async def metrics_endpoint() -> Response:
-        return Response(get_metrics().as_prometheus(), media_type="text/plain; version=0.0.4")
 
 else:
     app = None

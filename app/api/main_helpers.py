@@ -4,9 +4,10 @@ Centralizes JobStatusResponse construction and common error handling
 to eliminate code duplication.
 """
 
+from fastapi import HTTPException
+
 from app.api_models import JobStatusResponse
 from app.crawl.job_store import CrawlJobState
-from fastapi import HTTPException
 
 
 def _build_job_status(job: CrawlJobState) -> JobStatusResponse:
@@ -31,3 +32,6 @@ def _raise_not_found(job_id: str) -> None:
         status_code=404,
         detail={"code": "not_found", "message": "Job not found", "details": {"job_id": job_id}},
     )
+
+
+__all__ = ["_build_job_status", "_raise_not_found"]

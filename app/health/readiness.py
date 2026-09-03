@@ -1,7 +1,6 @@
 """Health and readiness endpoints (self-managed; no external config)."""
 
 import threading
-from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -54,10 +53,17 @@ class ReadinessState:
         }
 
 
+# Module-level singleton so routers outside this module (e.g. render, crawl,
+# map, jobs) can call ``begin_request`` / ``end_request`` without depending on
+# ``create_health_router`` being called first. ``create_health_router`` also
+# uses this instance so the readiness snapshot reflects the same counter.
+READINESS_STATE = ReadinessState()
+
+
 def create_health_router() -> "tuple[APIRouter, ReadinessState]":
     """Create health and readiness router (self-managed; no external config)."""
     router = APIRouter(tags=["Health"])
-    readiness_state = ReadinessState()
+    readiness_state = READINESS_STATE
 
     class HealthResponse(BaseModel):
         status: str = Field(description="Always 'ok' for liveness check.")
@@ -87,7 +93,9 @@ def create_health_router() -> "tuple[APIRouter, ReadinessState]":
         responses={
             503: {
                 "description": "Service saturated - resource guard at capacity (memory or CPU at target).",
-                "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}},
+                "content": {
+                    "application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}
+                },
             }
         },
     )
