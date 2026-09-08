@@ -36,12 +36,26 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # depends ONLY on the camoufox requirement line. Editing other requirements
 # (e.g. adding h2) therefore cannot invalidate this download, eliminating the
 # >10 minute rebuilds previously caused by a full layer-cache miss.
+#
+# NOTE: ``COPY --from`` can only see the stage's committed layer filesystem,
+# NOT BuildKit cache-mount contents (cache mounts are detached when the RUN
+# exits). The fetch therefore runs inside a cache mount for rebuild speed,
+# and the result is copied into the stage filesystem in the same RUN so the
+# runtime stage can pull it out via ``COPY --from=camoufox-binary``.
 FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS camoufox-binary
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir "$(grep -iE '^camoufox' requirements.txt)"
-RUN --mount=type=cache,target=/root/.cache/camoufox python -m camoufox fetch
+
+# Fetch the browser binary with a persistent cache mount as a safety net:
+# if the layer cache is pruned but the build cache survives, ``fetch``
+# short-circuits and the bundle layer is rebuilt cheaply from warm cache.
+RUN --mount=type=cache,target=/root/.cache/camoufox,sharing=locked \
+    python -m camoufox fetch \
+    && test -d /root/.cache/camoufox \
+    && mkdir -p /camoufox-bundle \
+    && cp -a /root/.cache/camoufox/. /camoufox-bundle/
 
 # ==========================================
 # 2. Runtime Stage: Lean production image
@@ -87,6 +101,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libxml2 libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
+
 # Create a non-root user for security
 RUN useradd -m -s /bin/bash appuser \
     && mkdir -p /app/logs /app/cache \
@@ -105,7 +120,7 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 # (the source image had not been tagged yet). The isolated stage depends only
 # on the camoufox package line, so editing other requirements cannot
 # invalidate the browser download cache.
-COPY --from=camoufox-binary --chown=appuser:appuser /home/appuser/.cache/camoufox /home/appuser/.cache/camoufox
+COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 
 # Copy application code. The logging helper is in-tree at
 # ``app/logging_config.py`` (no external shared-tree copy is needed).
