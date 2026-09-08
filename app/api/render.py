@@ -81,12 +81,17 @@ async def render_request(
         per_domain_limit=active_settings.per_domain_concurrency,
         delay_seconds=active_settings.per_domain_delay_ms / 1000,
     )
-    scheduled_results = await scheduler.run(jobs, lambda job: _call_worker(worker, job)) if jobs else []
-
+    # The scheduler hands each completed result to on_result together with the
+    # submitting job's index, so duplicate URLs in one batch map to their own
+    # slots. Matching by URL here would collapse duplicates onto index 0 and
+    # KeyError on the missing slot (adversarial H8), and is O(n^2) (L5a).
     by_index = dict(immediate_results)
-    for result in scheduled_results:
-        matching_job = next(job for job in jobs if job.url == result.url)
-        by_index[matching_job.index] = result
+
+    async def _collect(index: int, result: CrawlResult) -> None:
+        by_index[index] = result
+
+    if jobs:
+        await scheduler.run(jobs, lambda job: _call_worker(worker, job), on_result=_collect)
 
     ordered_results = [by_index[index] for index in range(len(urls))]
     return {
