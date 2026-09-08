@@ -777,15 +777,19 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
-        async with cffi_requests.AsyncClient(impersonate="firefox135", timeout=float(timeout_seconds)) as client:
+        # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
+        # AsyncClient does not exist; referencing it raises AttributeError
+        # and would silently degrade every impersonated fetch to plain httpx.
+        async with cffi_requests.AsyncSession(impersonate="firefox135", timeout=float(timeout_seconds)) as client:
             current_url = url
             hops = 0
+            started = time.monotonic()
             # Work with a copy of headers so we can mutate per-hop
             request_headers = dict(headers)
             while True:
                 pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
                 try:
-                    response = await client.get(pinned_url, headers=hop_headers, allow_redirects=False)
+                    response = await client.get(pinned_url, headers=hop_headers, allow_redirects=False, stream=True)
                 except Exception:
                     # Fall back to plain httpx for this request on transport errors.
                     return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
@@ -795,7 +799,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     return HttpFetchResult(
                         url=url, final_url=str(response.url), status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
-                        body=b"", elapsed_ms=int((time.monotonic() - 0) * 1000),
+                        body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
                     )
                 status_code = response.status_code
                 location = response.headers.get("location")
@@ -807,17 +811,31 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     hops += 1
                     continue
                 elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
-                # Decompress with a size cap (decompression-bomb guard).
+                # Stream RAW bytes with a running cap (H1): a hostile origin
+                # can omit content-length and stream gigabytes (chunked).
+                # Abort with a 413 as soon as the cap is exceeded instead of
+                # buffering the whole body into memory first.
                 encoding = response.headers.get("content-encoding", "")
+                raw = bytearray()
+                async for chunk in response.aiter_content():
+                    raw.extend(chunk)
+                    if len(raw) > max_content_length:
+                        return HttpFetchResult(
+                            url=url, final_url=str(response.url), status_code=413,
+                            headers={key.lower(): value for key, value in response.headers.items()},
+                            body=b"", elapsed_ms=elapsed_ms,
+                        )
+                raw_bytes = bytes(raw)
+                # Decompress with a size cap (decompression-bomb guard).
                 try:
-                    body = _decompress_body(response.content, encoding, max_output_bytes=max_content_length)
+                    body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
                 except DecompressionTooLargeError:
                     return HttpFetchResult(
                         url=url, final_url=str(response.url), status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
                         body=b"", elapsed_ms=elapsed_ms,
                     )
-                cffi_decompression_failed = detect_decompression_failure(response.content, encoding, body)
+                cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 resp_headers.pop("content-encoding", None)
                 _store_set_cookies(str(response.url), response.headers)
