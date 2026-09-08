@@ -6,18 +6,20 @@ Centralizes URL extraction and policy normalization used by both
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
-    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_EXTRACTION,
+    DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_STRATEGIES,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    MAX_RATE_LIMIT_RPS,
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
 )
 from app.settings import CrawlerSettings
-
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
@@ -70,6 +72,12 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         else:
             max_pages = max(1, min(2000, requested_pages))
         respect_robots = bool(limits.get("respect_robots", True))
+        max_rps = float(limits.get("max_rps", 0.0) or 0.0)
+        if not 0.0 <= max_rps <= MAX_RATE_LIMIT_RPS:
+            raise ValueError("invalid_policy_limits")
+        max_content_length_bytes = int(limits.get("max_content_length_bytes", 0) or 0)
+        if max_content_length_bytes < 0:
+            raise ValueError("invalid_policy_limits")
     except (TypeError, ValueError):
         raise ValueError("invalid_policy_limits") from None
     return {
@@ -87,6 +95,8 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             "respect_robots": respect_robots,
             "max_depth": max_depth,
             "max_pages": max_pages,
+            "max_rps": max_rps,
+            "max_content_length_bytes": max_content_length_bytes,
             "total_url_budget_seconds": max(0.1, min(900, float(limits.get("total_url_budget_seconds", DEFAULT_TOTAL_URL_BUDGET_SECONDS)))),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},

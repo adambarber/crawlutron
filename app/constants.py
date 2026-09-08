@@ -24,7 +24,7 @@ BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
 # Overridable via BROWSER_CRAWLER_USER_AGENT; update before publishing
 # to the final GitHub org (replace the placeholder URL below).
 DEFAULT_USER_AGENT: str = "browser-crawler/0.2 (+https://github.com/browser-crawler/browser-crawler)"
-USER_AGENT_TOKEN: str = "browser-crawler"
+USER_AGENT_TOKEN: str = "browser-crawler"  # noqa: S105 - robots.txt match token, not a credential
 BROWSER_HEADED_WARMED: str = "BROWSER_HEADED_WARMED"
 
 # Strategy ordering / registries (imported by service.py)
@@ -142,6 +142,10 @@ MAX_RETRIES: int = 5
 # reports idle capacity. Generous so it never trips on healthy targets.
 DEFAULT_TOTAL_URL_BUDGET_SECONDS: float = 180.0
 MAX_TOTAL_URL_BUDGET_SECONDS: float = 900.0
+# Upper bound for the per-domain token-bucket rate limiter (CrawlPolicyLimits
+# max_rps). Mirrors the API model's le=100.0 bound so the normalized policy
+# path and the pydantic path reject the same values.
+MAX_RATE_LIMIT_RPS: float = 100.0
 
 # Cache TTLs (seconds).
 DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
