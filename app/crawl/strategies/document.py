@@ -68,14 +68,36 @@ def _extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
         return _pdf_to_markdown(pdf)
 
 
+# Maximum redirect hops followed when fetching a document. Each hop is
+# re-validated against the SSRF guard (H2); beyond the budget the fetch
+# fails closed with empty text.
+_DOCUMENT_MAX_REDIRECTS = 5
+
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+    """Disable urlopen's automatic redirect-following.
+
+    Redirects are followed manually in the fetch loop below so every hop can
+    be re-validated against the SSRF guard first (H2).
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _default_document_text_extractor(url: str) -> str:
     """Default document text extractor: fetch the URL and extract Markdown.
 
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via
     ``BrowserRenderer(pdf_text_extractor=...)`` for tests.
 
-    SSRF (F2): the target URL is validated against the SSRF blocklist before
-    any fetch, so ``urlopen`` is never pointed at an internal/loopback host.
+    SSRF (F2, H2): the initial URL is validated against the SSRF blocklist
+    before any fetch, automatic redirect-following is disabled, and every
+    redirect hop is re-validated before it is fetched -- so the fetcher is
+    never pointed at an internal/loopback host, even when a public document
+    redirects to one.
     """
     # Fail closed on unsafe targets (internal/loopback/reserved ranges) BEFORE
     # any heavy import or network access (F2).
@@ -83,11 +105,24 @@ def _default_document_text_extractor(url: str) -> str:
 
     _check_ssrf_protection(url)
 
-    import pdfplumber
+    from urllib.parse import urljoin
 
+    opener = urllib.request.build_opener(_NoAutoRedirect)
+    current_url = url
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:  # noqa: S310 - validated above
-            pdf_bytes = response.read()
+        for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
+            with opener.open(current_url, timeout=30) as response:
+                status = getattr(response, "status", 200)
+                location = response.headers.get("Location")
+                if status in _REDIRECT_STATUSES and location:
+                    next_url = urljoin(current_url, location)
+                    _check_ssrf_protection(next_url)
+                    current_url = next_url
+                    continue
+                pdf_bytes = response.read()
+                break
+        else:
+            return ""
     except Exception:  # extraction failure yields empty text
         return ""
     try:
