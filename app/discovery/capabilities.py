@@ -2,8 +2,9 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.dependencies import get_settings
 from app.api_models import (
     CapabilitiesResponse,
     CrawlClassification,
@@ -20,6 +21,7 @@ from app.constants import (
 
 
 from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
+from app.search import active_search_provider_name, configured_search_providers
 
 OUTPUT_FIELDS = [
     "original_url",
@@ -78,6 +80,8 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "warmup": True,
             "request_profiles": True,
             "browser_profiles": True,
+            "web_search": True,
+            "mcp": True,
             "captcha_solving": False,
             "proxy_rotation": False,
             "identity_rotation": False,
@@ -94,17 +98,27 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "readiness_endpoint": True,
             "event_loop_thread_offload": True,
         },
+        "search": {
+            "active_provider": active_search_provider_name(settings),
+            "configured_providers": configured_search_providers(settings),
+            "endpoint": "/v1/search",
+            "provider_selection": "BROWSER_CRAWLER_SEARCH_PROVIDER (auto picks the first keyed provider; DuckDuckGo is the keyless fallback)",
+        },
+        "mcp": {
+            "endpoint": "/mcp",
+            "protocol_versions": ["2026-07-28"],
+        },
         "openapi_url": "/openapi.json",
         "swagger_ui_url": "/docs",
     }
 
 
-def create_capabilities_router(settings: CrawlerSettings) -> APIRouter:
+def create_capabilities_router() -> APIRouter:
     """Create capabilities router."""
     router = APIRouter(tags=["Discovery"])
 
     @router.get("/v1/capabilities", response_model=CapabilitiesResponse)
-    async def capabilities() -> dict[str, Any]:
+    async def capabilities(settings: CrawlerSettings = Depends(get_settings)) -> dict[str, Any]:
         """Describe crawler capabilities."""
         return capabilities_payload(settings)
 

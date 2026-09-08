@@ -1,16 +1,14 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-import pytest
 
+from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
-from app.models import HttpFetchResult
-from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import (
     _default_http_fetcher,
     _http_strategy_result,
     _looks_like_binary_body,
 )
-from app.constants import HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
+from app.models import HttpFetchResult
 
 
 async def _run(**kwargs):
@@ -140,7 +138,7 @@ class TestHttpStrategy:
 
     async def test_http_conditional_cache_returns_not_modified_on_304(self, base_url):
         url = f"{base_url}/with_etag"
-        cache = HttpCache(":memory:")
+        cache = HttpCache()
         cache.store(url, {"etag": "v1"})
         result = await _run(
             original_url=url,

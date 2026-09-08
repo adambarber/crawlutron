@@ -30,7 +30,7 @@ from app.constants import (
 
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
-API_VERSION = "0.2.0"
+API_VERSION = "0.3.0"
 SERVICE_NAME = "browser-crawler"
 
 
@@ -253,6 +253,55 @@ class MapRequest(BaseModel):
     policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.")
 
 
+class SiteMapResponse(BaseModel):
+    """Response for ``POST /v1/map``."""
+
+    url: str | None = Field(None, description="Root URL (final_url or original_url) of the mapping crawl.")
+    links: list[str] = Field(default_factory=list, description="In-page discovered links (sorted, de-duplicated).")
+    sitemaps: list[str] = Field(default_factory=list, description="robots.txt + sitemap.xml URLs (sorted, de-duplicated).")
+    feeds: list[str] = Field(default_factory=list, description="Discovered feed URLs (sorted, de-duplicated).")
+    all_urls: list[str] = Field(default_factory=list, description="De-duplicated union in stable encounter order.")
+
+
+class SearchRequest(BaseModel):
+    """Request body for ``POST /v1/search``.
+
+    A web-search query that returns SERP-style results (title, url,
+    description) from the configured provider. The service does not crawl
+    result URLs; callers pipe them into ``POST /v1/crawl`` themselves.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(..., min_length=1, max_length=500, description="Web search query.")
+    limit: int | None = Field(
+        None,
+        ge=1,
+        le=100,
+        description="Maximum results to return. Defaults to the server setting "
+        "BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT and is clamped to "
+        "BROWSER_CRAWLER_SEARCH_LIMIT_MAX.",
+    )
+
+
+class SearchResultItem(BaseModel):
+    """A single SERP result from ``POST /v1/search``."""
+
+    url: str = Field(description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service.")
+    title: str = Field(description="Result title from the search engine.")
+    description: str = Field("", description="Result snippet from the search engine.")
+
+
+class SearchResponse(BaseModel):
+    """Response for ``POST /v1/search`` (Firecrawl-style envelope)."""
+
+    success: bool = Field(True, description="True when the provider responded and results were shaped.")
+    query: str = Field(description="Echo of the submitted query.")
+    provider: str = Field(description="Search provider that produced the results.")
+    limit: int = Field(description="Number of results returned.")
+    data: list[SearchResultItem] = Field(default_factory=list, description="Ordered SERP results.")
+
+
 
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
@@ -381,6 +430,22 @@ class ReadinessResponse(BaseModel):
     saturated: bool = Field(description="True when the self-managed resource guard is at capacity; callers should treat HTTP 503 as backpressure, not process death.")
 
 
+class SearchCapabilities(BaseModel):
+    """Declared web-search capability for ``/v1/capabilities``."""
+
+    active_provider: str = Field(description="Provider ``auto`` selection resolves to for the current settings.")
+    configured_providers: list[str] = Field(description="Providers with credentials configured, in priority order.")
+    endpoint: str = Field(description="The web-search endpoint path.")
+    provider_selection: str = Field(description="Human-readable summary of how the provider is selected.")
+
+
+class McpCapabilities(BaseModel):
+    """Declared MCP capability for ``/v1/capabilities``."""
+
+    endpoint: str = Field(description="The MCP streamable-HTTP endpoint path.")
+    protocol_versions: list[str] = Field(description="MCP protocol versions the server implements.")
+
+
 class CapabilitiesResponse(BaseModel):
     service: str
     version: str
@@ -391,6 +456,8 @@ class CapabilitiesResponse(BaseModel):
     output_fields: list[str]
     default_limits: dict[str, int]
     features: dict[str, bool]
+    search: SearchCapabilities
+    mcp: McpCapabilities
     openapi_url: str
     swagger_ui_url: str
 

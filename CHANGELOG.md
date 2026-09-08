@@ -5,6 +5,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Web search endpoint** (`POST /v1/search`): discover public URLs from a
+  query via an operator-configured provider. Provider abstraction ships
+  Tavily, Brave, and Serper (keyed) plus a keyless DuckDuckGo fallback;
+  `BROWSER_CRAWLER_SEARCH_PROVIDER=auto` activates the first provider whose
+  `*_API_KEY` is set. Result URLs pass the same public-URL/SSRF validation as
+  crawl targets; provider failures surface as `502` and a selected-but-
+  unconfigured provider as `503` naming the missing variable. Search metrics
+  are exposed on `/metrics` (`crawler_search_*`).
+- **MCP 2026-07-28 endpoint** (`POST /mcp`): stateless streamable-HTTP server
+  exposing `search`, `crawl`, `map`, and `render` as MCP tools. Implements the
+  stateless protocol (no `initialize` handshake): `server/discover`,
+  `tools/list`, `tools/call`, per-request `_meta` validation, and
+  header/body validation for `MCP-Protocol-Version` / `Mcp-Method` /
+  `Mcp-Name`, with Origin (DNS-rebinding) rejection. Tools delegate to the
+  same handlers as the REST endpoints, so all four strategies and every
+  extraction method are available over MCP.
+- **Discovery payloads** now advertise search + MCP: `/v1/capabilities` gains
+  typed `search` and `mcp` capability blocks plus `web_search`/`mcp` feature
+  flags; `/v1/agent-hints` and `/.well-known/crawler-service` link the new
+  endpoints. Discovery routers now read settings via `Depends(get_settings)`
+  instead of closing over import-time values.
+- **Removed compatibility code**: `app/main.py` backward-compat exports
+  (`_format_crawl_item`, `_render_result_to_unified`, `build_unified_crawl_response`)
+  and the accepted-but-ignored `HttpCache(db_path=...)` parameter are gone;
+  `/v1/render` now uses the injected settings like every other endpoint.
+
 ### Security
 - **Thread-safety on `_DNS_CACHE`** (app/crawl/strategies/http.py): the
   module-level DNS resolution cache is now guarded by a `threading.Lock`,

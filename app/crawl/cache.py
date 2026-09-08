@@ -15,10 +15,9 @@ Design notes:
   =False`` connection with no lock -- a crash-under-load hazard on the async
   loop. A plain dict guarded by a lock is correct under the GIL for this
   access pattern.
-* ``db_path`` is accepted for backward compatibility but ignored: the cache is
-  intentionally in-memory. Persistence across restarts is out of scope here
-  (conditional revalidation is a within-session fast path); content caching
-  belongs to :class:`app.crawl.content_cache.ContentCache`.
+* The cache is intentionally in-memory. Persistence across restarts is out of
+  scope here (conditional revalidation is a within-session fast path); content
+  caching belongs to :class:`app.crawl.content_cache.ContentCache`.
 """
 
 from __future__ import annotations
@@ -36,15 +35,11 @@ class HttpCache:
 
     def __init__(
         self,
-        db_path: str = ":memory:",
         *,
         ttl_seconds: float = _DEFAULT_TTL_SECONDS,
         max_entries: int = _MAX_ENTRIES,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        # ``db_path`` retained for backward compatibility with legacy callers;
-        # this implementation is in-memory regardless.
-        del db_path
         self._ttl_seconds = max(0.0, ttl_seconds)
         self._max_entries = max(1, max_entries)
         self._clock = clock

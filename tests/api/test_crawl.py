@@ -8,7 +8,7 @@ from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.main import app, build_unified_crawl_response
+from app.main import app
 
 
 class TestCrawlApi:
@@ -210,7 +210,9 @@ class TestDiscoveryAndRenderApi:
             assert resp.status_code == 200, path
             assert resp.json()
 
-    async def test_condensed_response_alias(self):
+    async def test_build_unified_response(self):
+        from app.api.response_shaping import build_unified_crawl_response
+
         resp = build_unified_crawl_response([
             {"original_url": "http://x/", "final_url": "http://x/", "status": "success", "classification": "rendered"}
         ])

@@ -27,6 +27,13 @@ class MetricsStore:
     strategy_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     classification_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     total_elapsed_ms: float = 0.0
+    # Web search (POST /v1/search): per-provider result counts so operators can
+    # see which backend serves queries and whether any provider is erroring.
+    search_requests_total: int = 0
+    search_results_total: int = 0
+    search_errors_total: int = 0
+    search_provider_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    search_total_elapsed_ms: float = 0.0
 
     def reset(self) -> None:
         """Reinitialize every field in place to its default.
@@ -66,6 +73,21 @@ class MetricsStore:
         self.total_elapsed_ms += elapsed_ms
         self.crawl_errors_total += errors
 
+    def observe_search(
+        self,
+        *,
+        provider: str,
+        results: int = 0,
+        elapsed_ms: float = 0.0,
+        errors: int = 0,
+    ) -> None:
+        self.search_requests_total += 1
+        self.search_results_total += results
+        self.search_errors_total += errors
+        if provider:
+            self.search_provider_counts[provider] += results
+        self.search_total_elapsed_ms += elapsed_ms
+
     def as_prometheus(self) -> str:
         lines: list[str] = []
 
@@ -84,6 +106,14 @@ class MetricsStore:
         counter("crawler_crawl_success_total", self.crawl_success_total, "Total successful crawl results.")
         counter("crawler_crawl_failure_total", self.crawl_failure_total, "Total failed crawl results.")
         counter("crawler_crawl_errors_total", self.crawl_errors_total, "Total rejected/invalid crawl requests.")
+        counter("crawler_search_requests_total", self.search_requests_total, "Total web search requests received.")
+        counter("crawler_search_results_total", self.search_results_total, "Total web search results returned.")
+        counter("crawler_search_errors_total", self.search_errors_total, "Total failed web search requests.")
+        for provider, count in sorted(self.search_provider_counts.items()):
+            lines.append(f'crawler_search_results_total{{provider="{provider}"}} {count}')
+        lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
+        lines.append("# TYPE crawler_search_seconds_total counter")
+        lines.append(f"crawler_search_seconds_total {self.search_total_elapsed_ms / 1000.0:.3f}")
         lines.append("# HELP crawler_crawl_seconds_total Total wall-clock time spent crawling (seconds).")
         lines.append("# TYPE crawler_crawl_seconds_total counter")
         lines.append(f"crawler_crawl_seconds_total {self.total_elapsed_ms / 1000.0:.3f}")

@@ -71,6 +71,7 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
 )
 async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
     from app.api.main_helpers import _build_job_status
+
     job = job_store.load(job_id)
     if job is None:
         _raise_not_found(job_id)
@@ -92,6 +93,7 @@ async def control_job(
     job_store=Depends(get_job_store),
 ) -> JobStatusResponse:
     from app.api.main_helpers import _build_job_status
+
     job = job_store.load(job_id)
     if job is None:
         _raise_not_found(job_id)

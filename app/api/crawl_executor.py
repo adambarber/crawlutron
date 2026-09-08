@@ -51,6 +51,7 @@ async def execute_crawl(
     target_url = payload_dict.get("url")
     if isinstance(target_url, str):
         from app.validation import normalize_public_http_url
+
         try:
             normalize_public_http_url(target_url)
         except ValueError:

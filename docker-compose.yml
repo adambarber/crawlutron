@@ -26,10 +26,17 @@ services:
       BROWSER_CRAWLER_LOG_FILE: "/app/logs/browser-crawler.jsonl"
       # Opt-in: enable the on-disk content cache for repeatable crawls.
       BROWSER_CRAWLER_CONTENT_CACHE_ENABLED: "true"
-      # Local-dev escape hatch for the SSRF guard so the loopback fixtures
-      # used in the integration tests work. Remove this in production and
-      # rely on the default SSRF guard.
+      # SSRF guard on (secure default): only public HTTP(S) targets are
+      # crawlable. Set to "1" only for loopback-only local experimentation.
       BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS: "0"
+      # --- Web search (POST /v1/search) ---
+      # "auto" activates the first keyed provider whose *_API_KEY is set, then
+      # falls back to the keyless DuckDuckGo endpoint. Uncomment a key below to
+      # enable that provider for production use.
+      BROWSER_CRAWLER_SEARCH_PROVIDER: "auto"
+      # BROWSER_CRAWLER_TAVILY_API_KEY: ""
+      # BROWSER_CRAWLER_BRAVE_API_KEY: ""
+      # BROWSER_CRAWLER_SERPER_API_KEY: ""
     volumes:
       - ./logs:/app/logs
       - ./cache:/app/cache

@@ -13,7 +13,6 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from app.settings import CrawlerSettings
 
 
 from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
@@ -46,6 +45,10 @@ GUIDANCE = [
     "Inspect diagnostics.frames for legacy frameset and iframe URLs; the service reports frames but does not recursively crawl them.",
     "Inspect diagnostics.forms for form actions, methods, targets, and controls; the service reports forms but does not automatically submit them.",
     "Treat discovered pagination links as URL evidence only; callers must preserve form/search state before enqueueing paginated result URLs.",
+    "Use POST /v1/search to discover public URLs from a query; it returns SERP-style results (title, url, description) and does NOT crawl. Pipe result URLs into POST /v1/crawl.",
+    "Search result titles and snippets are provider-supplied and unverified; treat them as hints until the URL itself is crawled.",
+    "The active search provider is operator-configured (BROWSER_CRAWLER_SEARCH_PROVIDER + the matching *_API_KEY); GET /v1/capabilities reports which provider is active.",
+    "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol versions and capabilities, and tools/list exposes search, crawl, map, and render. The MCP tools mirror the REST endpoints exactly.",
     "Use discovered_link_count and discovered_links_truncated to decide whether to request a higher max_discovered_links limit.",
     "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, or access-denied controls; report those outcomes as classifications and evidence.",
     "Do not solve CAPTCHAs, do not rotate proxies, do not rotate identities, do not inject credentials, and do not continue after explicit denial.",
@@ -86,7 +89,7 @@ def agent_hints_payload() -> dict[str, Any]:
     }
 
 
-def create_agent_hints_router(settings: CrawlerSettings) -> APIRouter:
+def create_agent_hints_router() -> APIRouter:
     """Create agent hints router."""
     router = APIRouter(tags=["Discovery"])
 

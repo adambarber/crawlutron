@@ -1319,7 +1319,8 @@ async def _http_strategy_result(
             caller_conditional["If-None-Match"] = caller_validators["if_none_match"]
         if caller_validators.get("if_modified_since"):
             caller_conditional["If-Modified-Since"] = caller_validators["if_modified_since"]
-    # Provide default limits for backward compatibility with tests
+    # Apply policy limits; fall back to strategy defaults when the caller
+    # omitted them (engine-provided policies always carry explicit limits).
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)

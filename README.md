@@ -14,6 +14,10 @@ FastAPI. It exposes a single, machine-readable crawl contract that supports:
   on outcome rather than guessing.
 - **Discovery endpoints** — capabilities, agent hints, and a `.well-known` service
   descriptor so agents/bots can discover the contract without prior knowledge.
+- **Web search** — `POST /v1/search` discovers public URLs from a query through a
+  keyed provider (Tavily / Brave / Serper) with a keyless DuckDuckGo fallback.
+- **MCP** — `POST /mcp` exposes search/crawl/map/render as tools over the
+  Model Context Protocol (2026-07-28, stateless streamable HTTP).
 - **SSRF protection** — target URLs are validated to be public HTTP(S) only.
 - **Webhooks, batching, recursion, rate limiting, robots.txt respect** — best-effort,
   caller-owned frontier semantics.
@@ -116,12 +120,53 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 | `GET`  | `/ready` | Readiness probe; returns `503` when the self-managed resource guard is saturated (memory or CPU at the gate target). |
 | `POST` | `/v1/crawl` | Submit one URL (or a batch of URLs) for crawling. |
 | `POST` | `/v1/render` | Render a URL with the browser engine and return structured output. |
+| `POST` | `/v1/search` | Discover public URLs from a query via the configured search provider. |
+| `POST` | `/mcp` | MCP 2026-07-28 endpoint exposing search/crawl/map/render as tools. |
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
 | `GET`  | `/.well-known/crawler-service` | Service discovery descriptor (links to OpenAPI, agent hints, capabilities). |
 | `GET`  | `/metrics` | Prometheus-format metrics. |
 
 ---
+
+## Web search
+
+`POST /v1/search` discovers public URLs from a query and returns SERP-style
+results (`{success, query, provider, limit, data: [{url, title, description}]}`).
+It does **not** crawl result URLs — pipe them into `POST /v1/crawl`.
+
+The backend is operator-configured, not caller-selected:
+
+- `BROWSER_CRAWLER_SEARCH_PROVIDER` (`auto` | `tavily` | `brave` | `serper` | `duckduckgo`).
+- `auto` (default) activates the first configured keyed provider in priority
+  order (Tavily to Brave to Serper) and falls back to the keyless DuckDuckGo
+  HTML endpoint when no API key is set. The keyless endpoint may be
+  captcha-blocked from datacenter IPs, so configure a key for production use.
+- A selected provider without its key returns `503 search_provider_unavailable`
+  naming the missing `BROWSER_CRAWLER_*_API_KEY` variable.
+
+Result URLs pass the same public-URL validation as crawl targets (loopback and
+private targets are dropped). `GET /v1/capabilities` reports the active
+provider and the configured provider list.
+
+## MCP
+
+`POST /mcp` exposes `search`, `crawl`, `map`, and `render` as tools over the
+**Model Context Protocol (2026-07-28)** — the stateless revision: no
+`initialize` handshake, no sessions. Every request carries its protocol
+version and client capabilities in `_meta`, and the transport validates the
+`MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` headers against the body.
+
+- `server/discover` — supported protocol versions, capabilities, server identity.
+- `tools/list` — the four tools with JSON-Schema inputs.
+- `tools/call` — invokes a tool; returns text `content` plus
+  `structuredContent`, with `isError` set for execution failures.
+- The tools mirror the REST endpoints and delegate to the same handlers, so
+  **all four strategies and every extraction method are available through MCP**.
+- Webhook/async delivery is not available over MCP.
+
+The endpoint is loopback-only and rejects non-loopback `Origin` headers (DNS
+rebinding defense).
 
 ## Crawl request shape
 
@@ -230,6 +275,13 @@ defaults shown):
 | `BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS` | _(RAM-derived; ~139 at 3 GiB)_ | Max concurrent HTTP connections. Derived from the cgroup memory limit and capped at 512; override only to shrink. Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
 | `BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE` | _(RAM-derived; ~69 at 3 GiB)_ | Max idle keep-alive connections (≈ half of the connection ceiling). |
 | `BROWSER_CRAWLER_BROWSER_POOL_SIZE` | _(RAM-derived; 2 at 3 GiB)_ | Explicit browser-pool size override. Default is derived from the cgroup limit (reserves ≤50% of RAM for browsers); raising it multiplies RAM use and risks OOM. |
+| `BROWSER_CRAWLER_SEARCH_PROVIDER` | `auto` | Search backend: `auto` (first configured keyed provider) or explicit `tavily` / `brave` / `serper` / `duckduckgo`. |
+| `BROWSER_CRAWLER_TAVILY_API_KEY` | `""` | Tavily Search API key (activates the `tavily` provider). |
+| `BROWSER_CRAWLER_BRAVE_API_KEY` | `""` | Brave Search API key (activates the `brave` provider). |
+| `BROWSER_CRAWLER_SERPER_API_KEY` | `""` | Serper.dev API key (activates the `serper` provider). |
+| `BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT` | `5` | Default result count per search. |
+| `BROWSER_CRAWLER_SEARCH_LIMIT_MAX` | `20` | Hard cap on results per search. |
+| `BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
 | `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
 | `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
 | `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
@@ -290,6 +342,13 @@ with `422`.
 │   │   └── job_store.py / result_store.py / cache.py / content_cache.py
 │   ├── health/           # /health, /ready (READINESS_STATE singleton)
 │   ├── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known
+│   ├── search/           # /v1/search provider abstraction + endpoint
+│   │   ├── providers.py  # Tavily / Brave / Serper / DuckDuckGo + selection
+│   │   └── endpoint.py / router.py
+│   ├── mcp/              # MCP 2026-07-28 endpoint (POST /mcp)
+│   │   ├── protocol.py   # JSON-RPC helpers + request-metadata validation
+│   │   ├── tools.py      # search/crawl/map/render tool registry
+│   │   └── server.py / router.py
 │   ├── classify.py / constants.py / models.py / api_models.py / validation.py
 │   ├── scheduler.py / settings.py / metrics.py / output_formats.py / logging_config.py
 │   └── ...

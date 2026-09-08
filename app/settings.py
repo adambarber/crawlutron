@@ -81,6 +81,18 @@ class CrawlerSettings:
     max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
     browser_pool_size: int = DEFAULT_BROWSER_POOL_SIZE
     challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
+    # Web search provider configuration (POST /v1/search). ``search_provider``
+    # selects the backend: "auto" (default) picks the first configured keyed
+    # provider in priority order (tavily -> brave -> serper) and falls back to
+    # the keyless DuckDuckGo HTML endpoint when none are configured. An
+    # explicit provider name requires its matching ``*_API_KEY`` to be set.
+    search_provider: str = "auto"
+    tavily_api_key: str = ""
+    brave_api_key: str = ""
+    serper_api_key: str = ""
+    search_limit_default: int = 5
+    search_limit_max: int = 20
+    search_timeout_seconds: int = 15
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
@@ -122,4 +134,11 @@ class CrawlerSettings:
             max_concurrent_pages=int(source.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages)),
             browser_pool_size=int(source.get("BROWSER_CRAWLER_BROWSER_POOL_SIZE", cls.browser_pool_size)),
             challenge_wait_seconds=int(source.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds)),
+            search_provider=source.get("BROWSER_CRAWLER_SEARCH_PROVIDER", cls.search_provider),
+            tavily_api_key=source.get("BROWSER_CRAWLER_TAVILY_API_KEY", cls.tavily_api_key),
+            brave_api_key=source.get("BROWSER_CRAWLER_BRAVE_API_KEY", cls.brave_api_key),
+            serper_api_key=source.get("BROWSER_CRAWLER_SERPER_API_KEY", cls.serper_api_key),
+            search_limit_default=int(source.get("BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT", cls.search_limit_default)),
+            search_limit_max=int(source.get("BROWSER_CRAWLER_SEARCH_LIMIT_MAX", cls.search_limit_max)),
+            search_timeout_seconds=int(source.get("BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds)),
         )

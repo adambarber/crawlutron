@@ -30,14 +30,14 @@ from app.settings import CrawlerSettings
 logger = logging.getLogger(__name__)
 
 
-async def render(payload: RenderRequest) -> UnifiedCrawlResponse:
+async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCrawlResponse:
     """Render ``payload`` URLs with the pooled browser worker."""
     readiness_state.begin_request()
     try:
         pooled_worker = PooledBrowserWorker(get_browser_pool())
         result = await render_request(
             payload.model_dump(exclude_none=True),
-            settings=CrawlerSettings.from_mapping(),
+            settings=settings,
             worker=pooled_worker,
         )
         logger.info(

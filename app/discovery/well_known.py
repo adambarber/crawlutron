@@ -5,7 +5,6 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api_models import DiscoveryResponse
-from app.settings import CrawlerSettings
 
 
 from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
@@ -23,13 +22,24 @@ def discovery_payload() -> dict[str, Any]:
             "readiness": "/ready",
             "capabilities": "/v1/capabilities",
             "agent_hints": "/v1/agent-hints",
+            "search": "/v1/search",
+            "mcp": "/mcp",
         },
-        "recommended_endpoints": ["GET /health", "GET /ready", "GET /v1/capabilities", "GET /v1/agent-hints", "POST /v1/crawl", "POST /v1/render"],
+        "recommended_endpoints": [
+            "GET /health",
+            "GET /ready",
+            "GET /v1/capabilities",
+            "GET /v1/agent-hints",
+            "POST /v1/crawl",
+            "POST /v1/render",
+            "POST /v1/search",
+            "POST /mcp",
+        ],
         "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",
     }
 
 
-def create_well_known_router(settings: CrawlerSettings) -> APIRouter:
+def create_well_known_router() -> APIRouter:
     """Create well-known discovery router."""
     router = APIRouter(tags=["Discovery"])
 

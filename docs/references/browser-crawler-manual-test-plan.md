@@ -78,7 +78,7 @@ done
 
 ---
 
-## 4. Endpoint Inventory (8 endpoints + OpenAPI)
+## 4. Endpoint Inventory (10 endpoints + OpenAPI)
 
 | # | Method & Path | Tag | Purpose | Test IDs |
 |---|---|---|---|---|
@@ -90,7 +90,9 @@ done
 | E6 | `GET /.well-known/crawler-service` | Discovery | Machine-readable discovery links | TC-WK-01 |
 | E7 | `POST /v1/crawl` | Crawler | Policy-driven crawl (single + batch + webhook) | TC-CRAWL-* (many) |
 | E8 | `POST /v1/render` | Crawler | Backward-compatible browser render | TC-RENDER-01..04 |
-| E9 | `GET /openapi.json`, `GET /docs` | — | OpenAPI spec / Swagger UI | TC-OPENAPI-01 |
+| E9 | `POST /v1/search` | Search | Web search via configured provider | TC-SEARCH-01..03 |
+| E10 | `POST /mcp` | MCP | MCP 2026-07-28 streamable HTTP (discover/list/call) | TC-MCP-01..04 |
+| E11 | `GET /openapi.json`, `GET /docs` | — | OpenAPI spec / Swagger UI | TC-OPENAPI-01 |
 
 ---
 
@@ -267,7 +269,32 @@ All 30 values appear in `supported_classifications` (TC-CAP-01) and counters
 
 ---
 
-## 9. Execution (Smoke Test)
+## 9. Search & MCP Endpoints
+
+### TC-SEARCH-01 — Search returns shaped results
+With a keyed provider configured (`BROWSER_CRAWLER_SEARCH_PROVIDER` + the matching `*_API_KEY`), `POST /v1/search` with `{"query": "..."}` → `200`, body `{success, query, provider, limit, data:[{url, title, description}]}`. Result URLs are public HTTP(S) only; loopback/private targets are dropped.
+
+### TC-SEARCH-02 — Provider selection and configuration errors
+`GET /v1/capabilities` reports `search.active_provider` and `search.configured_providers`. With `BROWSER_CRAWLER_SEARCH_PROVIDER=brave` but no `BROWSER_CRAWLER_BRAVE_API_KEY` → `503 search_provider_unavailable` naming the missing variable. Keyless DuckDuckGo is the `auto` fallback when no key is configured (may be captcha-blocked from datacenter IPs).
+
+### TC-SEARCH-03 — Provider error surface
+A keyed provider returning non-200 → `502 search_provider_error` with the provider's message.
+
+### TC-MCP-01 — server/discover
+`POST /mcp` with a JSON-RPC `server/discover` request plus `MCP-Protocol-Version` / `Mcp-Method` headers → `200`, `result.resultType == "complete"`, `supportedVersions` contains `2026-07-28`, `capabilities.tools`, and `_meta.serverInfo`.
+
+### TC-MCP-02 — tools/list and tools/call
+`tools/list` → tools `search, crawl, map, render` (each with `description` + `inputSchema`). `tools/call` for each primitive returns `resultType: "complete"` with `content` and (for crawl/map/search) `structuredContent`. The crawl tool accepts the full default strategy chain (all four strategies) and the engine picks the first working one.
+
+### TC-MCP-03 — Request metadata validation
+Missing/mismatched `MCP-Protocol-Version`, `Mcp-Method`, or `Mcp-Name` → `400` with `-32020` (`HeaderMismatch`) or `-32022` (`UnsupportedProtocolVersion`); missing `_meta` → `400 -32602`; unknown method → `404 -32601`; non-loopback `Origin` → `403`.
+
+### TC-MCP-04 — Notifications and tool errors
+A JSON-RPC notification (no `id`) → `202` empty body. `tools/call` with an unknown tool → `-32602` "Unknown tool". Webhook/async args (`async_mode`/`webhook_url`) over MCP → tool error (`isError: true`) naming `POST /v1/crawl`.
+
+---
+
+## 10. Execution (Smoke Test)
 
 Run the high-value subset to confirm end-to-end health. Each step prints PASS/FAIL.
 
@@ -292,6 +319,16 @@ curl -fsS -X POST $B/v1/crawl -H 'Content-Type: application/json' \
 curl -fsS -X POST $B/v1/render -H 'Content-Type: application/json' \
   -d '{"url":"https://example.com"}' | jq_ok '.results[0].markdown' TC-RENDER-01
 
+# E9 search (requires a configured provider key; otherwise 503 is expected)
+curl -s -o /tmp/r.json -w '%{http_code}' -X POST $B/v1/search -H 'Content-Type: application/json' \
+  -d '{"query":"example","limit":3}' | grep -qE '200|503' && echo "PASS TC-SEARCH-01" || echo "FAIL TC-SEARCH-01"
+
+# E10 MCP discover
+curl -fsS -X POST $B/mcp -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}' \
+  | tee /tmp/r.json | jq_ok '.result.supportedVersions|index("2026-07-28")' TC-MCP-01
+
 # SSRF (private target blocked)
 curl -s -o /tmp/r.json -w '%{http_code}' -X POST $B/v1/crawl -H 'Content-Type: application/json' \
   -d '{"url":"http://127.0.0.1:8765/health"}' | grep -q 422 && echo "PASS TC-SSRF-01" || echo "FAIL TC-SSRF-01"
@@ -299,11 +336,11 @@ curl -s -o /tmp/r.json -w '%{http_code}' -X POST $B/v1/crawl -H 'Content-Type: a
 
 ---
 
-## 10. Coverage Matrix (functionality → test case)
+## 11. Coverage Matrix (functionality → test case)
 
 Every externally observable capability maps to ≥1 case above:
 
-- 8 endpoints + OpenAPI → §4 / §5 (E1–E9)
+- 10 endpoints + OpenAPI → §4 / §5 (E1–E11)
 - 4 strategies → TC-CRAWL-HTTP-01, TC-CRAWL-CFFI-01, TC-CRAWL-BR-01, TC-CRAWL-BRW-01, TC-CRAWL-FB-01
 - 4 extractions → TC-EXTR-FULL/DOM/TRAF/DOC
 - 10 `limits` fields → TC-LIM-*
@@ -314,6 +351,8 @@ Every externally observable capability maps to ≥1 case above:
 - batch + webhook → TC-BATCH/WEBHOOK-01/02
 - 27 classifications → §7
 - 6 statuses → encoded in result `status` across cases
+- web search + provider selection/errors → §9 (TC-SEARCH-01..03)
+- MCP 2026-07-28 endpoint (discover/list/call/validation/notifications) → §9 (TC-MCP-01..04)
 - SSRF / validation / concurrency / rate / logging / lifecycle → §8
 - metrics / readiness / capabilities / hints / well-known → §5
 
@@ -321,8 +360,8 @@ Every externally observable capability maps to ≥1 case above:
 
 ---
 
-## 11. Reporting
+## 12. Reporting
 
 For each case record: `TC id`, request, expected, actual, PASS/FAIL, latency.
-Block release on any FAIL in §9 smoke set. Full acceptance requires all §4–§8 cases PASS
+Block release on any FAIL in §10 smoke set. Full acceptance requires all §4–§9 cases PASS
 (or explicitly waived with reason for env-limited hostile-target classifications).

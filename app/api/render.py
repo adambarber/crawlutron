@@ -70,7 +70,9 @@ async def render_request(
             normalized = normalize_public_http_url(url)
             domain = registrable_domain(normalized)
         except ValueError as error:
-            immediate_results[index] = _disallowed_result((index, url), str(error), int((time.monotonic() - started) * 1000))
+            immediate_results[index] = _disallowed_result(
+                (index, url), str(error), int((time.monotonic() - started) * 1000)
+            )
             continue
         jobs.append(CrawlJob(index=index, url=normalized, domain=domain, options=options))
 

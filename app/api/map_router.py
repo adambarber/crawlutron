@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings, get_shutdown_event
 from app.api.map_endpoint import map_site
-from app.api_models import CrawlerError, MapRequest
+from app.api_models import CrawlerError, MapRequest, SiteMapResponse
 
 router = APIRouter(tags=["Crawler"])
 
@@ -22,11 +22,12 @@ router = APIRouter(tags=["Crawler"])
         "dedupe, persistence, and host-policy decisions."
     ),
     responses={400: {"model": CrawlerError, "description": "Invalid map request."}},
+    response_model=SiteMapResponse,
 )
 async def map(
     payload: MapRequest,
-    settings=Depends(get_settings),
-    shutdown_event=Depends(get_shutdown_event),
+    settings=Depends(get_settings),  # noqa: B008
+    shutdown_event=Depends(get_shutdown_event),  # noqa: B008
 ) -> dict:
     return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 

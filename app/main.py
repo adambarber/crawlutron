@@ -4,7 +4,6 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any
 
 from app.crawl.engine import crawl_request
 
@@ -16,18 +15,9 @@ from app.crawl.engine import crawl_request
 # integration layer.
 from app.logging_config import configure_service_logging
 
-from .api.response_shaping import (
-    build_unified_result as _build_unified_result,
-)
-from .api.response_shaping import (
-    format_crawl_item as _format_crawl_item,  # noqa: F401 - re-export for compat
-)
-from .api.response_shaping import (
-    render_result_to_unified as _render_result_to_unified,  # noqa: F401 - re-export for compat
-)
+from .api.response_shaping import build_unified_result as _build_unified_result
 from .api_models import (
     API_VERSION,
-    POLICY_SCHEMA_VERSION,
     UnifiedCrawlResponse,
 )
 from .crawl.job_store import JobStore
@@ -90,17 +80,6 @@ uvicorn_access_logger.setLevel(logger.level)
 # parser noise (e.g. trafilatura on <a> elements without href) and cannot be
 # acted on. Keep ERROR+ visible, drop the chatter.
 logging.getLogger("trafilatura").setLevel(logging.ERROR)
-
-
-def build_unified_crawl_response(results: list[dict[str, Any]]) -> UnifiedCrawlResponse:
-    """Backward-compatible alias: build the unified response (was CondensedCrawlResponse)."""
-    return UnifiedCrawlResponse(
-        request_id="crawl_unified",
-        submitted_count=len(results),
-        policy_schema_version=POLICY_SCHEMA_VERSION,
-        success=True,
-        results=[_build_unified_result(item) for item in results],
-    )
 
 
 if FastAPI is not None:
@@ -176,6 +155,14 @@ if FastAPI is not None:
                 "name": "Crawler",
                 "description": "Browser render and universal policy-driven crawl execution endpoints.",
             },
+            {
+                "name": "Search",
+                "description": "Web search front-end discovery via the configured provider.",
+            },
+            {
+                "name": "MCP",
+                "description": "Model Context Protocol 2026-07-28 endpoint exposing crawler tools.",
+            },
         ],
     )
     # Stash shared dependencies on ``app.state`` so router handlers outside
@@ -199,20 +186,24 @@ if FastAPI is not None:
     health_router, _ = create_health_router()
     app.include_router(health_router)
 
-    app.include_router(create_capabilities_router(settings))
-    app.include_router(create_agent_hints_router(settings))
-    app.include_router(create_well_known_router(settings))
+    app.include_router(create_capabilities_router())
+    app.include_router(create_agent_hints_router())
+    app.include_router(create_well_known_router())
     from .api.crawl_router import router as crawl_router
     from .api.jobs_router import router as jobs_router
     from .api.map_router import router as map_router
     from .api.metrics_router import router as metrics_router
     from .api.render_router import router as render_router
+    from .mcp.router import router as mcp_router
+    from .search.router import router as search_router
 
     app.include_router(metrics_router)
     app.include_router(render_router)
     app.include_router(map_router)
     app.include_router(jobs_router)
     app.include_router(crawl_router)
+    app.include_router(search_router)
+    app.include_router(mcp_router)
 
 else:
     app = None

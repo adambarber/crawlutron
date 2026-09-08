@@ -3,12 +3,13 @@
 import urllib.error
 
 import pytest
+from helpers import browser_available
+
+from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from helpers import browser_available
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import CrawlStrategyAttempt, DiscoveredLink, EngineCrawlResult
-from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER, EXTRACTION_FULL
+from app.models import CrawlStrategyAttempt, EngineCrawlResult
 
 
 def make_result(links):
@@ -41,7 +42,7 @@ class TestEngineCrawlRequest:
     async def test_crawl_request_conditional_cache_304(self, base_url):
         from helpers import run_crawl_async
         url = f"{base_url}/with_etag"
-        cache = HttpCache(":memory:")
+        cache = HttpCache()
         cache.store(url, {"etag": "v1"})
         payload = {
             "url": url,
@@ -72,7 +73,6 @@ class TestEngineCrawlRequest:
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
-        from helpers import run_crawl_async
 
         def failing_fetcher(target_url, headers, timeout, max_content_length=50 * 1024 * 1024):
             raise urllib.error.URLError("connection refused")

@@ -1,6 +1,6 @@
 """Unified output formatting: every crawl strategy funnels through one path."""
 
-from app.main import _format_crawl_item  # noqa: E402
+from app.api.response_shaping import format_crawl_item  # noqa: E402
 
 
 class TestFormatCrawlItemUnified:
@@ -13,7 +13,7 @@ class TestFormatCrawlItemUnified:
             "markdown": extract_content(html, "text/html", "http://example.com/").markdown,
             "final_url": "http://example.com/",
         }
-        markdown, metadata = _format_crawl_item(item)
+        markdown, metadata = format_crawl_item(item)
         assert markdown is not None
         assert "Body text here" in markdown
         assert metadata.get("title") == "T"
@@ -24,7 +24,7 @@ class TestFormatCrawlItemUnified:
             "final_url": "http://example.com/doc.pdf",
             "text": "extracted pdf text",
         }
-        markdown, metadata = _format_crawl_item(item)
+        markdown, metadata = format_crawl_item(item)
         assert markdown == "extracted pdf text"
         # No HTML to parse, so only the basic metadata survives.
         assert metadata == {}
@@ -35,17 +35,17 @@ class TestFormatCrawlItemUnified:
             "html": "<html><head></head><body></body></html>",
             "text": "fallback body text",
         }
-        markdown, metadata = _format_crawl_item(item)
+        markdown, metadata = format_crawl_item(item)
         assert markdown == "fallback body text"
 
     def test_document_markdown_without_html_returns_empty_metadata(self) -> None:
         item = {"final_url": "http://example.com/doc.csv", "markdown": "# Heading\n\nbody"}
-        markdown, metadata = _format_crawl_item(item)
+        markdown, metadata = format_crawl_item(item)
         assert markdown == "# Heading\n\nbody"
         assert metadata == {}
 
     def test_missing_text_returns_none_markdown(self) -> None:
         item = {"final_url": "http://example.com/x"}
-        markdown, metadata = _format_crawl_item(item)
+        markdown, metadata = format_crawl_item(item)
         assert markdown is None
         assert metadata == {}
