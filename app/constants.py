@@ -186,7 +186,6 @@ ANALYTICS_HOST_SUFFIXES = frozenset(
         "connect.facebook.net",
         "analytics.twitter.com",
         "x.com",
-        "cdc.gov",
         "pinterest.com",
         "hotjar.com",
         "scorecardresearch.com",
