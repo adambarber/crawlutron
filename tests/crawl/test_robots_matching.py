@@ -50,3 +50,42 @@ def test_plain_prefix_disallow_still_works():
 def test_disallow_root_blocks_everything():
     rules = [(False, "/")]
     assert _robots_allows("http://x.example/anything", rules) is False
+
+
+def test_pathological_wildcard_rule_matches_in_linear_time():
+    """A robots rule packed with overlapping wildcards must not backtrack.
+
+    ``/*a*`` repeated against a long no-match path drove the old regex into
+    exponential backtracking (8.5s for 30 wildcards x 2000 chars). The
+    matcher is linear, so doubling BOTH dimensions must stay fast.
+    """
+    import time as _time
+
+    from app.crawl.engine import _robots_pattern_to_regex
+
+    pattern = "/*a*" * 30
+    matcher = _robots_pattern_to_regex(pattern)
+    path = "/" + "b" * 2000 + "a"
+
+    start = _time.perf_counter()
+    result = matcher.match(path)
+    elapsed = _time.perf_counter() - start
+    assert result is False
+    assert elapsed < 0.5, f"wildcard match took {elapsed:.3f}s (backtracking?)"
+
+
+def test_pathological_pattern_match_parity_with_simple_cases():
+    from app.crawl.engine import _robots_pattern_to_regex
+
+    m = _robots_pattern_to_regex("/*a*")
+    assert m.match("/aaa") is True
+    assert m.match("/b") is False
+    assert m.match("/b/a") is True
+    m2 = _robots_pattern_to_regex("/page$")
+    assert m2.match("/page") is True
+    assert m2.match("/page/x") is False
+    m3 = _robots_pattern_to_regex("a")
+    assert m3.match("abc") is True
+    assert m3.match("xabc") is False
+    m4 = _robots_pattern_to_regex("")
+    assert m4.match("anything") is True

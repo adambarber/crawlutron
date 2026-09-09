@@ -418,26 +418,91 @@ async def _execute_crawl_chain(
     return replace(last_result, attempted_strategies=attempts)
 
 
+class _RobotsPathMatcher:
+    """Linear-time matcher for robots.txt path patterns.
+
+    Translating patterns to ``re`` (``*`` -> ``.*``) admits catastrophic
+    backtracking: a rule like ``/*a*`` repeated against a long non-matching
+    path measured 8.5s for 30 wildcards x 2000 chars, and doubles per added
+    wildcard. This matcher implements the same semantics (``*`` wildcard,
+    ``$`` end anchor, left-anchored prefix match) with pure ``str.find``
+    scanning: O(pattern + path) per match, no backtracking.
+    """
+
+    __slots__ = ("_literals", "_anchored_end")
+
+    def __init__(self, pattern: str) -> None:
+        self._anchored_end = pattern.endswith("$") and len(pattern) > 1
+        body = pattern[:-1] if self._anchored_end else pattern
+        self._literals = body.split("*")
+
+    def match(self, path: str) -> bool:
+        literals = self._literals
+        first = literals[0]
+        if not path.startswith(first):
+            return False
+        pos = len(first)
+        if self._anchored_end:
+            # Every remaining literal must fit and end exactly at len(path).
+            rest = literals[1:]
+            if not rest:
+                return pos == len(path)
+            scan = pos
+            for literal in rest:
+                found = path.find(literal, scan)
+                if found == -1:
+                    return False
+                scan = found + len(literal)
+            return scan == len(path)
+        # Prefix semantics: any placement of the remaining literals works —
+        # greedy left-to-right scan never blocks a prefix match.
+        for literal in literals[1:]:
+            found = path.find(literal, pos)
+            if found == -1:
+                return False
+            pos = found + len(literal)
+        return True
+
+
+class _MatchAll:
+    """Degenerate robots pattern ("" matches everything)."""
+
+    __slots__ = ()
+
+    def match(self, path: str) -> bool:  # noqa: ARG002 - surface parity
+        return True
+
+
+class _PrefixMatcher:
+    """Wildcard-free robots pattern: left-anchored prefix match."""
+
+    __slots__ = ("_prefix",)
+
+    def __init__(self, prefix: str) -> None:
+        self._prefix = prefix
+
+    def match(self, path: str) -> bool:
+        return path.startswith(self._prefix)
+
+
 @functools.lru_cache(maxsize=1024)
-def _robots_pattern_to_regex(pattern: str) -> re.Pattern[str]:
-    """Translate a robots.txt path pattern to a regex.
+def _robots_pattern_to_regex(pattern: str) -> re.Pattern[str] | _RobotsPathMatcher:
+    """Translate a robots.txt path pattern to a linear-time matcher.
 
     Per RFC 9309 / Google's interpretation: ``*`` matches any sequence of
     characters and ``$`` anchors the end of the path. Patterns are matched as
     path prefixes (left-anchored). An empty pattern matches everything.
+
+    Returns a :class:`_RobotsPathMatcher` — same ``.match()`` surface as a
+    compiled regex (returns a bool), but with guaranteed linear time; the
+    historical ``re`` translation backtracked exponentially on overlapping
+    wildcards (adversarial review M-robots-redos).
     """
     if pattern == "":
-        return re.compile(r".*")
-    parts: list[str] = ["^"]
-    last = len(pattern) - 1
-    for idx, ch in enumerate(pattern):
-        if ch == "*":
-            parts.append(".*")
-        elif ch == "$" and idx == last:
-            parts.append("$")
-        else:
-            parts.append(re.escape(ch))
-    return re.compile("".join(parts))
+        return _MatchAll()
+    if "*" not in pattern and not (pattern.endswith("$") and len(pattern) > 1):
+        return _PrefixMatcher(pattern)
+    return _RobotsPathMatcher(pattern)
 
 
 ROBOTS_CACHE_MAX_ENTRIES = 1000
