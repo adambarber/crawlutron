@@ -276,14 +276,17 @@ class BrowserRenderer:
             return
         await asyncio.to_thread(self._sleep, seconds)
 
-    def _harvest_session_cookies(self, page: Any, url: str) -> None:
+    async def _harvest_session_cookies(self, page: Any, url: str) -> None:
         """Capture the page's cookies into the per-domain bootstrap store.
 
         Must run BEFORE the page/context is closed -- Camoufox destroys the
-        context with the last page, leaving ``browser.contexts`` empty.
-        Schedules the async cookie read on the running loop.
+        context with the last page, leaving ``browser.contexts`` empty -- and
+        must COMPLETE before returning (M3): the cffi retry reads the store
+        synchronously right after the render, so a fire-and-forget task would
+        usually lose the race and retry cookieless. Harvest failures never
+        break the render itself.
         """
-        async def _collect() -> None:
+        try:
             from app.validation import registrable_domain as _rd
             context = getattr(page, "context", None)
             if context is None:
@@ -294,11 +297,8 @@ class BrowserRenderer:
                 _store_browser_cookies(_rd(url), header)
                 logger.info("browser_cookies_harvested",
                             extra={"domain": _rd(url), "count": len(cookies)})
-
-        try:
-            asyncio.get_running_loop().create_task(_collect())
-        except RuntimeError:
-            pass
+        except Exception as error:  # noqa: BLE001 - harvest is best-effort
+            logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
 
     async def _reset_browser(self) -> None:
         """Close any cached browser instance so the next render recreates it.
@@ -506,7 +506,7 @@ class BrowserRenderer:
         finally:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
-            self._harvest_session_cookies(page, url)
+            await self._harvest_session_cookies(page, url)
             await self._safe_close_page(page)
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
