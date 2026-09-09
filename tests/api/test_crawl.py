@@ -1,6 +1,8 @@
 """End-to-end /v1/crawl behavior against a real local HTTP server (no mocks)."""
 
+import asyncio
 import json
+import time
 
 import pytest
 from _testkit import poll_until as _poll_until  # noqa: F401  (used inside async test method)
@@ -434,8 +436,9 @@ class TestJobApi:
         job = job_store.create(root_url, {})
         return job.job_id
 
-    async def test_v1_jobs_list_get_of_persisted_rows(self):
-        # Create endpoint refuses with 501 (no engine executes jobs)
+    async def test_v1_jobs_create_runs_and_list_get(self):
+        # Create starts a background runner; with the fixture server the job
+        # completes a real whole-site crawl through the shared engine.
         resp = await self.client.post(
             "/v1/jobs",
             json={
@@ -446,32 +449,48 @@ class TestJobApi:
                 },
             },
         )
-        assert resp.status_code == 501, resp.text
-        assert resp.json()["code"] == "jobs_not_executed"
+        assert resp.status_code == 200, resp.text
+        job_id = resp.json()["job_id"]
+
+        # Wait for the runner to reach a terminal state.
+        deadline = time.monotonic() + 15.0
+        status = None
+        while time.monotonic() < deadline:
+            job_resp = await self.client.get(f"/v1/jobs/{job_id}")
+            assert job_resp.status_code == 200, job_resp.text
+            status = job_resp.json()["status"]
+            if status in {"completed", "failed", "cancelled"}:
+                break
+            await asyncio.sleep(0.05)
+        assert status == "completed", status
 
         # State inspection of directly-persisted rows still works
-        job_id = await self._seed_job(f"{self.base}/")
+        seeded = await self._seed_job(f"{self.base}/")
         resp2 = await self.client.get("/v1/jobs")
         assert resp2.status_code == 200
         jobs = resp2.json()["jobs"]
-        assert any(j["job_id"] == job_id for j in jobs)
+        assert any(j["job_id"] == seeded for j in jobs)
 
-        resp3 = await self.client.get(f"/v1/jobs/{job_id}")
+        resp3 = await self.client.get(f"/v1/jobs/{seeded}")
         assert resp3.status_code == 200
         job = resp3.json()
-        assert job["job_id"] == job_id
+        assert job["job_id"] == seeded
         assert job["status"] == "pending"
         assert job["frontier_size"] == 1
 
-    async def test_v1_jobs_control_refused_with_501(self):
-        # Control actions imply an executing engine; all are refused (H5)
+    async def test_v1_jobs_control_transitions_persisted_row(self):
+        # Directly-persisted (never-run) rows are PENDING: pause implies an
+        # active run (409). Cancel is valid from pending (aborts before start).
         job_id = await self._seed_job(f"{self.base}/")
-        for action in ("pause", "resume", "cancel"):
-            resp = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": action})
-            assert resp.status_code == 501, resp.text
-            assert resp.json()["code"] == "jobs_not_executed"
+        resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
+        assert resp_pause.status_code == 409, resp_pause.text
+        assert resp_pause.json()["code"] == "invalid_state"
 
-        # Unknown actions stay 422 (shape validation precedes the refusal)
+        resp_cancel = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
+        assert resp_cancel.status_code == 200, resp_cancel.text
+        assert resp_cancel.json()["status"] == "cancelled"
+
+        # Unknown actions stay 422 (shape validation precedes dispatch)
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
         assert "invalid_action" in resp_bad.json()["code"]

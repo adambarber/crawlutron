@@ -10,7 +10,6 @@ from __future__ import annotations
 import datetime
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -21,8 +20,6 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-
 
 
 def _json_default(obj):
@@ -41,42 +38,47 @@ def _json_default(obj):
 
 class JobKind(str, Enum):
     """Kind of crawl job."""
-    WHOLE_SITE = "whole_site"     # Recursive crawl with frontier/visited
-    SINGLE_SHOT = "single_shot"   # Single async crawl (no frontier/visited)
+
+    WHOLE_SITE = "whole_site"  # Recursive crawl with frontier/visited
+    SINGLE_SHOT = "single_shot"  # Single async crawl (no frontier/visited)
 
 
 class JobStatus(str, Enum):
     """Lifecycle status of a crawl job."""
-    PENDING = "pending"       # Created, not yet started
-    RUNNING = "running"       # Actively crawling
-    PAUSED = "paused"         # Paused by user
-    COMPLETED = "completed"   # Frontier exhausted / crawl finished
-    FAILED = "failed"         # Fatal error
-    CANCELLED = "cancelled"   # Explicitly cancelled
+
+    PENDING = "pending"  # Created, not yet started
+    RUNNING = "running"  # Actively crawling
+    PAUSED = "paused"  # Paused by user
+    COMPLETED = "completed"  # Frontier exhausted / crawl finished
+    FAILED = "failed"  # Fatal error
+    CANCELLED = "cancelled"  # Explicitly cancelled
 
 
 @dataclass
 class CrawlJobState:
     """Persistent state of a crawl job (whole-site or single-shot)."""
+
     job_id: str
     kind: JobKind = JobKind.WHOLE_SITE
     root_url: str = ""
     policy: dict[str, Any] = field(default_factory=dict)
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
-    frontier: list[str] = field(default_factory=list)   # URLs pending crawl
-    visited: set[str] = field(default_factory=set)      # URLs already crawled
+    frontier: list[str] = field(default_factory=list)  # URLs pending crawl
+    visited: set[str] = field(default_factory=set)  # URLs already crawled
     # Single-shot fields (used when kind == SINGLE_SHOT)
     # root_url holds the first URL (or "" for batch); results holds completed crawl results
     results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     error: str | None = None
-    stats: dict[str, int] = field(default_factory=lambda: {
-        "total_discovered": 0,
-        "total_crawled": 0,
-        "total_failed": 0,
-    })
+    stats: dict[str, int] = field(
+        default_factory=lambda: {
+            "total_discovered": 0,
+            "total_crawled": 0,
+            "total_failed": 0,
+        }
+    )
 
     def to_json(self) -> dict[str, Any]:
         """Serialize to JSON-serializable dict."""
@@ -87,7 +89,7 @@ class CrawlJobState:
         return data
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> "CrawlJobState":
+    def from_json(cls, data: dict[str, Any]) -> CrawlJobState:
         """Deserialize from JSON dict."""
         data = dict(data)
         data["visited"] = set(data.get("visited", []))
@@ -192,7 +194,8 @@ class JobStore:
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``."""
         job.updated_at = time.time()
-        self._conn.execute("""
+        self._conn.execute(
+            """
             INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
                                     created_at, updated_at, error, stats)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -207,20 +210,22 @@ class JobStore:
                 updated_at=excluded.updated_at,
                 error=excluded.error,
                 stats=excluded.stats
-        """, (
-            job.job_id,
-            job.kind.value,
-            job.root_url,
-            json.dumps(job.policy, separators=(",", ":"), default=_json_default),
-            job.status.value,
-            json.dumps(job.frontier, separators=(",", ":"), default=_json_default),
-            json.dumps(list(job.visited), separators=(",", ":"), default=_json_default),
-            json.dumps(job.results, separators=(",", ":"), default=_json_default),
-            job.created_at,
-            job.updated_at,
-            job.error,
-            json.dumps(job.stats, separators=(",", ":"), default=_json_default),
-        ))
+        """,
+            (
+                job.job_id,
+                job.kind.value,
+                job.root_url,
+                json.dumps(job.policy, separators=(",", ":"), default=_json_default),
+                job.status.value,
+                json.dumps(job.frontier, separators=(",", ":"), default=_json_default),
+                json.dumps(list(job.visited), separators=(",", ":"), default=_json_default),
+                json.dumps(job.results, separators=(",", ":"), default=_json_default),
+                job.created_at,
+                job.updated_at,
+                job.error,
+                json.dumps(job.stats, separators=(",", ":"), default=_json_default),
+            ),
+        )
         self._conn.commit()
 
     def load(self, job_id: str) -> CrawlJobState | None:
@@ -252,7 +257,7 @@ class JobStore:
         """List all jobs with basic info (no frontier/visited/results)."""
         with self._lock:
             rows = self._conn.execute("""
-                SELECT job_id, root_url, status, created_at, updated_at,
+                SELECT job_id, root_url, status, kind, created_at, updated_at,
                        json_array_length(frontier) as frontier_size,
                        json_array_length(visited) as visited_size,
                        json_array_length(results) as results_count
@@ -264,11 +269,12 @@ class JobStore:
                 "job_id": r[0],
                 "root_url": r[1],
                 "status": r[2],
-                "created_at": r[3],
-                "updated_at": r[4],
-                "frontier_size": r[5] or 0,
-                "visited_size": r[6] or 0,
-                "results_count": r[7] or 0,
+                "kind": r[3],
+                "created_at": r[4],
+                "updated_at": r[5],
+                "frontier_size": r[6] or 0,
+                "visited_size": r[7] or 0,
+                "results_count": r[8] or 0,
             }
             for r in rows
         ]

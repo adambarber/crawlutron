@@ -111,6 +111,10 @@ if FastAPI is not None:
             get_metrics=get_metrics,
         )
         await initialize_browser_pool(settings)
+        # Jobs: rewind crash orphans and resume every PENDING whole-site job.
+        from .api.job_runner import recover_and_start_pending_jobs
+
+        await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
         if settings.cookie_persistence_enabled:
             # Create the parent directory before the cookie jar tries to read
             # from it; standalone checkouts default to ./cache which may not
@@ -136,6 +140,10 @@ if FastAPI is not None:
         from .crawl.engine import _resource_gate
 
         shutdown_event.set()
+        # Stop job runners before closing the engine's shared clients.
+        from .api.job_runner import shutdown_job_runner
+
+        await shutdown_job_runner()
         await close_async_http_client()
         await close_browser_pool()
         _resource_gate.close()
