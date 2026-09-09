@@ -108,8 +108,19 @@ def decompress_body(body: bytes | bytearray | memoryview, content_encoding: str,
                 # brotlicffi-style bounded API
                 out = d.decompress(body, max_output_bytes + 1)
             elif d is not None and hasattr(d, "process"):
-                # google-brotli streaming API
-                out = bytes(d.process(body))
+                # google-brotli streaming API: feed incrementally and stop
+                # past the cap (H6). A single process(body) call would
+                # materialize the entire bomb in RAM. Stopping early leaves
+                # out over the cap, which the post-hoc check below turns
+                # into DecompressionTooLargeError (raising here would be
+                # swallowed by the passthrough handler around this block).
+                chunks = bytearray()
+                step = 16_384
+                for offset in range(0, len(body), step):
+                    chunks.extend(d.process(body[offset : offset + step]))
+                    if len(chunks) > max_output_bytes:
+                        break
+                out = bytes(chunks)
             else:
                 out = brotli.decompress(body)
         except Exception:
