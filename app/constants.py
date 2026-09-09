@@ -150,6 +150,13 @@ MAX_RATE_LIMIT_RPS: float = 100.0
 # Cache TTLs (seconds).
 DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
 
+# Disk content-cache byte budget (H9). max_entries bounds entry count, not
+# size: one envelope can hold a multi-MB base64 body, so without these caps
+# 10k entries could exceed 100GB of disk. Entries over the per-entry cap
+# are refused; LRU eviction enforces the total budget.
+CONTENT_CACHE_MAX_ENTRY_BYTES: int = 4 * 1024 * 1024
+CONTENT_CACHE_MAX_TOTAL_BYTES: int = 512 * 1024 * 1024
+
 # Sitemap discovery tuning.
 SITEMAP_MAX_DEPTH: int = 3
 SITEMAP_MAX_URLS: int = 10_000

@@ -27,7 +27,11 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable
 
-from app.constants import DEFAULT_CACHE_TTL_SECONDS
+from app.constants import (
+    CONTENT_CACHE_MAX_ENTRY_BYTES,
+    CONTENT_CACHE_MAX_TOTAL_BYTES,
+    DEFAULT_CACHE_TTL_SECONDS,
+)
 
 
 def _default_clock() -> float:
@@ -45,12 +49,20 @@ class ContentCache:
         namespace: str = "content",
         clock: Callable[[], float] = _default_clock,
         max_entries: int = 10000,
+        max_entry_bytes: int = CONTENT_CACHE_MAX_ENTRY_BYTES,
+        max_total_bytes: int = CONTENT_CACHE_MAX_TOTAL_BYTES,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
         self.namespace = namespace
         self.clock = clock
         self.max_entries = max_entries
+        self.max_entry_bytes = max_entry_bytes
+        self.max_total_bytes = max_total_bytes
+        # Parallel byte accounting for the LRU index (H9): entry count alone
+        # cannot bound disk use when one envelope holds a multi-MB body.
+        self._index_sizes: dict[str, int] = {}
+        self._index_total_bytes: int = 0
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         # In-memory LRU index (key -> path) so eviction never globs/stats the
@@ -78,24 +90,48 @@ class ContentCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
 
-    def _enforce_max_entries(self) -> None:
+    def _drop_locked(self, key: str) -> None:
+        """Remove one entry from the index, byte accounting, RAM and disk."""
+        old_path = self._index.pop(key, None)
+        freed = self._index_sizes.pop(key, 0)
+        self._index_total_bytes = max(0, self._index_total_bytes - freed)
+        if old_path is not None:
+            try:
+                old_path.unlink()
+            except OSError:
+                pass
+        # Keep the memory value cache consistent with evicted disk keys.
+        self._memory_cache.pop(key, None)
+
+    def _over_limits(self) -> bool:
+        over_count = (
+            self.max_entries is not None
+            and self.max_entries > 0
+            and len(self._index) > self.max_entries
+        )
+        over_bytes = (
+            self.max_total_bytes is not None
+            and self.max_total_bytes > 0
+            and self._index_total_bytes > self.max_total_bytes
+        )
+        return over_count or over_bytes
+
+    def _enforce_limits(self) -> None:
         """Evict least-recently-used entries using the in-memory index.
 
+        Enforces both the entry-count cap and the total byte budget (H9).
         Runs in O(overflow) unlinks with no directory glob/stat, unlike the
         previous implementation that listed and stat() every cache file on each
         write (#5).
         """
-        if self.max_entries is None or self.max_entries <= 0:
-            return
         with self._lock:
-            while len(self._index) > self.max_entries:
-                _key, old_path = self._index.popitem(last=False)
-                try:
-                    old_path.unlink()
-                except OSError:
-                    pass
-                # Keep the memory value cache consistent with evicted disk keys.
-                self._memory_cache.pop(_key, None)
+            while self._index and self._over_limits():
+                oldest_key = next(iter(self._index))
+                self._drop_locked(oldest_key)
+
+    def _enforce_max_entries(self) -> None:
+        """Backward-compatible alias for the count+byte enforcement."""
+        self._enforce_limits()
 
     # -- public API ---------------------------------------------------------
     def _read_envelope(self, key: str) -> dict[str, Any] | None:
@@ -175,11 +211,20 @@ class ContentCache:
         # cached_at records when this entry was written so callers can compare a
         # remote "last modified" signal against our local fetch time (#3).
         envelope = {"expires": expires, "value": value, "cached_at": self.clock()}
+        # Serialize first: entries over the per-entry cap are refused before
+        # any disk write (H9), and the byte size feeds total-budget accounting.
+        data = json.dumps(envelope)
         path = self._path_for(key)
         with self._lock:
-            path.write_text(json.dumps(envelope))
+            old_size = self._index_sizes.get(key, 0)
+            if self.max_entry_bytes is not None and len(data) > self.max_entry_bytes:
+                self._drop_locked(key)
+                return
+            path.write_text(data)
             self._index[key] = path
             self._index.move_to_end(key)
+            self._index_sizes[key] = len(data)
+            self._index_total_bytes += len(data) - old_size
             # Mirror small values into the in-memory value cache (#7).
             if sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
                 self._memory_cache[key] = (expires, value)
@@ -189,13 +234,13 @@ class ContentCache:
             else:
                 # A large value must not linger in the small-value cache.
                 self._memory_cache.pop(key, None)
-        # Enforce size limit after write, using the in-memory index (no glob).
-        # NOTE: this call briefly releases ``self._lock`` between the write
-        # and the eviction (re-acquired inside ``_enforce_max_entries``).
+        # Enforce count + byte limits after write, using the in-memory index
+        # (no glob). NOTE: this call briefly releases ``self._lock`` between
+        # the write and the eviction (re-acquired inside ``_enforce_limits``).
         # During that window another thread can read the just-written entry
         # and observe an over-sized index. This is benign — the entry is
         # valid and consistent; only the eviction is one step behind.
-        self._enforce_max_entries()
+        self._enforce_limits()
 
     def _write_envelope(self, path: "Path", envelope: dict[str, Any]) -> None:
         """Persist the envelope to disk (json.dumps of large HTML-sized values)."""
@@ -248,13 +293,27 @@ class ContentCache:
                 self._memory_cache.pop(key, None)
         # Offload the (potentially large) json.dumps + disk write off the loop.
         await asyncio.to_thread(self._write_envelope, path, envelope)
-        # Enforce size limit after write, using the in-memory index (no glob).
-        # NOTE: this call briefly releases ``self._lock`` between the write
-        # and the eviction (re-acquired inside ``_enforce_max_entries``).
+        # Size the written file for byte-budget accounting (H9) via stat so
+        # this works even when _write_envelope is stubbed in tests. Entries
+        # over the per-entry cap are removed again right away.
+        with self._lock:
+            try:
+                written = path.stat().st_size
+            except OSError:
+                written = 0
+            old_size = self._index_sizes.get(key, 0)
+            if self.max_entry_bytes is not None and written > self.max_entry_bytes:
+                self._drop_locked(key)
+                return
+            self._index_sizes[key] = written
+            self._index_total_bytes += written - old_size
+        # Enforce count + byte limits after write, using the in-memory index
+        # (no glob). NOTE: this call briefly releases ``self._lock`` between
+        # the write and the eviction (re-acquired inside ``_enforce_limits``).
         # During that window another thread can read the just-written entry
         # and observe an over-sized index. This is benign — the entry is
         # valid and consistent; only the eviction is one step behind.
-        self._enforce_max_entries()
+        self._enforce_limits()
 
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""
@@ -270,10 +329,15 @@ class ContentCache:
                 if expires is not None and now > expires:
                     path.unlink()
                     removed += 1
-            # Reconcile the index with what remains on disk.
+            # Reconcile the index with what remains on disk, and drop byte
+            # accounting for entries that are gone (H9).
             self._index = OrderedDict(
                 (k, v) for k, v in self._index.items() if v.exists()
             )
+            self._index_sizes = {
+                k: s for k, s in self._index_sizes.items() if k in self._index
+            }
+            self._index_total_bytes = sum(self._index_sizes.values())
             # Drop expired in-memory value entries (TTL honored even in RAM).
             for _k in [
                 k
@@ -295,6 +359,8 @@ class ContentCache:
                     continue
             # Drop the in-memory index so stale paths are not reused.
             self._index.clear()
-            # Drop the in-memory value cache too.
+            # Drop byte accounting and the in-memory value cache too.
+            self._index_sizes.clear()
+            self._index_total_bytes = 0
             self._memory_cache.clear()
         return removed
