@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -20,20 +21,23 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
-import logging
-
 from app.classify import classify_page
-from app.crawl.strategies.document import _default_document_text_extractor
-from app.models import CrawlResult, RenderOptions
-from app.crawl.strategies.http import CookieJar, _check_ssrf_protection, _classify_error_code, _build_pinned_request
-from app.validation import registrable_domain
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
 )
+from app.crawl.strategies.document import _default_document_text_extractor
+from app.crawl.strategies.http import (
+    CookieJar,
+    _build_pinned_request,
+    _check_ssrf_protection,
+    _classify_error_code,
+)
+from app.models import CrawlResult, RenderOptions
 from app.settings import CrawlerSettings
+from app.validation import registrable_domain
 
 logger = logging.getLogger(__name__)
 
@@ -532,7 +536,13 @@ class BrowserRenderer:
         finally:
             # Always release the page so the rendered tab/process is not leaked
             # between crawls (the root of the Camoufox memory growth).
-            await self._harvest_session_cookies(page, url)
+            # N6: a wedged context.cookies() must not hold the pooled renderer
+            # for the whole per-URL budget; fall back to cookieless (pre-M3
+            # behavior) after a short bounded wait.
+            try:
+                await asyncio.wait_for(self._harvest_session_cookies(page, url), timeout=5.0)
+            except TimeoutError:
+                pass
             await self._safe_close_page(page)
             # Increment render count for ALL attempts (success or failure) so
             # browser recycle logic bounds total attempts per browser instance.
