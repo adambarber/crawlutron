@@ -76,13 +76,18 @@ def clear_webhook_dependencies() -> None:
 
 
 async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None:
-    """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding-safe IP pinning.
+    """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
 
-    Resolves the webhook hostname exactly once, then connects to the
-    pinned IP while preserving the original ``Host`` header so virtual-
-    host routing still works. Caller MUST have validated ``webhook_url``
-    via :func:`validate_webhook_url` first; this helper assumes the URL
-    has already passed the SSRF guard.
+    Plain HTTP connects to the pinned IP (resolved once) while preserving
+    the original ``Host`` header so virtual-host routing still works.
+    HTTPS instead re-validates the hostname fresh and POSTs to the original
+    URL (L3): rewriting https to a raw IP breaks TLS verification (certs
+    never carry IP SANs), so IP-pinning would make every HTTPS delivery
+    fail. The residual rebinding window is the same posture the fetcher
+    accepts for HTTPS (pre-connect check + CA validation).
+
+    Caller MUST have validated ``webhook_url`` via ``validate_webhook_url``
+    first; this helper assumes the URL has already passed the SSRF guard.
 
     Consolidated from ``run_and_deliver_webhook`` so the ``post_webhook``
     path shares the same TOCTOU-safe delivery code (adversarial review
@@ -90,17 +95,21 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     """
     import httpx
 
-    from app.crawl.strategies.http import _resolve_and_pin_host
+    from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
 
-    _hostname, pinned_ip = _resolve_and_pin_host(webhook_url)
     parsed = urlparse(webhook_url)
-    pinned_url = (
-        f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
-        f"{parsed.path or '/'}" + (f"?{parsed.query}" if parsed.query else "")
-    )
     request_headers = {"Content-Type": "application/json"}
-    if parsed.hostname:
-        request_headers["Host"] = parsed.hostname
+    if parsed.scheme == "https":
+        _check_ssrf_protection(webhook_url)
+        pinned_url = webhook_url
+    else:
+        _hostname, pinned_ip = _resolve_and_pin_host(webhook_url)
+        pinned_url = (
+            f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
+            f"{parsed.path or '/'}" + (f"?{parsed.query}" if parsed.query else "")
+        )
+        if parsed.hostname:
+            request_headers["Host"] = parsed.hostname
     async with httpx.AsyncClient(timeout=30.0) as client:
         await client.post(pinned_url, content=payload_bytes, headers=request_headers)
 

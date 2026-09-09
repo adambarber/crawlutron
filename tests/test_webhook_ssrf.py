@@ -111,3 +111,44 @@ class TestWebhookDeliveryPinning:
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured
+
+    async def test_https_delivery_uses_validated_hostname_not_ip(self, monkeypatch):
+        """L3: rewriting an https URL to the pinned IP breaks TLS (certs
+        never carry IP SANs), so HTTPS webhooks were effectively dead.
+        HTTPS delivery POSTs to the validated hostname; HTTP keeps IP pinning."""
+        from app.api.webhooks import deliver_pinned_webhook
+
+        block_private_targets(monkeypatch)
+        captured = {}
+
+        class _MockResponse:
+            def __init__(self):
+                self.status_code = 200
+
+        class _Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return True
+
+            async def post(self, url, content=None, headers=None):
+                captured["url"] = url
+                captured["headers"] = headers
+                return _MockResponse()
+
+        import asyncio
+
+        _original_async_client = httpx.AsyncClient
+        httpx.AsyncClient = _Client
+        try:
+            with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+                await deliver_pinned_webhook("https://webhook.example.com/cb", b"{}")
+        finally:
+            httpx.AsyncClient = _original_async_client
+
+        assert captured["url"] == "https://webhook.example.com/cb", captured
+        assert "8.8.8.8" not in captured["url"], captured
