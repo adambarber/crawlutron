@@ -132,8 +132,10 @@ EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8765/health || exit 1
 
-# Production command
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
+# Production command. The bind interface defaults to loopback (M15: the service
+# has no caller authentication); BROWSER_CRAWLER_HOST must be set explicitly to
+# expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools
@@ -152,4 +154,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 USER appuser
 
 # Development command with hot-reloading and debug logging
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8765 --reload --log-level debug"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --reload --log-level debug"]

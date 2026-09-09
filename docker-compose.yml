@@ -20,6 +20,10 @@ services:
       - "127.0.0.1:8765:8765"
     environment:
       # Keep defaults out of the container; override per-deployment.
+      # BROWSER_CRAWLER_HOST=0.0.0.0 is required here: Docker port mapping
+      # cannot reach a loopback-bound process inside the container.
+      # External exposure stays gated by the loopback-only ports mapping above.
+      BROWSER_CRAWLER_HOST: "0.0.0.0"
       BROWSER_CRAWLER_LOG_LEVEL: "info"
       BROWSER_CRAWLER_WORKERS: "1"
       BROWSER_CRAWLER_CACHE_DIR: "/app/cache"

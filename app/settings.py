@@ -44,6 +44,11 @@ def _parse_bool_env_value(value: str) -> bool:
 
 @dataclass(frozen=True)
 class CrawlerSettings:
+    # Bind interface (M15): loopback by default since the service has no
+    # caller authentication. Container deployments that rely on port mapping
+    # must set 0.0.0.0 explicitly (the compose file does, gated by its
+    # loopback-only ports mapping).
+    host: str = "127.0.0.1"
     host_port: int = 8765
     global_concurrency: int = 4
     per_domain_concurrency: int = 2
@@ -98,6 +103,7 @@ class CrawlerSettings:
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
         source = os.environ if values is None else values
         return cls(
+            host=source.get("BROWSER_CRAWLER_HOST", cls.host),
             host_port=int(source.get("BROWSER_CRAWLER_HOST_PORT", cls.host_port)),
             global_concurrency=int(source.get("BROWSER_CRAWLER_GLOBAL_CONCURRENCY", cls.global_concurrency)),
             per_domain_concurrency=int(source.get("BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency)),
