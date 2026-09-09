@@ -57,6 +57,28 @@ class TestValidationGaps:
     def test_registrable_domain_two_part_suffix(self):
         assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
 
+    def test_integer_ip_literal_blocked(self, monkeypatch):
+        # L4: resolvers read bare integers/hex as IPv4; layer 1 must too.
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://2130706433/")  # 127.0.0.1
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://0x7f000001/")  # 127.0.0.1
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://127.1/")  # 127.0.0.1
+
+    def test_public_integer_literal_allowed(self, monkeypatch):
+        # Numeric but public (1.1.1.1) stays reachable.
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        assert normalize_public_http_url("http://16843009/") == "http://16843009"
+
+    def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
+        # Oversized integers wrap mod 2**32 on resolvers: this one lands on
+        # 127.0.0.1 and must be rejected, not passed through as a hostname.
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://6425673729/")
+
     def test_registrable_domain_multi_level_suffixes(self):
         # M5: the hand-rolled 7-entry suffix set collapsed every unlisted
         # two-part suffix to itself (a.co.jp and b.co.jp both -> co.jp),

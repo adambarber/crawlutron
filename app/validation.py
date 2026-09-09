@@ -26,6 +26,66 @@ def _is_tracking_param(key: str) -> bool:
     return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
 
 
+def _resolver_numeric_part(part: str) -> int | None:
+    """Parse one numeric IP component the way glibc-style resolvers do."""
+    if not part:
+        return None
+    lowered = part.lower()
+    if lowered.startswith("0x"):
+        digits = lowered[2:]
+        if not digits or any(c not in "0123456789abcdef" for c in digits):
+            return None
+        return int(digits, 16)
+    if len(part) > 1 and part.startswith("0"):
+        if any(c not in "01234567" for c in part):
+            return None
+        return int(part, 8)
+    if not part.isdigit():
+        return None
+    return int(part, 10)
+
+
+def _resolver_numeric_ipv4(host: str) -> int | None:
+    """Interpret *host* as IPv4 the way resolvers parse numeric forms (L4).
+
+    ``ipaddress`` rejects bare integers (``2130706433``), hex
+    (``0x7f000001``), and short dotted quads (``127.1``), but resolvers
+    accept them -- so layer 1 must classify the packed value itself instead
+    of treating every unparseable host as a plain hostname. Returns the
+    32-bit value, or None when the host is not a numeric form (or is out of
+    range, which resolvers also reject).
+    """
+    if not host or any(c not in "0123456789abcdefxABCDEF." for c in host):
+        return None
+    if "." not in host:
+        value = _resolver_numeric_part(host)
+        if value is None:
+            return None
+        # Oversized single integers wrap mod 2**32 on resolvers (verified
+        # against getaddrinfo); classify the effective address, not None.
+        return value & 0xFFFFFFFF
+    parts = host.split(".")
+    if not 2 <= len(parts) <= 4:
+        return None
+    values = []
+    for part in parts:
+        parsed = _resolver_numeric_part(part)
+        if parsed is None:
+            return None
+        values.append(parsed)
+    width = len(values)
+    for leading in values[:-1]:
+        if leading > 0xFF:
+            return None
+    last_limit = 1 << (8 * (5 - width))
+    if values[-1] >= last_limit:
+        return None
+    result = 0
+    for index, value in enumerate(values[:-1]):
+        result |= value << (8 * (3 - index))
+    return result | values[-1]
+
+
 def normalize_public_http_url(url: str) -> str:
     """Canonicalize a public HTTP(S) URL into a single normalized form.
 
@@ -56,10 +116,17 @@ def normalize_public_http_url(url: str) -> str:
         try:
             address = ipaddress.ip_address(host)
         except ValueError:
-            pass
-        else:
-            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
-                raise ValueError("private_network_target")
+            address = None
+        if address is None:
+            # Resolver-numeric forms ipaddress rejects (L4): classify the
+            # packed value with the same predicate set.
+            numeric = _resolver_numeric_ipv4(host)
+            if numeric is not None:
+                address = ipaddress.ip_address(numeric)
+        if address is not None and (
+            address.is_private or address.is_loopback or address.is_link_local or address.is_reserved
+        ):
+            raise ValueError("private_network_target")
 
     default_port = 80 if parsed.scheme == "http" else 443
     port = parsed.port
