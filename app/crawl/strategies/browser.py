@@ -476,8 +476,10 @@ class BrowserRenderer:
             # and visible text are reachable by the standard HTML/text extractors.
             await self._flatten_shadow_dom(page)
 
-            # Auto-accept cookie consent (best-effort) before extraction
-            await self._auto_accept_cookie_consent(page)
+            # Auto-accept cookie consent (opt-in only) before extraction
+            await self._auto_accept_cookie_consent(
+                page, bool((options.browser_profile or {}).get("auto_accept_cookie_consent"))
+            )
 
             # Extract with challenge waiting
             html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
@@ -813,11 +815,16 @@ class BrowserRenderer:
         except Exception:  # flattening is best-effort; never fail a render over it
             pass
 
-    async def _auto_accept_cookie_consent(self, page: Any) -> bool:
-        """Auto-click cookie consent accept buttons (best-effort).
+    async def _auto_accept_cookie_consent(self, page: Any, enabled: bool) -> bool:
+        """Auto-click cookie consent accept buttons (best-effort, opt-in).
 
-        Returns True if a consent button was clicked, False otherwise.
+        Clicking "Accept All" on the caller's behalf is an action with legal
+        weight, so it never happens implicitly: callers must pass
+        ``browser_profile.auto_accept_cookie_consent = true``. Returns True if
+        a consent button was clicked, False otherwise.
         """
+        if not enabled:
+            return False
         try:
             # Common cookie consent button selectors and text patterns
             consent_selectors = [

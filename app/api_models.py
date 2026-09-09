@@ -254,7 +254,7 @@ class CrawlPolicy(BaseModel):
     )
     browser_profile: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.",
+        description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), benign cookie jar hints, and auto_accept_cookie_consent (default false; when true the browser may click consent banners). Viewport changes Firefox window size; reduced resource mode disables images.",
     )
     discovery: DiscoveryConfig | None = Field(
         None,

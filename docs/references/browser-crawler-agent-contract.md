@@ -103,7 +103,8 @@ Policy fields agents may send:
   },
   "browser_profile": {
     "viewport": "desktop",
-    "resource_mode": "full"
+    "resource_mode": "full",
+    "auto_accept_cookie_consent": false
   },
   "discovery": {
     "robots": true,
@@ -156,7 +157,7 @@ policy decisions. Current diagnostics may include:
 - `runtime`: elapsed time and final URL.
 - `robots`: robots URL, crawl delay, and sitemap hints.
 - `discovery`: sitemap URLs and feed links discovered from robots, common sitemap locations, or HTML alternate links.
-- `browser_profile`: browser state, viewport, resource mode, and cookie jar hints.
+- `browser_profile`: browser state, viewport, resource mode, cookie jar hints, and the `auto_accept_cookie_consent` opt-in (default false).
 - `content_metrics`: visible text length, HTML length, link count, frame count, form count, frameset presence, and text-to-HTML ratio.
 - `frames`: legacy `<frame>` / `<iframe>` URLs with normalized URLs, frame names, titles, source URL, host, and same-host flags.
 - `forms`: form method/action/target/name/id metadata and control summaries. Form actions are resolved to normalized URLs, but forms are not submitted automatically.
@@ -253,7 +254,10 @@ paywall bypass, proxy rotation, identity rotation, credential injection,
 public network binding, or broad unqualified `docker compose up -d`
 workflows. Passive challenge waiting may observe whether a public page
 resolves during the configured timeout, but it must not click, solve,
-outsource, evade, or continue after explicit denial.
+outsource, evade, or continue after explicit denial. Cookie-consent
+auto-accept (`browser_profile.auto_accept_cookie_consent`) is disabled by
+default; when explicitly opted in, the browser may click consent banners
+on the caller's behalf.
 
 Use the targeted helper for local operation (from the repository root):
 

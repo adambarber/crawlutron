@@ -54,6 +54,7 @@ GUIDANCE = [
     "Do not bypass Cloudflare, WAF, CAPTCHA, login, paywall, or access-denied controls; report those outcomes as classifications and evidence.",
     "Do not solve CAPTCHAs, do not rotate proxies, do not rotate identities, do not inject credentials, and do not continue after explicit denial.",
     "Passive challenge waiting only observes whether a public page resolves within the configured timeout; it must not click, solve, outsource, or evade challenges.",
+    "Cookie-consent auto-accept is disabled by default: pass browser_profile.auto_accept_cookie_consent=true to allow consent-banner clicks on your behalf.",
     "Keep Chonkie downstream of extracted text rather than part of retrieval strategy selection.",
 ]
 

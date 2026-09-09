@@ -102,7 +102,8 @@ class TestBrowserCoverageGaps:
         class MockPage:
             async def query_selector(self, _):
                 return None
-        result = await renderer._auto_accept_cookie_consent(MockPage())
+        # Opt-in required (M4): disabled by default, no click without consent.
+        result = await renderer._auto_accept_cookie_consent(MockPage(), False)
         assert not (result)
 
     async def test_browser_renderer_click_consent_button(self):
@@ -120,7 +121,7 @@ class TestBrowserCoverageGaps:
                 if "accept" in selector:
                     return MockElement()
                 return None
-        result = await renderer._auto_accept_cookie_consent(MockPage())
+        result = await renderer._auto_accept_cookie_consent(MockPage(), True)
         assert result
 
 
