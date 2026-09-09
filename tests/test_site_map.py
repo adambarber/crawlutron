@@ -48,3 +48,23 @@ def test_build_site_map_empty():
     m = build_site_map({"results": []})
     assert m["url"] is None
     assert m["all_urls"] == []
+
+
+def test_build_site_map_resolves_relative_paths():
+    # L6: origin-relative paths must resolve against the root instead of
+    # leaking verbatim -- the SiteMapResponse contract promises normalized
+    # public URLs.
+    crawl_response = {
+        "results": [{
+            "original_url": "http://x.example/dir/",
+            "final_url": "http://x.example/dir/",
+            "diagnostics": {},
+            "discovered_links": [
+                {"url": "/page1", "normalized_url": "/page1"},
+                {"url": "http://x.example/abs", "normalized_url": "http://x.example/abs"},
+            ],
+        }]
+    }
+    m = build_site_map(crawl_response)
+    assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]
+    assert all(not u.startswith("/") for u in m["all_urls"])

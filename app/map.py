@@ -38,17 +38,23 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
     robots = diagnostics.get("robots") or {}
     discovery = diagnostics.get("discovery") or {}
 
+    root_url = result.get("final_url") or result.get("original_url") or ""
+
     def _normalize(u: str | None) -> str | None:
         """Canonicalize every emitted URL (sorts query params, strips
-        fragments/default ports). Origin-relative paths are kept verbatim;
-        un-normalizable absolute URLs are dropped rather than leaked raw."""
+        fragments/default ports). Origin-relative paths resolve against the
+        crawled root (L6); anything that still is not a normalizable public
+        URL is dropped rather than leaked raw."""
         if not u:
             return None
+        from urllib.parse import urljoin
+
         from app.validation import normalize_public_http_url
+        candidate = urljoin(root_url, u) if u.startswith("/") else u
         try:
-            return normalize_public_http_url(u)
+            return normalize_public_http_url(candidate)
         except ValueError:
-            return u if u.startswith("/") else None
+            return None
 
     links: list[str] = []
     for link in result.get("discovered_links", []) or []:
