@@ -723,17 +723,24 @@ class _ResultSpill:
             self.count += 1
 
     def load_ordered(self) -> list[dict[str, Any]]:
-        """Reassemble all spilled results in submission order."""
+        """Reassemble all spilled results in submission order.
+
+        Single pass: each parsed payload is placed directly into its index
+        slot — no intermediate tuple list, no O(N log N) sort. The returned
+        list still materializes every result (the response contract needs
+        the complete ordered set in RAM); streaming consumers are the
+        documented escape hatch if that ever becomes a constraint.
+        """
         self._fh.flush()
-        rows: list[tuple[int, dict[str, Any]]] = []
+        slots: dict[int, dict[str, Any]] = {}
         with open(self.path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
-                if line:
-                    entry = json.loads(line)
-                    rows.append((entry["i"], entry["r"]))
-        rows.sort(key=lambda pair: pair[0])
-        return [payload for _, payload in rows]
+                if not line:
+                    continue
+                entry = json.loads(line)
+                slots[entry["i"]] = entry["r"]
+        return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:
         try:
