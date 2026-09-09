@@ -28,7 +28,7 @@ from html import unescape
 from typing import Any, NamedTuple
 from urllib.parse import urljoin, urlparse
 
-from app.crawl.firecrawl_format import _text_from_html
+from app.crawl.llm_format import _text_from_html
 from app.models import DiscoveredLink
 from app.validation import normalize_public_http_url
 

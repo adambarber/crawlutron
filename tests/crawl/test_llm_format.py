@@ -1,13 +1,13 @@
-"""Firecrawl-format metadata extraction, including JSON-LD (SOTA)."""
+"""LLM-format metadata extraction, including JSON-LD (SOTA)."""
 
-from helpers import FIRECRAWL_TEST_HTML
+from helpers import LLM_FORMAT_TEST_HTML
 
-from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
+from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
 
 
-class TestFirecrawlMetadata:
+class TestPageMetadata:
     def test_extracts_title_and_meta(self):
-        meta = _extract_firecrawl_metadata(FIRECRAWL_TEST_HTML, "https://example.com")
+        meta = _extract_llm_metadata(LLM_FORMAT_TEST_HTML, "https://example.com")
         assert meta["title"] == "Test Page"
         assert meta["description"] == "A test page"
         assert meta["og_title"] == "OG Title"
@@ -15,7 +15,7 @@ class TestFirecrawlMetadata:
         assert meta["source_url"] == "https://example.com"
 
     def test_handles_empty(self):
-        assert _extract_firecrawl_metadata("", "https://example.com") == {"source_url": "https://example.com"}
+        assert _extract_llm_metadata("", "https://example.com") == {"source_url": "https://example.com"}
 
     def test_text_from_html_strips_scripts_and_tags(self):
         html = (
@@ -33,7 +33,7 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@context":"https://schema.org","name":"Test"}</script>'
             "</head><body><p>Body</p></body></html>"
         )
-        meta = _extract_firecrawl_metadata(html, "https://example.com")
+        meta = _extract_llm_metadata(html, "https://example.com")
         assert meta.get("json_ld") is not None
         assert meta["json_ld"]["name"] == "Test"
         assert meta["json_ld"]["@context"] == "https://schema.org"
@@ -43,12 +43,12 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@type":"A"}</script>'
             '<script type="application/ld+json">{"@type":"B"}</script>'
         )
-        meta = _extract_firecrawl_metadata(html, "https://example.com")
+        meta = _extract_llm_metadata(html, "https://example.com")
         assert isinstance(meta["json_ld"], list)
         assert len(meta["json_ld"]) == 2
 
     def test_json_ld_absent_when_no_script(self):
-        meta = _extract_firecrawl_metadata("<html><body>x</body></html>", "https://example.com")
+        meta = _extract_llm_metadata("<html><body>x</body></html>", "https://example.com")
         assert "json_ld" not in meta
 
     def test_single_parse_per_html(self, monkeypatch):
@@ -71,7 +71,7 @@ class TestJsonLdExtraction:
             '<script type="application/ld+json">{"@type":"WebSite"}</script>'
             "</head><body><p>x</p></body></html>"
         )
-        meta = _extract_firecrawl_metadata(html, "https://example.com")
+        meta = _extract_llm_metadata(html, "https://example.com")
         # #15: title, meta, JSON-LD, canonical, favicon, language all read from
         # ONE lxml parse instead of 8+ independent regex scans.
         assert calls["n"] == 1

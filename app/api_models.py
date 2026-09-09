@@ -420,7 +420,7 @@ class SearchResultItem(BaseModel):
 
 
 class SearchResponse(BaseModel):
-    """Response for ``POST /v1/search`` (Firecrawl-style envelope)."""
+    """Response for ``POST /v1/search`` (LLM-friendly envelope)."""
 
     success: bool = Field(True, description="True when the provider responded and results were shaped.")
     query: str = Field(description="Echo of the submitted query.")
@@ -498,7 +498,7 @@ class StrategyAttempt(BaseModel):
     )
 
 
-class FirecrawlMetadata(BaseModel):
+class PageMetadata(BaseModel):
     title: str | None = None
     description: str | None = None
     language: str | None = None
@@ -536,12 +536,12 @@ class UnifiedCrawlResult(BaseModel):
         default_factory=list, description="Ordered per-strategy attempt history."
     )
     error: str | None = Field(None, description="Stable machine-readable error detail, if any.")
-    # 3. Firecrawl-Style LLM Output (The "Meat")
+    # 3. LLM Output (The "Meat")
     markdown: str | None = Field(
         None, description="Cleaned page content in Markdown format for LLM consumption."
     )
-    metadata: FirecrawlMetadata = Field(
-        default_factory=FirecrawlMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata."
+    metadata: PageMetadata = Field(
+        default_factory=PageMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata."
     )
     # 4. Raw Data & Evidence (For debugging & non-LLM pipelines)
     html: str | None = Field(None, description="Raw HTML/body evidence when requested and available.")

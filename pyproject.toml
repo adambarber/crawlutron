@@ -125,7 +125,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # The job store wires the sqlite connection factory above the model imports.
 "app/crawl/job_store.py" = ["E402"]
 # Best-effort snapshot persistence: a failed cache write is never fatal.
-"app/crawl/firecrawl_format.py" = ["S110", "S112"]
+"app/crawl/llm_format.py" = ["S110", "S112"]
 "app/crawl/fetch_helpers.py" = ["S110", "S112"]
 
 # The str-based Enum style (class Foo(str, Enum)) is the project convention.

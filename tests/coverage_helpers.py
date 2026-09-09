@@ -63,7 +63,7 @@ from app.crawl.extraction import (
     _html_diagnostics,
     extract_js_endpoints,
 )
-from app.crawl.firecrawl_format import _extract_firecrawl_metadata
+from app.crawl.llm_format import _extract_llm_metadata
 from app.crawl.strategies.document import (
     _default_document_text_extractor,
     _format_table,

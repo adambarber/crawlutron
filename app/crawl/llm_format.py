@@ -1,4 +1,4 @@
-"""Firecrawl-compatible metadata extraction from HTML."""
+"""LLM-friendly metadata extraction from HTML."""
 
 import json
 import re
@@ -23,23 +23,23 @@ _META_MAP = {
 # Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
 # full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
 # Anything above a few MB is almost certainly above the practical meta-tag
-# density and is rejected (adversarial review F-firecrawl-size-guard).
-_MAX_FIRECRAWL_HTML_INPUT_BYTES = 4 * 1024 * 1024
+# density and is rejected (adversarial review F-llm-format-size-guard).
+_MAX_LLM_FORMAT_HTML_INPUT_BYTES = 4 * 1024 * 1024
 
 
-def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
-    """Extract Firecrawl-style metadata from HTML meta tags.
+def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
+    """Extract Page metadata from HTML meta tags.
 
     #15: parse the HTML once with lxml and read every field (title, meta
     og/twitter tags, JSON-LD, canonical, favicon, language) from the single
     tree instead of running 8+ independent regex scans over the raw string.
-    Inputs above ``_MAX_FIRECRAWL_HTML_INPUT_BYTES`` are truncated before
+    Inputs above ``_MAX_LLM_FORMAT_HTML_INPUT_BYTES`` are truncated before
     lxml parses them so a malicious oversized payload cannot exhaust RAM
-    building the DOM tree (adversarial F-firecrawl-size-guard).
+    building the DOM tree (adversarial F-llm-format-size-guard).
     """
     metadata: dict[str, Any] = {"source_url": url}
-    if len(html) > _MAX_FIRECRAWL_HTML_INPUT_BYTES:
-        html = html[:_MAX_FIRECRAWL_HTML_INPUT_BYTES]
+    if len(html) > _MAX_LLM_FORMAT_HTML_INPUT_BYTES:
+        html = html[:_MAX_LLM_FORMAT_HTML_INPUT_BYTES]
     # Lazy import avoids a circular import: extraction.py imports this module.
     from app.crawl.extraction import _parse_html_tree
 

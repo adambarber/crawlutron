@@ -338,7 +338,7 @@ with `422`.
 │   ├── crawl/            # Strategy implementations (http, browser, document, dom)
 │   │   ├── engine.py     # Orchestration + fallback-chain scheduling (1142 lines)
 │   │   ├── strategies/http.py / browser.py / document.py / browser_pool.py
-│   │   ├── extraction.py / decompression.py / firecrawl_format.py / ...
+│   │   ├── extraction.py / decompression.py / llm_format.py / ...
 │   │   └── job_store.py / result_store.py / cache.py / content_cache.py
 │   ├── health/           # /health, /ready (READINESS_STATE singleton)
 │   ├── discovery/        # /v1/capabilities, /v1/agent-hints, /.well-known

@@ -33,7 +33,7 @@ router = APIRouter(tags=["Crawler"])
         "BROWSER_HEADLESS for headless Firefox rendering via Camoufox, and BROWSER_HEADED_WARMED for headed Firefox "
         "with warmup URLs. How retrieved content is parsed is controlled separately by policy.extraction (full, "
         "trafilatura, or document); extraction is orthogonal to the fetch strategy. "
-        "Returns Firecrawl-style condensed Markdown output with metadata for LLM-friendly consumption. "
+        "Returns LLM-friendly condensed Markdown output with metadata for LLM-friendly consumption. "
         "Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
         "and max_discovered_links; omit limits to use defaults from /v1/capabilities. Use request_profile for "
         "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "

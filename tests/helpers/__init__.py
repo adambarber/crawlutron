@@ -37,7 +37,7 @@ def build_payload(
 
 
 # Shared HTML fixtures to avoid duplication across test modules.
-FIRECRAWL_TEST_HTML = (
+LLM_FORMAT_TEST_HTML = (
     "<html lang='en'><head><title>Test Page</title>"
     "<meta content='no-name-attribute'>"
     "<meta name='description' content=''>"

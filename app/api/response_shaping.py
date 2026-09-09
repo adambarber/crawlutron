@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api_models import FirecrawlMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
+from app.api_models import PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
 
 
 def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
@@ -28,14 +28,14 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     without HTML fall back to the strategy's extracted ``text`` so the consumer always
     receives a consistent Markdown payload regardless of how the content was acquired.
     """
-    from app.crawl.firecrawl_format import _extract_firecrawl_metadata
+    from app.crawl.llm_format import _extract_llm_metadata
 
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
     html = item.get("html")
     markdown = item.get("markdown")
     if markdown:
         if html and url:
-            return markdown, _extract_firecrawl_metadata(html, url)
+            return markdown, _extract_llm_metadata(html, url)
         return markdown, {}
     text = item.get("text")
     if not text:
@@ -47,14 +47,14 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
 
     The unified response carries both the LLM-friendly ``markdown`` and the
-    full ``diagnostics`` payload. Firecrawl-style metadata is produced by the
-    shared Firecrawl metadata extractor (``extract_firecrawl_format``) from the
+    full ``diagnostics`` payload. Page metadata is produced by the
+    shared page-metadata extractor (``_extract_llm_metadata``) from the
     raw HTML when available.
     """
     markdown, metadata_dict = format_crawl_item(item)
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    metadata = FirecrawlMetadata(
-        **{key: value for key, value in metadata_dict.items() if key in FirecrawlMetadata.model_fields}
+    metadata = PageMetadata(
+        **{key: value for key, value in metadata_dict.items() if key in PageMetadata.model_fields}
     )
     if metadata.source_url is None:
         metadata.source_url = url

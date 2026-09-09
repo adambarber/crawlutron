@@ -2,7 +2,7 @@
 
 from app.crawl.decompression import decompress_body
 from app.crawl.extraction import extract_content
-from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
+from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
 from app.discovery.agent_hints import (
     EXAMPLE_POLICIES,
     STRATEGY_DESCRIPTIONS,
@@ -36,9 +36,9 @@ class TestDecompression:
         assert decompress_body(b"hello", "unknown") == b"hello"
 
 
-class TestFirecrawlFormat:
-    def test_extract_firecrawl_metadata_handles_empty(self):
-        meta = _extract_firecrawl_metadata("", "https://example.com")
+class TestLlmFormat:
+    def test_extract_llm_metadata_handles_empty(self):
+        meta = _extract_llm_metadata("", "https://example.com")
         assert meta == {"source_url": "https://example.com"}
 
     def test_extract_content_html_returns_markdown(self):

@@ -11,7 +11,7 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | `app/main.py` | ~500 | FastAPI app, routes, readiness, exception handlers — **now 218 lines, routers extracted to `app/api/*`** |
-| `app/service.py` | ~1300 | Crawl orchestration, strategies, link extraction, Firecrawl compat — **deleted; now `app/crawl/engine.py` (1142) + `app/crawl/strategies/http.py` (1703) + `app/crawl/strategies/browser.py` (902)** |
+| `app/service.py` | ~1300 | Crawl orchestration, strategies, link extraction, LLM-format output — **deleted; now `app/crawl/engine.py` (1142) + `app/crawl/strategies/http.py` (1703) + `app/crawl/strategies/browser.py` (902)** |
 | `app/browser.py` | ~200 | Camoufox browser wrapper — **now `app/crawl/strategies/browser_pool.py` (150) + `app/crawl/strategies/browser.py`** |
 | `app/models.py` | ~180 | Dataclasses |
 | `app/api_models.py` | 224 | Pydantic models, enums |
@@ -114,7 +114,7 @@ app/
   crawl/
     engine.py           # crawl_request orchestration
     decompression.py    # _decompress_body
-    firecrawl_format.py # extract_firecrawl_format
+    llm_format.py # _extract_llm_metadata
     strategies/
       http.py           # HTTP strategies
       browser.py        # Browser strategies
@@ -134,7 +134,7 @@ tests/
   crawl/
     test_engine.py
     test_decompression.py
-    test_firecrawl_format.py
+    test_llm_format.py
   test_classify.py
   test_validation.py
   test_scheduler.py
@@ -146,7 +146,7 @@ tests/
 
 1. Create `app/health/readiness.py`, write test, move class
 2. Create `app/crawl/decompression.py`, write test, move function, fix gzip bug
-3. Create `app/crawl/firecrawl_format.py`, move `extract_firecrawl_format`
+3. Create `app/crawl/llm_format.py`, move `_extract_llm_metadata`
 4. Fix `/v1/crawl` response_model mismatch
 5. Fix invalid URL error handling
 6. Create `tests/conftest.py`, eliminate per-file sys.path
