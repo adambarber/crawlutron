@@ -136,7 +136,13 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
         overrides = {}
         if host_headers.get("Host"):
             overrides["Host"] = host_headers["Host"]
-        await route.continue_(url=pinned_url, headers=overrides)
+        # Omit headers= when there are no overrides (M1): Playwright treats
+        # an explicit headers dict as a full replacement, so passing {}
+        # would wipe UA/cookies/accept headers off every HTTPS subresource.
+        if overrides:
+            await route.continue_(url=pinned_url, headers=overrides)
+        else:
+            await route.continue_(url=pinned_url)
 
     return _handler
 
