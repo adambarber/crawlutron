@@ -169,6 +169,36 @@ def test_validators_conflict_with_policy_headers_rejected():
     assert request.validators["http://example.com/"].if_none_match == '"v1"'
 
 
+def test_conditional_headers_rejected_without_validators():
+    """M14: raw If-* in policy.headers is rejected even with no validators.
+
+    Without validators the raw headers flow into the fetch, an origin 304
+    yields a bodyless not_modified result -- caller-controlled content
+    suppression through the exact path the validator exists to guard.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    from app.api_models import CrawlRequest
+
+    with pytest.raises(ValidationError):
+        CrawlRequest(
+            url="http://example.com/",
+            policy={"headers": {"If-None-Match": '"v1"'}},
+        )
+    with pytest.raises(ValidationError):
+        CrawlRequest(
+            url="http://example.com/",
+            policy={"headers": {"if-modified-since": "Wed, 01 Jan 2024 00:00:00 GMT"}},
+        )
+    # Ordinary headers are still accepted.
+    request = CrawlRequest(
+        url="http://example.com/",
+        policy={"headers": {"Accept": "text/html"}},
+    )
+    assert request.policy.headers == {"Accept": "text/html"}
+
+
 async def test_decompression_failure_flagged_and_downgraded():
     """A Content-Encoding that fails to decompress yields garbage; it must be
     flagged in diagnostics and must not score as high-quality content."""

@@ -224,11 +224,11 @@ class CrawlRequest(BaseModel):
     def _reject_duplicate_conditional_headers(self):
         """Conditional headers must come from ``validators``, not raw policy headers.
 
-        Silently overriding a caller-supplied If-None-Match inside policy.headers
-        would make freshness polling unreliable; fail fast instead.
+        The engine translates ``validators`` into If-None-Match /
+        If-Modified-Since itself; raw conditionals in policy.headers would
+        bypass that flow and let an origin 304 suppress content with no
+        body (M14). Rejected with or without a validators map; fail fast.
         """
-        if not self.validators:
-            return self
         banned = {"if-none-match", "if-modified-since"}
         for key in self.policy.headers:
             if key.strip().lower() in banned:
