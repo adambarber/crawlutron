@@ -237,34 +237,82 @@ def _evidence(classification: str, signature: str, source: str, haystack: str, i
 # a benign double-compile race under threads) is replaced with two module-level
 # compiled patterns.
 _TAGS_RE = re.compile(r"<[^>]+>")
-_HTML_NOISE_RE = re.compile(
-    r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<!--[\s\S]*?-->",
-    re.IGNORECASE | re.DOTALL,
-)
 
 
-# Cap the input size passed to the noise-stripping regex. The pattern uses
-# ``.*?`` with ``re.DOTALL`` and alternation across three branches, which can
-# exhibit quadratic backtracking on inputs with many unclosed script/style
-# tags. Anything above a few MB is overwhelmingly likely to be a hostile
-# payload; truncate before stripping so we never feed the regex a
-# pathological input (adversarial review F-html-noise-re-quadratic).
+# Cap the input size for the noise-stripping scan. The scanner is linear, so
+# this is a resource bound (scan + output size), not a correctness one:
+# anything above a few MB is overwhelmingly likely to be a hostile payload.
 _MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024
 
 
 def _strip_html_noise(html: str | None) -> str:
-    """Remove scripts, styles, and comments in a SINGLE regex pass.
+    """Remove scripts, styles, and comments via linear string scanning.
 
-    Replaces the previous 4 sequential re.sub calls, each of which produced a
-    full copy of the HTML (~6x page size in intermediate strings). Truncates
-    ``html`` to ``_MAX_HTML_NOISE_INPUT_BYTES`` before the regex pass so a
-    pathological input (many unclosed tags triggering alternation
-    backtracking) cannot pin a worker (adversarial F-html-noise-re-quadratic).
+    Replaces the previous regex pass (``.*?`` alternation with ``re.DOTALL``),
+    which exhibited O(N^2) backtracking on inputs with many unclosed script
+    tags (adversarial review H-final-1: 4MB of unclosed tags pinned a worker
+    for tens of seconds). ``str.find`` scans each region exactly once, so the
+    cost is linear in input size regardless of tag structure.
+
+    Semantics are browser-consistent: an *unclosed* ``<script>``/``<style>``
+    or ``<!--`` swallows the remainder of the document (the old regex left
+    the unterminated body visible to classification — script code counted
+    as page text).
     """
     body = html or ""
     if len(body) > _MAX_HTML_NOISE_INPUT_BYTES:
         body = body[:_MAX_HTML_NOISE_INPUT_BYTES]
-    without_noise = _HTML_NOISE_RE.sub(" ", body)
+
+    out: list[str] = []
+    pos = 0
+    lower = body.lower()
+    while pos < len(body):
+        # Find the earliest noise opener from ``pos``.
+        candidates = []
+        idx = lower.find("<script", pos)
+        if idx != -1:
+            candidates.append(idx)
+        idx = lower.find("<style", pos)
+        if idx != -1:
+            candidates.append(idx)
+        idx = lower.find("<!--", pos)
+        if idx != -1:
+            candidates.append(idx)
+
+        if not candidates:
+            out.append(body[pos:])
+            break
+
+        start = min(candidates)
+        out.append(body[pos:start])
+
+        if body.startswith("<!--", start):
+            closer = "-->"
+        else:
+            # ``<script``/``<style`` — locate the closing tag. Match against
+            # ``lower`` (the opener scan is case-insensitive; ``body`` may be
+            # ``<SCRIPT>``).
+            tag = "script" if lower.startswith("<script", start) else "style"
+            # Word-boundary guard (regex ``\b`` parity): ``<scriptable`` is a
+            # run of text, not an opening tag.
+            after = start + 1 + len(tag)
+            if after < len(body) and (body[after].isalnum() or body[after] == "_"):
+                # Not a real opener (``<scriptable``): keep the token verbatim.
+                out.append(body[start : start + 2])
+                pos = start + 2
+                continue
+            closer = f"</{tag}"
+
+        end = lower.find(closer, start)
+        if end == -1:
+            # Unclosed block: swallow the remainder and stop.
+            pos = len(body)
+            break
+        # Consume through the closing tag's ``>`` (handles attributes/space).
+        gt = body.find(">", end)
+        pos = len(body) if gt == -1 else gt + 1
+
+    without_noise = "".join(out)
     return _TAGS_RE.sub(" ", without_noise)
 
 
