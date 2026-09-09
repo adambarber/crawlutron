@@ -53,8 +53,12 @@ class _FakeHttpResponse:
         self.status = status
         self.headers = headers or {}
 
-    def read(self):
-        return self._body
+    def read(self, amount: int = -1):
+        # Real urllib responses accept an optional byte count (read_capped
+        # asks for cap+1); mirror that contract.
+        if amount == -1:
+            return self._body
+        return self._body[:amount]
 
     def __enter__(self):
         return self

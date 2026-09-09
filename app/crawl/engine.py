@@ -16,7 +16,6 @@ import logging
 import os
 import re
 import tempfile
-import threading
 import time
 import uuid
 from dataclasses import replace
@@ -25,6 +24,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from app.api_models import POLICY_SCHEMA_VERSION
+from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     BROWSER_STRATEGIES,
@@ -508,44 +508,32 @@ ROBOTS_CACHE_MAX_ENTRIES = 1000
 
 # Module-level robots cache shared across all crawl_request calls in the
 # process (#9). Previously each crawl_request built its own cache, so two
-# separate API calls to the same domain each re-fetched /robots.txt. Promoting
-# it here lets the TTL cache be reused across requests; it is bounded by
-# ROBOTS_CACHE_MAX_ENTRIES via _cap_robots_cache.
-robots_cache: dict[str, tuple[float, list[tuple[bool, str]], list[str], float | None]] = {}
-# Concurrent crawl_requests can race on robots_cache (the dict is mutated from
-# the async event loop, but _cap_robots_cache is also reachable from worker
-# threads when paired with the to_thread offload). A plain dict.get/dict[]
-# sequence is not atomic under concurrent mutation (adversarial review
-# F-thread-safety); the lock makes the read-modify-write sequence atomic.
-_ROBOTS_CACHE_LOCK = threading.Lock()
+# separate API calls to the same domain each re-fetched /robots.txt.
+# BoundedTTLCache chokepoint: the lock lives INSIDE (get/put/purge are all
+# atomic), LRU eviction is built in -- the two historical bug classes here
+# (cap called outside the lock; forgetting the lock entirely) are no longer
+# expressible. Per-entry TTLs ride put(ttl=...) because the failure entry's
+# TTL is shorter than the success TTL.
+robots_cache = BoundedTTLCache[str, tuple[list[tuple[bool, str]], list[str], float | None]](
+    max_entries=ROBOTS_CACHE_MAX_ENTRIES, ttl=600.0
+)
 
 
-def _cap_robots_cache(cache: dict, max_size: int) -> None:
-    """Evict oldest entries (insertion order) once ``cache`` exceeds ``max_size``.
+def _cap_robots_cache(cache, max_size: int) -> None:
+    """Legacy seam: eviction now lives inside BoundedTTLCache.put (LRU).
 
-    The robots cache lives for the duration of a single crawl_request and is
-    normally trimmed by TTL, but a crawl that discovers thousands of unique
-    (still-fresh) domains would otherwise grow it without bound. This bounds
-    memory by evicting the least-recently-inserted origins (LRU by insertion).
+    Kept only because tests pin this name; a no-op against the chokepoint.
     """
-    while len(cache) > max_size:
-        cache.pop(next(iter(cache)))
+    return None
 
 
 def _purge_robots_cache(now: float | None = None) -> int:
     """Remove expired entries from the module robots cache; return count removed.
 
-    Module-level (was nested in _crawl_request_impl) so the shape contract is
-    directly testable. Entries are (expires, rules, sitemaps, crawl_delay)
-    4-tuples -- unpacking fewer (L10) crashed purging instead of evicting.
+    Kept as a named seam (tests + the size-check call site) delegating to the
+    BoundedTTLCache chokepoint; ``now`` is accepted for test determinism.
     """
-    if now is None:
-        now = time.monotonic()
-    with _ROBOTS_CACHE_LOCK:
-        expired = [origin for origin, (expires, _, _, _) in robots_cache.items() if expires <= now]
-        for origin in expired:
-            del robots_cache[origin]
-    return len(expired)
+    return robots_cache.purge_expired(now=now)
 
 
 def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
@@ -1052,19 +1040,13 @@ async def _crawl_request_impl(
     ) -> tuple[list[tuple[bool, str]], list[str], float | None]:
         now = time.monotonic()
         # Periodically purge expired entries to prevent unbounded growth.
-        # The len() read is intentionally outside the lock: it is a cheap
-        # pre-check that avoids a lock acquisition on the hot path. The
-        # purge + insert below acquire the lock so the actual mutation is
-        # atomic; the worst-case race is one extra purge per origin, never
-        # a corruption of the dict (adversarial review F-robots-cache-race).
-        with _ROBOTS_CACHE_LOCK:
-            cache_size = len(robots_cache)
-        if cache_size > ROBOTS_CACHE_MAX_ENTRIES:
-            _purge_robots_cache(now)
-        with _ROBOTS_CACHE_LOCK:
-            cached = robots_cache.get(origin)
-            if cached and cached[0] > now:
-                return cached[1], cached[2], cached[3]
+        # The chokepoint's put() evicts LRU-first under its own lock, so a
+        # crawl discovering thousands of unique origins can no longer grow
+        # the cache without bound (adversarial review F-robots-cache-race;
+        # the manual pre-purge + explicit cap are gone with the bare dict).
+        cached = robots_cache.get(origin)
+        if cached is not None:
+            return cached
         rules: list[tuple[bool, str]] = []
         sitemaps: list[str] = []
         crawl_delay: float | None = None
@@ -1087,11 +1069,7 @@ async def _crawl_request_impl(
             # quickly and a prolonged outage stays blocked.
             rules = [(False, "/")]
             ttl = min(robots_ttl, ROBOTS_FAILURE_TTL_SECONDS)
-        with _ROBOTS_CACHE_LOCK:
-            robots_cache[origin] = (now + ttl, rules, sitemaps, crawl_delay)
-            # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
-            # that discovers thousands of unique, still-fresh domains).
-            _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)
+        robots_cache.put(origin, (rules, sitemaps, crawl_delay), ttl=ttl)
         return rules, sitemaps, crawl_delay
 
     async def _robots_allows_target(target_url: str) -> bool:
@@ -1117,10 +1095,9 @@ async def _crawl_request_impl(
         discovery "robots was fetched, no sitemaps", preventing its own fetch,
         while ``None`` lets discovery fetch robots itself when needed (#4).
         """
-        with _ROBOTS_CACHE_LOCK:
-            cached = robots_cache.get(origin)
-        if cached and cached[0] > time.monotonic():
-            return list(cached[2])
+        cached = robots_cache.get(origin)
+        if cached is not None:
+            return list(cached[1])
         return None
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:

@@ -7,22 +7,30 @@ kept growing the cache. A module-level _cap_robots_cache evicts the oldest
 entries by insertion order once over the limit.
 """
 
+from app.bounded_ttl import BoundedTTLCache
 from app.crawl.engine import _cap_robots_cache
 
 
 def test_cap_robots_cache_evicts_oldest_when_over_limit():
-    cache = {}
+    """LRU eviction now lives inside the chokepoint; the seam is a no-op."""
+    from app.crawl.engine import ROBOTS_CACHE_MAX_ENTRIES
+
+    cache = BoundedTTLCache(max_entries=3, ttl=600.0)
     for i in range(5):
-        # Production 4-tuples (expires, rules, sitemaps, crawl_delay).
-        cache[f"origin{i}"] = (1000.0 + i, [("disallow", "/")], [], None)
-    _cap_robots_cache(cache, 3)
+        cache.put(f"origin{i}", ([("disallow", "/")], [], None), ttl=600.0)
+    _cap_robots_cache(cache, 3)  # legacy seam: no-op
     assert len(cache) == 3
     # Oldest two (origin0, origin1) evicted; newest three remain.
-    assert set(cache.keys()) == {"origin2", "origin3", "origin4"}
+    assert cache.get("origin0") is None and cache.get("origin1") is None
+    assert cache.get("origin2") is not None
+    assert ROBOTS_CACHE_MAX_ENTRIES == 1000
 
 
 def test_cap_robots_cache_noop_under_limit():
-    cache = {f"origin{i}": (1000.0 + i, [], [], None) for i in range(3)}
+
+    cache = BoundedTTLCache(max_entries=5, ttl=600.0)
+    for i in range(3):
+        cache.put(f"origin{i}", ([], [], None), ttl=600.0)
     _cap_robots_cache(cache, 5)
     assert len(cache) == 3
 
@@ -36,10 +44,12 @@ def test_purge_removes_only_expired_production_tuples():
     em.robots_cache.clear()
     try:
         now = time.monotonic()
-        em.robots_cache["http://old.test"] = (now - 1.0, [], [], None)
-        em.robots_cache["http://fresh.test"] = (now + 600.0, [], [], None)
+        # Expired entry: ttl-1 (engines treat expires_at > now as fresh).
+        em.robots_cache.put("http://old.test", ([], [], None), ttl=-1.0)
+        em.robots_cache.put("http://fresh.test", ([], [], None), ttl=600.0)
         assert _purge_robots_cache(now) == 1
-        assert set(em.robots_cache) == {"http://fresh.test"}
+        assert em.robots_cache.get("http://old.test") is None
+        assert em.robots_cache.get("http://fresh.test") is not None
     finally:
         em.robots_cache.clear()
 
@@ -48,7 +58,6 @@ async def test_purge_handles_production_shaped_entries():
     """L10: _purge_robots_cache unpacked 3-tuples while production stores
     (expires, rules, sitemaps, crawl_delay) 4-tuples -- purging a full cache
     crashed with ValueError instead of evicting."""
-    import time
 
     import app.crawl.engine as em
     from app.crawl.engine import ROBOTS_CACHE_MAX_ENTRIES, crawl_request
@@ -57,9 +66,11 @@ async def test_purge_handles_production_shaped_entries():
 
     em.robots_cache.clear()
     try:
-        now = time.monotonic()
         for i in range(ROBOTS_CACHE_MAX_ENTRIES + 1):
-            em.robots_cache[f"http://purge-{i}.test"] = (now - 1.0, [], [], None)
+            # Stale entries (ttl -1) stay present under the chokepoint's
+            # purge-only-deletion semantics; the L10 regression is that a
+            # full cache must not crash purging during a real crawl.
+            em.robots_cache.put(f"http://purge-{i}.test", ([], [], None), ttl=-1.0)
 
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             is_robots = url.endswith("/robots.txt")

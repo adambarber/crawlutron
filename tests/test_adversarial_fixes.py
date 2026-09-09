@@ -133,8 +133,12 @@ def test_dns_cache_concurrent_writes_do_not_corrupt():
 def test_robots_cache_lock_is_present():
     from app.crawl import engine as engine_mod
 
-    assert hasattr(engine_mod, "_ROBOTS_CACHE_LOCK")
-    assert isinstance(engine_mod._ROBOTS_CACHE_LOCK, type(threading.Lock()))
+    # The chokepoint moved the lock INSIDE the cache: the module no longer
+    # carries a bare dict + lock pair that callers must compose correctly.
+    cache = engine_mod.robots_cache
+    assert hasattr(cache, "_lock")
+    assert isinstance(cache._lock, type(threading.Lock()))
+    assert hasattr(cache, "put") and hasattr(cache, "purge_expired")
 
 
 # ---- _PENDING_CLIENT_CLOSE bounded ----
