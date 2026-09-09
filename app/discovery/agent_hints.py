@@ -8,6 +8,7 @@ from app.api_models import AgentHintsResponse, CrawlExtractionMethod, CrawlStrat
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.constants import (
     BROWSER_HEADLESS,
+    CFFI_IMPERSONATE_TARGET,
     EXTRACTION_DOCUMENT,
     EXTRACTION_TRAFILATURA,
     HTTP_CFFI_IMPERSONATE,
@@ -19,7 +20,7 @@ from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",
-    CrawlStrategy.HTTP_CFFI_IMPERSONATE: "TLS-fingerprint-impersonated HTTP via curl_cffi (chrome124) with browser-like compatibility headers for WAF/Cloudflare bypass.",
+    CrawlStrategy.HTTP_CFFI_IMPERSONATE: f"TLS-fingerprint-impersonated HTTP via curl_cffi ({CFFI_IMPERSONATE_TARGET}) with browser-like compatibility headers for WAF/Cloudflare bypass.",
     CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",
     CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",
 }

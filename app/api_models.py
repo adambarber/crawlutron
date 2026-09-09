@@ -26,11 +26,13 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
+    SERVICE_VERSION,
 )
 
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
-API_VERSION = "0.3.0"
+# Service version lives in app.constants (base layer, no import cycle).
+API_VERSION = SERVICE_VERSION
 SERVICE_NAME = "browser-crawler"
 
 

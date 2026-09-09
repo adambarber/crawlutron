@@ -52,7 +52,7 @@ async def main() -> None:
 
     import curl_cffi.requests as cr
 
-    async with cr.AsyncClient(impersonate="chrome124") as client:
+    async with cr.AsyncSession(impersonate="firefox135") as client:
         r1 = await client.get(_PROBE_TARGET, allow_redirects=False)
         out.append(f"cffi plain: {r1.status_code}")
         r2 = await client.get(

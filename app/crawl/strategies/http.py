@@ -50,6 +50,7 @@ _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 from app.classify import classify_page_with_evidence
 from app.constants import (
+    CFFI_IMPERSONATE_TARGET,
     DEFAULT_EXTRACTION,
     DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     DEFAULT_MAX_DISCOVERED_LINKS,
@@ -780,7 +781,7 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
         # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
         # AsyncClient does not exist; referencing it raises AttributeError
         # and would silently degrade every impersonated fetch to plain httpx.
-        async with cffi_requests.AsyncSession(impersonate="firefox135", timeout=float(timeout_seconds)) as client:
+        async with cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET, timeout=float(timeout_seconds)) as client:
             current_url = url
             hops = 0
             started = time.monotonic()
@@ -983,9 +984,9 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
     elif is_browser_like:
-        # Firefox identity: must match the curl_cffi firefox135 impersonation
-        # AND the Camoufox browser strategy so cookie-bootstrap sessions carry
-        # a consistent User-Agent across strategies.
+        # Firefox identity: must match CFFI_IMPERSONATE_TARGET AND the Camoufox
+        # browser strategy so cookie-bootstrap sessions carry a consistent
+        # User-Agent across strategies.
         if strategy == HTTP_CFFI_IMPERSONATE:
             headers["User-Agent"] = (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) "

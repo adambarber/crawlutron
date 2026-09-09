@@ -17,14 +17,22 @@ HTTP_DECLARED_CRAWLER: str = "HTTP_DECLARED_CRAWLER"
 HTTP_CFFI_IMPERSONATE: str = "HTTP_CFFI_IMPERSONATE"
 BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
 
+# Service version: single source of truth (L2). app.api_models.API_VERSION
+# aliases this so existing importers keep working.
+SERVICE_VERSION: str = "0.3.0"
 # Public-facing identity strings. Kept here so the same UA appears in both the
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
 # to outbound requests, and so the package version is sourced from a single
 # place instead of being duplicated across files.
 # Overridable via BROWSER_CRAWLER_USER_AGENT; update before publishing
 # to the final GitHub org (replace the placeholder URL below).
-DEFAULT_USER_AGENT: str = "browser-crawler/0.2 (+https://github.com/browser-crawler/browser-crawler)"
+DEFAULT_USER_AGENT: str = (
+    f"browser-crawler/{SERVICE_VERSION} (+https://github.com/browser-crawler/browser-crawler)"
+)
 USER_AGENT_TOKEN: str = "browser-crawler"  # noqa: S105 - robots.txt match token, not a credential
+# TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
+# fetcher and the agent-hints copy both reference this, so they cannot drift.
+CFFI_IMPERSONATE_TARGET: str = "firefox135"
 BROWSER_HEADED_WARMED: str = "BROWSER_HEADED_WARMED"
 
 # Strategy ordering / registries (imported by service.py)
