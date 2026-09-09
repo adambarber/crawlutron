@@ -199,7 +199,10 @@ class TestMoreCoverageGaps:
         )
         assert result.classification == "rendered"
 
-    async def test_http_cffi_import_fallback(self):
+    async def test_http_cffi_import_fallback(self, real_sleeps):
+        # Live impersonated fetch: needs real wall-clock sleeps -- the suite's
+        # instant-asyncio.sleep patch starves curl_cffi's socket/timer loop
+        # and wedges the transfer past all client timeouts.
         from app.crawl.strategies.http import _default_cffi_fetcher
         from helpers.server import spawn_server
         server = spawn_server()
