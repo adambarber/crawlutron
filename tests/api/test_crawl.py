@@ -66,11 +66,13 @@ class TestCrawlApi:
         assert "Example Org" in body["results"][0]["markdown"]
 
     async def test_v1_crawl_discovery_includes_robots_and_sitemap(self):
-        payload = self._crawl_payload(policy={
-            "strategies": [HTTP_DECLARED_CRAWLER],
-            "discovery": {"robots": True, "sitemaps": True, "feeds": True},
-            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-        })
+        payload = self._crawl_payload(
+            policy={
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "discovery": {"robots": True, "sitemaps": True, "feeds": True},
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+            }
+        )
         resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 200
         result = resp.json()["results"][0]
@@ -107,7 +109,12 @@ class TestCrawlApi:
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
                 "scope_regex": r"^https://example\.com",
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 100, "max_depth": 1},
+                "limits": {
+                    "timeout_seconds": 10,
+                    "max_retries": 0,
+                    "max_discovered_links": 100,
+                    "max_depth": 1,
+                },
             },
         )
         resp = await self.client.post("/v1/crawl", json=payload)
@@ -146,11 +153,10 @@ class TestCrawlApi:
         assert resp.status_code == 200, resp.text
         assert "crawler_crawl_requests_total" in resp.text
         assert "crawler_crawl_results_total" in resp.text
+
     async def test_v1_crawl_jsonl_output_format(self):
         # #17: output_format=jsonl returns newline-delimited JSON (one object per URL).
-        resp = await self.client.post(
-            "/v1/crawl", json=self._crawl_payload(output_format="jsonl")
-        )
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="jsonl"))
         assert resp.status_code == 200, resp.text
         assert "application/x-ndjson" in resp.headers.get("content-type", "")
         lines = [ln for ln in resp.text.splitlines() if ln.strip()]
@@ -161,18 +167,14 @@ class TestCrawlApi:
         assert obj["classification"] == "rendered"
 
     async def test_v1_crawl_markdown_output_format(self):
-        resp = await self.client.post(
-            "/v1/crawl", json=self._crawl_payload(output_format="markdown")
-        )
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="markdown"))
         assert resp.status_code == 200, resp.text
         assert "text/markdown" in resp.headers.get("content-type", "")
         assert f"# {self.base}" in resp.text
         assert "Example Org" in resp.text
 
     async def test_v1_crawl_csv_output_format(self):
-        resp = await self.client.post(
-            "/v1/crawl", json=self._crawl_payload(output_format="csv")
-        )
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="csv"))
         assert resp.status_code == 200, resp.text
         assert "text/csv" in resp.headers.get("content-type", "")
         rows = [ln for ln in resp.text.splitlines() if ln.strip()]
@@ -180,10 +182,9 @@ class TestCrawlApi:
         assert len(rows) == 2  # header + one result
 
     async def test_v1_crawl_unsupported_output_format_rejected(self):
-        resp = await self.client.post(
-            "/v1/crawl", json=self._crawl_payload(output_format="xml")
-        )
+        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="xml"))
         assert resp.status_code == 422
+
 
 class TestDiscoveryAndRenderApi:
     """Discovery/health endpoints and the legacy /v1/render path."""
@@ -227,9 +228,16 @@ class TestDiscoveryAndRenderApi:
     async def test_build_unified_response(self):
         from app.api.response_shaping import build_unified_crawl_response
 
-        resp = build_unified_crawl_response([
-            {"original_url": "http://x/", "final_url": "http://x/", "status": "success", "classification": "rendered"}
-        ])
+        resp = build_unified_crawl_response(
+            [
+                {
+                    "original_url": "http://x/",
+                    "final_url": "http://x/",
+                    "status": "success",
+                    "classification": "rendered",
+                }
+            ]
+        )
         assert resp.success is True
         assert resp.submitted_count == 1
 
@@ -280,6 +288,7 @@ class TestDiscoveryAndRenderApi:
     async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request
         from fastapi.exceptions import RequestValidationError
+
         handler = app.exception_handlers[RequestValidationError]
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
         request = Request(scope)
@@ -288,6 +297,7 @@ class TestDiscoveryAndRenderApi:
         )
         response = await handler(request, exc)
         assert response.status_code == 422
+
 
 class TestMapApi:
     """#2 /v1/map against a real local server (no mocks)."""
@@ -301,7 +311,10 @@ class TestMapApi:
     def _map_payload(self, **extra):
         payload = {
             "url": f"{self.base}/",
-            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}},
+            "policy": {
+                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+            },
         }
         payload.update(extra)
         return payload
@@ -323,6 +336,7 @@ class TestMapApi:
         resp = await self.client.post("/v1/map", json={"policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}})
         assert resp.status_code == 422
 
+
 class TestShadowDomApi:
     """#25 Shadow-DOM flattening via browser renderer (real camoufox)."""
 
@@ -335,13 +349,16 @@ class TestShadowDomApi:
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
     async def test_v1_crawl_shadow_dom_flattened(self):
-        resp = await self.client.post("/v1/crawl", json={
-            "url": f"{self.base}/shadow",
-            "policy": {
-                "strategies": ["BROWSER_HEADLESS"],
-                "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+        resp = await self.client.post(
+            "/v1/crawl",
+            json={
+                "url": f"{self.base}/shadow",
+                "policy": {
+                    "strategies": ["BROWSER_HEADLESS"],
+                    "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+                },
             },
-        })
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         result = body["results"][0]
@@ -349,8 +366,6 @@ class TestShadowDomApi:
         # After flattening, the shadow-root anchor is in the HTML and extracted.
         assert "Shadow Link" in (result.get("html") or "")
         assert "/shadow-link" in (result.get("html") or "")
-
-
 
 
 class TestCookiePersistenceApi:
@@ -363,6 +378,7 @@ class TestCookiePersistenceApi:
         self.cookie_file = tmp_path / "cookie_jar.json"
         # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
         from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+
         _GLOBAL_COOKIE_JAR.load_from_file(str(self.cookie_file))
         WEBHOOK_RECEIVED.clear()
         yield
@@ -401,6 +417,7 @@ class TestCookiePersistenceApi:
         result = resp.json()["results"][0]
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
 
+
 class TestJobApi:
     """#3+#14 Job API integration tests (real server)."""
 
@@ -410,26 +427,35 @@ class TestJobApi:
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
-    async def test_v1_jobs_create_list_get(self):
-        # Create a job
-        resp = await self.client.post("/v1/jobs", json={
-            "root_url": f"{self.base}/",
-            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 10, "max_retries": 0}},
-        })
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        job_id = body["job_id"]
-        assert body["status"] == "pending"
-        assert body["root_url"] == f"{self.base}/"
+    async def _seed_job(self, root_url):
+        """Seed a persisted row directly; create_endpoint refuses (H5)."""
+        from app.main import job_store
 
-        # List jobs
+        job = job_store.create(root_url, {})
+        return job.job_id
+
+    async def test_v1_jobs_list_get_of_persisted_rows(self):
+        # Create endpoint refuses with 501 (no engine executes jobs)
+        resp = await self.client.post(
+            "/v1/jobs",
+            json={
+                "root_url": f"{self.base}/",
+                "policy": {
+                    "strategies": ["HTTP_DECLARED_CRAWLER"],
+                    "limits": {"timeout_seconds": 10, "max_retries": 0},
+                },
+            },
+        )
+        assert resp.status_code == 501, resp.text
+        assert resp.json()["code"] == "jobs_not_executed"
+
+        # State inspection of directly-persisted rows still works
+        job_id = await self._seed_job(f"{self.base}/")
         resp2 = await self.client.get("/v1/jobs")
         assert resp2.status_code == 200
         jobs = resp2.json()["jobs"]
-        assert len(jobs) >= 1
         assert any(j["job_id"] == job_id for j in jobs)
 
-        # Get job
         resp3 = await self.client.get(f"/v1/jobs/{job_id}")
         assert resp3.status_code == 200
         job = resp3.json()
@@ -437,45 +463,21 @@ class TestJobApi:
         assert job["status"] == "pending"
         assert job["frontier_size"] == 1
 
-    async def test_v1_jobs_control_pause_resume_cancel(self):
-        resp = await self.client.post("/v1/jobs", json={
-            "root_url": f"{self.base}/",
-            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
-        })
-        job_id = resp.json()["job_id"]
+    async def test_v1_jobs_control_refused_with_501(self):
+        # Control actions imply an executing engine; all are refused (H5)
+        job_id = await self._seed_job(f"{self.base}/")
+        for action in ("pause", "resume", "cancel"):
+            resp = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": action})
+            assert resp.status_code == 501, resp.text
+            assert resp.json()["code"] == "jobs_not_executed"
 
-        # Cannot pause a pending job
-        resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
-        assert resp_pause.status_code == 422
+        # Unknown actions stay 422 (shape validation precedes the refusal)
+        resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
+        assert resp_bad.status_code == 422
+        assert "invalid_action" in resp_bad.json()["code"]
 
-        # Manually set to running (simulating engine starting it)
-        from app.crawl.job_store import JobStatus
-        from app.main import job_store
-        job = job_store.load(job_id)
-        job.status = JobStatus.RUNNING
-        job_store.save(job)
-
-        # Pause
-        resp_pause = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
-        assert resp_pause.status_code == 200
-        assert resp_pause.json()["status"] == "paused"
-
-        # Resume
-        resp_resume = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "resume"})
-        assert resp_resume.status_code == 200
-        assert resp_resume.json()["status"] == "running"
-
-        # Cancel
-        resp_cancel = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
-        assert resp_cancel.status_code == 200
-        assert resp_cancel.json()["status"] == "cancelled"
-
-    async def test_v1_jobs_delete(self):
-        resp = await self.client.post("/v1/jobs", json={
-            "root_url": f"{self.base}/",
-            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
-        })
-        job_id = resp.json()["job_id"]
+    async def test_v1_jobs_delete_of_persisted_row(self):
+        job_id = await self._seed_job(f"{self.base}/")
 
         resp_del = await self.client.delete(f"/v1/jobs/{job_id}")
         assert resp_del.status_code == 200
@@ -486,13 +488,8 @@ class TestJobApi:
         assert resp_get.status_code == 404
 
     async def test_v1_jobs_invalid_action(self):
-        resp = await self.client.post("/v1/jobs", json={
-            "root_url": f"{self.base}/",
-            "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
-        })
-        job_id = resp.json()["job_id"]
+        job_id = await self._seed_job(f"{self.base}/")
 
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
         assert "invalid_action" in resp_bad.json()["code"]
-

@@ -18,7 +18,6 @@ from app.api_models import (
     JobListResponse,
     JobStatusResponse,
 )
-from app.crawl.job_store import JobStatus
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
@@ -32,31 +31,41 @@ def _raise_not_found(job_id: str) -> None:
 
 @router.post(
     "",
-    summary="Create a new resumable whole-site crawl job (#3+#14)",
+    summary="Job state persistence only — no engine executes whole-site jobs (H5)",
     description=(
-        "Create a crawl job that recursively discovers and crawls URLs from a root URL. "
-        "The job persists its state (frontier, visited, results) to disk and can be "
-        "paused, resumed, and inspected across restarts. Callers own the job lifecycle."
+        "Refuses with 501: this endpoint persists job rows, but no engine "
+        "currently consumes the job frontier, so a created job would never "
+        "crawl. Use POST /v1/crawl (or /v1/map) for actual crawling. "
+        "Progression path: attach the crawl engine to the stored frontier "
+        "and flip this endpoint to enqueue real work."
     ),
-    responses={422: {"model": CrawlerError, "description": "Invalid job request."}},
+    responses={
+        501: {"model": CrawlerError, "description": "Whole-site job execution is not implemented."},
+        422: {"model": CrawlerError, "description": "Invalid job request."},
+    },
 )
 async def create_job(
     payload: JobCreateRequest,
     job_store=Depends(get_job_store),
 ) -> JobCreateResponse:
-    job = job_store.create(payload.root_url, payload.policy.model_dump(exclude_none=True))
-    return JobCreateResponse(
-        job_id=job.job_id,
-        status=job.status.value,
-        root_url=job.root_url,
-        created_at=job.created_at,
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "jobs_not_executed",
+            "message": (
+                "Whole-site job execution is not implemented: no engine consumes "
+                "the job frontier. Use /v1/crawl for crawling; job state persists "
+                "but never executes."
+            ),
+            "details": {},
+        },
     )
 
 
 @router.get(
     "",
-    summary="List all crawl jobs (#3+#14)",
-    description="Return a list of all crawl jobs with basic status info.",
+    summary="List crawl jobs (state inspection only — no engine executes jobs, H5)",
+    description="Return a list of all persisted crawl job rows with basic status info. No engine currently consumes the job frontier, so statuses will not advance on their own.",
 )
 async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
     jobs = job_store.list_jobs()
@@ -65,8 +74,8 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
 
 @router.get(
     "/{job_id}",
-    summary="Get crawl job status and results (#3+#14)",
-    description="Return the full job state including frontier, visited URLs, and results.",
+    summary="Get crawl job state (state inspection only — no engine executes jobs, H5)",
+    description="Return the full persisted job state including frontier, visited URLs, and results. No engine currently consumes the job frontier, so this reflects only rows written via the persistence API.",
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
@@ -80,10 +89,14 @@ async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusRes
 
 @router.post(
     "/{job_id}/control",
-    summary="Control a crawl job (pause/resume/cancel) (#3+#14)",
-    description="Pause, resume, or cancel a running crawl job.",
+    summary="Job control is refused — no engine runs jobs (H5)",
+    description=(
+        "Refuses with 501: pause/resume imply an engine executing the job, "
+        "and none exists. Cancel is likewise execution-dependent. See the "
+        "POST /v1/jobs description for the progression path."
+    ),
     responses={
-        404: {"model": CrawlerError, "description": "Job not found."},
+        501: {"model": CrawlerError, "description": "Job execution is not implemented."},
         422: {"model": CrawlerError, "description": "Invalid action."},
     },
 )
@@ -92,48 +105,29 @@ async def control_job(
     payload: JobControlRequest,
     job_store=Depends(get_job_store),
 ) -> JobStatusResponse:
-    from app.api.main_helpers import _build_job_status
-
-    job = job_store.load(job_id)
-    if job is None:
-        _raise_not_found(job_id)
-
     action = payload.action.lower()
-    if action == "pause":
-        if job.status != JobStatus.RUNNING:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "invalid_state", "message": "Can only pause a running job"},
-            )
-        job.status = JobStatus.PAUSED
-    elif action == "resume":
-        if job.status != JobStatus.PAUSED:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "invalid_state", "message": "Can only resume a paused job"},
-            )
-        job.status = JobStatus.RUNNING
-    elif action == "cancel":
-        if job.status in {JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED}:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "invalid_state", "message": "Job already terminal"},
-            )
-        job.status = JobStatus.CANCELLED
-    else:
+    if action not in {"pause", "resume", "cancel"}:
         raise HTTPException(
             status_code=422,
             detail={"code": "invalid_action", "message": f"Unknown action: {action}"},
         )
-
-    job_store.save(job)
-    return _build_job_status(job)
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "jobs_not_executed",
+            "message": (
+                "Job control implies a running engine; whole-site job execution "
+                "is not implemented. Use /v1/crawl for crawling."
+            ),
+            "details": {},
+        },
+    )
 
 
 @router.delete(
     "/{job_id}",
-    summary="Delete a crawl job (#3+#14)",
-    description="Permanently remove a crawl job and its data.",
+    summary="Delete a persisted crawl job row",
+    description="Permanently remove a persisted crawl job and its data (state management; no execution semantics).",
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def delete_job(job_id: str, job_store=Depends(get_job_store)) -> dict[str, str]:
