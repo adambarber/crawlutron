@@ -89,6 +89,14 @@ if FastAPI is not None:
         # Startup: wire webhook helpers, initialize browser pool, load cookie jar.
         from .api.async_crawl_runner import _get_async_crawl_semaphore
         from .api.webhooks import set_webhook_dependencies
+        from .crawl.engine import _resource_gate
+        from .health.readiness import READINESS_STATE
+
+        # Readiness saturation comes from the live resource gate, not the
+        # metrics gauges (which only recursive crawls refresh, M11).
+        READINESS_STATE.set_utilization_sampler(
+            lambda: (_resource_gate.memory_ratio(), _resource_gate.cpu_ratio())
+        )
 
         set_webhook_dependencies(
             webhook_semaphore=_get_async_crawl_semaphore(),

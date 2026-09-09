@@ -1,6 +1,7 @@
 """Health and readiness endpoints (self-managed; no external config)."""
 
 import threading
+from collections.abc import Callable
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -28,6 +29,16 @@ class ReadinessState:
     def __init__(self) -> None:
         self._active_requests = 0
         self._lock = threading.Lock()
+        self._utilization_sampler: Callable[[], tuple[float, float]] | None = None
+
+    def set_utilization_sampler(self, sampler: Callable[[], tuple[float, float]] | None) -> None:
+        """Install a live ``(memory, cpu)`` utilization source (M11).
+
+        The lifespan wires the engine's ResourceGate here so /ready reflects
+        current pressure even when no recursive crawl has run to refresh the
+        metrics gauges. ``None`` restores the gauge fallback (tests)."""
+        with self._lock:
+            self._utilization_sampler = sampler
 
     def begin_request(self) -> None:
         with self._lock:
@@ -40,9 +51,16 @@ class ReadinessState:
     def snapshot(self) -> dict[str, int | int | bool | str]:
         with self._lock:
             active_requests = self._active_requests
-        metrics = get_metrics()
-        mem_util = float(getattr(metrics, "resource_memory_utilization", 0.0) or 0.0)
-        cpu_util = float(getattr(metrics, "resource_cpu_utilization", 0.0) or 0.0)
+            sampler = self._utilization_sampler
+        if sampler is not None:
+            try:
+                mem_util, cpu_util = (float(v) for v in sampler())
+            except Exception:
+                sampler = None
+        if sampler is None:
+            metrics = get_metrics()
+            mem_util = float(getattr(metrics, "resource_memory_utilization", 0.0) or 0.0)
+            cpu_util = float(getattr(metrics, "resource_cpu_utilization", 0.0) or 0.0)
         saturated = mem_util >= _MEMORY_SATURATION or cpu_util >= _CPU_SATURATION
         return {
             "status": "saturated" if saturated else "ready",

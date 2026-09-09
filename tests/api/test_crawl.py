@@ -204,6 +204,20 @@ class TestDiscoveryAndRenderApi:
         assert "active_requests" in body
         assert "max_active_requests" in body
 
+    async def test_readiness_uses_live_gate_not_stale_gauges(self):
+        # M11: saturation must come from the live resource gate. No crawl
+        # has run here, so the metrics gauges are stale zeros -- a sampler
+        # reporting saturation must still yield 503.
+        from app.health.readiness import READINESS_STATE
+
+        READINESS_STATE.set_utilization_sampler(lambda: (0.99, 0.0))
+        try:
+            resp = await self.client.get("/ready")
+        finally:
+            READINESS_STATE.set_utilization_sampler(None)
+        assert resp.status_code == 503
+        assert resp.json()["saturated"] is True
+
     async def test_discovery_endpoints(self):
         for path in ("/.well-known/crawler-service", "/v1/capabilities", "/v1/agent-hints"):
             resp = await self.client.get(path)
