@@ -101,9 +101,29 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def registrable_domain(url: str) -> str:
-    parsed = urlparse(url)
-    host = (parsed.hostname or url).lower().rstrip(".")
+def _public_suffix_list():
+    """Lazily load the real public-suffix dataset (M5), None when absent.
+
+    The publicsuffixlist package ships a snapshot .dat (no runtime network).
+    Cached on first use; any failure falls back to the heuristic below so
+    the service never fails to import or gate without the dataset.
+    """
+    global _PSL
+    try:
+        return _PSL
+    except NameError:
+        pass
+    try:
+        from publicsuffixlist import PublicSuffixList
+
+        _PSL = PublicSuffixList()
+    except Exception:
+        _PSL = None
+    return _PSL
+
+
+def _heuristic_registrable_domain(host: str) -> str:
+    """Fallback used only when the PSL dataset is unavailable."""
     labels = host.split(".")
     if len(labels) <= 2:
         return host
@@ -111,3 +131,22 @@ def registrable_domain(url: str) -> str:
     if suffix in TWO_PART_PUBLIC_SUFFIXES and len(labels) >= 3:
         return ".".join(labels[-3:])
     return ".".join(labels[-2:])
+
+
+def registrable_domain(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or url).lower().rstrip(".")
+    try:
+        ascii_host = host.encode("idna").decode("ascii")
+    except Exception:
+        ascii_host = host
+    psl = _public_suffix_list()
+    if psl is not None:
+        try:
+            registrable = psl.privatesuffix(ascii_host)
+            if registrable:
+                return registrable
+        except Exception:  # noqa: S110 - deliberate fallthrough to heuristic below
+            # A poisoned/unparseable host falls through to the heuristic.
+            pass
+    return _heuristic_registrable_domain(host)

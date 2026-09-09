@@ -57,4 +57,25 @@ class TestValidationGaps:
     def test_registrable_domain_two_part_suffix(self):
         assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
 
+    def test_registrable_domain_multi_level_suffixes(self):
+        # M5: the hand-rolled 7-entry suffix set collapsed every unlisted
+        # two-part suffix to itself (a.co.jp and b.co.jp both -> co.jp),
+        # sharing gates across unrelated sites. The real PSL keeps them distinct.
+        assert registrable_domain("https://a.co.jp/x") == "a.co.jp"
+        assert registrable_domain("https://b.co.jp/x") == "b.co.jp"
+        assert registrable_domain("https://www.example.com.br/x") == "example.com.br"
+        assert registrable_domain("https://shop.example.gov.in/x") == "example.gov.in"
+
+    def test_registrable_domain_falls_back_without_dataset(self, monkeypatch):
+        # The heuristic fallback must keep working when the dataset is
+        # absent (import safety), even though correctness needs the PSL.
+        import sys
+
+        import app.validation as validation
+
+        monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
+        monkeypatch.delattr(validation, "_PSL", raising=False)
+        assert validation.registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
+        assert validation.registrable_domain("https://a.b.c.example.com/x") == "example.com"
+
 

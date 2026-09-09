@@ -17,3 +17,7 @@ beautifulsoup4>=4.12
 markdownify>=0.13
 # Required by FastAPI request/response models.
 pydantic>=2.0
+# Real public-suffix dataset for registrable_domain (M5). Ships a snapshot
+# .dat; no runtime network. The code falls back to a small heuristic when
+# the package is absent, but correctness needs the dataset installed.
+publicsuffixlist>=1.0.2
