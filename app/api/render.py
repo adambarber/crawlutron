@@ -85,13 +85,45 @@ async def render_request(
     # submitting job's index, so duplicate URLs in one batch map to their own
     # slots. Matching by URL here would collapse duplicates onto index 0 and
     # KeyError on the missing slot (adversarial H8), and is O(n^2) (L5a).
+    # Worker exceptions are swallowed by the scheduler's gather, so capture
+    # them per index: total pool exhaustion raises for a 503 (M12), any other
+    # missing slot becomes a per-URL failed result instead of a 500.
+    from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+
     by_index = dict(immediate_results)
+    worker_errors: dict[int, BaseException] = {}
 
     async def _collect(index: int, result: CrawlResult) -> None:
         by_index[index] = result
 
+    async def _call_and_capture(job: CrawlJob):
+        try:
+            return await _call_worker(worker, job)
+        except Exception as error:
+            worker_errors[job.index] = error
+            raise
+
     if jobs:
-        await scheduler.run(jobs, lambda job: _call_worker(worker, job), on_result=_collect)
+        await scheduler.run(jobs, _call_and_capture, on_result=_collect)
+
+    missing = [index for index in range(len(urls)) if index not in by_index]
+    if missing:
+        if all(isinstance(worker_errors.get(index), BrowserPoolExhaustedError) for index in missing):
+            raise worker_errors[missing[0]]
+        for index in missing:
+            error = worker_errors.get(index)
+            by_index[index] = CrawlResult(
+                url=urls[index],
+                status="failed",
+                classification="site_error",  # type: ignore[arg-type]
+                final_url=None,
+                html=None,
+                text=None,
+                attempts=0,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+                domain="",
+                error=str(error) if error is not None else "worker_failed",
+            )
 
     ordered_results = [by_index[index] for index in range(len(urls))]
     return {

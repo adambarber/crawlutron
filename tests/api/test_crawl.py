@@ -225,6 +225,31 @@ class TestDiscoveryAndRenderApi:
         resp = await self.client.post("/v1/render", json={"options": "not-a-dict"})
         assert resp.status_code == 422
 
+    async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
+        # M12: when every renderer is wedged, the wait times out and the
+        # request surfaces as 503, not a hang or a 500.
+        import app.api.render_endpoint as render_endpoint
+        from app.crawl.strategies.browser_pool import (
+            BrowserPoolExhaustedError,
+            set_browser_pool,
+        )
+
+        class _ExhaustedWorker:
+            def __init__(self, pool):
+                pass
+
+            async def __call__(self, job):
+                raise BrowserPoolExhaustedError("pool exhausted in test")
+
+        monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _ExhaustedWorker)
+        old = set_browser_pool(object())
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "browser_pool_unavailable"
+
     async def test_v1_render_without_pool_returns_503(self):
         # M13: a None browser pool (startup/shutdown window) must surface as
         # a clean 503, not an AttributeError 500 from inside the worker.

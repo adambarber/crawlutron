@@ -23,7 +23,11 @@ from app.api.response_shaping import (
     render_result_to_unified,
 )
 from app.api_models import POLICY_SCHEMA_VERSION, RenderRequest, UnifiedCrawlResponse
-from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
+from app.crawl.strategies.browser_pool import (
+    BrowserPoolExhaustedError,
+    PooledBrowserWorker,
+    get_browser_pool,
+)
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.settings import CrawlerSettings
 
@@ -47,11 +51,21 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
                 },
             )
         pooled_worker = PooledBrowserWorker(pool)
-        result = await render_request(
-            payload.model_dump(exclude_none=True),
-            settings=settings,
-            worker=pooled_worker,
-        )
+        try:
+            result = await render_request(
+                payload.model_dump(exclude_none=True),
+                settings=settings,
+                worker=pooled_worker,
+            )
+        except BrowserPoolExhaustedError as error:
+            logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "browser_pool_unavailable",
+                    "message": str(error),
+                },
+            ) from error
         logger.info(
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},

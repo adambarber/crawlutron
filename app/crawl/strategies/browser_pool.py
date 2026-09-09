@@ -21,6 +21,16 @@ from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 
+
+class BrowserPoolExhaustedError(Exception):
+    """Raised when no renderer becomes available within the acquire timeout."""
+
+
+# Default bound for BrowserPool.acquire (M12). Renders carry their own
+# per-URL budget on top; this only stops a leaked renderer from hanging
+# waiters forever with no diagnostics.
+BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS: float = 60.0
+
 # --- RAM-budget-aware browser pool sizing (adversarial perf: bounded browser pool) ---
 # Each pooled renderer owns one persistent Camoufox process (~600-900 MiB RSS once
 # WebExtensions/Web Content are counted). Because uvicorn runs one pool PER WORKER
@@ -67,11 +77,32 @@ class BrowserPool:
                 extra={"pool_size": self._pool_size, "ram_fraction": _BROWSER_RAM_FRACTION},
             )
 
-    async def acquire(self) -> BrowserRenderer:
-        """Acquire a renderer from the pool (waits if all busy)."""
+    async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
+        """Acquire a renderer from the pool.
+
+        The wait is bounded (M12): a leaked renderer must shrink capacity
+        loudly, not hang every subsequent acquire forever with no
+        diagnostics. Pass ``timeout=None`` only when the caller owns an
+        outer deadline.
+        """
         if not self._initialized:
             await self.initialize()
-        renderer = await self._available.get()
+        try:
+            if timeout is None:
+                renderer = await self._available.get()
+            else:
+                renderer = await asyncio.wait_for(self._available.get(), timeout)
+        except TimeoutError:
+            available = self._available.qsize()
+            logger.warning(
+                "browser_pool_acquire_timeout",
+                extra={"available": available, "pool_size": self._pool_size, "timeout_seconds": timeout},
+            )
+            raise BrowserPoolExhaustedError(
+                f"No browser renderer available within {timeout}s "
+                f"(available={available}, pool_size={self._pool_size}). "
+                "The pool is exhausted or a renderer leaked; try again later."
+            ) from None
         logger.debug("browser_pool_acquired", extra={"available": self._available.qsize()})
         return renderer
 
