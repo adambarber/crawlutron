@@ -111,16 +111,21 @@ def _default_document_text_extractor(url: str) -> str:
     current_url = url
     try:
         for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
-            with opener.open(current_url, timeout=30) as response:
-                status = getattr(response, "status", 200)
-                location = response.headers.get("Location")
-                if status in _REDIRECT_STATUSES and location:
-                    next_url = urljoin(current_url, location)
-                    _check_ssrf_protection(next_url)
-                    current_url = next_url
-                    continue
-                pdf_bytes = response.read()
-                break
+            try:
+                with opener.open(current_url, timeout=30) as response:
+                    pdf_bytes = response.read()
+                    break
+            except urllib.error.HTTPError as hop:
+                # Real urllib semantics (N2): with auto-redirect disabled,
+                # a redirect surfaces as HTTPError -- opener.open() never
+                # returns a 30x response object. Validate the hop, then follow.
+                location = hop.headers.get("Location")
+                if hop.code not in _REDIRECT_STATUSES or not location:
+                    raise
+                next_url = urljoin(current_url, location)
+                _check_ssrf_protection(next_url)
+                current_url = next_url
+                continue
         else:
             return ""
     except Exception:  # extraction failure yields empty text

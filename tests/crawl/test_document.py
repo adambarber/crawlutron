@@ -103,12 +103,14 @@ class TestDocumentRedirectSsrf:
             return _FakeHttpResponse(b"", status=302, headers={"Location": redirect_target})
 
         def fake_build_opener(*handlers):
-            # Emulate a non-following opener: single-hop raw responses.
+            # Emulate the REAL non-following opener semantics: when
+            # redirect_request returns None, urllib raises HTTPError — it
+            # never hands back a 30x response object (N2 regression guard).
             class _Opener:
                 def open(self, url, timeout=30):
                     fetched.append(url)
                     if url == initial_path:
-                        return _FakeHttpResponse(b"", status=302, headers={"Location": redirect_target})
+                        raise urllib.error.HTTPError(url, 302, "Moved", {"Location": redirect_target}, None)
                     return _FakeHttpResponse(pdf_bytes)
 
             return _Opener()
