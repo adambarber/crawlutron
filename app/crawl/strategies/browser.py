@@ -400,6 +400,11 @@ class BrowserRenderer:
         async with self._page_semaphore:
             return await self._render_with_page_unlocked(url, options)
 
+    async def _navigate_and_settle(self, page: Any, pinned_url: str) -> None:
+        """Goto the pinned URL and wait for a settled ready state."""
+        await page.goto(pinned_url, wait_until="domcontentloaded")
+        await self._wait_for_ready_state(page)
+
     async def _render_with_page_unlocked(self, url: str, options: RenderOptions) -> CrawlResult:
         # SSRF protection (F2): validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
@@ -441,10 +446,17 @@ class BrowserRenderer:
 
             # Navigate to target URL: set Host header for pinned IP navigation.
             # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
+            # The navigation honors RenderOptions.timeout_seconds (M9) via
+            # wait_for: expiration raises TimeoutError, which the render
+            # retry envelope maps to navigation_timeout. Floor at 1s so a
+            # zero/negative budget cannot break every render.
+            navigation_timeout = max(1.0, float(options.timeout_seconds))
             if goto_headers:
                 await page.set_extra_http_headers(goto_headers)
-            await page.goto(pinned_url, wait_until="domcontentloaded")
-            await self._wait_for_ready_state(page)
+            await asyncio.wait_for(
+                self._navigate_and_settle(page, pinned_url),
+                timeout=navigation_timeout,
+            )
             if goto_headers:
                 # Clear the page-scoped Host override: it was only needed for
                 # the pinned navigation. Leaving it set would spoof Host on
@@ -555,7 +567,17 @@ class BrowserRenderer:
                 elif action_type == "scroll_bottom":
                     await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
                 elif action_type == "wait" and selector:
-                    await page.wait_for_selector(selector, timeout=int(action.get("timeout", 5000)))
+                    # Clamp caller-supplied timeouts like wait_seconds (M9):
+                    # unbounded values park the render, and 0 would disable
+                    # Playwright's timeout entirely. Garbage falls back.
+                    try:
+                        requested_timeout = int(action.get("timeout", 5000))
+                    except (TypeError, ValueError):
+                        requested_timeout = 5000
+                    await page.wait_for_selector(
+                        selector,
+                        timeout=max(1, min(requested_timeout, int(_MAX_ACTION_WAIT_SECONDS * 1000))),
+                    )
                 elif action_type == "wait_seconds":
                     await self._async_sleep(min(float(action.get("seconds", 1)), _MAX_ACTION_WAIT_SECONDS))
                 elif action_type == "execute_js":
