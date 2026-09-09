@@ -225,6 +225,19 @@ class TestDiscoveryAndRenderApi:
         resp = await self.client.post("/v1/render", json={"options": "not-a-dict"})
         assert resp.status_code == 422
 
+    async def test_v1_render_without_pool_returns_503(self):
+        # M13: a None browser pool (startup/shutdown window) must surface as
+        # a clean 503, not an AttributeError 500 from inside the worker.
+        from app.crawl.strategies.browser_pool import set_browser_pool
+
+        old = set_browser_pool(None)
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "browser_pool_unavailable"
+
     async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request
         from fastapi.exceptions import RequestValidationError

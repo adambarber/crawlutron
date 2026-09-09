@@ -34,7 +34,19 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
     """Render ``payload`` URLs with the pooled browser worker."""
     readiness_state.begin_request()
     try:
-        pooled_worker = PooledBrowserWorker(get_browser_pool())
+        # Every render request needs the browser by definition: fail clean
+        # with a 503 when the pool is down (startup/shutdown window, M13)
+        # instead of an AttributeError 500 from inside the worker.
+        pool = get_browser_pool()
+        if pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "browser_pool_unavailable",
+                    "message": "Browser pool is not initialized; the service is starting up or shutting down.",
+                },
+            )
+        pooled_worker = PooledBrowserWorker(pool)
         result = await render_request(
             payload.model_dump(exclude_none=True),
             settings=settings,
