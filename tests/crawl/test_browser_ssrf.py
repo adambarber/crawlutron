@@ -83,8 +83,9 @@ async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     result = await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
-    # Should use set_extra_http_headers, NOT extra_http_headers param
-    assert page.set_extra_http_headers_calls == [{"Host": "example.com"}]
+    # Should use set_extra_http_headers, NOT extra_http_headers param;
+    # the pinned Host is cleared right after navigation (M2).
+    assert page.set_extra_http_headers_calls == [{"Host": "example.com"}, {}]
     assert result.status == "success"
 
 async def test_render_rejects_internal_redirect_target(monkeypatch):

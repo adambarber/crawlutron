@@ -439,6 +439,12 @@ class BrowserRenderer:
                 await page.set_extra_http_headers(goto_headers)
             await page.goto(pinned_url, wait_until="domcontentloaded")
             await self._wait_for_ready_state(page)
+            if goto_headers:
+                # Clear the page-scoped Host override: it was only needed for
+                # the pinned navigation. Leaving it set would spoof Host on
+                # every later request from this page (third-party XHR,
+                # subsequent navigations, M2).
+                await page.set_extra_http_headers({})
 
             # Browser action chains (#10): run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
