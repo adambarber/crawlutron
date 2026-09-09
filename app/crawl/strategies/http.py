@@ -104,6 +104,7 @@ def _rebuild_response(data: dict[str, Any]) -> Any:
 
 from urllib.parse import urljoin
 
+from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
@@ -761,7 +762,12 @@ async def _default_http_fetcher(
                 final_url = str(response.url)
         except httpx.HTTPStatusError as error:
             response = error.response
-            body = response.content
+            # Error bodies are attacker-influenced too: cap them like success
+            # bodies (a hostile 5xx must not buffer into memory via .content).
+            try:
+                body = await read_capped_async(response.aiter_raw(), max_content_length)
+            except BodyTooLarge:
+                return _http_413(url, response, started)
             status_code = response.status_code
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
             final_url = str(response.url)

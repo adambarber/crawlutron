@@ -109,11 +109,16 @@ def _default_document_text_extractor(url: str) -> str:
 
     opener = urllib.request.build_opener(_NoAutoRedirect)
     current_url = url
+    from app.bounded_io import read_capped_sync
+    from app.crawl.extraction import _EXTRACTION_DOC_MAX_INPUT_BYTES
+
     try:
         for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
             try:
                 with opener.open(current_url, timeout=30) as response:
-                    pdf_bytes = response.read()
+                    # N2: cap the read itself -- a hostile infinite body must
+                    # not buffer into memory before the extraction cap sees it.
+                    pdf_bytes = read_capped_sync(response, _EXTRACTION_DOC_MAX_INPUT_BYTES)
                     break
             except urllib.error.HTTPError as hop:
                 # Real urllib semantics (N2): with auto-redirect disabled,
