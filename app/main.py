@@ -139,6 +139,9 @@ if FastAPI is not None:
         await close_async_http_client()
         await close_browser_pool()
         _resource_gate.close()
+        # Symmetry with set_utilization_sampler(...): release the closed
+        # gate's ratio sampler so nothing dereferences it post-shutdown.
+        READINESS_STATE.set_utilization_sampler(None)
 
     app = FastAPI(
         title="Browser Crawler Execution Service",
