@@ -205,6 +205,18 @@ class CrawlPolicy(BaseModel):
         return profile
 
 
+def _require_exactly_one_url_source(model: BaseModel) -> BaseModel:
+    """Shared url/urls contract for crawl and render requests (L5).
+
+    Both set silently ignored ``url``; neither failed late in
+    ``_payload_urls``. Exactly one (non-empty) source is required."""
+    has_url = bool(model.url)
+    has_urls = bool(model.urls)
+    if has_url == has_urls:
+        raise ValueError("supply exactly one of 'url' or 'urls'")
+    return model
+
+
 class CrawlRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
@@ -239,6 +251,10 @@ class CrawlRequest(BaseModel):
                     "supply conditional validators only via 'validators'"
                 )
         return self
+
+    @model_validator(mode="after")
+    def _require_url_source(self):
+        return _require_exactly_one_url_source(self)
 
 
 class MapRequest(BaseModel):
@@ -326,6 +342,10 @@ class RenderRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to render. Use either url or urls.")
     urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to render. Use either url or urls.")
     options: RenderOptionsRequest | None = Field(None, description="Browser render options; omitted fields use server defaults.")
+
+    @model_validator(mode="after")
+    def _require_url_source(self):
+        return _require_exactly_one_url_source(self)
 
 
 class ClassificationEvidence(BaseModel):

@@ -29,6 +29,7 @@ from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     BROWSER_STRATEGIES,
     DEFAULT_EXTRACTION,
+    DEFAULT_STRATEGIES,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     EXTRACTION_DOCUMENT,
@@ -524,7 +525,10 @@ def _seed_is_fresh(
     # Lazy import avoids a module cycle (engine <-> http).
     from app.crawl.strategies.http import _content_cache_key, _headers_for_strategy
 
-    for strategy in policy.get("strategies", ["HTTP"]):
+    # Default to the real strategy chain (L5): the old ["HTTP"] placeholder
+    # is not a strategy, so its cache keys could never match stored entries
+    # and freshness was never detected through this path.
+    for strategy in policy.get("strategies", DEFAULT_STRATEGIES):
         key = _content_cache_key(
             url, strategy, _headers_for_strategy(strategy, policy, url),
             extraction, css, xp,

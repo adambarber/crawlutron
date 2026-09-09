@@ -96,3 +96,31 @@ class TestEngineCrawlRequest:
         assert result["status"] == "success"
         assert result["classification"] == "rendered"
         assert "Example Org" in result["markdown"]
+
+
+def test_seed_freshness_uses_real_default_strategies():
+    """L5b: without an explicit strategies list, freshness must probe the
+    real default chain -- not the placeholder ["HTTP"], whose cache keys
+    can never match anything actually stored."""
+    from app.constants import DEFAULT_EXTRACTION, HTTP_DECLARED_CRAWLER
+    from app.crawl.engine import _parse_lastmod, _seed_is_fresh
+    from app.crawl.strategies.http import _content_cache_key, _headers_for_strategy
+
+    url = "http://seed-fresh.test/page"
+    # Normalized shape but no strategies key: the default must apply.
+    policy = {"headers": {}, "request_profile": {}}
+    expected_key = _content_cache_key(
+        url,
+        HTTP_DECLARED_CRAWLER,
+        _headers_for_strategy(HTTP_DECLARED_CRAWLER, policy, url),
+        DEFAULT_EXTRACTION,
+        None,
+        None,
+    )
+    cached_at = _parse_lastmod("2024-06-01")
+
+    class _StubCache:
+        def cached_at_of(self, key):
+            return cached_at if key == expected_key else None
+
+    assert _seed_is_fresh(url, "2024-01-01", _StubCache(), policy) is True

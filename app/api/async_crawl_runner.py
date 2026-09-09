@@ -92,10 +92,18 @@ async def run_async_crawl(
             # Store results in job_store (single source of truth for async jobs)
             job.results = [response_payload]
             job.status = JobStatus.COMPLETED
+
+            # unified_results are UnifiedCrawlResult models (dict-tolerant: the
+            # runner must never crash stats computation for a shape variant).
+            def _failed(item) -> bool:
+                status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
+                return status == "failed"
+
+            failed = sum(1 for item in unified_results if _failed(item))
             job.stats = {
                 "total_discovered": len(unified_results),
                 "total_crawled": len(unified_results),
-                "total_failed": 0,
+                "total_failed": failed,
             }
             job_store.save(job)
 

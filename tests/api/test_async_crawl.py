@@ -157,6 +157,33 @@ class TestAsyncCrawlApi:
         assert len(body["results"]) == 1
         assert "request_id" in body
 
+    async def test_v1_crawl_async_mode_counts_failed_results(self):
+        """L5d: job stats must count failed results, not hardcode zero."""
+        from app.main import job_store
+
+        # One page fetches fine, one 404s (failed). A dead host would not
+        # work here: post-M7, robots fetch errors fail closed to
+        # robots_disallowed/skipped instead of reaching the fetch.
+        payload = self._crawl_payload(
+            urls=[f"{self.base}/", f"{self.base}/no-such-page-xyz"],
+            async_mode=True,
+        )
+        payload.pop("url")
+        resp = await self.client.post("/v1/crawl", json=payload)
+        assert resp.status_code == 202, resp.text
+        request_id = resp.json()["request_id"]
+
+        async def _wait_done() -> bool:
+            status_resp = await self.client.get(f"/v1/crawl/{request_id}")
+            return status_resp.status_code == 200
+
+        assert await _poll_until(_wait_done, timeout=15.0, interval=0.1), (
+            "Async crawl did not complete in time"
+        )
+        job = job_store.load(request_id)
+        assert job.stats["total_failed"] == 1
+        assert job.stats["total_crawled"] == 2
+
     async def test_v1_crawl_async_mode_batch_urls(self):
         """async_mode works with batch urls."""
         payload = self._crawl_payload(
