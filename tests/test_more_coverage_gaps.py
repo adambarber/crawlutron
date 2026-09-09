@@ -295,6 +295,8 @@ class TestMoreCoverageGaps:
         job_store.delete(job.job_id)
 
     async def test_main_job_control_cancel_completed(self):
+        # H5: cancel from a terminal state is a state conflict (409), not a
+        # shape error (422) — the request shape is valid, the transition isn't.
         from app.crawl.job_store import JobStatus
         from app.main import app, job_store
 
@@ -302,14 +304,15 @@ class TestMoreCoverageGaps:
         # Set to completed
         job.status = JobStatus.COMPLETED
         job_store.save(job)
-        await run_job_control_test(app, job_store, job.job_id, "cancel", 422)
+        await run_job_control_test(app, job_store, job.job_id, "cancel", 409)
         job_store.delete(job.job_id)
 
     async def test_main_job_control_resume_not_paused(self):
+        # H5: resume requires PAUSED; from PENDING it is a state conflict.
         from app.main import app, job_store
 
         job = job_store.create("http://example.com/", {})
-        await run_job_control_test(app, job_store, job.job_id, "resume", 422)
+        await run_job_control_test(app, job_store, job.job_id, "resume", 409)
         job_store.delete(job.job_id)
 
     async def test_engine_crawl_request_with_webhook(self):

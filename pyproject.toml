@@ -106,8 +106,9 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 "tests/**" = ["E402", "F403", "F405", "S", "B"]
 # Coverage-gap suites reach into module internals by design (getattr seams).
 "tests/test_*_gaps.py" = ["F841"]
-# The shared helper namespace intentionally re-exports its surface for suites.
+# The shared helper namespaces intentionally re-export their surface for suites.
 "tests/helpers/__init__.py" = ["F401"]
+"tests/coverage_helpers.py" = ["F401"]
 # Engine/strategy modules perform deferred heavy imports (optional browser
 # bindings) after module-level constants are computed; E402 is deliberate.
 "app/crawl/engine.py" = ["E402", "S110", "S112"]

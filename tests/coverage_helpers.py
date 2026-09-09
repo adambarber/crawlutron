@@ -11,14 +11,73 @@ These exercise pure functions and orchestration with real inputs only (no
 unittest.mock). Browser-dependent paths use real Camoufox or a real in-process
 HTTP server.
 """
+import asyncio
+import gzip
 import os
+from typing import Any
+
+import pytest
 
 # allow loopback crawl targets in this process too
 os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
 
+from helpers import (
+    make_async_client,
+    make_content_cache,
+    make_content_cache_with_entry,
+    make_job_store,
+    run_async_test,
+    run_job_control_test,
+)
 from helpers.server import spawn_server
 
-from app.models import CrawlResult
+from app.api.render import render_request
+from app.classify import classify_page_with_evidence
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
+)
+from app.crawl.cache import HttpCache
+from app.crawl.decompression import decompress_body
+from app.crawl.document_text import (
+    _collect_document_item_lines,
+    _document_item_range,
+    _format_extracted_document_text,
+    _is_document_item_marker,
+    _is_document_non_item_section,
+    _join_document_paragraph_lines,
+    _looks_like_document_heading,
+    _next_non_empty_document_line,
+    _should_join_document_paragraph,
+)
+from app.crawl.engine import (
+    _execute_crawl_chain,
+    _payload_policy,
+    crawl_request,
+)
+from app.crawl.extraction import (
+    _extract_discovered_links,
+    _html_diagnostics,
+    extract_js_endpoints,
+)
+from app.crawl.firecrawl_format import _extract_firecrawl_metadata
+from app.crawl.strategies.document import (
+    _default_document_text_extractor,
+    _format_table,
+)
+from app.crawl.strategies.http import (
+    _cookie_header_for_url,
+    _decode_body,
+    _default_http_fetcher,
+    _headers_for_strategy,
+    _quality_score,
+    _status_for_classification,
+)
+from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
+from app.validation import normalize_public_http_url, registrable_domain
 
 
 def _fake_browser(html=None, text="doc", metadata=None):

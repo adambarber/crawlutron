@@ -66,9 +66,10 @@ class TestMainCoverageGaps:
         async def test(client):
             resp = await client.get("/v1/jobs/nonexistent")
             assert resp.status_code == 404
-            # control is 501-refused regardless of job existence (H5)
+            # H5 execution contract: control resolves the row first — a
+            # missing job is 404, not the (reversed) 501 refusal.
             resp = await client.post("/v1/jobs/nonexistent/control", json={"action": "cancel"})
-            assert resp.status_code == 501
+            assert resp.status_code == 404
             resp = await client.delete("/v1/jobs/nonexistent")
             assert resp.status_code == 404
 

@@ -27,38 +27,40 @@ class TestEngineGaps:
         with pytest.raises(ValueError):
             _payload_policy({"policy": {"strategies": ["BOGUS"]}}, None)
 
-    async def test_browser_strategy_document_extraction(self):
+    async def test_browser_strategy_document_extraction(self, base_url):
+        # Live origin: M7's robots gate fail-closes connection-refused origins
+        # (127.0.0.1:1), so the subject here needs a server that 404s robots.
         policy = {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT}
         result = await crawl_request(
-            {"url": "http://127.0.0.1:1/doc", "policy": policy},
+            {"url": f"{base_url}/doc", "policy": policy},
             browser_worker=_fake_browser(html="<html><body>doc table</body></html>"),
             cache=HttpCache(),
         )
         assert result["results"][0]["status"] == "success"
         assert "doc table" in result["results"][0]["markdown"] or ""
 
-    async def test_browser_strategy_trafilatura_extraction(self):
+    async def test_browser_strategy_trafilatura_extraction(self, base_url):
         policy = {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA}
         result = await crawl_request(
-            {"url": "http://127.0.0.1:1/doc2", "policy": policy},
+            {"url": f"{base_url}/doc2", "policy": policy},
             browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
             cache=HttpCache(),
         )
         assert "trafilatura body" in result["results"][0]["markdown"] or ""
 
-    async def test_browser_strategy_no_content(self):
+    async def test_browser_strategy_no_content(self, base_url):
         policy = {"strategies": [BROWSER_HEADLESS]}
         result = await crawl_request(
-            {"url": "http://127.0.0.1:1/doc3", "policy": policy},
+            {"url": f"{base_url}/doc3", "policy": policy},
             browser_worker=_fake_browser(html=None, text=None),
             cache=HttpCache(),
         )
         assert (result["results"][0]["markdown"]) is None
 
-    async def test_browser_strategy_surfaces_xhr_and_screenshot(self):
+    async def test_browser_strategy_surfaces_xhr_and_screenshot(self, base_url):
         policy = {"strategies": [BROWSER_HEADLESS]}
         result = await crawl_request(
-            {"url": "http://127.0.0.1:1/doc4", "policy": policy},
+            {"url": f"{base_url}/doc4", "policy": policy},
             browser_worker=_fake_browser(
                 html="<html><body>x</body></html>",
                 metadata={"intercepted_xhr": [{"url": "u", "payload": {}}], "screenshot": "BASE64IMG"},
