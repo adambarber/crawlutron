@@ -24,7 +24,6 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
         raise ValueError("invalid_options")
     return RenderOptions(
         timeout_seconds=int(options.get("timeout_seconds", settings.default_timeout_seconds)),
-        wait_until=str(options.get("wait_until", "network_idle_or_timeout")),
         max_retries=int(options.get("max_retries", settings.default_max_retries)),
         respect_robots=bool(options.get("respect_robots", settings.respect_robots)),
         include_html=bool(options.get("include_html", True)),

@@ -57,7 +57,6 @@ CrawlStrategyName = Literal[
 @dataclass(frozen=True)
 class RenderOptions:
     timeout_seconds: int = 30
-    wait_until: str = "network_idle_or_timeout"
     max_retries: int = 2
     respect_robots: bool = True
     include_html: bool = True

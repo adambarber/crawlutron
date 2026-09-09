@@ -241,7 +241,7 @@ TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Render a URL (or batch) with the headless/headed Firefox worker and return structured "
             "output. Slower and heavier than crawl; prefer crawl for pages that do not need "
-            "JavaScript rendering. Options mirror POST /v1/render: timeout_seconds, wait_until, "
+            "JavaScript rendering. Options mirror POST /v1/render: timeout_seconds, "
             "max_retries, respect_robots, include_html, include_text."
         ),
         input_schema={
@@ -255,7 +255,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "options": {
                     "type": "object",
-                    "description": "RenderOptions per POST /v1/render (timeout_seconds, wait_until, max_retries, respect_robots, include_html, include_text).",
+                    "description": "RenderOptions per POST /v1/render (timeout_seconds, max_retries, respect_robots, include_html, include_text).",
                 },
             },
             "additionalProperties": False,

@@ -435,7 +435,6 @@ class RenderOptionsRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     timeout_seconds: int | None = Field(None, description="Per-render navigation timeout in seconds.")
-    wait_until: str | None = Field(None, description="Render settle condition, e.g. network_idle_or_timeout.")
     max_retries: int | None = Field(None, description="Maximum retries for a transient render failure.")
     respect_robots: bool | None = Field(
         None, description="Whether to honor robots.txt for the render target."
