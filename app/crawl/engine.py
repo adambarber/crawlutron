@@ -1038,7 +1038,6 @@ async def _crawl_request_impl(
     async def _fetch_robots_rules(
         origin: str,
     ) -> tuple[list[tuple[bool, str]], list[str], float | None]:
-        now = time.monotonic()
         # Periodically purge expired entries to prevent unbounded growth.
         # The chokepoint's put() evicts LRU-first under its own lock, so a
         # crawl discovering thousands of unique origins can no longer grow
