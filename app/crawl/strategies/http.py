@@ -86,6 +86,7 @@ def _serialize_response(resp: Any) -> dict[str, Any]:
 
 def _rebuild_response(data: dict[str, Any]) -> Any:
     """Reconstruct a minimal response object from a cached envelope."""
+
     class _CachedResponse:
         pass
 
@@ -96,6 +97,7 @@ def _rebuild_response(data: dict[str, Any]) -> Any:
     r.final_url = data["final_url"]
     r.elapsed_ms = data.get("elapsed_ms", 0)
     return r
+
 
 from urllib.parse import urljoin
 
@@ -158,7 +160,6 @@ def _classify_error_code(exc: BaseException) -> str:
     return "network_error"
 
 
-
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 _HTTP_CLIENT_INIT_LOCK = threading.Lock()  # serializes first-time client construction
@@ -167,6 +168,7 @@ _HTTP_CLIENT_INIT_LOCK = threading.Lock()  # serializes first-time client constr
 def _default_settings() -> CrawlerSettings:
     """Get default crawler settings for HTTP client configuration."""
     from app.settings import CrawlerSettings
+
     return CrawlerSettings.from_mapping()
 
 
@@ -341,9 +343,7 @@ class CookieJar:
     def _ns_key(namespace: str, host: str) -> tuple[str, str]:
         return (namespace or "", host)
 
-    def add_cookie_header(
-        self, url: str, set_cookie_header: str, *, namespace: str = ""
-    ) -> None:
+    def add_cookie_header(self, url: str, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.
 
         ``namespace`` isolates cookies between concurrent callers (e.g. per
@@ -448,6 +448,7 @@ class CookieJar:
             pass  # corrupted file -> empty jar
         return jar
 
+
 # Module-level cookie jar for persistent cross-request cookie storage (#2).
 _GLOBAL_COOKIE_JAR = CookieJar()
 
@@ -541,6 +542,7 @@ def _check_ssrf_protection(url: str) -> None:
     to disable for local testing.
     """
     from app.validation import parse_bool_env
+
     if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
         return
     parsed = urlparse(url)
@@ -569,11 +571,13 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     The original ``Host`` header is preserved by the caller.
     """
     import os
+
     parsed = urlparse(url)
     hostname = parsed.hostname
     if not hostname:
         return hostname or "", hostname or ""
     from app.validation import parse_bool_env
+
     if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
         # Local-dev escape hatch: bypass resolution but connect to the REAL
         # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
@@ -599,9 +603,12 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
 def _http_413(url: str, response: Any, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result for size/cap violations."""
     return HttpFetchResult(
-        url=url, final_url=str(response.url), status_code=413,
+        url=url,
+        final_url=str(response.url),
+        status_code=413,
         headers={"content-type": "application/octet-stream"},
-        body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
+        body=b"",
+        elapsed_ms=int((time.monotonic() - started) * 1000),
     )
 
 
@@ -626,10 +633,8 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
         _resolve_and_pin_host(url)
         return url, dict(headers)
     hostname, pinned_ip = _resolve_and_pin_host(url)
-    pinned_url = (
-        f"{parsed.scheme}://{pinned_ip}:{parsed.port or 80}"
-        f"{parsed.path or '/'}"
-        + (f"?{parsed.query}" if parsed.query else "")
+    pinned_url = f"{parsed.scheme}://{pinned_ip}:{parsed.port or 80}{parsed.path or '/'}" + (
+        f"?{parsed.query}" if parsed.query else ""
     )
     request_headers = dict(headers)
     if parsed.hostname:
@@ -642,9 +647,7 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
 # (used for extraction and other blocking work). The pinning path resolves FRESH
 # on every call for SSRF safety, so without this the loop would stall on each
 # resolver call (adversarial perf #1.1).
-_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=32, thread_name_prefix="dns-resolve"
-)
+_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
 
 async def _build_pinned_request_async(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
@@ -687,14 +690,16 @@ def _redirect_target(
     new_host = urlparse(new_url).hostname
     current_host = urlparse(current_url).hostname
     if new_host != current_host:
-        request_headers = {
-            k: v for k, v in request_headers.items()
-            if k.lower() not in _CREDENTIAL_HEADERS
-        }
+        request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
     return new_url, request_headers
 
 
-async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES) -> HttpFetchResult:
+async def _default_http_fetcher(
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
     SSRF-safe manual redirect handling (F1).
@@ -717,7 +722,9 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
         pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
         try:
             # follow_redirects=False: we follow manually so each hop is SSRF-checked.
-            async with client.stream("GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False) as response:
+            async with client.stream(
+                "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
+            ) as response:
                 content_length = response.headers.get("content-length")
                 if content_length and int(content_length) > max_content_length:
                     return _http_413(url, response, started)
@@ -766,7 +773,12 @@ async def _default_http_fetcher(url: str, headers: dict[str, str], timeout_secon
         )
 
 
-async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_seconds: int, max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES) -> HttpFetchResult:
+async def _default_cffi_fetcher(
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+) -> HttpFetchResult:
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
 
     Mirrors _default_http_fetcher, including SSRF-safe manual redirect handling
@@ -775,13 +787,17 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
     """
     try:
         import curl_cffi.requests as cffi_requests
+        from curl_cffi.requests.exceptions import RequestException
+        from curl_cffi.requests.models import STREAM_END
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
         # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
         # AsyncClient does not exist; referencing it raises AttributeError
         # and would silently degrade every impersonated fetch to plain httpx.
-        async with cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET, timeout=float(timeout_seconds)) as client:
+        async with cffi_requests.AsyncSession(
+            impersonate=CFFI_IMPERSONATE_TARGET, timeout=float(timeout_seconds)
+        ) as client:
             current_url = url
             hops = 0
             started = time.monotonic()
@@ -790,17 +806,23 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
             while True:
                 pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
                 try:
-                    response = await client.get(pinned_url, headers=hop_headers, allow_redirects=False, stream=True)
+                    response = await client.get(
+                        pinned_url, headers=hop_headers, allow_redirects=False, stream=True
+                    )
                 except Exception:
                     # Fall back to plain httpx for this request on transport errors.
                     return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
                 # Content-length check (#5)
                 content_length = response.headers.get("content-length")
                 if content_length and int(content_length) > max_content_length:
+                    await response.aclose()  # N8: release the curl handle
                     return HttpFetchResult(
-                        url=url, final_url=str(response.url), status_code=413,
+                        url=url,
+                        final_url=str(response.url),
+                        status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
-                        body=b"", elapsed_ms=int((time.monotonic() - started) * 1000),
+                        body=b"",
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
                     )
                 status_code = response.status_code
                 location = response.headers.get("location")
@@ -808,23 +830,51 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                 # iteration re-validates + re-pins the target via _build_pinned_request.
                 redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
                 if redirect is not None:
+                    await response.aclose()  # N8: release the curl handle
                     current_url, request_headers = redirect
                     hops += 1
                     continue
-                elapsed_ms = int(getattr(response, "elapsed", 0) * 1000) if hasattr(response, "elapsed") else 0
+                # N7: do not trust response.elapsed across curl_cffi versions
+                # (timedelta in a requests-compatible build would TypeError
+                # here and silently downgrade every fetch to httpx).
+                elapsed_ms = int((time.monotonic() - started) * 1000)
                 # Stream RAW bytes with a running cap (H1): a hostile origin
                 # can omit content-length and stream gigabytes (chunked).
                 # Abort with a 413 as soon as the cap is exceeded instead of
                 # buffering the whole body into memory first.
                 encoding = response.headers.get("content-encoding", "")
                 raw = bytearray()
-                async for chunk in response.aiter_content():
+                # Consume the curl queue directly rather than
+                # response.aiter_content(): on curl_cffi 0.16 the wrapper's
+                # exception path awaits aclose(), which blocks forever on the
+                # very stalled-stream error it is trying to re-raise (the
+                # LOW_SPEED abort lands as a queue item but the wrapper wedges
+                # before delivering it). Reading the queue keeps the abort
+                # prompt and the failure reraise unblocked (H1).
+                while True:
+                    # Bound the wait: if the producer task died without a
+                    # terminal sentinel, a bare get() would hang forever.
+                    # queue.get() is pure asyncio, so wait_for cancellation is
+                    # safe here (unlike cancelling curl's internal machinery).
+                    try:
+                        chunk = await asyncio.wait_for(
+                            response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
+                        )
+                    except TimeoutError as error:
+                        raise TimeoutError("cffi stream queue stalled") from error
+                    if isinstance(chunk, RequestException):
+                        raise chunk
+                    if chunk is STREAM_END:
+                        break
                     raw.extend(chunk)
                     if len(raw) > max_content_length:
                         return HttpFetchResult(
-                            url=url, final_url=str(response.url), status_code=413,
+                            url=url,
+                            final_url=str(response.url),
+                            status_code=413,
                             headers={key.lower(): value for key, value in response.headers.items()},
-                            body=b"", elapsed_ms=elapsed_ms,
+                            body=b"",
+                            elapsed_ms=elapsed_ms,
                         )
                 raw_bytes = bytes(raw)
                 # Decompress with a size cap (decompression-bomb guard).
@@ -832,9 +882,12 @@ async def _default_cffi_fetcher(url: str, headers: dict[str, str], timeout_secon
                     body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
                 except DecompressionTooLargeError:
                     return HttpFetchResult(
-                        url=url, final_url=str(response.url), status_code=413,
+                        url=url,
+                        final_url=str(response.url),
+                        status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
-                        body=b"", elapsed_ms=elapsed_ms,
+                        body=b"",
+                        elapsed_ms=elapsed_ms,
                     )
                 cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
@@ -989,8 +1042,7 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         # User-Agent across strategies.
         if strategy == HTTP_CFFI_IMPERSONATE:
             headers["User-Agent"] = (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) "
-                "Gecko/20100101 Firefox/135.0"
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
             )
             headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
             headers["Referer"] = "https://www.google.com/"
@@ -1024,7 +1076,9 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     return headers
 
 
-def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None, headers: dict[str, str] | None = None) -> str:
+def _decode_body(
+    body: bytes | bytearray | memoryview, content_type: str | None, headers: dict[str, str] | None = None
+) -> str:
     """Decode a response body to text.
 
     Try the declared (or UTF-8) charset strictly first; fall back to
@@ -1075,7 +1129,9 @@ def _status_for_classification(classification: str) -> str:
     return "failed"
 
 
-def _quality_score(status: str, classification: str, text: str | None, html: str | None, http_status: int | None) -> float:
+def _quality_score(
+    status: str, classification: str, text: str | None, html: str | None, http_status: int | None
+) -> float:
     if status != "success" or classification != "rendered":
         return 0.0
     text_length = len((text or "").strip())
@@ -1156,7 +1212,11 @@ async def _fetch_with_retries(
 
 def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
     normalized_content_type = (content_type or "").split(";", 1)[0].strip().lower()
-    if normalized_content_type.startswith("text/") or normalized_content_type in {"application/json", "application/xml", "application/xhtml+xml"}:
+    if normalized_content_type.startswith("text/") or normalized_content_type in {
+        "application/json",
+        "application/xml",
+        "application/xhtml+xml",
+    }:
         return False
     if "html" in normalized_content_type or "pdf" in normalized_content_type:
         return False
@@ -1165,8 +1225,11 @@ def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> 
         return True
     if body.startswith((b"PK\x03\x04", b"PK\x05\x06", b"\x1f\x8b")):
         return True
-    return normalized_content_type in {"application/octet-stream", "application/zip", "application/x-zip-compressed"}
-
+    return normalized_content_type in {
+        "application/octet-stream",
+        "application/zip",
+        "application/x-zip-compressed",
+    }
 
 
 async def _discovery_diagnostics(
@@ -1204,7 +1267,10 @@ async def _discovery_diagnostics(
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
-            robots_text = _decode_body(_decompress_body(robots_response.body, robots_headers.get("content-encoding", "")), robots_headers.get("content-type"))
+            robots_text = _decode_body(
+                _decompress_body(robots_response.body, robots_headers.get("content-encoding", "")),
+                robots_headers.get("content-type"),
+            )
             crawl_delay = None
             for line in robots_text.splitlines():
                 key, _, value = line.partition(":")
@@ -1227,10 +1293,13 @@ async def _discovery_diagnostics(
     if discovery.get("sitemaps"):
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         from app.crawl.fetch_helpers import fetch_sitemap_urls
+
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
             try:
                 # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
-                found_locs = await fetch_sitemap_urls(http_fetcher, sitemap_url, limits.get("timeout_seconds", 10))
+                found_locs = await fetch_sitemap_urls(
+                    http_fetcher, sitemap_url, limits.get("timeout_seconds", 10)
+                )
                 for loc, lastmod in found_locs:
                     sitemap_urls.append(loc)
                     if lastmod:
@@ -1239,7 +1308,9 @@ async def _discovery_diagnostics(
                 continue
     feeds: list[str] = []
     if discovery.get("feeds"):
-        for match in re.finditer(r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE):
+        for match in re.finditer(
+            r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE
+        ):
             tag = match.group(0)
             if "rss" not in tag.lower() and "atom" not in tag.lower():
                 continue
@@ -1294,9 +1365,7 @@ def _default_global_concurrency() -> int:
         return 4
 
 
-def _effective_max_content_length(
-    limits: dict[str, Any], global_concurrency: int | None = None
-) -> int:
+def _effective_max_content_length(limits: dict[str, Any], global_concurrency: int | None = None) -> int:
     """Per-page body cap, scaled down as concurrency rises (adversarial perf #2.1).
 
     An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
@@ -1365,8 +1434,12 @@ async def _http_strategy_result(
     revalidated_304 = False
     if content_cache is not None:
         ckey = _content_cache_key(
-            normalized_url, strategy, base_headers, extraction,
-            policy.get("css_selector"), policy.get("xpath"),
+            normalized_url,
+            strategy,
+            base_headers,
+            extraction,
+            policy.get("css_selector"),
+            policy.get("xpath"),
         )
         cached = await content_cache.aget(ckey)
         if cached is not None:
@@ -1388,8 +1461,12 @@ async def _http_strategy_result(
                 reval_headers.update(validator)
                 reval_headers.update(caller_conditional)
                 response, retry_diagnostics = await _fetch_with_retries(
-                    http_fetcher, normalized_url, reval_headers,
-                    timeout_seconds, max_retries, max_content_length,
+                    http_fetcher,
+                    normalized_url,
+                    reval_headers,
+                    timeout_seconds,
+                    max_retries,
+                    max_content_length,
                 )
                 if response.status_code == 304:
                     response = _rebuild_response(cached)
@@ -1418,13 +1495,13 @@ async def _http_strategy_result(
         # treat it as a normal response body instead.
         resp_headers_304 = {key.lower(): value for key, value in response.headers.items()}
         echoed_validators = {
-            "etag": resp_headers_304.get("etag") or (caller_conditional.get("If-None-Match") if caller_conditional else None),
-            "last_modified": resp_headers_304.get("last-modified") or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
+            "etag": resp_headers_304.get("etag")
+            or (caller_conditional.get("If-None-Match") if caller_conditional else None),
+            "last_modified": resp_headers_304.get("last-modified")
+            or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
         }
         echoed_validators = {k: v for k, v in echoed_validators.items() if v}
-        sent_conditional = any(
-            key in request_headers for key in ("If-None-Match", "If-Modified-Since")
-        )
+        sent_conditional = any(key in request_headers for key in ("If-None-Match", "If-Modified-Since"))
         if response.status_code == 304 and not revalidated_304 and sent_conditional:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             attempt = CrawlStrategyAttempt(
@@ -1471,7 +1548,9 @@ async def _http_strategy_result(
 
         headers = {key.lower(): value for key, value in response.headers.items()}
         content_type = headers.get("content-type")
-        if policy.get("extraction") != EXTRACTION_DOCUMENT and _looks_like_binary_body(response.body, content_type, response.final_url):
+        if policy.get("extraction") != EXTRACTION_DOCUMENT and _looks_like_binary_body(
+            response.body, content_type, response.final_url
+        ):
             result = _binary_no_text_result(
                 original_url=original_url,
                 normalized_url=normalized_url,
@@ -1495,7 +1574,9 @@ async def _http_strategy_result(
             decompressed = response.body
             strategy_decompression_failed = bool(getattr(response, "decompression_failed", False))
         body_text = _decode_body(decompressed, content_type)
-        is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(("<html", "<!doctype html"))
+        is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(
+            ("<html", "<!doctype html")
+        )
         html = body_text if is_html else None
         if extraction == EXTRACTION_DOCUMENT:
             extracted = await asyncio.to_thread(_extract_document, decompressed, response.final_url)
@@ -1507,7 +1588,12 @@ async def _http_strategy_result(
             extraction_method = EXTRACTION_METHOD_DOCUMENT
         elif extraction == EXTRACTION_TRAFILATURA:
             if is_html:
-                extracted = _extract_html(body_text, response.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+                extracted = _extract_html(
+                    body_text,
+                    response.final_url,
+                    css_selector=policy.get("css_selector"),
+                    xpath=policy.get("xpath"),
+                )
                 text = extracted.text or ""
                 markdown = extracted.markdown
             else:
@@ -1515,34 +1601,82 @@ async def _http_strategy_result(
                 markdown = None
             extraction_method = EXTRACTION_METHOD_TRAFILATURA
         else:
-            extracted = await asyncio.to_thread(extract_content, decompressed, content_type, response.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+            extracted = await asyncio.to_thread(
+                extract_content,
+                decompressed,
+                content_type,
+                response.final_url,
+                css_selector=policy.get("css_selector"),
+                xpath=policy.get("xpath"),
+            )
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY
         classification, classification_evidence = classify_page_with_evidence(html, text)
         if response.status_code == 403 and classification == "rendered":
             classification = "access_denied"
-            classification_evidence = [{"classification": "access_denied", "signature": "403", "source": "http_status", "context": "HTTP 403"}]
+            classification_evidence = [
+                {
+                    "classification": "access_denied",
+                    "signature": "403",
+                    "source": "http_status",
+                    "context": "HTTP 403",
+                }
+            ]
         elif response.status_code == 404:
             classification = "not_found"
-            classification_evidence = [{"classification": "not_found", "signature": "404", "source": "http_status", "context": "HTTP 404"}]
+            classification_evidence = [
+                {
+                    "classification": "not_found",
+                    "signature": "404",
+                    "source": "http_status",
+                    "context": "HTTP 404",
+                }
+            ]
         elif response.status_code == 410:
             classification = "gone"
-            classification_evidence = [{"classification": "gone", "signature": "410", "source": "http_status", "context": "HTTP 410"}]
+            classification_evidence = [
+                {"classification": "gone", "signature": "410", "source": "http_status", "context": "HTTP 410"}
+            ]
         elif response.status_code == 429:
             classification = "rate_limited"
-            classification_evidence = [{"classification": "rate_limited", "signature": "429", "source": "http_status", "context": "HTTP 429"}]
+            classification_evidence = [
+                {
+                    "classification": "rate_limited",
+                    "signature": "429",
+                    "source": "http_status",
+                    "context": "HTTP 429",
+                }
+            ]
         elif response.status_code >= 500:
             classification = "site_error"
-            classification_evidence = [{"classification": "site_error", "signature": str(response.status_code), "source": "http_status", "context": f"HTTP {response.status_code}"}]
+            classification_evidence = [
+                {
+                    "classification": "site_error",
+                    "signature": str(response.status_code),
+                    "source": "http_status",
+                    "context": f"HTTP {response.status_code}",
+                }
+            ]
         if extraction == EXTRACTION_TRAFILATURA and not is_html and classification == "rendered":
             classification = EXTRACTION_METHOD_BINARY_NO_TEXT
-            classification_evidence = [{"classification": EXTRACTION_METHOD_BINARY_NO_TEXT, "signature": "non_html_body", "source": "content_type", "context": content_type or ""}]
+            classification_evidence = [
+                {
+                    "classification": EXTRACTION_METHOD_BINARY_NO_TEXT,
+                    "signature": "non_html_body",
+                    "source": "content_type",
+                    "context": content_type or "",
+                }
+            ]
         status = _status_for_classification(classification)
         diagnostics: dict[str, Any] = {
-            "decompression_failed": bool(strategy_decompression_failed or getattr(response, "decompression_failed", False)),
+            "decompression_failed": bool(
+                strategy_decompression_failed or getattr(response, "decompression_failed", False)
+            ),
             "request_profile": {
-                "user_agent_family": str(policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")),
+                "user_agent_family": str(
+                    policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")
+                ),
                 "cookie_jar": str(policy.get("request_profile", {}).get("cookie_jar", "none")),
             },
             "retry": retry_diagnostics,
@@ -1636,8 +1770,11 @@ async def _http_strategy_result(
         # consumers; content-only crawls (no discovery, depth 0) skip the
         # extraction entirely and return empty links (#2-fix).
         if status == "success" and _want_discovery_links:
-            discovered_links, discovered_link_count, discovered_links_truncated = (
-                _extract_discovered_links(html, response.final_url, max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS), tree=tree)
+            discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
+                html,
+                response.final_url,
+                max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
+                tree=tree,
             )
         else:
             discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
@@ -1719,5 +1856,3 @@ async def _http_strategy_result(
 # ---------------------------------------------------------------------------
 # Document text annotation (agenda/legal document formatting)
 # ---------------------------------------------------------------------------
-
-

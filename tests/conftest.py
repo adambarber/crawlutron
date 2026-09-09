@@ -174,6 +174,27 @@ def fast_sleeps():
         yield
 
 
+@pytest.fixture(autouse=True)
+def stub_cffi_fetcher(request, monkeypatch):
+    """Replace the real curl_cffi TLS-impersonation fetcher in tests.
+
+    Stream-mode curl_cffi 0.16 has no plain timeout (it relies on a
+    LOW_SPEED abort), and its internal watchdog busy-spins the GIL under
+    the fast_sleeps patch, wedging the entire pytest process. Real cffi
+    behavior is exercised in subprocess-isolated tests and in live tests
+    marked ``real_cffi``; everything else gets a fast connection error,
+    matching the pre-streaming failure semantics the suite was built on.
+    """
+    if request.node.get_closest_marker("real_cffi"):
+        return
+    import app.crawl.engine as engine_module
+
+    async def _stub_cffi_fetcher(url, headers, timeout_seconds, max_content_length=0):
+        raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
+
+    monkeypatch.setattr(engine_module, "_default_cffi_fetcher", _stub_cffi_fetcher)
+
+
 @pytest.fixture
 def real_sleeps(monkeypatch):
     """Restore the real time.sleep / asyncio.sleep for timing-sensitive tests.

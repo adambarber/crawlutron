@@ -2,33 +2,52 @@
 
 A hostile origin can stream gigabytes without a Content-Length header
 (chunked). The cffi path read the entire body into memory before any cap
-applied. These tests pin the fix: stream via aiter_content, abort past
+applied. These tests pin the fix: stream via the response queue, abort past
 max_content_length with a 413, and stop consuming the stream promptly.
 """
 
 from app.crawl.strategies.http import _default_cffi_fetcher
 
 
-class _FakeCffiResponse:
-    def __init__(self, body: bytes, *, chunk_size=1024):
+class _FeedOnDemandQueue:
+    """Feeds one chunk per get(), mirroring curl's bounded-queue backpressure:
+    the producer only advances when the consumer reads, so counters measure
+    consumption (the property under test), not producer progress."""
+
+    def __init__(self, body: bytes, chunk_size: int):
         self._body = body
         self._chunk_size = chunk_size
-        self.chunks_yielded = 0
+        self._offset = 0
+
+    async def get(self):
+        from curl_cffi.requests.models import STREAM_END
+
+        if self._offset >= len(self._body):
+            return STREAM_END
+        chunk = self._body[self._offset : self._offset + self._chunk_size]
+        self._offset += len(chunk)
+        self.chunks_yielded = self._offset // self._chunk_size + (1 if self._offset % self._chunk_size else 0)
+        return chunk
+
+
+class _FakeCffiResponse:
+    def __init__(self, body: bytes, *, chunk_size=1024):
         self.status_code = 200
         self.url = "http://example.test/page"
         self.headers = {}  # no content-length: chunked-style body
         self.elapsed = 0.01
+        # The fetcher consumes queue items directly (the aiter_content
+        # wrapper is bypassed because its aclose wedges on aborted streams).
+        self.queue = _FeedOnDemandQueue(body, chunk_size)
 
     @property
     def content(self):
         # Emulates buffering: hands over the whole body at once.
-        return self._body
+        return b""
 
-    async def aiter_content(self, chunk_size=None):
-        step = chunk_size or self._chunk_size
-        for offset in range(0, len(self._body), step):
-            self.chunks_yielded += 1
-            yield self._body[offset : offset + step]
+    @property
+    def chunks_yielded(self):
+        return self.queue.chunks_yielded
 
 
 class _FakeCffiClient:
