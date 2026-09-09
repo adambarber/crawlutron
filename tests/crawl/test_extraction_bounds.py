@@ -1,10 +1,7 @@
-import os
-import time
-
 import pytest
 
 import app.crawl.extraction as ext_mod
-from app.crawl.extraction import _extract_document, _EXTRACTION_DOC_TIMEOUT, _MAX_EXTRACTED_MARKDOWN
+from app.crawl.extraction import _EXTRACTION_DOC_TIMEOUT, _extract_document  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +24,7 @@ async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
     """
     # Use env var to signal test hang to the worker subprocess (inherited).
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     # Set short timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
 
@@ -44,6 +42,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
     import multiprocessing
 
     monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.text is None
     assert result.markdown is None
@@ -58,6 +57,7 @@ async def test_extract_document_output_capped_at_5mb(monkeypatch):
 
     # Use env var to inject test data into the worker subprocess.
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", huge)
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     # Set the cap directly
     monkeypatch.setattr(ext_mod, "_MAX_EXTRACTED_MARKDOWN", test_cap)
 
@@ -72,6 +72,7 @@ async def test_extract_document_normal_works(monkeypatch):
     """Normal extraction returns the markdown content."""
     # Use env var to inject test data into the worker subprocess.
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
 
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.markdown == "## Hello Markdown"
@@ -85,18 +86,19 @@ async def test_extract_document_normal_works(monkeypatch):
 # forcefully killed on timeout (no lingering zombie / stalled pool).
 # ============================================================
 
+
 async def test_extract_document_process_pool_isolation(monkeypatch, real_sleeps):
     """Document extraction runs in a separate process so a hang can be killed
     and does not degrade the shared thread pool.
     """
     # Use a very short timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
-    from app.crawl.extraction import _EXTRACTION_DOC_TIMEOUT
 
-    assert _EXTRACTION_DOC_TIMEOUT == 0.01
+    assert ext_mod._EXTRACTION_DOC_TIMEOUT == 0.01
 
     # The subprocess will check this env var and hang if set.
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
 
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     # Should return None due to timeout (process killed).
@@ -119,6 +121,7 @@ async def test_extract_document_process_pool_normal_works(monkeypatch):
     # the key is it doesn't crash.
     assert isinstance(result, ext_mod.ExtractedContent)
 
+
 async def test_extract_document_recovers_after_timeout(monkeypatch, real_sleeps):
     """After a timed-out (killed) extraction, the next call still works.
 
@@ -127,6 +130,7 @@ async def test_extract_document_recovers_after_timeout(monkeypatch, real_sleeps)
     """
     # First call hangs and is killed on timeout (short timeout, hang injected).
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
     hung = _extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
     assert hung.text is None
@@ -138,6 +142,21 @@ async def test_extract_document_recovers_after_timeout(monkeypatch, real_sleeps)
     # stall the bounded extraction concurrency.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Recovered")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     recovered = _extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
     assert recovered.markdown == "## Recovered"
     monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+
+
+async def test_test_hooks_inert_without_gate(monkeypatch):
+    """N10: TEST_MARKITDOWN_* flags are inert unless BROWSER_CRAWLER_TEST_HOOKS=1
+    is also set — production children must not honor stray test flags."""
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
+    monkeypatch.delenv("BROWSER_CRAWLER_TEST_HOOKS", raising=False)
+
+    ungated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert ungated.markdown != "## hijacked"
+
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    gated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert gated.markdown == "## hijacked"

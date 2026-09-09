@@ -23,11 +23,9 @@ import logging
 import multiprocessing
 import os
 import re
-import sys
 import threading
 from html import unescape
-from html.parser import HTMLParser
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from urllib.parse import urljoin, urlparse
 
 from app.crawl.firecrawl_format import _text_from_html
@@ -50,7 +48,12 @@ _DEFAULT_DOC_EXTRACTION_WORKERS = 2
 def _doc_extraction_worker_count() -> int:
     """Configured concurrency for markitdown extraction (process semaphore size)."""
     try:
-        return max(1, int(os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", str(_DEFAULT_DOC_EXTRACTION_WORKERS))))
+        return max(
+            1,
+            int(
+                os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", str(_DEFAULT_DOC_EXTRACTION_WORKERS))
+            ),
+        )
     except ValueError:
         return _DEFAULT_DOC_EXTRACTION_WORKERS
 
@@ -63,12 +66,23 @@ def _doc_extraction_worker_count() -> int:
 _DOC_SEM = threading.Semaphore(_doc_extraction_worker_count())
 
 
+def _test_hooks_enabled() -> bool:
+    """Single gate for the TEST_MARKITDOWN_* child-process hooks (N10).
+
+    The hooks exist so tests can simulate child death/hang/output without
+    real parsers, but a stray env var must never alter production behavior:
+    they only fire when the operator explicitly exports
+    BROWSER_CRAWLER_TEST_HOOKS=1 alongside the per-hook flag.
+    """
+    return os.environ.get("BROWSER_CRAWLER_TEST_HOOKS") == "1"
+
+
 def _run_markitdown_in_process(body: bytes, conn) -> None:
     """Worker-process entry: run markitdown and ship the result over ``conn``."""
     # Support for test-induced child death (M8): exit without sending, as a
     # worker segfaulting on hostile input would. Inherited via env so it
     # works under both fork and spawn start methods.
-    if os.environ.get("TEST_MARKITDOWN_DIE") == "1":
+    if _test_hooks_enabled() and os.environ.get("TEST_MARKITDOWN_DIE") == "1":
         try:
             conn.close()
         except Exception:  # noqa: BLE001, S110 - dying child, nothing to log to
@@ -77,12 +91,12 @@ def _run_markitdown_in_process(body: bytes, conn) -> None:
     try:
         res = _markitdown_extract(body)
         conn.send(("ok", res))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         conn.send(("err", None))
     finally:
         try:
             conn.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             pass
 
 
@@ -90,11 +104,11 @@ def _terminate_doc_process(proc) -> None:
     """Force-kill a runaway document-extraction process and reap it."""
     try:
         proc.terminate()
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass
     try:
         proc.join(timeout=5)
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         pass
 
 
@@ -104,13 +118,14 @@ def _markitdown_extract(body: bytes) -> str | None:
     Runs in a separate process so it can be forcefully killed on timeout.
     """
     # Support for test-induced hang simulation
-    if os.environ.get("TEST_MARKITDOWN_HANG") == "1":
+    if _test_hooks_enabled() and os.environ.get("TEST_MARKITDOWN_HANG") == "1":
         import time
+
         time.sleep(10)  # Longer than any test timeout
 
     # Support for test output injection
     test_output = os.environ.get("TEST_MARKITDOWN_OUTPUT")
-    if test_output is not None:
+    if _test_hooks_enabled() and test_output is not None:
         return test_output
 
     try:
@@ -133,15 +148,11 @@ async def _shutdown_doc_extraction_executor() -> None:
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
 # A pathological selector (or adversarial payload) could otherwise run
 # unbounded and tie up a request worker. Override via env var.
-_EXTRACTION_SELECTOR_TIMEOUT = float(
-    os.environ.get("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", "2.0")
-)
+_EXTRACTION_SELECTOR_TIMEOUT = float(os.environ.get("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", "2.0"))
 
 # Wall-clock bound (seconds) for document extraction (markitdown).
 # Override via BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT.
-_EXTRACTION_DOC_TIMEOUT = float(
-    os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0")
-)
+_EXTRACTION_DOC_TIMEOUT = float(os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0"))
 
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
@@ -149,9 +160,11 @@ _EXTRACTION_DOC_TIMEOUT = float(
 _EXTRACTION_DOC_MAX_INPUT_BYTES = int(
     os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", str(20 * 1024 * 1024))
 )
-_EXTRACTION_DOC_ENABLED = os.environ.get(
-    "BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "true"
-).lower() not in ("0", "false", "no")
+_EXTRACTION_DOC_ENABLED = os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "true").lower() not in (
+    "0",
+    "false",
+    "no",
+)
 
 # Maximum extracted markdown size (chars) to prevent unbounded output (F5).
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
@@ -177,8 +190,17 @@ def _eval_selector(fn, timeout):
 
 _PDF_MAGIC = b"%PDF"
 _DOC_EXTENSIONS = (
-    ".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx",
-    ".csv", ".json", ".xml", ".epub",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".xls",
+    ".xlsx",
+    ".csv",
+    ".json",
+    ".xml",
+    ".epub",
 )
 
 
@@ -230,7 +252,11 @@ def extract_content(
     if _is_html(content_type, content):
         return _extract_html(_decode(content), url)
     if _looks_like_document(content_type, content, url):
-        body = bytes(content) if isinstance(content, (bytes, bytearray, memoryview)) else content.encode("utf-8", "replace")
+        body = (
+            bytes(content)
+            if isinstance(content, (bytes, bytearray, memoryview))
+            else content.encode("utf-8", "replace")
+        )
         return _extract_document(body, url)
     text = _decode(content).strip()
     return ExtractedContent(text or None, text or None)
@@ -242,7 +268,7 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
         from markdownify import markdownify as html_to_md
 
         md = html_to_md(html_fragment) or None
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         md = None
     text = _text_from_html(html_fragment) or None
     return text, md
@@ -271,9 +297,7 @@ def _extract_selected(
         except ImportError:
             return ExtractedContent(None, None)
         soup = BeautifulSoup(html, "html.parser")
-        selected = _eval_selector(
-            lambda: soup.select(css_selector), _EXTRACTION_SELECTOR_TIMEOUT
-        )
+        selected = _eval_selector(lambda: soup.select(css_selector), _EXTRACTION_SELECTOR_TIMEOUT)
         if selected is _EXTRACTION_SELECTOR_SENTINEL:
             logger.warning(
                 "extraction_selector_timeout",
@@ -288,9 +312,7 @@ def _extract_selected(
         if tree is None:
             return ExtractedContent(None, None)
         try:
-            nodes = _eval_selector(
-                lambda: tree.xpath(xpath), _EXTRACTION_SELECTOR_TIMEOUT
-            )
+            nodes = _eval_selector(lambda: tree.xpath(xpath), _EXTRACTION_SELECTOR_TIMEOUT)
         except Exception:  # invalid XPath is caller error, not extraction
             return ExtractedContent(None, None)
         if nodes is _EXTRACTION_SELECTOR_SENTINEL:
@@ -326,6 +348,7 @@ def _extract_html(
         return _extract_selected(html, url, css_selector=css_selector, xpath=xpath)
     try:
         import trafilatura
+
         md = trafilatura.extract(
             html,
             url=url,
@@ -337,7 +360,7 @@ def _extract_html(
             include_links=True,
             deduplicate=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001, S110
         md = None
     if not md or not md.strip():
         # Fallback to markdownify before the plain-text extractor so that
@@ -346,7 +369,7 @@ def _extract_html(
             from markdownify import markdownify as html_to_md
 
             md = html_to_md(html) or None
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110
             md = None
     if not md or not md.strip():
         md = _text_from_html(html) or None
@@ -378,9 +401,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     _DOC_SEM.acquire()
     try:
         parent_conn, child_conn = multiprocessing.Pipe()
-        proc = multiprocessing.Process(
-            target=_run_markitdown_in_process, args=(body, child_conn)
-        )
+        proc = multiprocessing.Process(target=_run_markitdown_in_process, args=(body, child_conn))
         proc.start()
         child_conn.close()  # parent keeps only its end of the pipe
         md = None
@@ -413,9 +434,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     # Cap output size (F5).
     if len(md) > _MAX_EXTRACTED_MARKDOWN:
         md = md[:_MAX_EXTRACTED_MARKDOWN]
-        logger.warning(
-            "extraction_document_truncated", extra={"max_chars": _MAX_EXTRACTED_MARKDOWN}
-        )
+        logger.warning("extraction_document_truncated", extra={"max_chars": _MAX_EXTRACTED_MARKDOWN})
     return ExtractedContent(md, md)
 
 
@@ -534,7 +553,9 @@ def _extract_forms(
         for control in form_el.iter(*_CONTROL_TAGS):
             cattrs = {key.lower(): value for key, value in control.attrib.items()}
             tag = str(control.tag)
-            control_type = (cattrs.get("type") or "text").lower() if tag == "input" else cattrs.get("type", "")
+            control_type = (
+                (cattrs.get("type") or "text").lower() if tag == "input" else cattrs.get("type", "")
+            )
             controls.append(
                 {
                     "tag": tag,
@@ -558,9 +579,7 @@ def _extract_forms(
     return forms
 
 
-def _html_diagnostics(
-    html: str | None, source_url: str | None, *, tree: Any | None = None
-) -> dict[str, Any]:
+def _html_diagnostics(html: str | None, source_url: str | None, *, tree: Any | None = None) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
     # #11: parse the HTML once and share the single lxml tree across the
     # frames/forms passes instead of reparsing per pass.
@@ -573,8 +592,6 @@ def _html_diagnostics(
     if forms:
         diagnostics["forms"] = forms
     return diagnostics
-
-
 
 
 def _extract_discovered_links(
