@@ -97,6 +97,9 @@ if FastAPI is not None:
         READINESS_STATE.set_utilization_sampler(
             lambda: (_resource_gate.memory_ratio(), _resource_gate.cpu_ratio())
         )
+        # The module-level gate is built at import time with no running
+        # loop, so its lag probe must start here (M16).
+        _resource_gate.start_lag_probe()
 
         set_webhook_dependencies(
             webhook_semaphore=_get_async_crawl_semaphore(),
@@ -130,9 +133,12 @@ if FastAPI is not None:
 
         from app.crawl.strategies.http import close_async_http_client
 
+        from .crawl.engine import _resource_gate
+
         shutdown_event.set()
         await close_async_http_client()
         await close_browser_pool()
+        _resource_gate.close()
 
     app = FastAPI(
         title="Browser Crawler Execution Service",

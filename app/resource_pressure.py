@@ -80,10 +80,10 @@ class LoopLagProbe:
     def start(self) -> None:
         """Begin sampling on the current running loop (idempotent)."""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            return
-        if loop is None or not loop.is_running():
+            # No running loop (e.g. import time): never implicitly create
+            # one; the owner starts the probe explicitly once a loop runs.
             return
         if self._task is not None and not self._task.done():
             return
@@ -342,6 +342,14 @@ class ResourceGate:
         # and minimal deployments do not pay for a background task; when off it
         # reports zero lag and leaves the gate untouched.
         self._lag_probe = LoopLagProbe()
+
+    def start_lag_probe(self) -> None:
+        """Start the loop-lag sampler on the running loop (M16).
+
+        Called from lifespan startup, not __init__: the module-level gate is
+        constructed at import time with no running loop, so an __init__-time
+        start silently never schedules and lag reads 0.0 forever. Idempotent.
+        """
         if _LOOP_LAG_PROBE_ENABLED:
             self._lag_probe.start()
 
