@@ -8,7 +8,6 @@ The previous implementation used naive ``str.startswith(pattern)`` which:
 
 These tests pin the correct RFC 9309 behavior.
 """
-import pytest
 
 from app.crawl.engine import _robots_allows
 

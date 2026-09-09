@@ -10,7 +10,6 @@ app.resource_pressure as the single source of truth shared with the httpx pool
 and the weighted admission, so the test patches read_memory_stats there.
 """
 
-import os
 
 import pytest
 

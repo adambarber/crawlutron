@@ -1,6 +1,5 @@
 """fetch_sitemap_urls must extract <lastmod> alongside <loc> (#1)."""
 
-import urllib.request
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.models import HttpFetchResult
 

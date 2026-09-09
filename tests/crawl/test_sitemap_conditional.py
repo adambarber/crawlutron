@@ -2,8 +2,7 @@
 
 import time
 
-from app.crawl import fetch_helpers
-from app.crawl.fetch_helpers import fetch_sitemap_urls, _SITEMAP_CACHE
+from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.models import HttpFetchResult
 
 

@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestDocumentGaps:
     def test_format_table_empty(self):
         assert _format_table([]) == ""

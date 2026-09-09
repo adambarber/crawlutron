@@ -7,11 +7,10 @@ import socket
 from unittest.mock import patch
 
 import pytest
+from _testkit import block_private_targets
 
 from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
 from app.validation import normalize_public_http_url
-from _testkit import block_private_targets
-
 
 
 class TestSSRFProtection:

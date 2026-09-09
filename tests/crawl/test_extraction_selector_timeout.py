@@ -8,7 +8,6 @@ and returns a safe empty fallback on timeout.
 import time
 
 import bs4
-import pytest
 
 import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import ExtractedContent, _extract_selected

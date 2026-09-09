@@ -1,7 +1,6 @@
 """Regression test: uncompressed bodies arrive as bytearray; the document
 extraction path must handle them (batch A2 previously broke this)."""
 
-import sys
 
 async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
     """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""

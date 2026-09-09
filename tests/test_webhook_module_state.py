@@ -75,7 +75,6 @@ def test_deliver_webhook_without_dependencies_raises():
     callbacks and crash somewhere downstream with an obscure error.
     """
     wm.clear_webhook_dependencies()
-    import pytest
     with pytest.raises(RuntimeError, match="not initialized"):
         # asyncio.run to drive the coroutine
         asyncio.run(

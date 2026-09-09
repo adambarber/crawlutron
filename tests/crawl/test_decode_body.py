@@ -1,11 +1,10 @@
 """#5: _decode_body decodes via a strict fast path with charset-normalizer fallback."""
 
-import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.http import _decode_body
 
 
 def test_decode_valid_utf8_strict():
-    body = "héllo wörld".encode("utf-8")
+    body = "héllo wörld".encode()
     assert _decode_body(body, "text/html; charset=utf-8") == "héllo wörld"
 
 
@@ -25,14 +24,14 @@ def test_decode_invalid_bytes_does_not_raise():
 
 def test_decode_unknown_charset_falls_back():
     # An unknown declared charset must not raise LookupError.
-    body = "plain".encode("utf-8")
+    body = b"plain"
     out = _decode_body(body, "text/html; charset=not-a-real-charset")
     assert out == "plain"
 
 
 def test_decode_handles_bytearray_and_headers():
     import gzip
-    raw = "compressed".encode("utf-8")
+    raw = b"compressed"
     body = gzip.compress(raw)
     out = _decode_body(bytearray(body), "text/html", {"content-encoding": "gzip"})
     assert out == "compressed"

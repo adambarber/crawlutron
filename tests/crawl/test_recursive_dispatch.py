@@ -7,8 +7,6 @@ full engine (the reason the dispatch was extracted from ``crawl_request``).
 
 import asyncio
 
-import pytest
-
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink, EngineCrawlResult
 

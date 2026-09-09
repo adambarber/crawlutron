@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from app.crawl.strategies.browser import BrowserRenderer
 from app.api_models import CrawlPolicy
+from app.crawl.strategies.browser import BrowserRenderer
 
 
 def _make_mock_page() -> MagicMock:

@@ -4,7 +4,7 @@ Uses the shared ``job_store`` fixture (conftest.py) and pytest's ``tmp_path``
 instead of per-test ``tempfile.TemporaryDirectory`` boilerplate.
 """
 
-from app.crawl.job_store import JobStore, JobStatus, CrawlJobState
+from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 
 
 def test_jobstore_create_and_load(job_store):

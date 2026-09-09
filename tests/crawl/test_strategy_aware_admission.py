@@ -11,14 +11,13 @@ import asyncio
 
 import pytest
 
-from app.resource_pressure import CpuGate, ResourceGate, MemoryGate
-from app.crawl.recursive import run_recursive_crawl, _batch_is_http_heavy
-from app.models import CrawlTask, DiscoveredLink, EngineCrawlResult
 from app.constants import (
-    HTTP_DECLARED_CRAWLER,
-    HTTP_CFFI_IMPERSONATE,
     BROWSER_HEADLESS,
+    HTTP_DECLARED_CRAWLER,
 )
+from app.crawl.recursive import _batch_is_http_heavy, run_recursive_crawl
+from app.models import CrawlTask, EngineCrawlResult
+from app.resource_pressure import ResourceGate
 
 
 # ---------------------------------------------------------------------------

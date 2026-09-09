@@ -3,20 +3,18 @@
 The frontier was a list using O(n) pop(0); it is now a collections.deque with
 O(1) popleft. Behavior (BFS completeness/ordering) must be unchanged.
 """
-from urllib.parse import urlparse
 
-import pytest
+
+from _testkit import site_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from app.crawl.strategies.http import HttpFetchResult
-from _testkit import site_fetcher
 
 
 def _build_hub(n_leaves: int):
     leaves = " ".join(f'<a href="/l{i}">l{i}</a>' for i in range(n_leaves))
     pages = {
-        "/": (200, f"<html><body><a href='/hub'>hub</a></body></html>", "text/html"),
+        "/": (200, "<html><body><a href='/hub'>hub</a></body></html>", "text/html"),
         "/hub": (200, f"<html><body>{leaves}</body></html>", "text/html"),
     }
     for i in range(n_leaves):

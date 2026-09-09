@@ -1,13 +1,18 @@
 """Tests for extracted modular components."""
 
 from app.crawl.decompression import decompress_body
-from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
 from app.crawl.extraction import extract_content
-from app.health.readiness import ReadinessState, create_health_router
-from app.metrics import get_metrics
+from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
+from app.discovery.agent_hints import (
+    EXAMPLE_POLICIES,
+    STRATEGY_DESCRIPTIONS,
+    agent_hints_payload,
+    create_agent_hints_router,
+)
 from app.discovery.capabilities import capabilities_payload, create_capabilities_router
-from app.discovery.agent_hints import agent_hints_payload, create_agent_hints_router, EXAMPLE_POLICIES, STRATEGY_DESCRIPTIONS
-from app.discovery.well_known import discovery_payload, create_well_known_router
+from app.discovery.well_known import create_well_known_router, discovery_payload
+from app.health.readiness import ReadinessState
+from app.metrics import get_metrics
 from app.settings import CrawlerSettings
 
 

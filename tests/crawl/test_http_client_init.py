@@ -3,8 +3,6 @@ deprecated get_event_loop, and is guarded against concurrent first-time build.
 """
 import asyncio
 
-import pytest
-
 import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.http import get_async_http_client
 

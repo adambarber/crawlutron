@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestValidationGaps:
     def test_unsupported_scheme(self):
         with pytest.raises(ValueError):

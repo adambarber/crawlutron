@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestExtractionGaps:
     def test_nested_anchor(self):
         # Real HTML parsers (lxml) flatten illegally-nested anchors into

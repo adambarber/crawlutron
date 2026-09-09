@@ -4,7 +4,6 @@ scope_regex is applied to every discovered link URL. A pattern such as
 ``(a+)+$`` triggers catastrophic backtracking and can hang the request. We
 refuse to compile pathological patterns and bound the number of links scanned.
 """
-import pytest
 
 from app.crawl.engine import _compile_scope_regex_safe
 from app.models import EngineCrawlResult

@@ -1,8 +1,7 @@
-import pytest
 from urllib.parse import urlparse
 
 import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.http import _default_http_fetcher, _build_pinned_request, _MAX_REDIRECT_HOPS
+from app.crawl.strategies.http import _default_http_fetcher
 
 
 class MockResponse:
@@ -94,7 +93,7 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
     keys. Using get_list("set-cookie") gives each header separately.
     """
-    from app.crawl.strategies.http import _store_set_cookies, CookieJar
+    from app.crawl.strategies.http import CookieJar, _store_set_cookies
 
     # Use a fresh jar to avoid interference from other tests
     jar = CookieJar()

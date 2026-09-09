@@ -7,17 +7,20 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 import httpx
+import pytest
+from _testkit import block_private_targets
 
-from app.api import webhooks as _webhook_module
 from app.api.webhooks import (
-    set_webhook_dependencies,
     clear_webhook_dependencies,
-    validate_webhook_url as _validate_webhook_url,
+    set_webhook_dependencies,
+)
+from app.api.webhooks import (
     deliver_webhook as _deliver_webhook,
 )
-from _testkit import block_private_targets
+from app.api.webhooks import (
+    validate_webhook_url as _validate_webhook_url,
+)
 
 
 class _FakeUnifiedResponse:
@@ -140,7 +143,6 @@ class TestWebhookDeliveryPinning:
                 captured["headers"] = headers
                 return _MockResponse()
 
-        import asyncio
 
         _original_async_client = httpx.AsyncClient
         httpx.AsyncClient = _Client

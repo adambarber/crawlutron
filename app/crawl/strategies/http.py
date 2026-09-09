@@ -570,7 +570,6 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     client connects to that exact IP instead of re-resolving at connect time.
     The original ``Host`` header is preserved by the caller.
     """
-    import os
 
     parsed = urlparse(url)
     hostname = parsed.hostname

@@ -1,10 +1,8 @@
 """Adversarial perf #2.3: cgroup-read cache, leading memory signal, loop-lag."""
 
-import asyncio
-import time
 
 from app.cgroup_sense import _invalidate_cgroup_cache, _read_int
-from app.memory_pressure import MemoryGate, read_memory_stats
+from app.memory_pressure import MemoryGate
 from app.resource_pressure import LoopLagProbe, ResourceGate
 
 

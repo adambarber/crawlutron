@@ -9,10 +9,9 @@ import socket
 from unittest.mock import patch
 
 import pytest
+from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
-from app.crawl.strategies.http import _resolve_and_pin_host, _check_ssrf_protection
-from _testkit import block_private_targets, assert_dns_pinning_uses_first_resolution
-
+from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
 
 
 class TestSSrfDnsPinning:

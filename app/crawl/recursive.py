@@ -13,11 +13,11 @@ import asyncio
 import inspect
 import logging
 import re
-import time
 from collections import deque
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from itertools import islice
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.constants import (
     BROWSER_STRATEGIES,
@@ -26,10 +26,10 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
-from app.scheduler import DomainScheduler
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
+from app.scheduler import DomainScheduler
 from app.validation import registrable_domain
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTI
 
 def _batch_is_http_heavy(
     scheduler: DomainScheduler,
-    frontier: "deque[tuple[int, CrawlTask]]",
+    frontier: deque[tuple[int, CrawlTask]],
     sample: int,
 ) -> bool:
     """True when the majority of the sampled frontier is HTTP-pinned work.
@@ -152,7 +152,7 @@ async def run_recursive_crawl(
     scheduler: DomainScheduler,
     worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]],
     robots_allows: Callable[[str], Awaitable[bool]],
-    robots_crawl_delay: "Callable[[str], Awaitable[float | None]] | None" = None,
+    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
     sitemap_seeds: Callable[[], Awaitable[list[str]]],
     spill: Any,
@@ -162,7 +162,7 @@ async def run_recursive_crawl(
     respect_robots: bool,
     include_html: bool,
     want_document_bodies: bool,
-    scope_pattern: "re.Pattern[str] | None",
+    scope_pattern: re.Pattern[str] | None,
     global_concurrency: int,
     seed_sitemaps: bool,
     resource_gate: ResourceGate,
@@ -179,7 +179,7 @@ async def run_recursive_crawl(
     admission = admission or default_admission_policy(resource_gate)
 
     visited: set[str] = set()
-    frontier: "deque[tuple[int, CrawlTask]]" = deque([(0, job) for job in jobs])
+    frontier: deque[tuple[int, CrawlTask]] = deque([(0, job) for job in jobs])
     next_index = len(jobs)
     page_count = 0
     # bounded recursive BFS (#11) seeded by sitemaps (#13)

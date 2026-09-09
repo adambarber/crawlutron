@@ -13,7 +13,6 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIXTURE_PDF = os.path.join(_HERE, "..", "fixtures", "sample_table.pdf")
 
@@ -309,7 +308,7 @@ class TestServer:
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
-    def start(self) -> "TestServer":
+    def start(self) -> TestServer:
         self._thread.start()
         return self
 

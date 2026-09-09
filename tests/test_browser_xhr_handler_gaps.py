@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestBrowserXhrHandlerGaps:
     async def test_json_payload_captured(self):
         from app.crawl.strategies.browser import BrowserRenderer

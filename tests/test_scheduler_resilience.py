@@ -4,11 +4,11 @@
 in-flight jobs when a single job raises, aborting the whole batch on one
 transient error.
 """
-import pytest
 
-from app.models import CrawlJob, CrawlStrategyAttempt, EngineCrawlResult
-from app.scheduler import DomainScheduler
 from _testkit import make_job, make_result
+
+from app.models import CrawlJob, EngineCrawlResult
+from app.scheduler import DomainScheduler
 
 
 class TestSchedulerResilience:

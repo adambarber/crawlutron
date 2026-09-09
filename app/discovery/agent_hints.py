@@ -4,19 +4,17 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import AgentHintsResponse, CrawlExtractionMethod, CrawlStrategy
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
+from app.api_models import (
+    AgentHintsResponse,
+    CrawlExtractionMethod,
+    CrawlStrategy,
+)
 from app.constants import (
-    BROWSER_HEADLESS,
     CFFI_IMPERSONATE_TARGET,
-    EXTRACTION_DOCUMENT,
     EXTRACTION_TRAFILATURA,
-    HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-
-
-from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
 
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",

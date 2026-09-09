@@ -6,11 +6,10 @@ delay behavior.
 """
 import time
 
-import pytest
+from _testkit import make_job, make_result
 
 from app.models import CrawlJob
 from app.scheduler import DomainScheduler
-from _testkit import make_job, make_result
 
 
 async def _ok(job: CrawlJob):

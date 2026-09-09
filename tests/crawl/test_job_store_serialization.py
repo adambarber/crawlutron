@@ -7,9 +7,7 @@ state lost), and load() returned None for ANY exception, hiding corruption.
 import datetime
 import logging
 
-import pytest
-
-from app.crawl.job_store import JobStore, JobStatus
+from app.crawl.job_store import JobStore
 
 
 def _store(tmp_path):

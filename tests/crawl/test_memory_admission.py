@@ -14,7 +14,6 @@ from app.memory_pressure import (
     read_memory_stats,
 )
 
-
 # --- sensing ---
 
 def test_read_memory_stats_v2(tmp_path):
@@ -104,9 +103,10 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
     """Integration: with the memory sampler pinned at 99% usage, the engine pauses
     dispatch (gate waits) yet the crawl still completes. The combined ResourceGate
     is exercised; CPU is pinned idle so only memory drives the throttle."""
+    from _testkit import site_fetcher
+
     import app.crawl.engine as engine_mod
     from app.resource_pressure import ResourceGate
-    from _testkit import site_fetcher
 
     gate = ResourceGate()
     gate.memory.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
@@ -141,9 +141,10 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
 async def test_engine_throttles_batches_under_cpu_pressure(tmp_path, monkeypatch):
     """Integration: with the CPU sampler pinned at 99% of quota, the engine pauses
     dispatch (gate waits) yet the crawl still completes. Mirrors the memory test."""
+    from _testkit import site_fetcher
+
     import app.crawl.engine as engine_mod
     from app.resource_pressure import ResourceGate
-    from _testkit import site_fetcher
 
     gate = ResourceGate()
     gate.memory.max_wait_seconds = 0.05

@@ -1,6 +1,5 @@
 """Result retrieval by request_id (fixes dead status_url + lost sync results)."""
 
-import pytest
 
 from app.crawl.result_store import CrawlResultStore
 
@@ -56,6 +55,7 @@ def test_missing_id_returns_none():
 async def test_status_url_roundtrip_via_api():
     """The 202-advertised status_url now actually works end to end."""
     from helpers import make_async_client
+
     from app.main import app
 
     async def run(client):

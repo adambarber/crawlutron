@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestSchedulerCoverageGaps:
     """Cover remaining branches in scheduler.py"""
 
@@ -32,8 +33,9 @@ class TestSchedulerCoverageGaps:
         assert scheduler.is_circuit_open("example.com")
 
     def test_circuit_breaker_cooldown_expired(self):
-        from app.scheduler import DomainScheduler
         import time
+
+        from app.scheduler import DomainScheduler
         scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
         scheduler._circuit_open_until["example.com"] = time.monotonic() - 1
         assert not (scheduler.is_circuit_open("example.com"))
@@ -56,8 +58,9 @@ class TestSchedulerCoverageGaps:
     def test_circuit_breaker_exponential_backoff(self):
         """Adversarial perf #2.1: consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
-        from app.scheduler import DomainScheduler
         import time
+
+        from app.scheduler import DomainScheduler
 
         s = DomainScheduler(
             global_limit=1, per_domain_limit=1, delay_seconds=0.0,

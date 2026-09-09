@@ -9,17 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 
 import httpx
-
 from helpers.server import EtagHandler
 
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
-
 
 # --------------------------- unit: pure cache behavior ---------------------------
 
@@ -137,7 +134,7 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
-    from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
+    from app.crawl.strategies.http import _http_strategy_result
     url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     # First crawl: stores 200 + etag.
     r1 = await _http_strategy_result(
@@ -181,8 +178,9 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
 
 async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path):
     """Recursive crawl_request reuses the content cache for seed AND discovered pages (#5)."""
-    from app.crawl.strategies.http import HttpFetchResult
     from urllib.parse import urlparse
+
+    from app.crawl.strategies.http import HttpFetchResult
 
     fetched_pages: list[str] = []
 

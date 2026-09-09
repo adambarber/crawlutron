@@ -25,9 +25,7 @@ from dataclasses import dataclass
 from app.cgroup_sense import _read_int, _read_text
 from app.memory_pressure import (
     MemoryGate,
-    MemoryStats,
     ResourceGauge,
-    batch_scale,
     read_memory_stats,
 )
 
@@ -74,8 +72,8 @@ class LoopLagProbe:
         self._hard = hard_threshold
         self._smoothing = smoothing
         self._lag = 0.0
-        self._task: "asyncio.Task | None" = None
-        self._loop: "asyncio.AbstractEventLoop | None" = None
+        self._task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def start(self) -> None:
         """Begin sampling on the current running loop (idempotent)."""
@@ -434,7 +432,7 @@ _BROWSER_RAM_FRACTION = float(os.environ.get("BROWSER_CRAWLER_BROWSER_RAM_FRACTI
 _MAX_DERIVED_POOL_SIZE = int(os.environ.get("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", "4"))
 
 
-def derive_browser_pool_size(limit_bytes: "int | None" = None) -> int:
+def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     """Single global browser-pool size from the cgroup memory limit.
 
     Honors ``BROWSER_CRAWLER_BROWSER_POOL_SIZE``; else derives so the pool uses at
@@ -511,7 +509,7 @@ def _build_admission_policy(
     )
 
 
-def default_admission_policy(gate: "ResourceGate") -> "WeightedAdmission":
+def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
     """A conservative policy used when the caller does not supply one.
 
     Assumes a 2-process browser pool (the 3 GiB default) so tests / minimal
@@ -530,7 +528,7 @@ class WeightedAdmission:
     when nothing fits it yields :data:`_ADMIT_YIELD_SECONDS` of backpressure.
     """
 
-    def __init__(self, gate: "ResourceGate", policy: AdmissionPolicy) -> None:
+    def __init__(self, gate: ResourceGate, policy: AdmissionPolicy) -> None:
         self._gate = gate
         self._p = policy
 
@@ -545,7 +543,7 @@ class WeightedAdmission:
         # with headroom -- never admit new browser renders when saturated.
         return max(0, int(self._p.max_browser_concurrency * self.headroom_fraction()))
 
-    async def admit(self, want_http: int, want_browser: int) -> "tuple[int, int]":
+    async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
         h = min(want_http, self.http_capacity())
         b = min(want_browser, self.browser_capacity())
         if h + b == 0 and (want_http + want_browser) > 0:

@@ -7,8 +7,6 @@ from app.output_formats import (
     serialize_results,
 )
 
-
-
 SAMPLE = [
     {
         "original_url": "http://a.example/",

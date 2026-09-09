@@ -3,13 +3,13 @@
 import asyncio
 
 from app.crawl.extraction import (
-    _detect_pagination,
-    extract_content,
     ExtractedContent,
+    _detect_pagination,
+    _extract_html,
     _is_html,
     _looks_like_document,
     _text_from_html,
-    _extract_html,
+    extract_content,
     extract_js_endpoints,
 )
 

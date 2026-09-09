@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from app.constants import (
     DEFAULT_BROWSER_POOL_SIZE,
@@ -12,7 +12,6 @@ from app.constants import (
 )
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
-
 
 # Connection-pool sizing (T7): bind the HTTP pool to the SAME RAM-derived HTTP
 # concurrency the weighted admission allows, so the two can never diverge as RAM
@@ -100,7 +99,7 @@ class CrawlerSettings:
     search_timeout_seconds: int = 15
 
     @classmethod
-    def from_mapping(cls, values: Mapping[str, str] | None = None) -> "CrawlerSettings":
+    def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
         source = os.environ if values is None else values
         return cls(
             host=source.get("BROWSER_CRAWLER_HOST", cls.host),

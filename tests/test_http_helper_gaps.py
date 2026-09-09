@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestHttpHelperGaps:
     def test_cookie_header_per_host(self):
         assert _cookie_header_for_url(

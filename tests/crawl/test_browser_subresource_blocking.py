@@ -6,12 +6,10 @@ pytestmark = pytest.mark.browser
 non-essential subresources to cut render bandwidth (#2)."""
 
 
-import asyncio
 from unittest.mock import patch
 
 import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
-
 
 
 class _FakeRoute:

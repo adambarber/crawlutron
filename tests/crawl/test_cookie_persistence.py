@@ -1,7 +1,7 @@
 """#9 Cookie persistence - pure tests (no mocks)."""
 
-import tempfile
 import os
+import tempfile
 
 from app.crawl.strategies.http import CookieJar
 
@@ -34,7 +34,8 @@ def test_cookie_jar_load_missing_file_returns_empty():
 
 def test_cookie_jar_load_corrupted_file_returns_empty():
     """Loading from corrupted JSON returns empty jar (no crash)."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "corrupt.json")
         with open(path, "w") as f:
@@ -45,7 +46,8 @@ def test_cookie_jar_load_corrupted_file_returns_empty():
 
 def test_cookie_jar_persistence_preserves_multiple_domains():
     """Multiple domains are all preserved."""
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "cookies.json")
         jar = CookieJar()

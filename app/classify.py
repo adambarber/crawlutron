@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
     ("captcha_detected", ("verify you are human", "human verification", "complete the captcha", "captcha challenge", "prove you are human", "security check", "i'm not a robot")),

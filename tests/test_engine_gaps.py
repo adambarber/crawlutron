@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestEngineGaps:
     # Uses the module-level _fake_browser worker factory.
 
@@ -132,8 +133,8 @@ class TestEngineGaps:
         """Adversarial perf #2.6: a host's robots Crawl-delay is honored as a
         per-domain minimum delay during the crawl."""
         from app.crawl import engine as engine_mod
-        from app.scheduler import DomainScheduler
         from app.crawl.cache import HttpCache
+        from app.scheduler import DomainScheduler
 
         calls = []
         orig = DomainScheduler.set_domain_min_delay
@@ -167,8 +168,8 @@ class TestEngineGaps:
     def test_effective_max_content_length_scales(self):
         """Adversarial perf #2.1: per-page cap shrinks as concurrency rises, floor
         respected, explicit policy value wins."""
-        from app.crawl.strategies.http import _effective_max_content_length
         from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+        from app.crawl.strategies.http import _effective_max_content_length
 
         # Explicit value always wins.
         assert _effective_max_content_length({"max_content_length_bytes": 123}) == 123

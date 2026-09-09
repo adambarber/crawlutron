@@ -3,6 +3,7 @@
 
 def test_accepts_bytearray_gzip():
     import gzip
+
     from app.crawl.decompression import decompress_body, detect_decompression_failure
 
     body = bytearray(gzip.compress(b"hello world"))
@@ -13,6 +14,7 @@ def test_accepts_bytearray_gzip():
 
 def test_accepts_bytearray_brotli():
     import brotli
+
     from app.crawl.decompression import decompress_body
 
     body = bytearray(brotli.compress(b"<html>br content</html>"))

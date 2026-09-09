@@ -4,14 +4,12 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-from urllib.parse import urlparse
 
-import pytest
+
+from _testkit import run_scoped_crawl, site_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from app.crawl.strategies.http import HttpFetchResult
-from _testkit import run_scoped_crawl, site_fetcher
 
 
 class TestRecursiveCrawl:

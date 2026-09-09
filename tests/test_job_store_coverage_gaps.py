@@ -2,12 +2,15 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestJobStoreCoverageGaps:
     """Cover remaining branches in job_store.py"""
 
     def test_job_store_load_exception(self):
+        import pathlib
+        import tempfile
+
         from app.crawl.job_store import JobStore
-        import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
             store = JobStore(db_path)
@@ -20,8 +23,10 @@ class TestJobStoreCoverageGaps:
             assert (result) is None
 
     def test_job_store_close(self):
+        import pathlib
+        import tempfile
+
         from app.crawl.job_store import JobStore
-        import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
             store = JobStore(db_path)

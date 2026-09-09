@@ -20,7 +20,7 @@ def test_no_encoding():
 
 
 def test_decode_body_respects_charset():
-    body = "<html>é</html>".encode("utf-8")
+    body = "<html>é</html>".encode()
     assert "é" in _decode_body(body, "text/html; charset=utf-8")
 
 

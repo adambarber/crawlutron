@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestDocumentTextParserGaps:
     def test_range_action(self):
         out = _format_extracted_document_text(

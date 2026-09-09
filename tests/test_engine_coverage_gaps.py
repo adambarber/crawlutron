@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestEngineCoverageGaps:
     """Cover remaining branches in engine.py"""
 

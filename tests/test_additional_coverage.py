@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestAdditionalCoverage:
     """Additional targeted tests to close coverage gaps."""
 
@@ -12,8 +13,9 @@ class TestAdditionalCoverage:
         assert cache.get("key") == {"data": "second"}
 
     def test_content_cache_get_corrupt_json(self):
+        import tempfile
+
         from app.crawl.content_cache import ContentCache
-        import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = ContentCache(tmpdir, default_ttl=60)
             cache_path = cache._path_for("testkey")
@@ -35,8 +37,10 @@ class TestAdditionalCoverage:
             assert removed == 1
 
     def test_job_store_update(self):
-        from app.crawl.job_store import JobStore, JobStatus
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
+
+        from app.crawl.job_store import JobStore
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
             store = JobStore(db_path)
@@ -72,16 +76,18 @@ class TestAdditionalCoverage:
             serialize_results(results, "unknown_format")
 
     def test_decompression_zlib(self):
-        from app.crawl.decompression import decompress_body
         import zlib
+
+        from app.crawl.decompression import decompress_body
         original = b"hello world " * 10
         compressed = zlib.compress(original)
         result = decompress_body(compressed, "deflate")
         assert (result) is not None
 
     def test_decompression_gzip(self):
-        from app.crawl.decompression import decompress_body
         import gzip
+
+        from app.crawl.decompression import decompress_body
         original = b"hello world " * 10
         compressed = gzip.compress(original)
         result = decompress_body(compressed, "gzip")
@@ -118,8 +124,8 @@ class TestAdditionalCoverage:
         assert scheduler._domain_failures.get("example.com", 0) == 0
 
     async def test_http_async_client_close(self):
-        from app.crawl.strategies.http import get_async_http_client, close_async_http_client
-        import asyncio
+
+        from app.crawl.strategies.http import close_async_http_client, get_async_http_client
         # Get a client, then close it
         async def test():
             client = get_async_http_client()
@@ -127,8 +133,8 @@ class TestAdditionalCoverage:
         await test()
 
     def test_engine_shared_content_cache(self):
-        from app.crawl.engine import _get_shared_content_cache
         from app.crawl.content_cache import ContentCache
+        from app.crawl.engine import _get_shared_content_cache
         cache = _get_shared_content_cache()
         assert isinstance(cache, ContentCache)
 

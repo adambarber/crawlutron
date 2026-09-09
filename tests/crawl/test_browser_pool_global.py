@@ -9,9 +9,9 @@ clear the global so a later access cannot hand out a closed pool.
 import pytest
 
 from app.crawl.strategies.browser_pool import (
+    close_browser_pool,
     get_browser_pool,
     set_browser_pool,
-    close_browser_pool,
 )
 
 

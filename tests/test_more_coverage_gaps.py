@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestMoreCoverageGaps:
     """More targeted tests to close remaining coverage gaps."""
 
@@ -40,7 +41,8 @@ class TestMoreCoverageGaps:
             pass
 
     def test_job_store_load_corrupt_row(self):
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             store = make_job_store(tmpdir)
             job = store.create("http://example.com/", {})
@@ -65,8 +67,8 @@ class TestMoreCoverageGaps:
         assert "example.com" not in scheduler._domain_latency_ema
 
     async def test_http_strategy_not_modified(self):
-        from app.crawl.strategies.http import _http_strategy_result
         from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
 
         def not_mod_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             class Resp:
@@ -90,8 +92,9 @@ class TestMoreCoverageGaps:
         assert result.classification == "not_modified"
 
     def test_content_cache_clear_os_error(self):
+        import tempfile
+
         from app.crawl.content_cache import ContentCache
-        import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = ContentCache(tmpdir, default_ttl=60)
             cache.set("key1", {"data": "1"})
@@ -179,8 +182,8 @@ class TestMoreCoverageGaps:
         assert status == "failed"
 
     async def test_http_cffi_imersonate_result(self):
-        from app.crawl.strategies.http import _http_strategy_result
         from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
         def cffi_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             class Resp:
                 status_code = 200
@@ -203,8 +206,9 @@ class TestMoreCoverageGaps:
         # Live impersonated fetch: needs real wall-clock sleeps -- the suite's
         # instant-asyncio.sleep patch starves curl_cffi's socket/timer loop
         # and wedges the transfer past all client timeouts.
-        from app.crawl.strategies.http import _default_cffi_fetcher
         from helpers.server import spawn_server
+
+        from app.crawl.strategies.http import _default_cffi_fetcher
         server = spawn_server()
         try:
             result = await _default_cffi_fetcher(server.base_url + "/", {}, 10, 50*1024*1024)
@@ -225,9 +229,11 @@ class TestMoreCoverageGaps:
         assert (result) is not None
 
     async def test_main_invalid_webhook_url(self):
-        from app.main import app
+
+        import httpx
         from httpx import AsyncClient
-        import asyncio, httpx
+
+        from app.main import app
         async def test():
             transport = httpx.ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -242,8 +248,8 @@ class TestMoreCoverageGaps:
         job_store.delete(job.job_id)
 
     async def test_main_job_control_cancel_completed(self):
-        from app.main import app, job_store
         from app.crawl.job_store import JobStatus
+        from app.main import app, job_store
         job = job_store.create("http://example.com/", {})
         # Set to completed
         job.status = JobStatus.COMPLETED
@@ -253,15 +259,15 @@ class TestMoreCoverageGaps:
 
     async def test_main_job_control_resume_not_paused(self):
         from app.main import app, job_store
-        from app.crawl.job_store import JobStatus
         job = job_store.create("http://example.com/", {})
         await run_job_control_test(app, job_store, job.job_id, "resume", 422)
         job_store.delete(job.job_id)
 
     async def test_engine_crawl_request_with_webhook(self):
+        import asyncio
+
         from app.crawl.engine import crawl_request
         from app.settings import CrawlerSettings
-        import asyncio
         payload = {
             "url": "http://127.0.0.1:1/",
             "policy": {
@@ -292,8 +298,8 @@ class TestMoreCoverageGaps:
         assert len(links) > 0
 
     async def test_http_strategy_with_cffi_retry(self):
-        from app.crawl.strategies.http import _http_strategy_result
         from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
         call_count = [0]
         def retry_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             call_count[0] += 1

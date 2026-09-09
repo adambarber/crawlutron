@@ -1,12 +1,8 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
-import asyncio
-from dataclasses import replace
 
-import app.crawl.engine as engine_mod
 from app.crawl.engine import _execute_crawl_chain
-from app.crawl.strategies.browser import _BROWSER_COOKIES_BY_DOMAIN
 from app.models import CrawlResult
 
 

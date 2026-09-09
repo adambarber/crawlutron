@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestClassifyGaps:
     def test_html_without_script_style_signal(self):
         # Regression guard for the HTML-comment classification bypass fix:

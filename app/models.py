@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, is_dataclass, fields
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Literal
 
 from app.constants import (
@@ -10,7 +10,6 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-
 
 ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
 Classification = Literal[

@@ -15,7 +15,6 @@ import base64
 import json
 import logging
 import os
-import re
 import time
 from collections import OrderedDict
 from collections.abc import Callable
@@ -30,7 +29,6 @@ from app.constants import (
 )
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.http import (
-    CookieJar,
     _build_pinned_request,
     _check_ssrf_protection,
     _classify_error_code,
@@ -82,7 +80,6 @@ _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 # content and only add network load. The canonical list lives in
 # app.constants (single source of truth) so the engine can also refuse to
 # enqueue these hosts as jobs.
-from app.constants import ANALYTICS_HOST_SUFFIXES as _ANALYTICS_HOST_SUFFIXES  # noqa: E402
 from app.constants import is_analytics_host as _is_analytics_url  # noqa: E402
 
 
@@ -202,7 +199,7 @@ _MAX_ACTION_WAIT_SECONDS = 10.0
 # Bounded with an LRU so a long-lived process crawling many domains cannot
 # grow this dict without bound (#6).
 _BROWSER_COOKIES_MAX = 500
-_BROWSER_COOKIES_BY_DOMAIN: "OrderedDict[str, str]" = OrderedDict()
+_BROWSER_COOKIES_BY_DOMAIN: OrderedDict[str, str] = OrderedDict()
 
 
 def _store_browser_cookies(domain: str, header: str) -> None:
@@ -229,7 +226,7 @@ class BrowserRenderer:
         challenge_wait_seconds: float | None = None,
         pdf_text_extractor: Callable[[str], str] | None = None,
         warmup_urls: list[str] | None = None,
-        settings: "CrawlerSettings | None" = None,
+        settings: CrawlerSettings | None = None,
     ) -> None:
         self._browser_factory = browser_factory or self._create_camoufox_browser
         self._sleep = sleep
@@ -696,7 +693,6 @@ class BrowserRenderer:
         on the box read another tenant's session tokens
         (adversarial review F-storage-state-path-traversal).
         """
-        import os
         from pathlib import Path
 
         # Allow known keys (e.g., "default", "session")

@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.scheduler import DomainScheduler
-from app.crawl.engine import _execute_crawl_chain
 from app.constants import (
-    HTTP_DECLARED_CRAWLER,
-    HTTP_CFFI_IMPERSONATE,
     BROWSER_HEADLESS,
-    HTTP_STRATEGIES,
-    BROWSER_STRATEGIES,
+    HTTP_CFFI_IMPERSONATE,
+    HTTP_DECLARED_CRAWLER,
 )
-from app.models import EngineCrawlResult, CrawlStrategyAttempt
+from app.scheduler import DomainScheduler
 
 
 class TestStrategyPinning:
@@ -53,8 +49,6 @@ class TestExecuteCrawlChainPinning:
     @pytest.mark.asyncio
     async def test_chain_starts_at_pinned_strategy(self) -> None:
         """When a domain is pinned, the chain should start at that strategy."""
-        from app.crawl.strategies.http import _default_http_fetcher, _default_cffi_fetcher
-        from app.crawl.cache import HttpCache
 
         scheduler = DomainScheduler(
             global_limit=10,

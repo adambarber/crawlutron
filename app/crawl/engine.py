@@ -33,7 +33,6 @@ from app.constants import (
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     EXTRACTION_DOCUMENT,
-    USER_AGENT_TOKEN,
     EXTRACTION_METHOD_DOCUMENT,
     EXTRACTION_METHOD_DOM_TEXT,
     EXTRACTION_METHOD_TRAFILATURA,
@@ -41,6 +40,7 @@ from app.constants import (
     HTTP_BLOCKED_CLASSIFICATIONS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
+    USER_AGENT_TOKEN,
 )
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy

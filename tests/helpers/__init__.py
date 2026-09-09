@@ -2,14 +2,16 @@
 
 import asyncio
 import pathlib
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
+
+from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.job_store import JobStore
-from app.constants import HTTP_DECLARED_CRAWLER
 
 
 def build_payload(
@@ -153,8 +155,8 @@ async def run_job_control_test(
         job = job_store.create("http://example.com/", {})
         await run_job_control_test(app, job_store, job.job_id, "cancel", 422)
     """
-    from httpx import AsyncClient
     import httpx
+    from httpx import AsyncClient
 
     async with make_async_client(app)() as client:
         resp = await client.post(

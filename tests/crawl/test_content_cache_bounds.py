@@ -1,4 +1,3 @@
-import pytest
 
 from app.crawl.content_cache import ContentCache
 

@@ -53,8 +53,8 @@ class TestHarvestWaitBounded:
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self, real_sleeps, monkeypatch):
-        from tests._testkit import BrowserFakeBrowser, BrowserFakePage, build_pinned_renderer
         from app.crawl.strategies.browser import BrowserRenderer, RenderOptions
+        from tests._testkit import BrowserFakePage, build_pinned_renderer
 
         url = "http://example.com/page"
         domain = registrable_domain(url)

@@ -7,8 +7,6 @@ without being closed. This test verifies the superseded client is closed.
 '''
 import asyncio
 
-import pytest
-
 import app.crawl.strategies.http as http_mod
 
 

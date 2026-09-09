@@ -15,7 +15,6 @@ from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
 
-
 class FakeElement:
     def __init__(self, selector):
         self.selector = selector

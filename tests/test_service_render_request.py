@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestServiceRenderRequest:
     # Uses the module-level _worker factory.
 

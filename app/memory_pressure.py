@@ -10,12 +10,12 @@ batches pause until usage drains.
 
 from __future__ import annotations
 
-from app.cgroup_sense import _read_int
-
 import asyncio
 import os
 import time
 from dataclasses import dataclass
+
+from app.cgroup_sense import _read_int
 
 # Self-managed memory admission targets (no operator knob): the gate rides
 # at TARGET and pauses at HARD against the cgroup memory limit it discovers

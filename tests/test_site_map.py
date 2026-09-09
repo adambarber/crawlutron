@@ -3,7 +3,6 @@
 from app.map import build_site_map
 
 
-
 def test_build_site_map_aggregates_and_dedupes():
     crawl_response = {
         "results": [{

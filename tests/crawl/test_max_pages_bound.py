@@ -1,10 +1,10 @@
-import pytest
+
+from _testkit import site_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.payload_helpers import _payload_policy
 from app.settings import CrawlerSettings
-from _testkit import site_fetcher
 
 
 async def test_max_pages_default_is_bounded_not_unlimited():

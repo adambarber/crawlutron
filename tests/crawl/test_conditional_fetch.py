@@ -5,7 +5,6 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
-import asyncio
 
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _http_strategy_result

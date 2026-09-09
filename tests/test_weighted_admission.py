@@ -11,11 +11,10 @@ import asyncio
 import pytest
 
 from app.resource_pressure import (
-    AdmissionPolicy,
+    _BROWSER_TASK_RAM_BYTES,
+    _HTTP_TASK_RAM_BYTES,
     WeightedAdmission,
     _build_admission_policy,
-    _HTTP_TASK_RAM_BYTES,
-    _BROWSER_TASK_RAM_BYTES,
 )
 
 

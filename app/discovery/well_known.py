@@ -4,10 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import DiscoveryResponse
-
-
-from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION
+from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION, DiscoveryResponse
 
 
 def discovery_payload() -> dict[str, Any]:

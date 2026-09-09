@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestHttpCoverageGaps:
     """Cover remaining branches in http.py"""
 
@@ -31,8 +32,8 @@ class TestHttpCoverageGaps:
         assert result.status_code == 200
 
     async def test_http_strategy_result_httpx_request_error(self):
-        from app.crawl.strategies.http import _http_strategy_result
         from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
         cache = HttpCache()
         def failing_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             import httpx
@@ -48,8 +49,8 @@ class TestHttpCoverageGaps:
         assert result.classification == "network_error"
 
     async def test_http_strategy_result_httpx_http_status_error(self):
-        from app.crawl.strategies.http import _http_strategy_result
         from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
         cache = HttpCache()
         def error_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             import httpx
@@ -76,9 +77,9 @@ class TestHttpCoverageGaps:
         assert isinstance(result, str)
 
     async def test_http_strategy_result_binary_classification(self):
-        from app.crawl.strategies.http import _http_strategy_result
-        from app.crawl.cache import HttpCache
         from app.constants import EXTRACTION_METHOD_BINARY_NO_TEXT
+        from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
         cache = HttpCache()
         def binary_fetcher(url, headers, timeout, max_content_length=50*1024*1024):
             class Resp:

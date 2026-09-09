@@ -9,7 +9,6 @@ import json
 import socket
 
 import httpx
-import pytest
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.strategies.http import _classify_error_code, _http_strategy_result

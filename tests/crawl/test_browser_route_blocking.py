@@ -8,6 +8,7 @@ import time
 import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
 
+
 class MockRequest:
     def __init__(self, url):
         self.url = url
@@ -243,8 +244,9 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from app.crawl.strategies.browser import _make_ssrf_websocket_handler
     from _testkit import block_private_targets
+
+    from app.crawl.strategies.browser import _make_ssrf_websocket_handler
 
 
     block_private_targets(monkeypatch)

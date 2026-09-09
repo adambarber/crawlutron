@@ -9,9 +9,10 @@
 
 import asyncio
 
-import app.crawl.strategies.browser as browser_mod
 from _testkit import BrowserFakePage, build_pinned_renderer
-from app.crawl.strategies.browser import BrowserRenderer, _MAX_ACTION_WAIT_SECONDS
+
+import app.crawl.strategies.browser as browser_mod
+from app.crawl.strategies.browser import _MAX_ACTION_WAIT_SECONDS, BrowserRenderer
 from app.models import RenderOptions
 
 

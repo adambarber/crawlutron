@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestFirecrawlFormatGaps:
     def test_malformed_json_ld_is_ignored(self):
         md = _extract_firecrawl_metadata(

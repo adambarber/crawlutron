@@ -6,8 +6,8 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
-from .models import CrawlJob, CrawlResult, EngineCrawlResult, CrawlStrategyAttempt
 from .crawl.result_helpers import _failed_engine_result
+from .models import CrawlJob, EngineCrawlResult
 
 SchedulerWorker = Callable[[CrawlJob], Awaitable[EngineCrawlResult]]
 
@@ -202,8 +202,8 @@ class DomainScheduler:
         self,
         jobs: list[CrawlJob],
         worker: SchedulerWorker,
-        on_result: "Callable[[int, EngineCrawlResult], Awaitable[None]] | None" = None,
-    ) -> "list[EngineCrawlResult] | None":
+        on_result: Callable[[int, EngineCrawlResult], Awaitable[None]] | None = None,
+    ) -> list[EngineCrawlResult] | None:
         """Run ``jobs`` through ``worker``.
 
         When ``on_result`` is provided, each completed result is handed to it
@@ -223,7 +223,7 @@ class DomainScheduler:
         # Retain results in memory only when the caller needs them back
         # (recursive frontier expansion). With on_result set, results are spilled
         # per-job and never accumulated here, bounding batch RAM (#3.1).
-        results: "list[EngineCrawlResult | None] | None" = None if on_result else [None] * result_count
+        results: list[EngineCrawlResult | None] | None = None if on_result else [None] * result_count
 
         async def run_one(job: CrawlJob) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global

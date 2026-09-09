@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestCacheGaps:
     def test_conditional_headers_include_last_modified(self):
         c = HttpCache()

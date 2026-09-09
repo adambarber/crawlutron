@@ -8,7 +8,6 @@ pytestmark = pytest.mark.browser
 from app.crawl.strategies.browser import BrowserRenderer
 
 
-
 class _FakeResponse:
     def __init__(self, url, payload):
         self.url = url

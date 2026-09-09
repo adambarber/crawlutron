@@ -13,9 +13,10 @@ import json
 import os
 import tempfile
 
+from _testkit import site_fetcher
+
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from _testkit import site_fetcher
 
 
 def _pages():

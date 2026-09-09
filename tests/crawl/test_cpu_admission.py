@@ -7,7 +7,6 @@ instead of exceeding the quota and getting throttled by the kernel. The
 ResourceGate combines memory + CPU so the most-contended resource sets the pace.
 """
 
-import pytest
 
 from app.resource_pressure import (
     CpuGate,
@@ -15,7 +14,6 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
-
 
 # --- sensing: quota ---
 

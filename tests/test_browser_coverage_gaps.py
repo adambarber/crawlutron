@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestBrowserCoverageGaps:
     """Cover remaining branches in browser.py"""
 

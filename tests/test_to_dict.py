@@ -54,7 +54,7 @@ def test_to_dict_handles_cyclic_link_graph():
     @dataclass
     class _Node:
         name: str
-        parent: "_Node | None" = None
+        parent: _Node | None = None
         children: list = field(default_factory=list)
 
     a = _Node("a")

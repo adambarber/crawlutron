@@ -3,10 +3,9 @@ worker threads. Without a lock / busy_timeout, concurrent sqlite3 writes raise
 ``database is locked`` (OperationalError) or corrupt reads.
 """
 import sqlite3
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from app.crawl.job_store import JobStore, JobStatus
+from app.crawl.job_store import JobStatus, JobStore
 
 
 def _store(tmp_path=None):

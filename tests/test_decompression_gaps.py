@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestDecompressionGaps:
     def test_gzip_failure_returns_body(self):
         assert decompress_body(b"not gzip", "gzip") == b"not gzip"

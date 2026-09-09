@@ -1,14 +1,13 @@
 """DomainScheduler real behavior: jitter, domain cooldowns, job scheduling (no mocks)."""
 
-import asyncio
 import random
 import time
 from typing import Any
 
-import pytest
-from app.models import CrawlJob, CrawlStrategyAttempt, EngineCrawlResult
-from app.scheduler import DomainScheduler
 from _testkit import make_job, make_result
+
+from app.models import CrawlJob
+from app.scheduler import DomainScheduler
 
 
 async def ok_worker(job: CrawlJob) -> Any:

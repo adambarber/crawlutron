@@ -2,6 +2,7 @@
 
 from coverage_helpers import *  # noqa: F401,F403
 
+
 class TestDecompressionCoverageGaps:
     """Cover remaining branches in decompression.py"""
 

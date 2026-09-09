@@ -14,7 +14,6 @@ from typing import Any
 
 from app.constants import (
     DISCOVERY_BODY_MAX_BYTES,
-    SITEMAP_CACHE_EVICT_BATCH,
     SITEMAP_CACHE_MAX_ENTRIES,
     SITEMAP_CACHE_TTL_SECONDS,
     SITEMAP_FANOUT_TIMEOUT_SECONDS,
@@ -23,7 +22,6 @@ from app.constants import (
     SITEMAP_MAX_URLS,
 )
 from app.crawl.strategies.http import _decode_body, _decompress_body
-
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
@@ -75,7 +73,7 @@ async def _fetch_and_decode(
 # change moves sitemap parsing to ``asyncio.to_thread``, this cache will
 # need an explicit ``threading.Lock`` (mirroring ``_DNS_CACHE_LOCK`` in
 # ``app/crawl/strategies/http.py``).
-_SITEMAP_CACHE: "OrderedDict[str, tuple[float, list, str | None, str | None]]" = OrderedDict()
+_SITEMAP_CACHE: OrderedDict[str, tuple[float, list, str | None, str | None]] = OrderedDict()
 
 
 async def fetch_sitemap_urls(
@@ -103,6 +101,7 @@ async def fetch_sitemap_urls(
     avoids re-downloading unchanged sitemaps on every crawl.
     """
     import re as _re
+
     from app.crawl.decompression import DecompressionTooLargeError
 
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)

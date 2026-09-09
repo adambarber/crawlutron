@@ -4,14 +4,18 @@ pytestmark = pytest.mark.browser
 
 import urllib.request
 
+from _testkit import BrowserFakePage, build_pinned_renderer
+
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
 import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.browser import _resolve_browser_target, _assert_safe_final_url, _is_ssrf_blocked, _make_ssrf_route_handler
-from _testkit import BrowserFakePage, build_pinned_renderer
+from app.crawl.strategies.browser import (
+    _assert_safe_final_url,
+    _is_ssrf_blocked,
+    _make_ssrf_route_handler,
+    _resolve_browser_target,
+)
 from app.models import RenderOptions
-
-
 
 # --------------------------------------------------------------------------
 # document.py: SSRF gate on urlopen (F2)

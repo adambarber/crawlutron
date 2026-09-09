@@ -6,7 +6,6 @@ regardless of the requested host, breaking virtual-host routing and silently
 misrouting traffic. The escape hatch should simply bypass resolution and use
 the original hostname.
 """
-import pytest
 
 from app.crawl.strategies.http import _resolve_and_pin_host
 

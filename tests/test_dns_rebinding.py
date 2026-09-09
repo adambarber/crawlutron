@@ -6,13 +6,11 @@ the fix, ``_resolve_and_pin_host`` resolves once and the fetcher connects to the
 pinned IP with the original ``Host`` header preserved.
 """
 import socket
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
+from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
-from app.crawl.strategies.http import _resolve_and_pin_host, _default_http_fetcher
-from _testkit import block_private_targets, assert_dns_pinning_uses_first_resolution
-
+from app.crawl.strategies.http import _default_http_fetcher
 
 
 class TestDNSRebindingFix:
@@ -25,7 +23,6 @@ class TestDNSRebindingFix:
         """The HTTP fetcher must connect to the pinned IP and forward the
         original Host header (so virtual-host routing is preserved)."""
         block_private_targets(monkeypatch)
-        import urllib.parse as up
         captured = {}
 
         class _Resp:

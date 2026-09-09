@@ -5,7 +5,6 @@ import re
 from html import unescape
 from typing import Any
 
-
 _META_MAP = {
     "description": "description",
     "og:title": "og_title",

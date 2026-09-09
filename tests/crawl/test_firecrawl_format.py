@@ -1,7 +1,8 @@
 """Firecrawl-format metadata extraction, including JSON-LD (SOTA)."""
 
-from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
 from helpers import FIRECRAWL_TEST_HTML
+
+from app.crawl.firecrawl_format import _extract_firecrawl_metadata, _text_from_html
 
 
 class TestFirecrawlMetadata:

@@ -6,6 +6,7 @@ behind browser_profile.auto_accept_consent (default off).
 """
 
 from _testkit import BrowserFakePage
+
 from app.crawl.strategies.browser import BrowserRenderer
 
 

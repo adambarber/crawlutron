@@ -9,7 +9,6 @@ from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import _BROWSER_COOKIES_MAX, _store_browser_cookies, get_browser_cookies_for
 
 
-
 def _with_clean_cache(fn):
     saved = dict(browser_mod._BROWSER_COOKIES_BY_DOMAIN)
     browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
