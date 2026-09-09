@@ -23,13 +23,13 @@ def _decompress_streaming(make_fileobj, compressed: bytes, max_output_bytes: int
                 break
             out.extend(chunk)
             if len(out) > max_output_bytes:
-                raise DecompressionTooLargeError(
-                    f"decompressed body exceeds {max_output_bytes} bytes"
-                )
+                raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
     return bytes(out)
 
 
-def decompress_body(body: bytes | bytearray | memoryview, content_encoding: str, *, max_output_bytes: int | None = None) -> bytes:
+def decompress_body(
+    body: bytes | bytearray | memoryview, content_encoding: str, *, max_output_bytes: int | None = None
+) -> bytes:
     """Decompress response body based on Content-Encoding header.
 
     Exception-safe: if a decoder is unavailable or the body was already
@@ -69,14 +69,10 @@ def decompress_body(body: bytes | bytearray | memoryview, content_encoding: str,
             d = zlib.decompressobj()
             out.extend(d.decompress(body, max_output_bytes + 1))
             if len(out) > max_output_bytes or d.unconsumed_tail:
-                raise DecompressionTooLargeError(
-                    f"decompressed body exceeds {max_output_bytes} bytes"
-                )
+                raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
             out.extend(d.flush())
             if len(out) > max_output_bytes:
-                raise DecompressionTooLargeError(
-                    f"decompressed body exceeds {max_output_bytes} bytes"
-                )
+                raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
             return bytes(out)
         except DecompressionTooLargeError:
             raise
@@ -127,9 +123,7 @@ def decompress_body(body: bytes | bytearray | memoryview, content_encoding: str,
             return body
 
         if len(out) > max_output_bytes:
-            raise DecompressionTooLargeError(
-                f"decompressed body exceeds {max_output_bytes} bytes"
-            )
+            raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
         return bytes(out)
 
     return body

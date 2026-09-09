@@ -6,7 +6,6 @@ from the single _usage_ratio() signal. A stub subclass keeps it fast and
 isolated (no cgroup/real-resource sensing).
 """
 
-
 import pytest
 
 from app.memory_pressure import ResourceGauge

@@ -4,6 +4,7 @@ not silently swallow deserialization errors.
 Before the fix, save() raised TypeError on datetime/bytes in results (job
 state lost), and load() returned None for ANY exception, hiding corruption.
 """
+
 import datetime
 import logging
 
@@ -47,8 +48,19 @@ def test_load_logs_warning_on_corruption(tmp_path, caplog):
          created_at, updated_at, error, stats)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        ("corrupt-id", "http://example.com/", "{}", "pending", "[]", "[]",
-         "{not valid json", 0.0, 0.0, None, "{}"),
+        (
+            "corrupt-id",
+            "http://example.com/",
+            "{}",
+            "pending",
+            "[]",
+            "[]",
+            "{not valid json",
+            0.0,
+            0.0,
+            None,
+            "{}",
+        ),
     )
     store._conn.commit()
     with caplog.at_level(logging.WARNING):

@@ -35,7 +35,6 @@ async def test_domain_delay_does_not_block_other_domains(real_sleeps):
     async def worker(job):
         starts[job.index] = time.monotonic()
         await asyncio.sleep(0.02)
-        from app.models import EngineCrawlResult  # noqa: F401  (any value works)
         return "ok"
 
     t0 = time.monotonic()

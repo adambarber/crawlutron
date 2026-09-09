@@ -27,16 +27,23 @@ def _recording_fetcher(pages):
 def _doc_pages():
     """Town page advertising a PDF alongside an HTML subpage."""
     return {
-        "/": (200, '<html><body><a href="/local">l</a>'
-                    '<a href="/reports/2024-minutes.pdf">pdf</a></body></html>', "text/html"),
+        "/": (
+            200,
+            '<html><body><a href="/local">l</a><a href="/reports/2024-minutes.pdf">pdf</a></body></html>',
+            "text/html",
+        ),
         "/local": (200, "<html>l</html>", "text/html"),
     }
 
 
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     pages = {
-        "/": (200, '<html><body><a href="/keep/x">k</a>'
-                    '<a href="https://instagram.com/cityofexample">ig</a></body></html>', "text/html"),
+        "/": (
+            200,
+            '<html><body><a href="/keep/x">k</a>'
+            '<a href="https://instagram.com/cityofexample">ig</a></body></html>',
+            "text/html",
+        ),
         "/keep/x": (200, "<html>x</html>", "text/html"),
     }
     fetcher, fetched = _recording_fetcher(pages)
@@ -55,15 +62,19 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     assert not any("instagram.com" in u for u in fetched)
     # ...but the advertised profile is still recorded on the seed result
     root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
-    recorded = {l["normalized_url"] for l in root["discovered_links"]}
+    recorded = {d["normalized_url"] for d in root["discovered_links"]}
     assert "https://instagram.com/cityofexample" in recorded
 
 
 async def test_skip_list_hosts_recorded_but_never_enqueued():
     pages = {
-        "/": (200, '<html><body><a href="/local">l</a>'
-                    '<a href="https://www.pinterest.com/pin/1">p</a>'
-                    '<a href="https://x.com/mayor">x</a></body></html>', "text/html"),
+        "/": (
+            200,
+            '<html><body><a href="/local">l</a>'
+            '<a href="https://www.pinterest.com/pin/1">p</a>'
+            '<a href="https://x.com/mayor">x</a></body></html>',
+            "text/html",
+        ),
         "/local": (200, "<html>l</html>", "text/html"),
     }
     fetcher, fetched = _recording_fetcher(pages)
@@ -73,7 +84,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
     root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
-    recorded = {l["normalized_url"] for l in root["discovered_links"]}
+    recorded = {d["normalized_url"] for d in root["discovered_links"]}
     assert "https://www.pinterest.com/pin/1" in recorded
     assert "https://x.com/mayor" in recorded
 
@@ -88,7 +99,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)
     root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
-    recorded = {l["normalized_url"] for l in root["discovered_links"]}
+    recorded = {d["normalized_url"] for d in root["discovered_links"]}
     assert "http://example.com/reports/2024-minutes.pdf" in recorded
 
 

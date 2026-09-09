@@ -131,7 +131,7 @@ def _build_routes() -> dict[str, dict[str, Any]]:
             "status": 200,
             "headers": {
                 "content-type": "text/plain; charset=utf-8",
-                "set-cookie": "session_id=abc123; Path=/; HttpOnly; SameSite=Lax"
+                "set-cookie": "session_id=abc123; Path=/; HttpOnly; SameSite=Lax",
             },
             "body": b"cookie set",
         },
@@ -212,7 +212,11 @@ def _build_routes() -> dict[str, dict[str, Any]]:
         },
         "/with_lastmod": {
             "status": 200,
-            "headers": {"content-type": "text/html; charset=utf-8", "etag": "v2", "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"},
+            "headers": {
+                "content-type": "text/html; charset=utf-8",
+                "etag": "v2",
+                "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+            },
             "body": b"<html><body>last modified page</body></html>",
         },
         "/ratelimit": {
@@ -224,11 +228,11 @@ def _build_routes() -> dict[str, dict[str, Any]]:
             "status": 200,
             "headers": {"content-type": "text/html; charset=utf-8"},
             "body": (
-                b'<html><head><title>Legacy</title></head><body>'
+                b"<html><head><title>Legacy</title></head><body>"
                 b'<frameset><frame src="/a"></frameset>'
                 b'<form action="/submit" method="post"><input name="q" value="x"></form>'
                 b'<a href="/page2">Next</a><a href="/page2">Next</a>'
-                b'</body></html>'
+                b"</body></html>"
             ),
         },
         "/missing": {"status": 404, "headers": {"content-type": "text/plain"}, "body": b"not found"},
@@ -283,13 +287,13 @@ class _Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._handle()
 
-    def do_HEAD(self) -> None:  # noqa: N802
+    def do_HEAD(self) -> None:
         self._handle()
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         length = int(self.headers.get("content-length", "0") or "0")
         body = self.rfile.read(length) if length else b""
         WEBHOOK_RECEIVED.append(body)
@@ -336,7 +340,7 @@ def spawn_server() -> TestServer:
 class CountingHandler(BaseHTTPRequestHandler):
     """Serves one cacheable page and counts hits on ``server.hits``."""
 
-    def do_GET(self):  # noqa: N802
+    def do_GET(self):
         self.server.hits += 1  # type: ignore[attr-defined]
         body = b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>"
         self.send_response(200)
@@ -359,7 +363,7 @@ class EtagHandler(BaseHTTPRequestHandler):
     etag = "v1"
     body = b"<html><body>etagged content</body></html>"
 
-    def do_GET(self):  # noqa: N802
+    def do_GET(self):
         server = self.server
         if_none = self.headers.get("If-None-Match")
         if if_none == self.etag:

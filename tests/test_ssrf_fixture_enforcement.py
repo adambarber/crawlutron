@@ -4,6 +4,7 @@ These tests are not testing SSRF behavior itself (covered by ``test_ssrf_*``);
 they confirm the conftest fixture refuses to let a test exercise the SSRF
 helpers without first calling ``block_private_targets``.
 """
+
 import pytest
 
 from app.crawl.strategies import http as http_mod
@@ -27,6 +28,7 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_require
     # Deliberately do NOT set BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=0.
     # The fixture must catch this.
     import os
+
     monkeypatch.delenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", raising=False)
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
     with pytest.raises(pytest.fail.Exception, match="SSRF guard"):

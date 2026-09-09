@@ -85,18 +85,18 @@ def _run_markitdown_in_process(body: bytes, conn) -> None:
     if _test_hooks_enabled() and os.environ.get("TEST_MARKITDOWN_DIE") == "1":
         try:
             conn.close()
-        except Exception:  # noqa: BLE001, S110 - dying child, nothing to log to
+        except Exception:
             pass
         os._exit(1)
     try:
         res = _markitdown_extract(body)
         conn.send(("ok", res))
-    except Exception:  # noqa: BLE001, S110
+    except Exception:
         conn.send(("err", None))
     finally:
         try:
             conn.close()
-        except Exception:  # noqa: BLE001, S110
+        except Exception:
             pass
 
 
@@ -104,11 +104,11 @@ def _terminate_doc_process(proc) -> None:
     """Force-kill a runaway document-extraction process and reap it."""
     try:
         proc.terminate()
-    except Exception:  # noqa: BLE001, S110
+    except Exception:
         pass
     try:
         proc.join(timeout=5)
-    except Exception:  # noqa: BLE001, S110
+    except Exception:
         pass
 
 
@@ -268,7 +268,7 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
         from markdownify import markdownify as html_to_md
 
         md = html_to_md(html_fragment) or None
-    except Exception:  # noqa: BLE001, S110
+    except Exception:
         md = None
     text = _text_from_html(html_fragment) or None
     return text, md
@@ -360,7 +360,7 @@ def _extract_html(
             include_links=True,
             deduplicate=True,
         )
-    except Exception:  # noqa: BLE001, S110
+    except Exception:
         md = None
     if not md or not md.strip():
         # Fallback to markdownify before the plain-text extractor so that
@@ -369,7 +369,7 @@ def _extract_html(
             from markdownify import markdownify as html_to_md
 
             md = html_to_md(html) or None
-        except Exception:  # noqa: BLE001, S110
+        except Exception:
             md = None
     if not md or not md.strip():
         md = _text_from_html(html) or None

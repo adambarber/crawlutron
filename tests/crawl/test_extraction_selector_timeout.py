@@ -5,6 +5,7 @@ a request worker. _extract_selected now evaluates selectors inside a worker
 thread with a timeout (BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT, default 2s)
 and returns a safe empty fallback on timeout.
 """
+
 import time
 
 import bs4
@@ -16,7 +17,8 @@ from app.crawl.extraction import ExtractedContent, _extract_selected
 def test_css_selector_slow_must_not_hang(monkeypatch, real_sleeps):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     monkeypatch.setattr(
-        bs4.BeautifulSoup, "select",
+        bs4.BeautifulSoup,
+        "select",
         lambda self, selector: time.sleep(3) or [],
     )
     html = "<html><body><p class='x'>hi</p></body></html>"

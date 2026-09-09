@@ -7,8 +7,12 @@ from app.models import HttpFetchResult
 
 def _resp(url, body, ctype):
     return HttpFetchResult(
-        url=url, final_url=url, status_code=200,
-        headers={"content-type": ctype}, body=body.encode("utf-8"), elapsed_ms=1,
+        url=url,
+        final_url=url,
+        status_code=200,
+        headers={"content-type": ctype},
+        body=body.encode("utf-8"),
+        elapsed_ms=1,
     )
 
 
@@ -17,7 +21,11 @@ async def _fake_fetcher(calls, url, headers, timeout, max_content_length=50 * 10
     if url.endswith("/robots.txt"):
         return _resp(url, "User-agent: *\nDisallow: /secret\n", "text/plain")
     if "sitemap" in url:
-        return _resp(url, "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>", "application/xml")
+        return _resp(
+            url,
+            "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
+            "application/xml",
+        )
     return _resp(url, "<html></html>", "text/html")
 
 

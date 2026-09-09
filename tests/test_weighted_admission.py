@@ -31,9 +31,7 @@ class _FakeGate:
 
 
 def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3):
-    return _build_admission_policy(
-        limit, pool_size=pool_size, max_concurrent_pages=max_concurrent_pages
-    )
+    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=max_concurrent_pages)
 
 
 class TestPolicyDerivation:
@@ -47,9 +45,7 @@ class TestPolicyDerivation:
         assert p.max_browser_concurrency == 2 * 3
 
     def test_http_ceiling_capped_at_hard_max(self):
-        huge = _build_admission_policy(
-            1024 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3
-        )
+        huge = _build_admission_policy(1024 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3)
         assert huge.max_http_concurrency <= 512
 
     def test_smaller_limit_yields_smaller_http_ceiling(self):

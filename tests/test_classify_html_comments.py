@@ -20,12 +20,16 @@ class TestClassifyHtmlComments:
     def test_html_comment_cannot_spoof_any_signature(self):
         # A comment containing every block signature must still yield "rendered"
         # when the visible content is benign.
-        comment = "<!-- " + " ".join(
-            "access denied captcha detected bot challenge javascript required "
-            "unsupported browser geolocation blocked waf challenge rate limited "
-            "paywall detected login required cookie consent required not found "
-            "service unavailable forbidden"
-        ) + " -->"
+        comment = (
+            "<!-- "
+            + " ".join(
+                "access denied captcha detected bot challenge javascript required "
+                "unsupported browser geolocation blocked waf challenge rate limited "
+                "paywall detected login required cookie consent required not found "
+                "service unavailable forbidden"
+            )
+            + " -->"
+        )
         html = f"<html>{comment}<body>Welcome to our site</body></html>"
         assert classify_page(html, "Welcome to our site") == "rendered"
 

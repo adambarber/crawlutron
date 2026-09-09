@@ -18,6 +18,7 @@ class _FakeResponse:
     async def json(self):
         return self._payload
 
+
 async def test_response_handler_caps_entries_and_payload_size():
     collected = []
     handler = BrowserRenderer._make_response_handler(collected)
@@ -31,12 +32,9 @@ async def test_response_handler_caps_entries_and_payload_size():
     # Each kept payload is capped at max_payload_chars (8192); oversized ones
     # are flagged truncated rather than stored whole.
     assert all(
-        e.get("payload_truncated")
-        or len((e.get("payload") or {}).get("blob", "")) <= 8192
-        for e in collected
+        e.get("payload_truncated") or len((e.get("payload") or {}).get("blob", "")) <= 8192 for e in collected
     )
     assert all("payload_truncated" in e or (e.get("payload") or {}).get("blob") for e in collected)
     # Oversized payloads are truncated out rather than stored whole.
     assert all(len((e.get("payload") or {}).get("blob", "")) <= 200_000 for e in collected)
     assert any(e.get("payload_truncated") for e in collected)
-

@@ -6,6 +6,7 @@ catastrophic backtracking if applied with re.search on every discovered link.
 The fix compiles the pattern once with _compile_scope_regex_safe (which rejects
 pathological patterns) and uses the compiled pattern's .search() in the loop.
 """
+
 import re
 
 from _testkit import run_scoped_crawl, site_fetcher
@@ -22,9 +23,7 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
     orig = re.search
 
     def _guarded(pattern, *args, **kwargs):
-        assert pattern != CATASTROPHIC, (
-            "recursive loop used unsafe re.search with raw scope_regex"
-        )
+        assert pattern != CATASTROPHIC, "recursive loop used unsafe re.search with raw scope_regex"
         return orig(pattern, *args, **kwargs)
 
     monkeypatch.setattr(re, "search", _guarded)

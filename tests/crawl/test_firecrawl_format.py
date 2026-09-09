@@ -53,6 +53,7 @@ class TestJsonLdExtraction:
 
     def test_single_parse_per_html(self, monkeypatch):
         import app.crawl.extraction as extraction
+
         calls = {"n": 0}
         real = extraction._parse_html_tree
 

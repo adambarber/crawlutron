@@ -1,6 +1,6 @@
 """TestJobStoreCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestJobStoreCoverageGaps:
@@ -11,10 +11,12 @@ class TestJobStoreCoverageGaps:
         import tempfile
 
         from app.crawl.job_store import JobStore
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
             store = JobStore(db_path)
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.execute("DROP TABLE IF EXISTS jobs")
             conn.commit()
@@ -27,10 +29,9 @@ class TestJobStoreCoverageGaps:
         import tempfile
 
         from app.crawl.job_store import JobStore
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
             store = JobStore(db_path)
             store._conn.close()
             store._conn.close()
-
-

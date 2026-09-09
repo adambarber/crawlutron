@@ -95,8 +95,6 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
         await res
 
 
-
-
 def _count_strategy_tiers(scheduler, frontier, n):
     """Count HTTP vs browser tasks among the next ``n`` frontier entries.
 
@@ -188,7 +186,15 @@ async def run_recursive_crawl(
             if seed in visited:
                 continue
             frontier.append(
-                (0, CrawlTask(index=next_index, original_url=seed, normalized_url=seed, domain=registrable_domain(seed)))
+                (
+                    0,
+                    CrawlTask(
+                        index=next_index,
+                        original_url=seed,
+                        normalized_url=seed,
+                        domain=registrable_domain(seed),
+                    ),
+                )
             )
             next_index += 1
     _ramp = float(global_concurrency)
@@ -212,10 +218,7 @@ async def run_recursive_crawl(
         # upcoming batch is predominantly HTTP-pinned, ride the CPU-aware HTTP
         # scale instead of the memory-held-by-browsers combined gate.
         _http_scale = getattr(resource_gate, "http_scale_factor", None)
-        if (
-            _http_scale is not None
-            and _batch_is_http_heavy(scheduler, frontier, _HTTP_HEAVY_LOOKAHEAD)
-        ):
+        if _http_scale is not None and _batch_is_http_heavy(scheduler, frontier, _HTTP_HEAVY_LOOKAHEAD):
             scale = _http_scale()
         # #self-tuning first-batch warmup: until the CPU gate has a sample, cap
         # the first batch at base concurrency.
@@ -239,14 +242,13 @@ async def run_recursive_crawl(
             max(1, max_pages - page_count),
         )
         if scale < 1.0:
-            _limited = (
-                "cpu" if resource_gate.cpu_ratio() >= resource_gate.memory_ratio()
-                else "memory"
-            )
+            _limited = "cpu" if resource_gate.cpu_ratio() >= resource_gate.memory_ratio() else "memory"
             logger.debug(
-                "resource admission: throttling batch (scale=%.2f, limited_by=%s, "
-                "mem=%.2f cpu=%.2f)",
-                scale, _limited, metrics.resource_memory_utilization, metrics.resource_cpu_utilization,
+                "resource admission: throttling batch (scale=%.2f, limited_by=%s, mem=%.2f cpu=%.2f)",
+                scale,
+                _limited,
+                metrics.resource_memory_utilization,
+                metrics.resource_cpu_utilization,
             )
             batch_size = max(1, int(batch_size * scale))
             metrics.resource_throttle_batches_total += 1
@@ -282,12 +284,10 @@ async def run_recursive_crawl(
             visited.add(job.normalized_url)
 
         scheduled_results = (
-            await scheduler.run([job for _, job in allowed_jobs], worker)
-            if allowed_jobs
-            else []
+            await scheduler.run([job for _, job in allowed_jobs], worker) if allowed_jobs else []
         )
 
-        for (depth, job), result in zip(allowed_jobs, scheduled_results):
+        for (depth, job), result in zip(allowed_jobs, scheduled_results, strict=False):
             # Strip heavy payloads inside the loop so they are not retained
             # for the whole crawl when the caller did not ask for them (#1).
             if not include_html:
@@ -316,7 +316,12 @@ async def run_recursive_crawl(
                 frontier.append(
                     (
                         depth + 1,
-                        CrawlTask(index=next_index, original_url=link.url, normalized_url=link.normalized_url, domain=link.host),
+                        CrawlTask(
+                            index=next_index,
+                            original_url=link.url,
+                            normalized_url=link.normalized_url,
+                            domain=link.host,
+                        ),
                     )
                 )
                 next_index += 1

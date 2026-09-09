@@ -82,7 +82,9 @@ class TestAsyncCrawlApi:
                 assert len(body["results"]) == 1
                 assert body["results"][0]["status"] == "success"
                 return True
-            assert status_resp.status_code == 202, f"unexpected status {status_resp.status_code}: {status_resp.text}"
+            assert status_resp.status_code == 202, (
+                f"unexpected status {status_resp.status_code}: {status_resp.text}"
+            )
             data = status_resp.json()
             assert data["code"] == "pending"
             assert "status" in data["details"]
@@ -107,7 +109,7 @@ class TestAsyncCrawlApi:
             "Webhook not delivered in time"
         )
 
-        delivered = delivered = __import__('json').loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
+        delivered = delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["request_id"] == request_id
         assert delivered["success"] is True
         assert len(delivered["results"]) == 1
@@ -135,6 +137,7 @@ class TestAsyncCrawlApi:
 
         # Verify job exists in job_store with SINGLE_SHOT kind
         from app.main import job_store
+
         job = job_store.load(request_id)
         assert job is not None, "Job not found in job_store"
         assert job.kind.value == "single_shot"
@@ -203,9 +206,7 @@ class TestAsyncCrawlApi:
                 assert body["submitted_count"] == 2
                 assert len(body["results"]) == 2
                 return True
-            assert status_resp.status_code == 202, (
-                f"Unexpected status: {status_resp.status_code}"
-            )
+            assert status_resp.status_code == 202, f"Unexpected status: {status_resp.status_code}"
             return False
 
         assert await _poll_until(_wait_done, timeout=15.0, interval=0.1), (
@@ -228,7 +229,7 @@ class TestAsyncCrawlApi:
             "Webhook not delivered in time"
         )
 
-        delivered = __import__('json').loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
+        delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["success"] is True
 
     async def test_v1_crawl_async_mode_invalid_webhook_rejected(self):

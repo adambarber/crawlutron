@@ -16,10 +16,11 @@ from app.memory_pressure import (
 
 # --- sensing ---
 
+
 def test_read_memory_stats_v2(tmp_path):
     cg = tmp_path / "cgroup"
     cg.mkdir()
-    (cg / "memory.max").write_text("3221225472\n")     # 3 GiB
+    (cg / "memory.max").write_text("3221225472\n")  # 3 GiB
     (cg / "memory.current").write_text("1610612736\n")  # 1.5 GiB
     stats = read_memory_stats(cgroup_root=str(cg))
     assert stats == MemoryStats(total_bytes=3221225472, used_bytes=1610612736)
@@ -30,11 +31,9 @@ def test_read_memory_stats_v2_max_string_falls_back_to_total_ram(tmp_path, monke
     cg.mkdir()
     (cg / "memory.max").write_text("max\n")
     (cg / "memory.current").write_text("104857600\n")
-    monkeypatch.setattr(
-        "app.memory_pressure._total_system_ram", lambda: 8 * 1024 ** 3
-    )
+    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 8 * 1024**3)
     stats = read_memory_stats(cgroup_root=str(cg))
-    assert stats.total_bytes == 8 * 1024 ** 3
+    assert stats.total_bytes == 8 * 1024**3
 
 
 def test_read_memory_stats_v1(tmp_path):
@@ -48,13 +47,14 @@ def test_read_memory_stats_v1(tmp_path):
 
 
 def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path, monkeypatch):
-    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 4 * 1024 ** 3)
+    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 4 * 1024**3)
     stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"))
-    assert stats.total_bytes == 4 * 1024 ** 3
+    assert stats.total_bytes == 4 * 1024**3
     assert stats.used_bytes == 0
 
 
 # --- governance ---
+
 
 def test_batch_scale_full_below_target():
     assert batch_scale(used=0.80, total=1.0, target=0.92) == 1.0
@@ -85,8 +85,8 @@ async def test_gate_blocks_dispatch_above_hard_ceiling(monkeypatch):
     monkeypatch.setattr(gate, "_usage_ratio", lambda: next(samples))
 
     await gate.wait_while_saturated(max_wait_seconds=10)
-    assert len(waits) >= 2          # blocked until the third sample
-    assert waits[-1] <= 1.0         # short polling intervals, never long ones
+    assert len(waits) >= 2  # blocked until the third sample
+    assert waits[-1] <= 1.0  # short polling intervals, never long ones
 
 
 async def test_gate_returns_immediately_under_target():
@@ -187,7 +187,8 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
     ratios = iter([0.5, 0.5, 0.1, 0.5, 0.5])
     ticks = iter([0.0, 10.0, 20.0, 30.0, 40.0])
     monkeypatch.setattr(
-        mp, "read_memory_stats",
+        mp,
+        "read_memory_stats",
         lambda cgroup_root="/sys/fs/cgroup": mp.MemoryStats(
             total_bytes=1000, used_bytes=int(next(ratios) * 1000)
         ),

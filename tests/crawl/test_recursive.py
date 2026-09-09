@@ -4,8 +4,6 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-
-
 from _testkit import run_scoped_crawl, site_fetcher
 
 from app.crawl.cache import HttpCache
@@ -29,7 +27,11 @@ class TestRecursiveCrawl:
 
     async def test_max_pages_bounds_recursion(self):
         pages = {
-            "/": (200, '<html><body><a href="/a">a</a><a href="/b">b</a><a href="/c">c</a></body></html>', "text/html"),
+            "/": (
+                200,
+                '<html><body><a href="/a">a</a><a href="/b">b</a><a href="/c">c</a></body></html>',
+                "text/html",
+            ),
             "/a": (200, "<html>a</html>", "text/html"),
             "/b": (200, "<html>b</html>", "text/html"),
             "/c": (200, "<html>c</html>", "text/html"),
@@ -46,7 +48,11 @@ class TestRecursiveCrawl:
     async def test_robots_disallows_link(self):
         pages = {
             "/robots.txt": (200, "User-agent: *\nDisallow: /private\n", "text/plain"),
-            "/": (200, '<html><body><a href="/public">pub</a><a href="/private">priv</a></body></html>', "text/html"),
+            "/": (
+                200,
+                '<html><body><a href="/public">pub</a><a href="/private">priv</a></body></html>',
+                "text/html",
+            ),
             "/public": (200, "<html>pub</html>", "text/html"),
             "/private": (200, "<html>priv</html>", "text/html"),
         }
@@ -79,7 +85,7 @@ class TestRecursiveCrawl:
             "/": (200, "<html>home</html>", "text/html"),
             "/sitemap.xml": (
                 200,
-                '<urlset><url><loc>http://example.com/s1</loc></url><url><loc>http://example.com/s2</loc></url></urlset>',
+                "<urlset><url><loc>http://example.com/s1</loc></url><url><loc>http://example.com/s2</loc></url></urlset>",
                 "application/xml",
             ),
             "/s1": (200, "<html>s1</html>", "text/html"),
@@ -101,7 +107,10 @@ class TestRecursiveCrawl:
         }
         payload = {
             "url": "http://example.com/",
-            "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "browser_profile": {"include_html": False}},
+            "policy": {
+                "limits": {"max_depth": 1, "max_pages": 10},
+                "browser_profile": {"include_html": False},
+            },
         }
         out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
         for result in out["results"]:
@@ -113,6 +122,7 @@ class TestRecursiveCrawl:
 class TestRecursiveCrawlServer:
     async def test_real_server_recursive_follows_links(self, base_url):
         from helpers import run_crawl_async
+
         payload = {
             "url": f"{base_url}/",
             "policy": {

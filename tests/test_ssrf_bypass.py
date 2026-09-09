@@ -3,6 +3,7 @@
 Uses ``monkeypatch`` to disable the local-dev escape hatch per test so the
 global environment is always restored and never poisons other tests.
 """
+
 import socket
 from unittest.mock import patch
 
@@ -22,13 +23,17 @@ class TestSSRFProtection:
 
     def test_check_ssrf_protection_allows_public_ip(self, monkeypatch):
         block_private_targets(monkeypatch)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+        with patch(
+            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
+        ):
             # Should not raise for a public IP.
             _check_ssrf_protection("http://8.8.8.8:8080/")
 
     def test_resolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
         block_private_targets(monkeypatch)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 80))]):
+        with patch(
+            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 80))]
+        ):
             hostname, ip = _resolve_and_pin_host("http://example.com:8080/")
         assert hostname == "example.com"
         assert ip == "1.2.3.4"

@@ -5,7 +5,6 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
-
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import HttpFetchResult
@@ -31,20 +30,27 @@ def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         headers_out.update(headers)
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
+            url=url,
+            final_url=url,
+            status_code=200,
             headers={"content-type": "text/html", **(extra_headers or {})},
-            body=_html(body).encode(), elapsed_ms=1,
+            body=_html(body).encode(),
+            elapsed_ms=1,
         )
+
     return fetcher
 
 
 async def test_caller_validators_sent_as_conditional_headers():
     captured = {}
     fetcher = _ok_fetcher(captured, extra_headers={"etag": '"v1"'})
-    await _run_http(fetcher, validators={
-        "if_none_match": '"v1-old"',
-        "if_modified_since": "Wed, 01 Jan 2025 00:00:00 GMT",
-    })
+    await _run_http(
+        fetcher,
+        validators={
+            "if_none_match": '"v1-old"',
+            "if_modified_since": "Wed, 01 Jan 2025 00:00:00 GMT",
+        },
+    )
     assert captured["If-None-Match"] == '"v1-old"'
     assert captured["If-Modified-Since"] == "Wed, 01 Jan 2025 00:00:00 GMT"
 
@@ -58,10 +64,15 @@ async def test_no_validators_means_no_conditional_headers():
 
 async def test_caller_validator_304_yields_not_modified():
     """A 304 against caller-owned validators is not_modified: no body exists."""
+
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return HttpFetchResult(
-            url=url, final_url=url, status_code=304,
-            headers={}, body=b"", elapsed_ms=1,
+            url=url,
+            final_url=url,
+            status_code=304,
+            headers={},
+            body=b"",
+            elapsed_ms=1,
         )
 
     result = await _run_http(fetcher, validators={"if_none_match": '"v1"'})
@@ -77,10 +88,16 @@ async def test_caller_validator_304_yields_not_modified():
 async def test_success_result_surfaces_origin_validators():
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
-            headers={"content-type": "text/html", "etag": '"abc123"',
-                     "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"},
-            body=_html("fresh").encode(), elapsed_ms=1,
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={
+                "content-type": "text/html",
+                "etag": '"abc123"',
+                "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+            },
+            body=_html("fresh").encode(),
+            elapsed_ms=1,
         )
 
     result = await _run_http(fetcher)
@@ -94,21 +111,22 @@ async def test_engine_routes_validators_by_url(real_sleeps):
     def make_fetcher():
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             from urllib.parse import urlparse
+
             path = urlparse(url).path or "/"
             seen_headers[path] = dict(headers)
             status = 304 if (path == "/etagged" and headers.get("If-None-Match") == '"v9"') else 200
             body = _html(f"page {path}").encode() if status == 200 else b""
             return HttpFetchResult(
-                url=url, final_url=url, status_code=status,
-                headers={"content-type": "text/html"}, body=body, elapsed_ms=1,
+                url=url,
+                final_url=url,
+                status_code=status,
+                headers={"content-type": "text/html"},
+                body=body,
+                elapsed_ms=1,
             )
+
         return fetcher
 
-    payload = {
-        "url": "http://example.com/plain",
-        "urls": None,
-        "validators": {"http://example.com/etagged": {"if_none_match": '"v9"'}},
-    }
     # Two URLs; only the second carries validators.
     payload2 = {
         "urls": ["http://example.com/plain", "http://example.com/etagged"],
@@ -136,10 +154,12 @@ async def test_real_server_conditional_roundtrip(base_url):
     assert r1["validators"]["etag"], r1.get("validators")
     etag = r1["validators"]["etag"]
 
-    second = await run_crawl_async({
-        "url": url,
-        "validators": {url: {"if_none_match": etag}},
-    })
+    second = await run_crawl_async(
+        {
+            "url": url,
+            "validators": {url: {"if_none_match": etag}},
+        }
+    )
     r2 = second["results"][0]
     assert r2["status"] == "success"
     assert r2["classification"] == "not_modified"
@@ -210,11 +230,14 @@ async def test_decompression_failure_flagged_and_downgraded():
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
+            url=url,
+            final_url=url,
+            status_code=200,
             # Advertise gzip but deliver corrupt stream (decompressor will
             # silently pass bytes through).
             headers={"content-type": "text/html", "content-encoding": "gzip"},
-            body=real_body, elapsed_ms=1,
+            body=real_body,
+            elapsed_ms=1,
         )
 
     result = await _run_http(fetcher)

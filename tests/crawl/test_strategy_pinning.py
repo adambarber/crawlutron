@@ -65,6 +65,7 @@ class TestExecuteCrawlChainPinning:
             attempted.append("http")
             # Return a blocked result so it would normally escalate
             from app.crawl.result_helpers import _blocked_engine_result
+
             return _blocked_engine_result(
                 original_url="http://example.com/test",
                 normalized_url="http://example.com/test",
@@ -76,6 +77,7 @@ class TestExecuteCrawlChainPinning:
         async def fake_cffi_fetcher(*args, **kwargs):
             attempted.append("cffi")
             from app.crawl.result_helpers import _blocked_engine_result
+
             return _blocked_engine_result(
                 original_url="http://example.com/test",
                 normalized_url="http://example.com/test",

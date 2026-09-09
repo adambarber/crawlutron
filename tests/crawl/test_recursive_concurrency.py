@@ -33,21 +33,26 @@ async def test_recursive_crawl_fetches_links_concurrently(real_sleeps):
         await asyncio.sleep(0.05)  # simulate network latency
         inflight["n"] -= 1
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
+            url=url,
+            final_url=url,
+            status_code=200,
             headers={"content-type": "text/html"},
-            body=_page_html(path).encode(), elapsed_ms=1,
+            body=_page_html(path).encode(),
+            elapsed_ms=1,
         )
 
     payload = {
         "url": "http://example.com/",
         "policy": {"limits": {"max_depth": 1, "max_pages": 10}},
     }
-    settings = CrawlerSettings.from_mapping({
-        "BROWSER_CRAWLER_GLOBAL_CONCURRENCY": "8",
-        # Same-host links are additionally bounded by the per-domain gate;
-        # raise it so concurrency is observable for this single-domain site.
-        "BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY": "4",
-    })
+    settings = CrawlerSettings.from_mapping(
+        {
+            "BROWSER_CRAWLER_GLOBAL_CONCURRENCY": "8",
+            # Same-host links are additionally bounded by the per-domain gate;
+            # raise it so concurrency is observable for this single-domain site.
+            "BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY": "4",
+        }
+    )
     response = await crawl_request(payload, settings=settings, http_fetcher=fetcher)
 
     assert response["submitted_count"] == 1

@@ -50,7 +50,11 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     if not isinstance(headers, dict):
         raise ValueError("invalid_policy_headers")
     strategies = policy.get("strategies") or DEFAULT_STRATEGIES
-    if not isinstance(strategies, list) or not all(isinstance(strategy, str) for strategy in strategies) or not strategies:
+    if (
+        not isinstance(strategies, list)
+        or not all(isinstance(strategy, str) for strategy in strategies)
+        or not strategies
+    ):
         raise ValueError("invalid_policy_strategies")
     if any(strategy not in SUPPORTED_STRATEGIES for strategy in strategies):
         raise ValueError("invalid_policy_strategy")
@@ -60,7 +64,11 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     request_profile = policy.get("request_profile") or {}
     browser_profile = policy.get("browser_profile") or {}
     discovery = policy.get("discovery") or {}
-    if not isinstance(request_profile, dict) or not isinstance(browser_profile, dict) or not isinstance(discovery, dict):
+    if (
+        not isinstance(request_profile, dict)
+        or not isinstance(browser_profile, dict)
+        or not isinstance(discovery, dict)
+    ):
         raise ValueError("invalid_policy_profile")
     try:
         max_depth = max(0, min(20, int(limits.get("max_depth", 0))))
@@ -90,14 +98,18 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         "limits": {
             "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
             "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
-            "challenge_wait_seconds": int(limits.get("challenge_wait_seconds", DEFAULT_CHALLENGE_WAIT_SECONDS)),
+            "challenge_wait_seconds": int(
+                limits.get("challenge_wait_seconds", DEFAULT_CHALLENGE_WAIT_SECONDS)
+            ),
             "max_discovered_links": int(limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS)),
             "respect_robots": respect_robots,
             "max_depth": max_depth,
             "max_pages": max_pages,
             "max_rps": max_rps,
             "max_content_length_bytes": max_content_length_bytes,
-            "total_url_budget_seconds": max(0.1, min(900, float(limits.get("total_url_budget_seconds", DEFAULT_TOTAL_URL_BUDGET_SECONDS)))),
+            "total_url_budget_seconds": max(
+                0.1, min(900, float(limits.get("total_url_budget_seconds", DEFAULT_TOTAL_URL_BUDGET_SECONDS)))
+            ),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},
         "request_profile": dict(request_profile),

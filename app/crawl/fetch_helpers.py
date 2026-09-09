@@ -59,7 +59,7 @@ async def _fetch_and_decode(
                 return None, status
             return _decode_body(body, resp_headers.get("content-type")), status
         return None, status
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return None, None
 
@@ -127,8 +127,13 @@ async def fetch_sitemap_urls(
                     )
                 except DecompressionTooLargeError:
                     return None, rh.get("etag"), rh.get("last-modified"), False
-                return _decode_body(body, rh.get("content-type")), rh.get("etag"), rh.get("last-modified"), False
-        except Exception:  # noqa: BLE001
+                return (
+                    _decode_body(body, rh.get("content-type")),
+                    rh.get("etag"),
+                    rh.get("last-modified"),
+                    False,
+                )
+        except Exception:
             pass
         return None, None, None, False
 
@@ -200,7 +205,7 @@ async def fetch_sitemap_urls(
     try:
         results = await asyncio.gather(*[recurse(sitemap_url, 0, conditional)])
         root_etag, root_lm = results[0]
-    except Exception:  # noqa: BLE001
+    except Exception:
         root_etag, root_lm = (cached[2] if cached else None), (cached[3] if cached else None)
     # Store with LRU recency and evict the least-recently-used entries
     # past the cap. OrderedDict gives O(1) move-to-end on access and

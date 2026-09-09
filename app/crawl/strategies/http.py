@@ -21,7 +21,10 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 import base64
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.settings import CrawlerSettings
 
 import httpx
 
@@ -202,7 +205,7 @@ async def _safe_aclose(client):
     """
     try:
         await client.aclose()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -300,7 +303,7 @@ def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.Asyn
             if stale_to_release is not None:
                 try:
                     stale_to_release.close()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
             _schedule_client_close(old_client)
     return _DEFAULT_HTTP_CLIENT
@@ -556,10 +559,12 @@ def _check_ssrf_protection(url: str) -> None:
         # rather than silently allowing it. Previously this let unresolvable
         # hostnames bypass the private-IP block and reach loopback via the pin
         # fallback in _resolve_and_pin_host.
-        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}")
+        raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
         if _is_private_or_loopback_ip(ip):
-            raise ValueError(f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}")
+            raise ValueError(
+                f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
+            ) from None
 
 
 def _resolve_and_pin_host(url: str) -> tuple[str, str]:
@@ -1203,7 +1208,7 @@ async def _fetch_with_retries(
             if inspect.iscoroutine(response):
                 response = await response
             return response, {"attempts": attempt, "transient_errors": transient_errors}
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             transient_errors.append(_classify_error_code(error))
             if attempt >= max_attempts:
                 raise
@@ -1286,7 +1291,7 @@ async def _discovery_diagnostics(
                 "crawl_delay_seconds": crawl_delay,
                 "sitemaps": robots_sitemaps,
             }
-        except Exception as error:  # noqa: BLE001
+        except Exception as error:
             diagnostics["robots"] = {"url": robots_url, "error": _classify_error_code(error), "sitemaps": []}
     sitemap_urls: list[str] = []
     if discovery.get("sitemaps"):
@@ -1399,7 +1404,6 @@ async def _http_strategy_result(
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
     # Caller-supplied conditional validators (freshness monitoring): sent as
     # If-None-Match / If-Modified-Since so an unchanged page returns 304.
-    decompression_failed = False
     caller_conditional: dict[str, str] = {}
     if caller_validators:
         if caller_validators.get("if_none_match"):
@@ -1542,7 +1546,7 @@ async def _http_strategy_result(
             if response.status_code < 300 and response.status_code != 304:
                 try:
                     await content_cache.aset(ckey, _serialize_response(response))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     pass
 
         headers = {key.lower(): value for key, value in response.headers.items()}
@@ -1815,7 +1819,7 @@ async def _http_strategy_result(
             next_page_url=next_page_url,
             validators=origin_validators,
         )
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         elapsed_ms = int((time.monotonic() - started) * 1000)
         error_code = _classify_error_code(error)
         # Never expose raw exception text in the API response (it can leak DNS

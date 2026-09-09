@@ -13,6 +13,7 @@ class MockRequest:
     def __init__(self, url):
         self.url = url
 
+
 class MockRoute:
     def __init__(self):
         self.aborted = False
@@ -26,9 +27,11 @@ class MockRoute:
         self.continued = True
         self.continued_url = url
 
+
 def slow_build_pinned_request(url, headers):
     time.sleep(0.05)  # Blocking call - would block event loop if run directly
     return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
 
 async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread to avoid
@@ -42,6 +45,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     def blocking_build_pinned_request(url, headers):
         nonlocal check_thread_id
         import threading
+
         check_thread_id = threading.get_ident()
         time.sleep(0.05)  # Blocking call - would block event loop if run directly
         return ("http://1.2.3.4:80/", {"Host": "example.com"})
@@ -62,7 +66,9 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     assert check_thread_id is not None
     # Main thread ID
     import threading
+
     assert check_thread_id != threading.main_thread().ident
+
 
 async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch, real_sleeps):
     """Multiple concurrent route handler calls should not block each other.
@@ -92,10 +98,12 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
     # Allow some overhead, but should be well under 200ms
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
 
+
 # ============================================================
 # Finding 1: Route handler must PIN subresources to validated IP
 # to prevent DNS-rebinding TOCTOU (SSRF)
 # ============================================================
+
 
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     """Safe subresource requests should be pinned to validated IP and continued
@@ -118,8 +126,10 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
             self.aborted = False
             self.continued_url = None
             self.continued_headers = None
+
         async def abort(self):
             self.aborted = True
+
         async def continue_(self, url=None, headers=None):
             self.continued_url = url
             self.continued_headers = headers
@@ -131,6 +141,7 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     assert route.aborted is False
     assert route.continued_url == "http://1.2.3.4:80/path"
     assert route.continued_headers == {"Host": "example.com"}
+
 
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
@@ -149,6 +160,7 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     assert route.aborted is True
     assert route.continued is False
 
+
 async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread
     to avoid blocking the event loop with synchronous DNS lookups."""
@@ -157,6 +169,7 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     def blocking_build_pinned_request(url, headers):
         nonlocal check_thread_id
         import threading
+
         check_thread_id = threading.get_ident()
         time.sleep(0.05)  # Blocking DNS
         return ("http://1.2.3.4:80/", {"Host": "example.com"})
@@ -172,7 +185,9 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     assert route.continued_url == "http://1.2.3.4:80/"
     assert check_thread_id is not None
     import threading
+
     assert check_thread_id != threading.main_thread().ident
+
 
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
     """Multiple concurrent pinning operations should not block each other."""
@@ -190,6 +205,7 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
     class MockRoute:
         def __init__(self):
             self.continued = False
+
         async def continue_(self, **kwargs):
             self.continued = True
 
@@ -205,9 +221,11 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
     total_time = max(end_times) - min(start_times)
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
 
+
 class _Req:
     def __init__(self, url):
         self.url = url
+
 
 class _Route:
     def __init__(self):
@@ -219,6 +237,7 @@ class _Route:
 
     async def continue_(self, **k):
         self.continued = True
+
 
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
     """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
@@ -233,6 +252,7 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
     await handler(route, _Req("http://example.com/"))
     assert route.aborted is True and route.continued is False
 
+
 async def test_ssrf_route_handler_allows_non_network_schemes():
     """data:/blob:/about: requests never touch DNS; they must pass through."""
     handler = _make_ssrf_route_handler()
@@ -242,12 +262,12 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
         await handler(route, _Req(scheme_url))
         assert route.continued is True and route.aborted is False, scheme_url
 
+
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
     from _testkit import block_private_targets
 
     from app.crawl.strategies.browser import _make_ssrf_websocket_handler
-
 
     block_private_targets(monkeypatch)
     handler = _make_ssrf_websocket_handler()
@@ -256,10 +276,10 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
         def __init__(self, url):
             self.url = url
             self.closed = False
+
         def close(self):
             self.closed = True
 
     internal = Ws("ws://127.0.0.1:9000/socket")
     await handler(internal)
     assert internal.closed is True, "internal WS not closed"
-

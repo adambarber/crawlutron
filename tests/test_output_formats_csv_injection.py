@@ -7,6 +7,7 @@ is attacker-influenced; a malicious page whose ``error`` field is
 CSV output. The ``_csv_neutralize`` helper prefixes dangerous cells with a
 single quote (which spreadsheets display-but-discard on render).
 """
+
 from app.output_formats import (
     _csv_neutralize,
     serialize_results,
@@ -55,7 +56,11 @@ def test_serialize_results_csv_neutralizes_attacker_content():
     assert ",'=cmd" in body
     # And the raw unescaped formula must NOT appear (it would mean the
     # attacker payload was emitted unquoted).
-    assert "'" not in body.split("\n")[1].split(",")[1] or "=cmd" not in body.split("\n")[1].split(",")[1] or body.split("\n")[1].split(",")[1].startswith("'")
+    assert (
+        "'" not in body.split("\n")[1].split(",")[1]
+        or "=cmd" not in body.split("\n")[1].split(",")[1]
+        or body.split("\n")[1].split(",")[1].startswith("'")
+    )
 
 
 def test_serialize_results_csv_preserves_url_columns():

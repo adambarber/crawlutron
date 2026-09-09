@@ -187,9 +187,7 @@ class DomainScheduler:
     def set_domain_min_delay(self, domain: str, seconds: float) -> None:
         """Enforce a minimum inter-request delay for a domain (robots Crawl-delay)."""
         if seconds and seconds > 0:
-            self._domain_min_delay[domain] = max(
-                self._domain_min_delay.get(domain, 0.0), float(seconds)
-            )
+            self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), float(seconds))
 
     def _purge_expired(self) -> None:
         """Drop cooldown and circuit-breaker entries that have already elapsed."""

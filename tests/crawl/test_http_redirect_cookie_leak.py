@@ -41,7 +41,8 @@ def _patch_fetch_transport(monkeypatch, responses):
     monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
     monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(
-        http_mod, "_resolve_and_pin_host",
+        http_mod,
+        "_resolve_and_pin_host",
         lambda url: (urlparse(url).hostname, "1.2.3.4"),
     )
     return mock_client
@@ -86,7 +87,6 @@ async def test_http_fetcher_keeps_cookie_on_same_domain_redirect(monkeypatch):
         assert captured.get("Authorization") == SENSITIVE_HEADERS["Authorization"]
 
 
-
 def test_store_set_cookies_handles_multiple_set_cookie_headers():
     """_store_set_cookies must capture all Set-Cookie headers, not just one.
 
@@ -98,14 +98,17 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     # Use a fresh jar to avoid interference from other tests
     jar = CookieJar()
     import app.crawl.strategies.http as http_mod
+
     old_jar = http_mod._GLOBAL_COOKIE_JAR
     http_mod._GLOBAL_COOKIE_JAR = jar
     try:
+
         class MockHeaders:
             def get_list(self, key):
                 if key.lower() == "set-cookie":
                     return ["session=abc; Path=/", "csrf=xyz; Path=/"]
                 return []
+
             def items(self):
                 return []
 

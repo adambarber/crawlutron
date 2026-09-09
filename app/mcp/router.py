@@ -36,8 +36,8 @@ router = APIRouter(tags=["MCP"])
 )
 async def mcp_endpoint(
     request: Request,
-    settings=Depends(get_settings),  # noqa: B008
-    shutdown_event=Depends(get_shutdown_event),  # noqa: B008
+    settings=Depends(get_settings),
+    shutdown_event=Depends(get_shutdown_event),
 ):
     if not origin_allowed(request.headers.get("origin")):
         return JSONResponse(

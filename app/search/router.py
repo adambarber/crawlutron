@@ -38,7 +38,7 @@ router = APIRouter(tags=["Search"])
 )
 async def search(
     payload: SearchRequest,
-    settings=Depends(get_settings),  # noqa: B008
+    settings=Depends(get_settings),
 ) -> SearchResponse:
     return await search_handler(payload, settings=settings)
 

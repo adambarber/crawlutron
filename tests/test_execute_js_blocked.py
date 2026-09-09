@@ -9,6 +9,7 @@ layers are enforced:
 Both are tested here; the fix lives in ``app/crawl/strategies/browser.py`` and
 ``app/api_models.py``.
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest

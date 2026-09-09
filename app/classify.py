@@ -4,8 +4,28 @@ import re
 from typing import Any
 
 CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("login_required", ("sign in to continue", "log in to continue", "login required", "sign into your account", "sign in to confirm")),
-    ("captcha_detected", ("verify you are human", "human verification", "complete the captcha", "captcha challenge", "prove you are human", "security check", "i'm not a robot")),
+    (
+        "login_required",
+        (
+            "sign in to continue",
+            "log in to continue",
+            "login required",
+            "sign into your account",
+            "sign in to confirm",
+        ),
+    ),
+    (
+        "captcha_detected",
+        (
+            "verify you are human",
+            "human verification",
+            "complete the captcha",
+            "captcha challenge",
+            "prove you are human",
+            "security check",
+            "i'm not a robot",
+        ),
+    ),
     (
         "bot_challenge_detected",
         (
@@ -18,15 +38,54 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "cloudflare ray id",
         ),
     ),
-    ("cookie_consent_required", ("this site uses cookies to", "by continuing you agree", "we value your privacy", "cookie settings", "reject all", "manage preferences")),
+    (
+        "cookie_consent_required",
+        (
+            "this site uses cookies to",
+            "by continuing you agree",
+            "we value your privacy",
+            "cookie settings",
+            "reject all",
+            "manage preferences",
+        ),
+    ),
     ("javascript_required", ("javascript is required", "enable javascript to view", "requires javascript")),
-    ("unsupported_browser", ("browser is not supported", "unsupported browser", "please update your browser")),
-    ("geolocation_blocked", ("not available in your location", "unavailable in your region", "location restricted")),
-    ("waf_challenge_detected", ("web application firewall", "incident id", "request blocked by web application firewall")),
-    ("rate_limited", ("too many requests", "rate limit exceeded", "rate-limited", "throttled", "quota exceeded")),
-    ("paywall_detected", ("subscription required to", "paywall", "metered paywall", "premium subscription", "unlock this article", "subscriber only", "members only")),
-    ("access_denied", ("access denied", "request has been blocked", "forbidden", "security rules", "403 forbidden")),
-    ("not_found", ("custom404", "404. the page/url requested", "404 not found", "page not found", "not found")),
+    (
+        "unsupported_browser",
+        ("browser is not supported", "unsupported browser", "please update your browser"),
+    ),
+    (
+        "geolocation_blocked",
+        ("not available in your location", "unavailable in your region", "location restricted"),
+    ),
+    (
+        "waf_challenge_detected",
+        ("web application firewall", "incident id", "request blocked by web application firewall"),
+    ),
+    (
+        "rate_limited",
+        ("too many requests", "rate limit exceeded", "rate-limited", "throttled", "quota exceeded"),
+    ),
+    (
+        "paywall_detected",
+        (
+            "subscription required to",
+            "paywall",
+            "metered paywall",
+            "premium subscription",
+            "unlock this article",
+            "subscriber only",
+            "members only",
+        ),
+    ),
+    (
+        "access_denied",
+        ("access denied", "request has been blocked", "forbidden", "security rules", "403 forbidden"),
+    ),
+    (
+        "not_found",
+        ("custom404", "404. the page/url requested", "404 not found", "page not found", "not found"),
+    ),
     ("site_error", ("runtime error", "server error in '/' application", "application error")),
     ("gone", ("410 gone",)),
 )
@@ -42,38 +101,48 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
 # marker-tuple approach used by maigret (MIT) and cloudscraper (MIT); a single
 # marker hit is sufficient evidence.
 STRONG_CLASSIFICATION_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("bot_challenge_detected", (
-        "_cf_chl_opt",
-        "cf_chl_prog",
-        "jschl-answer",
-        "jschl_vc",
-        "challenges.cloudflare.com",
-        "/cdn-cgi/challenge-platform/",
-        "cf-mitigated",
-        "checking your browser before you access",
-        "attention required! | cloudflare",
-    )),
-    ("captcha_detected", (
-        "g-recaptcha",
-        "grecaptcha.render",
-        "hcaptcha",
-        "cf-turnstile",
-        "data-sitekey",
-    )),
+    (
+        "bot_challenge_detected",
+        (
+            "_cf_chl_opt",
+            "cf_chl_prog",
+            "jschl-answer",
+            "jschl_vc",
+            "challenges.cloudflare.com",
+            "/cdn-cgi/challenge-platform/",
+            "cf-mitigated",
+            "checking your browser before you access",
+            "attention required! | cloudflare",
+        ),
+    ),
+    (
+        "captcha_detected",
+        (
+            "g-recaptcha",
+            "grecaptcha.render",
+            "hcaptcha",
+            "cf-turnstile",
+            "data-sitekey",
+        ),
+    ),
 )
 
 # Classifications whose prose signatures are common English phrases ("too many
 # requests", "we value your privacy"). A single phrase match must be
 # corroborated by a second independent block signal, otherwise benign pages are
 # misclassified and the engine escalates through every strategy for nothing.
-SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset({
-    "rate_limited",
-    "cookie_consent_required",
-    "paywall_detected",
-})
+SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
+    {
+        "rate_limited",
+        "cookie_consent_required",
+        "paywall_detected",
+    }
+)
 
 
-def classify_page_with_evidence(html: str | None, text: str | None, *, title: str | None = None) -> tuple[str, list[dict[str, Any]]]:
+def classify_page_with_evidence(
+    html: str | None, text: str | None, *, title: str | None = None
+) -> tuple[str, list[dict[str, Any]]]:
     stripped_html = _strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
@@ -97,7 +166,9 @@ def classify_page_with_evidence(html: str | None, text: str | None, *, title: st
             if index < 0:
                 index = html_haystack.find(marker)
             if index >= 0:
-                return classification, [_evidence(classification, marker, "structural_marker", raw_haystack, index)]
+                return classification, [
+                    _evidence(classification, marker, "structural_marker", raw_haystack, index)
+                ]
 
     # Pass 1: prose signatures. Record every distinct match; soft
     # classifications additionally require corroboration (>= 2 distinct
@@ -107,25 +178,29 @@ def classify_page_with_evidence(html: str | None, text: str | None, *, title: st
     matches: list[dict[str, Any]] = []
     for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
-            for source, haystack in (("visible_text", visible_haystack), ("html_without_script_style", html_haystack)):
+            for source, haystack in (
+                ("visible_text", visible_haystack),
+                ("html_without_script_style", html_haystack),
+            ):
                 index = haystack.find(signature)
                 if index >= 0:
-                    matches.append({
-                        "priority": priority,
-                        "classification": classification,
-                        "signature": signature,
-                        "source": source,
-                        "haystack": haystack,
-                        "index": index,
-                    })
+                    matches.append(
+                        {
+                            "priority": priority,
+                            "classification": classification,
+                            "signature": signature,
+                            "source": source,
+                            "haystack": haystack,
+                            "index": index,
+                        }
+                    )
                     break  # earliest source is enough for this signature
     if not matches:
         return "rendered", []
 
     distinct_classifications = {m["classification"] for m in matches}
     best_priority = min(m["priority"] for m in matches)
-    chosen = min((m for m in matches if m["priority"] == best_priority),
-                 key=lambda m: m["index"])
+    chosen = min((m for m in matches if m["priority"] == best_priority), key=lambda m: m["index"])
     classification = chosen["classification"]
 
     # Corroboration: >= 2 independent signals anywhere on the page (either two
@@ -134,13 +209,15 @@ def classify_page_with_evidence(html: str | None, text: str | None, *, title: st
     if classification in SOFT_SINGLE_SIGNAL_CLASSIFICATIONS and not corroborated:
         return "rendered", []
 
-    return classification, [_evidence(
-        classification,
-        chosen["signature"],
-        chosen["source"],
-        chosen["haystack"],
-        chosen["index"],
-    )]
+    return classification, [
+        _evidence(
+            classification,
+            chosen["signature"],
+            chosen["source"],
+            chosen["haystack"],
+            chosen["index"],
+        )
+    ]
 
 
 def _evidence(classification: str, signature: str, source: str, haystack: str, index: int) -> dict[str, str]:

@@ -390,7 +390,7 @@ def _reset_global_http_state():
 
     try:
         http_mod._GLOBAL_COOKIE_JAR.clear()
-    except Exception:  # noqa: BLE001 - best-effort cleanup only
+    except Exception:
         pass
     try:
         if http_mod._DEFAULT_HTTP_CLIENT is not None:
@@ -404,7 +404,7 @@ def _reset_global_http_state():
                     loop.run_until_complete(http_mod.close_async_http_client())
             except RuntimeError:
                 http_mod._DEFAULT_HTTP_CLIENT = None
-    except Exception:  # noqa: BLE001 - best-effort cleanup only
+    except Exception:
         pass
     # robots_cache was promoted to module-level and shared across crawl_request
     # calls (#9). Tests reuse origins with different robots.txt bodies, so
@@ -423,7 +423,7 @@ def _reset_global_http_state():
         from app.cgroup_sense import _invalidate_cgroup_cache
 
         _invalidate_cgroup_cache()
-    except Exception:  # noqa: BLE001 - best-effort cleanup only
+    except Exception:
         pass
     # DNS cache + pending client close queue + cookie namespace contextvar
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
@@ -441,7 +441,7 @@ def _reset_global_http_state():
         # Reset the per-request cookie namespace so a test that sets one does
         # not leak into a subsequent test's request context.
         http_mod._COOKIE_NAMESPACE.set("")
-    except Exception:  # noqa: BLE001 - best-effort cleanup only
+    except Exception:
         pass
 
 

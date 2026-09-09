@@ -82,7 +82,9 @@ EXAMPLE_POLICIES = {
 def agent_hints_payload() -> dict[str, Any]:
     return {
         "service": "browser-crawler",
-        "strategies": {strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()},
+        "strategies": {
+            strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()
+        },
         "extractions": {method.value: description for method, description in EXTRACTION_DESCRIPTIONS.items()},
         "guidance": GUIDANCE,
         "example_policies": EXAMPLE_POLICIES,

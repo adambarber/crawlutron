@@ -17,10 +17,7 @@ class TestDeepUrlNormalization:
         )
 
     def test_preserves_non_default_port(self):
-        assert (
-            normalize_public_http_url("https://example.com:8443/path")
-            == "https://example.com:8443/path"
-        )
+        assert normalize_public_http_url("https://example.com:8443/path") == "https://example.com:8443/path"
 
     def test_trailing_slash_and_fragment_removed(self):
         assert normalize_public_http_url("https://example.com/") == "https://example.com"
@@ -28,6 +25,5 @@ class TestDeepUrlNormalization:
 
     def test_duplicate_keys_kept_and_sorted(self):
         assert (
-            normalize_public_http_url("https://example.com/?b=2&a=1&a=0")
-            == "https://example.com?a=0&a=1&b=2"
+            normalize_public_http_url("https://example.com/?b=2&a=1&a=0") == "https://example.com?a=0&a=1&b=2"
         )

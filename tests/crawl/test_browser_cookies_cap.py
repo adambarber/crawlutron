@@ -18,6 +18,7 @@ def _with_clean_cache(fn):
         browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
         browser_mod._BROWSER_COOKIES_BY_DOMAIN.update(saved)
 
+
 def test_cookie_cache_capped():
     def run():
         for i in range(600):
@@ -29,6 +30,7 @@ def test_cookie_cache_capped():
 
     _with_clean_cache(run)
 
+
 def test_lru_keeps_recently_used():
     def run():
         for i in range(_BROWSER_COOKIES_MAX + 50):
@@ -39,4 +41,3 @@ def test_lru_keeps_recently_used():
         assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
 
     _with_clean_cache(run)
-

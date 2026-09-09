@@ -1,6 +1,5 @@
 """Adversarial perf #2.3: cgroup-read cache, leading memory signal, loop-lag."""
 
-
 from app.cgroup_sense import _invalidate_cgroup_cache, _read_int
 from app.memory_pressure import MemoryGate
 from app.resource_pressure import LoopLagProbe, ResourceGate
@@ -27,6 +26,7 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
 
     def _fake_stats(*, cgroup_root):
         from app.memory_pressure import MemoryStats
+
         v = values[idx[0] % len(values)]
         idx[0] += 1
         return MemoryStats(total_bytes=100, used_bytes=v * 100)

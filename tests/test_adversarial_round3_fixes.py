@@ -8,6 +8,7 @@ Findings addressed:
   buffer cannot poison subsequent requests on the same connection.
 - C3: per-chunk ``headers`` (HTTP/1.1 trailers) are preserved across truncation.
 """
+
 import re
 from unittest.mock import MagicMock
 
@@ -17,7 +18,9 @@ from app.crawl.strategies import http as http_mod
 def _extract_function_body(source: str, name: str) -> str:
     """Extract just the body of an async function ``name`` at any indent."""
     pattern = re.compile(
-        r"^[ \t]*async def " + re.escape(name) + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
+        r"^[ \t]*async def "
+        + re.escape(name)
+        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
         re.MULTILINE | re.DOTALL,
     )
     m = pattern.search(source)
@@ -95,9 +98,7 @@ def test_body_size_middleware_preserves_per_chunk_headers():
     with open(src_path) as f:
         source = f.read()
     body = _extract_function_body(source, "_capped_receive")
-    non_comment = "\n".join(
-        line for line in body.splitlines() if not line.lstrip().startswith("#")
-    )
+    non_comment = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
     assert "{**message" in non_comment
     assert "dict(message)" not in non_comment
 

@@ -105,7 +105,7 @@ async def crawl(
         )
         try:
             result_store.put(result["request_id"], response_model.model_dump())
-        except Exception:  # noqa: BLE001 - retrieval is best-effort
+        except Exception:
             logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
         output_format = payload.output_format
         if output_format and output_format.lower() != "json":

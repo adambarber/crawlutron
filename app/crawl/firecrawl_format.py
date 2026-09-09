@@ -87,7 +87,9 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
             continue
         if "canonical" in rel and "canonical_url" not in metadata:
             metadata["canonical_url"] = href
-        elif any(k in rel for k in ("icon", "shortcut icon", "apple-touch-icon")) and "favicon" not in metadata:
+        elif (
+            any(k in rel for k in ("icon", "shortcut icon", "apple-touch-icon")) and "favicon" not in metadata
+        ):
             metadata["favicon"] = href
 
     # language from <html lang=...>
@@ -102,6 +104,8 @@ def _extract_firecrawl_metadata(html: str, url: str) -> dict[str, Any]:
 
 def _text_from_html(html: str) -> str:
     without_scripts = re.sub(r"<script\b[^>]*>.*?</script>", " ", html, flags=re.IGNORECASE | re.DOTALL)
-    without_styles = re.sub(r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL)
+    without_styles = re.sub(
+        r"<style\b[^>]*>.*?</style>", " ", without_scripts, flags=re.IGNORECASE | re.DOTALL
+    )
     text = re.sub(r"<[^>]+>", " ", without_styles)
     return re.sub(r"\s+", " ", unescape(text)).strip()

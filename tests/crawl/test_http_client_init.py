@@ -1,6 +1,7 @@
 """Adversarial fix (MEDIUM): HTTP client init uses get_running_loop, not the
 deprecated get_event_loop, and is guarded against concurrent first-time build.
 """
+
 import asyncio
 
 import app.crawl.strategies.http as http_mod
@@ -12,7 +13,8 @@ def test_get_async_http_client_avoids_deprecated_get_event_loop(monkeypatch):
     # make it raise and confirm the client is still obtainable (it must use
     # get_running_loop instead).
     monkeypatch.setattr(
-        asyncio, "get_event_loop",
+        asyncio,
+        "get_event_loop",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("get_event_loop is deprecated")),
     )
     # Force the construction path.

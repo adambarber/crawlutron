@@ -19,11 +19,13 @@ from app.settings import CrawlerSettings
 class TestDecompression:
     def test_gzip(self):
         import gzip
+
         data = gzip.compress(b"hello world")
         assert decompress_body(data, "gzip") == b"hello world"
 
     def test_deflate(self):
         import zlib
+
         data = zlib.compress(b"hello world")
         assert decompress_body(data, "deflate") == b"hello world"
 

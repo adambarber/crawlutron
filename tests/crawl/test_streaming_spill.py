@@ -21,8 +21,11 @@ from app.crawl.engine import crawl_request
 
 def _pages():
     return {
-        "/": (200, '<html><body><a href="/a">a</a>'
-                    '<a href="https://instagram.com/city">ig</a></body></html>', "text/html"),
+        "/": (
+            200,
+            '<html><body><a href="/a">a</a><a href="https://instagram.com/city">ig</a></body></html>',
+            "text/html",
+        ),
         "/a": (200, "<html>aaa</html>", "text/html"),
     }
 
@@ -49,11 +52,11 @@ async def test_spill_file_gets_one_json_line_per_page(tmp_path):
 
 
 async def test_response_equivalent_with_and_without_spill(tmp_path):
-    straight = await crawl_request(
-        _payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache()
-    )
+    straight = await crawl_request(_payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache())
     spilled = await crawl_request(
-        _payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache(),
+        _payload(),
+        http_fetcher=site_fetcher(_pages()),
+        cache=HttpCache(),
         spill_path=str(tmp_path / "s.ndjson"),
     )
     assert straight["results"] == spilled["results"]

@@ -52,4 +52,3 @@ class TestBrowserRendererStatus:
                 assert renderer._headless_enabled() is False
             finally:
                 del os.environ["BROWSER_CRAWLER_HEADLESS"]
-

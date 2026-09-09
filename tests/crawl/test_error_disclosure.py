@@ -5,6 +5,7 @@ Raw detail is NEVER returned to the caller. Only a stable error code is exposed
 in ``error``/``diagnostics``, and the raw detail is logged server-side for
 debugging (see app.crawl.strategies.http._http_strategy_result).
 """
+
 import json
 import socket
 

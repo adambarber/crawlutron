@@ -86,10 +86,10 @@ async def crawl(
             }
         ],
     ),
-    settings=Depends(get_settings),  # noqa: B008
-    job_store=Depends(get_job_store),  # noqa: B008
-    result_store=Depends(get_result_store),  # noqa: B008
-    shutdown_event=Depends(get_shutdown_event),  # noqa: B008
+    settings=Depends(get_settings),
+    job_store=Depends(get_job_store),
+    result_store=Depends(get_result_store),
+    shutdown_event=Depends(get_shutdown_event),
 ):
     return await crawl_handler(
         payload,
@@ -114,8 +114,8 @@ async def crawl(
 )
 async def get_crawl_result(
     request_id: str,
-    job_store=Depends(get_job_store),  # noqa: B008
-    result_store=Depends(get_result_store),  # noqa: B008
+    job_store=Depends(get_job_store),
+    result_store=Depends(get_result_store),
 ) -> UnifiedCrawlResponse:
     return await get_crawl_result_handler(request_id, job_store=job_store, result_store=result_store)
 

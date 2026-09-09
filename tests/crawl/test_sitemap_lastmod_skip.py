@@ -26,8 +26,12 @@ def test_seed_is_fresh(tmp_path):
     url = "http://example.com/page"
     policy = _policy()
     key = _content_cache_key(
-        url, "HTTP", _headers_for_strategy("HTTP", policy, url),
-        policy.get("extraction"), policy.get("css_selector"), policy.get("xpath"),
+        url,
+        "HTTP",
+        _headers_for_strategy("HTTP", policy, url),
+        policy.get("extraction"),
+        policy.get("css_selector"),
+        policy.get("xpath"),
     )
     cache.set(key, {"html": "<html>...</html>"})
 

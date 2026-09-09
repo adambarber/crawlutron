@@ -2,6 +2,7 @@
 DNS cache lock, robots cache lock, _ResultSpill fd-leak fix, _PENDING_CLIENT_CLOSE
 bound, and FastAPI lifespan removal of ``lifespan=_lifespan(None)``.
 """
+
 import os
 import threading
 
@@ -13,6 +14,7 @@ def _read_main_source() -> str:
     import inspect
 
     from app import main as main_mod
+
     return inspect.getsource(main_mod)
 
 
@@ -30,7 +32,7 @@ def test_body_size_middleware_registered():
     """The middleware must be installed on the FastAPI app."""
     src = _read_main_source()
     # Registration lives in main.py; implementation lives in app/api/middleware.py
-    assert 'limit_request_body' in src
+    assert "limit_request_body" in src
     assert 'app.middleware("http")(limit_request_body)' in src or '@app.middleware("http")' in src
     import inspect
 
@@ -49,6 +51,7 @@ def test_body_size_middleware_registered():
 def test_storage_state_rejects_path_under_tmp_when_settings_present():
     """When settings are provided, ``/tmp`` is NOT an allowed base."""
     from app.settings import CrawlerSettings
+
     settings = CrawlerSettings(cache_dir="/app/cache")
     r = BrowserRenderer(settings=settings)
     # /tmp is allowed only when no settings were supplied
@@ -59,6 +62,7 @@ def test_storage_state_rejects_path_under_tmp_when_settings_present():
 
 def test_storage_state_allows_known_keys():
     from app.settings import CrawlerSettings
+
     settings = CrawlerSettings(cache_dir="/app/cache")
     r = BrowserRenderer(settings=settings)
     for key in ("default", "session", "persistent"):
@@ -67,6 +71,7 @@ def test_storage_state_allows_known_keys():
 
 def test_storage_state_rejects_path_traversal():
     from app.settings import CrawlerSettings
+
     settings = CrawlerSettings(cache_dir="/app/cache")
     r = BrowserRenderer(settings=settings)
     assert r._validate_storage_state_path("/app/elsewhere/x.json") is None
@@ -85,6 +90,7 @@ def test_storage_state_fallback_to_tmp_only_when_no_settings():
 def test_browser_renderer_stores_cache_dir():
     """The cache_dir set on settings is accessible for storage_state validation."""
     from app.settings import CrawlerSettings
+
     settings = CrawlerSettings(cache_dir="/var/lib/browser-crawler/cache")
     r = BrowserRenderer(settings=settings)
     assert r._cache_dir == "/var/lib/browser-crawler/cache"
@@ -93,6 +99,7 @@ def test_browser_renderer_stores_cache_dir():
 # ---- DNS cache lock ----
 def test_dns_cache_lock_is_present_and_used():
     from app.crawl.strategies import http as http_mod
+
     assert hasattr(http_mod, "_DNS_CACHE_LOCK")
     assert isinstance(http_mod._DNS_CACHE_LOCK, type(threading.Lock()))
 
@@ -109,7 +116,7 @@ def test_dns_cache_concurrent_writes_do_not_corrupt():
         try:
             for _ in range(50):
                 http_mod._resolve_ips(host)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(8)]
@@ -125,6 +132,7 @@ def test_dns_cache_concurrent_writes_do_not_corrupt():
 # ---- robots_cache lock ----
 def test_robots_cache_lock_is_present():
     from app.crawl import engine as engine_mod
+
     assert hasattr(engine_mod, "_ROBOTS_CACHE_LOCK")
     assert isinstance(engine_mod._ROBOTS_CACHE_LOCK, type(threading.Lock()))
 
@@ -132,6 +140,7 @@ def test_robots_cache_lock_is_present():
 # ---- _PENDING_CLIENT_CLOSE bounded ----
 def test_pending_client_close_has_cap():
     from app.crawl.strategies import http as http_mod
+
     assert hasattr(http_mod, "_PENDING_CLIENT_CLOSE_MAX")
     assert http_mod._PENDING_CLIENT_CLOSE_MAX >= 1
     assert hasattr(http_mod, "_PENDING_CLIENT_CLOSE_LOCK")
@@ -168,6 +177,7 @@ def test_pending_client_close_cap_drops_oldest_silently():
 def test_result_spill_close_deletes_owned_file():
     """Auto-created spill files are removed on close."""
     from app.crawl.engine import _ResultSpill
+
     spill = _ResultSpill()  # auto-owned path
     path = spill.path
     assert os.path.exists(path)
@@ -180,6 +190,7 @@ def test_result_spill_keeps_caller_owned_path():
     import tempfile
 
     from app.crawl.engine import _ResultSpill
+
     target = os.path.join(tempfile.gettempdir(), "spill_keep_test.json")
     try:
         spill = _ResultSpill(target)

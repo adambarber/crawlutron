@@ -45,6 +45,3 @@ def test_safe_compile_accepts_normal_pattern():
     pat = _compile_scope_regex_safe(r"example\.com")
     assert pat is not None
     assert pat.search("http://example.com/x")
-
-
-

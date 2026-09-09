@@ -23,10 +23,7 @@ def _spy_parse(monkeypatch):
 
 def test_html_diagnostics_parses_once(monkeypatch):
     calls = _spy_parse(monkeypatch)
-    html = (
-        "<html><body><a href='/x'>x</a>"
-        "<form action='/s'><input name='q'></form></body></html>"
-    )
+    html = "<html><body><a href='/x'>x</a><form action='/s'><input name='q'></form></body></html>"
     extraction._html_diagnostics(html, "http://example.com/")
     assert calls["n"] == 1
 
@@ -40,9 +37,7 @@ def test_shared_tree_parses_once_across_passes(monkeypatch):
     tree = extraction._parse_html_tree(html)
     assert calls["n"] == 1
     extraction._html_diagnostics(html, "http://example.com/", tree=tree)
-    links, _, _ = extraction._extract_discovered_links(
-        html, "http://example.com/", tree=tree
-    )
+    links, _, _ = extraction._extract_discovered_links(html, "http://example.com/", tree=tree)
     # frames, forms, and links all reused the single pre-parsed tree.
     assert calls["n"] == 1
     assert links

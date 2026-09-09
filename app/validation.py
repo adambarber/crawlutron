@@ -14,9 +14,18 @@ TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net
 # a legitimate content parameter, so stripping it could collapse distinct pages.
 _TRACKING_PARAM_EXACT = frozenset(
     {
-        "gclid", "gclsrc", "fbclid", "gbraid", "wbraid",
-        "mc_cid", "mc_eid", "mkt_tok", "igshid",
-        "_hsenc", "_hsmi", "hsctat",
+        "gclid",
+        "gclsrc",
+        "fbclid",
+        "gbraid",
+        "wbraid",
+        "mc_cid",
+        "mc_eid",
+        "mkt_tok",
+        "igshid",
+        "_hsenc",
+        "_hsmi",
+        "hsctat",
     }
 )
 
@@ -140,11 +149,7 @@ def normalize_public_http_url(url: str) -> str:
         # by UTM/tracking tags canonicalize to the same key and are not fetched
         # as duplicate pages (#6). Remaining params are sorted so URLs differing
         # only in parameter order also canonicalize identically.
-        pairs = [
-            (k, v)
-            for (k, v) in parse_qsl(query, keep_blank_values=True)
-            if not _is_tracking_param(k)
-        ]
+        pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
     return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
@@ -213,7 +218,7 @@ def registrable_domain(url: str) -> str:
             registrable = psl.privatesuffix(ascii_host)
             if registrable:
                 return registrable
-        except Exception:  # noqa: S110 - deliberate fallthrough to heuristic below
+        except Exception:
             # A poisoned/unparseable host falls through to the heuristic.
             pass
     return _heuristic_registrable_domain(host)

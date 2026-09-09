@@ -6,9 +6,12 @@ from app.models import HttpFetchResult
 
 def _sitemap_fetcher(xml: str):
     resp = HttpFetchResult(
-        url="http://x.test/sitemap.xml", final_url="http://x.test/sitemap.xml",
-        status_code=200, headers={"content-type": "application/xml"},
-        body=xml.encode("utf-8"), elapsed_ms=1,
+        url="http://x.test/sitemap.xml",
+        final_url="http://x.test/sitemap.xml",
+        status_code=200,
+        headers={"content-type": "application/xml"},
+        body=xml.encode("utf-8"),
+        elapsed_ms=1,
     )
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
@@ -45,9 +48,12 @@ async def test_index_children_recurse_without_lastmod():
     def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         xml = index if url.endswith("/sitemap.xml") else sub
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
+            url=url,
+            final_url=url,
+            status_code=200,
             headers={"content-type": "application/xml"},
-            body=xml.encode("utf-8"), elapsed_ms=1,
+            body=xml.encode("utf-8"),
+            elapsed_ms=1,
         )
 
     urls = await fetch_sitemap_urls(fetcher, "http://x.test/sitemap.xml", 10)

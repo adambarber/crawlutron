@@ -9,17 +9,21 @@ import os
 import tempfile
 from pathlib import Path
 
-os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
+os.environ.setdefault(
+    "BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl")
+)
 
-from app.crawl.strategies.browser import BrowserRenderer  # noqa: E402
-from app.models import RenderOptions  # noqa: E402
+from app.crawl.strategies.browser import BrowserRenderer
+from app.models import RenderOptions
 
 
 def _raise_timeout(**kwargs: object):
     raise TimeoutError("navigation timeout")
 
+
 def _raise_generic(**kwargs: object):
     raise RuntimeError("boom")
+
 
 class TestBrowserRenderRetry:
     async def test_render_exhausts_retries_on_timeout_error(self):
@@ -35,6 +39,7 @@ class TestBrowserRenderRetry:
         assert result.status == "retry_exhausted"
         assert result.classification == "unknown_error"
         assert result.attempts == 2
+
 
 class TestBrowserKwargs:
     def test_default_viewport_is_desktop(self):
@@ -55,4 +60,3 @@ class TestBrowserKwargs:
         assert renderer._get_browser_kwargs({"resource_mode": "reduced"})["args"] == [
             "--blink-settings=imagesEnabled=false"
         ]
-

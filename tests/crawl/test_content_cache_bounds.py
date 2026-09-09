@@ -1,10 +1,10 @@
-
 from app.crawl.content_cache import ContentCache
 
 
 def test_default_max_entries_is_bounded_not_none():
     """ContentCache has a bounded default max_entries (F6)."""
     import tempfile
+
     with tempfile.TemporaryDirectory() as d:
         c = ContentCache(cache_dir=d, default_ttl=3600)
         # The default should be a positive integer, not None (which meant unbounded).
@@ -40,6 +40,7 @@ def test_max_entries_enforces_bound(tmp_path):
 def test_explicit_max_entries_zero_disables_limit():
     """max_entries=0 means no limit (opt-out)."""
     import tempfile
+
     with tempfile.TemporaryDirectory() as d:
         c = ContentCache(cache_dir=d, default_ttl=3600, max_entries=0)
         # Should not enforce

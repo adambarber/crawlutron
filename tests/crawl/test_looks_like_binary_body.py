@@ -5,6 +5,7 @@ false-positived on ordinary UTF-8 text (e.g. any 3-byte sequence led by 0xE3,
 common in CJK). The correct magic bytes are PK\x03\x04 (zip local header),
 PK\x05\x06 (zip EOCD), and \x1f\x8b (gzip). These tests lock that in.
 """
+
 from app.crawl.strategies.http import _looks_like_binary_body
 
 

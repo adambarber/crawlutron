@@ -21,7 +21,21 @@ async def test_probe2(tmp_path):
     async def fake(payload_dict, *, settings, shutdown_event):
         print("  fake called", payload_dict.get("urls"), flush=True)
         urls = payload_dict.get("urls") or [payload_dict.get("url")]
-        return {"results": [{"original_url": u, "normalized_url": u, "final_url": u, "status": "success", "classification": "rendered", "discovered_links": []} for u in urls], "submitted_count": len(urls)}
+        return {
+            "results": [
+                {
+                    "original_url": u,
+                    "normalized_url": u,
+                    "final_url": u,
+                    "status": "success",
+                    "classification": "rendered",
+                    "discovered_links": [],
+                }
+                for u in urls
+            ],
+            "submitted_count": len(urls),
+        }
+
     job_runner.install_execute_crawl(fake)
 
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")

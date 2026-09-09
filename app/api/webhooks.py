@@ -137,7 +137,7 @@ async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
     try:
         validate_webhook_url(webhook_url)
         await deliver_pinned_webhook(webhook_url, payload_bytes)
-    except Exception as exc:  # noqa: BLE001 - best-effort delivery
+    except Exception as exc:
         logger.warning(
             "webhook_delivery_failed",
             extra={"url": webhook_url, "error": str(exc)},
@@ -226,7 +226,7 @@ async def run_and_deliver_webhook(
             )
             return
         await deliver_pinned_webhook(webhook_url, payload_bytes)
-    except Exception:  # noqa: BLE001, S110 - webhook delivery is best-effort
+    except Exception:
         pass
 
 

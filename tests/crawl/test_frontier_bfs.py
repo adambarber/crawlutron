@@ -4,7 +4,6 @@ The frontier was a list using O(n) pop(0); it is now a collections.deque with
 O(1) popleft. Behavior (BFS completeness/ordering) must be unchanged.
 """
 
-
 from _testkit import site_fetcher
 
 from app.crawl.cache import HttpCache
@@ -24,7 +23,10 @@ def _build_hub(n_leaves: int):
 
 async def test_bfs_crawls_all_discovered_leaves():
     pages = _build_hub(300)
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000}}}
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000}},
+    }
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
     urls = {r["normalized_url"] for r in out["results"]}
     # root, hub, and all 300 leaves must be present.

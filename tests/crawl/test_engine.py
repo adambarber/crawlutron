@@ -20,7 +20,16 @@ def make_result(links):
         status="success",
         classification="rendered",
         selected_strategy=HTTP_DECLARED_CRAWLER,
-        attempted_strategies=[CrawlStrategyAttempt(strategy=HTTP_DECLARED_CRAWLER, status="success", classification="rendered", http_status=200, content_type="text/html", elapsed_ms=1)],
+        attempted_strategies=[
+            CrawlStrategyAttempt(
+                strategy=HTTP_DECLARED_CRAWLER,
+                status="success",
+                classification="rendered",
+                http_status=200,
+                content_type="text/html",
+                elapsed_ms=1,
+            )
+        ],
         http_status=200,
         headers={},
         content_type="text/html",
@@ -36,11 +45,13 @@ def make_result(links):
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):
         from helpers import crawl_homepage_async
+
         response = await crawl_homepage_async(base_url)
         assert "Example Org" in response["results"][0]["markdown"]
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
         from helpers import run_crawl_async
+
         url = f"{base_url}/with_etag"
         cache = HttpCache()
         cache.store(url, {"etag": "v1"})
@@ -58,6 +69,7 @@ class TestEngineCrawlRequest:
 
     async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
         from helpers import run_crawl_async
+
         payload = {
             "url": f"{base_url}/",
             "policy": {

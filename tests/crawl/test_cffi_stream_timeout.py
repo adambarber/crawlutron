@@ -26,7 +26,7 @@ class _StalledBodyHandler:
 
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self):  # noqa: N802 - http.server API
+    def do_GET(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Transfer-Encoding", "chunked")
@@ -34,7 +34,7 @@ class _StalledBodyHandler:
         self.wfile.flush()
         time.sleep(3600)
 
-    def log_message(self, *args):  # noqa: ANN002
+    def log_message(self, *args):
         pass
 
 

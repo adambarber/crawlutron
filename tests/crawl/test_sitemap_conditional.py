@@ -13,8 +13,12 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
     if last_modified:
         headers["last-modified"] = last_modified
     return HttpFetchResult(
-        url="http://x.test/sitemap.xml", final_url="http://x.test/sitemap.xml",
-        status_code=status, headers=headers, body=body.encode("utf-8"), elapsed_ms=1,
+        url="http://x.test/sitemap.xml",
+        final_url="http://x.test/sitemap.xml",
+        status_code=status,
+        headers=headers,
+        body=body.encode("utf-8"),
+        elapsed_ms=1,
     )
 
 

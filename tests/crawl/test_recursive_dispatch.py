@@ -71,13 +71,27 @@ class _Gate:
 
 def _link(url: str) -> DiscoveredLink:
     return DiscoveredLink(
-        url=url, normalized_url=url, text="", rel=[], source_url="http://a/",
-        host="a", is_same_host=True,
+        url=url,
+        normalized_url=url,
+        text="",
+        rel=[],
+        source_url="http://a/",
+        host="a",
+        is_same_host=True,
     )
 
 
-async def _run(jobs, worker, gate=None, *, respect_robots=False, max_depth=2,
-               max_pages=10, global_concurrency=4, seed_sitemaps=False):
+async def _run(
+    jobs,
+    worker,
+    gate=None,
+    *,
+    respect_robots=False,
+    max_depth=2,
+    max_pages=10,
+    global_concurrency=4,
+    seed_sitemaps=False,
+):
     if gate is None:
         gate = _Gate()
     spill = _Spill()
@@ -131,7 +145,9 @@ async def test_expands_frontier_from_discovered_links():
     # root + /1 + /2
     assert len(spill.writes) == 3
     assert set(spill.writes[i].normalized_url for i in sorted(spill.writes)) == {
-        "http://a/", "http://a/1", "http://a/2",
+        "http://a/",
+        "http://a/1",
+        "http://a/2",
     }
 
 
@@ -164,12 +180,23 @@ async def test_robots_disallows_discovered_link_silently():
     spill = _Spill()
     scheduler = _Scheduler()
     await run_recursive_crawl(
-        jobs=jobs, scheduler=scheduler, worker=worker, robots_allows=robots_allows,
+        jobs=jobs,
+        scheduler=scheduler,
+        worker=worker,
+        robots_allows=robots_allows,
         robots_disallowed=lambda job: _make_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]), spill=spill,
-        shutdown_event=asyncio.Event(), max_depth=2, max_pages=10, respect_robots=True,
-        include_html=True, want_document_bodies=False, scope_pattern=None, global_concurrency=4,
-        seed_sitemaps=False, resource_gate=_Gate(),
+        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
+        spill=spill,
+        shutdown_event=asyncio.Event(),
+        max_depth=2,
+        max_pages=10,
+        respect_robots=True,
+        include_html=True,
+        want_document_bodies=False,
+        scope_pattern=None,
+        global_concurrency=4,
+        seed_sitemaps=False,
+        resource_gate=_Gate(),
     )
     assert seen == ["http://a/"]  # the blocked link was never crawled
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/"}
@@ -186,16 +213,29 @@ async def test_robots_disallows_initial_job_as_skip():
     async def robots_allows(url):
         return url != "http://a/blocked"
 
-    jobs = [CrawlTask(index=0, original_url="http://a/blocked", normalized_url="http://a/blocked", domain="a")]
+    jobs = [
+        CrawlTask(index=0, original_url="http://a/blocked", normalized_url="http://a/blocked", domain="a")
+    ]
     spill = _Spill()
     scheduler = _Scheduler()
     await run_recursive_crawl(
-        jobs=jobs, scheduler=scheduler, worker=worker, robots_allows=robots_allows,
+        jobs=jobs,
+        scheduler=scheduler,
+        worker=worker,
+        robots_allows=robots_allows,
         robots_disallowed=lambda job: _make_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]), spill=spill,
-        shutdown_event=asyncio.Event(), max_depth=2, max_pages=10, respect_robots=True,
-        include_html=True, want_document_bodies=False, scope_pattern=None, global_concurrency=4,
-        seed_sitemaps=False, resource_gate=_Gate(),
+        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
+        spill=spill,
+        shutdown_event=asyncio.Event(),
+        max_depth=2,
+        max_pages=10,
+        respect_robots=True,
+        include_html=True,
+        want_document_bodies=False,
+        scope_pattern=None,
+        global_concurrency=4,
+        seed_sitemaps=False,
+        resource_gate=_Gate(),
     )
     assert seen == []  # worker never invoked
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/blocked"}

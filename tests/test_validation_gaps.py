@@ -1,6 +1,6 @@
 """TestValidationGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestValidationGaps:
@@ -100,5 +100,3 @@ class TestValidationGaps:
         monkeypatch.delattr(validation, "_PSL", raising=False)
         assert validation.registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
         assert validation.registrable_domain("https://a.b.c.example.com/x") == "example.com"
-
-

@@ -79,7 +79,6 @@ def batch_scale(used: float, total: float, target: float, hard: float | None = N
     return max(0.0, 1.0 - (ratio - target) / span)
 
 
-
 class ResourceGauge:
     """Base admission gauge for one bounded resource.
 

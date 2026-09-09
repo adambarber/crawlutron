@@ -1,6 +1,5 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
-
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.strategies.http import (
@@ -19,17 +18,25 @@ def _html_fetcher(html: str):
     # Returns an async fetcher that serves a fixed HTML body for any URL.
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
-            headers={"content-type": "text/html"}, body=html.encode("utf-8"), elapsed_ms=1,
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            body=html.encode("utf-8"),
+            elapsed_ms=1,
         )
+
     return fetcher
 
 
 def _run_kwargs(fetcher):
     return dict(
-        original_url="http://x.test/", normalized_url="http://x.test/",
-        strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
-        cache=HttpCache(), content_cache=None,
+        original_url="http://x.test/",
+        normalized_url="http://x.test/",
+        strategy=HTTP_DECLARED_CRAWLER,
+        http_fetcher=fetcher,
+        cache=HttpCache(),
+        content_cache=None,
     )
 
 
@@ -38,7 +45,12 @@ def http_policy(**overrides):
         "strategies": [HTTP_DECLARED_CRAWLER],
         "extraction": EXTRACTION_FULL,
         "scope_regex": None,
-        "limits": {"timeout_seconds": 10, "max_retries": 0, "challenge_wait_seconds": 15, "max_discovered_links": 50},
+        "limits": {
+            "timeout_seconds": 10,
+            "max_retries": 0,
+            "challenge_wait_seconds": 15,
+            "max_discovered_links": 50,
+        },
         "headers": {},
         "request_profile": {"user_agent_family": "generic_crawler", "cookie_jar": "none"},
         "browser_profile": {},
@@ -58,18 +70,24 @@ class TestHttpStrategy:
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             recorded.append((url, headers))
             return HttpFetchResult(
-                url=url, final_url=url, status_code=200,
+                url=url,
+                final_url=url,
+                status_code=200,
                 headers={"content-type": "text/html"},
-                body=b"<html><body><a href='/p'>p</a></body></html>", elapsed_ms=1,
+                body=b"<html><body><a href='/p'>p</a></body></html>",
+                elapsed_ms=1,
             )
 
         cache = HttpCache()
         cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
         await _run(
             policy=http_policy(discovery={"robots": True}),
-            original_url="http://x.test/", normalized_url="http://x.test/",
-            strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
-            cache=cache, content_cache=None,
+            original_url="http://x.test/",
+            normalized_url="http://x.test/",
+            strategy=HTTP_DECLARED_CRAWLER,
+            http_fetcher=fetcher,
+            cache=cache,
+            content_cache=None,
         )
         robot_calls = [h for u, h in recorded if u.endswith("/robots.txt")]
         assert robot_calls, "discovery never fetched robots.txt"
@@ -193,11 +211,11 @@ class TestHttpStrategy:
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
         from helpers import crawl_homepage_async
+
         response = await crawl_homepage_async(base_url)
         assert response["submitted_count"] == 1
         assert len(response["results"]) == 1
         assert "Example Org" in response["results"][0]["markdown"]
-
 
     async def test_js_endpoints_and_sitemap_discovery_gated_without_discovery(self):
         # B1: the heavier discovery-only extras -- JS-endpoint extraction and the
@@ -227,7 +245,9 @@ class TestHttpStrategy:
         # discovery requested -> js_endpoints extracted; the (remote)
         # sitemap/feed discovery is performed, so the robots diagnostics block
         # is populated (proving the gated function ran for this crawl).
-        r2 = await _run(policy=http_policy(discovery={"robots": True, "sitemaps": True, "feeds": True}), **kwargs)
+        r2 = await _run(
+            policy=http_policy(discovery={"robots": True, "sitemaps": True, "feeds": True}), **kwargs
+        )
         assert isinstance(r2.diagnostics["js_endpoints"], list)
         assert r2.diagnostics["js_endpoints"]  # non-empty: HTML contains a fetch() endpoint
         assert "robots" in r2.diagnostics
@@ -240,22 +260,36 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
     import app.crawl.strategies.http as http_mod
 
     async def fake_diag(**kwargs):
-        return {"discovery": {"sitemap_urls": ["https://x.test/sitemap.xml"], "feeds": ["https://x.test/feed"]}}
+        return {
+            "discovery": {"sitemap_urls": ["https://x.test/sitemap.xml"], "feeds": ["https://x.test/feed"]}
+        }
 
     monkeypatch.setattr(http_mod, "_discovery_diagnostics", fake_diag)
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
-            headers={"content-type": "text/html"}, body=b"<html><body>x</body></html>", elapsed_ms=1,
+            url=url,
+            final_url=url,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            body=b"<html><body>x</body></html>",
+            elapsed_ms=1,
         )
 
     kwargs = dict(
-        original_url="http://x.test/", normalized_url="http://x.test/",
-        strategy=HTTP_DECLARED_CRAWLER, http_fetcher=fetcher,
-        cache=HttpCache(), content_cache=None,
+        original_url="http://x.test/",
+        normalized_url="http://x.test/",
+        strategy=HTTP_DECLARED_CRAWLER,
+        http_fetcher=fetcher,
+        cache=HttpCache(),
+        content_cache=None,
     )
-    r_rec = await _run(policy=http_policy(discovery={"sitemaps": True}, limits={"timeout_seconds": 10, "max_retries": 0, "max_depth": 1}), **kwargs)
+    r_rec = await _run(
+        policy=http_policy(
+            discovery={"sitemaps": True}, limits={"timeout_seconds": 10, "max_retries": 0, "max_depth": 1}
+        ),
+        **kwargs,
+    )
     r_flat = await _run(policy=http_policy(discovery={"sitemaps": True}), **kwargs)
 
     rec_disc = r_rec.diagnostics.get("discovery") or {}

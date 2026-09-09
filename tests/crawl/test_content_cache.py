@@ -63,7 +63,7 @@ def test_zero_ttl_means_no_expiry(tmp_path):
     clock = {"t": 0.0}
     c = ContentCache(cache_dir=tmp_path / "z", default_ttl=0, clock=lambda: clock["t"])
     c.set("k", "v")
-    clock["t"] = 10 ** 9
+    clock["t"] = 10**9
     assert c.get("k") == "v"
 
 
@@ -73,13 +73,14 @@ def test_prune_removes_only_expired(tmp_path):
     c.set("a", 1)
     c.set("b", 2)
     clock["t"] = 20.0  # a,b expired (expire at 10)
-    c.set("c", 3)      # expires at 30, still fresh at t=20
+    c.set("c", 3)  # expires at 30, still fresh at t=20
     assert c.prune() == 2
     assert c.get("c") == 3
     assert c.get("a") is None
 
 
 # --------------------------- integration: real server, no mocks ---------------------------
+
 
 async def _fetch_via_cache(url: str, cache: ContentCache):
     key = cache.make_key(url)
@@ -121,12 +122,20 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
         return await _default_http_fetcher(u, headers, timeout, max_content)
 
     r1 = await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=counting_fetcher, content_cache=cache,
+        original_url=url,
+        normalized_url=url,
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=counting_fetcher,
+        content_cache=cache,
     )
     r2 = await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=counting_fetcher, content_cache=cache,
+        original_url=url,
+        normalized_url=url,
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=counting_fetcher,
+        content_cache=cache,
     )
     assert r1.status == "success" and r2.status == "success"
     assert calls["n"] == 1  # cache prevented the second real fetch
@@ -135,18 +144,29 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
     from app.crawl.strategies.http import _http_strategy_result
+
     url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     # First crawl: stores 200 + etag.
     r1 = await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
+        original_url=url,
+        normalized_url=url,
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=fetcher,
+        cache=cache,
+        content_cache=content_cache,
     )
     assert r1.status == "success"
     assert etag_server.hits == 1
     # Second crawl: content HIT + validator present -> conditional revalidation (304) -> cache served.
     r2 = await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
+        original_url=url,
+        normalized_url=url,
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=fetcher,
+        cache=cache,
+        content_cache=content_cache,
     )
     assert r2.status == "success"
     # Server was re-hit once for the conditional GET (304, no body re-download).
@@ -158,16 +178,26 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
     """If the etag changed, revalidation returns 200 and fresh content is served (#5)."""
     url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     await _http_strategy_result(
-        original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
+        original_url=url,
+        normalized_url=url,
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=fetcher,
+        cache=cache,
+        content_cache=content_cache,
     )
     # Simulate the upstream page changing its etag + body.
     try:
         EtagHandler.etag = "v2"
         EtagHandler.body = b"<html><body>changed content</body></html>"
         r2 = await _http_strategy_result(
-            original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER",
-            policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache,
+            original_url=url,
+            normalized_url=url,
+            strategy="HTTP_DECLARED_CRAWLER",
+            policy=policy,
+            http_fetcher=fetcher,
+            cache=cache,
+            content_cache=content_cache,
         )
         assert r2.status == "success"
         assert "changed content" in (r2.markdown or "")
@@ -193,9 +223,14 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
             if isinstance(body, str):
                 body = body.encode()
             return HttpFetchResult(
-                url=url, final_url=url, status_code=status,
-                headers={"content-type": ctype}, body=body, elapsed_ms=1,
+                url=url,
+                final_url=url,
+                status_code=status,
+                headers={"content-type": ctype},
+                body=body,
+                elapsed_ms=1,
             )
+
         return fetcher
 
     pages = {
@@ -208,7 +243,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=cache, content_cache=content_cache)
     first = list(fetched_pages)
     await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=cache, content_cache=content_cache)
-    second = list(fetched_pages)[len(first):]  # only the 2nd crawl's page fetches
+    second = list(fetched_pages)[len(first) :]  # only the 2nd crawl's page fetches
     assert first == ["/", "/a"], first
     # Both the seed and the discovered child must be served from the content cache.
     assert second == [], f"recursive pages should be served from content cache, re-fetched: {second}"

@@ -4,6 +4,7 @@ The fetcher must reject (413) responses that would expand to more than
 ``max_content_length`` bytes after decompression, and must cap raw bytes read
 for chunked (no Content-Length) responses.
 """
+
 import gzip
 import http.server
 import threading
@@ -83,9 +84,7 @@ async def test_chunked_response_without_content_length_is_capped():
     thread.start()
     try:
         # ~2 MB streamed with no Content-Length; cap at 100 KB -> rejected.
-        res = await _default_http_fetcher(
-            f"http://127.0.0.1:{port}/chunked_huge", {}, 10, 100_000
-        )
+        res = await _default_http_fetcher(f"http://127.0.0.1:{port}/chunked_huge", {}, 10, 100_000)
         assert res.status_code == 413, res.status_code
         assert res.body == b""
     finally:

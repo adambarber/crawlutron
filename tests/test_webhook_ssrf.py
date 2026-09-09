@@ -4,6 +4,7 @@ The webhook validator must resolve DNS hostnames and reject any that map to a
 private/loopback address, and the delivery POST must connect to a pinned IP
 (DNS-rebinding safe) while preserving the original Host header.
 """
+
 import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,19 +37,23 @@ class _FakeUnifiedResponse:
         }
 
 
-
 class TestWebhookUrlValidation:
     def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
         block_private_targets(monkeypatch)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]):
+        with patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
+        ):
             with pytest.raises(ValueError):
                 _validate_webhook_url("http://evil.example.com/callback")
 
     def test_allows_public_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a public IP is accepted."""
         block_private_targets(monkeypatch)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+        with patch(
+            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
+        ):
             _validate_webhook_url("http://public.example.com/callback")
 
     def test_rejects_non_http_scheme(self):
@@ -59,6 +64,7 @@ class TestWebhookUrlValidation:
         block_private_targets(monkeypatch)
         with pytest.raises(ValueError):
             _validate_webhook_url("http://localhost:8080/callback")
+
 
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
@@ -91,10 +97,14 @@ class TestWebhookDeliveryPinning:
         # httpx.AsyncClient is imported lazily inside deliver_pinned_webhook, so
         # monkeypatching the module-level httpx module covers all entry points.
         import asyncio
+
         _original_async_client = httpx.AsyncClient
         httpx.AsyncClient = _Client
         try:
-            with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
+            ):
                 # Initialize webhook module-level state with a fake crawl_request.
                 set_webhook_dependencies(
                     webhook_semaphore=asyncio.Semaphore(1),
@@ -106,7 +116,9 @@ class TestWebhookDeliveryPinning:
                     get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
                 )
                 try:
-                    await _deliver_webhook("http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock())
+                    await _deliver_webhook(
+                        "http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock()
+                    )
                 finally:
                     clear_webhook_dependencies()
         finally:
@@ -143,11 +155,13 @@ class TestWebhookDeliveryPinning:
                 captured["headers"] = headers
                 return _MockResponse()
 
-
         _original_async_client = httpx.AsyncClient
         httpx.AsyncClient = _Client
         try:
-            with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
+            ):
                 await deliver_pinned_webhook("https://webhook.example.com/cb", b"{}")
         finally:
             httpx.AsyncClient = _original_async_client

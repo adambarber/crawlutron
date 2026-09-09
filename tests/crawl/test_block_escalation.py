@@ -8,13 +8,13 @@ from pathlib import Path
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "bc-block-test.jsonl"))
 
-from _testkit import assert_result_success, make_fetch  # noqa: E402
+from _testkit import assert_result_success, make_fetch
 
-from app.constants import (  # noqa: E402
+from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from app.crawl.engine import _execute_crawl_chain  # noqa: E402
+from app.crawl.engine import _execute_crawl_chain
 
 
 class TestBlockAutoEscalation:
@@ -55,7 +55,9 @@ class TestBlockAutoEscalation:
         def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             calls["n"] += 1
             if calls["n"] == 1:
-                return make_fetch(body=b"<html><body>Checking your browser - cf-browser-verification</body></html>")
+                return make_fetch(
+                    body=b"<html><body>Checking your browser - cf-browser-verification</body></html>"
+                )
             return make_fetch(body=b"<html><body>Protected content here</body></html>")
 
         result = await self._run_chain([HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE], fetcher, base_policy)

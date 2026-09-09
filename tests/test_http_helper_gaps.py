@@ -1,18 +1,23 @@
 """TestHttpHelperGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestHttpHelperGaps:
     def test_cookie_header_per_host(self):
-        assert _cookie_header_for_url(
+        assert (
+            _cookie_header_for_url(
                 {"cookie_jar": "per_host", "cookies": {"e.com": {"a": "1"}}},
                 "http://e.com/",
-            ) == "a=1"
+            )
+            == "a=1"
+        )
 
     def test_headers_cffi_impersonate(self):
         headers = _headers_for_strategy(
-            HTTP_CFFI_IMPERSONATE, {"request_profile": {}, "headers": {}}, "http://e.com/",
+            HTTP_CFFI_IMPERSONATE,
+            {"request_profile": {}, "headers": {}},
+            "http://e.com/",
         )
         assert "User-Agent" in headers
         # Firefox identity (matching the firefox135 impersonation) sends no
@@ -39,5 +44,3 @@ class TestHttpHelperGaps:
         body = gzip.compress(b"hello world")
         out = _decode_body(body, "text/html", {"content-encoding": "gzip"})
         assert out == "hello world"
-
-

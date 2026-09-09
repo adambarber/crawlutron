@@ -50,6 +50,7 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
         from urllib.parse import urljoin
 
         from app.validation import normalize_public_http_url
+
         candidate = urljoin(root_url, u) if u.startswith("/") else u
         try:
             return normalize_public_http_url(candidate)

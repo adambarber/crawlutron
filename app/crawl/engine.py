@@ -108,15 +108,11 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
-
-
-
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
     result = worker(job)
     if inspect.iscoroutine(result):
         return await result
     return await asyncio.to_thread(worker, job)
-
 
 
 # A single user-supplied scope_regex is applied to every discovered link.
@@ -160,7 +156,6 @@ def _compile_scope_regex_safe(scope_regex: str | None):
     return compiled
 
 
-
 async def _browser_strategy_result(
     *,
     original_url: str,
@@ -192,12 +187,21 @@ async def _browser_strategy_result(
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_DOCUMENT
         elif extraction == EXTRACTION_TRAFILATURA:
-            extracted = _extract_html(content, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+            extracted = _extract_html(
+                content, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath")
+            )
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_TRAFILATURA
         else:
-            extracted = await asyncio.to_thread(extract_content, content, None, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath"))
+            extracted = await asyncio.to_thread(
+                extract_content,
+                content,
+                None,
+                result.final_url,
+                css_selector=policy.get("css_selector"),
+                xpath=policy.get("xpath"),
+            )
             text = extracted.text or ""
             markdown = extracted.markdown
             extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
@@ -214,7 +218,10 @@ async def _browser_strategy_result(
     diagnostics: dict[str, Any] = {
         "browser_profile": policy.get("browser_profile") or {},
         "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
-        "content_metrics": {"visible_text_length": len((text or "").strip()), "html_length": len((result.html or "").strip())},
+        "content_metrics": {
+            "visible_text_length": len((text or "").strip()),
+            "html_length": len((result.html or "").strip()),
+        },
         **_html_diagnostics(result.html, result.final_url, tree=tree),
     }
     intercepted = result.metadata.get("intercepted_xhr")
@@ -226,7 +233,11 @@ async def _browser_strategy_result(
 
     quality = _quality_score(result.status, result.classification, text, result.html, None)
     discovered_links, discovered_link_count, discovered_links_truncated = (
-        _extract_discovered_links(result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"], tree=tree) if result.status == "success" else ([], 0, False)
+        _extract_discovered_links(
+            result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"], tree=tree
+        )
+        if result.status == "success"
+        else ([], 0, False)
     )
     next_page_url = _detect_pagination(result.html, result.final_url)
     if next_page_url:
@@ -267,9 +278,9 @@ async def _browser_strategy_result(
     )
 
 
-
 # Block/challenge classifications that should trigger strategy auto-escalation (#7).
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
+
 
 async def _execute_crawl_chain(
     *,
@@ -364,6 +375,7 @@ async def _execute_crawl_chain(
         # Cookie bootstrap: after a successful render on a domain where cffi
         # was blocked, retry cffi once with browser-minted session cookies.
         from app.crawl.strategies.browser import get_browser_cookies_for
+
         if (
             result.status == "success"
             and result.classification == "rendered"
@@ -379,10 +391,14 @@ async def _execute_crawl_chain(
                 retry_headers["Cookie"] = cookie_header
                 retry_policy["headers"] = retry_headers
                 retry_result = await _http_strategy_result(
-                    original_url=original_url, normalized_url=normalized_url,
-                    strategy=HTTP_CFFI_IMPERSONATE, policy=retry_policy,
-                    http_fetcher=cffi_fetcher, cache=cache,
-                    content_cache=content_cache, caller_validators=caller_validators,
+                    original_url=original_url,
+                    normalized_url=normalized_url,
+                    strategy=HTTP_CFFI_IMPERSONATE,
+                    policy=retry_policy,
+                    http_fetcher=cffi_fetcher,
+                    cache=cache,
+                    content_cache=content_cache,
+                    caller_validators=caller_validators,
                     robots_sitemaps=robots_sitemaps,
                 )
                 attempts.extend(retry_result.attempted_strategies)
@@ -390,7 +406,9 @@ async def _execute_crawl_chain(
                     return replace(retry_result, attempted_strategies=attempts)
                 last_result = result
 
-        if result.status == "success" and (result.quality_score > 0 or result.classification == "not_modified"):
+        if result.status == "success" and (
+            result.quality_score > 0 or result.classification == "not_modified"
+        ):
             # Pin the successful strategy for this domain so subsequent fetches
             # in the same job start here instead of re-climbing the ladder.
             if scheduler is not None:
@@ -523,9 +541,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
         return None
 
 
-def _seed_is_fresh(
-    url: str, lastmod: str | None, content_cache: Any, policy: dict[str, Any]
-) -> bool:
+def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: dict[str, Any]) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
     re-fetching it (#3).
@@ -546,8 +562,12 @@ def _seed_is_fresh(
     # and freshness was never detected through this path.
     for strategy in policy.get("strategies", DEFAULT_STRATEGIES):
         key = _content_cache_key(
-            url, strategy, _headers_for_strategy(strategy, policy, url),
-            extraction, css, xp,
+            url,
+            strategy,
+            _headers_for_strategy(strategy, policy, url),
+            extraction,
+            css,
+            xp,
         )
         cached_at = content_cache.cached_at_of(key)
         if cached_at is not None and lastmod_ts <= cached_at:
@@ -665,9 +685,6 @@ class _ResultSpill:
                 pass
 
 
-
-
-
 def _parse_robots_crawl_delay(text: str) -> float | None:
     """Extract the Crawl-delay (seconds) for our user-agent group, if any.
 
@@ -753,12 +770,22 @@ async def crawl_request(
         _COOKIE_NAMESPACE,
         cookie_namespace_for,
     )
+
     _cookie_token = _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
     try:
         return await _crawl_request_impl(
-            payload, active_settings, urls, policy, fetcher, cffi, shutdown_event,
-            browser_worker=browser_worker, cache=cache, content_cache=content_cache,
-            webhook_url=webhook_url, spill_path=spill_path,
+            payload,
+            active_settings,
+            urls,
+            policy,
+            fetcher,
+            cffi,
+            shutdown_event,
+            browser_worker=browser_worker,
+            cache=cache,
+            content_cache=content_cache,
+            webhook_url=webhook_url,
+            spill_path=spill_path,
         )
     finally:
         _COOKIE_NAMESPACE.reset(_cookie_token)
@@ -787,7 +814,9 @@ async def _crawl_request_impl(
             domain = registrable_domain(normalized_url)
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
-        jobs.append(CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain))
+        jobs.append(
+            CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain)
+        )
 
     # Limits are the same for all jobs; extract once for scheduler config
     limits = policy.get("limits", {})
@@ -823,10 +852,7 @@ async def _crawl_request_impl(
             pass
 
     def _validators_for(job: CrawlTask) -> dict[str, str] | None:
-        return (
-            validators_by_url.get(job.normalized_url)
-            or validators_by_url.get(job.original_url)
-        )
+        return validators_by_url.get(job.normalized_url) or validators_by_url.get(job.original_url)
 
     async def run_job(job: CrawlTask) -> tuple[int, EngineCrawlResult]:
         index = job.index
@@ -841,8 +867,7 @@ async def _crawl_request_impl(
         # while the resource gate reports idle capacity. If the chain blows the
         # budget we fail the URL as network_error and free the slot.
         budget = float(
-            (policy.get("limits") or {}).get("total_url_budget_seconds")
-            or DEFAULT_TOTAL_URL_BUDGET_SECONDS
+            (policy.get("limits") or {}).get("total_url_budget_seconds") or DEFAULT_TOTAL_URL_BUDGET_SECONDS
         )
         try:
             result = await asyncio.wait_for(

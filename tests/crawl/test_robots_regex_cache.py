@@ -5,6 +5,7 @@ recompiled every robot rule's pattern. For a large crawl this compiles tens of
 thousands of identical regexes. The compiled pattern is now cached so each
 unique pattern is compiled once.
 """
+
 import re
 from unittest.mock import patch
 

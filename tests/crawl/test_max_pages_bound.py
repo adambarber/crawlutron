@@ -1,4 +1,3 @@
-
 from _testkit import site_fetcher
 
 from app.crawl.cache import HttpCache
@@ -16,9 +15,7 @@ async def test_max_pages_default_is_bounded_not_unlimited():
 
 async def test_max_pages_zero_falls_back_to_default():
     settings = CrawlerSettings()
-    policy = _payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, settings
-    )
+    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, settings)
     assert policy["limits"]["max_pages"] == 100
 
 
@@ -32,9 +29,7 @@ async def test_max_pages_clamped_to_upper_bound():
 
 async def test_max_pages_positive_preserved():
     settings = CrawlerSettings()
-    policy = _payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, settings
-    )
+    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, settings)
     assert policy["limits"]["max_pages"] == 7
 
 

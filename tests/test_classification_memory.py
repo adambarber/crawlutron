@@ -3,6 +3,7 @@
 
 def _strip(html):
     from app.classify import _strip_html_noise
+
     return _strip_html_noise(html)
 
 
@@ -27,8 +28,9 @@ def test_classify_unchanged_after_refactor():
     from app.classify import classify_page
 
     # spoof attempt still neutralized
-    assert classify_page(
-        "<!-- access denied --><body>Welcome to our site</body>", "Welcome to our site"
-    ) == "rendered"
+    assert (
+        classify_page("<!-- access denied --><body>Welcome to our site</body>", "Welcome to our site")
+        == "rendered"
+    )
     # visible block phrase (hard classification) detected
     assert classify_page("<body>access denied</body>", "access denied") == "access_denied"

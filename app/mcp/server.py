@@ -241,7 +241,7 @@ async def handle_mcp_request(
         return 404, error_response(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
     except ProtocolValidationError as error:
         return error.status_code, error.payload
-    except Exception:  # noqa: BLE001 - a handler crash must not take down the endpoint
+    except Exception:
         logger.exception("mcp_request_failed", extra={"method": method, "request_id": request_id})
         return 500, error_response(request_id, INTERNAL_ERROR, "Internal error")
 

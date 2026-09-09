@@ -1,6 +1,6 @@
 """Unified output formatting: every crawl strategy funnels through one path."""
 
-from app.api.response_shaping import format_crawl_item  # noqa: E402
+from app.api.response_shaping import format_crawl_item
 
 
 class TestFormatCrawlItemUnified:

@@ -84,9 +84,7 @@ class CrawlResultStore:
     def _prune(self, now: float) -> None:
         if self._ttl_seconds <= 0:
             return
-        self._conn.execute(
-            "DELETE FROM results WHERE stored_at < ?", (now - self._ttl_seconds,)
-        )
+        self._conn.execute("DELETE FROM results WHERE stored_at < ?", (now - self._ttl_seconds,))
 
     def close(self) -> None:
         with self._lock:

@@ -26,7 +26,7 @@ router = APIRouter(tags=["Crawler"])
 )
 async def render(
     payload: RenderRequest,
-    settings=Depends(get_settings),  # noqa: B008
+    settings=Depends(get_settings),
 ) -> UnifiedCrawlResponse:
     return await render_handler(payload, settings=settings)
 

@@ -91,10 +91,7 @@ class TestKatanaDiscovery:
         assert {"url": "/api/data"} in endpoints
 
     def test_extract_js_endpoints_finds_axios_and_xhr(self):
-        html = (
-            'axios.get("/api/items");'
-            'xhr.open("GET", "/api/widgets");'
-        )
+        html = 'axios.get("/api/items");xhr.open("GET", "/api/widgets");'
         endpoints = extract_js_endpoints(html)
         assert {"url": "/api/items"} in endpoints
         assert {"url": "/api/widgets"} in endpoints
@@ -107,10 +104,7 @@ class TestKatanaDiscovery:
     def test_extract_js_endpoints_resolves_against_source(self):
         html = 'fetch("/api/x"); axios.get("/y")'
         endpoints = extract_js_endpoints(html, "http://e.com/page")
-        assert (
-            endpoints
-            == [{"url": "http://e.com/api/x"}, {"url": "http://e.com/y"}]
-        )
+        assert endpoints == [{"url": "http://e.com/api/x"}, {"url": "http://e.com/y"}]
 
     def test_extract_js_endpoints_dedupes_resolved(self):
         html = 'fetch("/api/x"); fetch("/api/x")'
@@ -157,18 +151,24 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     import app.crawl.extraction as ex
 
     spawned = False
+
     class _FakeProcess:
         def __init__(self, *a, **k):
             nonlocal spawned
             spawned = True
+
         def start(self):
             pass
+
         def is_alive(self):
             return False
+
         def join(self, *a, **k):
             pass
+
         def terminate(self):
             pass
+
     monkeypatch.setattr(ex.multiprocessing, "Process", _FakeProcess)
     monkeypatch.setattr(ex, "_EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
@@ -182,18 +182,24 @@ async def test_extract_document_kill_switch(monkeypatch):
     import app.crawl.extraction as ex
 
     spawned = False
+
     class _FakeProcess:
         def __init__(self, *a, **k):
             nonlocal spawned
             spawned = True
+
         def start(self):
             pass
+
         def is_alive(self):
             return False
+
         def join(self, *a, **k):
             pass
+
         def terminate(self):
             pass
+
     monkeypatch.setattr(ex.multiprocessing, "Process", _FakeProcess)
     monkeypatch.setattr(ex, "_EXTRACTION_DOC_ENABLED", False)
 

@@ -12,7 +12,6 @@ import asyncio
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient  # noqa: F401  (kept for parity with other suites)
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
@@ -42,7 +41,7 @@ def _canned_result(url: str, *, status: str = "success", links: list[str] | None
         "final_url": url,
         "status": status,
         "classification": "rendered" if status == "success" else "site_error",
-        "discovered_links": [_link(l, url) for l in links or []],
+        "discovered_links": [_link(link, url) for link in links or []],
     }
 
 

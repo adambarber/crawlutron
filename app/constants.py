@@ -29,7 +29,7 @@ SERVICE_VERSION: str = "0.3.0"
 DEFAULT_USER_AGENT: str = (
     f"browser-crawler/{SERVICE_VERSION} (+https://github.com/browser-crawler/browser-crawler)"
 )
-USER_AGENT_TOKEN: str = "browser-crawler"  # noqa: S105 - robots.txt match token, not a credential
+USER_AGENT_TOKEN: str = "browser-crawler"
 # TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
 # fetcher and the agent-hints copy both reference this, so they cannot drift.
 CFFI_IMPERSONATE_TARGET: str = "firefox135"

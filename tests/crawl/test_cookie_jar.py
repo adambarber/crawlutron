@@ -5,6 +5,7 @@ concurrent writes can lose updates or raise mid-iteration. And save_to_file
 wrote directly to the target path, so a crash during json.dump left a
 truncated/corrupted file (silently losing all persisted cookies on restart).
 """
+
 import json
 import os
 import tempfile
@@ -76,7 +77,7 @@ def test_concurrent_cookie_writes_do_not_raise():
             for i in range(50):
                 jar.add_cookie_header(url, f"k{thread_id}_{i}=v; Path=/")
                 _ = jar.cookie_header_for(url)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=worker, args=(t,)) for t in range(8)]

@@ -9,10 +9,13 @@ from app.classify import classify_page
 
 def test_single_soft_phrase_does_not_classify():
     """A benign page mentioning one phrase must stay rendered."""
-    assert classify_page(
-        "<html><body>Sorry, too many requests. Enjoy the rest of our site.</body></html>",
-        None,
-    ) == "rendered"
+    assert (
+        classify_page(
+            "<html><body>Sorry, too many requests. Enjoy the rest of our site.</body></html>",
+            None,
+        )
+        == "rendered"
+    )
 
 
 def test_corroborated_soft_phrases_classify():

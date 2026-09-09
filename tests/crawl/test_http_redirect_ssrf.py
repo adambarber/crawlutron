@@ -1,4 +1,3 @@
-
 import httpx
 import pytest
 
@@ -18,6 +17,7 @@ class _Resp:
         async def gen():
             for c in self._chunks:
                 yield c
+
         return gen()
 
 
@@ -100,9 +100,7 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
 
 async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
     """The manual loop must terminate even on indefinite redirects (F1)."""
-    responses = [
-        _Resp(302, {"location": "http://a.example/"}, "http://public.example/") for _ in range(10)
-    ]
+    responses = [_Resp(302, {"location": "http://a.example/"}, "http://public.example/") for _ in range(10)]
     fake = _FakeClient(responses)
     monkeypatch.setattr(http_mod, "get_async_http_client", lambda *a, **k: fake)
     monkeypatch.setattr(http_mod, "_build_pinned_request", lambda url, headers: (url, dict(headers)))

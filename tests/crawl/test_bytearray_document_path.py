@@ -11,16 +11,24 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
         # csv served WITHOUT compression -> decompress_body returns the raw
         # buffer unchanged, which is a bytearray
         return HttpFetchResult(
-            url=url, final_url=url, status_code=200,
+            url=url,
+            final_url=url,
+            status_code=200,
             headers={"content-type": "text/csv"},
-            body=bytearray(b"name,age\nAlice,30\nBob,25"), elapsed_ms=1,
+            body=bytearray(b"name,age\nAlice,30\nBob,25"),
+            elapsed_ms=1,
         )
 
     result = await _http_strategy_result(
-        original_url="https://sudbury.ma.us/x.csv", normalized_url="https://sudbury.ma.us/x.csv",
+        original_url="https://sudbury.ma.us/x.csv",
+        normalized_url="https://sudbury.ma.us/x.csv",
         strategy="HTTP_DECLARED_CRAWLER",
-        policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {"timeout_seconds": 10},
-                "headers": {}, "extraction": "document"},
+        policy={
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "limits": {"timeout_seconds": 10},
+            "headers": {},
+            "extraction": "document",
+        },
         http_fetcher=fetcher,
     )
     assert result.status == "success", (result.status, result.classification)

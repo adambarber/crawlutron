@@ -46,29 +46,31 @@ def _task(domain):
 class TestBatchIsHttpHeavy:
     def test_all_http_pinned(self):
         sched = _HSScheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
-        frontier = [ (0, _task(f"site{i}.gov")) for i in range(4)]
+        frontier = [(0, _task(f"site{i}.gov")) for i in range(4)]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is True
 
     def test_majority_http_pinned(self):
         # 2 of 3 pinned HTTP; the 3rd unpinned (not yet proven cheap)
         sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER, "b.gov": HTTP_DECLARED_CRAWLER})
-        frontier = [(0, _task(d)) for d in ["a.gov","b.gov","c.gov"]]
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is True
 
     def test_half_or_less_not_http_heavy(self):
         # 1 of 3 pinned HTTP -> not HTTP-heavy (conservative)
         sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER})
-        frontier = [(0, _task(d)) for d in ["a.gov","b.gov","c.gov"]]
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is False
 
     def test_browser_pinned_counts_against(self):
         # 2 browser-pinned, 1 HTTP-pinned -> not HTTP-heavy
-        sched = _HSScheduler({
-            "a.gov": BROWSER_HEADLESS,
-            "b.gov": BROWSER_HEADLESS,
-            "c.gov": HTTP_DECLARED_CRAWLER,
-        })
-        frontier = [(0, _task(d)) for d in ["a.gov","b.gov","c.gov"]]
+        sched = _HSScheduler(
+            {
+                "a.gov": BROWSER_HEADLESS,
+                "b.gov": BROWSER_HEADLESS,
+                "c.gov": HTTP_DECLARED_CRAWLER,
+            }
+        )
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is False
 
     def test_no_pins_is_false(self):
@@ -128,12 +130,21 @@ class _Spill:
 
 def _mk_result(url):
     return EngineCrawlResult(
-        original_url=url, normalized_url=url, final_url=url,
-        status="success", classification="rendered",
-        selected_strategy="HTTP_DECLARED_CRAWLER", attempted_strategies=[],
-        http_status=200, headers={}, content_type="text/html",
-        html="", text="t", extraction_method="http_html",
-        quality_score=1.0, discovered_links=[],
+        original_url=url,
+        normalized_url=url,
+        final_url=url,
+        status="success",
+        classification="rendered",
+        selected_strategy="HTTP_DECLARED_CRAWLER",
+        attempted_strategies=[],
+        http_status=200,
+        headers={},
+        content_type="text/html",
+        html="",
+        text="t",
+        extraction_method="http_html",
+        quality_score=1.0,
+        discovered_links=[],
     )
 
 
@@ -170,10 +181,12 @@ async def _run_with_gate(sched, gate, jobs):
 class TestDispatcherStrategyAwareScaling:
     async def test_http_heavy_batch_uses_http_scale(self):
         # Two domains already proven HTTP (pinned) -> dispatcher consults http_scale_factor
-        sched = _HSScheduler({
-            "a.gov": HTTP_DECLARED_CRAWLER,
-            "b.gov": HTTP_DECLARED_CRAWLER,
-        })
+        sched = _HSScheduler(
+            {
+                "a.gov": HTTP_DECLARED_CRAWLER,
+                "b.gov": HTTP_DECLARED_CRAWLER,
+            }
+        )
         jobs = [_task("a.gov"), _task("b.gov")]
         gate = _RecordingGate(batch=0.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)
@@ -185,10 +198,12 @@ class TestDispatcherStrategyAwareScaling:
 
     async def test_browser_bound_batch_uses_combined_scale(self):
         # Browser-pinned domains -> dispatcher stays on the combined gate
-        sched = _HSScheduler({
-            "a.gov": BROWSER_HEADLESS,
-            "b.gov": BROWSER_HEADLESS,
-        })
+        sched = _HSScheduler(
+            {
+                "a.gov": BROWSER_HEADLESS,
+                "b.gov": BROWSER_HEADLESS,
+            }
+        )
         jobs = [_task("a.gov"), _task("b.gov")]
         gate = _RecordingGate(batch=1.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)
@@ -227,7 +242,7 @@ class TestHttpScaleEscapesMemory:
         # HTTP work is NOT memory-bound: it rides the CPU scale, escaping the
         # browser-held-memory bottleneck that throttles browser-bound batches.
         assert http_scale > memory_scale
-        assert memory_scale < 1.0          # memory gate would clamp browser work
+        assert memory_scale < 1.0  # memory gate would clamp browser work
         assert http_scale == pytest.approx(1.0, rel=0.01)
 
     def test_http_scale_respects_tight_cpu(self, monkeypatch):
@@ -244,7 +259,7 @@ class TestHttpScaleEscapesMemory:
         """Same resources: HTTP scale (CPU-driven) exceeds the combined/browser scale."""
         gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
         monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.89)  # falling off
-        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.30)     # headroom > 0.5
+        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.30)  # headroom > 0.5
 
         http_scale = gate.http_scale_factor()
         browser_scale = gate.batch_scale_factor()

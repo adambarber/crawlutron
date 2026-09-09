@@ -5,19 +5,24 @@ from app.map import build_site_map
 
 def test_build_site_map_aggregates_and_dedupes():
     crawl_response = {
-        "results": [{
-            "original_url": "http://x.example/",
-            "final_url": "http://x.example/",
-            "diagnostics": {
-                "robots": {"sitemaps": ["http://x.example/sitemap.xml", "http://x.example/sitemap2.xml"]},
-                "discovery": {"sitemap_urls": ["http://x.example/sitemap.xml"], "feeds": ["http://x.example/feed.xml"]},
-            },
-            "discovered_links": [
-                {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
-                {"url": "http://x.example/b", "normalized_url": "http://x.example/b"},
-                {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
-            ],
-        }]
+        "results": [
+            {
+                "original_url": "http://x.example/",
+                "final_url": "http://x.example/",
+                "diagnostics": {
+                    "robots": {"sitemaps": ["http://x.example/sitemap.xml", "http://x.example/sitemap2.xml"]},
+                    "discovery": {
+                        "sitemap_urls": ["http://x.example/sitemap.xml"],
+                        "feeds": ["http://x.example/feed.xml"],
+                    },
+                },
+                "discovered_links": [
+                    {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
+                    {"url": "http://x.example/b", "normalized_url": "http://x.example/b"},
+                    {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
+                ],
+            }
+        ]
     }
     m = build_site_map(crawl_response)
     assert m["url"] == "http://x.example/"
@@ -26,16 +31,25 @@ def test_build_site_map_aggregates_and_dedupes():
     assert "http://x.example/sitemap2.xml" in m["sitemaps"]
     assert m["feeds"] == ["http://x.example/feed.xml"]
     assert m["all_urls"] == [
-        "http://x.example/a", "http://x.example/b",
-        "http://x.example/sitemap.xml", "http://x.example/sitemap2.xml",
+        "http://x.example/a",
+        "http://x.example/b",
+        "http://x.example/sitemap.xml",
+        "http://x.example/sitemap2.xml",
         "http://x.example/feed.xml",
     ]
 
 
 def test_build_site_map_handles_dataclass_links():
     from app.models import DiscoveredLink
+
     link = DiscoveredLink(
-        url="https://r/page", normalized_url="https://r/page", text="", rel=[], source_url="https://r/", host="r", is_same_host=True
+        url="https://r/page",
+        normalized_url="https://r/page",
+        text="",
+        rel=[],
+        source_url="https://r/",
+        host="r",
+        is_same_host=True,
     )
     crawl_response = {"results": [{"final_url": "http://r/", "discovered_links": [link], "diagnostics": {}}]}
     m = build_site_map(crawl_response)
@@ -54,15 +68,17 @@ def test_build_site_map_resolves_relative_paths():
     # leaking verbatim -- the SiteMapResponse contract promises normalized
     # public URLs.
     crawl_response = {
-        "results": [{
-            "original_url": "http://x.example/dir/",
-            "final_url": "http://x.example/dir/",
-            "diagnostics": {},
-            "discovered_links": [
-                {"url": "/page1", "normalized_url": "/page1"},
-                {"url": "http://x.example/abs", "normalized_url": "http://x.example/abs"},
-            ],
-        }]
+        "results": [
+            {
+                "original_url": "http://x.example/dir/",
+                "final_url": "http://x.example/dir/",
+                "diagnostics": {},
+                "discovered_links": [
+                    {"url": "/page1", "normalized_url": "/page1"},
+                    {"url": "http://x.example/abs", "normalized_url": "http://x.example/abs"},
+                ],
+            }
+        ]
     }
     m = build_site_map(crawl_response)
     assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]

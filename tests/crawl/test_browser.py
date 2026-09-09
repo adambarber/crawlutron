@@ -75,4 +75,3 @@ class TestBrowserRenderer:
         )
         assert response["submitted_count"] == 1
         assert "Example Org" in response["results"][0]["markdown"]
-

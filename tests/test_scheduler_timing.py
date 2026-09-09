@@ -4,6 +4,7 @@
 sleeps must explicitly request the ``real_sleeps`` fixture to verify the actual
 delay behavior.
 """
+
 import time
 
 from _testkit import make_job, make_result
@@ -19,7 +20,10 @@ async def _ok(job: CrawlJob):
 async def _run_two_same_domain(delay: float = 0.1) -> float:
     """Drive two same-domain jobs through the scheduler; return elapsed seconds."""
     scheduler = DomainScheduler(
-        global_limit=1, per_domain_limit=1, delay_seconds=delay, adaptive=False,
+        global_limit=1,
+        per_domain_limit=1,
+        delay_seconds=delay,
+        adaptive=False,
     )
     jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
     started = time.monotonic()
@@ -36,7 +40,10 @@ async def test_real_sleeps_exercise_per_domain_delay(real_sleeps):
 
 async def test_real_sleeps_exercise_domain_cooldown(real_sleeps):
     scheduler = DomainScheduler(
-        global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False,
+        global_limit=1,
+        per_domain_limit=1,
+        delay_seconds=0.0,
+        adaptive=False,
     )
     scheduler.set_domain_cooldown("example.com", 0.3)
     job = make_job(0, "https://example.com/")

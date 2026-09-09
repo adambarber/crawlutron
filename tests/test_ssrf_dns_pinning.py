@@ -5,6 +5,7 @@ once and returns the pinned IP used for the connection, and that private
 targets are rejected. They use ``monkeypatch`` so the global environment is
 restored automatically and never poisons other tests.
 """
+
 import socket
 from unittest.mock import patch
 
@@ -34,7 +35,10 @@ class TestSSrfDnsPinning:
 
     def test_private_resolution_raises(self, monkeypatch):
         block_private_targets(monkeypatch)
-        with patch("socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]):
+        with patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
+        ):
             with pytest.raises(ValueError):
                 _resolve_and_pin_host("http://example.com/")
 

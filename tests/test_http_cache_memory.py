@@ -58,7 +58,7 @@ def test_concurrent_store_get_is_safe():
                 cache.store(url, {"etag": f'"{i}"'})
                 etag, _ = cache.get(url)
                 assert etag == f'"{i}"', (url, etag)
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:
             errors.append(exc)
 
     threads = [threading.Thread(target=worker, args=(f"h{t}",)) for t in range(8)]

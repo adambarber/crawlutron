@@ -19,6 +19,7 @@ class _FakeElement:
     def __init__(self, selector):
         self.selector = selector
 
+
 class _FakePage:
     def __init__(self, tracker):
         self._tracker = tracker
@@ -53,6 +54,7 @@ class _FakePage:
     async def close(self):
         return None
 
+
 class _FakeBrowser:
     def __init__(self, tracker):
         self._tracker = tracker
@@ -64,6 +66,7 @@ class _FakeBrowser:
     def is_closed(self):
         return False
 
+
 class _FakeBrowserCM:
     def __init__(self, tracker):
         self.browser = _FakeBrowser(tracker)
@@ -74,17 +77,15 @@ class _FakeBrowserCM:
     async def __aexit__(self, *exc):
         return False
 
+
 async def test_concurrent_page_renders_capped(monkeypatch, real_sleeps):
     monkeypatch.setenv("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "2")
     tracker = {"n": 0, "max": 0}
     renderer = BrowserRenderer(browser_factory=lambda **kw: _FakeBrowserCM(tracker))
     try:
         opts = RenderOptions(browser_profile={})
-        await asyncio.gather(
-            *[renderer.render("http://example.com/", opts) for _ in range(6)]
-        )
+        await asyncio.gather(*[renderer.render("http://example.com/", opts) for _ in range(6)])
     finally:
         await renderer.close()
     assert tracker["max"] <= 2, f"page cap ignored: {tracker}"
     assert tracker["max"] >= 2, f"cap serialized renders entirely: {tracker}"
-

@@ -6,6 +6,7 @@ Verifies the P0 reviewer finding: the ``global`` statement in
 forgets a name, the corresponding module global stays at its previous
 value, silently breaking webhook delivery at runtime.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -77,9 +78,7 @@ def test_deliver_webhook_without_dependencies_raises():
     wm.clear_webhook_dependencies()
     with pytest.raises(RuntimeError, match="not initialized"):
         # asyncio.run to drive the coroutine
-        asyncio.run(
-            wm.deliver_webhook("http://example.com/cb", "rid", {}, MagicMock())
-        )
+        asyncio.run(wm.deliver_webhook("http://example.com/cb", "rid", {}, MagicMock()))
 
 
 def test_build_job_status_handles_single_shot_jobs():

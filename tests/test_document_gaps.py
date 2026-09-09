@@ -1,6 +1,6 @@
 """TestDocumentGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestDocumentGaps:
@@ -13,5 +13,3 @@ class TestDocumentGaps:
     def test_extract_broken_pdf_from_server(self, base_url):
         text = _default_document_text_extractor(base_url + "/broken.pdf")
         assert text == ""
-
-

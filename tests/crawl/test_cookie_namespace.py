@@ -5,6 +5,7 @@ one tenant to another (adversarial review F-cookie-cross-contamination). The
 namespace contextvar is set per ``crawl_request`` from
 ``request_profile.cookie_namespace`` so cookies are keyed by tenant.
 """
+
 from app.crawl.strategies.http import (
     _COOKIE_NAMESPACE,
     CookieJar,

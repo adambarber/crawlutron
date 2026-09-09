@@ -43,8 +43,8 @@ _DEFAULT_CPU_BUDGET = None
 # container. When disabled the probe reports zero lag and the gate is unaffected.
 _LOOP_LAG_PROBE_ENABLED = os.environ.get("BROWSER_CRAWLER_LOOP_LAG_PROBE", "0") == "1"
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05
-_LOOP_LAG_OK_THRESHOLD = 0.05      # below this lag (s) -> full speed
-_LOOP_LAG_HARD_THRESHOLD = 0.30    # at/above this lag (s) -> full throttle
+_LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
+_LOOP_LAG_HARD_THRESHOLD = 0.30  # at/above this lag (s) -> full throttle
 _LOOP_LAG_SMOOTHING = 0.25
 
 
@@ -124,6 +124,7 @@ class LoopLagProbe:
 # CPU sensing (cgroup v2 -> v1 -> unbounded)
 # ---------------------------------------------------------------------------
 
+
 def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
     """Allocated CPUs for this cgroup (quota / period).
 
@@ -188,6 +189,7 @@ def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
 # ---------------------------------------------------------------------------
 # CPU admission gate (rate-based)
 # ---------------------------------------------------------------------------
+
 
 class CpuGate(ResourceGauge):
     """Admission gate driven by CPU utilization relative to the cgroup quota.
@@ -296,9 +298,11 @@ class CpuGate(ResourceGauge):
             return True
         return self._last_usage is not None and self._last_wall is not None
 
+
 # ---------------------------------------------------------------------------
 # Combined gate over memory + CPU
 # ---------------------------------------------------------------------------
+
 
 class ResourceGate:
     """Combined admission gate over memory + CPU.
@@ -418,7 +422,9 @@ class ResourceGate:
 # stays RAM-budgeted.
 
 _HTTP_TASK_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", str(12 * 1024 * 1024)))
-_BROWSER_TASK_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", str(700 * 1024 * 1024)))
+_BROWSER_TASK_RAM_BYTES = int(
+    os.environ.get("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", str(700 * 1024 * 1024))
+)
 _ADMIT_YIELD_SECONDS = float(os.environ.get("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", "0.05"))
 _MAX_HTTP_CONCURRENCY = int(os.environ.get("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", "512"))
 
@@ -499,7 +505,9 @@ def _build_admission_policy(
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
     browser_pool_reserve_bytes = pool_size * browser_task_bytes
-    max_http = max_http_concurrency_for(limit, pool_size, http_task_bytes=http_task_bytes, browser_task_bytes=browser_task_bytes)
+    max_http = max_http_concurrency_for(
+        limit, pool_size, http_task_bytes=http_task_bytes, browser_task_bytes=browser_task_bytes
+    )
     return AdmissionPolicy(
         http_task_bytes=http_task_bytes,
         browser_task_bytes=browser_task_bytes,

@@ -284,7 +284,7 @@ class DuckDuckGoProvider:
             from lxml import html as lxml_html
 
             tree = lxml_html.fromstring(body)
-        except Exception:  # noqa: BLE001 - unparsable HTML is a provider error
+        except Exception:
             raise SearchProviderError("duckduckgo returned unparsable HTML") from None
         for node in tree.xpath("//div[contains(concat(' ', normalize-space(@class), ' '), ' result ')]"):
             link = node.xpath(".//a[contains(@class, 'result__a')]")

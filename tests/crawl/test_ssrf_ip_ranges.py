@@ -1,9 +1,10 @@
-'''LOW fix (F7): the SSRF IP check must reject non-public ranges beyond
+"""LOW fix (F7): the SSRF IP check must reject non-public ranges beyond
 private/loopback/link-local - CGNAT (100.64.0.0/10), multicast, reserved,
 unspecified, IPv6 unique-local (fc00::/7) and NAT64 (64:ff9b::/96). Previously
 only is_private/is_loopback/is_link_local were checked, so e.g. 100.64.0.1 or a
 multicast address slipped through.
-'''
+"""
+
 import app.crawl.strategies.http as http_mod
 
 

@@ -1,18 +1,22 @@
 """TestHttpServerGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestHttpServerGaps:
-
     def _policy(self, extra=None):
-        policy = {"request_profile": {}, "headers": {}, "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}}
+        policy = {
+            "request_profile": {},
+            "headers": {},
+            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        }
         if extra:
             policy.update(extra)
         return policy
 
     async def test_cache_last_modified_store(self, base_url):
         from app.crawl.strategies.http import _http_strategy_result
+
         cache = HttpCache()
         out = await _http_strategy_result(
             original_url=base_url + "/with_lastmod",
@@ -28,6 +32,7 @@ class TestHttpServerGaps:
 
     async def test_rate_limit_cooldown(self, base_url):
         from app.crawl.strategies.http import _http_strategy_result
+
         cache = HttpCache()
         out = await _http_strategy_result(
             original_url=base_url + "/ratelimit",
@@ -47,5 +52,3 @@ class TestHttpServerGaps:
             cache=HttpCache(),
         )
         assert result["results"][0]["status"] == "success"
-
-

@@ -1,7 +1,7 @@
 import pytest
 
 import app.crawl.extraction as ext_mod
-from app.crawl.extraction import _EXTRACTION_DOC_TIMEOUT, _extract_document  # noqa: F401
+from app.crawl.extraction import _extract_document
 
 
 @pytest.fixture(autouse=True)

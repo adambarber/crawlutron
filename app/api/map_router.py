@@ -26,8 +26,8 @@ router = APIRouter(tags=["Crawler"])
 )
 async def map(
     payload: MapRequest,
-    settings=Depends(get_settings),  # noqa: B008
-    shutdown_event=Depends(get_shutdown_event),  # noqa: B008
+    settings=Depends(get_settings),
+    shutdown_event=Depends(get_shutdown_event),
 ) -> dict:
     return await map_site(payload, settings=settings, shutdown_event=shutdown_event)
 

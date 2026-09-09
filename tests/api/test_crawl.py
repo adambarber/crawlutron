@@ -5,7 +5,6 @@ import json
 import time
 
 import pytest
-from _testkit import poll_until as _poll_until  # noqa: F401  (used inside async test method)
 from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
 

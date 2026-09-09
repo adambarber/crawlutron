@@ -1,11 +1,12 @@
-'''HIGH fix (F9): an unresolvable hostname must NOT route the crawler to
+"""HIGH fix (F9): an unresolvable hostname must NOT route the crawler to
 loopback. Previously _check_ssrf_protection silently passed on socket.gaierror
 and _resolve_and_pin_host fell back to pinning '127.0.0.1', letting an attacker
 submit a non-resolving URL (e.g. http://nonexistent.invalid/) to reach local
 services. This also covers the webhook path, which validates/_pins via the same
 helpers (_validate_webhook_url -> _check_ssrf_protection; _deliver_webhook ->
 _resolve_and_pin_host).
-'''
+"""
+
 import socket
 
 import pytest

@@ -1,6 +1,6 @@
 """TestMainCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestMainCoverageGaps:

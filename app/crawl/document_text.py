@@ -25,10 +25,14 @@ def _format_extracted_document_text(text: str, *, source_url: str) -> str:
             index += 1
             continue
 
-        range_action_match = re.match(r"^(?P<start>\d+[a-z])\s*-\s*(?P<end>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE)
+        range_action_match = re.match(
+            r"^(?P<start>\d+[a-z])\s*-\s*(?P<end>\d+[a-z])\s+(?P<action>.+)$", line, flags=re.IGNORECASE
+        )
         if range_action_match:
             action = range_action_match.group("action").strip()
-            for item_number in _document_item_range(range_action_match.group("start"), range_action_match.group("end")):
+            for item_number in _document_item_range(
+                range_action_match.group("start"), range_action_match.group("end")
+            ):
                 action_by_item[item_number] = action
             index += 1
             continue
@@ -81,9 +85,15 @@ def _should_join_document_paragraph(previous: str, current: str) -> bool:
         return False
     if re.match(r"^[,;:.!?)]", current):
         return True
-    if not re.search(r"[.!?:;)]$", previous) and _looks_like_document_prose(previous) and _looks_like_document_prose(current):
+    if (
+        not re.search(r"[.!?:;)]$", previous)
+        and _looks_like_document_prose(previous)
+        and _looks_like_document_prose(current)
+    ):
         return True
-    return _looks_like_document_prose(previous) and _looks_like_document_prose(current) and current[:1].islower()
+    return (
+        _looks_like_document_prose(previous) and _looks_like_document_prose(current) and current[:1].islower()
+    )
 
 
 def _join_document_paragraph_lines(previous: str, current: str) -> str:

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
-os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl"))
+os.environ.setdefault(
+    "BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl")
+)
 
-from _testkit import (  # noqa: E402
+from _testkit import (
     assert_result_failed,
     assert_result_success,
     make_base_policy,
@@ -17,7 +19,7 @@ from _testkit import (  # noqa: E402
     raise_fetcher,
 )
 
-from app.api.render import _render_options  # noqa: E402
+from app.api.render import _render_options
 from app.constants import (
     BROWSER_HEADLESS,
     EXTRACTION_DOCUMENT,
@@ -25,42 +27,43 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
     HTTP_DECLARED_CRAWLER,
 )
-from app.crawl.document_text import (  # noqa: E402
+from app.crawl.document_text import (
     _collect_document_item_lines,
     _document_item_range,
     _format_extracted_document_text,
     _next_non_empty_document_line,
     _should_join_document_paragraph,
 )
-from app.crawl.engine import (  # noqa: E402
+from app.crawl.engine import (
     _call_worker,
     _execute_crawl_chain,
     _payload_policy,
     _payload_urls,
     crawl_request,
 )
-from app.crawl.extraction import (  # noqa: E402
+from app.crawl.extraction import (
     _extract_discovered_links,
     _extract_forms,
     _extract_frames,
     _FrameCollector,
 )
-from app.crawl.strategies.http import (  # noqa: E402
+from app.crawl.strategies.http import (
     _cookie_header_for_url,
     _fetch_with_retries,
     _headers_for_strategy,
     _http_strategy_result,
     _looks_like_binary_body,
     _retry_after_seconds,
-    _select_fingerprint,  # noqa: E402
+    _select_fingerprint,
 )
-from app.settings import CrawlerSettings  # noqa: E402
+from app.settings import CrawlerSettings
 
 
 def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
     if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
         raise ConnectionError("discovery failed")
     return make_fetch()
+
 
 class TestValidationHelpers:
     def test_payload_urls_errors(self) -> None:
@@ -94,6 +97,7 @@ class TestValidationHelpers:
         assert _retry_after_seconds({"retry-after": "30"}) == 30
         assert _retry_after_seconds({}) is None
 
+
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
         policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
@@ -102,12 +106,17 @@ class TestHeaderHelpers:
 
     def test_cookie_header_invalid_structures(self) -> None:
         assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, "http://host/") == ""
-        assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, "http://host/") == ""
+        assert (
+            _cookie_header_for_url({"cookie_jar": "per_host", "cookies": {"host": "notdict"}}, "http://host/")
+            == ""
+        )
+
 
 class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         with pytest.raises(ConnectionError):
             await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
+
 
 class TestPureParsing:
     def test_document_item_range_branches(self) -> None:
@@ -117,7 +126,9 @@ class TestPureParsing:
         assert _document_item_range("1a", "x") == ["1a", "x"]
 
     def test_looks_like_binary_body_branches(self) -> None:
-        assert _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
+        assert (
+            _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/z.zip") is True
+        )
         assert _looks_like_binary_body(b"PK\x03\x04data", "text/html", "http://x/") is False
         assert _looks_like_binary_body(b"data", "application/json", "http://x/") is False
         assert _looks_like_binary_body(b"data", "application/octet-stream", "http://x/") is True
@@ -158,13 +169,23 @@ class TestPureParsing:
         collector.feed('<frame></frame><iframe src="http://x/f"></iframe>')
         assert len(collector.frames) == 1
 
+
 class TestHttpStrategyResult:
-    async def _run(self, status=200, strategy=HTTP_DECLARED_CRAWLER, fetcher=None,
-             ctype="text/html; charset=utf-8", body=b"<html><body>hello</body></html>",
-             final_url="http://example.com/", policy=None):
+    async def _run(
+        self,
+        status=200,
+        strategy=HTTP_DECLARED_CRAWLER,
+        fetcher=None,
+        ctype="text/html; charset=utf-8",
+        body=b"<html><body>hello</body></html>",
+        final_url="http://example.com/",
+        policy=None,
+    ):
         if fetcher is None:
-            def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):  # noqa: F811
+
+            def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
                 return make_fetch(status=status, ctype=ctype, body=body, final_url=final_url, url=url)
+
         pol = make_base_policy()
         if policy:
             pol.update(policy)
@@ -180,8 +201,13 @@ class TestHttpStrategyResult:
         assert_result_success(await self._run())
 
     async def test_status_classification_overrides(self) -> None:
-        for status, classification in [(403, "access_denied"), (404, "not_found"),
-                                       (410, "gone"), (429, "rate_limited"), (500, "site_error")]:
+        for status, classification in [
+            (403, "access_denied"),
+            (404, "not_found"),
+            (410, "gone"),
+            (429, "rate_limited"),
+            (500, "site_error"),
+        ]:
             assert (await self._run(status=status)).classification == classification, status
 
     async def test_network_error_handler(self) -> None:
@@ -205,14 +231,18 @@ class TestHttpStrategyResult:
 
     async def test_trafilatura_extract_html_and_non_html(self) -> None:
         assert "hello" in ((await self._run(policy={"extraction": EXTRACTION_TRAFILATURA})).text or "")
-        non_html = await self._run(policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}")
+        non_html = await self._run(
+            policy={"extraction": EXTRACTION_TRAFILATURA}, ctype="application/json", body=b"{}"
+        )
         assert non_html.text == ""
 
     async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
         def feed_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
                 raise ConnectionError("discovery failed")
-            return make_fetch(body=b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>')
+            return make_fetch(
+                body=b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>'
+            )
 
         result = await self._run(
             fetcher=feed_fetcher,
@@ -221,6 +251,7 @@ class TestHttpStrategyResult:
         assert result.status == "success"
         assert "robots" in result.diagnostics
         assert result.diagnostics["robots"].get("error") is not None
+
 
 class TestExecuteCrawlChain:
     async def _run_chain(self, strategy, **kwargs):
@@ -243,27 +274,28 @@ class TestExecuteCrawlChain:
     async def test_unsupported_strategy(self) -> None:
         assert (await self._run_chain("NOT_A_STRATEGY")).classification == "unknown_error"
 
+
 class TestCrawlRequest:
     async def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
-        payload = {"urls": ["http://example.com/"] * (settings.max_batch_size + 1),
-                   "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
+        payload = {
+            "urls": ["http://example.com/"] * (settings.max_batch_size + 1),
+            "policy": {"strategies": [HTTP_DECLARED_CRAWLER]},
+        }
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
-            await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher,
- browser_worker=None)
+            await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher, browser_worker=None)
 
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
         with pytest.raises(ValueError, match=r"^invalid_url"):
-            await crawl_request(payload, http_fetcher=ok_fetcher,
- browser_worker=None)
+            await crawl_request(payload, http_fetcher=ok_fetcher, browser_worker=None)
 
     async def test_success_with_injected_fetcher(self) -> None:
         payload = {"url": "http://example.com/", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
-        result = await crawl_request(payload, http_fetcher=ok_fetcher,
- browser_worker=None)
+        result = await crawl_request(payload, http_fetcher=ok_fetcher, browser_worker=None)
         assert result["submitted_count"] == 1
         assert result["results"][0]["status"] == "success"
+
 
 class TestServiceEdgeCases:
     def test_form_collector_select_textarea_button(self) -> None:
@@ -302,9 +334,7 @@ class TestServiceEdgeCases:
 
     def test_collect_document_item_lines_breaks_on_public_participation(self) -> None:
         # A bare numbered marker followed by a non-item section breaks collection.
-        title_lines, next_index = _collect_document_item_lines(
-            ["1.", "Public Participation", "more"], 0
-        )
+        title_lines, next_index = _collect_document_item_lines(["1.", "Public Participation", "more"], 0)
         assert title_lines == []
 
     def test_looks_like_binary_body_magic_without_zip_extension(self) -> None:
@@ -322,13 +352,18 @@ class TestServiceEdgeCases:
             )
 
         result = await TestHttpStrategyResult()._run(
-            fetcher=fetcher, policy={"limits": {"timeout_seconds": 5, "max_retries": 0}, "discovery": {"robots": True, "sitemaps": True, "feeds": True}}
+            fetcher=fetcher,
+            policy={
+                "limits": {"timeout_seconds": 5, "max_retries": 0},
+                "discovery": {"robots": True, "sitemaps": True, "feeds": True},
+            },
         )
         assert result.status == "success"
         assert "robots" in result.diagnostics
         assert result.diagnostics["robots"].get("crawl_delay_seconds") is None
         assert "discovery" in result.diagnostics
         assert result.diagnostics["discovery"]["feeds"]
+
 
 class TestCallWorkerContract:
     async def test_awaits_coroutine_worker_directly(self) -> None:
@@ -348,7 +383,6 @@ class TestCallWorkerContract:
             return "sync-result"
 
         assert await _call_worker(sync_worker, _Job()) == "sync-result"
-
 
 
 class TestFingerprintInjectionRotation:
@@ -377,7 +411,9 @@ class TestFingerprintInjectionRotation:
 
     def test_default_request_has_no_fingerprint_rotation(self):
         headers = _headers_for_strategy(
-            "HTTP_DECLARED_CRAWLER", {"request_profile": {}, "headers": {}}, "http://x/",
+            "HTTP_DECLARED_CRAWLER",
+            {"request_profile": {}, "headers": {}},
+            "http://x/",
         )
         assert headers["Accept-Language"] == "en-US,en;q=0.9"
         assert "Mozilla" not in headers["User-Agent"]

@@ -7,7 +7,6 @@ instead of exceeding the quota and getting throttled by the kernel. The
 ResourceGate combines memory + CPU so the most-contended resource sets the pace.
 """
 
-
 from app.resource_pressure import (
     CpuGate,
     ResourceGate,
@@ -16,6 +15,7 @@ from app.resource_pressure import (
 )
 
 # --- sensing: quota ---
+
 
 def test_read_cpu_quota_v2(tmp_path):
     cg = tmp_path / "cgroup"
@@ -53,6 +53,7 @@ def test_read_cpu_quota_missing_is_unbounded(tmp_path):
 
 # --- sensing: usage ---
 
+
 def test_read_cpu_usage_v2(tmp_path):
     cg = tmp_path / "cgroup"
     cg.mkdir()
@@ -72,6 +73,7 @@ def test_read_cpu_usage_missing_is_none(tmp_path):
 
 
 # --- governance: rate sampling ---
+
 
 def _fake_clock_and_usage(monkeypatch, clock, usage):
     monkeypatch.setattr("app.resource_pressure.time.monotonic", lambda: clock[0])
@@ -157,6 +159,7 @@ async def test_cpu_gate_returns_immediately_under_target(monkeypatch):
 
 # --- combined ResourceGate ---
 
+
 async def test_resource_gate_waits_while_either_saturated(monkeypatch):
     gate = ResourceGate()
     gate.memory.max_wait_seconds = 0.05
@@ -215,6 +218,7 @@ def test_metrics_expose_resource_utilization_and_counters():
     # Defaults render without error.
     assert "crawler_resource_memory_utilization 0.0000" in text
     assert "crawler_resource_cpu_utilization 0.0000" in text
+
 
 def test_cpu_gate_is_warm_only_after_sample(monkeypatch):
     # Unbounded (no quota/budget) -> always warm, so the full multiplier is safe.

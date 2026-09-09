@@ -8,7 +8,6 @@ the MCP tool descriptions. These tests pin the removal and that callers
 sending wait_until are not broken (the unknown key is simply ignored).
 """
 
-
 from app.models import RenderOptions
 
 

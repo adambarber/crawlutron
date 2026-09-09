@@ -8,8 +8,8 @@ def test_content_metrics_counts_in_single_pass():
         '<html><a href="/a">x</a>'
         '<iframe src="y"></iframe>'
         '<frame src="z"></frame>'
-        '<frameset><frame></frame></frameset>'
-        '<form><input></form></html>'
+        "<frameset><frame></frame></frameset>"
+        "<form><input></form></html>"
     )
     m = _content_metrics("visible", html)
     assert m["link_count"] == 1

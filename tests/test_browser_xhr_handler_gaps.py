@@ -1,6 +1,6 @@
 """TestBrowserXhrHandlerGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestBrowserXhrHandlerGaps:
@@ -38,6 +38,3 @@ class TestBrowserXhrHandlerGaps:
         await handler(FakeResponse())
         assert len(collected) == 1
         assert (collected[0]["payload"]) is None
-
-
-

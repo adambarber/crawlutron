@@ -71,7 +71,7 @@ async def shutdown_job_runner() -> None:
             await task
         except asyncio.CancelledError:
             pass
-        except Exception:  # noqa: BLE001 - shutdown must never raise
+        except Exception:
             logger.warning("job_runner_shutdown_task_error", extra={"job_id": job_id})
     _tasks.clear()
 
@@ -188,7 +188,7 @@ async def _run_job(
                     continue
                 try:
                     unified = build_unified_result(item)
-                except Exception:  # noqa: BLE001 - never lose a page to shaping
+                except Exception:
                     unified = None
                 if unified is not None:
                     job.results.append(unified.model_dump())
@@ -216,7 +216,7 @@ async def _run_job(
     except asyncio.CancelledError:
         # delete()/shutdown cancellation: leave any pre-cancel state intact.
         raise
-    except Exception as exc:  # noqa: BLE001 - background task must not crash the app
+    except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
         job = job_store.load(job_id)
         if job is not None and job.status == JobStatus.RUNNING:

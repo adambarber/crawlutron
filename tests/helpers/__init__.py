@@ -67,7 +67,9 @@ async def crawl_homepage_async(
     payload = build_payload(
         url=f"{base_url}/",
         strategies=strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],
-        limits=limits if limits is not None else {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+        limits=limits
+        if limits is not None
+        else {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
     )
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
 
@@ -84,9 +86,11 @@ def make_async_client(app) -> Callable[[], Awaitable[httpx.AsyncClient]]:
 
     This avoids repeating the httpx.ASGITransport + AsyncClient boilerplate.
     """
+
     def _factory() -> httpx.AsyncClient:
         transport = httpx.ASGITransport(app=app)
         return httpx.AsyncClient(transport=transport, base_url="http://test")
+
     return _factory
 
 
@@ -123,6 +127,7 @@ def make_content_cache(tmpdir: str, *, default_ttl: float = 1, clock=None) -> Co
     """
     if clock is None:
         import time
+
         clock = time.monotonic
     return ContentCache(tmpdir, default_ttl=default_ttl, clock=clock)
 
@@ -159,13 +164,13 @@ async def run_job_control_test(
     from httpx import AsyncClient
 
     async with make_async_client(app)() as client:
-        resp = await client.post(
-            f"/v1/jobs/{job_id}/control",
-            json={"action": action}
-        )
+        resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": action})
         assert resp.status_code == expected_status
 
-def make_content_cache_with_entry(tmpdir: str, key: str = "key1", value: dict = None, *, default_ttl: float = 1, clock=None) -> ContentCache:
+
+def make_content_cache_with_entry(
+    tmpdir: str, key: str = "key1", value: dict = None, *, default_ttl: float = 1, clock=None
+) -> ContentCache:
     """Create a ContentCache with a test entry already set.
 
     This reduces duplication in ContentCache tests that all start with
@@ -188,8 +193,6 @@ def make_content_cache_with_entry(tmpdir: str, key: str = "key1", value: dict = 
     return cache
 
 
-
-
 def browser_available() -> bool:
     """Return True if a Playwright Chromium binary is installed and can be used.
 
@@ -202,6 +205,7 @@ def browser_available() -> bool:
     except Exception:
         return False
     import os
+
     try:
         with sync_playwright() as p:
             path = p.chromium.executable_path

@@ -20,14 +20,20 @@ async def test_robots_cache_shared_across_requests():
             if url.endswith("/robots.txt"):
                 calls["robots"] += 1
                 return HttpFetchResult(
-                    url=url, final_url=url, status_code=200,
+                    url=url,
+                    final_url=url,
+                    status_code=200,
                     headers={"content-type": "text/plain"},
-                    body=b"User-agent: *\nDisallow: /secret\n", elapsed_ms=1,
+                    body=b"User-agent: *\nDisallow: /secret\n",
+                    elapsed_ms=1,
                 )
             return HttpFetchResult(
-                url=url, final_url=url, status_code=200,
+                url=url,
+                final_url=url,
+                status_code=200,
                 headers={"content-type": "text/html"},
-                body=b"<html><body>hi</body></html>", elapsed_ms=1,
+                body=b"<html><body>hi</body></html>",
+                elapsed_ms=1,
             )
 
         return fetcher

@@ -1,6 +1,6 @@
 """TestSchedulerCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestSchedulerCoverageGaps:
@@ -8,6 +8,7 @@ class TestSchedulerCoverageGaps:
 
     def test_token_bucket_basic(self):
         from app.scheduler import _TokenBucket
+
         bucket = _TokenBucket(rate=10.0, capacity=5.0)
         wait = bucket.consume(1.0)
         assert wait == 0.0
@@ -18,6 +19,7 @@ class TestSchedulerCoverageGaps:
 
     def test_token_bucket_refill(self):
         from app.scheduler import _TokenBucket
+
         bucket = _TokenBucket(rate=100.0, capacity=10.0)
         bucket.consume(10.0)
         # Manually refill tokens as if 0.1s passed (at 100 tokens/s, that's 10 more)
@@ -27,6 +29,7 @@ class TestSchedulerCoverageGaps:
 
     def test_circuit_breaker_opens(self):
         from app.scheduler import DomainScheduler
+
         scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
         for _ in range(5):
             scheduler.record_failure("example.com")
@@ -36,12 +39,14 @@ class TestSchedulerCoverageGaps:
         import time
 
         from app.scheduler import DomainScheduler
+
         scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
         scheduler._circuit_open_until["example.com"] = time.monotonic() - 1
         assert not (scheduler.is_circuit_open("example.com"))
 
     def test_scheduler_record_latency(self):
         from app.scheduler import DomainScheduler
+
         scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0, adaptive=True)
         scheduler.record_latency("example.com", 1.0)
         scheduler.record_latency("example.com", 2.0)
@@ -49,11 +54,9 @@ class TestSchedulerCoverageGaps:
 
     def test_scheduler_max_rps_token_bucket(self):
         from app.scheduler import DomainScheduler
+
         scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0, max_rps=5.0)
         assert scheduler._max_rps > 0
-
-
-
 
     def test_circuit_breaker_exponential_backoff(self):
         """Adversarial perf #2.1: consecutive trips escalate the cooldown
@@ -63,12 +66,18 @@ class TestSchedulerCoverageGaps:
         from app.scheduler import DomainScheduler
 
         s = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0,
-            circuit_threshold=5, circuit_cooldown_base=30.0, circuit_cooldown=600.0,
+            global_limit=1,
+            per_domain_limit=1,
+            delay_seconds=0.0,
+            circuit_threshold=5,
+            circuit_cooldown_base=30.0,
+            circuit_cooldown=600.0,
         )
 
         def open_after(failures: int) -> float:
-            s._domain_failures.clear(); s._circuit_trip_count.clear(); s._circuit_open_until.clear()
+            s._domain_failures.clear()
+            s._circuit_trip_count.clear()
+            s._circuit_open_until.clear()
             for _ in range(failures):
                 s.record_failure("x")
             return s._circuit_open_until["x"] - time.monotonic()
@@ -80,11 +89,11 @@ class TestSchedulerCoverageGaps:
         s.record_success("x")
         assert s._circuit_trip_count["x"] == 0
 
-
     def test_scheduler_set_domain_min_delay(self):
         """Adversarial perf #2.6: a robots Crawl-delay is enforced as a floor
         on top of the global/adaptive delay."""
         from app.scheduler import DomainScheduler
+
         s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
         assert s.current_delay("a.com") == 0.0
         s.set_domain_min_delay("a.com", 2.0)
@@ -95,23 +104,20 @@ class TestSchedulerCoverageGaps:
 
     def test_parse_robots_crawl_delay_specific_group_wins(self):
         from app.crawl.engine import _parse_robots_crawl_delay
-        text = (
-            "User-agent: *\n"
-            "Crawl-delay: 1\n"
-            "User-agent: browser-crawler\n"
-            "Crawl-delay: 4\n"
-        )
+
+        text = "User-agent: *\nCrawl-delay: 1\nUser-agent: browser-crawler\nCrawl-delay: 4\n"
         assert _parse_robots_crawl_delay(text) == 4.0
 
     def test_parse_robots_crawl_delay_star_only(self):
         from app.crawl.engine import _parse_robots_crawl_delay
+
         text = "User-agent: *\nCrawl-delay: 3\n"
         assert _parse_robots_crawl_delay(text) == 3.0
 
     def test_parse_robots_crawl_delay_absent(self):
         from app.crawl.engine import _parse_robots_crawl_delay
-        assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
+        assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
     async def test_run_streams_results_via_on_result(self):
         """Adversarial perf #3.1: with ``on_result`` set, each completed result is

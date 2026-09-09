@@ -10,6 +10,7 @@ For deployments that want richer logging (rotating files, structured
 JSON, JSON-Lines with HTTP context), swap ``configure_service_logging``
 with a more capable implementation in your own integration.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,10 +21,28 @@ from datetime import UTC, datetime
 from typing import Any
 
 _RESERVED_LOGRECORD_ATTRS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process", "message", "asctime",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "message",
+    "asctime",
 }
 
 

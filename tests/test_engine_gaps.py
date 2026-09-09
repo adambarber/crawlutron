@@ -1,15 +1,26 @@
 """TestEngineGaps coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *  # noqa: F401,F403
+from coverage_helpers import *
 
 
 class TestEngineGaps:
     # Uses the module-level _fake_browser worker factory.
 
     def test_result_dict(self):
-        d = to_dict(CrawlResult(url="http://x/", status="success", classification="rendered",
-                                    final_url="http://x/", html=None, text="t", attempts=1,
-                                    elapsed_ms=1, domain="x", metadata={}))
+        d = to_dict(
+            CrawlResult(
+                url="http://x/",
+                status="success",
+                classification="rendered",
+                final_url="http://x/",
+                html=None,
+                text="t",
+                attempts=1,
+                elapsed_ms=1,
+                domain="x",
+                metadata={},
+            )
+        )
         assert d["url"] == "http://x/"
 
     def test_payload_policy_invalid_strategy(self):
@@ -58,7 +69,6 @@ class TestEngineGaps:
         assert "intercepted_xhr" in diag
         assert "screenshot" in diag
 
-
     async def test_per_url_budget_fails_slow_chain(self):
         """Adversarial perf #2.2: a URL that blows its total_url_budget_seconds
         must be failed as network_error instead of holding a slot."""
@@ -74,10 +84,13 @@ class TestEngineGaps:
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],
             "extraction": "dom",
-            "limits": {"timeout_seconds": 30, "max_retries": 0,
-                       "max_discovered_links": 10,
-                       "respect_robots": False,
-                       "total_url_budget_seconds": 0.1},
+            "limits": {
+                "timeout_seconds": 30,
+                "max_retries": 0,
+                "max_discovered_links": 10,
+                "respect_robots": False,
+                "total_url_budget_seconds": 0.1,
+            },
             "headers": {},
             "request_profile": {},
         }
@@ -125,9 +138,8 @@ class TestEngineGaps:
         assert result.classification == "rate_limited"
         assert "example.com" in scheduler._domain_cooldowns
         import time as _time
+
         assert abs(scheduler._domain_cooldowns["example.com"] - (_time.time() + 30)) <= 5
-
-
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
         """Adversarial perf #2.6: a host's robots Crawl-delay is honored as a
@@ -147,23 +159,31 @@ class TestEngineGaps:
 
         def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
             from app.crawl.strategies.http import HttpFetchResult
+
             if url.endswith("/robots.txt"):
                 body = b"User-agent: *\nCrawl-delay: 2\n"
             else:
                 body = b"<html><body>ok</body></html>"
             return HttpFetchResult(
-                url=url, final_url=url, status_code=200,
-                headers={"content-type": "text/html"}, body=body, elapsed_ms=1,
+                url=url,
+                final_url=url,
+                status_code=200,
+                headers={"content-type": "text/html"},
+                body=body,
+                elapsed_ms=1,
             )
 
-        policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "dom",
-                  "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}}
+        policy = {
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "extraction": "dom",
+            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        }
         await engine_mod.crawl_request(
             {"url": "http://example.com/", "policy": policy},
-            http_fetcher=fetcher, cache=HttpCache(),
+            http_fetcher=fetcher,
+            cache=HttpCache(),
         )
         assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
-
 
     def test_effective_max_content_length_scales(self):
         """Adversarial perf #2.1: per-page cap shrinks as concurrency rises, floor
@@ -191,18 +211,24 @@ class TestEngineGaps:
         def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
             body = b"<html><body>some page content</body></html>"
             return HttpFetchResult(
-                url=url, final_url=url, status_code=200,
-                headers={"content-type": "text/html"}, body=body, elapsed_ms=1,
+                url=url,
+                final_url=url,
+                status_code=200,
+                headers={"content-type": "text/html"},
+                body=body,
+                elapsed_ms=1,
             )
 
         policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "dom",
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "extraction": "dom",
             "browser_profile": {"include_html": False},
             "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
         }
         out = await engine_mod.crawl_request(
             {"url": "http://example.com/", "policy": policy},
-            http_fetcher=fetcher, cache=HttpCache(),
+            http_fetcher=fetcher,
+            cache=HttpCache(),
         )
         res = out["results"][0]
         assert res["html"] is None

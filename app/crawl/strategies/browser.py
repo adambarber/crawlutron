@@ -17,7 +17,7 @@ import logging
 import os
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.classify import classify_page
@@ -61,6 +61,7 @@ def _assert_safe_final_url(final_url: str) -> None:
     """
     _check_ssrf_protection(final_url)
 
+
 def _is_ssrf_blocked(url: str) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target (F8)."""
     try:
@@ -80,7 +81,7 @@ _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 # content and only add network load. The canonical list lives in
 # app.constants (single source of truth) so the engine can also refuse to
 # enqueue these hosts as jobs.
-from app.constants import is_analytics_host as _is_analytics_url  # noqa: E402
+from app.constants import is_analytics_host as _is_analytics_url
 
 
 def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screenshot: bool = False):
@@ -119,16 +120,11 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
         # text-extraction crawler never needs images/fonts/media, and blocking
         # them cuts ~70% of rendered-page bandwidth. They are only permitted
         # when an explicit screenshot is requested (#4).
-        if (
-            getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES
-            and not include_screenshot
-        ):
+        if getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot:
             await route.abort()
             return
         try:
-            pinned_url, host_headers = await asyncio.to_thread(
-                _build_pinned_request, request.url, {}
-            )
+            pinned_url, host_headers = await asyncio.to_thread(_build_pinned_request, request.url, {})
         except Exception:
             # Fail closed: DNS timeout, resolver errors, anything unexpected ->
             # abort rather than let an unchecked connection proceed.
@@ -161,7 +157,7 @@ def _make_ssrf_websocket_handler():
         scheme = url.split(":", 1)[0].lower()
         if scheme not in ("ws", "wss"):
             return  # not a websocket target
-        http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme):]
+        http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
         try:
             await asyncio.to_thread(_check_ssrf_protection, http_equivalent)
         except Exception:
@@ -239,7 +235,9 @@ class BrowserRenderer:
                 self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
             else:
                 self._challenge_wait_seconds = float(
-                    os.environ.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", str(DEFAULT_CHALLENGE_WAIT_SECONDS))
+                    os.environ.get(
+                        "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", str(DEFAULT_CHALLENGE_WAIT_SECONDS)
+                    )
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
@@ -268,7 +266,9 @@ class BrowserRenderer:
         _concurrent_pages = (
             settings.max_concurrent_pages
             if settings is not None
-            else int(os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", str(DEFAULT_MAX_CONCURRENT_PAGES)))
+            else int(
+                os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", str(DEFAULT_MAX_CONCURRENT_PAGES))
+            )
         )
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
 
@@ -295,6 +295,7 @@ class BrowserRenderer:
         """
         try:
             from app.validation import registrable_domain as _rd
+
             context = getattr(page, "context", None)
             if context is None:
                 return
@@ -302,9 +303,8 @@ class BrowserRenderer:
             header = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
             if header:
                 _store_browser_cookies(_rd(url), header)
-                logger.info("browser_cookies_harvested",
-                            extra={"domain": _rd(url), "count": len(cookies)})
-        except Exception as error:  # noqa: BLE001 - harvest is best-effort
+                logger.info("browser_cookies_harvested", extra={"domain": _rd(url), "count": len(cookies)})
+        except Exception as error:
             logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
 
     async def _reset_browser(self) -> None:
@@ -338,13 +338,17 @@ class BrowserRenderer:
                 last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
-                    return self._failure_result(url, "retry_exhausted", "navigation_timeout", attempts, started, last_error)
+                    return self._failure_result(
+                        url, "retry_exhausted", "navigation_timeout", attempts, started, last_error
+                    )
                 await self._async_sleep(min(2 ** (attempts - 1), 5))
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
                 last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
-                    return self._failure_result(url, "retry_exhausted", "unknown_error", attempts, started, last_error)
+                    return self._failure_result(
+                        url, "retry_exhausted", "unknown_error", attempts, started, last_error
+                    )
                 await self._async_sleep(min(2 ** (attempts - 1), 5))
 
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
@@ -483,7 +487,9 @@ class BrowserRenderer:
             )
 
             # Extract with challenge waiting
-            html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(page, options)
+            html, text, classification, challenge_resolved = await self._extract_with_challenge_wait(
+                page, options
+            )
 
             extraction_method = "dom_text"
             final_url = page.url
@@ -727,7 +733,9 @@ class BrowserRenderer:
             return {"viewport": {"width": 390, "height": 844}}
         return {"viewport": {"width": 1365, "height": 768}}
 
-    async def _extract_with_challenge_wait(self, page: Any, options: RenderOptions) -> tuple[str | None, str | None, str, bool]:
+    async def _extract_with_challenge_wait(
+        self, page: Any, options: RenderOptions
+    ) -> tuple[str | None, str | None, str, bool]:
         html = await self._extract_html(page) if options.include_html else None
         text = await self._extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
@@ -858,9 +866,9 @@ class BrowserRenderer:
                 'button[class*="consent"]',
                 'button[id*="cookie"]',
                 'button[class*="cookie"]',
-                '#onetrust-accept-btn-handler',
-                '.cc-btn.cc-allow',
-                '.cookie-consent-accept',
+                "#onetrust-accept-btn-handler",
+                ".cc-btn.cc-allow",
+                ".cookie-consent-accept",
                 '[data-testid="cookie-accept"]',
                 '[data-cy="accept-cookies"]',
             ]
@@ -927,6 +935,7 @@ class BrowserRenderer:
     def _create_camoufox_browser(self, **kwargs: Any):
         """Factory for AsyncCamoufox browser."""
         from camoufox.async_api import AsyncCamoufox
+
         return AsyncCamoufox(**kwargs)
 
     def _warmup_urls_from_env(self) -> list[str]:
@@ -934,7 +943,12 @@ class BrowserRenderer:
         return [url.strip() for url in value.split(",") if url.strip()]
 
     def _headless_enabled(self) -> bool:
-        return os.environ.get("BROWSER_CRAWLER_HEADLESS", "true").strip().lower() not in {"0", "false", "no", "off"}
+        return os.environ.get("BROWSER_CRAWLER_HEADLESS", "true").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
 
     def _looks_like_pdf(self, url: str) -> bool:
         return url.split("?", 1)[0].lower().endswith(".pdf")

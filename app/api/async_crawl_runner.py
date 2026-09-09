@@ -110,7 +110,7 @@ async def run_async_crawl(
             # Also store in result_store for backward compat (sync path reads from here)
             try:
                 result_store.put(request_id, response_payload)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
 
             # Deliver webhook if provided
@@ -119,7 +119,7 @@ async def run_async_crawl(
 
                 await post_webhook(webhook_url, response_payload)
 
-    except Exception as exc:  # noqa: BLE001 - background task must not crash
+    except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
         job = job_store.load(request_id)
         if job is not None:
@@ -138,7 +138,7 @@ async def run_async_crawl(
                 from app.api.webhooks import post_webhook
 
                 await post_webhook(webhook_url, error_payload)
-            except Exception:  # noqa: BLE001, S110
+            except Exception:
                 pass
 
 

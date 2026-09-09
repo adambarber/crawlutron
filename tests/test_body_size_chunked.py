@@ -10,8 +10,11 @@ When the client sends a Transfer-Encoding: chunked request with multiple
 def _extract_function_body(source: str, name: str) -> str:
     """Extract just the body of an async function ``name`` at any indent."""
     import re
+
     pattern = re.compile(
-        r"^[ \t]*async def " + re.escape(name) + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
+        r"^[ \t]*async def "
+        + re.escape(name)
+        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
         re.MULTILINE | re.DOTALL,
     )
     m = pattern.search(source)
@@ -34,7 +37,7 @@ def test_chunked_request_truncation_sets_connection_close():
     sockets are not poisoned (adversarial review F-no-body-size-limit C1)."""
     with open("app/api/middleware.py") as f:
         source = f.read()
-    assert "response.headers[\"Connection\"] = \"close\"" in source
+    assert 'response.headers["Connection"] = "close"' in source
 
 
 def test_chunked_request_drain_continues_after_truncation():

@@ -1,15 +1,17 @@
 """Result retrieval by request_id (fixes dead status_url + lost sync results)."""
 
-
 from app.crawl.result_store import CrawlResultStore
 
 
 def _clock(start=1000.0):
     state = {"t": start}
+
     def clock():
         return state["t"]
+
     def advance(seconds):
         state["t"] += seconds
+
     return clock, advance
 
 

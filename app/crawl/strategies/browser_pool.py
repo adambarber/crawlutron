@@ -117,7 +117,7 @@ class BrowserPool:
             for renderer in self._renderers:
                 try:
                     await renderer.close()
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             self._renderers.clear()
             self._initialized = False
