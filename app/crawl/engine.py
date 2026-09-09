@@ -450,6 +450,22 @@ def _cap_robots_cache(cache: dict, max_size: int) -> None:
         cache.pop(next(iter(cache)))
 
 
+def _purge_robots_cache(now: float | None = None) -> int:
+    """Remove expired entries from the module robots cache; return count removed.
+
+    Module-level (was nested in _crawl_request_impl) so the shape contract is
+    directly testable. Entries are (expires, rules, sitemaps, crawl_delay)
+    4-tuples -- unpacking fewer (L10) crashed purging instead of evicting.
+    """
+    if now is None:
+        now = time.monotonic()
+    with _ROBOTS_CACHE_LOCK:
+        expired = [origin for origin, (expires, _, _, _) in robots_cache.items() if expires <= now]
+        for origin in expired:
+            del robots_cache[origin]
+    return len(expired)
+
+
 def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     """Return True if ``target_url`` is allowed by the robots ``rules``.
 
@@ -869,16 +885,6 @@ async def _crawl_request_impl(
     # allow-list an origin for the full robots_ttl, nor block it for an hour.
     ROBOTS_FAILURE_TTL_SECONDS = 60.0
 
-    def _purge_robots_cache(now: float | None = None) -> int:
-        """Remove expired entries from robots cache; return number removed."""
-        if now is None:
-            now = time.monotonic()
-        with _ROBOTS_CACHE_LOCK:
-            expired = [origin for origin, (expires, _, _) in robots_cache.items() if expires <= now]
-            for origin in expired:
-                del robots_cache[origin]
-        return len(expired)
-
     def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
         """RFC 9309 group selection: parse discrete user-agent groups and apply
         only the most-specific group matching our product token (falling back to
@@ -945,7 +951,9 @@ async def _crawl_request_impl(
                 out.append(value.strip())
         return out
 
-    async def _fetch_robots_rules(origin: str) -> tuple[list[tuple[bool, str]], list[str]]:
+    async def _fetch_robots_rules(
+        origin: str,
+    ) -> tuple[list[tuple[bool, str]], list[str], float | None]:
         now = time.monotonic()
         # Periodically purge expired entries to prevent unbounded growth.
         # The len() read is intentionally outside the lock: it is a cheap
