@@ -173,3 +173,27 @@ async def test_engine_throttles_batches_under_cpu_pressure(tmp_path, monkeypatch
         "http://example.com/a",
     }
     assert waits, "engine dispatched without consulting the resource gate under CPU pressure"
+
+
+def test_direct_reads_do_not_perturb_slope(monkeypatch):
+    """L7: _usage_ratio() is read by readiness/metrics/waits between dispatch
+    scale computations. Those reads must not mutate the slope series, or a
+    single stray sample invents a climb that is not there."""
+    import time
+
+    import app.memory_pressure as mp
+
+    ratios = iter([0.5, 0.5, 0.1, 0.5, 0.5])
+    ticks = iter([0.0, 10.0, 20.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        mp, "read_memory_stats",
+        lambda cgroup_root="/sys/fs/cgroup": mp.MemoryStats(
+            total_bytes=1000, used_bytes=int(next(ratios) * 1000)
+        ),
+    )
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    gate = mp.MemoryGate(target=0.9, hard=1.0)
+    assert gate.leading_usage_ratio() == 0.5
+    assert gate.leading_usage_ratio() == 0.5
+    gate._usage_ratio()  # stray readiness/metrics read of a dip sample
+    assert gate.leading_usage_ratio() == 0.5

@@ -187,11 +187,17 @@ class MemoryGate(ResourceGauge):
         self._slope: float = 0.0
 
     def _usage_ratio(self) -> float:
+        """Current trailing fraction. Pure read (L7): never mutates slope
+        state, so interleaved readiness/metrics/wait readers cannot perturb
+        the dispatch estimator's slope series."""
         stats = read_memory_stats(cgroup_root=self.cgroup_root)
         if stats.total_bytes <= 0:
             return 0.0
-        ratio = stats.used_bytes / stats.total_bytes
-        # Track the slope for the leading estimate (no throttling effect here).
+        return stats.used_bytes / stats.total_bytes
+
+    def _track_slope(self, ratio: float) -> None:
+        """Advance the climb-rate series. Only the leading estimate calls
+        this, so the series reflects consecutive estimator samples."""
         now = time.monotonic()
         if self._prev_ratio is not None:
             dt = now - self._prev_time
@@ -202,7 +208,6 @@ class MemoryGate(ResourceGauge):
             self._slope = 0.0
         self._prev_ratio = ratio
         self._prev_time = now
-        return ratio
 
     def leading_usage_ratio(self) -> float:
         """Trailing fraction plus a capped anticipation of the climb rate.
@@ -210,6 +215,7 @@ class MemoryGate(ResourceGauge):
         Only used by the dispatch scale factor, never by the hard-ceiling wait.
         """
         raw = self._usage_ratio()
+        self._track_slope(raw)
         if raw >= self.hard:
             return raw
         # If usage is rising, add up to _MAX_ANTICIPATION so we throttle early.
