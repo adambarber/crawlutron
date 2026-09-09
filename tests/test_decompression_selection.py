@@ -1,9 +1,9 @@
-"""TestDecompressionGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Per-encoding decompression failure handling and plain passthrough."""
 
 from coverage_helpers import *
 
 
-class TestDecompressionGaps:
+class TestDecompressionSelection:
     def test_gzip_failure_returns_body(self):
         assert decompress_body(b"not gzip", "gzip") == b"not gzip"
 

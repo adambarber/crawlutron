@@ -1,9 +1,9 @@
-"""TestPayloadHelpersCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Payload helper edge cases: strategy validation and default handling."""
 
 from coverage_helpers import *
 
 
-class TestPayloadHelpersCoverageGaps:
+class TestPayloadHelpersEdges:
     """Cover remaining branches in payload_helpers.py"""
 
     def test_payload_policy_invalid_limits(self):

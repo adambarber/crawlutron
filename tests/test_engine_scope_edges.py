@@ -1,9 +1,9 @@
-"""TestEngineCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Crawl-chain scope edge cases: robots disallow and skip continuation."""
 
 from coverage_helpers import *
 
 
-class TestEngineCoverageGaps:
+class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):

@@ -1,9 +1,9 @@
-"""TestEngineGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Engine chain edge cases: result shaping, payload policy, strategy chain, budgets, robots."""
 
 from coverage_helpers import *
 
 
-class TestEngineGaps:
+class TestEngineChainEdges:
     # Uses the module-level _fake_browser worker factory.
 
     def test_result_dict(self):

@@ -1,9 +1,9 @@
-"""TestDecompressionCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Decompression edge cases: bomb caps, chunked streams, corrupt payloads."""
 
 from coverage_helpers import *
 
 
-class TestDecompressionCoverageGaps:
+class TestDecompressionEdgeCases:
     """Cover remaining branches in decompression.py"""
 
     def test_decompress_body_brotli_import_error(self):

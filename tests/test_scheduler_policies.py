@@ -1,9 +1,9 @@
-"""TestSchedulerCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Scheduler policy units: token buckets, circuit breakers, robots crawl delays."""
 
 from coverage_helpers import *
 
 
-class TestSchedulerCoverageGaps:
+class TestSchedulerPolicies:
     """Cover remaining branches in scheduler.py"""
 
     def test_token_bucket_basic(self):

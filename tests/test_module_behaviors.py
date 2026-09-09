@@ -1,4 +1,4 @@
-"""Tests for extracted modular components."""
+"""Behavioral units of extracted modules: decompression, output formats, formatting."""
 
 from app.crawl.decompression import decompress_body
 from app.crawl.extraction import extract_content
@@ -16,7 +16,7 @@ from app.metrics import get_metrics
 from app.settings import CrawlerSettings
 
 
-class TestDecompression:
+class TestDecompressionBehaviors:
     def test_gzip(self):
         import gzip
 

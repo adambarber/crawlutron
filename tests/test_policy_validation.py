@@ -1,9 +1,9 @@
-"""TestValidationGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""URL and network policy validation: schemes, private networks, registrable domains."""
 
 from coverage_helpers import *
 
 
-class TestValidationGaps:
+class TestPolicyValidation:
     def test_unsupported_scheme(self):
         with pytest.raises(ValueError):
             normalize_public_http_url("ftp://example.com/")

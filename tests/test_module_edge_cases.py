@@ -1,9 +1,9 @@
-"""TestAdditionalCoverage coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Cross-module edge cases: cache, job store, decompression, scheduler, formats."""
 
 from coverage_helpers import *
 
 
-class TestAdditionalCoverage:
+class TestModuleEdgeCases:
     """Additional targeted tests to close coverage gaps."""
 
     def test_content_cache_set_overwrite(self):

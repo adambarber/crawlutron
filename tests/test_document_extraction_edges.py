@@ -1,9 +1,9 @@
-"""TestDocumentGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Document extraction edge cases: redirects, SSRF guards, timeouts."""
 
 from coverage_helpers import *
 
 
-class TestDocumentGaps:
+class TestDocumentExtractionEdges:
     def test_format_table_empty(self):
         assert _format_table([]) == ""
 

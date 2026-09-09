@@ -1,9 +1,41 @@
-"""TestHttpCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""HTTP strategy edge cases: fallback chains, streaming caps, timeout handling."""
+
+import multiprocessing
+import os
 
 from coverage_helpers import *
+from helpers.server import _Handler as _BaseHandler
+from helpers.server import spawn_threaded_server
 
 
-class TestHttpCoverageGaps:
+class _SimpleHandler(_BaseHandler):
+    """Minimal 200/text-html handler for the subprocess cffi smoke test."""
+
+    def do_GET(self):
+        body = b"<html><body>ok</body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
+    """Subprocess body for the cffi smoke test (must be module-level to pickle)."""
+    import asyncio
+
+    os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
+
+    from app.crawl.strategies.http import _default_cffi_fetcher
+
+    try:
+        result = asyncio.run(_default_cffi_fetcher(url, {}, 10, 50 * 1024 * 1024))
+        out_queue.put(("ok", result.status_code))
+    except Exception as error:
+        out_queue.put(("err", type(error).__name__, str(error)[:160]))
+
+
+class TestHttpStrategyEdges:
     """Cover remaining branches in http.py"""
 
     def test_charset_from_bytes_import_error(self):
@@ -30,12 +62,33 @@ class TestHttpCoverageGaps:
         assert _is_private_or_loopback_ip("invalid")
 
     def test_default_cffi_fetcher_response(self):
-        from app.crawl.strategies.http import _default_cffi_fetcher
+        """real_cffi subprocess: a normal fetch returns the served 200.
 
-        result = _spawn_fetch(
-            lambda s: asyncio.run(_default_cffi_fetcher(s.base_url + "/", {}, 10, 50 * 1024 * 1024))
-        )
-        assert result.status_code == 200
+        In-process real cffi is banned (#1744/#1746): under fast_sleeps the
+        curl watchdog busy-spins the GIL and wedges the pytest process, so
+        the fetch runs in an isolated interpreter with a hard join.
+        """
+        import multiprocessing
+
+        server = spawn_threaded_server(_SimpleHandler)
+        url = f"http://127.0.0.1:{server.server_port}/"
+        out_queue: multiprocessing.Queue = multiprocessing.Queue()
+        worker = multiprocessing.Process(target=_cffi_smoke_worker, args=(url, out_queue))
+        try:
+            worker.start()
+            worker.join(timeout=10.0)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join()
+                pytest.fail("cffi fetcher hung past 10s on a normal response")
+        finally:
+            server.shutdown()
+            server.server_close()
+
+        assert worker.exitcode == 0, f"worker crashed: exitcode={worker.exitcode}"
+        assert not out_queue.empty(), "worker produced no result"
+        outcome, status_or_exc = out_queue.get()
+        assert outcome == "ok" and status_or_exc == 200
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.crawl.cache import HttpCache

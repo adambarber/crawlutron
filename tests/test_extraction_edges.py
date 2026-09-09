@@ -1,9 +1,9 @@
-"""TestExtractionCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Content extraction edge cases: markitdown worker, EOF handling, zombie reaping."""
 
 from coverage_helpers import *
 
 
-class TestExtractionCoverageGaps:
+class TestExtractionEdges:
     """Cover remaining branches in extraction.py"""
 
     def test_extract_content_with_css_selector(self):

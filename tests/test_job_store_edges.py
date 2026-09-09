@@ -1,9 +1,9 @@
-"""TestJobStoreCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Job store edge cases: corrupt rows, frontier persistence, state transitions."""
 
 from coverage_helpers import *
 
 
-class TestJobStoreCoverageGaps:
+class TestJobStoreEdges:
     """Cover remaining branches in job_store.py"""
 
     def test_job_store_load_exception(self):

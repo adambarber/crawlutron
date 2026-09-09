@@ -1,9 +1,9 @@
-"""TestHttpServerGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""HTTP body handling through a live server: caching, rate-limit cooldown, cffi."""
 
 from coverage_helpers import *
 
 
-class TestHttpServerGaps:
+class TestHttpBodyHandling:
     def _policy(self, extra=None):
         policy = {
             "request_profile": {},
@@ -46,7 +46,8 @@ class TestHttpServerGaps:
         assert "cooldown" in out.diagnostics
         assert out.diagnostics["cooldown"]["retry_after_seconds"] == 30
 
-    async def test_cffi_fetch_via_crawl_request(self, base_url):
+    @pytest.mark.real_cffi
+    async def test_cffi_fetch_via_crawl_request(self, base_url, real_sleeps):
         result = await crawl_request(
             {"url": base_url + "/", "policy": {"strategies": ["HTTP_CFFI_IMPERSONATE"]}},
             cache=HttpCache(),

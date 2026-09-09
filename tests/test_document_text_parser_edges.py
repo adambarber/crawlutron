@@ -1,9 +1,9 @@
-"""TestDocumentTextParserGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Document text parser edge cases: encoding, malformed HTML, empty documents."""
 
 from coverage_helpers import *
 
 
-class TestDocumentTextParserGaps:
+class TestDocumentTextParserEdges:
     def test_range_action(self):
         out = _format_extracted_document_text(
             "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it",

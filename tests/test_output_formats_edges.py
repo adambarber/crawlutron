@@ -1,9 +1,9 @@
-"""TestOutputFormatsCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Output format edge cases: CSV injection guards, unknown formats, defaults."""
 
 from coverage_helpers import *
 
 
-class TestOutputFormatsCoverageGaps:
+class TestOutputFormatsEdges:
     """Cover remaining branches in output_formats.py"""
 
     def test_serialize_default_fallback(self):

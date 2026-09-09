@@ -1,9 +1,9 @@
-"""TestClassifyGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""HTML comment handling in content classification."""
 
 from coverage_helpers import *
 
 
-class TestClassifyGaps:
+class TestClassificationComments:
     def test_html_without_script_style_signal(self):
         # Regression guard for the HTML-comment classification bypass fix:
         # a block signature inside an HTML comment must NOT be detected

@@ -1,9 +1,9 @@
-"""TestBrowserXhrHandlerGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""XHR/ajax interception edge cases in the browser worker."""
 
 from coverage_helpers import *
 
 
-class TestBrowserXhrHandlerGaps:
+class TestBrowserXhrEdgeCases:
     async def test_json_payload_captured(self):
         from app.crawl.strategies.browser import BrowserRenderer
 

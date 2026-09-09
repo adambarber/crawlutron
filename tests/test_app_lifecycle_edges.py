@@ -1,9 +1,9 @@
-"""TestMainCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""App lifecycle edge cases: import failures, lifespan startup/shutdown paths."""
 
 from coverage_helpers import *
 
 
-class TestMainCoverageGaps:
+class TestAppLifecycleEdges:
     """Cover remaining branches in main.py"""
 
     def test_main_import_error_handling(self):
@@ -13,11 +13,17 @@ class TestMainCoverageGaps:
 
     async def test_render_endpoint_value_error(self):
         from app.main import app
+        from app.crawl.strategies.browser_pool import set_browser_pool
 
         async def test(client):
             # ASGI harness runs no lifespan, so the pool is None; M13's guard
             # answers 503 browser_pool_unavailable before URL validation.
-            resp = await client.post("/v1/render", json={"url": "invalid"})
+            # Own the premise explicitly: ordering must never decide it.
+            previous = set_browser_pool(None)
+            try:
+                resp = await client.post("/v1/render", json={"url": "invalid"})
+            finally:
+                set_browser_pool(previous)
             assert resp.status_code == 503
             assert resp.json()["code"] == "browser_pool_unavailable"
 

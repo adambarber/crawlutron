@@ -1,9 +1,9 @@
-"""TestMoreCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Cross-module edge cases (continued): charset fallbacks, OS errors, safe coercion."""
 
 from coverage_helpers import *
 
 
-class TestMoreCoverageGaps:
+class TestModuleEdgeCasesMore:
     """More targeted tests to close remaining coverage gaps."""
 
     def test_content_cache_prune_os_error(self):

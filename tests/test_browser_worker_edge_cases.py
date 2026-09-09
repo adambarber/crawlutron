@@ -1,9 +1,9 @@
-"""TestBrowserCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Browser worker edge cases: rendering, XHR handling, consent, crash classification."""
 
 from coverage_helpers import *
 
 
-class TestBrowserCoverageGaps:
+class TestBrowserWorkerEdgeCases:
     """Cover remaining branches in browser.py"""
 
     async def test_browser_renderer_reset_browser_error(self):

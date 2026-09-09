@@ -1,9 +1,9 @@
-"""TestHttpHelperGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Fetch helper edge cases: sitemap recursion, rate limiting, robots fetching."""
 
 from coverage_helpers import *
 
 
-class TestHttpHelperGaps:
+class TestFetchHelpersEdges:
     def test_cookie_header_per_host(self):
         assert (
             _cookie_header_for_url(

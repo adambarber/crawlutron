@@ -1,9 +1,9 @@
-"""TestContentCacheCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Content cache edge cases: eviction, corruption, budget accounting."""
 
 from coverage_helpers import _temp_cache
 
 
-class TestContentCacheCoverageGaps:
+class TestContentCacheEdgeCases:
     """Cover remaining branches in content_cache.py"""
 
     def test_content_cache_get_invalid_json(self):

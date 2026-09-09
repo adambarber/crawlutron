@@ -1,9 +1,9 @@
-"""TestCacheGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""HTTP cache edge cases: TTL expiry, conditional revalidation, vary handling."""
 
 from coverage_helpers import *
 
 
-class TestCacheGaps:
+class TestHttpCacheEdges:
     def test_conditional_headers_include_last_modified(self):
         c = HttpCache()
         c.store("http://x/1", {"etag": "v1", "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"})

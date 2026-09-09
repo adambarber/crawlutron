@@ -105,7 +105,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # (asserts, fake creds) that bandit/bugbear flag; strict hygiene does not apply.
 "tests/**" = ["E402", "F403", "F405", "S", "B"]
 # Coverage-gap suites reach into module internals by design (getattr seams).
-"tests/test_*_gaps.py" = ["F841"]
+"tests/test_module_edge_cases_more.py" = ["F841"]
 # The shared helper namespaces intentionally re-export their surface for suites.
 "tests/helpers/__init__.py" = ["F401"]
 "tests/coverage_helpers.py" = ["F401"]

@@ -1,9 +1,9 @@
-"""TestResultHelpersCoverageGaps coverage tests (split from tests/test_coverage_gaps.py)."""
+"""Result helper edge cases: classification fallbacks and evidence merging."""
 
 from coverage_helpers import *
 
 
-class TestResultHelpersCoverageGaps:
+class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
 
     def test_blocked_engine_result(self):
