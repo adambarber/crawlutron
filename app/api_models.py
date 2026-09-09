@@ -6,28 +6,24 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import (
-    DEFAULT_MAX_DISCOVERED_LINKS,
+    BROWSER_HEADED_WARMED,
+    BROWSER_HEADLESS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    MAX_TOTAL_URL_BUDGET_SECONDS,
-    MAX_DISCOVERED_LINKS,
-    MAX_RETRIES,
-    DEFAULT_STRATEGIES,
     EXTRACTION_DOCUMENT,
     EXTRACTION_DOM,
     EXTRACTION_FULL,
     EXTRACTION_TRAFILATURA,
-    BROWSER_HEADED_WARMED,
-    BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
-    SUPPORTED_EXTRACTIONS,
-    SUPPORTED_STRATEGIES,
+    MAX_DISCOVERED_LINKS,
+    MAX_RETRIES,
+    MAX_TOTAL_URL_BUDGET_SECONDS,
     SERVICE_VERSION,
 )
-
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 # Service version lives in app.constants (base layer, no import cycle).
@@ -291,14 +287,19 @@ class CrawlPolicy(BaseModel):
 
 
 def _require_exactly_one_url_source(model: BaseModel) -> BaseModel:
-    """Shared url/urls contract for crawl and render requests (L5).
+    """Shared url/urls contract for crawl and render requests (L5, N4).
 
     Both set silently ignored ``url``; neither failed late in
-    ``_payload_urls``. Exactly one (non-empty) source is required."""
-    has_url = bool(model.url)
-    has_urls = bool(model.urls)
+    ``_payload_urls``. Exactly one source is required, and ``urls=[]`` is
+    NOT "absent": it dumps through exclude_none and resolves to zero
+    targets, so an identity check (not truthiness) gates the contract.
+    """
+    has_url = model.url is not None
+    has_urls = model.urls is not None
     if has_url == has_urls:
         raise ValueError("supply exactly one of 'url' or 'urls'")
+    if has_urls and not model.urls:
+        raise ValueError("'urls' must contain at least one URL")
     return model
 
 

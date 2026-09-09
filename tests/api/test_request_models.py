@@ -28,3 +28,17 @@ def test_neither_url_nor_urls_rejected(model):
 def test_exactly_one_url_source_accepted(model):
     assert model(url="http://example.com/").url == "http://example.com/"
     assert model(urls=["http://example.com/"]).urls == ["http://example.com/"]
+
+
+@pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
+def test_empty_urls_list_with_url_rejected(model):
+    """N4: urls=[] is not "absent" -- exclude_none dumps it, _payload_urls
+    resolves it to zero targets, and url is silently ignored."""
+    with pytest.raises(ValidationError):
+        model(url="http://example.com/", urls=[])
+
+
+@pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
+def test_urls_only_empty_rejected(model):
+    with pytest.raises(ValidationError):
+        model(urls=[])
