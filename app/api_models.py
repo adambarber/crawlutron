@@ -6,7 +6,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import (
-    DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_HTTP_TIMEOUT_SECONDS,
@@ -117,9 +116,18 @@ class DiscoveryConfig(BaseModel):
 
     Only recognized keys are accepted; extra keys are rejected.
     """
-    robots: bool = Field(True, description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow patterns.")
-    sitemaps: bool = Field(True, description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common locations.")
-    feeds: bool = Field(True, description='Detect RSS/Atom/JSON Feed links via <link rel="alternate"> and common feed paths.')
+
+    robots: bool = Field(
+        True,
+        description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow patterns.",
+    )
+    sitemaps: bool = Field(
+        True,
+        description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common locations.",
+    )
+    feeds: bool = Field(
+        True, description='Detect RSS/Atom/JSON Feed links via <link rel="alternate"> and common feed paths.'
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -133,8 +141,13 @@ class FetchValidators(BaseModel):
     ``not_modified`` result (no content) so freshness monitors avoid paying
     full-fetch cost on unchanged pages.
     """
-    if_none_match: str | None = Field(None, description="ETag from a previous crawl result; sent as If-None-Match.")
-    if_modified_since: str | None = Field(None, description="Last-Modified date from a previous crawl result; sent as If-Modified-Since.")
+
+    if_none_match: str | None = Field(
+        None, description="ETag from a previous crawl result; sent as If-None-Match."
+    )
+    if_modified_since: str | None = Field(
+        None, description="Last-Modified date from a previous crawl result; sent as If-Modified-Since."
+    )
 
 
 class ContentValidators(BaseModel):
@@ -143,26 +156,76 @@ class ContentValidators(BaseModel):
     Feed ``etag`` / ``last_modified`` back as ``if_none_match`` /
     ``if_modified_since`` on a later request to revalidate cheaply.
     """
+
     etag: str | None = Field(None, description="Origin ETag for the final representation, if provided.")
     last_modified: str | None = Field(None, description="Origin Last-Modified date, if provided.")
 
 
 class CrawlPolicyLimits(BaseModel):
-    timeout_seconds: int = Field(DEFAULT_HTTP_TIMEOUT_SECONDS, ge=1, le=120, description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.")
-    max_retries: int = Field(DEFAULT_MAX_RETRIES, ge=0, le=MAX_RETRIES, description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.")
-    challenge_wait_seconds: int = Field(DEFAULT_CHALLENGE_WAIT_SECONDS, ge=0, le=120, description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.")
-    max_discovered_links: int = Field(DEFAULT_MAX_DISCOVERED_LINKS, ge=0, le=MAX_DISCOVERED_LINKS, description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.")
-    respect_robots: bool = Field(True, description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.")
-    max_depth: int = Field(0, ge=0, le=20, description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.")
-    max_pages: int = Field(0, ge=0, le=2000, description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).")
-    max_rps: float = Field(0.0, ge=0.0, le=100.0, description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.")
-    max_content_length_bytes: int = Field(DEFAULT_MAX_CONTENT_LENGTH_BYTES, ge=0, description="Maximum content size in bytes per response. 10MB default bounds memory under parallel crawling (2GB budget); raise for large-document workloads.")
-    total_url_budget_seconds: float = Field(DEFAULT_TOTAL_URL_BUDGET_SECONDS, ge=0.1, le=MAX_TOTAL_URL_BUDGET_SECONDS, description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit URL that exceeds this is failed as network_error instead of holding a concurrency slot. Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs should keep this generous).")
-
+    timeout_seconds: int = Field(
+        DEFAULT_HTTP_TIMEOUT_SECONDS,
+        ge=1,
+        le=120,
+        description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.",
+    )
+    max_retries: int = Field(
+        DEFAULT_MAX_RETRIES,
+        ge=0,
+        le=MAX_RETRIES,
+        description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.",
+    )
+    challenge_wait_seconds: int = Field(
+        DEFAULT_CHALLENGE_WAIT_SECONDS,
+        ge=0,
+        le=120,
+        description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.",
+    )
+    max_discovered_links: int = Field(
+        DEFAULT_MAX_DISCOVERED_LINKS,
+        ge=0,
+        le=MAX_DISCOVERED_LINKS,
+        description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.",
+    )
+    respect_robots: bool = Field(
+        True,
+        description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.",
+    )
+    max_depth: int = Field(
+        0,
+        ge=0,
+        le=20,
+        description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.",
+    )
+    max_pages: int = Field(
+        0,
+        ge=0,
+        le=2000,
+        description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).",
+    )
+    max_rps: float = Field(
+        0.0,
+        ge=0.0,
+        le=100.0,
+        description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.",
+    )
+    max_content_length_bytes: int | None = Field(
+        None,
+        ge=0,
+        description="Maximum content size in bytes per response. Omit (recommended) to let the service scale the per-page cap against its RAM budget and concurrency; set an explicit value only when a host needs a hard cap regardless of parallelism.",
+    )
+    total_url_budget_seconds: float = Field(
+        DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+        ge=0.1,
+        le=MAX_TOTAL_URL_BUDGET_SECONDS,
+        description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit URL that exceeds this is failed as network_error instead of holding a concurrency slot. Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs should keep this generous).",
+    )
 
 
 class CrawlPolicy(BaseModel):
-    schema_version: str = Field(POLICY_SCHEMA_VERSION, description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.")
+    schema_version: str = Field(
+        POLICY_SCHEMA_VERSION,
+        description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.",
+    )
     strategies: list[CrawlStrategy] = Field(
         default_factory=lambda: [
             CrawlStrategy.HTTP_DECLARED_CRAWLER,
@@ -177,14 +240,38 @@ class CrawlPolicy(BaseModel):
         CrawlExtractionMethod.FULL,
         description="Output/parsing pipeline applied to the content the selected fetch strategy retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
     )
-    limits: CrawlPolicyLimits = Field(default_factory=CrawlPolicyLimits, description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.")
-    headers: dict[str, str] = Field(default_factory=dict, description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.")
-    request_profile: dict[str, Any] = Field(default_factory=dict, description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.")
-    browser_profile: dict[str, Any] = Field(default_factory=dict, description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.")
-    discovery: DiscoveryConfig | None = Field(None, description="Optional discovery configuration. Only robots, sitemaps, and feeds are recognized. Omit to use defaults (all enabled).")
-    scope_regex: str | None = Field(None, description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.")
-    css_selector: str | None = Field(None, description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.")
-    xpath: str | None = Field(None, description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.")
+    limits: CrawlPolicyLimits = Field(
+        default_factory=CrawlPolicyLimits,
+        description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.",
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.",
+    )
+    request_profile: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.",
+    )
+    browser_profile: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), and benign cookie jar hints. Viewport changes Firefox window size; reduced resource mode disables images.",
+    )
+    discovery: DiscoveryConfig | None = Field(
+        None,
+        description="Optional discovery configuration. Only robots, sitemaps, and feeds are recognized. Omit to use defaults (all enabled).",
+    )
+    scope_regex: str | None = Field(
+        None,
+        description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.",
+    )
+    css_selector: str | None = Field(
+        None,
+        description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.",
+    )
+    xpath: str | None = Field(
+        None,
+        description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
+    )
 
     @field_validator("browser_profile")
     @classmethod
@@ -199,9 +286,7 @@ class CrawlPolicy(BaseModel):
         actions = (profile or {}).get("actions") or []
         for action in actions:
             if isinstance(action, dict) and str(action.get("type", "")).lower() == "execute_js":
-                raise ValueError(
-                    "execute_js actions are not permitted in browser_profile"
-                )
+                raise ValueError("execute_js actions are not permitted in browser_profile")
         return profile
 
 
@@ -219,16 +304,26 @@ def _require_exactly_one_url_source(model: BaseModel) -> BaseModel:
 
 class CrawlRequest(BaseModel):
     url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
-    urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls.")
-    policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan.")
+    urls: list[str] | None = Field(
+        None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls."
+    )
+    policy: CrawlPolicy = Field(
+        default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan."
+    )
     validators: dict[str, FetchValidators] = Field(
         default_factory=dict,
         description="Optional map of submitted URL -> cached validators for conditional revalidation. "
-                    "Keys may be the original or normalized URL. Matching URLs are fetched with "
-                    "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",
+        "Keys may be the original or normalized URL. Matching URLs are fetched with "
+        "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",
     )
-    async_mode: bool = Field(False, description="When true, accept immediately (202) and run the crawl in the background. Results are persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result is delivered there on completion.")
-    webhook_url: str | None = Field(None, description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.")
+    async_mode: bool = Field(
+        False,
+        description="When true, accept immediately (202) and run the crawl in the background. Results are persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result is delivered there on completion.",
+    )
+    webhook_url: str | None = Field(
+        None,
+        description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.",
+    )
     output_format: str | None = Field(
         None,
         description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
@@ -268,17 +363,28 @@ class MapRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     url: str = Field(..., description="Root public HTTP(S) URL to map.")
-    policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.")
+    policy: CrawlPolicy = Field(
+        default_factory=CrawlPolicy,
+        description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.",
+    )
 
 
 class SiteMapResponse(BaseModel):
     """Response for ``POST /v1/map``."""
 
     url: str | None = Field(None, description="Root URL (final_url or original_url) of the mapping crawl.")
-    links: list[str] = Field(default_factory=list, description="In-page discovered links (sorted, de-duplicated).")
-    sitemaps: list[str] = Field(default_factory=list, description="robots.txt + sitemap.xml URLs (sorted, de-duplicated).")
-    feeds: list[str] = Field(default_factory=list, description="Discovered feed URLs (sorted, de-duplicated).")
-    all_urls: list[str] = Field(default_factory=list, description="De-duplicated union in stable encounter order.")
+    links: list[str] = Field(
+        default_factory=list, description="In-page discovered links (sorted, de-duplicated)."
+    )
+    sitemaps: list[str] = Field(
+        default_factory=list, description="robots.txt + sitemap.xml URLs (sorted, de-duplicated)."
+    )
+    feeds: list[str] = Field(
+        default_factory=list, description="Discovered feed URLs (sorted, de-duplicated)."
+    )
+    all_urls: list[str] = Field(
+        default_factory=list, description="De-duplicated union in stable encounter order."
+    )
 
 
 class SearchRequest(BaseModel):
@@ -305,7 +411,9 @@ class SearchRequest(BaseModel):
 class SearchResultItem(BaseModel):
     """A single SERP result from ``POST /v1/search``."""
 
-    url: str = Field(description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service.")
+    url: str = Field(
+        description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service."
+    )
     title: str = Field(description="Result title from the search engine.")
     description: str = Field("", description="Result snippet from the search engine.")
 
@@ -320,7 +428,6 @@ class SearchResponse(BaseModel):
     data: list[SearchResultItem] = Field(default_factory=list, description="Ordered SERP results.")
 
 
-
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
 
@@ -329,7 +436,9 @@ class RenderOptionsRequest(BaseModel):
     timeout_seconds: int | None = Field(None, description="Per-render navigation timeout in seconds.")
     wait_until: str | None = Field(None, description="Render settle condition, e.g. network_idle_or_timeout.")
     max_retries: int | None = Field(None, description="Maximum retries for a transient render failure.")
-    respect_robots: bool | None = Field(None, description="Whether to honor robots.txt for the render target.")
+    respect_robots: bool | None = Field(
+        None, description="Whether to honor robots.txt for the render target."
+    )
     include_html: bool | None = Field(None, description="Include the rendered HTML in the result.")
     include_text: bool | None = Field(None, description="Include extracted visible text in the result.")
 
@@ -340,8 +449,12 @@ class RenderRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     url: str | None = Field(None, description="Single public HTTP(S) URL to render. Use either url or urls.")
-    urls: list[str] | None = Field(None, description="Batch of public HTTP(S) URLs to render. Use either url or urls.")
-    options: RenderOptionsRequest | None = Field(None, description="Browser render options; omitted fields use server defaults.")
+    urls: list[str] | None = Field(
+        None, description="Batch of public HTTP(S) URLs to render. Use either url or urls."
+    )
+    options: RenderOptionsRequest | None = Field(
+        None, description="Browser render options; omitted fields use server defaults."
+    )
 
     @model_validator(mode="after")
     def _require_url_source(self):
@@ -351,28 +464,38 @@ class RenderRequest(BaseModel):
 class ClassificationEvidence(BaseModel):
     classification: str = Field(description="Classification selected by this matched evidence.")
     signature: str = Field(description="Signature that matched the selected source bucket.")
-    source: str = Field(description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or http_status.")
+    source: str = Field(
+        description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or http_status."
+    )
     context: str = Field("", description="Short normalized context around the matched signature.")
 
 
 class DiscoveredLink(BaseModel):
     url: str = Field(description="Raw href value observed on the selected page.")
-    normalized_url: str = Field(description="Absolute public HTTP(S) URL resolved against the selected page final URL.")
+    normalized_url: str = Field(
+        description="Absolute public HTTP(S) URL resolved against the selected page final URL."
+    )
     text: str = Field("", description="Visible anchor text after whitespace normalization.")
     rel: list[str] = Field(default_factory=list, description="Anchor rel tokens, when present.")
     source_url: str = Field(description="Final page URL where this link was discovered.")
     host: str = Field(description="Host for the normalized URL.")
-    is_same_host: bool = Field(description="True when the discovered link host matches the source page host exactly.")
+    is_same_host: bool = Field(
+        description="True when the discovered link host matches the source page host exactly."
+    )
 
 
 class StrategyAttempt(BaseModel):
     strategy: CrawlStrategy = Field(description="Strategy attempted for this URL.")
     status: CrawlStatus = Field(description="Attempt-level status.")
     classification: CrawlClassification = Field(description="Attempt-level classification.")
-    http_status: int | None = Field(None, description="HTTP status observed by this strategy, when available.")
+    http_status: int | None = Field(
+        None, description="HTTP status observed by this strategy, when available."
+    )
     content_type: str | None = Field(None, description="Observed content type, when available.")
     elapsed_ms: int = Field(description="Attempt elapsed time in milliseconds.")
-    error: str | None = Field(None, description="Stable machine-readable error detail for this attempt, if any.")
+    error: str | None = Field(
+        None, description="Stable machine-readable error detail for this attempt, if any."
+    )
 
 
 class FirecrawlMetadata(BaseModel):
@@ -406,12 +529,20 @@ class UnifiedCrawlResult(BaseModel):
     # 2. Execution Status
     status: CrawlStatus = Field(description="Overall per-URL status (success, blocked, failed, etc.).")
     classification: CrawlClassification = Field(description="Overall per-URL classification.")
-    selected_strategy: CrawlStrategy | None = Field(None, description="Strategy that produced the selected result.")
-    attempted_strategies: list[StrategyAttempt] = Field(default_factory=list, description="Ordered per-strategy attempt history.")
+    selected_strategy: CrawlStrategy | None = Field(
+        None, description="Strategy that produced the selected result."
+    )
+    attempted_strategies: list[StrategyAttempt] = Field(
+        default_factory=list, description="Ordered per-strategy attempt history."
+    )
     error: str | None = Field(None, description="Stable machine-readable error detail, if any.")
     # 3. Firecrawl-Style LLM Output (The "Meat")
-    markdown: str | None = Field(None, description="Cleaned page content in Markdown format for LLM consumption.")
-    metadata: FirecrawlMetadata = Field(default_factory=FirecrawlMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata.")
+    markdown: str | None = Field(
+        None, description="Cleaned page content in Markdown format for LLM consumption."
+    )
+    metadata: FirecrawlMetadata = Field(
+        default_factory=FirecrawlMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata."
+    )
     # 4. Raw Data & Evidence (For debugging & non-LLM pipelines)
     html: str | None = Field(None, description="Raw HTML/body evidence when requested and available.")
     text: str | None = Field(None, description="Extracted text evidence (pre-markdown) when available.")
@@ -421,14 +552,22 @@ class UnifiedCrawlResult(BaseModel):
     http_status: int | None = Field(None)
     headers: dict[str, str] = Field(default_factory=dict)
     content_type: str | None = Field(None)
-    extraction_method: str | None = Field(None, description="http_html, dom_text, pdf_text, trafilatura_extract, etc.")
+    extraction_method: str | None = Field(
+        None, description="http_html, dom_text, pdf_text, trafilatura_extract, etc."
+    )
     # 6. Discovery & Diagnostics
-    diagnostics: dict[str, Any] = Field(default_factory=dict, description="robots, sitemaps, frames, forms, js_endpoints, intercepted_xhr, etc.")
+    diagnostics: dict[str, Any] = Field(
+        default_factory=dict,
+        description="robots, sitemaps, frames, forms, js_endpoints, intercepted_xhr, etc.",
+    )
     discovered_link_count: int = Field(0, ge=0)
     discovered_links_truncated: bool = Field(False)
     discovered_links: list[DiscoveredLink] = Field(default_factory=list)
     next_page_url: str | None = Field(None, description="Auto-detected pagination URL, if found.")
-    validators: ContentValidators | None = Field(None, description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified result.")
+    validators: ContentValidators | None = Field(
+        None,
+        description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified result.",
+    )
 
 
 class UnifiedCrawlResponse(BaseModel):
@@ -446,17 +585,29 @@ class CrawlerError(BaseModel):
 
 
 class ReadinessResponse(BaseModel):
-    status: str = Field(description="Capacity state: ready below the self-managed resource ceiling, saturated when memory or CPU utilization rides at the gate target.")
-    active_requests: int = Field(description="Currently active /v1/crawl and /v1/render requests tracked by the service.")
-    max_active_requests: int = Field(description="0 = unbounded; saturation is resource-driven (memory/CPU utilization at the self-managed gate target), not a fixed request cap.")
-    saturated: bool = Field(description="True when the self-managed resource guard is at capacity; callers should treat HTTP 503 as backpressure, not process death.")
+    status: str = Field(
+        description="Capacity state: ready below the self-managed resource ceiling, saturated when memory or CPU utilization rides at the gate target."
+    )
+    active_requests: int = Field(
+        description="Currently active /v1/crawl and /v1/render requests tracked by the service."
+    )
+    max_active_requests: int = Field(
+        description="0 = unbounded; saturation is resource-driven (memory/CPU utilization at the self-managed gate target), not a fixed request cap."
+    )
+    saturated: bool = Field(
+        description="True when the self-managed resource guard is at capacity; callers should treat HTTP 503 as backpressure, not process death."
+    )
 
 
 class SearchCapabilities(BaseModel):
     """Declared web-search capability for ``/v1/capabilities``."""
 
-    active_provider: str = Field(description="Provider ``auto`` selection resolves to for the current settings.")
-    configured_providers: list[str] = Field(description="Providers with credentials configured, in priority order.")
+    active_provider: str = Field(
+        description="Provider ``auto`` selection resolves to for the current settings."
+    )
+    configured_providers: list[str] = Field(
+        description="Providers with credentials configured, in priority order."
+    )
     endpoint: str = Field(description="The web-search endpoint path.")
     provider_selection: str = Field(description="Human-readable summary of how the provider is selected.")
 
@@ -500,13 +651,16 @@ class DiscoveryResponse(BaseModel):
     recommended_endpoints: list[str]
     description: str
 
+
 class JobCreateRequest(BaseModel):
     """Create a new resumable whole-site crawl job (#3+#14)."""
 
     model_config = ConfigDict(extra="ignore")
 
     root_url: str = Field(..., description="Root public HTTP(S) URL to crawl recursively.")
-    policy: CrawlPolicy = Field(default_factory=CrawlPolicy, description="Crawl policy (strategies, limits, scope_regex, extraction).")
+    policy: CrawlPolicy = Field(
+        default_factory=CrawlPolicy, description="Crawl policy (strategies, limits, scope_regex, extraction)."
+    )
 
 
 class JobCreateResponse(BaseModel):
@@ -551,4 +705,3 @@ class JobControlRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     action: str = Field(..., description="One of: pause, resume, cancel.")
-

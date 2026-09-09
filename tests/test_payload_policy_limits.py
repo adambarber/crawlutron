@@ -57,6 +57,38 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         assert policy["limits"]["max_content_length_bytes"] == 0
 
 
+class TestPydanticDefaultPreservesRamScaling:
+    """N3: the pydantic default must not silently disable the RAM-scaled cap.
+
+    CrawlRequest.model_dump(exclude_none=True) is what the endpoints feed the
+    engine. A concrete default on CrawlPolicyLimits.max_content_length_bytes
+    materializes in every dump, making the concurrency-scaled cap in
+    _effective_max_content_length unreachable through /v1/crawl. The field
+    must therefore default to None and only an explicit caller value flows.
+    """
+
+    def test_default_request_omits_the_cap(self):
+        from app.api_models import CrawlRequest
+
+        request = CrawlRequest(url="https://example.com/")
+        payload = request.model_dump(exclude_none=True)
+        dumped_limits = payload["policy"]["limits"]
+        assert "max_content_length_bytes" not in dumped_limits
+
+    def test_explicit_cap_still_flows(self):
+        from app.api_models import CrawlPolicyLimits, CrawlRequest
+
+        request = CrawlRequest(
+            url="https://example.com/",
+            policy={"limits": CrawlPolicyLimits(max_content_length_bytes=4096)},
+        )
+        policy = _payload_policy(
+            request.model_dump(exclude_none=True),
+            CrawlerSettings.from_mapping({}),
+        )
+        assert policy["limits"]["max_content_length_bytes"] == 4096
+
+
 class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
         # The advertised limit must bite end-to-end: normalization keeps it
