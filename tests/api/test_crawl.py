@@ -311,10 +311,11 @@ class TestMapApi:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "all_urls" in body
-        # sitemap advertises /page1 and /page2 (sitemap URLs are path-relative)
-        assert "/page2" in body["all_urls"]
+        # sitemap advertises /page1 and /page2, resolved to absolute URLs
+        # against the origin (L6: SiteMapResponse contract).
+        assert f"{self.base}/page2" in body["all_urls"]
         # robots points at /sitemap.xml
-        assert "/sitemap.xml" in body["sitemaps"]
+        assert f"{self.base}/sitemap.xml" in body["sitemaps"]
         # in-page links are discovered too
         assert len(body["links"]) >= 1
 
