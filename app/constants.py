@@ -157,6 +157,10 @@ SITEMAP_CACHE_TTL_SECONDS: float = DEFAULT_CACHE_TTL_SECONDS
 SITEMAP_CACHE_MAX_ENTRIES: int = 1000
 SITEMAP_CACHE_EVICT_BATCH: int = 200
 SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
+# Maximum child-sitemap fetches in flight per index level (H7). An index
+# lists every child before any max_urls accounting, so without chunking a
+# single hostile sitemapindex could spawn tens of thousands of tasks.
+SITEMAP_INDEX_FANOUT: int = 16
 
 # Engine scheduling: a recursive-crawl batch pulls global_concurrency * this.
 ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2

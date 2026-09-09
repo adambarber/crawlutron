@@ -18,6 +18,7 @@ from app.constants import (
     SITEMAP_CACHE_MAX_ENTRIES,
     SITEMAP_CACHE_TTL_SECONDS,
     SITEMAP_FANOUT_TIMEOUT_SECONDS,
+    SITEMAP_INDEX_FANOUT,
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
@@ -143,16 +144,24 @@ async def fetch_sitemap_urls(
             return etag, last_modified
         locs = loc_pattern.findall(text)
         if "<sitemapindex" in text.lower():
-            # Fan out: fetch all child sitemaps of an index concurrently.
+            # Bounded fan-out (H7): never schedule more children than still
+            # needed to reach max_urls, and fetch them in capped chunks so a
+            # hostile index with tens of thousands of children cannot spawn
+            # a task (and a fetch) per child.
             children = [c for c in locs if c not in visited]
-            pending = [asyncio.create_task(recurse(child, depth + 1)) for child in children]
-            if pending:
-                # Bounded fan-out: stragglers are cancelled so one slow server
-                # cannot gate the entire resolution.
-                done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
-                for t in pending:
-                    if t not in done:
-                        t.cancel()
+            children = children[: max(0, max_urls - len(page_urls))]
+            for offset in range(0, len(children), SITEMAP_INDEX_FANOUT):
+                if len(page_urls) >= max_urls:
+                    break
+                chunk = children[offset : offset + SITEMAP_INDEX_FANOUT]
+                pending = [asyncio.create_task(recurse(child, depth + 1)) for child in chunk]
+                if pending:
+                    # Stragglers are cancelled so one slow server cannot gate
+                    # the entire resolution.
+                    done, _ = await asyncio.wait(pending, timeout=SITEMAP_FANOUT_TIMEOUT_SECONDS)
+                    for t in pending:
+                        if t not in done:
+                            t.cancel()
             return etag, last_modified
         # Page sitemap: associate each <loc> with its neighboring <lastmod>.
         # Use byte offsets so this works whether entries are wrapped in <url>
