@@ -38,6 +38,18 @@ async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
 
 
+async def test_extract_document_child_death_returns_empty(monkeypatch):
+    """A worker that dies before sending (segfault) yields empty extraction,
+    not an unhandled EOFError, and leaves no zombie behind (M8)."""
+    import multiprocessing
+
+    monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert result.text is None
+    assert result.markdown is None
+    assert multiprocessing.active_children() == []
+
+
 async def test_extract_document_output_capped_at_5mb(monkeypatch):
     """Extracted markdown is truncated to _MAX_EXTRACTED_MARKDOWN (F5)."""
     # Use a smaller cap for faster test (10KB instead of 5MB)

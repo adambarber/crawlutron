@@ -65,6 +65,15 @@ _DOC_SEM = threading.Semaphore(_doc_extraction_worker_count())
 
 def _run_markitdown_in_process(body: bytes, conn) -> None:
     """Worker-process entry: run markitdown and ship the result over ``conn``."""
+    # Support for test-induced child death (M8): exit without sending, as a
+    # worker segfaulting on hostile input would. Inherited via env so it
+    # works under both fork and spawn start methods.
+    if os.environ.get("TEST_MARKITDOWN_DIE") == "1":
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001, S110 - dying child, nothing to log to
+            pass
+        os._exit(1)
     try:
         res = _markitdown_extract(body)
         conn.send(("ok", res))
@@ -377,7 +386,16 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
         md = None
         try:
             if parent_conn.poll(_EXTRACTION_DOC_TIMEOUT):
-                _, md = parent_conn.recv()
+                try:
+                    _, md = parent_conn.recv()
+                except (EOFError, OSError):
+                    # The child died before sending (segfault on hostile
+                    # input): poll() reports EOF as readable, then recv()
+                    # raises. Graceful empty extraction, not an unhandled
+                    # error -- and reap the child on every path (M8).
+                    logger.warning("extraction_document_child_died")
+                    _terminate_doc_process(proc)
+                    return ExtractedContent(None, None)
             else:
                 logger.warning("extraction_document_timeout")
                 _terminate_doc_process(proc)
