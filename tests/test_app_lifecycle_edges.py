@@ -12,8 +12,8 @@ class TestAppLifecycleEdges:
         assert (app.main) is not None
 
     async def test_render_endpoint_value_error(self):
-        from app.main import app
         from app.crawl.strategies.browser_pool import set_browser_pool
+        from app.main import app
 
         async def test(client):
             # ASGI harness runs no lifespan, so the pool is None; M13's guard

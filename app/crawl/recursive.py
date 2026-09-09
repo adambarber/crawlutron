@@ -29,6 +29,7 @@ from app.constants import (
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
+from app.safe_regex import RegexTimeout, match_bounded
 from app.scheduler import DomainScheduler
 from app.validation import registrable_domain
 
@@ -47,6 +48,20 @@ RECURSIVE_RAMP_MAX: int = 128
 # (ramp ceiling x concurrency multiplier) so we gauge the very batch we're about
 # to size.
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+
+
+def _scope_allows(compiled, url: str) -> bool:
+    """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
+
+    Mirrors engine._scope_allows: a pathological pattern must never hang
+    the BFS loop (N-1); if the wall-clock budget fires, the URL is treated
+    as out-of-scope and the crawl continues.
+    """
+    try:
+        return match_bounded(compiled, url) is not None
+    except RegexTimeout:
+        logger.warning("scope_regex_timeout", extra={"url": url})
+        return False
 
 
 def _batch_is_http_heavy(
@@ -303,7 +318,7 @@ async def run_recursive_crawl(
                     continue
                 if not want_document_bodies and is_document_url(link.normalized_url):
                     continue
-                if scope_pattern is not None and not scope_pattern.search(link.normalized_url):
+                if scope_pattern is not None and not _scope_allows(scope_pattern, link.normalized_url):
                     continue
                 if respect_robots and not await robots_allows(link.normalized_url):
                     continue

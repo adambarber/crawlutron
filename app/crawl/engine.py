@@ -44,6 +44,7 @@ from app.constants import (
 )
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
+from app.safe_regex import RegexTimeout, UnsafePattern, compile_untrusted, match_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -118,42 +119,40 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
 # A single user-supplied scope_regex is applied to every discovered link.
 # Bound the work and refuse pathological patterns (ReDoS guard).
 _MAX_SCOPE_PATTERN_LEN = 256
-_MAX_SCOPE_QUANTIFIERS = 10
 _MAX_SCOPE_LINKS = 5000
-# A group immediately followed by a quantifier that itself contains a quantifier
-# or alternation is the classic catastrophic-backtracking shape (e.g. "(a+)+$").
-_SCOPE_GROUP_QUANT = re.compile(r"\((?:[^()]|\([^()]*\))*\)\s*[+*?{]")
+
+
+def _scope_allows(compiled, url: str) -> bool:
+    """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
+
+    A pathological pattern must never hang the crawl loop (N-1); if the
+    wall-clock budget fires, the URL is treated as out-of-scope and the
+    crawl continues.
+    """
+    try:
+        return match_bounded(compiled, url) is not None
+    except RegexTimeout:
+        logger.warning("scope_regex_timeout", extra={"url": url})
+        return False
 
 
 def _compile_scope_regex_safe(scope_regex: str | None):
-    """Compile a user-supplied scope regex, refusing pathological patterns.
+    """Compile a user-supplied scope regex for bounded matching.
 
-    A malicious or careless ``scope_regex`` (e.g. ``(a+)+$``) can trigger
-    catastrophic backtracking and hang the request. We reject patterns that are
-    too long or contain a quantified group (nested quantifier / alternation),
-    which are the classic ReDoS vectors. Invalid patterns (``re.error``) are
-    also rejected, preserving the previous safe-fallback behavior.
+    Defense in depth (N-1): static shape rejection is bypassable by
+    construction — the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
+    every enumerated heuristic — so the durable guarantee is BOUNDED
+    EXECUTION via :mod:`app.safe_regex`: every match runs on the ``regex``
+    engine with a wall-clock timeout, raising RegexTimeout instead of
+    hanging the crawl loop. The cheap heuristics below remain as an early
+    filter for obvious footguns; they are not load-bearing.
     """
     if not scope_regex:
         return None
-    if len(scope_regex) > _MAX_SCOPE_PATTERN_LEN:
-        return None
-    if _SCOPE_GROUP_QUANT.search(scope_regex):
-        return None
     try:
-        compiled = re.compile(scope_regex)
-    except re.error:
+        return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
+    except (UnsafePattern, re.error):
         return None
-    # Ungrouped quantifier chains (e.g. "a?a?a?..." repeated 20+ times) defeat
-    # the grouped-quantifier rule above while still creating exponential
-    # ambiguity on failed matches. Bound the number of quantifier tokens:
-    # legitimate scope regexes need only a handful.
-    # Brace forms include leading-comma variants ({,n}) which are valid Python
-    # regex quantifiers -- verified event-loop-hang bypass if uncounted.
-    quantifier_tokens = len(re.findall(r"(?<!\\)(?:[*+?]|\{\d*(?:,\d*)?\})", scope_regex))
-    if quantifier_tokens > _MAX_SCOPE_QUANTIFIERS:
-        return None
-    return compiled
 
 
 async def _browser_strategy_result(
@@ -1151,7 +1150,7 @@ async def _crawl_request_impl(
                     normalized_seed = normalize_public_http_url(loc)
                 except ValueError:
                     continue
-                if scope_pattern is not None and not scope_pattern.search(normalized_seed):
+                if scope_pattern is not None and not _scope_allows(scope_pattern, normalized_seed):
                     continue
                 # #3: skip URLs whose content we already cache and that the
                 # sitemap says have not changed since we cached them.

@@ -9,7 +9,7 @@ pdfplumber>=0.11.0
 charset-normalizer>=3.3.0
 h2>=4.1.0
 httpx>=0.27.0
-# Imported by app/crawl/extraction.py and app/crawl/firecrawl_format.py
+# Imported by app/crawl/extraction.py and app/crawl/llm_format.py
 # (silent dependency before this entry; explicitly listed to keep fresh
 # installs green).
 lxml>=5.0
@@ -17,6 +17,9 @@ beautifulsoup4>=4.12
 markdownify>=0.13
 # Required by FastAPI request/response models.
 pydantic>=2.0
+# Bounded-execution regex engine (app/safe_regex.py): native C-loop timeout=
+# for attacker-influenced patterns; stdlib re cannot be interrupted (GIL wedge).
+regex>=2026.5.9
 # Real public-suffix dataset for registrable_domain (M5). Ships a snapshot
 # .dat; no runtime network. The code falls back to a small heuristic when
 # the package is absent, but correctness needs the dataset installed.

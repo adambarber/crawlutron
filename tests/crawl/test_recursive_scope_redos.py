@@ -39,14 +39,46 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
     }
     payload = {
         "url": "http://example.com/",
-        # Catastrophic pattern: the safe compiler rejects it, so it is treated as
-        # "no scope filter" (all links kept) rather than hanging the request.
+        # Catastrophic-but-valid pattern: bounded matching (N-1) runs it with
+        # a wall-clock budget instead of rejecting it at compile. It genuinely
+        # matches /a (ends in "a") and not /b, so scope filtering now WORKS
+        # where the old reject-on-shape guard silently dropped the filter.
         "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": CATASTROPHIC},
     }
     out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
     urls = {r["normalized_url"] for r in out["results"]}
     assert "http://example.com/a" in urls
-    assert "http://example.com/b" in urls
+    assert "http://example.com/b" not in urls
+
+
+async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
+    # A pathological pattern that defeats the regex engine's optimizer must
+    # raise RegexTimeout, which the scope filter treats as out-of-scope
+    # (fail-closed): the crawl completes, nothing hangs.
+    from app.safe_regex import RegexTimeout
+
+    calls = {"n": 0}
+
+    def _always_timeout(pattern, *args, **kwargs):
+        calls["n"] += 1
+        raise RegexTimeout("test-induced budget expiry")
+
+    monkeypatch.setattr("app.crawl.recursive.match_bounded", _always_timeout)
+    pages = {
+        "/": (200, '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>', "text/html"),
+        "/a": (200, "<html>a</html>", "text/html"),
+        "/b": (200, "<html>b</html>", "text/html"),
+    }
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": r"^/keep/"},
+    }
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    assert calls["n"] > 0, "bounded match never invoked"
+    urls = {r["normalized_url"] for r in out["results"]}
+    assert "http://example.com" in urls
+    assert "http://example.com/a" not in urls
+    assert "http://example.com/b" not in urls
 
 
 async def test_recursive_scope_regex_still_filters_with_valid_pattern(monkeypatch):
