@@ -30,7 +30,6 @@ from app.constants import (
     BROWSER_STRATEGIES,
     DEFAULT_EXTRACTION,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    DEFAULT_USER_AGENT,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     EXTRACTION_DOCUMENT,
     USER_AGENT_TOKEN,
@@ -862,6 +861,9 @@ async def _crawl_request_impl(
     # robots_cache is module-level (shared across requests, #9); we reference it
     # directly from the nested helpers below.
     robots_ttl = 600.0
+    # Negative-result TTL for robots fetch failures (M7): a blip must not
+    # allow-list an origin for the full robots_ttl, nor block it for an hour.
+    ROBOTS_FAILURE_TTL_SECONDS = 60.0
 
     def _purge_robots_cache(now: float | None = None) -> int:
         """Remove expired entries from robots cache; return number removed."""
@@ -902,7 +904,6 @@ async def _crawl_request_impl(
         if current is not None:
             groups.append(current)
 
-        ua_full = DEFAULT_USER_AGENT
         best_rules: list[tuple[bool, str]] | None = None
         best_len = -1
         star_rules: list[tuple[bool, str]] | None = None
@@ -912,7 +913,10 @@ async def _crawl_request_impl(
                     if star_rules is None:
                         star_rules = grules
                     break
-                if agent and agent in ua_full and len(agent) > best_len:
+                # Match the product token, not the full User-Agent string:
+                # URL/version fragments in our UA must not claim groups, and
+                # this is the same token _parse_robots_crawl_delay uses (M7).
+                if agent and agent in our_token and len(agent) > best_len:
                     best_len = len(agent)
                     best_rules = grules
                     break
@@ -959,13 +963,24 @@ async def _crawl_request_impl(
         robots_url = urljoin(origin, "/robots.txt")
         # Lock released before the blocking network call so concurrent
         # crawls for different origins do not serialize on the lock.
-        body = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
-        if body is not None:
+        body, status = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
+        ttl = robots_ttl
+        if status == 200 and body is not None:
             rules = _parse_robots_rules(body)
             sitemaps = _parse_robots_sitemaps(body)
             crawl_delay = _parse_robots_crawl_delay(body)
+        elif status == 404:
+            # No robots.txt: nothing to enforce.
+            pass
+        else:
+            # 5xx, other statuses, or transport failure: fail closed by
+            # disallowing everything (M7). Cached on a short TTL so a blip
+            # cannot allow-list an origin, while a recovery is picked up
+            # quickly and a prolonged outage stays blocked.
+            rules = [(False, "/")]
+            ttl = min(robots_ttl, ROBOTS_FAILURE_TTL_SECONDS)
         with _ROBOTS_CACHE_LOCK:
-            robots_cache[origin] = (now + robots_ttl, rules, sitemaps, crawl_delay)
+            robots_cache[origin] = (now + ttl, rules, sitemaps, crawl_delay)
             # Hard cap: evict oldest origins if still over the limit (e.g. a crawl
             # that discovers thousands of unique, still-fresh domains).
             _cap_robots_cache(robots_cache, ROBOTS_CACHE_MAX_ENTRIES)

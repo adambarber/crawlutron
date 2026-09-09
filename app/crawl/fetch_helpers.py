@@ -34,15 +34,22 @@ async def _fetch_and_decode(
     url: str,
     headers: dict[str, str],
     timeout_seconds: int,
-) -> str | None:
-    """Fetch a URL and return decoded text body, or None on failure."""
+) -> tuple[str | None, int | None]:
+    """Fetch a URL, returning ``(decoded body, HTTP status)``.
+
+    The body is present only on 200; the status lets callers distinguish
+    "no such document" (404) from "origin is erroring" (5xx), which
+    robots handling treats differently (fail closed, M7). ``(None, None)``
+    on transport-level failure.
+    """
     from app.crawl.decompression import DecompressionTooLargeError
 
     try:
         resp = fetcher(url, headers, timeout_seconds)
         if inspect.iscoroutine(resp):
             resp = await resp
-        if resp.status_code == 200:
+        status = resp.status_code
+        if status == 200:
             resp_headers = {key.lower(): value for key, value in resp.headers.items()}
             try:
                 body = _decompress_body(
@@ -51,11 +58,12 @@ async def _fetch_and_decode(
                     max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
                 )
             except DecompressionTooLargeError:
-                return None
-            return _decode_body(body, resp_headers.get("content-type"))
+                return None, status
+            return _decode_body(body, resp_headers.get("content-type")), status
+        return None, status
     except Exception:  # noqa: BLE001
         pass
-    return None
+    return None, None
 
 
 # Sitemap cache (LRU via OrderedDict.move_to_end + popitem).
