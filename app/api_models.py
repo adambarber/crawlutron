@@ -273,6 +273,7 @@ class CrawlPolicy(BaseModel):
     @classmethod
     def _validate_scope_regex(cls, value: str | None) -> str | None:
         from app.safe_regex import UnsafePattern, compile_untrusted
+
         if value is None:
             return None
         try:

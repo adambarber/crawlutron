@@ -154,11 +154,7 @@ def test_no_hand_rolled_redirect_hops_in_migrated_files():
         path = APP_ROOT.parent / rel
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "urljoin"
-            ):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "urljoin":
                 offenders.append(f"{rel}:{node.lineno}")
     assert not offenders, "Use SafeUrl.redirect_hop for redirect hops: " + ", ".join(offenders)
 

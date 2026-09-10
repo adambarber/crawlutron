@@ -17,7 +17,10 @@ class TestJsonDefault:
         assert json.dumps(M(), default=json_default) == '{"a": 1}'
 
     def test_datetime_isoformat(self):
-        assert json.dumps(datetime.datetime(2024, 1, 2, 3, 4, 5), default=json_default) == '"2024-01-02T03:04:05"'
+        assert (
+            json.dumps(datetime.datetime(2024, 1, 2, 3, 4, 5), default=json_default)
+            == '"2024-01-02T03:04:05"'
+        )
         assert json.dumps(datetime.date(2024, 1, 2), default=json_default) == '"2024-01-02"'
 
     def test_bytes_decoded(self):

@@ -42,9 +42,7 @@ class TestSafeUrlParse:
 
     def test_parse_with_pin_returns_first_public_ip(self, monkeypatch):
         block_private_targets(monkeypatch)
-        two_public = _PUBLIC + [
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))
-        ]
+        two_public = _PUBLIC + [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
         with _resolve_as(two_public):
             safe = SafeUrl.parse("http://example.com/", pin=True)
         assert safe.hostname == "example.com"

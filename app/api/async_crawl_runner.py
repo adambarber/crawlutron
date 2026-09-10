@@ -35,9 +35,7 @@ logger = logging.getLogger(__name__)
 # Module-level concurrency semaphore. Bounded so a flood of 202 responses
 # cannot spawn unbounded concurrent crawls and OOM the container
 # (adversarial review F-no-concurrency-cap).
-_WEBHOOK_CRAWL_CONCURRENCY = get_env_int(
-    "BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", 4, lo=1
-)
+_WEBHOOK_CRAWL_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
 _async_crawl_semaphore: asyncio.Semaphore | None = None
 
 
