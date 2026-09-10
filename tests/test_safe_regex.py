@@ -1,5 +1,6 @@
 """Contract tests for the bounded-execution regex chokepoint (N-1)."""
 
+import threading
 import time
 
 import pytest
@@ -54,11 +55,18 @@ class TestMatchBounded:
         # bound with an optimizer-resistant variant of the same class.
         compiled = compile_untrusted(r"^(a|aa)+((a|aa)+)*x")
         text = "a" * 60 + "!"
+        threads_before = threading.active_count()
         start = time.perf_counter()
         with pytest.raises(RegexTimeout):
             match_bounded(compiled, text, timeout=0.05)
         elapsed = time.perf_counter() - start
-        assert elapsed < 2.0, f"timeout did not bound the match: {elapsed:.2f}s"
+        # Tight bound: the native C-loop timeout fires at ~the budget. A
+        # thread-abandonment implementation would also pass a loose bound
+        # while leaving a wedged worker burning behind (G1) -- so pin both
+        # the wall time AND that no thread was left running.
+        assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
+        time.sleep(0.2)  # let any abandoned worker reveal itself
+        assert threading.active_count() <= threads_before, "match left a thread behind"
 
     def test_timeout_bounds_exponential_backtracking(self):
         # A shape the regex engine cannot optimize away: (a|aa)+b against a
@@ -66,11 +74,14 @@ class TestMatchBounded:
         # raise RegexTimeout at ~the budget instead of hanging.
         compiled = compile_untrusted(r"(a|aa)+b")
         text = "a" * 80 + "c"
+        threads_before = threading.active_count()
         start = time.perf_counter()
         with pytest.raises(RegexTimeout):
             match_bounded(compiled, text, timeout=0.05)
         elapsed = time.perf_counter() - start
-        assert elapsed < 2.0, f"timeout did not bound the match: {elapsed:.2f}s"
+        assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
+        time.sleep(0.2)  # let any abandoned worker reveal itself
+        assert threading.active_count() <= threads_before, "match left a thread behind"
 
     def test_matching_input_unaffected_by_timeout(self):
         # Same pattern, matching input: completes immediately (the bound
