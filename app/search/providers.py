@@ -104,7 +104,7 @@ async def _provider_http(
             raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
         except BodyTooLarge as error:
             raise SearchProviderError(f"provider body exceeded {_SEARCH_RESPONSE_MAX_BYTES} bytes") from error
-        text = raw.decode(response.charset or "utf-8", errors="replace")
+        text = raw.decode(response.encoding or "utf-8", errors="replace")
         return response.status_code, text
 
 

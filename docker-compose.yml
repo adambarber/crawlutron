@@ -38,7 +38,7 @@ services:
       # falls back to the keyless DuckDuckGo endpoint. Uncomment a key below to
       # enable that provider for production use.
       BROWSER_CRAWLER_SEARCH_PROVIDER: "auto"
-      # BROWSER_CRAWLER_TAVILY_API_KEY: ""
+      BROWSER_CRAWLER_TAVILY_API_KEY: "${BROWSER_CRAWLER_TAVILY_API_KEY:-}"
       # BROWSER_CRAWLER_BRAVE_API_KEY: ""
       # BROWSER_CRAWLER_SERPER_API_KEY: ""
     volumes:

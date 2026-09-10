@@ -302,7 +302,7 @@ class TestProviderHttpCaps:
 
         class _Resp:
             status_code = 200
-            charset = "utf-8"
+            encoding = "utf-8"
 
             def aiter_bytes(self):
                 return _Body().aiter_bytes()
@@ -333,7 +333,7 @@ class TestProviderHttpCaps:
 
         class _Resp:
             status_code = 200
-            charset = "utf-8"
+            encoding = "utf-8"
 
             def aiter_bytes(self):
                 return _Body().aiter_bytes()
@@ -352,3 +352,68 @@ class TestProviderHttpCaps:
         with mock.patch.object(providers_mod, "get_async_http_client", return_value=_Client()):
             with pytest.raises(SearchProviderError, match="[Ee]xceed"):
                 await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
+
+
+class _FakeStreamResponse:
+    """httpx-faithful stream response.
+
+    Mirrors the REAL httpx attribute surface _provider_http relies on —
+    ``encoding`` (never ``charset``), ``status_code``, ``aiter_bytes`` — per
+    the #1745 rule that fakes must mirror the real client surface. The
+    shared ``fake_provider_http`` fixture patches _provider_http wholesale,
+    which left this decode path with zero coverage and shipped a reference
+    to an attribute httpx does not have (500 on every real search request).
+    """
+
+    def __init__(self, body: bytes, encoding: str | None = "utf-8"):
+        self._body = body
+        self.encoding = encoding
+        self.status_code = 200
+
+    async def aiter_bytes(self):
+        yield self._body
+
+
+class _FakeStreamClient:
+    def __init__(self, response: _FakeStreamResponse):
+        self._response = response
+
+    def stream(self, method: str, url: str, **kwargs):
+        outer = self
+
+        class _Ctx:
+            async def __aenter__(self):
+                return outer._response
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _Ctx()
+
+
+async def test_provider_http_decodes_via_httpx_encoding(monkeypatch):
+    """Real _provider_http decode path: httpx exposes ``encoding``, not ``charset``."""
+    import app.search.providers as providers_module
+
+    body = b'{"data": []}'
+    fake = _FakeStreamClient(_FakeStreamResponse(body, encoding="utf-8"))
+    monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
+    status, text = await providers_module._provider_http(
+        "GET", "http://provider.test/search", timeout_seconds=2.0
+    )
+    assert status == 200
+    assert text == '{"data": []}'
+
+
+async def test_provider_http_decodes_utf8_when_encoding_unknown(monkeypatch):
+    """No declared/detectable charset must fall back to UTF-8, not crash."""
+    import app.search.providers as providers_module
+
+    body = b"<html>ok</html>"
+    fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=None))
+    monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
+    status, text = await providers_module._provider_http(
+        "GET", "http://provider.test/search", timeout_seconds=2.0
+    )
+    assert status == 200
+    assert text == "<html>ok</html>"
