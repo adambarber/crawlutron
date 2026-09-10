@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sys
 import threading
 import time
 from collections import OrderedDict
@@ -226,7 +225,10 @@ class ContentCache:
             self._index_sizes[key] = len(data)
             self._index_total_bytes += len(data) - old_size
             # Mirror small values into the in-memory value cache (#7).
-            if sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+            # Gate on the SERIALIZED size: shallow sys.getsizeof(dict) sees
+            # only the container, so multi-MB entries passed the old gate
+            # (final review #1) and the mirror became the RAM exhaustion path.
+            if len(data) < self._MEMORY_CACHE_MAX_SIZE:
                 self._memory_cache[key] = (expires, value)
                 self._memory_cache.move_to_end(key)
                 if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
@@ -266,7 +268,9 @@ class ContentCache:
             return None
         value = envelope.get("value")
         expires = envelope.get("expires")
-        if value is not None and sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+        # Gate on the same serialized-size measure as the write sites: the
+        # disk index already knows the envelope bytes for this key.
+        if value is not None and self._index_sizes.get(key, 0) < self._MEMORY_CACHE_MAX_SIZE:
             with self._lock:
                 self._memory_cache[key] = (expires, value)
                 self._memory_cache.move_to_end(key)
@@ -296,7 +300,8 @@ class ContentCache:
             self._index.move_to_end(key)
             self._index_sizes[key] = size
             self._index_total_bytes += size - prior_size
-            if sys.getsizeof(value) < self._MEMORY_CACHE_MAX_SIZE:
+            # Same serialized-size gate as set() (final review #1).
+            if size < self._MEMORY_CACHE_MAX_SIZE:
                 self._memory_cache[key] = (expires, value)
                 self._memory_cache.move_to_end(key)
                 if len(self._memory_cache) > self._MEMORY_CACHE_MAX:

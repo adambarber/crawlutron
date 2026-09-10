@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sys
 
 import httpx
 from helpers.server import EtagHandler
@@ -247,3 +248,22 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     assert first == ["/", "/a"], first
     # Both the seed and the discovered child must be served from the content cache.
     assert second == [], f"recursive pages should be served from content cache, re-fetched: {second}"
+
+
+async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
+    """Shallow sys.getsizeof on a dict sees only the container (~200 B), so a
+    multi-MB serialized entry passed the old mirror gate and landed in RAM
+    (final-review #1: worst case _MEMORY_CACHE_MAX x full-size entries)."""
+    cache = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    fat = {"body": "x" * (cache._MEMORY_CACHE_MAX_SIZE + 1024)}
+    assert sys.getsizeof(fat) < cache._MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
+
+    await cache.aset("fat-key", fat)
+    assert cache._read_envelope("fat-key") is not None  # disk: written
+    assert "fat-key" not in cache._memory_cache  # RAM mirror: must skip
+
+
+async def test_mirror_gate_small_value_still_mirrors(tmp_path):
+    cache = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    await cache.aset("small-key", {"body": "tiny"})
+    assert "small-key" in cache._memory_cache
