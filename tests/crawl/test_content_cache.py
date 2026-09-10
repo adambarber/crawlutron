@@ -267,3 +267,33 @@ async def test_mirror_gate_small_value_still_mirrors(tmp_path):
     cache = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
     await cache.aset("small-key", {"body": "tiny"})
     assert "small-key" in cache._memory_cache
+
+
+async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
+    """H2: after a warm restart ``_index_sizes`` is empty for pre-existing files,
+    so ``aget`` must gate the RAM mirror on the actual envelope bytes (stat),
+    not ``_index_sizes.get(key, 0)`` -- which defaults to 0 and lets a multi-MB
+    cold read into the small-value mirror (the RAM exhaustion path the
+    serialized-size gate was built to close)."""
+    fat = {"body": "x" * (1024 * 1024 + 1024)}  # > _MEMORY_CACHE_MAX_SIZE
+    writer = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    await writer.aset("fat-key", fat)
+    assert "fat-key" not in writer._memory_cache  # write gate already refuses
+
+    # Fresh instance over the same dir: cold index, pre-existing disk file.
+    reader = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    assert reader._index_sizes.get("fat-key") is None  # truly cold
+    got = await reader.aget("fat-key")
+    assert got is not None  # served from disk
+    assert "fat-key" not in reader._memory_cache  # must NOT land in RAM mirror
+
+
+async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
+    """Parity: a genuinely small cold read keeps the RAM-mirror benefit."""
+    writer = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    await writer.aset("small-key", {"body": "tiny"})
+    reader = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    assert reader._index_sizes.get("small-key") is None
+    got = await reader.aget("small-key")
+    assert got == {"body": "tiny"}
+    assert "small-key" in reader._memory_cache  # small: mirror is correct

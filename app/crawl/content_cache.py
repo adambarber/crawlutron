@@ -269,9 +269,17 @@ class ContentCache:
             return None
         value = envelope.get("value")
         expires = envelope.get("expires")
-        # Gate on the same serialized-size measure as the write sites: the
-        # disk index already knows the envelope bytes for this key.
-        if value is not None and self._index_sizes.get(key, 0) < self._MEMORY_CACHE_MAX_SIZE:
+        # Gate on the same serialized-size measure as the write sites. On a
+        # cold read (key absent from the in-process index) `_index_sizes`
+        # reports 0, which let any multi-MB envelope into the 100-entry RAM
+        # mirror (H2); size from the serialized envelope on disk instead.
+        entry_size = self._index_sizes.get(key)
+        if entry_size is None:
+            try:
+                entry_size = self._path_for(key).stat().st_size
+            except OSError:
+                entry_size = self._MEMORY_CACHE_MAX_SIZE
+        if value is not None and entry_size < self._MEMORY_CACHE_MAX_SIZE:
             with self._lock:
                 self._memory_cache[key] = (expires, value)
                 self._memory_cache.move_to_end(key)
