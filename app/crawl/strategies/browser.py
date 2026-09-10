@@ -36,7 +36,7 @@ from app.crawl.strategies.http import (
 from app.json_safe import json_default
 from app.models import CrawlResult, RenderOptions
 from app.settings import CrawlerSettings
-from app.validation import registrable_domain
+from app.validation import get_env_float, get_env_int, registrable_domain
 
 logger = logging.getLogger(__name__)
 
@@ -235,10 +235,8 @@ class BrowserRenderer:
             if settings is not None:
                 self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
             else:
-                self._challenge_wait_seconds = float(
-                    os.environ.get(
-                        "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", str(DEFAULT_CHALLENGE_WAIT_SECONDS)
-                    )
+                self._challenge_wait_seconds = get_env_float(
+                    "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
@@ -260,16 +258,14 @@ class BrowserRenderer:
         self._max_browser_renders = (
             settings.max_browser_renders
             if settings is not None
-            else get_env_int(("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", str(DEFAULT_MAX_BROWSER_RENDERS)))
+            else get_env_int("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
         )
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
         _concurrent_pages = (
             settings.max_concurrent_pages
             if settings is not None
-            else int(
-                os.environ.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", str(DEFAULT_MAX_CONCURRENT_PAGES))
-            )
+            else get_env_int("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
         )
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
 

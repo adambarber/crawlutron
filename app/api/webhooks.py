@@ -19,12 +19,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import Any
 from urllib.parse import urlparse
 
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
+from app.validation import get_env_int
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
 
 
 def _max_webhook_size() -> int:
-    return get_env_int(("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "10485760"))
+    return get_env_int("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", 10_485_760, lo=1)
 
 
 async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:

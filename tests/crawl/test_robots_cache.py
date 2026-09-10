@@ -16,6 +16,7 @@ def test_purge_removes_only_expired_production_tuples():
     import app.crawl.engine as em
     from app.crawl.engine import _purge_robots_cache
 
+    assert isinstance(em.robots_cache, BoundedTTLCache)
     em.robots_cache.clear()
     try:
         now = time.monotonic()
@@ -83,19 +84,23 @@ async def test_purge_handles_production_shaped_entries():
 
 def test_failure_ttl_is_60s_not_600s():
     """G3 pin: robots transport failure writes ttl=60s, not the 600s default."""
-    import time, app.crawl.engine as em
+    import time
+
+    import app.crawl.engine as em
     from app.crawl.strategies.http import HttpFetchResult
+
     em.robots_cache.clear()
     try:
+
         async def bad_robots(url, headers, timeout, max_content_length=0):
             return HttpFetchResult(
-                url=url, final_url=url, status_code=500,
-                headers={}, body=b"fail", elapsed_ms=1)
+                url=url, final_url=url, status_code=500, headers={}, body=b"fail", elapsed_ms=1
+            )
+
         # Direct seam: drive via internal fetch (test doesn't need full crawl)
         # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals.
         # A 500 response writes rules=[(False,"/")], ttl=min(600,60)=60.
-        em.robots_cache.put(
-            "http://fail-ttl.test", ([(False,"/")], [], None), ttl=60.0)
+        em.robots_cache.put("http://fail-ttl.test", ([(False, "/")], [], None), ttl=60.0)
         entries = em.robots_cache._entries
         expires_at, value = entries.get("http://fail-ttl.test")
         delta = (expires_at - time.monotonic()) if expires_at else float("inf")

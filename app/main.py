@@ -1,5 +1,4 @@
 from __future__ import annotations
-from app.validation import get_env_int, get_env_float
 
 import asyncio
 import logging
@@ -15,6 +14,7 @@ from app.crawl.engine import crawl_request
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
 from app.logging_config import configure_service_logging
+from app.validation import get_env_float, get_env_int
 
 from .api.response_shaping import build_unified_result as _build_unified_result
 from .api_models import (
@@ -55,7 +55,7 @@ job_store = JobStore(settings.cache_dir + "/jobs.db")
 # makes results recoverable if the HTTP connection drops mid-response).
 result_store = CrawlResultStore(
     settings.cache_dir + "/results.db",
-    ttl_seconds=get_env_float("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600"),
+    ttl_seconds=get_env_float("BROWSER_CRAWLER_RESULT_TTL_SECONDS", 3600.0),
     max_entries=get_env_int("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", 1000),
 )
 

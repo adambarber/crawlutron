@@ -272,15 +272,13 @@ class CrawlPolicy(BaseModel):
     @field_validator("scope_regex")
     @classmethod
     def _validate_scope_regex(cls, value: str | None) -> str | None:
-        from app.safe_regex import compile_untrusted, UnsafePattern
+        from app.safe_regex import UnsafePattern, compile_untrusted
         if value is None:
             return None
-        result = compile_untrusted(value, max_len=256)
-        if result is None:
-            raise ValueError(
-                f"scope_regex exceeds max length of 256 or contains invalid syntax: "
-                f"received {len(value)} chars"
-            )
+        try:
+            compile_untrusted(value, max_len=256)
+        except UnsafePattern as exc:
+            raise ValueError(f"scope_regex rejected: {exc}") from exc
         return value
 
     @field_validator("browser_profile")

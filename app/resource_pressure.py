@@ -423,9 +423,7 @@ class ResourceGate:
 # stays RAM-budgeted.
 
 _HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 12 * 1024 * 1024, lo=0)
-_BROWSER_TASK_RAM_BYTES = get_env_int(
-    "BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0
-)
+_BROWSER_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
 _ADMIT_YIELD_SECONDS = get_env_float("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
 _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512, lo=1)
 
@@ -435,7 +433,7 @@ _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512,
 # memory limit, centralized here (import-safe from settings) as the single source of
 # truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
 _BROWSER_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
-_BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", "0.5")
+_BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
 _MAX_DERIVED_POOL_SIZE = get_env_int("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", 4)
 
 

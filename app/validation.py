@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import math
 import os
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
@@ -174,47 +175,96 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def get_env_int(name: str, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
-    """Read an env var as an int; log and fall back to ``default`` on garbage.
-
-    A typo'd numeric env var must never crash the boot (two module-import
-    ``int(os.environ.get(...))`` sites did exactly that). Out-of-range
-    values clamp to ``[lo, hi]`` when bounds are given.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw.strip())
-    except (TypeError, ValueError):
-        logging.getLogger(__name__).warning(
-            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": default}
-        )
-        return default
+def _clamp(value, lo, hi):
+    """Bound ``value`` to ``[lo, hi]`` when the bounds are provided."""
     if lo is not None and value < lo:
         return lo
     if hi is not None and value > hi:
         return hi
     return value
+
+
+def _as_int_default(value, *, name) -> int:
+    """Coerce a caller-supplied default to a finite int; never raise.
+
+    Accepts int/float/int-like str; anything else (None, "abc", inf, nan)
+    logs and yields 0 rather than leaking a non-numeric default that would
+    turn later arithmetic (``limit // default``) into a crash or a
+    string-repetition blow-up.
+    """
+    try:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(value)
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0})
+        return 0
+
+
+def _as_float_default(value, *, name) -> float:
+    """Coerce a caller-supplied default to a finite float; never raise."""
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning("invalid_env_default", extra={"env_name": name, "fallback": 0.0})
+        return 0.0
+    if not math.isfinite(result):
+        logging.getLogger(__name__).warning(
+            "non_finite_env_default", extra={"env_name": name, "fallback": 0.0}
+        )
+        return 0.0
+    return result
+
+
+def get_env_int(name: str, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
+    """Read an env var as an int; never crash, always return an int.
+
+    Hardened against every class of bad input (adversarial review: the
+    chokepoint must make the mistake unrepresentable): a typo'd env var or
+    an un-coercible/non-numeric *default* falls back to a bounded int, and
+    the result is always clamped to ``[lo, hi]`` when bounds are given. A
+    string default like ``"0.5"`` can no longer leak a ``str`` into
+    downstream arithmetic.
+    """
+    fallback = _clamp(_as_int_default(default, name=name), lo, hi)
+    raw = os.environ.get(name)
+    if raw is None:
+        return fallback
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning(
+            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    return _clamp(value, lo, hi)
 
 
 def get_env_float(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
-    """Float sibling of :func:`get_env_int` (same log-and-fallback contract)."""
+    """Float sibling of :func:`get_env_int`; never crash, always a finite float.
+
+    Rejects non-finite values (``inf``/``nan``) from BOTH the default and the
+    environment: ``float("inf")`` parses cleanly but ``int(limit * inf)``
+    overflows at import, so the value is treated as garbage and the bounded
+    fallback is returned instead.
+    """
+    fallback = _clamp(_as_float_default(default, name=name), lo, hi)
     raw = os.environ.get(name)
     if raw is None:
-        return default
+        return fallback
     try:
-        value = float(raw.strip())
-    except (TypeError, ValueError):
+        value = float(str(raw).strip())
+    except (TypeError, ValueError, OverflowError):
         logging.getLogger(__name__).warning(
-            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": default}
+            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
         )
-        return default
-    if lo is not None and value < lo:
-        return lo
-    if hi is not None and value > hi:
-        return hi
-    return value
+        return fallback
+    if not math.isfinite(value):
+        logging.getLogger(__name__).warning(
+            "non_finite_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    return _clamp(value, lo, hi)
 
 
 def _public_suffix_list():

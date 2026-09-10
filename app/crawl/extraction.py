@@ -48,12 +48,7 @@ _DEFAULT_DOC_EXTRACTION_WORKERS = 2
 def _doc_extraction_worker_count() -> int:
     """Configured concurrency for markitdown extraction (process semaphore size)."""
     try:
-        return max(
-            1,
-            int(
-                os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", str(_DEFAULT_DOC_EXTRACTION_WORKERS))
-            ),
-        )
+        return get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_EXTRACTION_WORKERS, lo=1)
     except ValueError:
         return _DEFAULT_DOC_EXTRACTION_WORKERS
 
@@ -157,8 +152,8 @@ _EXTRACTION_DOC_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT"
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
 # size and allow deployments to disable subprocess extraction entirely.
-_EXTRACTION_DOC_MAX_INPUT_BYTES = int(
-    os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", str(20 * 1024 * 1024))
+_EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int(
+    "BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1
 )
 _EXTRACTION_DOC_ENABLED = os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "true").lower() not in (
     "0",
