@@ -1,0 +1,137 @@
+Let me analyze this chunk of messages (201-285). This is a continuation of the security-review fix work (H-batch fixes after the validation phase completed in earlier compartments).
+
+The work in this chunk:
+- Committed H3 (already in prior compartment, 192-200 covered H3).
+- H4 fix: RED test then GREEN — wire `max_content_length_bytes` and `max_rps` through `_payload_policy`. Added `MAX_RATE_LIMIT_RPS` constant to `app/constants.py`. Behavioral test proving 413 path end-to-end via strategy layer `_http_strategy_result`. Committed.
+- H8 fix: render_request duplicate-URL 500 via `by_index` KeyError. RED, GREEN, committed.
+- H2 fix: SSRF bypass via urlopen redirect-following in PDF extractor. DNS seam, RED, GREEN, committed.
+- Started investigating H1 (cffi fetcher streaming cap) — reading curl_cffi version, stream support, existing cffi tests. Chunk ends mid-H1 investigation.
+
+Let me structure compartments:
+
+1. [201-225] H4 fix: payload policy limits. Actually [224-225] is "U: Continue". The H4 work spans 201-~225ish. Let me be careful about boundaries.
+
+Actually [201-223] covers H3 commit + H4 RED/GREEN + behavioral test setup. [224-225] U: Continue. [226-...] continues with H4 test work, then H8, H2, H1.
+
+Let me split:
+- Compartment A: H4 fix (201-~some index). H4 RED, wire max_content_length_bytes + max_rps through _payload_policy, MAX_RATE_LIMIT_RPS constant in app/constants.py, behavioral 413 test, commit.
+- Then H8 fix.
+- Then H2 fix.
+- Then H1 investigation begins.
+
+I need to guess where H4 ends and H8 begins. The TC list: "...Commit H4 fix / TC: Find render_request tests / TC: Render test harness shape..." — "Commit H4 fix" then render_request tests start H8. 
+
+Within H4, there's a break: the commit H4 happens after "...Format test file, verify, show H4 diff / TC: Commit H4 fix". So H4 runs through "Commit H4 fix".
+
+H8: "render_request tests... Job construction + worker result shape... Scheduler.run... _disallowed_result shape... Confirm H8 RED... Confirm H8 GREEN... Commit H8 fix..."
+
+H2: "Extractor seam + tests... SSRF guard flag semantics... DNS seam names... Confirm H2 RED... Confirm H2 GREEN... Commit H2 fix..."
+
+H1: "Read cffi fetcher / curl_cffi version + stream support / Response streaming methods / Existing cffi tests" — investigation starts.
+
+This is a single logical arc really — the security-review fix queue (H3 done in prior compartment, then H4, H8, H2 fixed, H1 investigation starts). But the instructions say each task is a distinct objective with its own commit. The user imposed "a commit per task" protocol. So these are distinct work units. I'll split them into separate compartments since each is a distinct fix with its own RED/GREEN/commit.
+
+Let me determine importance. These are security fixes from the adversarial review. H4 (dead rate/limit caps), H8 (duplicate URL 500), H2 (SSRF redirect bypass). These are security fixes but each is self-contained. The findings are already captured in project context/validation. I'd rate these moderately. H2 is SSRF — security-relevant, but once fixed the bug is gone. H4 establishes max_rps clamp [0,100] and constant — a config value. H8 fixes KeyError.
+
+I'll rate:
+- H4: importance 55 (establishes MAX_RATE_LIMIT_RPS constant and clamping behavior, behavioral proof)
+- H8: importance 40
+- H2: importance 60 (SSRF security fix, DNS seam added to extractor — architectural seam for testability)
+
+Actually the H2 fix adds a DNS resolution seam to the PDF extractor — that's a testability architecture change. And H2 is SSRF (security). I'd say 60-65.
+
+Let me also consider: these are all part of the bigger security-review arc. Each committed separately per protocol. I'll keep them as separate compartments since they're clearly distinct tasks.
+
+Let me figure out the message ranges:
+- H4: 201-~248? The "Commit H4 fix" appears in the middle. Let me count TC items. Hard to know exact ordinals. The messages are A: blocks containing multiple TCs. Each [N] is one message. [201-223] is one block with many TCs (H3 commit through H4 behavioral test setup). [224-225] is U: Continue. [226-285] is one big block.
+
+So H4 spans 201 through partway into 226-285. Since I can't see exact message boundaries within the TC lists, I'll estimate based on TC ordering. Given the compartment boundary rules, I'll assign:
+
+- Compartment 1 (H4): start=201, end=~the commit H4 point. Since I can't precisely see where 224/225 fall relative to H4 commit... [224-225] is "U: Continue" which came right after the H4 behavioral test strategy-layer discussion at end of [201-223]. Then [226-285] continues H4 test work → commit H4 → H8 → H2 → H1.
+
+I'll set Compartment 1 (H4): 201-248 approximately. But I need contiguous non-overlapping ranges. Let me be reasonable. Given the ambiguity, I'll set:
+- H4: 201-248 (through "Commit H4 fix")
+- H8: 249-263 (through "Commit H8 fix")
+- H2: 264-280 (through "Commit H2 fix")
+- H1 investigation: 281-285 (cffi fetcher investigation starts)
+
+Hmm, but that's guesswork on exact numbers. Actually the guidance says every displayed raw message ordinal must appear in exactly one compartment. Since I only have block-level ordinals (201-223, 224-225, 226-285), I'll work within those. The cleanest: since H4, H8, H2, H1 all live within [201-285], and I know H3 commit was in [201-223] (continuation of prior H3 work), I'll allocate:
+
+Actually the prior compartment [192-200] covered H3 fix. Then [201-223] says "H3 is done and committed-able... Committing H3 per task: / H3 committed. **H4 next — RED.**" So [201-223] starts with the H3 commit and moves into H4 RED.
+
+Let me structure:
+- Compartment 1 (H4 payload policy fix): start=201, end=247. Covers H3 commit wrap-up + H4 full RED/GREEN/behavioral/commit.
+- Compartment 2 (H8 duplicate-URL fix): start=248, end=262.
+- Compartment 3 (H2 SSRF redirect fix): start=263, end=280.
+- Compartment 4 (H1 cffi streaming-cap investigation): start=281, end=285.
+
+The exact numbers are somewhat arbitrary given block granularity, but that's acceptable. Actually, I should be more careful. The messages are numbered per actual message. Given 201-285 is 85 messages and H4 through H1 spans them, allocating ~47/15/18/5 is reasonable.
+
+Hmm, wait — I should reconsider. Actually maybe simpler and more defensible: give each fix a compartment with approximate ranges that are contiguous. I'll go with my allocation but note the range boundaries are approximate within the tool-heavy run.
+
+Actually, let me reconsider importance for H4. H4 was rated "fully valid" and the fix wires the two dead advertised limits through the API path AND adds MAX_RATE_LIMIT_RPS to constants with clamping. The clamping behavior [0,100] is a durable config value. And the finding itself (dead limits) is now fixed. Importance ~55-60.
+
+For facts: MAX_RATE_LIMIT_RPS constant, max_rps clamped [0,100], max_content_length_bytes default 0 (RAM-scaled). H2 SSRF fix added DNS seam to pdf extractor. H8 fixed by_index KeyError.
+
+Let me check dedup against project_memory. Nothing covers these specifically.
+
+Facts candidates:
+- CONFIG_VALUES: `MAX_RATE_LIMIT_RPS` constant lives in `app/constants.py`; max_rps clamped to [0,100]. Hmm is this durable? Yes — the clamp bound. But is it a config value? It's a semantic bound. I'll include as CONFIG_VALUES.
+- NAMING: none really.
+- CONSTRAINTS: H2 — urlopen follows redirects, enabling SSRF bypass; fixed by adding DNS seam. Actually that's a fixed bug in our code → narrative, not constraint (we can fix it, we did). Not a constraint.
+- ARCHITECTURE: the extractor now has a DNS-resolution seam for SSRF guard testability. Could be ARCHITECTURE ("PDF extractor uses a DNS resolution seam so the SSRF guard is testable without network"). That's a load-bearing testability design. Maybe.
+
+Actually H2's key: pdfplumber path uses urlopen which follows redirects → SSRF. Fix: DNS seam. This is a genuine security fix. Let me keep it narrative-focused, maybe one ARCHITECTURE fact about the DNS seam.
+
+Let me also consider events. These are routine bug fixes against our own code (validated security findings). Not external constraints. H2 is an SSRF in urlopen — that's Python stdlib behavior (urlopen follows redirects) which is arguably an external constraint discovery. Hmm. The adversarial review discovered it. But the review already documented it (H2). Is this a durable external constraint future sessions benefit from? urlopen following redirects enabling SSRF is a well-known general behavior; the compartment narrative captures it. I could emit a causal_incident for H2 since SSRF-via-redirect-following in urlopen is an external-system quirk that constrains future extractor work. I think that's defensible. But it's also just "a bug we fixed." The decisive test: if forgotten, would a future session hit the same surprise? If someone writes another urlopen-based fetcher, yes. I'll emit one causal_incident for H2.
+
+Actually, let me be conservative. The general "urlopen follows redirects" is common knowledge in security. The specific finding was the review's. I'll emit it as a causal_incident since it's a real external stdlib behavior that constrains fetcher design. affected_surface: other or tool_protocol. I'll say other (stdlib). Let me include it.
+
+Let me now write the compartments. First person voice, I am the agent who did this work (continuing from session_references).
+
+Compartment 1 (H4):
+P1: Committed H3, then H4. H4 finding: both advertised max_rps/max_content_length_bytes limits dead through API path. RED test... The max_content_length_bytes default is 0 in normalized dict (absent → RAM-scaled default preserved). max_rps clamped to documented [0,100], out-of-range rejected; the bound lives in the API model (le=100.0), added MAX_RATE_LIMIT_RPS to app/constants.py next to other policy bounds. GREEN. Behavioral proof: strategy layer _http_strategy_result with real loopback fetch, tiny cap (max_content_length_bytes: 64) → 413 path. The impl signature too heavy for unit test; right seam is the strategy layer where _effective_max_content_length lives. Full suite + lint. Committed H4.
+
+Also spotted L1 inline (`time.monotonic() - 0`) at the 413 path, fold into H1 commit.
+
+P2 condensed.
+
+Compartment 2 (H8): duplicate-URL 500 via by_index KeyError in render_request. Found render_request tests, harness shape, _worker factory, _disallowed_result shape, Scheduler.run ordering. RED, GREEN, committed.
+
+Compartment 3 (H2): SSRF redirect-following urlopen bypass in PDF extractor. Added DNS resolution seam so SSRF guard testable without network. Fixed function-level pdfplumber import (redundant check). RED, GREEN (with fixed fakes), committed.
+
+Compartment 4 (H1): cffi fetcher investigation begins. curl_cffi version + stream support, response streaming methods, existing cffi tests. Streaming cap to prevent OOM. Investigation only — unprocessed continues into next chunk.
+
+Since [226-285] is a tool-heavy block and the chunk ends mid-H1 investigation, I should set unprocessed_from for H1 continuation? No — the chunk covers 201-285 entirely. H1 investigation started within 285, it's covered by compartment 4. The chunk ends at 285 mid-investigation but that's the end of this pass's data. No unprocessed needed since 285 is the last message.
+
+Let me assign ranges more concretely. I'll use:
+- C1 H4: 201-248
+- C2 H8: 249-263
+- C3 H2: 264-279
+- C4 H1: 280-285
+
+These are approximate but contiguous and cover all. Good enough.
+
+Actually, I realize I should double check — should the H3 commit (which happens at start of [201-223]) be folded into the prior H3 compartment or a new one? The prior compartment ended at 200 with "Full suite 791 passed... committed per one-commit-per-task protocol" — actually it said "Committed per the one-commit-per-task protocol." So H3 was already committed by 200. Then [201-223] says "H3 is done and committed-able... Committing H3 per task" — slight redundancy, likely the commit command execution. I'll fold that H3 commit execution into compartment 1's start as a wrap-up. Fine.
+
+Now write output.
+
+Importance:
+- H4: 55
+- H8: 40
+- H2: 62 (security SSRF, DNS seam architecture)
+- H1: 30 (investigation in progress, low yield yet)
+
+Let me write the P4 shapes:
+- C1 H4: anchors: MAX_RATE_LIMIT_RPS; app/constants.py; _payload_policy; max_rps [0,100]. `<p4>MAX_RATE_LIMIT_RPS in app/constants.py; _payload_policy wires max_rps (clamped [0,100]) + max_content_length_bytes; L1 time.monotonic()-0 fold</p4>`
+- C2 H8: `render_request by_index KeyError; _disallowed_result`
+- C3 H2: `PDF extractor urlopen redirect SSRF; DNS seam; pdfplumber import`
+- C4 H1: `cffi fetcher streaming cap investigation`
+
+Facts:
+- CONFIG_VALUES: `MAX_RATE_LIMIT_RPS` constant lives in `app/constants.py`; `max_rps` is clamped to the documented `[0, 100]` range (out-of-range rejected), and absent `max_content_length_bytes` defaults to `0` in the normalized policy dict (RAM-scaled default preserved).
+- ARCHITECTURE: PDF extractor SSRF guard uses a DNS-resolution seam so redirect-following urlopen behavior is testable without network.
+
+Events: one causal_incident for H2.
+
+Let me write it out.

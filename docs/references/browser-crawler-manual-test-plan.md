@@ -1,7 +1,7 @@
 # Browser-Crawler Service — Manual Test Plan
 
 **Service:** `browser-crawler` (Policy-driven universal crawler execution service)
-**Image:** `dev-stack/browser-crawler:local` (built from `docker/browser-crawler/Dockerfile`)
+**Image:** built from this directory's `Dockerfile` (see `docker compose build browser-crawler`)
 **Base URL (local):** `http://127.0.0.1:8765`
 **Policy schema version:** `2026-06-23` (from `/v1/capabilities`)
 
