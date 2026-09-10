@@ -18,7 +18,6 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.json_safe import json_default
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
@@ -33,6 +32,7 @@ from app.api_models import (
     UnifiedCrawlResponse,
 )
 from app.crawl.strategies.browser_pool import get_browser_pool
+from app.json_safe import json_default
 from app.search.endpoint import search as search_endpoint_handler
 
 logger = logging.getLogger(__name__)

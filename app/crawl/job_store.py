@@ -7,7 +7,6 @@ so they can survive process restarts.
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
 import sqlite3

@@ -20,7 +20,6 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from app.json_safe import json_default
 from app.classify import classify_page
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
@@ -34,6 +33,7 @@ from app.crawl.strategies.http import (
     _check_ssrf_protection,
     _classify_error_code,
 )
+from app.json_safe import json_default
 from app.models import CrawlResult, RenderOptions
 from app.settings import CrawlerSettings
 from app.validation import registrable_domain
