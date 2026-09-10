@@ -233,6 +233,12 @@ leak, JobStore concurrency, selector DoS) were already fixed.
   threads waiting on the lock.
 
 ### Fixed
+- **Classification input change on script-truncated bodies**: the linear HTML
+  noise scanner neutralizes an unclosed ``<script>`` to end of input, so for
+  bodies truncated mid-script by ``max_content_length`` the text after the
+  cut no longer reaches classification (the old regex left truncated-script
+  content visible). Deliberate fail-closed trade; classification-sensitive
+  callers may see diffs on truncated pages (final review #8).
 - **``_ResultSpill.close()`` double-unlink**: removed the duplicate
   ``if self._own:`` block that could ``os.unlink`` the same path
   twice (raising ``FileNotFoundError`` once the first unlink

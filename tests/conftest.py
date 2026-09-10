@@ -406,6 +406,17 @@ def _reset_global_http_state():
                 http_mod._DEFAULT_HTTP_CLIENT = None
     except Exception:
         pass
+    # The real app's shutdown event is module-global and shared by every
+    # ASGI test. A test that drives the real lifespan (shutdown) leaves it
+    # SET; production never reuses a set event (fresh boot = fresh event),
+    # so restore that invariant here -- otherwise later /v1/crawl calls
+    # abort with empty results and fresh jobs go PAUSED (poisoned event).
+    try:
+        from app.main import app as _app
+
+        _app.state.shutdown_event = asyncio.Event()
+    except Exception:
+        pass
     # robots_cache was promoted to module-level and shared across crawl_request
     # calls (#9). Tests reuse origins with different robots.txt bodies, so
     # clear it between tests for isolation. Production keeps it shared (a given

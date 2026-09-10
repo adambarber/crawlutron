@@ -278,3 +278,28 @@ class TestToolsCall:
         resp = await _mcp(async_client, body)
         assert resp.status_code == 200
         assert resp.json()["error"]["code"] == -32602
+
+
+class TestInternalErrorContract:
+    """N-4: an unexpected tool exception must stay inside the JSON-RPC shape."""
+
+    async def test_unexpected_tool_exception_returns_internal_error(self, monkeypatch):
+        import app.mcp.server as server_mod
+        from app.mcp.server import handle_mcp_request
+
+        async def boom(**kwargs):
+            raise ValueError("simulated tool crash")
+
+        monkeypatch.setattr(server_mod, "_call_tool", boom)
+        body = _body("tools/call", params={"name": "search", "arguments": {}, "_meta": {**_META}})
+        status, payload = await handle_mcp_request(
+            body,
+            protocol_version_header=_PROTOCOL_VERSION,
+            method_header="tools/call",
+            name_header="search",
+            settings=None,
+            shutdown_event=None,
+        )
+        assert status == 500
+        assert payload["error"]["code"] == -32603
+        assert payload["id"] == 1

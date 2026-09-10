@@ -82,22 +82,35 @@ def validate_meta(params: dict[str, Any] | None, request_id: int | str) -> None:
                 "io.modelcontextprotocol/protocolVersion and clientCapabilities",
             ),
         )
-    if not isinstance(meta.get(META_PROTOCOL_VERSION), str):
+    version = meta.get(META_PROTOCOL_VERSION)
+    if not isinstance(version, str):
+        # Missing and wrong-type are different caller errors (N-6): say which.
+        reason = (
+            f"Missing required _meta key: {META_PROTOCOL_VERSION}"
+            if META_PROTOCOL_VERSION not in meta
+            else f"Invalid _meta key (must be a string): {META_PROTOCOL_VERSION}"
+        )
         raise ProtocolValidationError(
             400,
             error_response(
                 request_id,
                 INVALID_PARAMS,
-                f"Missing required _meta key: {META_PROTOCOL_VERSION}",
+                reason,
             ),
         )
-    if not isinstance(meta.get(META_CLIENT_CAPABILITIES), dict):
+    capabilities = meta.get(META_CLIENT_CAPABILITIES)
+    if not isinstance(capabilities, dict):
+        reason = (
+            f"Missing required _meta key: {META_CLIENT_CAPABILITIES}"
+            if META_CLIENT_CAPABILITIES not in meta
+            else f"Invalid _meta key (must be an object): {META_CLIENT_CAPABILITIES}"
+        )
         raise ProtocolValidationError(
             400,
             error_response(
                 request_id,
                 INVALID_PARAMS,
-                f"Missing required _meta key: {META_CLIENT_CAPABILITIES}",
+                reason,
             ),
         )
 

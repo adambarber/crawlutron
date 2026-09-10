@@ -776,6 +776,23 @@ async def _default_http_fetcher(
         )
 
 
+def _release_stream_noblock(response: Any) -> None:
+    """Schedule a best-effort stream close without awaiting it (N-5).
+
+    Callers are abandoning a live or wedged producer; awaiting
+    ``response.aclose()`` would join that task and can hang (H1). The done
+    callback consumes the result so a failed close never surfaces.
+    """
+    try:
+        aclose = getattr(response, "aclose", None)
+        if aclose is None:  # queue-contract fakes carry no close handle
+            return
+        task = asyncio.ensure_future(aclose())
+    except RuntimeError:  # no running loop (tests driving the helper raw)
+        return
+    task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+
+
 async def _default_cffi_fetcher(
     url: str,
     headers: dict[str, str],
@@ -855,8 +872,12 @@ async def _default_cffi_fetcher(
                 # before delivering it). Reading the queue keeps the abort
                 # prompt and the failure reraise unblocked (H1).
                 while True:
-                    # Bound the wait: if the producer task died without a
-                    # terminal sentinel, a bare get() would hang forever.
+                    # Bound the wait PER CHUNK, not per response (N-5): this
+                    # mirrors httpx's read-timeout semantics -- an inter-chunk
+                    # gap limit. A slow-drip origin (one byte per interval)
+                    # can keep the stream alive up to max_content_length; the
+                    # per-URL budget above bounds the total. Do not "fix"
+                    # this into a total deadline without also bounding drips.
                     # queue.get() is pure asyncio, so wait_for cancellation is
                     # safe here (unlike cancelling curl's internal machinery).
                     try:
@@ -864,6 +885,12 @@ async def _default_cffi_fetcher(
                             response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
                         )
                     except TimeoutError as error:
+                        # Stall: release the handle WITHOUT awaiting. aclose()
+                        # joins the producer task, which is exactly the wedged
+                        # task being escaped; awaiting it hangs like the old
+                        # aiter_content() wrapper did (H1). A scheduled close
+                        # reclaims the handle; the session client bounds any leak.
+                        _release_stream_noblock(response)
                         raise TimeoutError("cffi stream queue stalled") from error
                     if isinstance(chunk, RequestException):
                         raise chunk
@@ -871,6 +898,11 @@ async def _default_cffi_fetcher(
                         break
                     raw.extend(chunk)
                     if len(raw) > max_content_length:
+                        # Mid-stream abandon: same non-blocking release as the
+                        # stall path (awaiting aclose on a live producer is
+                        # safe pre-consumption, but here the producer may be a
+                        # hostile drip -- never wait on it).
+                        _release_stream_noblock(response)
                         return HttpFetchResult(
                             url=url,
                             final_url=str(response.url),
