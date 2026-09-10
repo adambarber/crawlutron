@@ -23,6 +23,16 @@ class TestContract:
         assert cache.purge_expired() == 1
         assert cache.get("a") is None
 
+    def test_get_stale_returns_expired_entries_for_304_reuse(self):
+        clock = {"now": 1000.0}
+        cache = BoundedTTLCache(max_entries=4, ttl=10.0, clock=lambda: clock["now"])
+        cache.put("u", (["/p1"], "v1", None))
+        clock["now"] += 60.0  # expired
+        assert cache.get("u") is None  # freshness still enforced on get
+        assert cache.get_stale("u") == (["/p1"], "v1", None)  # present for 304 reuse
+        assert cache.peek("missing") is None
+        assert cache.get_stale("missing") is None
+
     def test_lru_eviction_beyond_max_entries(self):
         clock = {"now": 1000.0}
         cache = BoundedTTLCache(max_entries=2, ttl=100.0, clock=lambda: clock["now"])

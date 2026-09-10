@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import time
-from collections import OrderedDict
 from typing import Any
 
 from app.constants import (
@@ -21,6 +19,7 @@ from app.constants import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
+from app.bounded_ttl import BoundedTTLCache
 from app.crawl.strategies.http import _decode_body, _decompress_body
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
@@ -64,16 +63,13 @@ async def _fetch_and_decode(
     return None, None
 
 
-# Sitemap cache (LRU via OrderedDict.move_to_end + popitem).
+# Sitemap cache: one locked, bounded, TTL'd store (app.bounded_ttl).
 #
-# Thread-safety: under CPython this is safe in practice because the GIL
-# serializes Python bytecode for OrderedDict mutations. The cache is only
-# read/written from the asyncio event loop (no threads), so even a GIL-free
-# runtime (PyPy, GraalPy) would see single-threaded access. If a future
-# change moves sitemap parsing to ``asyncio.to_thread``, this cache will
-# need an explicit ``threading.Lock`` (mirroring ``_DNS_CACHE_LOCK`` in
-# ``app/crawl/strategies/http.py``).
-_SITEMAP_CACHE: OrderedDict[str, tuple[float, list, str | None, str | None]] = OrderedDict()
+# The lock lives inside the chokepoint, so call sites can never forget it
+# (the class of bug that produced the robots-cache and DNS-cache races).
+_SITEMAP_CACHE: BoundedTTLCache[str, tuple[list, str | None, str | None]] = BoundedTTLCache(
+    max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS
+)
 
 
 async def fetch_sitemap_urls(
@@ -146,10 +142,11 @@ async def fetch_sitemap_urls(
         text, etag, last_modified, not_modified = await _fetch_text(current_url, cond_headers)
         if not_modified:
             # 304: reuse the previously resolved URLs for this exact URL.
-            prev = _SITEMAP_CACHE.get(current_url)
+            # get_stale (not get): the entry must be PRESENT, not fresh --
+            # the origin just confirmed the last-known set is still valid.
+            prev = _SITEMAP_CACHE.get_stale(current_url)
             if prev:
-                _SITEMAP_CACHE.move_to_end(current_url)
-                for entry in prev[1]:
+                for entry in prev[0]:
                     page_urls.add(entry)
             return etag, last_modified
         if text is None:
@@ -187,31 +184,25 @@ async def fetch_sitemap_urls(
         return etag, last_modified
 
     cached = _SITEMAP_CACHE.get(sitemap_url)
-    now = time.monotonic()
-    if cached is not None and now - cached[0] < SITEMAP_CACHE_TTL_SECONDS:
-        # Fresh: serve directly and mark recently used (LRU).
-        _SITEMAP_CACHE.move_to_end(sitemap_url)
-        return set(cached[1])
+    if cached is not None:
+        # Fresh: serve directly (get() already LRU-touched).
+        return set(cached[0])
     # Expired (or absent): fall through and re-fetch. Leave the entry in the
     # cache so a 304 response in recurse() can still reuse its URLs (do NOT pop
     # it here, or the conditional 304 reuse below would lose the cached set).
     # On a cache expiry, replay the prior ETag/Last-Modified as a conditional
     # request unless the caller supplied their own headers.
     if conditional is None and cached:
-        if cached[2]:
-            conditional = {"If-None-Match": cached[2]}
-        elif cached[3]:
-            conditional = {"If-Modified-Since": cached[3]}
+        if cached[1]:
+            conditional = {"If-None-Match": cached[1]}
+        elif cached[2]:
+            conditional = {"If-Modified-Since": cached[2]}
     try:
         results = await asyncio.gather(*[recurse(sitemap_url, 0, conditional)])
         root_etag, root_lm = results[0]
     except Exception:
-        root_etag, root_lm = (cached[2] if cached else None), (cached[3] if cached else None)
-    # Store with LRU recency and evict the least-recently-used entries
-    # past the cap. OrderedDict gives O(1) move-to-end on access and
-    # O(overflow) eviction without the previous full sort of the whole
-    # cache on every overflow (B4/B5).
-    _SITEMAP_CACHE[sitemap_url] = (now, list(page_urls), root_etag, root_lm)
-    while len(_SITEMAP_CACHE) > SITEMAP_CACHE_MAX_ENTRIES:
-        _SITEMAP_CACHE.popitem(last=False)
+        root_etag, root_lm = (cached[1] if cached else None), (cached[2] if cached else None)
+    # Store through the chokepoint: LRU recency refresh and bounded eviction
+    # happen inside put(), under its lock (no more manual popitem loop).
+    _SITEMAP_CACHE.put(sitemap_url, (list(page_urls), root_etag, root_lm))
     return page_urls

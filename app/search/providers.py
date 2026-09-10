@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
 
+from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http import get_async_http_client
 from app.validation import normalize_public_http_url
 
@@ -57,6 +58,11 @@ class SearchProviderError(Exception):
     """A provider call failed (network, non-2xx, or an unparsable body)."""
 
 
+# Search responses are snippets: a 1 MiB ceiling is generous (a DDG HTML
+# page is ~200 KB) and keeps hostile provider bodies out of RAM and lxml.
+_SEARCH_RESPONSE_MAX_BYTES = 1 * 1024 * 1024
+
+
 class SearchProviderUnavailable(Exception):
     """A provider was selected but its credentials are not configured."""
 
@@ -85,8 +91,8 @@ async def _provider_http(
     to inject fixture responses without touching the providers themselves.
     """
     client = get_async_http_client()
-    timeout = httpx.Timeout(read=timeout_seconds, connect=5.0, pool=5.0)
-    response = await client.request(
+    timeout = httpx.Timeout(timeout_seconds, connect=5.0, read=timeout_seconds, write=10.0, pool=5.0)
+    async with client.stream(
         method,
         url,
         params=params,
@@ -94,8 +100,15 @@ async def _provider_http(
         data=data,
         headers=headers,
         timeout=timeout,
-    )
-    return response.status_code, response.text
+    ) as response:
+        try:
+            raw = await read_capped_async(response.aiter_bytes(), _SEARCH_RESPONSE_MAX_BYTES)
+        except BodyTooLarge as error:
+            raise SearchProviderError(
+                f"provider body exceeded {_SEARCH_RESPONSE_MAX_BYTES} bytes"
+            ) from error
+        text = raw.decode(response.charset or "utf-8", errors="replace")
+        return response.status_code, text
 
 
 def _clip(text: str) -> str:

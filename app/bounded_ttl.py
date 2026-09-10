@@ -65,6 +65,22 @@ class BoundedTTLCache(Generic[K, V]):
         """Value without the LRU touch (expiry still applies)."""
         return self._entry_if_fresh(key, touch=False)
 
+    def get_stale(self, key: K) -> V | None:
+        """Value even when expired (304-reuse contract), with LRU touch.
+
+        The sitemap fetcher reuses last-known URLs when the origin answers
+        304 Not Modified; the entry must be present, not fresh. Expiry is
+        enforced by the fetch path (get), not here.
+        """
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            self._entries.move_to_end(key)
+            return entry[1]
+        """Value without the LRU touch (expiry still applies)."""
+        return self._entry_if_fresh(key, touch=False)
+
     def put(self, key: K, value: V, *, ttl: float | None = None) -> None:
         """Insert/refresh under the lock, evicting LRU beyond max_entries."""
         now = self._clock()

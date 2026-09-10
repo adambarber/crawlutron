@@ -1,6 +1,5 @@
 """Sitemap fetches must send conditional requests and reuse the cache on 304 (#5)."""
 
-import time
 
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.models import HttpFetchResult
@@ -25,7 +24,8 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
 async def test_304_reuses_cached_urls_without_reparsing():
     url = "http://x.test/sitemap.xml"
     # Seed an EXPIRED cache entry (forces a re-fetch attempt).
-    _SITEMAP_CACHE[url] = (time.monotonic() - 7200, [("http://x.test/p1", None)], "v1", None)
+    # Seed an EXPIRED entry (negative ttl) through the chokepoint seam.
+    _SITEMAP_CACHE.put(url, ([("http://x.test/p1", None)], "v1", None), ttl=-1.0)
     calls = []
 
     async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
@@ -39,12 +39,12 @@ async def test_304_reuses_cached_urls_without_reparsing():
     # Conditional header was sent.
     assert any(c.get("If-None-Match") == "v1" for c in calls)
     # Cache TTL was refreshed (entry still present, not re-parsed).
-    assert _SITEMAP_CACHE[url][0] > time.monotonic() - 1
+    assert _SITEMAP_CACHE.peek(url) is not None  # TTL refreshed, entry fresh again
 
 
 async def test_etag_captured_and_stored_on_200():
     url = "http://x.test/sitemap.xml"
-    _SITEMAP_CACHE.pop(url, None)
+    _SITEMAP_CACHE.discard(url)
     xml = """<?xml version="1.0"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>http://x.test/p1</loc><lastmod>2024-01-01</lastmod></url>
@@ -56,5 +56,5 @@ async def test_etag_captured_and_stored_on_200():
     out = await fetch_sitemap_urls(fetcher, url, 10)
     assert ("http://x.test/p1", "2024-01-01") in out
     # The new etag/last-modified are stored so the next crawl can send a 304 check.
-    assert _SITEMAP_CACHE[url][2] == "v2"
-    assert _SITEMAP_CACHE[url][3] == "Wed, 01 Jan 2024 00:00:00 GMT"
+    assert _SITEMAP_CACHE.peek(url)[1] == "v2"
+    assert _SITEMAP_CACHE.peek(url)[2] == "Wed, 01 Jan 2024 00:00:00 GMT"

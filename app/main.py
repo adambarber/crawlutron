@@ -111,10 +111,8 @@ if FastAPI is not None:
             get_metrics=get_metrics,
         )
         await initialize_browser_pool(settings)
-        # Jobs: rewind crash orphans and resume every PENDING whole-site job.
-        from .api.job_runner import recover_and_start_pending_jobs
-
-        await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
+        # Cookies first: recovered jobs can receive cookies in their first
+        # batch, and a clear-then-populate load would drop those (final #5).
         if settings.cookie_persistence_enabled:
             # Create the parent directory before the cookie jar tries to read
             # from it; standalone checkouts default to ./cache which may not
@@ -123,27 +121,32 @@ if FastAPI is not None:
             from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
 
             _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
+        # Jobs: rewind crash orphans and resume every PENDING whole-site job.
+        from .api.job_runner import recover_and_start_pending_jobs
+
+        await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
 
         yield
 
-        # Shutdown: save cookie jar if persistence enabled, then close clients and browser pool
+        # Shutdown: stop the world FIRST so in-flight job crawls can't
+        # deliver webhooks against cleared dependencies or mint cookies
+        # after the snapshot is taken (final review #4). Then persist the
+        # jar, release webhook deps, and close clients.
+        shutdown_event.set()
+        from .api.job_runner import shutdown_job_runner
+
+        await shutdown_job_runner()
         from .api.webhooks import clear_webhook_dependencies
 
-        clear_webhook_dependencies()
         if settings.cookie_persistence_enabled:
             from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
 
             _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
+        clear_webhook_dependencies()
 
         from app.crawl.strategies.http import close_async_http_client
 
         from .crawl.engine import _resource_gate
-
-        shutdown_event.set()
-        # Stop job runners before closing the engine's shared clients.
-        from .api.job_runner import shutdown_job_runner
-
-        await shutdown_job_runner()
         await close_async_http_client()
         await close_browser_pool()
         _resource_gate.close()

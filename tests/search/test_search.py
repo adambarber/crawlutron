@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from unittest import mock
 
 import pytest
 
@@ -19,6 +20,7 @@ from app.search.providers import (
     SearchProviderUnavailable,
     SerperProvider,
     TavilyProvider,
+    _provider_http,
     configured_search_providers,
     get_search_provider,
 )
@@ -284,3 +286,69 @@ class TestSearchEndpoint:
         assert body["search"]["active_provider"] == "brave"
         assert "brave" in body["search"]["configured_providers"]
         assert body["mcp"]["endpoint"] == "/mcp"
+
+
+class TestProviderHttpCaps:
+    """_provider_http must bound provider response bodies before parsing."""
+
+    async def test_search_body_under_cap_passes_through(self):
+        import app.search.providers as providers_mod
+
+        small = json.dumps({"results": []}).encode()
+
+        class _Body:
+            async def aiter_bytes(self):
+                yield small
+
+        class _Resp:
+            status_code = 200
+            charset = "utf-8"
+
+            def aiter_bytes(self):
+                return _Body().aiter_bytes()
+
+        class _Stream:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *args):
+                return False
+
+        class _Client:
+            def stream(self, *a, **k):
+                return _Stream()
+
+        with mock.patch.object(providers_mod, "get_async_http_client", return_value=_Client()):
+            status, body = await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
+        assert status == 200
+        assert json.loads(body) == {"results": []}
+
+    async def test_search_unbounded_body_is_refused(self):
+        import app.search.providers as providers_mod
+
+        class _Body:
+            async def aiter_bytes(self):
+                while True:
+                    yield b"x" * 65536
+
+        class _Resp:
+            status_code = 200
+            charset = "utf-8"
+
+            def aiter_bytes(self):
+                return _Body().aiter_bytes()
+
+        class _Stream:
+            async def __aenter__(self):
+                return _Resp()
+
+            async def __aexit__(self, *args):
+                return False
+
+        class _Client:
+            def stream(self, *a, **k):
+                return _Stream()
+
+        with mock.patch.object(providers_mod, "get_async_http_client", return_value=_Client()):
+            with pytest.raises(SearchProviderError, match="[Ee]xceed"):
+                await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)

@@ -50,15 +50,27 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
 
     def timed(n):
         payload = ("<script>" + "a" * 500) * n
-        t0 = time.perf_counter()
+        # Warm-up once to settle first-call effects; min-of-3 so timer
+        # noise on a loaded runner can't flake a linear implementation
+        # (final review #6).
         _strip_html_noise(payload)
-        return time.perf_counter() - t0
+        best = None
+        for _ in range(3):
+            t0 = time.perf_counter()
+            _strip_html_noise(payload)
+            elapsed = time.perf_counter() - t0
+            best = elapsed if best is None else min(best, elapsed)
+        return best
 
     t_small = timed(400)
     t_big = timed(800)
     assert t_big < t_small * 3.5, (
         f"super-linear blowup: {t_small:.3f}s -> {t_big:.3f}s (ratio {t_big / t_small:.1f}x for 2x input)"
     )
+    # Absolute ceiling: the ~400 KB pass must complete well under one CI
+    # tick on any reasonable machine; a quadratic reimplementation would
+    # be orders of magnitude slower.
+    assert t_big < 0.25, f"linear scan too slow: {t_big:.3f}s for ~400 KB"
 
 
 def test_strip_unclosed_script_neutralizes_to_end_and_keeps_preceding_text():

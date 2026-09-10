@@ -44,7 +44,7 @@ def _child_xml(i: int) -> str:
 class TestSitemapFanoutBound:
     async def test_child_scheduling_capped_by_remaining_need(self, real_sleeps, monkeypatch):
         url = "http://fanout.test/sitemap.xml"
-        _SITEMAP_CACHE.pop(url, None)
+        _SITEMAP_CACHE.discard(url)
         index_body = _index_xml(200)
         in_flight = 0
         max_in_flight = 0
@@ -76,7 +76,7 @@ class TestSitemapFanoutBound:
         try:
             out = await fetch_sitemap_urls(fetcher, url, 10, max_urls=20)
         finally:
-            _SITEMAP_CACHE.pop(url, None)
+            _SITEMAP_CACHE.discard(url)
         assert len(out) == 20
         # Enqueue-time cap: never schedule more children than still needed.
         assert child_fetches <= 20

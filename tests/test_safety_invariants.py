@@ -14,12 +14,61 @@ import pathlib
 
 APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
 
-# app/safe_regex.py is the sanctioned wrapper around engine-level compilation.
+# app/safe_regex.py is the sanctioned wrapper around engine-level compilation
+# (stdlib `re` for literals; the third-party `regex` engine for bounded
+# execution). Every other module must route through it.
 _CHOKEPOINT_MODULES = {"safe_regex.py"}
+
+# Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
+# attacker-influenced text (the ReDoS shape). `re.search(LITERAL, text)` is
+# safe -- only a dynamic PATTERN is the hazard.
+_RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findall", "split"}
 
 
 def _app_python_files():
     return sorted(p for p in APP_ROOT.rglob("*.py") if p.name not in _CHOKEPOINT_MODULES)
+
+
+def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag re.<method>(<non-literal pattern>, ...) -- the ReDoS shape."""
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "re"
+            and node.func.attr in _RE_DYNAMIC_METHODS
+            and node.args
+            and not isinstance(node.args[0], ast.Constant)
+        ):
+            offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} re.{node.func.attr}(<dynamic pattern>)")
+    return offenders
+
+
+def test_no_dynamic_pattern_re_calls():
+    """re.* with a non-literal pattern must go through app.safe_regex."""
+    offenders: list[str] = []
+    for path in _app_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        offenders.extend(_dynamic_pattern_re_calls(tree, path))
+    assert not offenders, "Use app.safe_regex.compile_untrusted/match_bounded: " + ", ".join(offenders)
+
+
+def test_no_direct_regex_engine_import():
+    """Only safe_regex.py may import the third-party `regex` engine."""
+    offenders: list[str] = []
+    for path in _app_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "regex":
+                        offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}")
+            elif isinstance(node, ast.ImportFrom):
+                if node.module == "regex":
+                    offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}")
+    assert not offenders, "Only app.safe_regex may import the regex engine: " + ", ".join(offenders)
 
 
 def test_no_bare_re_compile_on_nonliteral():
@@ -115,7 +164,13 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_no_bare_body_reads_in_strategies():
-    """Every body read in strategies/ must be capped (N2 class)."""
+    """Every body read in strategies/ must be capped (N2 class).
+
+    Scope note: the chokepoint (app/bounded_io.py) lives OUTSIDE strategies/
+    so its own ``stream.read(n)`` calls are exempt by path; the other
+    body-acquisition path (app/search/providers.py) routes through
+    read_capped_async. Widening this scope must keep those exemptions.
+    """
     strategies = APP_ROOT / "crawl" / "strategies"
     offenders: list[str] = []
     for path in sorted(strategies.rglob("*.py")):
