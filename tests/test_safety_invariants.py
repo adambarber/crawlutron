@@ -12,21 +12,32 @@ from __future__ import annotations
 import ast
 import pathlib
 
-APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
+from chokepoint_walks import (
+    REPO_ROOT,
+    SANCTIONED,
+    STRATEGIES_DIR,
+    app_python_files,
+    app_trees,
+    file_tree,
+    offender,
+    trees_under,
+)
 
-# app/safe_regex.py is the sanctioned wrapper around engine-level compilation
-# (stdlib `re` for literals; the third-party `regex` engine for bounded
-# execution). Every other module must route through it.
-_CHOKEPOINT_MODULES = {"safe_regex.py"}
+__all__ = [
+    "REPO_ROOT",
+    "SANCTIONED",
+    "STRATEGIES_DIR",
+    "app_python_files",
+    "app_trees",
+    "file_tree",
+    "offender",
+    "trees_under",
+]
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
 # attacker-influenced text (the ReDoS shape). `re.search(LITERAL, text)` is
 # safe -- only a dynamic PATTERN is the hazard.
 _RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findall", "split"}
-
-
-def _app_python_files():
-    return sorted(p for p in APP_ROOT.rglob("*.py") if p.name not in _CHOKEPOINT_MODULES)
 
 
 def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -42,17 +53,14 @@ def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and node.args
             and not isinstance(node.args[0], ast.Constant)
         ):
-            offenders.append(
-                f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} re.{node.func.attr}(<dynamic pattern>)"
-            )
+            offenders.append(offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)"))
     return offenders
 
 
 def test_no_dynamic_pattern_re_calls():
     """re.* with a non-literal pattern must go through app.safe_regex."""
     offenders: list[str] = []
-    for path in _app_python_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in app_trees():
         offenders.extend(_dynamic_pattern_re_calls(tree, path))
     assert not offenders, "Use app.safe_regex.compile_untrusted/match_bounded: " + ", ".join(offenders)
 
@@ -60,24 +68,22 @@ def test_no_dynamic_pattern_re_calls():
 def test_no_direct_regex_engine_import():
     """Only safe_regex.py may import the third-party `regex` engine."""
     offenders: list[str] = []
-    for path in _app_python_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in app_trees():
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "regex":
-                        offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}")
+                        offenders.append(offender(path, node.lineno))
             elif isinstance(node, ast.ImportFrom):
                 if node.module == "regex":
-                    offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}")
+                    offenders.append(offender(path, node.lineno))
     assert not offenders, "Only app.safe_regex may import the regex engine: " + ", ".join(offenders)
 
 
 def test_no_bare_re_compile_on_nonliteral():
     """Non-literal re.compile must go through app.safe_regex.compile_untrusted."""
     offenders: list[str] = []
-    for path in _app_python_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in app_trees():
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
@@ -88,7 +94,7 @@ def test_no_bare_re_compile_on_nonliteral():
                 and node.args
                 and not isinstance(node.args[0], ast.Constant)
             ):
-                offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno}")
+                offenders.append(offender(path, node.lineno))
     assert not offenders, "Use app.safe_regex.compile_untrusted for non-literal patterns: " + ", ".join(
         offenders
     )
@@ -121,7 +127,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
                 continue
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Await):
-                    offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{inner.lineno}")
+                    offenders.append(offender(path, inner.lineno))
             break
     return offenders
 
@@ -129,8 +135,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_no_await_inside_lock_bodies():
     """A lock held across an await blocks the loop and can deadlock (M3)."""
     offenders: list[str] = []
-    for path in _app_python_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in app_trees():
         offenders.extend(_lock_bodies_with_awaits(tree, path))
     assert not offenders, "Lock held across await: " + ", ".join(offenders)
 
@@ -151,11 +156,10 @@ def test_no_hand_rolled_redirect_hops_in_migrated_files():
     """Redirect hops in migrated files go through SafeUrl.redirect_hop."""
     offenders: list[str] = []
     for rel in _SAFE_URL_MIGRATED:
-        path = APP_ROOT.parent / rel
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        path, tree = file_tree(rel)
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "urljoin":
-                offenders.append(f"{rel}:{node.lineno}")
+                offenders.append(offender(path, node.lineno))
     assert not offenders, "Use SafeUrl.redirect_hop for redirect hops: " + ", ".join(offenders)
 
 
@@ -175,14 +179,14 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and not node.args
             and not node.keywords
         ):
-            offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} .read()")
+            offenders.append(offender(path, node.lineno, ".read()"))
         elif (
             isinstance(node, ast.Attribute)
             and node.attr == "content"
             and isinstance(node.value, ast.Name)
             and node.value.id.lower().startswith("response")
         ):
-            offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} .content")
+            offenders.append(offender(path, node.lineno, ".content"))
     return offenders
 
 
@@ -194,9 +198,7 @@ def test_no_bare_body_reads_in_strategies():
     body-acquisition path (app/search/providers.py) routes through
     read_capped_async. Widening this scope must keep those exemptions.
     """
-    strategies = APP_ROOT / "crawl" / "strategies"
     offenders: list[str] = []
-    for path in sorted(strategies.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for path, tree in trees_under(STRATEGIES_DIR):
         offenders.extend(_bare_body_reads(tree, path))
     assert not offenders, "Use app.bounded_io.read_capped_sync/read_capped_async: " + ", ".join(offenders)

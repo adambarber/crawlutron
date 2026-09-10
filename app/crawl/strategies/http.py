@@ -75,7 +75,7 @@ from app.crawl.document_text import (
     _format_extracted_document_text,
 )
 from app.timeouts import Timeouts
-from app.validation import public_url_or_none
+from app.validation import get_env_int, public_url_or_none
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -419,7 +419,6 @@ class CookieJar:
     def load_from_file(cls, path: str) -> CookieJar:
         """Load a cookie jar from a JSON file. Returns empty jar if file missing/invalid."""
         import json
-        import os
 
         jar = cls()
         if not os.path.exists(path):
@@ -1371,9 +1370,7 @@ def _content_cache_key(
 # Adversarial perf #2.1: bound the RAM consumed by in-flight page bodies. At high
 # global_concurrency the per-page cap shrinks so the whole active set cannot
 # exhaust the budget. Operators with known RAM headroom can override the budget.
-_RAM_SAFETY_BYTES = int(
-    os.environ.get("BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES", str(1 * 1024 * 1024 * 1024))
-)
+_RAM_SAFETY_BYTES = get_env_int("BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
 _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 
 
