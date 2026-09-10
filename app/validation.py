@@ -4,6 +4,7 @@ import ipaddress
 import logging
 import math
 import os
+from collections.abc import Mapping
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
@@ -162,17 +163,14 @@ def _strip_trailing_colon(value: str) -> str:
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
-    """Read an env var and return a boolean.
+    """Read an env var and return a boolean, warning on unrecognized values.
 
-    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
-    Anything else (including unset) is treated as the default. Centralized so
-    every SSRF / feature-flag check agrees on what "on" means (adversarial
-    review F-ssrf-env-var-parsing).
+    Truthy values: ``1``, ``true``, ``yes``, ``on``; falsy: ``0``/``false``/
+    ``no``/``off`` (case-insensitive). Garbage logs a warning naming the
+    variable and returns ``default``. Centralized so every SSRF /
+    feature-flag check agrees on what "on" means.
     """
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return parse_bool_value(os.environ.get(name), default, env_name=name)
 
 
 def _clamp(value, lo, hi):
@@ -182,6 +180,76 @@ def _clamp(value, lo, hi):
     if hi is not None and value > hi:
         return hi
     return value
+
+
+def get_mapping_int(
+    mapping: Mapping[str, str], name: str, default: int, *, lo: int | None = None, hi: int | None = None
+) -> int:
+    """Mapping face of :func:`get_env_int`; identical never-raise contract.
+
+    ``CrawlerSettings.from_mapping`` reads a mapping (os.environ in prod, a
+    dict in tests), so the chokepoint must serve both faces from one core.
+    """
+    fallback = _clamp(_as_int_default(default, name=name), lo, hi)
+    raw = mapping.get(name)
+    if raw is None:
+        return fallback
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning(
+            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    return _clamp(value, lo, hi)
+
+
+def get_mapping_float(
+    mapping: Mapping[str, str], name: str, default: float, *, lo: float | None = None, hi: float | None = None
+) -> float:
+    """Mapping face of :func:`get_env_float`; identical never-raise contract."""
+    fallback = _clamp(_as_float_default(default, name=name), lo, hi)
+    raw = mapping.get(name)
+    if raw is None:
+        return fallback
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning(
+            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    if not math.isfinite(value):
+        logging.getLogger(__name__).warning(
+            "non_finite_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    return _clamp(value, lo, hi)
+
+
+def parse_bool_value(raw: str | None, default: bool, *, env_name: str) -> bool:
+    """Parse a boolean env value; warn (never silently flip) on garbage.
+
+    Unset/empty -> ``default``. Recognized truthy: 1/true/yes/on; falsy:
+    0/false/no/off (case-insensitive). Anything else logs a warning naming
+    the variable and returns ``default`` -- so a typo can no longer silently
+    fail a policy open (``RESPECT_ROBOTS=ture`` keeps robots respected).
+    """
+    if raw is None or not raw.strip():
+        return default
+    lowered = raw.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    logging.getLogger(__name__).warning(
+        "invalid_bool_env for %s: %r (using default %r)",
+        env_name,
+        raw,
+        default,
+        extra={"env_name": env_name, "env_value": raw, "fallback": default},
+    )
+    return default
 
 
 def _as_int_default(value, *, name) -> int:
@@ -226,45 +294,18 @@ def get_env_int(name: str, default: int, *, lo: int | None = None, hi: int | Non
     string default like ``"0.5"`` can no longer leak a ``str`` into
     downstream arithmetic.
     """
-    fallback = _clamp(_as_int_default(default, name=name), lo, hi)
-    raw = os.environ.get(name)
-    if raw is None:
-        return fallback
-    try:
-        value = int(str(raw).strip())
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning(
-            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    return _clamp(value, lo, hi)
+    return get_mapping_int(os.environ, name, default, lo=lo, hi=hi)
 
 
 def get_env_float(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
-    """Float sibling of :func:`get_env_int`; never crash, always a finite float.
+    """Read an env var as a float; never crash, always a finite float.
 
     Rejects non-finite values (``inf``/``nan``) from BOTH the default and the
     environment: ``float("inf")`` parses cleanly but ``int(limit * inf)``
     overflows at import, so the value is treated as garbage and the bounded
     fallback is returned instead.
     """
-    fallback = _clamp(_as_float_default(default, name=name), lo, hi)
-    raw = os.environ.get(name)
-    if raw is None:
-        return fallback
-    try:
-        value = float(str(raw).strip())
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning(
-            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    if not math.isfinite(value):
-        logging.getLogger(__name__).warning(
-            "non_finite_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    return _clamp(value, lo, hi)
+    return get_mapping_float(os.environ, name, default, lo=lo, hi=hi)
 
 
 def _public_suffix_list():

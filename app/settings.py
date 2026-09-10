@@ -12,6 +12,7 @@ from app.constants import (
 )
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
+from app.validation import get_mapping_float, get_mapping_int, parse_bool_value
 
 # Connection-pool sizing (T7): bind the HTTP pool to the SAME RAM-derived HTTP
 # concurrency the weighted admission allows, so the two can never diverge as RAM
@@ -100,82 +101,111 @@ class CrawlerSettings:
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, str] | None = None) -> CrawlerSettings:
+        """Build settings from a mapping (os.environ by default).
+
+        Every numeric read goes through the never-raise env chokepoint
+        (``get_mapping_int``/``get_mapping_float``): a typo'd value falls
+        back to the dataclass default with a warning instead of crashing
+        boot, and every boolean goes through ``parse_bool_value`` so a typo
+        can never silently flip a policy open (``RESPECT_ROBOTS=ture``
+        keeps robots respected).
+        """
         source = os.environ if values is None else values
         return cls(
             host=source.get("BROWSER_CRAWLER_HOST", cls.host),
-            host_port=int(source.get("BROWSER_CRAWLER_HOST_PORT", cls.host_port)),
-            global_concurrency=int(source.get("BROWSER_CRAWLER_GLOBAL_CONCURRENCY", cls.global_concurrency)),
-            per_domain_concurrency=int(
-                source.get("BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency)
+            host_port=get_mapping_int(source, "BROWSER_CRAWLER_HOST_PORT", cls.host_port),
+            global_concurrency=get_mapping_int(
+                source, "BROWSER_CRAWLER_GLOBAL_CONCURRENCY", cls.global_concurrency
             ),
-            per_domain_delay_ms=int(
-                source.get("BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms)
+            per_domain_concurrency=get_mapping_int(
+                source, "BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency
             ),
-            max_batch_size=int(source.get("BROWSER_CRAWLER_MAX_BATCH_SIZE", cls.max_batch_size)),
-            default_timeout_seconds=int(
-                source.get("BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS", cls.default_timeout_seconds)
+            per_domain_delay_ms=get_mapping_int(
+                source, "BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
             ),
-            default_max_retries=int(
-                source.get("BROWSER_CRAWLER_DEFAULT_MAX_RETRIES", cls.default_max_retries)
+            max_batch_size=get_mapping_int(source, "BROWSER_CRAWLER_MAX_BATCH_SIZE", cls.max_batch_size),
+            default_timeout_seconds=get_mapping_int(
+                source, "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS", cls.default_timeout_seconds
             ),
-            respect_robots=_parse_bool_env_value(
-                source.get("BROWSER_CRAWLER_RESPECT_ROBOTS", str(cls.respect_robots))
+            default_max_retries=get_mapping_int(
+                source, "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES", cls.default_max_retries
+            ),
+            respect_robots=parse_bool_value(
+                source.get("BROWSER_CRAWLER_RESPECT_ROBOTS"),
+                cls.respect_robots,
+                env_name="BROWSER_CRAWLER_RESPECT_ROBOTS",
             ),
             allowed_hosts=source.get("BROWSER_CRAWLER_ALLOWED_HOSTS", cls.allowed_hosts),
             denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
             log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),
             log_file_path=source.get("BROWSER_CRAWLER_LOG_FILE", cls.log_file_path),
-            log_file_max_bytes=int(source.get("BROWSER_CRAWLER_LOG_MAX_BYTES", cls.log_file_max_bytes)),
-            log_file_backup_count=int(
-                source.get("BROWSER_CRAWLER_LOG_BACKUP_COUNT", cls.log_file_backup_count)
+            log_file_max_bytes=get_mapping_int(
+                source, "BROWSER_CRAWLER_LOG_MAX_BYTES", cls.log_file_max_bytes
+            ),
+            log_file_backup_count=get_mapping_int(
+                source, "BROWSER_CRAWLER_LOG_BACKUP_COUNT", cls.log_file_backup_count
             ),
             cache_dir=source.get("BROWSER_CRAWLER_CACHE_DIR", cls.cache_dir),
-            cache_ttl_seconds=int(source.get("BROWSER_CRAWLER_CACHE_TTL_SECONDS", cls.cache_ttl_seconds)),
-            content_cache_enabled=_parse_bool_env_value(
-                source.get("BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", str(cls.content_cache_enabled))
+            cache_ttl_seconds=get_mapping_int(
+                source, "BROWSER_CRAWLER_CACHE_TTL_SECONDS", cls.cache_ttl_seconds
             ),
-            adaptive_throttling=_parse_bool_env_value(
-                source.get("BROWSER_CRAWLER_ADAPTIVE_THROTTLING", str(cls.adaptive_throttling))
+            content_cache_enabled=parse_bool_value(
+                source.get("BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"),
+                cls.content_cache_enabled,
+                env_name="BROWSER_CRAWLER_CONTENT_CACHE_ENABLED",
             ),
-            adaptive_min_delay=float(
-                source.get("BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay)
+            adaptive_throttling=parse_bool_value(
+                source.get("BROWSER_CRAWLER_ADAPTIVE_THROTTLING"),
+                cls.adaptive_throttling,
+                env_name="BROWSER_CRAWLER_ADAPTIVE_THROTTLING",
             ),
-            adaptive_max_delay=float(
-                source.get("BROWSER_CRAWLER_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay)
+            adaptive_min_delay=get_mapping_float(
+                source, "BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay
             ),
-            adaptive_latency_factor=float(
-                source.get("BROWSER_CRAWLER_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor)
+            adaptive_max_delay=get_mapping_float(
+                source, "BROWSER_CRAWLER_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay
             ),
-            cookie_persistence_enabled=_parse_bool_env_value(
-                source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED", "false")
+            adaptive_latency_factor=get_mapping_float(
+                source, "BROWSER_CRAWLER_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor
+            ),
+            cookie_persistence_enabled=parse_bool_value(
+                source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED"),
+                cls.cookie_persistence_enabled,
+                env_name="BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED",
             ),
             cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", cls.cookie_jar_path),
-            http_max_connections=int(
-                source.get("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections)
+            http_max_connections=get_mapping_int(
+                source, "BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections
             ),
-            http_max_keepalive=int(source.get("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive)),
-            http_keepalive_expiry=float(
-                source.get("BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry)
+            http_max_keepalive=get_mapping_int(
+                source, "BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive
             ),
-            max_browser_renders=int(
-                source.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", cls.max_browser_renders)
+            http_keepalive_expiry=get_mapping_float(
+                source, "BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry
             ),
-            max_concurrent_pages=int(
-                source.get("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages)
+            max_browser_renders=get_mapping_int(
+                source, "BROWSER_CRAWLER_MAX_BROWSER_RENDERS", cls.max_browser_renders
             ),
-            browser_pool_size=int(source.get("BROWSER_CRAWLER_BROWSER_POOL_SIZE", cls.browser_pool_size)),
-            challenge_wait_seconds=int(
-                source.get("BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds)
+            max_concurrent_pages=get_mapping_int(
+                source, "BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
+            ),
+            browser_pool_size=get_mapping_int(
+                source, "BROWSER_CRAWLER_BROWSER_POOL_SIZE", cls.browser_pool_size
+            ),
+            challenge_wait_seconds=get_mapping_int(
+                source, "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
             ),
             search_provider=source.get("BROWSER_CRAWLER_SEARCH_PROVIDER", cls.search_provider),
             tavily_api_key=source.get("BROWSER_CRAWLER_TAVILY_API_KEY", cls.tavily_api_key),
             brave_api_key=source.get("BROWSER_CRAWLER_BRAVE_API_KEY", cls.brave_api_key),
             serper_api_key=source.get("BROWSER_CRAWLER_SERPER_API_KEY", cls.serper_api_key),
-            search_limit_default=int(
-                source.get("BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT", cls.search_limit_default)
+            search_limit_default=get_mapping_int(
+                source, "BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
             ),
-            search_limit_max=int(source.get("BROWSER_CRAWLER_SEARCH_LIMIT_MAX", cls.search_limit_max)),
-            search_timeout_seconds=int(
-                source.get("BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds)
+            search_limit_max=get_mapping_int(
+                source, "BROWSER_CRAWLER_SEARCH_LIMIT_MAX", cls.search_limit_max
+            ),
+            search_timeout_seconds=get_mapping_int(
+                source, "BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
             ),
         )
