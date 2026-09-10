@@ -641,6 +641,11 @@ class BrowserRenderer:
                 "payload": None,
             }
             try:
+                # ACCEPTED RESIDUAL: the browser process has already
+                # materialized this body in its own memory; Python parses it
+                # once here (transiently) before the 8KB retention cap. Bounding
+                # the parse itself would silently drop legitimate large JSON
+                # API payloads from link discovery.
                 payload = await response.json()
             except Exception:  # payload capture is best-effort
                 payload = None

@@ -121,6 +121,9 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 | `POST` | `/v1/crawl` | Submit one URL (or a batch of URLs) for crawling. |
 | `POST` | `/v1/render` | Render a URL with the browser engine and return structured output. |
 | `POST` | `/v1/search` | Discover public URLs from a query via the configured search provider. |
+| `POST` | `/v1/map` | Crawl a site's link graph and return the discovered URL set (no content extraction). |
+| `POST` | `/v1/crawl/{request_id}` | Fetch the result of an async crawl submission. |
+| `GET`/`POST` | `/v1/jobs` | Whole-site resumable jobs: create (with frontier), list, inspect, pause/resume/cancel. |
 | `POST` | `/mcp` | MCP 2026-07-28 endpoint exposing search/crawl/map/render as tools. |
 | `GET`  | `/v1/capabilities` | Declares supported strategies, classifications, extraction methods, profiles. |
 | `GET`  | `/v1/agent-hints` | Machine-readable guidance for agents/bots (request shapes, caveats). |
