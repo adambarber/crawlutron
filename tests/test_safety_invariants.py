@@ -42,7 +42,9 @@ def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and node.args
             and not isinstance(node.args[0], ast.Constant)
         ):
-            offenders.append(f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} re.{node.func.attr}(<dynamic pattern>)")
+            offenders.append(
+                f"{path.relative_to(APP_ROOT.parent)}:{node.lineno} re.{node.func.attr}(<dynamic pattern>)"
+            )
     return offenders
 
 

@@ -51,11 +51,14 @@ async def test_pinterest_aborted_with_and_without_www():
 
 
 async def test_cdcgov_aborted_with_and_without_www():
-    # suffix match covers apex and subdomains alike
+    # H3: cdc.gov is a government CONTENT host, not tracking infrastructure.
+    # It was removed from ANALYTICS_HOST_SUFFIXES (data poisoning); the
+    # route handler must let it through. Suffix match still covers apex
+    # and subdomains alike for hosts that ARE on the list (see pinterest).
     for url in ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"):
         route = _FakeRoute()
         await _handler_for(None)(route, _FakeRequest(url, "document"))
-        assert route.decision() == "abort", url
+        assert route.decision() == "continue", url
 
 
 async def test_xcom_aborted_regardless_of_mode():

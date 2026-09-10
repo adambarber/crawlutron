@@ -147,6 +147,7 @@ if FastAPI is not None:
         from app.crawl.strategies.http import close_async_http_client
 
         from .crawl.engine import _resource_gate
+
         await close_async_http_client()
         await close_browser_pool()
         _resource_gate.close()

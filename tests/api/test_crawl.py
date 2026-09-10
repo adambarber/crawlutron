@@ -348,25 +348,35 @@ class TestShadowDomApi:
         WEBHOOK_RECEIVED.clear()
 
     @pytest.mark.browser
-    @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
+    @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
     async def test_v1_crawl_shadow_dom_flattened(self):
-        resp = await self.client.post(
-            "/v1/crawl",
-            json={
-                "url": f"{self.base}/shadow",
-                "policy": {
-                    "strategies": ["BROWSER_HEADLESS"],
-                    "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+        # The ASGI harness runs no lifespan, so the pool is None; a real
+        # browser-strategy crawl needs a live pool. Initialize (real
+        # camoufox) and close it in a finally so no browsers leak into
+        # later tests.
+        from app.crawl.strategies.browser_pool import close_browser_pool, initialize_browser_pool
+
+        await initialize_browser_pool()
+        try:
+            resp = await self.client.post(
+                "/v1/crawl",
+                json={
+                    "url": f"{self.base}/shadow",
+                    "policy": {
+                        "strategies": ["BROWSER_HEADLESS"],
+                        "limits": {"timeout_seconds": 30, "max_retries": 0, "max_discovered_links": 50},
+                    },
                 },
-            },
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        result = body["results"][0]
-        assert result["status"] == "success"
-        # After flattening, the shadow-root anchor is in the HTML and extracted.
-        assert "Shadow Link" in (result.get("html") or "")
-        assert "/shadow-link" in (result.get("html") or "")
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            result = body["results"][0]
+            assert result["status"] == "success"
+            # After flattening, the shadow-root anchor is in the HTML and extracted.
+            assert "Shadow Link" in (result.get("html") or "")
+            assert "/shadow-link" in (result.get("html") or "")
+        finally:
+            await close_browser_pool()
 
 
 class TestCookiePersistenceApi:

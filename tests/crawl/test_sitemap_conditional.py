@@ -1,6 +1,5 @@
 """Sitemap fetches must send conditional requests and reuse the cache on 304 (#5)."""
 
-
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
 from app.models import HttpFetchResult
 

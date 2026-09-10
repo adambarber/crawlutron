@@ -194,17 +194,28 @@ def make_content_cache_with_entry(
 
 
 def browser_available() -> bool:
-    """Return True if a Playwright Chromium binary is installed and can be used.
+    """Return True if a usable browser binary is installed.
 
     Used to skip browser-dependent tests in environments where the browser
     binary is not installed (e.g. lightweight CI images). When the binary is
     present the tests run normally.
+
+    Checks Camoufox FIRST: BrowserRenderer launches via camoufox, so its
+    binary is the capability that matters. The Playwright Chromium check
+    remains as a fallback (it version-drifts independently of camoufox).
     """
+    import os
+
+    try:
+        from camoufox.utils import launch_path
+
+        return bool(launch_path()) and os.path.exists(launch_path())
+    except Exception:
+        pass
     try:
         from playwright.sync_api import sync_playwright
     except Exception:
         return False
-    import os
 
     try:
         with sync_playwright() as p:

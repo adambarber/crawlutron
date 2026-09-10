@@ -498,9 +498,7 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
 # produced races. LRU eviction inside put() replaces the soft-cap clear.
 _DNS_TTL = 60.0
 _DNS_CACHE_MAX = 4096
-_DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(
-    max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL
-)
+_DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL)
 
 
 def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:

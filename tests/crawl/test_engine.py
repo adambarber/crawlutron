@@ -83,10 +83,21 @@ class TestEngineCrawlRequest:
         assert result["classification"] == "browser_crash"
 
     @pytest.mark.browser
-    @pytest.mark.skipif(not browser_available(), reason="Playwright chromium not installed")
+    @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
+        class _FakeRobotsOk:
+            status_code = 200
+            headers = {}
+            body = b"User-agent: *\nAllow: /\n"
+
         def failing_fetcher(target_url, headers, timeout, max_content_length=50 * 1024 * 1024):
+            # Fail page fetches but serve robots.txt: robots is per-origin
+            # (M7 fail-closed), so a fake that also breaks robots would
+            # skip the crawl before the browser fallback is ever reached.
+            # The intent here is page-fetch failure -> browser fallback.
+            if target_url.endswith("/robots.txt"):
+                return _FakeRobotsOk()
             raise urllib.error.URLError("connection refused")
 
         renderer = BrowserRenderer()
