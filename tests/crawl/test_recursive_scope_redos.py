@@ -63,7 +63,10 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
         calls["n"] += 1
         raise RegexTimeout("test-induced budget expiry")
 
-    monkeypatch.setattr("app.crawl.recursive.match_bounded", _always_timeout)
+    # The bounded scope check is deduped into app.crawl.scope_match (M10), so
+    # match_bounded is invoked there; patching that one seam now guards both
+    # the recursive loop and the sitemap-seed filter.
+    monkeypatch.setattr("app.crawl.scope_match.match_bounded", _always_timeout)
     pages = {
         "/": (200, '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>', "text/html"),
         "/a": (200, "<html>a</html>", "text/html"),

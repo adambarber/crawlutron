@@ -202,3 +202,33 @@ def test_no_bare_body_reads_in_strategies():
     for path, tree in trees_under(STRATEGIES_DIR):
         offenders.extend(_bare_body_reads(tree, path))
     assert not offenders, "Use app.bounded_io.read_capped_sync/read_capped_async: " + ", ".join(offenders)
+
+
+def _scope_matcher_definitions() -> list[str]:
+    """File labels of every ``def scope_allows``/``_scope_allows`` under app/.
+
+    M10: the bounded scope check was verbatim-copied into engine.py and
+    recursive.py; a one-sided fix would have left the other on the stale
+    contract. Deduped into app/crawl/scope_match.py -- a second definition
+    anywhere means the copy crept back.
+    """
+    defs: list[str] = []
+    for path, tree in app_trees(exclude=frozenset()):
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
+                "scope_allows",
+                "_scope_allows",
+            }:
+                defs.append(offender(path, node.lineno))
+    return defs
+
+
+def test_scope_matcher_has_exactly_one_definition():
+    """The fail-closed scope matcher must live in one module only.
+
+    Behavior parity across the dedupe is covered by test_scope_regex.py;
+    this pins the structural property that no second copy exists to drift.
+    """
+    defs = _scope_matcher_definitions()
+    assert len(defs) == 1, f"scope matcher duplicated again: {defs}"
+    assert "app/crawl/scope_match.py" in defs[0], defs

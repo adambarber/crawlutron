@@ -26,10 +26,10 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
+from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
-from app.safe_regex import RegexTimeout, match_bounded
 from app.scheduler import DomainScheduler
 from app.validation import registrable_domain
 
@@ -48,20 +48,6 @@ RECURSIVE_RAMP_MAX: int = 128
 # (ramp ceiling x concurrency multiplier) so we gauge the very batch we're about
 # to size.
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-
-
-def _scope_allows(compiled, url: str) -> bool:
-    """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
-
-    Mirrors engine._scope_allows: a pathological pattern must never hang
-    the BFS loop (N-1); if the wall-clock budget fires, the URL is treated
-    as out-of-scope and the crawl continues.
-    """
-    try:
-        return match_bounded(compiled, url) is not None
-    except RegexTimeout:
-        logger.warning("scope_regex_timeout", extra={"url": url})
-        return False
 
 
 def _batch_is_http_heavy(

@@ -42,9 +42,10 @@ from app.constants import (
     HTTP_STRATEGIES,
     USER_AGENT_TOKEN,
 )
+from app.crawl.scope_match import scope_allows as _scope_allows
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
-from app.safe_regex import RegexTimeout, UnsafePattern, compile_untrusted, match_bounded
+from app.safe_regex import UnsafePattern, compile_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -120,20 +121,6 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
 # Bound the work and refuse pathological patterns (ReDoS guard).
 _MAX_SCOPE_PATTERN_LEN = 256
 _MAX_SCOPE_LINKS = 5000
-
-
-def _scope_allows(compiled, url: str) -> bool:
-    """Bounded scope check: a RegexTimeout fails CLOSED (link excluded).
-
-    A pathological pattern must never hang the crawl loop (N-1); if the
-    wall-clock budget fires, the URL is treated as out-of-scope and the
-    crawl continues.
-    """
-    try:
-        return match_bounded(compiled, url) is not None
-    except RegexTimeout:
-        logger.warning("scope_regex_timeout", extra={"url": url})
-        return False
 
 
 def _compile_scope_regex_safe(scope_regex: str | None):
