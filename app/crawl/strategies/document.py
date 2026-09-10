@@ -12,6 +12,8 @@ import io
 import urllib.request
 from typing import Any
 
+from app.timeouts import Timeouts
+
 
 def _format_table(rows: list[list[Any]]) -> str:
     """Render a single extracted table (list of rows) as a Markdown table."""
@@ -118,7 +120,7 @@ def _default_document_text_extractor(url: str) -> str:
             try:
                 connect_url, connect_headers = current.connect()
                 request = urllib.request.Request(connect_url, headers=connect_headers)
-                with opener.open(request, timeout=30) as response:
+                with opener.open(request, timeout=Timeouts.defaults().read) as response:
                     # N2: cap the read itself -- a hostile infinite body must
                     # not buffer into memory before the extraction cap sees it.
                     pdf_bytes = read_capped_sync(response, _EXTRACTION_DOC_MAX_INPUT_BYTES)
