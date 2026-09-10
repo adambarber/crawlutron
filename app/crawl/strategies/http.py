@@ -13,7 +13,6 @@ import os
 import re
 import socket
 import ssl
-import tempfile
 import threading
 import time
 from urllib.parse import urlparse
@@ -397,12 +396,13 @@ class CookieJar:
     def save_to_file(self, path: str) -> None:
         """Persist the cookie jar to a JSON file atomically.
 
-        Writes to a temp file in the same directory and ``os.replace``s it into
-        place, so a crash (or write error) mid-serialization cannot leave a
-        truncated/corrupted file that silently loses all persisted cookies.
+        Routes through the app.atomic_write chokepoint (temp file + fsync
+        + replace), so a crash (or write error) mid-serialization cannot
+        leave a truncated/corrupted file that silently loses all cookies.
         """
         import json
-        import os
+
+        from app.atomic_write import atomic_write_text
 
         with self._lock:
             # Persist only the legacy shared namespace ("") for backward
@@ -413,21 +413,7 @@ class CookieJar:
                 if ns:
                     continue
                 data[host] = dict(cookies)
-        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        directory = os.path.dirname(path) or "."
-        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".cookiejar.", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp_path, path)
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        atomic_write_text(path, json.dumps(data))
 
     @classmethod
     def load_from_file(cls, path: str) -> CookieJar:

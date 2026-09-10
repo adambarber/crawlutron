@@ -27,6 +27,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from app.atomic_write import atomic_write_text
 from app.constants import (
     CONTENT_CACHE_MAX_ENTRY_BYTES,
     CONTENT_CACHE_MAX_TOTAL_BYTES,
@@ -219,7 +220,7 @@ class ContentCache:
                 # entry for this key is kept; TTL governs its staleness.
                 return
             old_size = self._index_sizes.get(key, 0)
-            path.write_text(data)
+            atomic_write_text(path, data)
             self._index[key] = path
             self._index.move_to_end(key)
             self._index_sizes[key] = len(data)
@@ -246,7 +247,7 @@ class ContentCache:
 
     def _write_envelope(self, path: Path, envelope: dict[str, Any]) -> None:
         """Persist the envelope to disk (json.dumps of large HTML-sized values)."""
-        path.write_text(json.dumps(envelope))
+        atomic_write_text(path, json.dumps(envelope))
 
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
         """Async ``get``: offload the (potentially large) on-disk envelope read
@@ -337,7 +338,7 @@ class ContentCache:
     def _write_data(self, path: Path, data: str) -> None:
         """Persist a pre-serialized envelope (N1: ``aset`` sizes the exact
         bytes before writing; ``set`` keeps its synchronous inline write)."""
-        path.write_text(data)
+        atomic_write_text(path, data)
 
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""

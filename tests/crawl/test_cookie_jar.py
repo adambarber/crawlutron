@@ -34,7 +34,7 @@ def test_save_to_file_is_atomic_on_failure():
         raise Boom("disk full")
 
     try:
-        with patch("json.dump", side_effect=boom):
+        with patch("json.dumps", side_effect=boom):
             try:
                 jar.save_to_file(target)
             except Boom:
