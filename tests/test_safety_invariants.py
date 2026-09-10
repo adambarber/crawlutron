@@ -135,7 +135,32 @@ def test_no_await_inside_lock_bodies():
     assert not offenders, "Lock held across await: " + ", ".join(offenders)
 
 
-# --- bounded I/O (chokepoints review) -------------------------------------
+# --- SafeUrl chokepoint (final review) ------------------------------------
+
+# Files migrated onto app.safe_url must not regress to hand-rolled redirect
+# hops: urljoin-based hop construction outside safe_url.py reintroduces the
+# "forgot one of the five steps" class. (The http fetcher's own hop path
+# and link/robots/sitemap URL *construction* are separate uses, not hops.)
+_SAFE_URL_MIGRATED = {
+    "app/crawl/strategies/document.py",
+    "app/api/webhooks.py",
+}
+
+
+def test_no_hand_rolled_redirect_hops_in_migrated_files():
+    """Redirect hops in migrated files go through SafeUrl.redirect_hop."""
+    offenders: list[str] = []
+    for rel in _SAFE_URL_MIGRATED:
+        path = APP_ROOT.parent / rel
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "urljoin"
+            ):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, "Use SafeUrl.redirect_hop for redirect hops: " + ", ".join(offenders)
 
 
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:

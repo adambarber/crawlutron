@@ -100,22 +100,20 @@ def _default_document_text_extractor(url: str) -> str:
     redirects to one.
     """
     # Fail closed on unsafe targets (internal/loopback/reserved ranges) BEFORE
-    # any heavy import or network access (F2).
-    from app.crawl.strategies.http import _check_ssrf_protection
-
-    _check_ssrf_protection(url)
-
-    from urllib.parse import urljoin
+    # any heavy import or network access (F2). The SafeUrl chokepoint folds
+    # normalize + check into parse(); every redirect hop re-validates via
+    # redirect_hop() -- there is no raw-str hop path left to forget a step.
+    from app.safe_url import SafeUrl
 
     opener = urllib.request.build_opener(_NoAutoRedirect)
-    current_url = url
     from app.bounded_io import read_capped_sync
     from app.crawl.extraction import _EXTRACTION_DOC_MAX_INPUT_BYTES
 
     try:
+        current = SafeUrl.parse(url)
         for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
             try:
-                with opener.open(current_url, timeout=30) as response:
+                with opener.open(current.raw, timeout=30) as response:
                     # N2: cap the read itself -- a hostile infinite body must
                     # not buffer into memory before the extraction cap sees it.
                     pdf_bytes = read_capped_sync(response, _EXTRACTION_DOC_MAX_INPUT_BYTES)
@@ -123,13 +121,11 @@ def _default_document_text_extractor(url: str) -> str:
             except urllib.error.HTTPError as hop:
                 # Real urllib semantics (N2): with auto-redirect disabled,
                 # a redirect surfaces as HTTPError -- opener.open() never
-                # returns a 30x response object. Validate the hop, then follow.
+                # returns a 30x response object. Re-validate, then follow.
                 location = hop.headers.get("Location")
                 if hop.code not in _REDIRECT_STATUSES or not location:
                     raise
-                next_url = urljoin(current_url, location)
-                _check_ssrf_protection(next_url)
-                current_url = next_url
+                current = current.redirect_hop(location)
                 continue
         else:
             return ""

@@ -95,17 +95,21 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     """
     import httpx
 
-    from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
+    from app.safe_url import SafeUrl
 
-    parsed = urlparse(webhook_url)
+    # Re-parse through the chokepoint (normalize + check + pin in one
+    # place) rather than reimplementing urlparse/check/pin inline -- the
+    # manual composition is exactly the shape that produced the redirect
+    # findings. validate_webhook_url already ran at the edge; parsing again
+    # here closes the TOCTOU between validation and delivery.
+    safe = SafeUrl.parse(webhook_url, pin=True)
+    parsed = urlparse(safe.raw)
     request_headers = {"Content-Type": "application/json"}
     if parsed.scheme == "https":
-        _check_ssrf_protection(webhook_url)
-        pinned_url = webhook_url
+        pinned_url = safe.raw
     else:
-        _hostname, pinned_ip = _resolve_and_pin_host(webhook_url)
         pinned_url = (
-            f"{parsed.scheme}://{pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
+            f"{parsed.scheme}://{safe.pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
             f"{parsed.path or '/'}" + (f"?{parsed.query}" if parsed.query else "")
         )
         if parsed.hostname:
@@ -151,22 +155,14 @@ def validate_webhook_url(webhook_url: str) -> None:
     Resolves the hostname and rejects any that map to a private/loopback
     address, protecting against attacker-controlled DNS that returns an
     internal IP (DNS-rebinding class of SSRF).
-    """
-    from app.crawl.strategies.http import _check_ssrf_protection
-    from app.validation import parse_bool_env
 
-    allow_private = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
-    parsed = urlparse(webhook_url)
-    if parsed.scheme not in {"http", "https"}:
-        raise ValueError("webhook_url must use http or https scheme")
-    hostname = parsed.hostname
-    if not hostname:
-        raise ValueError("webhook_url missing hostname")
-    if allow_private:
-        return
-    if hostname in {"localhost", "host.docker.internal"}:
-        raise ValueError("webhook_url points to private network target")
-    _check_ssrf_protection(webhook_url)
+    Implemented on the SafeUrl chokepoint: normalize (scheme/hostname/
+    private-name rules) + DNS check in one place. Raises ValueError if
+    unsafe; returns None when the URL is safe to deliver to.
+    """
+    from app.safe_url import SafeUrl
+
+    SafeUrl.parse(webhook_url)
 
 
 async def run_and_deliver_webhook(
