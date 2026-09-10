@@ -18,6 +18,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from app.json_safe import json_default
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
@@ -103,7 +104,7 @@ async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolR
     except HTTPException as error:
         return ToolResult(text=_http_exception_message(error), is_error=True)
     dump = unified.model_dump()
-    return ToolResult(text=json.dumps(dump, default=str), structured=dump)
+    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
 async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -115,7 +116,7 @@ async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolRes
         frontier = await map_site(payload, settings=settings, shutdown_event=shutdown_event)
     except HTTPException as error:
         return ToolResult(text=_http_exception_message(error), is_error=True)
-    return ToolResult(text=json.dumps(frontier, default=str), structured=frontier)
+    return ToolResult(text=json.dumps(frontier, default=json_default), structured=frontier)
 
 
 async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -133,7 +134,7 @@ async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> Tool
     except HTTPException as error:
         return ToolResult(text=_http_exception_message(error), is_error=True)
     dump = unified.model_dump()
-    return ToolResult(text=json.dumps(dump, default=str), structured=dump)
+    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
 async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -146,7 +147,7 @@ async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> Tool
     except HTTPException as error:
         return ToolResult(text=_http_exception_message(error), is_error=True)
     dump = response.model_dump()
-    return ToolResult(text=json.dumps(dump, default=str), structured=dump)
+    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
 def _schema(model: type) -> dict[str, Any]:

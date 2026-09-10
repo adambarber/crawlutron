@@ -25,16 +25,10 @@ SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = ("json", "jsonl", "ndjson", "markdow
 
 
 def _default(obj: Any) -> Any:
-    """JSON fallback for objects that are not natively serializable."""
-    reducer = getattr(obj, "model_dump", None)
-    if callable(reducer):
-        return reducer()
-    reducer = getattr(obj, "dict", None)
-    if callable(reducer):
-        return reducer()
-    if hasattr(obj, "__dict__"):
-        return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
-    return str(obj)
+    """Output fallback -- now the shared app.json_safe chokepoint."""
+    from app.json_safe import json_default
+
+    return json_default(obj)
 
 
 def _safe(val: Any) -> str:

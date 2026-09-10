@@ -23,17 +23,10 @@ from typing import Any
 
 
 def _json_default(obj):
-    """Fallback serializer so JobStore.save never raises on non-JSON-native
-    result/policy values (datetime, bytes, sets, exceptions, etc.)."""
-    if isinstance(obj, (datetime.datetime, datetime.date)):
-        return obj.isoformat()
-    if isinstance(obj, bytes):
-        return obj.decode("utf-8", "replace")
-    if isinstance(obj, set):
-        return list(obj)
-    if isinstance(obj, Exception):
-        return f"{type(obj).__name__}: {obj}"
-    return str(obj)
+    """JobStore save fallback -- now the shared app.json_safe chokepoint."""
+    from app.json_safe import json_default
+
+    return json_default(obj)
 
 
 class JobKind(str, Enum):
