@@ -163,7 +163,7 @@ def validate_webhook_url(webhook_url: str) -> None:
     """
     from app.safe_url import SafeUrl
 
-    SafeUrl.parse(webhook_url)
+    SafeUrl.parse(webhook_url, pin=True)
 
 
 async def run_and_deliver_webhook(

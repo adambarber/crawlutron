@@ -63,3 +63,32 @@ class SafeUrl:
         Raises ValueError when the hop target is unsafe.
         """
         return SafeUrl.parse(urljoin(self.raw, location), pin=self.pinned_ip is not None)
+
+    def connect(self) -> tuple[str, dict[str, str]]:
+        """Return ``(connect_url, headers)`` applying the pin policy.
+
+        Plain HTTP connects to the exact validated ``pinned_ip`` (closing the
+        DNS-rebinding TOCTOU between parse-time validation and connect-time
+        re-resolution) with a ``Host`` header preserving the original hostname
+        for virtual hosting. HTTPS keeps the hostname so TLS SNI / certificate
+        verification works (real certs carry no IP SAN); there the rebinding
+        window is bounded by CA validation plus the pre-connect IP check,
+        matching the sibling HTTP fetcher.
+
+        Raises ValueError when an HTTP URL was parsed without pinning: the
+        unsafe fallback (connect-by-name, which re-resolves DNS) is made
+        unrepresentable rather than silently reachable.
+        """
+        parsed = urlparse(self.raw)
+        if parsed.scheme == "https":
+            return self.raw, {}
+        if not self.pinned_ip:
+            raise ValueError(f"unpinned http URL cannot connect safely: {self.raw!r}")
+        port = f":{parsed.port}" if parsed.port else ""
+        connect_url = f"{parsed.scheme}://{self.pinned_ip}{port}{parsed.path or '/'}"
+        if parsed.query:
+            connect_url = f"{connect_url}?{parsed.query}"
+        headers: dict[str, str] = {}
+        if parsed.hostname:
+            headers["Host"] = f"{parsed.hostname}{port}"
+        return connect_url, headers

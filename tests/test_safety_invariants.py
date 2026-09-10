@@ -308,3 +308,34 @@ def _is_response_url(node: ast.expr) -> bool:
         and isinstance(node.args[0].value, ast.Name)
         and node.args[0].value.id == "response"
     )
+
+
+def _unpinned_safe_url_parses(tree, path):
+    """Every SafeUrl.parse fetch consumer must pass an explicit ``pin=``.
+
+    An unpinned parse is the H5 rebinding window: validation resolves one IP,
+    then ``connect`` re-resolves at open time and a hostile DNS can swap the
+    answer. Forcing an explicit pin at every call site makes "forgot to pin"
+    impossible to merge; safe_url.py itself is exempt (redirect_hop passes a
+    computed pin preference, and the classmethod defines the parameter).
+    """
+    offenders = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "parse"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "SafeUrl"
+        ):
+            continue
+        if not any(kw.arg == "pin" for kw in node.keywords):
+            offenders.append(offender(path, node.lineno, "SafeUrl.parse(...) must pass pin=True"))
+    return offenders
+
+
+def test_safe_url_parse_always_pins():
+    offenders = []
+    for path, tree in app_trees(exclude=SANCTIONED | {"safe_url.py"}):
+        offenders.extend(_unpinned_safe_url_parses(tree, path))
+    assert not offenders, "unpinned SafeUrl.parse (DNS-rebinding window): " + "; ".join(offenders)

@@ -120,6 +120,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 "app/validation.py" = ["S110"]
 # robots single-token matcher constant (not a credential; S105 name heuristic).
 "app/constants.py" = ["S105"]
+# S310: document.py hands opener.open a urllib Request whose URL comes from
+# SafeUrl.connect() -- SafeUrl.parse admits only http/https, so the file:/
+# custom-scheme audit is a false positive there (H5 pinned connect).
+"app/crawl/strategies/document.py" = ["S310"]
 "app/crawl/strategies/http.py" = ["E402", "S110", "S112"]
 "app/crawl/strategies/browser.py" = ["S108", "S110", "S112", "E402"]
 # The job store wires the sqlite connection factory above the model imports.

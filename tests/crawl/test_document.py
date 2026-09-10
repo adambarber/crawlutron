@@ -68,70 +68,81 @@ class _FakeHttpResponse:
 
 
 class TestDocumentRedirectSsrf:
-    """H2: a public PDF that redirects to an internal host must not be followed."""
+    """H2: a public PDF that redirects to an internal host must not be followed.
+
+    H5: the extractor connects to the PINNED IP returned by validation, so
+    urllib never re-resolves DNS at connect time -- the rebinding TOCTOU is
+    closed. The logical hostname rides the Host header, which is what the
+    fake opener dispatches on (both test hosts resolve to the same IP).
+    """
 
     PDF_PATH = "http://initial.test/doc.pdf"
     EVIL_PATH = "http://evil.test/internal.pdf"
     ALLOWED_PATH = "http://allowed.test/doc.pdf"
+    PINNED_IP = "93.184.216.1"
 
     def _install_fakes(self, monkeypatch, pdf_bytes, redirect_target):
+        import urllib.error
         import urllib.request
 
         import app.crawl.strategies.http as http_strategy
 
-        fetched: list[str] = []
-        initial_path = self.PDF_PATH
-        evil_path = self.EVIL_PATH
-        allowed_path = self.ALLOWED_PATH
-
         def fake_resolve_ips(hostname, *, use_cache=True):
             if hostname == "evil.test":
                 return ["169.254.169.254"]
-            return ["93.184.216.1"]
+            return [self.PINNED_IP]
 
         monkeypatch.setattr(http_strategy, "_resolve_ips", fake_resolve_ips)
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
 
-        def fake_urlopen(url, timeout=30):
-            # Emulate stdlib urlopen: follows redirects automatically.
-            seen = 0
-            while url == initial_path and seen < 5:
-                fetched.append(url)
-                url = redirect_target
-                seen += 1
-            fetched.append(url)
-            if url == redirect_target and redirect_target == evil_path:
-                return _FakeHttpResponse(pdf_bytes)
-            if url == allowed_path:
-                return _FakeHttpResponse(pdf_bytes)
-            return _FakeHttpResponse(b"", status=302, headers={"Location": redirect_target})
+        fetched: list[str] = []  # logical host names from the Host header
+        connect_urls: list[str] = []  # URLs actually handed to the connection
 
         def fake_build_opener(*handlers):
             # Emulate the REAL non-following opener semantics: when
-            # redirect_request returns None, urllib raises HTTPError — it
+            # redirect_request returns None, urllib raises HTTPError -- it
             # never hands back a 30x response object (N2 regression guard).
             class _Opener:
-                def open(self, url, timeout=30):
-                    fetched.append(url)
-                    if url == initial_path:
-                        raise urllib.error.HTTPError(url, 302, "Moved", {"Location": redirect_target}, None)
+                def open(self, request, timeout=30):
+                    connect_urls.append(request.full_url)
+                    host = request.get_header("Host") or ""
+                    fetched.append(host)
+                    if host == "initial.test":
+                        raise urllib.error.HTTPError(
+                            request.full_url,
+                            302,
+                            "Moved",
+                            {"Location": redirect_target},
+                            None,
+                        )
                     return _FakeHttpResponse(pdf_bytes)
 
             return _Opener()
 
-        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
         monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
-        return fetched
+        return fetched, connect_urls
 
     def test_redirect_to_internal_host_is_not_followed(self, monkeypatch):
-        pdf_bytes = FIXTURE.read_bytes()
-        fetched = self._install_fakes(monkeypatch, pdf_bytes, self.EVIL_PATH)
+        fetched, _ = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), self.EVIL_PATH)
         assert _default_document_text_extractor(self.PDF_PATH) == ""
-        assert self.EVIL_PATH not in fetched
+        assert "initial.test" in fetched  # the pinned connect happened
+        assert "evil.test" not in fetched  # the hop was rejected before connect
 
     def test_redirect_to_public_host_still_works(self, monkeypatch):
-        pdf_bytes = FIXTURE.read_bytes()
-        fetched = self._install_fakes(monkeypatch, pdf_bytes, self.ALLOWED_PATH)
+        fetched, _ = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), self.ALLOWED_PATH)
         md = _default_document_text_extractor(self.PDF_PATH)
         assert "Alice" in md
-        assert self.ALLOWED_PATH in fetched
+        assert "allowed.test" in fetched
+
+    def test_connect_is_pinned_to_validated_ip(self, monkeypatch):
+        """H5: the connection URL carries the validated IP, not the hostname.
+
+        urllib never re-resolves because the request URL host IS the IP that
+        passed the SSRF check; the original hostname rides the Host header.
+        """
+        from urllib.parse import urlparse
+
+        _, connect_urls = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), self.ALLOWED_PATH)
+        _default_document_text_extractor(self.PDF_PATH)
+        assert connect_urls, "extractor must issue a pinned connect"
+        assert urlparse(connect_urls[0]).hostname == self.PINNED_IP

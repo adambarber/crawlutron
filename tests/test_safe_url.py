@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import socket
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 import pytest
 from _testkit import block_private_targets
@@ -71,3 +72,42 @@ class TestSafeUrlRedirectHop:
             safe = SafeUrl.parse("http://example.com/a", pin=True)
             hopped = safe.redirect_hop("/b")
         assert hopped.pinned_ip == "93.184.216.34"
+
+
+class TestSafeUrlConnect:
+    """connect() applies the pin policy so a fetcher cannot re-resolve at
+    connect time (DNS rebinding TOCTOU): plain HTTP connects to the exact
+    validated IP with a Host header preserving the hostname; HTTPS keeps the
+    hostname (SNI/cert), matching the sibling HTTP fetcher."""
+
+    def test_http_connect_uses_pinned_ip_and_host_header(self, monkeypatch):
+        block_private_targets(monkeypatch)
+        with _resolve_as(_PUBLIC):
+            safe = SafeUrl.parse("http://example.com:8080/a/b?x=1", pin=True)
+        connect_url, headers = safe.connect()
+        parsed = urlparse(connect_url)
+        assert parsed.hostname == "93.184.216.34"
+        assert parsed.port == 8080
+        assert parsed.path == "/a/b"
+        assert parsed.query == "x=1"
+        assert headers["Host"] == "example.com:8080"
+
+    def test_http_connect_refuses_unpinned_url(self, monkeypatch):
+        # An unpinned SafeUrl has no validated IP to connect to; falling back
+        # to hostname would silently re-open the rebinding window, so the
+        # chokepoint refuses rather than degrading to the unsafe path.
+        block_private_targets(monkeypatch)
+        with _resolve_as(_PUBLIC):
+            safe = SafeUrl.parse("http://example.com/a")  # pin defaults False
+        with pytest.raises(ValueError):
+            safe.connect()
+
+    def test_https_connect_keeps_hostname_for_sni(self, monkeypatch):
+        block_private_targets(monkeypatch)
+        https_addrs = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        with _resolve_as(https_addrs):
+            safe = SafeUrl.parse("https://example.com/secure.pdf", pin=True)
+        connect_url, headers = safe.connect()
+        parsed = urlparse(connect_url)
+        assert parsed.hostname == "example.com"  # never the IP (breaks SNI)
+        assert "Host" not in headers

@@ -107,7 +107,7 @@ def _default_document_text_extractor(url: str) -> str:
 
     # Parse BEFORE the fetch try: unsafe input raises loudly (the F2
     # contract); only fetch/extract failures below yield empty text.
-    current = SafeUrl.parse(url)
+    current = SafeUrl.parse(url, pin=True)
 
     opener = urllib.request.build_opener(_NoAutoRedirect)
     from app.bounded_io import read_capped_sync
@@ -116,7 +116,9 @@ def _default_document_text_extractor(url: str) -> str:
     try:
         for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
             try:
-                with opener.open(current.raw, timeout=30) as response:
+                connect_url, connect_headers = current.connect()
+                request = urllib.request.Request(connect_url, headers=connect_headers)
+                with opener.open(request, timeout=30) as response:
                     # N2: cap the read itself -- a hostile infinite body must
                     # not buffer into memory before the extraction cap sees it.
                     pdf_bytes = read_capped_sync(response, _EXTRACTION_DOC_MAX_INPUT_BYTES)
