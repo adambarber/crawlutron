@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.validation import get_env_int, get_env_float
 
 import asyncio
 import logging
@@ -54,7 +55,7 @@ job_store = JobStore(settings.cache_dir + "/jobs.db")
 # makes results recoverable if the HTTP connection drops mid-response).
 result_store = CrawlResultStore(
     settings.cache_dir + "/results.db",
-    ttl_seconds=float(os.environ.get("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600")),
+    ttl_seconds=get_env_float(("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600")),
     max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
 )
 

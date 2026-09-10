@@ -260,7 +260,7 @@ class BrowserRenderer:
         self._max_browser_renders = (
             settings.max_browser_renders
             if settings is not None
-            else int(os.environ.get("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", str(DEFAULT_MAX_BROWSER_RENDERS)))
+            else get_env_int(("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", str(DEFAULT_MAX_BROWSER_RENDERS)))
         )
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.

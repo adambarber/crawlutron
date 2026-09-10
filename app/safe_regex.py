@@ -57,9 +57,11 @@ def match_bounded(
     op: str = "search",
     timeout: float = DEFAULT_MATCH_TIMEOUT_SECONDS,
 ):
-    """Run a bounded match; raises RegexTimeout instead of hanging.
+    """Bounded match; raises RegexTimeout instead of hanging.
 
-    ``op`` is the regex-method name: search, match, or fullmatch.
+    Fail-closed direction (G8): crawl scope treats ``RegexTimeout`` as
+    ``no-match`` (fail-closed exclusion); robots matcher treats it as
+    disallowed; document extractor returns empty. No unbounded hang escapes.
     """
     if compiled is None:
         return None

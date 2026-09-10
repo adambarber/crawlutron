@@ -524,14 +524,6 @@ robots_cache = BoundedTTLCache[str, tuple[list[tuple[bool, str]], list[str], flo
 )
 
 
-def _cap_robots_cache(cache, max_size: int) -> None:
-    """Legacy seam: eviction now lives inside BoundedTTLCache.put (LRU).
-
-    Kept only because tests pin this name; a no-op against the chokepoint.
-    """
-    return None
-
-
 def _purge_robots_cache(now: float | None = None) -> int:
     """Remove expired entries from the module robots cache; return count removed.
 

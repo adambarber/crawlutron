@@ -269,6 +269,20 @@ class CrawlPolicy(BaseModel):
         description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
     )
 
+    @field_validator("scope_regex")
+    @classmethod
+    def _validate_scope_regex(cls, value: str | None) -> str | None:
+        from app.safe_regex import compile_untrusted, UnsafePattern
+        if value is None:
+            return None
+        result = compile_untrusted(value, max_len=256)
+        if result is None:
+            raise ValueError(
+                f"scope_regex exceeds max length of 256 or contains invalid syntax: "
+                f"received {len(value)} chars"
+            )
+        return value
+
     @field_validator("browser_profile")
     @classmethod
     def _reject_execute_js_actions(cls, profile: dict[str, Any]) -> dict[str, Any]:

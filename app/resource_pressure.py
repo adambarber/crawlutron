@@ -434,8 +434,8 @@ _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512,
 # Both the browser pool and the HTTP connection pool size themselves from the cgroup
 # memory limit, centralized here (import-safe from settings) as the single source of
 # truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
-_BROWSER_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_BROWSER_RAM_BYTES", str(700 * 1024 * 1024)))
-_BROWSER_RAM_FRACTION = float(os.environ.get("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", "0.5"))
+_BROWSER_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
+_BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", "0.5")
 _MAX_DERIVED_POOL_SIZE = int(os.environ.get("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", "4"))
 
 
