@@ -76,6 +76,7 @@ from app.crawl.document_text import (
     _format_extracted_document_text,
 )
 from app.timeouts import Timeouts
+from app.validation import public_url_or_none
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -1765,17 +1766,19 @@ async def _http_strategy_result(
         # content-only crawls (B1).
         raw_endpoints = extract_js_endpoints(html, normalized_url) if discovery else []
         diagnostics["js_endpoints"] = [
-            endpoint
+            {**endpoint, "url": clean}
             for endpoint in raw_endpoints
-            if urlparse(str(endpoint.get("url", ""))).scheme in ("", "http", "https")
+            if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=response.final_url))
+            is not None
         ]
         # Pagination detection stays on for all crawls: next_page_url is a
         # standard result field (returned even without discovery mode), so it is
         # always computed. Only the heavier discovery-only extras below are
         # gated on `discovery` (B1).
         next_page_url = _detect_pagination(html, response.final_url)
-        if next_page_url and urlparse(next_page_url).scheme not in ("http", "https"):
-            next_page_url = None
+        # Egress filter (public_url_or_none): _detect_pagination already
+        # resolves against final_url, so this only drops non-http(s).
+        next_page_url = public_url_or_none(next_page_url) if next_page_url else None
         if next_page_url:
             diagnostics["next_page_url"] = next_page_url
         quality = _quality_score(status, classification, text, html, response.status_code)

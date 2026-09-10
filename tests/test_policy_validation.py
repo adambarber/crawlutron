@@ -96,7 +96,51 @@ class TestPolicyValidation:
 
         import app.validation as validation
 
-        monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
-        monkeypatch.delattr(validation, "_PSL", raising=False)
-        assert validation.registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
-        assert validation.registrable_domain("https://a.b.c.example.com/x") == "example.com"
+        # NOTE: the loader caches into module-global _PSL (including the
+        # failed None). monkeypatch.delattr cannot restore a never-existing
+        # attribute, so save/restore explicitly -- otherwise the cached None
+        # poisons every later PSL test in the session (order-dependent).
+        had_psl = "_PSL" in vars(validation)
+        old_psl = vars(validation).get("_PSL")
+        try:
+            monkeypatch.setitem(sys.modules, "publicsuffixlist", None)
+            if had_psl:
+                monkeypatch.delattr(validation, "_PSL")
+            assert validation.registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"
+            assert validation.registrable_domain("https://a.b.c.example.com/x") == "example.com"
+        finally:
+            if had_psl:
+                validation._PSL = old_psl
+            else:
+                vars(validation).pop("_PSL", None)
+
+
+class TestPublicUrlOrNone:
+    """Egress filter: resolve-then-strict-accept (js_endpoints/next-page)."""
+
+    def test_relative_resolves_against_source(self):
+        assert (
+            public_url_or_none("/api/x", resolve_against="https://example.gov/p")
+            == "https://example.gov/api/x"
+        )
+
+    def test_protocol_relative_resolves_then_accepts(self):
+        assert (
+            public_url_or_none("//cdn.example.gov/x", resolve_against="https://example.gov/p")
+            == "https://cdn.example.gov/x"
+        )
+
+    def test_absolute_http_url_passes_without_base(self):
+        assert public_url_or_none("https://example.gov/a") == "https://example.gov/a"
+
+    def test_unresolvable_relative_is_none(self):
+        assert public_url_or_none("/api/x") is None
+
+    def test_non_http_schemes_are_none(self):
+        assert public_url_or_none("javascript:alert(1)", resolve_against="https://example.gov/") is None
+        assert public_url_or_none("data:text/html,x", resolve_against="https://example.gov/") is None
+        assert public_url_or_none("ftp://example.gov/x") is None
+
+    def test_empty_is_none(self):
+        assert public_url_or_none("") is None
+        assert public_url_or_none("   ") is None

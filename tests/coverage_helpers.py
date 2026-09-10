@@ -77,7 +77,7 @@ from app.crawl.strategies.http import (
     _status_for_classification,
 )
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
-from app.validation import normalize_public_http_url, registrable_domain
+from app.validation import normalize_public_http_url, public_url_or_none, registrable_domain
 
 
 def _fake_browser(html=None, text="doc", metadata=None):

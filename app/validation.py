@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
@@ -222,3 +222,27 @@ def registrable_domain(url: str) -> str:
             # A poisoned/unparseable host falls through to the heuristic.
             pass
     return _heuristic_registrable_domain(host)
+
+
+def public_url_or_none(raw: str | None, *, resolve_against: str | None = None) -> str | None:
+    """Egress filter: resolve relatives FIRST, then strictly accept http/https.
+
+    Attacker-influenced URLs leave the service through several doors
+    (js_endpoints, next_page_url, sitemap locs, discovered links), each
+    filtered slightly differently. The recurring inconsistency: a bare
+    ``urlparse(url).scheme`` check treats protocol-relative (``//evil.com/x``)
+    and relative (``/api``) URLs as scheme ``""`` -- one site allowed ``""``
+    (emitting unresolvable URLs), another dropped it (killing relative
+    pagination). Resolving against the source URL first makes both cases
+    absolute, after which only http/https survive; ``javascript:``/``data:``/
+    ``ftp:`` are always None, as is anything unresolvable.
+    """
+    if not raw or not raw.strip():
+        return None
+    candidate = raw.strip()
+    if resolve_against:
+        candidate = urljoin(resolve_against, candidate)
+    parsed = urlparse(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    return candidate

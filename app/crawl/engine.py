@@ -88,7 +88,7 @@ from app.models import (
 from app.resource_pressure import derive_browser_pool_size
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url, registrable_domain
+from app.validation import normalize_public_http_url, public_url_or_none, registrable_domain
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -241,7 +241,12 @@ async def _browser_strategy_result(
     next_page_url = _detect_pagination(result.html, result.final_url)
     if next_page_url:
         diagnostics["next_page_url"] = next_page_url
-    diagnostics["js_endpoints"] = extract_js_endpoints(result.html, result.final_url)
+    diagnostics["js_endpoints"] = [
+        {**endpoint, "url": clean}
+        for endpoint in extract_js_endpoints(result.html, result.final_url)
+        if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=result.final_url))
+        is not None
+    ]
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status=result.status,
