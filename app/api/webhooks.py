@@ -21,6 +21,7 @@ import json
 import logging
 from typing import Any
 
+from app.bounded_io import BodyTooLarge, read_capped_async
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
 from app.validation import get_env_int
@@ -105,7 +106,18 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
-        await client.post(connect_url, content=payload_bytes, headers=request_headers)
+        async with client.stream(
+            "POST", connect_url, content=payload_bytes, headers=request_headers
+        ) as response:
+            try:
+                # The webhook RESPONSE is attacker-controlled: drain it through
+                # the bounded_io cap instead of buffering it in RAM (M3).
+                await read_capped_async(response.aiter_bytes(), _max_webhook_size())
+            except BodyTooLarge:
+                logger.warning(
+                    "webhook_response_too_large",
+                    extra={"limit_bytes": _max_webhook_size()},
+                )
 
 
 def _max_webhook_size() -> int:
@@ -212,8 +224,10 @@ async def run_and_deliver_webhook(
             )
             return
         await deliver_pinned_webhook(webhook_url, payload_bytes)
-    except Exception:
-        pass
+    except Exception as error:
+        logger.warning(
+            "webhook_delivery_failed: %s", error, extra={"webhook_url": webhook_url}
+        )
 
 
 async def deliver_webhook(
