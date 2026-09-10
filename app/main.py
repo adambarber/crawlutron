@@ -55,8 +55,8 @@ job_store = JobStore(settings.cache_dir + "/jobs.db")
 # makes results recoverable if the HTTP connection drops mid-response).
 result_store = CrawlResultStore(
     settings.cache_dir + "/results.db",
-    ttl_seconds=get_env_float(("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600")),
-    max_entries=int(os.environ.get("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", "1000")),
+    ttl_seconds=get_env_float("BROWSER_CRAWLER_RESULT_TTL_SECONDS", "3600"),
+    max_entries=get_env_int("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", 1000),
 )
 
 # Ensure the parent directory of the log file exists before the logger tries

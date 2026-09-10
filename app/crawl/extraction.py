@@ -148,11 +148,11 @@ async def _shutdown_doc_extraction_executor() -> None:
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
 # A pathological selector (or adversarial payload) could otherwise run
 # unbounded and tie up a request worker. Override via env var.
-_EXTRACTION_SELECTOR_TIMEOUT = float(os.environ.get("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", "2.0"))
+_EXTRACTION_SELECTOR_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", 2.0)
 
 # Wall-clock bound (seconds) for document extraction (markitdown).
 # Override via BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT.
-_EXTRACTION_DOC_TIMEOUT = float(os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", "10.0"))
+_EXTRACTION_DOC_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", 10.0)
 
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
