@@ -105,12 +105,15 @@ def _default_document_text_extractor(url: str) -> str:
     # redirect_hop() -- there is no raw-str hop path left to forget a step.
     from app.safe_url import SafeUrl
 
+    # Parse BEFORE the fetch try: unsafe input raises loudly (the F2
+    # contract); only fetch/extract failures below yield empty text.
+    current = SafeUrl.parse(url)
+
     opener = urllib.request.build_opener(_NoAutoRedirect)
     from app.bounded_io import read_capped_sync
     from app.crawl.extraction import _EXTRACTION_DOC_MAX_INPUT_BYTES
 
     try:
-        current = SafeUrl.parse(url)
         for _ in range(_DOCUMENT_MAX_REDIRECTS + 1):
             try:
                 with opener.open(current.raw, timeout=30) as response:
