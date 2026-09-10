@@ -85,7 +85,10 @@ class SafeUrl:
         if not self.pinned_ip:
             raise ValueError(f"unpinned http URL cannot connect safely: {self.raw!r}")
         port = f":{parsed.port}" if parsed.port else ""
-        connect_url = f"{parsed.scheme}://{self.pinned_ip}{port}{parsed.path or '/'}"
+        # An IPv6 literal must be bracketed in a URL netloc or its colons
+        # corrupt port/path parsing (H5-C); getaddrinfo can return v6.
+        host = f"[{self.pinned_ip}]" if ":" in self.pinned_ip else self.pinned_ip
+        connect_url = f"{parsed.scheme}://{host}{port}{parsed.path or '/'}"
         if parsed.query:
             connect_url = f"{connect_url}?{parsed.query}"
         headers: dict[str, str] = {}

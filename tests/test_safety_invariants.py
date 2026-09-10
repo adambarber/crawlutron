@@ -339,3 +339,34 @@ def test_safe_url_parse_always_pins():
     for path, tree in app_trees(exclude=SANCTIONED | {"safe_url.py"}):
         offenders.extend(_unpinned_safe_url_parses(tree, path))
     assert not offenders, "unpinned SafeUrl.parse (DNS-rebinding window): " + "; ".join(offenders)
+def test_no_inline_pinned_url_composition():
+    """The pinned connect URL -- IP literal, IPv6 bracketing, port, and Host
+    header composition -- is SafeUrl.connect()'s job alone.
+
+    Three divergent copies of that composition had already drifted into the
+    tree (safe_url, http fetcher, webhook builder); the copies disagreed on
+    Host-port handling and all lacked IPv6 bracketing (H5-C). An f-string
+    that mentions pinned_ip outside app/safe_url.py re-opens that drift.
+    """
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=frozenset({"safe_url.py", "safe_regex.py"})):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            for value in node.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    if "pinned_ip" in value.value:
+                        offenders.append(offender(path, node.lineno, "f-string with pinned_ip"))
+                if isinstance(value, ast.FormattedValue):
+                    expr = value.value
+                    if isinstance(expr, ast.Attribute) and expr.attr == "pinned_ip":
+                        offenders.append(offender(path, node.lineno, "f-string interpolates .pinned_ip"))
+                    if (
+                        isinstance(expr, ast.Name)
+                        and isinstance(expr.ctx, ast.Load)
+                        and "pinned" in expr.id.lower()
+                    ):
+                        offenders.append(offender(path, node.lineno, f"f-string interpolates {expr.id}"))
+    assert not offenders, (
+        "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)
+    )

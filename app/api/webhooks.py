@@ -20,7 +20,6 @@ import asyncio
 import json
 import logging
 from typing import Any
-from urllib.parse import urlparse
 
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
@@ -79,13 +78,12 @@ def clear_webhook_dependencies() -> None:
 async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None:
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
 
-    Plain HTTP connects to the pinned IP (resolved once) while preserving
-    the original ``Host`` header so virtual-host routing still works.
-    HTTPS instead re-validates the hostname fresh and POSTs to the original
-    URL (L3): rewriting https to a raw IP breaks TLS verification (certs
-    never carry IP SANs), so IP-pinning would make every HTTPS delivery
-    fail. The residual rebinding window is the same posture the fetcher
-    accepts for HTTPS (pre-connect check + CA validation).
+    The pin policy lives in ``SafeUrl.connect()`` (plain HTTP connects to the
+    validated IP with the original ``Host`` header; HTTPS keeps the hostname
+    because certs carry no IP SANs -- the residual rebinding window there is
+    the same posture the fetcher accepts: pre-connect check + CA validation).
+    This helper holds no URL composition of its own, so the IPv6 bracketing
+    and Host handling cannot drift from the fetchers (H5-C).
 
     Caller MUST have validated ``webhook_url`` via ``validate_webhook_url``
     first; this helper assumes the URL has already passed the SSRF guard.
@@ -104,19 +102,11 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     # findings. validate_webhook_url already ran at the edge; parsing again
     # here closes the TOCTOU between validation and delivery.
     safe = SafeUrl.parse(webhook_url, pin=True)
-    parsed = urlparse(safe.raw)
-    request_headers = {"Content-Type": "application/json"}
-    if parsed.scheme == "https":
-        pinned_url = safe.raw
-    else:
-        pinned_url = (
-            f"{parsed.scheme}://{safe.pinned_ip}:{parsed.port or (80 if parsed.scheme == 'http' else 443)}"
-            f"{parsed.path or '/'}" + (f"?{parsed.query}" if parsed.query else "")
-        )
-        if parsed.hostname:
-            request_headers["Host"] = parsed.hostname
+    connect_url, connect_headers = safe.connect()
+    request_headers = {"Content-Type": "application/json", **connect_headers}
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
-        await client.post(pinned_url, content=payload_bytes, headers=request_headers)
+        await client.post(connect_url, content=payload_bytes, headers=request_headers)
+
 
 
 def _max_webhook_size() -> int:

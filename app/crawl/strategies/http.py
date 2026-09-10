@@ -601,33 +601,21 @@ def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
 
 
 def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """Resolve + validate the target (DNS-rebinding safe) and build the request.
+    """Resolve ``url`` once and build the pinned request for it.
 
-    Returns ``(request_url, request_headers)`` shared by both fetchers.
-
-    The target's DNS is resolved once and the resulting IP is validated against
-    the SSRF blocklist *before* connecting. For plain HTTP the connection is
-    additionally pinned to that exact IP. For HTTPS the original URL is kept:
-    TLS SNI/hostname verification is performed against the real hostname
-    (CDN/edge certificates do not carry IP SANs, so rewriting the URL to the IP
-    breaks every properly-configured HTTPS site). The rebinding window on HTTPS
-    is therefore bounded by CA validation plus the pre-connect IP check instead
-    of raw pinning.
+    Delegates entirely to the SafeUrl chokepoint: ``parse(pin=True)`` runs
+    normalize + SSRF check + resolve-and-pin, and ``connect()`` applies the
+    documented pin policy (http -> IP literal + Host header, https ->
+    hostname kept for SNI). Keeping the composition in one place is what
+    makes IPv6 bracketing, port handling, and the Host header impossible
+    to drift between fetch paths (H5-C).
     """
-    _check_ssrf_protection(url)
-    parsed = urlparse(url)
-    if parsed.scheme == "https":
-        # Validate resolved IPs, but keep the hostname for correct TLS.
-        _resolve_and_pin_host(url)
-        return url, dict(headers)
-    hostname, pinned_ip = _resolve_and_pin_host(url)
-    pinned_url = f"{parsed.scheme}://{pinned_ip}:{parsed.port or 80}{parsed.path or '/'}" + (
-        f"?{parsed.query}" if parsed.query else ""
-    )
-    request_headers = dict(headers)
-    if parsed.hostname:
-        request_headers["Host"] = parsed.hostname
-    return pinned_url, request_headers
+    from app.safe_url import SafeUrl
+
+    safe = SafeUrl.parse(url, pin=True)
+    connect_url, connect_headers = safe.connect()
+    return connect_url, {**headers, **connect_headers}
+
 
 
 # Dedicated thread pool for blocking DNS resolution so hundreds of concurrent

@@ -111,3 +111,22 @@ class TestSafeUrlConnect:
         parsed = urlparse(connect_url)
         assert parsed.hostname == "example.com"  # never the IP (breaks SNI)
         assert "Host" not in headers
+
+    def test_http_connect_brackets_ipv6_literal(self, monkeypatch):
+        # H5-C: getaddrinfo can hand back a public IPv6 address; an unbracketed
+        # literal corrupts the URL netloc (its colons collide with port
+        # parsing) and urllib misroutes. Pinned URLs must bracket v6 literals.
+        block_private_targets(monkeypatch)
+        v6_addrs = [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))
+        ]
+        with _resolve_as(v6_addrs):
+            safe = SafeUrl.parse("http://v6.example/docs.pdf?x=1", pin=True)
+        connect_url, headers = safe.connect()
+        parsed = urlparse(connect_url)
+        assert connect_url.startswith("http://[2606:4700:4700::1111]/")
+        assert parsed.hostname == "2606:4700:4700::1111"
+        assert parsed.port is None
+        assert parsed.path == "/docs.pdf"
+        assert parsed.query == "x=1"
+        assert headers["Host"] == "v6.example"
