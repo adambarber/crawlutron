@@ -28,15 +28,15 @@ from app.api_models import UnifiedCrawlResponse
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
+from app.validation import get_env_int
 
 logger = logging.getLogger(__name__)
 
 # Module-level concurrency semaphore. Bounded so a flood of 202 responses
 # cannot spawn unbounded concurrent crawls and OOM the container
 # (adversarial review F-no-concurrency-cap).
-_WEBHOOK_CRAWL_CONCURRENCY = max(
-    1,
-    int(__import__("os").environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", "4")),
+_WEBHOOK_CRAWL_CONCURRENCY = get_env_int(
+    "BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", 4, lo=1
 )
 _async_crawl_semaphore: asyncio.Semaphore | None = None
 

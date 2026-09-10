@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
@@ -171,6 +172,49 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_env_int(name: str, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
+    """Read an env var as an int; log and fall back to ``default`` on garbage.
+
+    A typo'd numeric env var must never crash the boot (two module-import
+    ``int(os.environ.get(...))`` sites did exactly that). Out-of-range
+    values clamp to ``[lo, hi]`` when bounds are given.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": default}
+        )
+        return default
+    if lo is not None and value < lo:
+        return lo
+    if hi is not None and value > hi:
+        return hi
+    return value
+
+
+def get_env_float(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
+    """Float sibling of :func:`get_env_int` (same log-and-fallback contract)."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": default}
+        )
+        return default
+    if lo is not None and value < lo:
+        return lo
+    if hi is not None and value > hi:
+        return hi
+    return value
 
 
 def _public_suffix_list():

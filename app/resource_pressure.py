@@ -28,6 +28,7 @@ from app.memory_pressure import (
     ResourceGauge,
     read_memory_stats,
 )
+from app.validation import get_env_float, get_env_int
 
 # Self-managed CPU admission targets (no operator knob): the gate rides at
 # TARGET and pauses at HARD against the cgroup CPU quota it discovers itself.
@@ -421,12 +422,12 @@ class ResourceGate:
 # the HTTP path can scale to hundreds of concurrent pages while the browser tier
 # stays RAM-budgeted.
 
-_HTTP_TASK_RAM_BYTES = int(os.environ.get("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", str(12 * 1024 * 1024)))
-_BROWSER_TASK_RAM_BYTES = int(
-    os.environ.get("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", str(700 * 1024 * 1024))
+_HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 12 * 1024 * 1024, lo=0)
+_BROWSER_TASK_RAM_BYTES = get_env_int(
+    "BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0
 )
-_ADMIT_YIELD_SECONDS = float(os.environ.get("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", "0.05"))
-_MAX_HTTP_CONCURRENCY = int(os.environ.get("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", "512"))
+_ADMIT_YIELD_SECONDS = get_env_float("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
+_MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512, lo=1)
 
 
 # --- Shared RAM-budget sizing (browser pool + httpx pool derive from this) ---
