@@ -583,11 +583,16 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
 
 
-def _http_413(url: str, response: Any, started: float) -> HttpFetchResult:
-    """Standard 413 (payload too large) result for size/cap violations."""
+def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
+    """Standard 413 (payload too large) result for size/cap violations.
+
+    Takes the logical ``final_url`` (never ``current_url``): for a
+    pinned plain-HTTP fetch the response url is the resolved-IP literal, and
+    surfacing it leaks topology and mis-keys cookies by IP.
+    """
     return HttpFetchResult(
         url=url,
-        final_url=str(response.url),
+        final_url=final_url,
         status_code=413,
         headers={"content-type": "application/octet-stream"},
         body=b"",
@@ -710,7 +715,7 @@ async def _default_http_fetcher(
             ) as response:
                 content_length = response.headers.get("content-length")
                 if content_length and int(content_length) > max_content_length:
-                    return _http_413(url, response, started)
+                    return _http_413(url, current_url, started)
                 status_code = response.status_code
                 location = response.headers.get("location")
                 # SSRF-safe redirect: only follow within the hop budget. The next
@@ -728,16 +733,16 @@ async def _default_http_fetcher(
                 async for chunk in response.aiter_raw():
                     raw.extend(chunk)
                     if len(raw) > max_content_length:
-                        return _http_413(url, response, started)
+                        return _http_413(url, current_url, started)
                 encoding = response.headers.get("content-encoding", "")
                 try:
                     body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
                 except DecompressionTooLargeError:
-                    return _http_413(url, response, started)
+                    return _http_413(url, current_url, started)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 # Already decompressed above; drop header to avoid a second pass.
                 resp_headers.pop("content-encoding", None)
-                final_url = str(response.url)
+                final_url = current_url
         except httpx.HTTPStatusError as error:
             response = error.response
             # Error bodies are attacker-influenced too: cap them like success
@@ -748,7 +753,7 @@ async def _default_http_fetcher(
                 return _http_413(url, response, started)
             status_code = response.status_code
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
-            final_url = str(response.url)
+            final_url = current_url
         elapsed_ms = int((time.monotonic() - started) * 1000)
         _store_set_cookies(final_url or url, resp_headers)
         return HttpFetchResult(
@@ -823,7 +828,7 @@ async def _default_cffi_fetcher(
                     await response.aclose()  # N8: release the curl handle
                     return HttpFetchResult(
                         url=url,
-                        final_url=str(response.url),
+                        final_url=current_url,
                         status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
                         body=b"",
@@ -890,7 +895,7 @@ async def _default_cffi_fetcher(
                         _release_stream_noblock(response)
                         return HttpFetchResult(
                             url=url,
-                            final_url=str(response.url),
+                            final_url=current_url,
                             status_code=413,
                             headers={key.lower(): value for key, value in response.headers.items()},
                             body=b"",
@@ -903,7 +908,7 @@ async def _default_cffi_fetcher(
                 except DecompressionTooLargeError:
                     return HttpFetchResult(
                         url=url,
-                        final_url=str(response.url),
+                        final_url=current_url,
                         status_code=413,
                         headers={key.lower(): value for key, value in response.headers.items()},
                         body=b"",
@@ -912,10 +917,10 @@ async def _default_cffi_fetcher(
                 cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
                 resp_headers = {key.lower(): value for key, value in response.headers.items()}
                 resp_headers.pop("content-encoding", None)
-                _store_set_cookies(str(response.url), response.headers)
+                _store_set_cookies(current_url, response.headers)
                 return HttpFetchResult(
                     url=url,
-                    final_url=str(response.url),
+                    final_url=current_url,
                     status_code=status_code,
                     headers=resp_headers,
                     body=body,
