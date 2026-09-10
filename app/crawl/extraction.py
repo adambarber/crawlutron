@@ -30,7 +30,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _text_from_html
 from app.models import DiscoveredLink
-from app.validation import normalize_public_http_url
+from app.validation import get_env_float, get_env_int, normalize_public_http_url
 
 logger = logging.getLogger(__name__)
 
