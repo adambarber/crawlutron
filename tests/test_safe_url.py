@@ -117,9 +117,7 @@ class TestSafeUrlConnect:
         # literal corrupts the URL netloc (its colons collide with port
         # parsing) and urllib misroutes. Pinned URLs must bracket v6 literals.
         block_private_targets(monkeypatch)
-        v6_addrs = [
-            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))
-        ]
+        v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))]
         with _resolve_as(v6_addrs):
             safe = SafeUrl.parse("http://v6.example/docs.pdf?x=1", pin=True)
         connect_url, headers = safe.connect()

@@ -617,7 +617,6 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
     return connect_url, {**headers, **connect_headers}
 
 
-
 # Dedicated thread pool for blocking DNS resolution so hundreds of concurrent
 # fetches never block the event loop or contend with the default asyncio executor
 # (used for extraction and other blocking work). The pinning path resolves FRESH

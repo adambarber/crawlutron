@@ -339,6 +339,8 @@ def test_safe_url_parse_always_pins():
     for path, tree in app_trees(exclude=SANCTIONED | {"safe_url.py"}):
         offenders.extend(_unpinned_safe_url_parses(tree, path))
     assert not offenders, "unpinned SafeUrl.parse (DNS-rebinding window): " + "; ".join(offenders)
+
+
 def test_no_inline_pinned_url_composition():
     """The pinned connect URL -- IP literal, IPv6 bracketing, port, and Host
     header composition -- is SafeUrl.connect()'s job alone.
@@ -367,6 +369,4 @@ def test_no_inline_pinned_url_composition():
                         and "pinned" in expr.id.lower()
                     ):
                         offenders.append(offender(path, node.lineno, f"f-string interpolates {expr.id}"))
-    assert not offenders, (
-        "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)
-    )
+    assert not offenders, "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)

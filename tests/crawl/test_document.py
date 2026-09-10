@@ -83,10 +83,9 @@ class TestDocumentRedirectSsrf:
 
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
         import socket
-        from urllib.parse import urlparse
-
         import urllib.error
         import urllib.request
+        from urllib.parse import urlparse
 
         import app.crawl.strategies.http as http_strategy
 

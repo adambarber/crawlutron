@@ -8,6 +8,7 @@ pinned IP with the original ``Host`` header preserved.
 
 import socket
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
@@ -69,6 +70,7 @@ class TestDNSRebindingFix:
         ):
             result = await _default_http_fetcher("http://example.com/page", {}, 10, 50 * 1024 * 1024)
 
-        assert captured["url"].startswith("http://1.2.3.4:80"), captured
+        parsed = urlparse(captured["url"])
+        assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", captured
         assert captured["host_header"] == "example.com", captured
         assert result.status_code == 200

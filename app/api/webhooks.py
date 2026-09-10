@@ -108,7 +108,6 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
         await client.post(connect_url, content=payload_bytes, headers=request_headers)
 
 
-
 def _max_webhook_size() -> int:
     return get_env_int("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", 10_485_760, lo=1)
 
