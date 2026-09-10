@@ -75,6 +75,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.document_text import (
     _format_extracted_document_text,
 )
+from app.timeouts import Timeouts
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -184,7 +185,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
     client = httpx.AsyncClient(
         http2=True,
         follow_redirects=True,
-        timeout=30.0,
+        timeout=Timeouts.defaults().as_httpx(),
         limits=httpx.Limits(
             max_connections=settings.http_max_connections,
             max_keepalive_connections=settings.http_max_keepalive,
@@ -709,7 +710,7 @@ async def _default_http_fetcher(
     await _drain_pending_client_closes()
     client = get_async_http_client()
     started = time.monotonic()
-    timeout = httpx.Timeout(connect=5.0, read=float(timeout_seconds), write=10.0, pool=5.0)
+    timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     current_url = url
     hops = 0
     # Work with a copy of headers so we can mutate per-hop

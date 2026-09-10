@@ -22,10 +22,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
-import httpx
-
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http import get_async_http_client
+from app.timeouts import Timeouts
 from app.validation import normalize_public_http_url
 
 logger = logging.getLogger(__name__)
@@ -91,7 +90,7 @@ async def _provider_http(
     to inject fixture responses without touching the providers themselves.
     """
     client = get_async_http_client()
-    timeout = httpx.Timeout(timeout_seconds, connect=5.0, read=timeout_seconds, write=10.0, pool=5.0)
+    timeout = Timeouts.for_request(timeout_seconds).as_httpx()
     async with client.stream(
         method,
         url,

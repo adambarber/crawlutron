@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.settings import CrawlerSettings
+from app.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
         )
         if parsed.hostname:
             request_headers["Host"] = parsed.hostname
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
         await client.post(pinned_url, content=payload_bytes, headers=request_headers)
 
 
