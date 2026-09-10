@@ -430,8 +430,7 @@ def _reset_global_http_state():
     # or schedules a client close would leak state into the next test
     # (adversarial review F-test-isolation).
     try:
-        with http_mod._DNS_CACHE_LOCK:
-            http_mod._DNS_CACHE.clear()
+        http_mod._DNS_CACHE.clear()
         # Drop pending-client references: we cannot await aclose from sync
         # context, but dropping the references lets GC reclaim the sockets
         # once the loop that owns them exits. The capped queue means the

@@ -98,14 +98,17 @@ def test_browser_renderer_stores_cache_dir():
 
 # ---- DNS cache lock ----
 def test_dns_cache_lock_is_present_and_used():
+    from app.bounded_ttl import BoundedTTLCache
     from app.crawl.strategies import http as http_mod
 
-    assert hasattr(http_mod, "_DNS_CACHE_LOCK")
-    assert isinstance(http_mod._DNS_CACHE_LOCK, type(threading.Lock()))
+    # The chokepoint moved the lock INSIDE the cache: the module no longer
+    # carries a bare dict + lock pair that callers must compose correctly.
+    assert isinstance(http_mod._DNS_CACHE, BoundedTTLCache)
+    assert isinstance(http_mod._DNS_CACHE._lock, type(threading.Lock()))
 
 
 def test_dns_cache_concurrent_writes_do_not_corrupt():
-    """Two threads racing ``_resolve_ips`` must produce a consistent dict."""
+    """Eight threads racing ``_resolve_ips`` must leave a consistent cache."""
     from app.crawl.strategies import http as http_mod
 
     # Resolve a host that exists on every test machine
@@ -125,8 +128,9 @@ def test_dns_cache_concurrent_writes_do_not_corrupt():
     for t in threads:
         t.join()
     assert not errors, errors
-    # Cache must still be a dict (not corrupted by concurrent mutation).
-    assert isinstance(http_mod._DNS_CACHE, dict)
+    # Cache is consistent (not corrupted by concurrent mutation) and the
+    # winning write is readable.
+    assert set(http_mod._DNS_CACHE.peek(host)) == {"127.0.0.1"}
 
 
 # ---- robots_cache lock ----

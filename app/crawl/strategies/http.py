@@ -51,6 +51,7 @@ _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "browser_crawler_cookie_namespace", default=""
 )
 
+from app.bounded_ttl import BoundedTTLCache
 from app.classify import classify_page_with_evidence
 from app.constants import (
     CFFI_IMPERSONATE_TARGET,
@@ -491,15 +492,15 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
 # would otherwise issue a blocking socket.getaddrinfo per fetch. The TTL is
 # deliberately short so DNS changes (and the rebinding window for SSRF) stay
 # bounded; the SSRF path re-validates resolved IPs on every fresh resolution.
-_DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
+#
+# One locked, bounded, TTL'd store (app.bounded_ttl): the whole-cache clear
+# beyond the cap and the manual lock both lived here before, and both
+# produced races. LRU eviction inside put() replaces the soft-cap clear.
 _DNS_TTL = 60.0
 _DNS_CACHE_MAX = 4096
-# Guard for concurrent reads/writes to _DNS_CACHE. _resolve_ips is called from
-# both the async event loop and worker threads (asyncio.to_thread) so the cache
-# mutation path needs explicit synchronization -- a plain dict.get/dict[]
-# sequence can corrupt state or drop entries under concurrent access
-# (adversarial review F-thread-safety).
-_DNS_CACHE_LOCK = threading.Lock()
+_DNS_CACHE: BoundedTTLCache[str, list[str]] = BoundedTTLCache(
+    max_entries=_DNS_CACHE_MAX, ttl=_DNS_TTL
+)
 
 
 def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
@@ -517,11 +518,9 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
     the host is safe to connect to, and the actual connection re-validates.
     """
     if use_cache:
-        now = time.monotonic()
-        with _DNS_CACHE_LOCK:
-            cached = _DNS_CACHE.get(hostname)
-        if cached and (now - cached[0]) < _DNS_TTL:
-            return cached[1]
+        cached = _DNS_CACHE.get(hostname)
+        if cached is not None:
+            return cached
     addrinfo = socket.getaddrinfo(hostname, None)
     ips = [entry[4][0] for entry in addrinfo]
     if use_cache:
@@ -529,13 +528,7 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         # resolves fresh and must never persist an IP here -- otherwise a
         # private/rebound IP seen during pinning would poison the shared
         # validation cache and let the check later treat it as safe.
-        with _DNS_CACHE_LOCK:
-            _DNS_CACHE[hostname] = (time.monotonic(), ips)
-            if len(_DNS_CACHE) > _DNS_CACHE_MAX:
-                # Soft cap: drop the whole cache rather than letting it grow
-                # unbounded across a crawl that touches many unique hosts. A brief
-                # re-resolution burst is acceptable and keeps memory predictable.
-                _DNS_CACHE.clear()
+        _DNS_CACHE.put(hostname, ips)
     return ips
 
 

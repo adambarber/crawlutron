@@ -10,6 +10,7 @@ import asyncio
 import inspect
 from typing import Any
 
+from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
     DISCOVERY_BODY_MAX_BYTES,
     SITEMAP_CACHE_MAX_ENTRIES,
@@ -19,7 +20,6 @@ from app.constants import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
-from app.bounded_ttl import BoundedTTLCache
 from app.crawl.strategies.http import _decode_body, _decompress_body
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
