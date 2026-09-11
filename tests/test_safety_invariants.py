@@ -110,19 +110,28 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
     checked. Sync-with bodies that await include any `threading.Lock`/
     `RLock` context (which is what ContentCache.aset did before its N1
     rework).
+
+    A lock is recognized by case-insensitive name stem (lock/mutex/guard)
+    *or* by binding to a threading lock-family constructor anywhere in the
+    module, so `self._mutex = threading.RLock()` cannot rename its way out
+    of the sweep.
     """
     offenders: list[str] = []
+    lock_names = _threading_lock_bindings(tree)
     for node in ast.walk(tree):
         if not isinstance(node, (ast.With, ast.AsyncWith)):
             continue
         if isinstance(node, ast.AsyncWith):
             continue  # asyncio.Lock bodies may await by design
         for item in node.items:
-            # `with self._lock:` / `with lock:` / `with some_lock:` --
+            # `with self._lock:` / `with _CLOSE_LOCK:` / `with guard:` --
             # a sync lock context. Any await inside is a loop-blocker.
             expr = item.context_expr
-            looks_like_lock = (isinstance(expr, ast.Attribute) and expr.attr.endswith("lock")) or (
-                isinstance(expr, ast.Name) and "lock" in expr.id
+            referred = getattr(expr, "attr", None) or getattr(expr, "id", None)
+            if referred is None:
+                continue
+            looks_like_lock = any(stem in referred.lower() for stem in _LOCK_NAME_STEMS) or (
+                referred in lock_names
             )
             if not looks_like_lock:
                 continue
@@ -133,12 +142,55 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return offenders
 
 
+_LOCK_NAME_STEMS = ("lock", "mutex", "guard")
+_THREADING_LOCK_CONSTRUCTORS = frozenset({"Lock", "RLock", "Condition", "Semaphore", "BoundedSemaphore"})
+
+
+def _threading_lock_bindings(tree: ast.AST) -> set[str]:
+    """Names/attributes bound to threading lock-family constructors."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        ctor = getattr(func, "attr", None) or getattr(func, "id", None)
+        if ctor not in _THREADING_LOCK_CONSTRUCTORS:
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                names.add(target.id)
+            elif isinstance(target, ast.Attribute):
+                names.add(target.attr)
+    return names
+
+
 def test_no_await_inside_lock_bodies():
     """A lock held across an await blocks the loop and can deadlock (M3)."""
     offenders: list[str] = []
     for path, tree in app_trees():
         offenders.extend(_lock_bodies_with_awaits(tree, path))
     assert not offenders, "Lock held across await: " + ", ".join(offenders)
+
+
+def test_lock_detector_bites():
+    """Name stems beyond 'lock' and threading-bound aliases must fire (M3)."""
+    mutex = ast.parse(
+        "class C:\n    def __init__(self):\n        self._mutex = __import__('threading').Lock()\n"
+        "    async def go(self):\n        with self._mutex:\n            await x()\n"
+    )
+    assert _lock_bodies_with_awaits(mutex, REPO_ROOT / "app" / "_synthetic.py"), "_mutex escaped the sweep"
+    bound = ast.parse(
+        "import threading\n\n_async_gate = threading.RLock()\n\n"
+        "async def go():\n    with _async_gate:\n        await x()\n"
+    )
+    assert _lock_bodies_with_awaits(bound, REPO_ROOT / "app" / "_synthetic.py"), "threading-bound name escaped"
+    asyncio_ok = ast.parse(
+        "import asyncio\n\nclass C:\n    def __init__(self):\n        self._lock = asyncio.Lock()\n"
+        "    async def go(self):\n        async with self._lock:\n            await x()\n"
+    )
+    assert not _lock_bodies_with_awaits(asyncio_ok, REPO_ROOT / "app" / "_synthetic.py"), "asyncio lock flagged"
+    plain_ok = ast.parse("def go():\n    with open('f'):\n        pass\n")
+    assert not _lock_bodies_with_awaits(plain_ok, REPO_ROOT / "app" / "_synthetic.py")
 
 
 # --- SafeUrl chokepoint (final review) ------------------------------------
