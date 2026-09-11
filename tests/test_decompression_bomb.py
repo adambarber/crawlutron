@@ -28,11 +28,12 @@ def test_decompression_succeeds_under_limit():
     assert decompress_body(bomb, "gzip", max_output_bytes=100_000) == payload
 
 
-def test_decompression_without_limit_is_unchanged():
+def test_decompression_without_limit_is_rejected():
     payload = b"hello world"
     bomb = gzip.compress(payload)
-    # Backward-compatible: no max_output_bytes -> decompress normally.
-    assert decompress_body(bomb, "gzip") == payload
+    # H2 closure: no cap is no longer a legal call — the bound is required.
+    with pytest.raises(TypeError):
+        decompress_body(bomb, "gzip")
 
 
 def test_deflate_bomb_is_bounded():

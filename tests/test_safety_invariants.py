@@ -783,3 +783,48 @@ def test_fetch_builder_detector_bites():
     assert len(offenders) == 1, offenders
     good = ast.parse("def f():\n    return make_fetch(url='u')\n")
     assert not _testkit_builder_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Decompression bomb guard (jscpd #5 family / H2 closure)
+# ---------------------------------------------------------------------------
+
+_DECOMPRESS_FUNCS = frozenset({"decompress_body", "_decompress_body"})
+_DECOMPRESS_SANCTIONED = frozenset({"decompression.py"})
+
+
+def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a decompress_body call that omits the mandatory output cap.
+
+    A small gzip/deflate/brotli stream can expand to gigabytes; every
+    production caller must bound the output. The cap is now a required
+    keyword at the chokepoint, so this AST sweep is belt-and-suspenders
+    against a caller reaching for an ``int`` default or ``**kwargs``.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if fname not in _DECOMPRESS_FUNCS:
+            continue
+        kwargs = {kw.arg for kw in node.keywords if kw.arg}
+        if "max_output_bytes" not in kwargs:
+            offenders.append(offender(path, node.lineno, f"{fname}(...) without max_output_bytes"))
+    return offenders
+
+
+def test_all_decompress_calls_pass_a_cap():
+    """Every production decompression is size-bounded (H2 closure)."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED):
+        offenders.extend(_decompress_cap_offenders(tree, path))
+    assert not offenders, "decompress_body needs max_output_bytes=: " + ", ".join(offenders)
+
+
+def test_decompress_cap_detector_bites():
+    bad = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc)\n")
+    offenders = _decompress_cap_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    good = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n")
+    assert not _decompress_cap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")

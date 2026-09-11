@@ -32,7 +32,10 @@ def test_decode_unknown_charset_falls_back():
 def test_decode_handles_bytearray_and_headers():
     import gzip
 
+    from app.crawl.decompression import decompress_body
+
     raw = b"compressed"
     body = gzip.compress(raw)
-    out = _decode_body(bytearray(body), "text/html", {"content-encoding": "gzip"})
+    decoded_bytes = decompress_body(bytearray(body), "gzip", max_output_bytes=1_000_000)
+    out = _decode_body(bytearray(decoded_bytes), "text/html")
     assert out == "compressed"

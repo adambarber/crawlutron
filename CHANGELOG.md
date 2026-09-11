@@ -223,6 +223,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   passthroughs. No assertion changed; the win is that the next contract
   field lands in one builder instead of rippling through every fixture.
   Detector fails CI on a test that re-inlines the dataclass.
+- **Decompression cap is mandatory (H2 closure)** (app/crawl/
+  decompression.py, app/crawl/strategies/http.py): `max_output_bytes` was
+  an optional keyword and three production paths called it without one —
+  the uncapped `gzip.decompress`/`zlib.decompress`/`brotli.decompress`
+  branches let a compressed bomb expand unbounded. The cap is now a
+  required keyword and the uncapped branches are deleted; the defensive
+  re-decompress in the HTTP strategy and the robots discovery read pass
+  the policy cap and `DISCOVERY_BODY_MAX_BYTES` respectively. `_decode_body`
+  lost its headers-triggered internal decompression entirely — decoding is
+  downstream of the chokepoint, not a second decompression seam. AST
+  detector bans any production decompress call that omits the bound.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

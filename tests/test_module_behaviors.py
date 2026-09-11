@@ -21,19 +21,19 @@ class TestDecompressionBehaviors:
         import gzip
 
         data = gzip.compress(b"hello world")
-        assert decompress_body(data, "gzip") == b"hello world"
+        assert decompress_body(data, "gzip", max_output_bytes=10_000_000) == b"hello world"
 
     def test_deflate(self):
         import zlib
 
         data = zlib.compress(b"hello world")
-        assert decompress_body(data, "deflate") == b"hello world"
+        assert decompress_body(data, "deflate", max_output_bytes=10_000_000) == b"hello world"
 
     def test_no_encoding(self):
-        assert decompress_body(b"hello", "") == b"hello"
+        assert decompress_body(b"hello", "", max_output_bytes=10_000_000) == b"hello"
 
     def test_unknown_encoding(self):
-        assert decompress_body(b"hello", "unknown") == b"hello"
+        assert decompress_body(b"hello", "unknown", max_output_bytes=10_000_000) == b"hello"
 
 
 class TestLlmFormat:

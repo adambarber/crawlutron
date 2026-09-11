@@ -40,7 +40,7 @@ class TestModuleEdgeCasesMore:
         from app.crawl.decompression import decompress_body
 
         try:
-            result = decompress_body(b"not gzip data", "gzip")
+            result = decompress_body(b"not gzip data", "gzip", max_output_bytes=10_000_000)
             assert result == b"not gzip data"
         except Exception:
             pass
@@ -147,8 +147,9 @@ class TestModuleEdgeCasesMore:
     def test_http_charset_decode_error(self):
         from app.crawl.strategies.http import _decode_body
 
-        # Test with invalid charset in headers
-        result = _decode_body(b"hello", "text/plain", {"charset": "invalid_charset"})
+        # Charset rides on the content-type only; a stray value can never
+        # reach the decoder as a headers argument (the parameter is gone).
+        result = _decode_body(b"hello", "text/plain; charset=invalid_charset")
         assert isinstance(result, str)
 
     def test_http_cookie_invalid(self):

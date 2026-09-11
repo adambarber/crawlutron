@@ -58,6 +58,7 @@ from app.constants import (
     DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_USER_AGENT,
+    DISCOVERY_BODY_MAX_BYTES,
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_BINARY_NO_TEXT,
     EXTRACTION_METHOD_DOCUMENT,
@@ -1092,10 +1093,8 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     return headers
 
 
-def _decode_body(
-    body: bytes | bytearray | memoryview, content_type: str | None, headers: dict[str, str] | None = None
-) -> str:
-    """Decode a response body to text.
+def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None) -> str:
+    """Decode an already-decompressed response body to text.
 
     Try the declared (or UTF-8) charset strictly first; fall back to
     charset-normalizer when that fails, then to a lossy UTF-8 decode. This
@@ -1109,8 +1108,6 @@ def _decode_body(
     """
     if not isinstance(body, bytes):
         body = bytes(body)
-    if headers:
-        body = _decompress_body(body, headers.get("content-encoding", ""))
 
     charset = "utf-8"
     if content_type:
@@ -1284,7 +1281,11 @@ async def _discovery_diagnostics(
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
             robots_text = _decode_body(
-                _decompress_body(robots_response.body, robots_headers.get("content-encoding", "")),
+                _decompress_body(
+                    robots_response.body,
+                    robots_headers.get("content-encoding", ""),
+                    max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
+                ),
                 robots_headers.get("content-type"),
             )
             crawl_delay = None
@@ -1579,7 +1580,9 @@ async def _http_strategy_result(
         if content_encoding_header:
             # The fetcher normally decompresses and strips this header; if it is
             # still present the body was not verified -- detect silent failure.
-            decompressed = _decompress_body(response.body, content_encoding_header)
+            decompressed = _decompress_body(
+                response.body, content_encoding_header, max_output_bytes=max_content_length
+            )
             strategy_decompression_failed = detect_decompression_failure(
                 response.body, content_encoding_header, decompressed
             )

@@ -41,6 +41,7 @@ class TestFetchHelpersEdges:
         assert score <= 0.4
 
     def test_decode_body_gzip_content_encoding(self):
+        # Decompression happens at the capped chokepoint, then decode.
         body = gzip.compress(b"hello world")
-        out = _decode_body(body, "text/html", {"content-encoding": "gzip"})
+        out = _decode_body(decompress_body(body, "gzip", max_output_bytes=1_000_000), "text/html")
         assert out == "hello world"

@@ -89,7 +89,7 @@ class TestModuleEdgeCases:
 
         original = b"hello world " * 10
         compressed = zlib.compress(original)
-        result = decompress_body(compressed, "deflate")
+        result = decompress_body(compressed, "deflate", max_output_bytes=10_000_000)
         assert (result) is not None
 
     def test_decompression_gzip(self):
@@ -99,20 +99,20 @@ class TestModuleEdgeCases:
 
         original = b"hello world " * 10
         compressed = gzip.compress(original)
-        result = decompress_body(compressed, "gzip")
+        result = decompress_body(compressed, "gzip", max_output_bytes=10_000_000)
         assert (result) is not None
 
     def test_decompression_unknown_encoding(self):
         from app.crawl.decompression import decompress_body
 
-        result = decompress_body(b"some data", "unknown")
+        result = decompress_body(b"some data", "unknown", max_output_bytes=10_000_000)
         assert result == b"some data"
 
     def test_decompression_none_encoding(self):
         from app.crawl.decompression import decompress_body
 
         # With an unrecognized encoding, returns the original body
-        result = decompress_body(b"some data", "unknown_encoding")
+        result = decompress_body(b"some data", "unknown_encoding", max_output_bytes=10_000_000)
         assert result == b"some data"
 
     def test_scheduler_domain_cooldowns(self):

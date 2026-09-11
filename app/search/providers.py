@@ -198,7 +198,9 @@ class TavilyProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(payload.get("results"), url_key="url", title_key="title", description_key="content")
+        return _collect_results(
+            payload.get("results"), url_key="url", title_key="title", description_key="content"
+        )
 
 
 class BraveProvider:
@@ -221,7 +223,10 @@ class BraveProvider:
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
         return _collect_results(
-            (payload.get("web") or {}).get("results"), url_key="url", title_key="title", description_key="description"
+            (payload.get("web") or {}).get("results"),
+            url_key="url",
+            title_key="title",
+            description_key="description",
         )
 
 
@@ -244,7 +249,9 @@ class SerperProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(payload.get("organic"), url_key="link", title_key="title", description_key="snippet")
+        return _collect_results(
+            payload.get("organic"), url_key="link", title_key="title", description_key="snippet"
+        )
 
 
 class DuckDuckGoProvider:

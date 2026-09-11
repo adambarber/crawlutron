@@ -28,27 +28,27 @@ def _decompress_streaming(make_fileobj, compressed: bytes, max_output_bytes: int
 
 
 def decompress_body(
-    body: bytes | bytearray | memoryview, content_encoding: str, *, max_output_bytes: int | None = None
+    body: bytes | bytearray | memoryview,
+    content_encoding: str,
+    *,
+    max_output_bytes: int,
 ) -> bytes:
     """Decompress response body based on Content-Encoding header.
+
+    ``max_output_bytes`` is a required keyword: every caller states the
+    decompression-bomb bound explicitly, so a new call site physically cannot
+    expand attacker-compressed bytes without a cap (H2 closure — the optional
+    default existed only for the uncapped legacy branches, which are gone).
 
     Exception-safe: if a decoder is unavailable or the body was already
     decompressed (e.g. a transport auto-decompresses and leaves the
     ``Content-Encoding`` header on the response), the original body is
-    returned unchanged instead of raising.
-
-    When ``max_output_bytes`` is provided, decompression is performed in a
-    size-bounded streaming fashion and a :class:`DecompressionTooLargeError`
-    is raised if the output would exceed the limit (decompression-bomb guard).
+    returned unchanged instead of raising. A genuine over-cap expansion
+    raises :class:`DecompressionTooLargeError`.
     """
     encoding = content_encoding.lower().strip()
 
     if "gzip" in encoding:
-        if max_output_bytes is None:
-            try:
-                return gzip.decompress(body)
-            except Exception:
-                return body
         try:
             return _decompress_streaming(
                 lambda data: gzip.GzipFile(fileobj=io.BytesIO(data)), body, max_output_bytes
@@ -59,11 +59,6 @@ def decompress_body(
             return body
 
     if "deflate" in encoding:
-        if max_output_bytes is None:
-            try:
-                return zlib.decompress(body)
-            except Exception:
-                return body
         try:
             out = bytearray()
             d = zlib.decompressobj()
@@ -84,16 +79,10 @@ def decompress_body(
             import brotli
         except ImportError:
             return body
-        if max_output_bytes is None:
-            try:
-                return brotli.decompress(body)
-            except Exception:
-                return body
         # Bounded brotli decompression. The brotli ecosystem has two
         # incompatible streaming APIs (google-brotli exposes .process(),
         # brotlicffi exposes .decompress(data, cap)) -- detect and use whichever
         # exists. Fall back to full decompress + post-hoc cap check.
-        d = None
         try:
             d = brotli.Decompressor()
         except Exception:

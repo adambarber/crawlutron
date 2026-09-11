@@ -26,5 +26,5 @@ def test_accepts_memoryview():
     from app.crawl.decompression import decompress_body
 
     body = memoryview(gzip.compress(b"mv test")) if (gzip := __import__("gzip")) else None
-    out = decompress_body(body, "gzip")
+    out = decompress_body(body, "gzip", max_output_bytes=10_000_000)
     assert out == b"mv test"
