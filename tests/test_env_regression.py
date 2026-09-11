@@ -13,6 +13,10 @@ single-shape detector):
    env-key prefix is the robust signal regardless of how the mapping is
    aliased (settings.py:from_mapping blinds spot, OSS-review H1).
 2. ``int/float(os.environ.get(...))`` -- the direct shape, any key name.
+3. ``var = <env read>; ... int(var)`` -- the alias read-back. The original
+   bypass for this shape lived in resource_pressure.derive_browser_pool_size
+   (``explicit = os.environ.get(...); int(explicit)``), which slipped past
+   shapes 1-2 because the coercion targets the *variable*, not the call.
 """
 
 import ast
@@ -33,6 +37,48 @@ def _is_env_get(node: ast.AST) -> bool:
     )
 
 
+def _is_env_source(node: ast.AST) -> bool:
+    """Any direct env read: ``os.environ.get(...)``, ``os.getenv(...)``,
+    ``os.environ[...]``."""
+    if _is_env_get(node):
+        return True
+    if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "getenv":
+        return True
+    return (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "environ"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "os"
+    )
+
+
+def _env_get_aliases(tree: ast.AST) -> set[str]:
+    """Names assigned directly from an env read in this module's tree."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _is_env_source(node.value):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None and _is_env_source(node.value):
+            if isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+    return names
+
+
+def test_env_alias_escape_bites():
+    """Shape 3 must fire on the read-back that shapes 1-2 structurally miss."""
+    bad = ast.parse(
+        'import os\n\ndef f():\n    raw = os.environ.get("BROWSER_CRAWLER_X")\n    return int(raw)\n'
+    )
+    assert _env_get_aliases(bad) == {"raw"}
+    ok = ast.parse('def f(limits):\n    raw = limits.get("max_bytes")\n    return int(raw)\n')
+    assert not _env_get_aliases(ok)
+    subscript = ast.parse(
+        'import os\n\ndef f():\n    raw = os.environ["BROWSER_CRAWLER_X"]\n    return int(raw)\n'
+    )
+    assert _env_get_aliases(subscript) == {"raw"}
+
+
 def _is_browser_crawler_get(node: ast.AST) -> bool:
     """True for ``<mapping>.get("BROWSER_CRAWLER_...")`` under any alias."""
     return (
@@ -49,6 +95,7 @@ def _is_browser_crawler_get(node: ast.AST) -> bool:
 def test_no_bare_env_int_or_float_in_app():
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):
+        env_aliases = _env_get_aliases(tree)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
                 continue
@@ -65,4 +112,8 @@ def test_no_bare_env_int_or_float_in_app():
                     )
                 elif _is_env_get(arg):
                     offenders.append(offender(path, node.lineno, f"bare {node.func.id} on os.environ.get"))
+                elif isinstance(arg, ast.Name) and arg.id in env_aliases:
+                    offenders.append(
+                        offender(path, node.lineno, f"bare {node.func.id} on env-read alias {arg.id!r}")
+                    )
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)

@@ -247,6 +247,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   loop — every item re-added the running total, inflating `total_failed`
   quadratically (2 failures reported as 3). The merge moved outside the
   loop; a two-failure execution test pins the count.
+- **Await-in-lock detector stops being name-shy** (tests/
+  test_safety_invariants.py): the M3 sweep matched only names containing
+  "lock", so `self._mutex = threading.RLock()` — and the uppercase
+  `_HTTP_CLIENT_INIT_LOCK`/`_PENDING_CLIENT_CLOSE_LOCK` in the HTTP
+  strategy — escaped it. Matching is now case-insensitive stems
+  (lock/mutex/guard) plus any name bound to a threading lock-family
+  constructor in the module; bite test covers renamed, bound, and
+  false-positive directions.
+- **Env alias escape closed (H1 family)** (app/resource_pressure.py,
+  tests/test_env_regression.py): `derive_browser_pool_size` read
+  `BROWSER_CRAWLER_BROWSER_POOL_SIZE` raw and wrapped `int()` in a
+  try/except two statements after the `.get()` — invisible to the
+  coercion-shape detector. The value now comes through `get_env_int`, so
+  a non-positive or blank override falls through to derivation instead of
+  clamping to 1 (pinned by parametrized behavior tests; garbage now also
+  logs). The detector gains shape 3: any `int`/`float` of a name assigned
+  directly from `os.environ.get`/`getenv`/subscript, bite-proven.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

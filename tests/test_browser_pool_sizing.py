@@ -41,6 +41,15 @@ def test_explicit_override_rejects_garbage(monkeypatch):
     assert bp._derive_browser_pool_size() == 2
 
 
+@pytest.mark.parametrize("raw", ["0", "-5", "  "])
+def test_nonpositive_or_blank_override_falls_through(monkeypatch, raw):
+    # An override that cannot mean a pool size (zero, negative, blank) is
+    # garbage, not a clamp-to-1 request: derivation owns the sizing.
+    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", raw)
+    monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
+    assert bp._derive_browser_pool_size() == 2
+
+
 def test_budget_derivation_3g_defaults(monkeypatch):
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     # 0.5 * 3GiB / 700MiB ~= 2.19 -> floor 2

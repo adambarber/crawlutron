@@ -445,12 +445,9 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     discoverable. Shared by ``app.crawl.strategies.browser_pool`` and the httpx
     pool sizing so the connection ceiling tracks the admission's HTTP concurrency.
     """
-    explicit = os.environ.get("BROWSER_CRAWLER_BROWSER_POOL_SIZE")
-    if explicit:
-        try:
-            return max(1, int(explicit))
-        except (TypeError, ValueError):
-            pass
+    explicit = get_env_int("BROWSER_CRAWLER_BROWSER_POOL_SIZE", 0, lo=0)
+    if explicit > 0:
+        return explicit
     limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes
     if limit and limit > 0:
         budget = int(limit * _BROWSER_RAM_FRACTION)
