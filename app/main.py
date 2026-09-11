@@ -16,11 +16,7 @@ from app.crawl.engine import crawl_request
 from app.logging_config import configure_service_logging
 from app.validation import get_env_float, get_env_int
 
-from .api.response_shaping import build_unified_result as _build_unified_result
-from .api_models import (
-    API_VERSION,
-    UnifiedCrawlResponse,
-)
+from .api_models import API_VERSION
 from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (
@@ -107,8 +103,6 @@ if FastAPI is not None:
             shutdown_event=shutdown_event,
             crawl_request_fn=crawl_request,
             pool_getter=get_browser_pool,
-            unified_response_cls=UnifiedCrawlResponse,
-            build_unified_result=_build_unified_result,
             get_metrics=get_metrics,
         )
         await initialize_browser_pool(settings)

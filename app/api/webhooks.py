@@ -8,10 +8,12 @@ helpers directly.
 
 Module-level ``set_webhook_dependencies`` wires the app context
 (``webhook_semaphore``, ``shutdown_event``, ``crawl_request``,
-``build_unified_result``, ``unified_response_cls``, ``pool_getter``,
-``get_metrics``) once at startup so the delivery helpers can stay stateless
-and the tests can mock individual hooks instead of constructing full
-FastAPI dependency trees.
+``pool_getter``, ``get_metrics``) once at startup so the delivery helpers
+can stay stateless and the tests can mock individual hooks instead of
+constructing full FastAPI dependency trees. The response payload itself is
+always built by :func:`app.api.response_shaping.build_unified_crawl_response`
+— the one shaping chokepoint, called directly (never a swappable hook, so a
+test cannot reinstate a drift-prone construction path).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import json
 import logging
 from typing import Any
 
+from app.api.response_shaping import build_unified_crawl_response
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
@@ -36,8 +39,6 @@ _webhook_semaphore: asyncio.Semaphore | None = None
 _shutdown_event: asyncio.Event | None = None
 _crawl_request_fn = None
 _pool_getter = None
-_unified_response_cls = None
-_build_unified_result_fn = None
 _get_metrics_fn = None
 
 
@@ -47,32 +48,26 @@ def set_webhook_dependencies(
     shutdown_event: asyncio.Event,
     crawl_request_fn,
     pool_getter,
-    unified_response_cls,
-    build_unified_result,
     get_metrics,
 ) -> None:
     """Install app context for the webhook helpers (called from lifespan)."""
     global _webhook_semaphore, _shutdown_event, _crawl_request_fn, _pool_getter
-    global _unified_response_cls, _build_unified_result_fn, _get_metrics_fn
+    global _get_metrics_fn
     _webhook_semaphore = webhook_semaphore
     _shutdown_event = shutdown_event
     _crawl_request_fn = crawl_request_fn
     _pool_getter = pool_getter
-    _unified_response_cls = unified_response_cls
-    _build_unified_result_fn = build_unified_result
     _get_metrics_fn = get_metrics
 
 
 def clear_webhook_dependencies() -> None:
     """Reset module-level state (used by lifespan teardown and tests)."""
     global _webhook_semaphore, _shutdown_event, _crawl_request_fn, _pool_getter
-    global _unified_response_cls, _build_unified_result_fn, _get_metrics_fn
+    global _get_metrics_fn
     _webhook_semaphore = None
     _shutdown_event = None
     _crawl_request_fn = None
     _pool_getter = None
-    _unified_response_cls = None
-    _build_unified_result_fn = None
     _get_metrics_fn = None
 
 
@@ -189,8 +184,6 @@ async def run_and_deliver_webhook(
             _shutdown_event,
             _crawl_request_fn,
             _pool_getter,
-            _unified_response_cls,
-            _build_unified_result_fn,
             _get_metrics_fn,
         )
     ):
@@ -207,13 +200,11 @@ async def run_and_deliver_webhook(
     )
     result["request_id"] = request_id
     _get_metrics_fn().observe_crawl(results=result.get("results", []))
-    unified_results = [_build_unified_result_fn(item) for item in result.get("results", [])]
-    response_payload = _unified_response_cls(
+    response_payload = build_unified_crawl_response(
+        result.get("results", []),
         request_id=request_id,
-        submitted_count=result.get("submitted_count", len(unified_results)),
+        submitted_count=result.get("submitted_count"),
         policy_schema_version=result.get("policy_schema_version", ""),
-        success=True,
-        results=unified_results,
     ).model_dump()
     try:
         payload_bytes = json.dumps(response_payload, separators=(",", ":")).encode("utf-8")

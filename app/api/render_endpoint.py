@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from app.api.render import render_request
 from app.api.response_shaping import (
-    build_unified_result,
+    build_unified_crawl_response,
     render_result_to_unified,
 )
 from app.api_models import POLICY_SCHEMA_VERSION, RenderRequest, UnifiedCrawlResponse
@@ -70,14 +70,11 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
-        return UnifiedCrawlResponse(
+        return build_unified_crawl_response(
+            [render_result_to_unified(item) for item in result.get("results", [])],
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
             policy_schema_version=POLICY_SCHEMA_VERSION,
-            success=True,
-            results=[
-                build_unified_result(render_result_to_unified(item)) for item in result.get("results", [])
-            ],
         )
     except ValueError as error:
         logger.warning("render_request_rejected", extra={"error": str(error)})

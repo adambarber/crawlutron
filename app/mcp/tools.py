@@ -21,7 +21,7 @@ from pydantic import ValidationError
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
-from app.api.response_shaping import build_unified_result
+from app.api.response_shaping import build_unified_crawl_response
 from app.api_models import (
     CrawlRequest,
     MapRequest,
@@ -94,12 +94,11 @@ async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolR
             settings=settings,
             shutdown_event=shutdown_event,
         )
-        unified = UnifiedCrawlResponse(
+        unified = build_unified_crawl_response(
+            result["results"],
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
             policy_schema_version=result["policy_schema_version"],
-            success=True,
-            results=[build_unified_result(item) for item in result["results"]],
         )
     except HTTPException as error:
         return ToolResult(text=_http_exception_message(error), is_error=True)

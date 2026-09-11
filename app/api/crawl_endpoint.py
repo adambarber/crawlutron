@@ -21,7 +21,7 @@ from fastapi import BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, Response
 
 from app.api.crawl_executor import execute_crawl
-from app.api.response_shaping import build_unified_result
+from app.api.response_shaping import build_unified_crawl_response
 from app.api.webhooks import validate_webhook_url
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.job_store import JobKind
@@ -95,13 +95,11 @@ async def crawl(
             elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
         )
         logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
-        unified = [build_unified_result(item) for item in result.get("results", [])]
-        response_model = UnifiedCrawlResponse(
+        response_model = build_unified_crawl_response(
+            result.get("results", []),
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
             policy_schema_version=result["policy_schema_version"],
-            success=True,
-            results=unified,
         )
         try:
             result_store.put(result["request_id"], response_model.model_dump())
@@ -110,20 +108,16 @@ async def crawl(
         output_format = payload.output_format
         if output_format and output_format.lower() != "json":
             try:
-                body, media_type = serialize_results([u.model_dump() for u in unified], output_format)
+                body, media_type = serialize_results(
+                    [u.model_dump() for u in response_model.results], output_format
+                )
             except ValueError as error:
                 raise HTTPException(
                     status_code=422,
                     detail={"code": "validation_error", "message": str(error), "details": {}},
                 ) from error
             return Response(content=body, media_type=media_type)
-        return UnifiedCrawlResponse(
-            request_id=result["request_id"],
-            submitted_count=result["submitted_count"],
-            policy_schema_version=result["policy_schema_version"],
-            success=True,
-            results=unified,
-        )
+        return response_model
     except ValueError as error:
         get_metrics().observe_crawl(errors=1)
         logger.warning("crawl_request_rejected", extra={"error": str(error)})

@@ -24,19 +24,6 @@ from app.api.webhooks import (
 )
 
 
-class _FakeUnifiedResponse:
-    """Stub for ``UnifiedCrawlResponse`` that returns a JSON-serializable dict."""
-
-    def __init__(self, **_kwargs):
-        self.kwargs = _kwargs
-
-    def model_dump(self):
-        return {
-            "request_id": self.kwargs.get("request_id", "test"),
-            "results": self.kwargs.get("results", []),
-        }
-
-
 class TestWebhookUrlValidation:
     def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
@@ -120,8 +107,6 @@ class TestWebhookDeliveryPinning:
                     shutdown_event=asyncio.Event(),
                     crawl_request_fn=AsyncMock(return_value={"results": []}),
                     pool_getter=lambda: MagicMock(),
-                    unified_response_cls=_FakeUnifiedResponse,
-                    build_unified_result=lambda x: x,
                     get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
                 )
                 try:

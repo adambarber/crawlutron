@@ -454,3 +454,44 @@ def test_raw_href_frontier_detector_bites():
     )
     offenders = _frontier_sink_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
     assert len(offenders) == 1 and "frontier.append" in offenders[0], offenders
+
+
+# ---------------------------------------------------------------------------
+# Crawl-response shaping chokepoint (jscpd #1 class)
+# ---------------------------------------------------------------------------
+
+
+def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` construction
+    outside response_shaping — callers must use build_unified_crawl_response so
+    persisted/webhook/REST payloads cannot drift (the #1754 rule, endpoint-wide).
+    ``**stored`` deserialization splats have no explicit results= keyword."""
+    if path.name == "response_shaping.py":
+        return []
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "UnifiedCrawlResponse"
+            and any(kw.arg == "results" for kw in node.keywords)
+        ):
+            offenders.append(offender(path, node.lineno, "explicit UnifiedCrawlResponse(results=...) build"))
+    return offenders
+
+
+def test_crawl_response_built_only_by_shaping_chokepoint():
+    """Every UnifiedCrawlResponse-with-results flows through the shaper."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_crawl_response_construction_offenders(tree, path))
+    assert not offenders, "Use app.api.response_shaping.build_unified_crawl_response: " + ", ".join(offenders)
+
+
+def test_crawl_response_chokepoint_detector_bites():
+    """Synthetic bypass fires; **stored deserialization splat stays clean."""
+    bypass = ast.parse("def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n")
+    offenders = _crawl_response_construction_offenders(bypass, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    stored = ast.parse("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n")
+    assert not _crawl_response_construction_offenders(stored, REPO_ROOT / "app" / "api" / "_synthetic.py")

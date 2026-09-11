@@ -23,8 +23,7 @@ import logging
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl
-from app.api.response_shaping import build_unified_result
-from app.api_models import UnifiedCrawlResponse
+from app.api.response_shaping import build_unified_crawl_response
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
@@ -78,14 +77,13 @@ async def run_async_crawl(
             )
             result["request_id"] = request_id
             get_metrics().observe_crawl(results=result.get("results", []))
-            unified_results = [build_unified_result(item) for item in result.get("results", [])]
-            response_payload = UnifiedCrawlResponse(
+            response_model = build_unified_crawl_response(
+                result.get("results", []),
                 request_id=request_id,
-                submitted_count=result.get("submitted_count", len(unified_results)),
+                submitted_count=result.get("submitted_count"),
                 policy_schema_version=result.get("policy_schema_version", ""),
-                success=True,
-                results=unified_results,
-            ).model_dump()
+            )
+            response_payload = response_model.model_dump()
 
             # Store results in job_store (single source of truth for async jobs)
             job.results = [response_payload]
@@ -97,6 +95,7 @@ async def run_async_crawl(
                 status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
                 return status == "failed"
 
+            unified_results = response_model.results
             failed = sum(1 for item in unified_results if _failed(item))
             job.stats = {
                 "total_discovered": len(unified_results),
@@ -126,12 +125,8 @@ async def run_async_crawl(
             job_store.save(job)
         if webhook_url:
             try:
-                error_payload = UnifiedCrawlResponse(
-                    request_id=request_id,
-                    submitted_count=0,
-                    policy_schema_version="",
-                    success=False,
-                    results=[],
+                error_payload = build_unified_crawl_response(
+                    [], request_id=request_id, success=False
                 ).model_dump()
                 from app.api.webhooks import post_webhook
 
