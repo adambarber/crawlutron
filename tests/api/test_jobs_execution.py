@@ -153,6 +153,27 @@ class TestWholeSiteJobExecution:
         # Discovered link b was crawled in a follow-up batch.
         assert len(job.results) == 2
 
+    async def test_total_failed_counts_once_per_failed_item(self, client, job_store, real_sleeps):
+        # Batch 2 submits b and c, both fail: the per-item `failed` counter is
+        # cumulative, so adding it inside the loop once reported 1+2=3.
+        job_runner.install_execute_crawl(
+            _fake_execute(
+                [
+                    _canned_result(
+                        "http://example.test/a", links=["http://example.test/b", "http://example.test/c"]
+                    )
+                ]
+            )
+        )
+        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
+        job_id = resp.json()["job_id"]
+
+        status = await _wait_status(job_store, job_id, {"completed", "failed"})
+        assert status == "completed"
+        job = job_store.load(job_id)
+        assert job.stats["total_crawled"] == 3
+        assert job.stats["total_failed"] == 2
+
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
         """H1: the frontier must carry the validated URL, never the raw href.
 

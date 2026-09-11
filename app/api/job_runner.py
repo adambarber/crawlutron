@@ -198,8 +198,6 @@ async def _run_job(
                 if item.get("status") == "failed":
                     failed += 1
                 job.stats["total_crawled"] = len(job.visited)
-                if failed:
-                    job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
                 for link in item.get("discovered_links") or []:
                     link_url = frontier_link_url(link)
                     if not link_url:
@@ -207,6 +205,10 @@ async def _run_job(
                     if link_url not in job.visited and link_url not in job.frontier:
                         job.frontier.append(link_url)
                         job.stats["total_discovered"] += 1
+            # `failed` accumulates across the batch: merge it once, outside
+            # the loop, or every item re-adds the running total (1+2+...+n).
+            if failed:
+                job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
             job_store.save(job)
 
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:

@@ -242,6 +242,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   IDs" policy now governs them: 48 → 128 bits of entropy on the wire.
   The `crawl_` prefix and shape are unchanged, so no test assertions moved.
   AST detector bans any `uuid4()` call or `.hex` slice outside `ids.py`.
+- **Batch-level failure accounting (job_runner)**: the per-item `failed`
+  counter is cumulative across a batch, but its stats merge ran inside the
+  loop — every item re-added the running total, inflating `total_failed`
+  quadratically (2 failures reported as 3). The merge moved outside the
+  loop; a two-failure execution test pins the count.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
