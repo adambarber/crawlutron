@@ -17,7 +17,6 @@ import os
 import re
 import tempfile
 import time
-import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -41,6 +40,7 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
 )
+from app.crawl.ids import new_request_id
 from app.crawl.robots_parse import (
     parse_robots_crawl_delay,
     parse_robots_rules,
@@ -1094,7 +1094,7 @@ async def _crawl_request_impl(
             admission=_admission,
         )
     response = {
-        "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
+        "request_id": new_request_id(),
         "submitted_count": len(urls),
         # Report the service's own schema version: echoing the caller-supplied
         # value would let responses claim a contract the service never ran.

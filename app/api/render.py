@@ -8,10 +8,10 @@ deleted; existing callers import from ``app.api.render``.
 from __future__ import annotations
 
 import time
-import uuid
 from typing import Any
 
 from app.crawl.engine import _call_worker, _payload_urls
+from app.crawl.ids import new_request_id
 from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -126,7 +126,7 @@ async def render_request(
 
     ordered_results = [by_index[index] for index in range(len(urls))]
     return {
-        "request_id": f"crawl_{uuid.uuid4().hex[:12]}",
+        "request_id": new_request_id(),
         "submitted_count": len(urls),
         "results": [to_dict(result) for result in ordered_results],
     }

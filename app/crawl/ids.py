@@ -1,0 +1,23 @@
+"""One sanctioned source of minted handles (jscpd #3 / H4 residue).
+
+Every user-visible id is minted here so the entropy policy is stated once:
+request/job ids double as the only lookup credential for
+``GET /v1/crawl/{request_id}``-style routes, so they carry the full 128-bit
+UUID hex — short ids are brute-forceable (HIGH #9).
+"""
+
+from __future__ import annotations
+
+import uuid
+
+REQUEST_ID_PREFIX = "crawl_"
+
+
+def new_job_id() -> str:
+    """Mint a whole-site/async job id: full 32-hex UUID entropy."""
+    return uuid.uuid4().hex
+
+
+def new_request_id() -> str:
+    """Mint a request handle: prefixed, full 32-hex UUID entropy."""
+    return f"{REQUEST_ID_PREFIX}{uuid.uuid4().hex}"

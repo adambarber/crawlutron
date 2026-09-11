@@ -828,3 +828,44 @@ def test_decompress_cap_detector_bites():
     assert len(offenders) == 1, offenders
     good = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n")
     assert not _decompress_cap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Handle minting is single-sourced (H4 residue / HIGH #9 entropy policy)
+# ---------------------------------------------------------------------------
+
+_ID_MINT_SANCTIONED = frozenset({"ids.py"})
+
+
+def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag direct ``uuid4()`` calls or ``.hex`` slicing outside app/crawl/ids.
+
+    Handles double as the lookup credential for status/result routes, so the
+    full-entropy policy must live in exactly one primitive; a re-inlined mint
+    is where a shorter slice silently regresses to 48 bits.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if fname == "uuid4":
+                offenders.append(offender(path, node.lineno, "uuid4() minted outside app/crawl/ids.py"))
+        elif isinstance(node, ast.Subscript) and getattr(node.value, "attr", None) == "hex":
+            offenders.append(offender(path, node.lineno, "uuid hex sliced outside app/crawl/ids.py"))
+    return offenders
+
+
+def test_handles_are_minted_in_one_place():
+    """Only app/crawl/ids.py calls uuid4 or slices its hex (H4 residue)."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | _ID_MINT_SANCTIONED):
+        offenders.extend(_id_mint_offenders(tree, path))
+    assert not offenders, "handle minting is single-sourced in app/crawl/ids.py: " + ", ".join(offenders)
+
+
+def test_id_mint_detector_bites():
+    bad = ast.parse("import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n")
+    offenders = _id_mint_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 2, offenders  # uuid4 call AND hex slice
+    good = ast.parse("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n")
+    assert not _id_mint_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")

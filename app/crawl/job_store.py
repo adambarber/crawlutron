@@ -12,13 +12,14 @@ import logging
 import sqlite3
 import threading
 import time
-import uuid
 
 logger = logging.getLogger(__name__)
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+from app.crawl.ids import new_job_id
 
 
 def _json_default(obj):
@@ -152,7 +153,7 @@ class JobStore:
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
-        job_id = uuid.uuid4().hex
+        job_id = new_job_id()
         job = CrawlJobState(
             job_id=job_id,
             kind=JobKind.WHOLE_SITE,

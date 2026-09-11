@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import time
-import uuid
 from typing import Any
 
 from fastapi import BackgroundTasks
@@ -25,6 +24,7 @@ from app.api.exceptions import http_error
 from app.api.response_shaping import build_unified_crawl_response
 from app.api.webhooks import validate_webhook_url
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
+from app.crawl.ids import new_request_id
 from app.crawl.job_store import JobKind
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
@@ -59,7 +59,7 @@ async def crawl(
                 raise http_error(422, "validation_error", "Invalid webhook_url")
             if webhook_url:
                 validate_webhook_url(webhook_url)
-            request_id = f"crawl_{uuid.uuid4().hex[:12]}"
+            request_id = new_request_id()
             job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
             from app.api.async_crawl_runner import run_async_crawl
 

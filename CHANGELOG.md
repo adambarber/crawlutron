@@ -234,6 +234,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   lost its headers-triggered internal decompression entirely — decoding is
   downstream of the chokepoint, not a second decompression seam. AST
   detector bans any production decompress call that omits the bound.
+- **One handle-minting primitive (H4 residue)** (app/crawl/ids.py):
+  `new_request_id()`/`new_job_id()` replace the four re-inlined
+  `uuid4().hex[:12]` mints (engine, crawl_endpoint, render) and job_store's
+  raw hex. The 12-hex handles are the *only* lookup credential for
+  `GET /v1/crawl/{request_id}`, so HIGH #9's "avoid brute-forceable short
+  IDs" policy now governs them: 48 → 128 bits of entropy on the wire.
+  The `crawl_` prefix and shape are unchanged, so no test assertions moved.
+  AST detector bans any `uuid4()` call or `.hex` slice outside `ids.py`.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
