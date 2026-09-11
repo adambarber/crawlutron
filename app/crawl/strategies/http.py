@@ -741,7 +741,7 @@ async def _default_http_fetcher(
             try:
                 body = await read_capped_async(response.aiter_raw(), max_content_length)
             except BodyTooLarge:
-                    return _http_413(url, current_url, started)
+                return _http_413(url, current_url, started)
             status_code = response.status_code
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
             final_url = current_url

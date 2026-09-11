@@ -225,9 +225,7 @@ async def run_and_deliver_webhook(
             return
         await deliver_pinned_webhook(webhook_url, payload_bytes)
     except Exception as error:
-        logger.warning(
-            "webhook_delivery_failed: %s", error, extra={"webhook_url": webhook_url}
-        )
+        logger.warning("webhook_delivery_failed: %s", error, extra={"webhook_url": webhook_url})
 
 
 async def deliver_webhook(

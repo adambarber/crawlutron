@@ -64,7 +64,5 @@ def test_no_bare_env_int_or_float_in_app():
                         )
                     )
                 elif _is_env_get(arg):
-                    offenders.append(
-                        offender(path, node.lineno, f"bare {node.func.id} on os.environ.get")
-                    )
+                    offenders.append(offender(path, node.lineno, f"bare {node.func.id} on os.environ.get"))
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)
