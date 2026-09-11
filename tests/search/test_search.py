@@ -156,6 +156,57 @@ class TestProviderParsing:
         assert [r.url for r in results] == ["https://example.gov/a", "https://example.gov/b"]
 
 
+# --- Shared result collector (jscpd #4: three provider loops were verbatim) -
+
+
+class TestCollectResults:
+    def test_dedupes_by_normalized_url_and_preserves_order(self):
+        from app.search.providers import _collect_results
+
+        items = [
+            {"url": "https://example.gov/a", "title": "A", "content": "first"},
+            {"url": "https://example.gov/a/", "title": "A dup", "content": "dup"},
+            {"url": "https://example.gov/b", "title": "B", "content": "second"},
+        ]
+        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        assert [(r.url, r.title, r.description) for r in results] == [
+            ("https://example.gov/a", "A", "first"),
+            ("https://example.gov/b", "B", "second"),
+        ]
+
+    def test_skips_non_dicts_blank_and_private_urls(self, monkeypatch):
+        from _testkit import block_private_targets
+
+        from app.search.providers import _collect_results
+
+        block_private_targets(monkeypatch)
+        items = [
+            "not-a-dict",
+            None,
+            {"url": "", "title": "blank"},
+            {"url": "http://127.0.0.1/secret", "title": "private"},
+            {"title": "no url key"},
+            {"url": "https://example.gov/ok", "title": "kept"},
+        ]
+        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        assert [r.url for r in results] == ["https://example.gov/ok"]
+        assert results[0].description == ""
+
+    def test_clips_whitespace_and_long_fields(self):
+        from app.search.providers import _MAX_TEXT_LENGTH, _collect_results
+
+        items = [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}]
+        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        assert results[0].title == "a b"
+        assert results[0].description.endswith("…")
+        assert len(results[0].description) == _MAX_TEXT_LENGTH + 1  # ellipsis adds one
+
+    def test_none_items_iterable_is_empty(self):
+        from app.search.providers import _collect_results
+
+        assert _collect_results(None, url_key="url", title_key="title", description_key="content") == []
+
+
 # --- Provider selection -----------------------------------------------------
 
 

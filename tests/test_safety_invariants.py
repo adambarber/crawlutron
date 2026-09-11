@@ -609,3 +609,73 @@ def test_envelope_detector_bites():
         "response = build_thing({'code': 1, 'message': 'x'})\n"
     )
     assert not _envelope_dict_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Search-provider result normalization (jscpd #4 family)
+# ---------------------------------------------------------------------------
+
+
+def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag the keyed-provider dedupe loop re-inlined outside the collector.
+
+    The exact copy-paste shape is ``seen: set`` + ``isinstance(item, dict)``
+    guard + ``SearchResult`` construction in one function. DuckDuckGo's
+    provider legitimately keeps a separate lxml node-walk: it has no dict
+    guard, so the sink never fires on it.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) or node.name == "_collect_results":
+            continue
+        subs = list(ast.walk(node))
+        assigns_seen = any(
+            isinstance(s, ast.AnnAssign) and getattr(s.target, "id", "") == "seen" for s in subs
+        )
+        builds_result = any(
+            isinstance(s, ast.Call) and getattr(s.func, "id", "") == "SearchResult" for s in subs
+        )
+        guards_dict = any(
+            isinstance(s, ast.Call)
+            and getattr(s.func, "id", "") == "isinstance"
+            and len(s.args) >= 2
+            and getattr(s.args[1], "id", "") == "dict"
+            for s in subs
+        )
+        if assigns_seen and builds_result and guards_dict:
+            offenders.append(offender(path, node.lineno, "dedupe loop re-inlined outside _collect_results"))
+    return offenders
+
+
+def test_no_provider_dedupe_loop_reinlines():
+    """One normalize/dedupe/clip contract for all keyed providers."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_provider_loop_reinlines(tree, path))
+    assert not offenders, "Use app.search.providers._collect_results: " + ", ".join(offenders)
+
+
+def test_provider_loop_detector_bites():
+    """The three-provider copy fires; the DDG lxml-walk shape stays clean."""
+    bad = ast.parse(
+        "async def search(self, query, limit, timeout_seconds):\n"
+        "    results = []\n"
+        "    seen: set[str] = set()\n"
+        "    for item in payload.get('results') or []:\n"
+        "        if not isinstance(item, dict):\n"
+        "            continue\n"
+        "        results.append(SearchResult(url=item.get('url')))\n"
+        "    return results\n"
+    )
+    offenders = _provider_loop_reinlines(bad, REPO_ROOT / "app" / "search" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    ddg_like = ast.parse(
+        "async def search(self, query, limit, timeout_seconds):\n"
+        "    results = []\n"
+        "    seen: set[str] = set()\n"
+        "    for node in tree.xpath('//div'):\n"
+        "        href = node.get('href')\n"
+        "        results.append(SearchResult(url=href))\n"
+        "    return results\n"
+    )
+    assert not _provider_loop_reinlines(ddg_like, REPO_ROOT / "app" / "search" / "_synthetic.py")

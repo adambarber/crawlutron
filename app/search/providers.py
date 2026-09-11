@@ -126,6 +126,35 @@ def _normalize_url(raw: str) -> str | None:
         return None
 
 
+def _collect_results(
+    items: object, *, url_key: str, title_key: str, description_key: str
+) -> list[SearchResult]:
+    """Normalize a keyed provider's raw result list into ``SearchResult``s.
+
+    The three keyed providers (Tavily/Brave/Serper) differ only in which key
+    holds which field; the validation/dedupe/clip flow is one contract
+    (jscpd #4 — it was hand-copied three times). Non-dict entries and
+    non-public URLs are dropped, never rewritten (#1721).
+    """
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        url = _normalize_url(str(item.get(url_key) or ""))
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        results.append(
+            SearchResult(
+                url=url,
+                title=_clip(str(item.get(title_key) or "")),
+                description=_clip(str(item.get(description_key) or "")),
+            )
+        )
+    return results
+
+
 def _parse_json(body: str) -> dict[str, Any]:
     try:
         payload = json.loads(body)
@@ -169,23 +198,7 @@ class TavilyProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        results: list[SearchResult] = []
-        seen: set[str] = set()
-        for item in payload.get("results") or []:
-            if not isinstance(item, dict):
-                continue
-            url = _normalize_url(str(item.get("url") or ""))
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            results.append(
-                SearchResult(
-                    url=url,
-                    title=_clip(str(item.get("title") or "")),
-                    description=_clip(str(item.get("content") or "")),
-                )
-            )
-        return results
+        return _collect_results(payload.get("results"), url_key="url", title_key="title", description_key="content")
 
 
 class BraveProvider:
@@ -207,23 +220,9 @@ class BraveProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        results: list[SearchResult] = []
-        seen: set[str] = set()
-        for item in (payload.get("web") or {}).get("results") or []:
-            if not isinstance(item, dict):
-                continue
-            url = _normalize_url(str(item.get("url") or ""))
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            results.append(
-                SearchResult(
-                    url=url,
-                    title=_clip(str(item.get("title") or "")),
-                    description=_clip(str(item.get("description") or "")),
-                )
-            )
-        return results
+        return _collect_results(
+            (payload.get("web") or {}).get("results"), url_key="url", title_key="title", description_key="description"
+        )
 
 
 class SerperProvider:
@@ -245,23 +244,7 @@ class SerperProvider:
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
-        results: list[SearchResult] = []
-        seen: set[str] = set()
-        for item in payload.get("organic") or []:
-            if not isinstance(item, dict):
-                continue
-            url = _normalize_url(str(item.get("link") or ""))
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            results.append(
-                SearchResult(
-                    url=url,
-                    title=_clip(str(item.get("title") or "")),
-                    description=_clip(str(item.get("snippet") or "")),
-                )
-            )
-        return results
+        return _collect_results(payload.get("organic"), url_key="link", title_key="title", description_key="snippet")
 
 
 class DuckDuckGoProvider:
