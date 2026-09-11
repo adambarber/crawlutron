@@ -103,19 +103,19 @@ class TestSchedulerPolicies:
         assert s.current_delay("a.com") == 5.0
 
     def test_parse_robots_crawl_delay_specific_group_wins(self):
-        from app.crawl.engine import _parse_robots_crawl_delay
+        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 1\nUser-agent: browser-crawler\nCrawl-delay: 4\n"
         assert _parse_robots_crawl_delay(text) == 4.0
 
     def test_parse_robots_crawl_delay_star_only(self):
-        from app.crawl.engine import _parse_robots_crawl_delay
+        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         text = "User-agent: *\nCrawl-delay: 3\n"
         assert _parse_robots_crawl_delay(text) == 3.0
 
     def test_parse_robots_crawl_delay_absent(self):
-        from app.crawl.engine import _parse_robots_crawl_delay
+        from app.crawl.robots_parse import parse_robots_crawl_delay as _parse_robots_crawl_delay
 
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 

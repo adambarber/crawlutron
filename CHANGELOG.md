@@ -202,6 +202,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that silently omitted `details` now always carry it (contract already
   documented it); the triplicated browser-pool 503 message is one
   constant. Envelope literals outside the sanctioned module fail CI.
+- **One search-result normalization contract (jscpd #4)**: the
+  Tavily/Brave/Serper parse loops — verbatim copies differing only in key
+  names — collapsed into `_collect_results`. Behavior byte-identical; the
+  risk retired is one provider's SSRF-drop or dedupe rule silently
+  drifting from its siblings. Tree-wide detector keeps the loop in one
+  place.
+- **One robots.txt line-scanner (jscpd #5)**: crawl-delay, rules, and
+  sitemaps each re-rolled the BOM/comment/`partition(":")` walk plus the
+  RFC-9309 group accumulator, and had already drifted on the empty-value
+  gate. `app/crawl/robots_parse.py` is the single tokenizer + selector;
+  consumers supply only their "which directives do I accept" predicate.
+  Shipped selection semantics (matched-group-is-final, invalid-delay falls
+  back to star, agents accumulate across non-consumed lines) pinned by
+  characterization tests. Detector bans a second `lstrip(BOM)+splitlines()`
+  scan.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

@@ -40,7 +40,11 @@ from app.constants import (
     HTTP_BLOCKED_CLASSIFICATIONS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
-    USER_AGENT_TOKEN,
+)
+from app.crawl.robots_parse import (
+    parse_robots_crawl_delay,
+    parse_robots_rules,
+    parse_robots_sitemaps,
 )
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.memory_pressure import read_memory_stats
@@ -728,61 +732,6 @@ class _ResultSpill:
                 pass
 
 
-def _parse_robots_crawl_delay(text: str) -> float | None:
-    """Extract the Crawl-delay (seconds) for our user-agent group, if any.
-
-    Mirrors :func:`_parse_robots_rules` group selection (the most-specific
-    group matching our product token wins, else the ``*`` group). A host's
-    Crawl-delay is a politeness floor the scheduler must honor (adversarial
-    perf #2.6). Returns None when no group declares one.
-    """
-    our_token = USER_AGENT_TOKEN
-    groups: list[list] = []
-    last_agents: list[str] = []
-    current: list | None = None
-    for raw in text.lstrip("\ufeff").splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip().lower()
-        value = value.strip()
-        if key == "user-agent":
-            if current is not None:
-                groups.append(current)
-                current = None
-            last_agents.append(value.lower())
-        elif key == "crawl-delay" and value:
-            if current is None:
-                current = [list(last_agents), None]
-                last_agents = []
-            try:
-                delay = float(value)
-            except ValueError:
-                delay = None
-            if delay is not None and delay >= 0:
-                current[1] = delay
-    if current is not None:
-        groups.append(current)
-
-    best_delay: float | None = None
-    best_len = -1
-    star_delay: float | None = None
-    for agents, delay in groups:
-        for agent in agents:
-            if agent == "*":
-                if star_delay is None:
-                    star_delay = delay
-                break
-            if agent and agent in our_token and len(agent) > best_len:
-                best_len = len(agent)
-                best_delay = delay
-                break
-    if best_delay is not None:
-        return best_delay
-    return star_delay
-
-
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -953,72 +902,6 @@ async def _crawl_request_impl(
     # allow-list an origin for the full robots_ttl, nor block it for an hour.
     ROBOTS_FAILURE_TTL_SECONDS = 60.0
 
-    def _parse_robots_rules(text: str) -> list[tuple[bool, str]]:
-        """RFC 9309 group selection: parse discrete user-agent groups and apply
-        only the most-specific group matching our product token (falling back to
-        the ``*`` group). Previously rules were unioned across ALL groups, so a
-        Baiduspider ``Disallow: /`` blocked our crawler site-wide."""
-        our_token = USER_AGENT_TOKEN
-        groups: list[tuple[list[str], list[tuple[bool, str]]]] = []
-        last_agents: list[str] = []
-        current: tuple[list[str], list[tuple[bool, str]]] | None = None
-        for raw in text.lstrip("\ufeff").splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if not line:
-                continue
-            key, _, value = line.partition(":")
-            key = key.strip().lower()
-            value = value.strip()
-            if key == "user-agent":
-                if current is not None:
-                    groups.append(current)
-                    current = None
-                last_agents.append(value.lower())
-            elif key in ("disallow", "allow") and value is not None:
-                if current is None:
-                    current = (list(last_agents), [])
-                    last_agents = []
-                current[1].append((key == "allow", value))
-        if current is not None:
-            groups.append(current)
-
-        best_rules: list[tuple[bool, str]] | None = None
-        best_len = -1
-        star_rules: list[tuple[bool, str]] | None = None
-        for agents, grules in groups:
-            for agent in agents:
-                if agent == "*":
-                    if star_rules is None:
-                        star_rules = grules
-                    break
-                # Match the product token, not the full User-Agent string:
-                # URL/version fragments in our UA must not claim groups, and
-                # this is the same token _parse_robots_crawl_delay uses (M7).
-                if agent and agent in our_token and len(agent) > best_len:
-                    best_len = len(agent)
-                    best_rules = grules
-                    break
-        if best_rules is not None:
-            return best_rules
-        return star_rules if star_rules is not None else []
-
-    def _parse_robots_sitemaps(text: str) -> list[str]:
-        """Extract ``Sitemap:`` directive URLs from a robots.txt body (#4).
-
-        These are the sitemap locations discovery diagnostics would otherwise
-        re-fetch from /robots.txt; caching them here lets the engine pass them
-        down so discovery skips its own robots fetch.
-        """
-        out: list[str] = []
-        for raw in text.lstrip("\ufeff").splitlines():
-            line = raw.split("#", 1)[0].strip()
-            if not line:
-                continue
-            key, _, value = line.partition(":")
-            if key.strip().lower() == "sitemap" and value.strip():
-                out.append(value.strip())
-        return out
-
     async def _fetch_robots_rules(
         origin: str,
     ) -> tuple[list[tuple[bool, str]], list[str], float | None]:
@@ -1039,9 +922,9 @@ async def _crawl_request_impl(
         body, status = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
         ttl = robots_ttl
         if status == 200 and body is not None:
-            rules = _parse_robots_rules(body)
-            sitemaps = _parse_robots_sitemaps(body)
-            crawl_delay = _parse_robots_crawl_delay(body)
+            rules = parse_robots_rules(body)
+            sitemaps = parse_robots_sitemaps(body)
+            crawl_delay = parse_robots_crawl_delay(body)
         elif status == 404:
             # No robots.txt: nothing to enforce.
             pass

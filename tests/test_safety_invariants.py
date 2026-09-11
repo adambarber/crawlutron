@@ -679,3 +679,65 @@ def test_provider_loop_detector_bites():
         "    return results\n"
     )
     assert not _provider_loop_reinlines(ddg_like, REPO_ROOT / "app" / "search" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# robots.txt scanning (jscpd #5 family)
+# ---------------------------------------------------------------------------
+
+_ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
+
+
+def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """One line-walk for every robots consumer.
+
+    Sink: a function doing the ``lstrip(BOM) + splitlines()`` scan. It lived
+    three times (crawl-delay, rules, sitemaps) and drifted on the empty-value
+    gate; the tokenizer in app/crawl/robots_parse.py is now the only one.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+            continue
+        if node.name == _ROBOTS_SCANNER_SANCTIONED:
+            continue
+        has_bom_strip = any(
+            isinstance(s, ast.Call)
+            and getattr(s.func, "attr", "") == "lstrip"
+            and s.args
+            and isinstance(s.args[0], ast.Constant)
+            and s.args[0].value in ("﻿", "\ufeff")
+            for s in ast.walk(node)
+        )
+        has_split = any(
+            isinstance(s, ast.Call) and getattr(s.func, "attr", "") == "splitlines" for s in ast.walk(node)
+        )
+        if has_bom_strip and has_split:
+            offenders.append(offender(path, node.lineno, f"{node.name} re-rolls the robots line-scanner"))
+    return offenders
+
+
+def test_robots_line_scanner_lives_in_one_place():
+    """Every robots consumer walks lines through the shared tokenizer."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_robots_scanner_offenders(tree, path))
+    assert not offenders, "app/crawl/robots_parse.iter_robots_fields is the single scanner: " + ", ".join(
+        offenders
+    )
+
+
+def test_robots_scanner_detector_bites():
+    bad = ast.parse(
+        "def parse_robots_rules(text):\n"
+        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+        "        yield raw\n"
+    )
+    offenders = _robots_scanner_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "parse_robots_rules" in offenders[0], offenders
+    good = ast.parse(
+        "def iter_robots_fields(text):\n"
+        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+        "        yield raw.strip()\n"
+    )
+    assert not _robots_scanner_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
