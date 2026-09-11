@@ -169,6 +169,56 @@ class ContentCache:
             self._index.move_to_end(key)
             return envelope
 
+    def _memory_hit_locked(self, key: str) -> Any | None:
+        """RAM-mirror probe (callers must hold ``self._lock``).
+
+        Returns the cached value on a fresh hit (bumping RAM + disk-index LRU
+        recency), ``None`` on miss or expiry. The single home of the probe so
+        the sync and async paths cannot drift. ``None`` is never a stored
+        value: envelopes without a value are misses, not members.
+        """
+        if key not in self._memory_cache:
+            return None
+        expires, value = self._memory_cache[key]
+        if expires is not None and self.clock() > expires:
+            self._memory_cache.pop(key, None)
+            return None
+        self._memory_cache.move_to_end(key)
+        # Keep disk-index LRU recency in sync so eviction still protects
+        # recently used entries even when served from RAM.
+        if key in self._index:
+            self._index.move_to_end(key)
+        return value
+
+    def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
+        """Store into the RAM mirror under the serialized-size gate (N5/final #1)
+        and the entry-count cap — the single home of the store so no path can
+        lose either bound. Oversized values are dropped, never mirrored.
+        """
+        if value is None or size >= self._MEMORY_CACHE_MAX_SIZE:
+            # A large value must not linger in the small-value cache.
+            self._memory_cache.pop(key, None)
+            return
+        self._memory_cache[key] = (expires, value)
+        self._memory_cache.move_to_end(key)
+        if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
+            self._memory_cache.popitem(last=False)
+
+    def _entry_size_on_disk_locked(self, key: str) -> int:
+        """Serialized size of ``key``'s envelope for the mirror gate.
+
+        Gate on the SERIALIZED size (H2): shallow sys.getsizeof sees only the
+        container. Falls back to the cap when the size cannot be established,
+        so an unknown-size entry can never sneak into the RAM mirror.
+        """
+        entry_size = self._index_sizes.get(key)
+        if entry_size is None:
+            try:
+                entry_size = self._path_for(key).stat().st_size
+            except OSError:
+                entry_size = self._MEMORY_CACHE_MAX_SIZE
+        return entry_size
+
     def get(self, key: str, ttl: int | None = None) -> Any | None:
         """Return the cached value if present and unexpired, else ``None``.
 
@@ -176,19 +226,18 @@ class ContentCache:
         entry) it falls back to the on-disk envelope (#7).
         """
         with self._lock:
-            if key in self._memory_cache:
-                expires, value = self._memory_cache[key]
-                if expires is not None and self.clock() > expires:
-                    self._memory_cache.pop(key, None)
-                else:
-                    self._memory_cache.move_to_end(key)
-                    # Keep disk-index LRU recency in sync so eviction still
-                    # protects recently used entries even when served from RAM.
-                    if key in self._index:
-                        self._index.move_to_end(key)
-                    return value
+            hit = self._memory_hit_locked(key)
+            if hit is not None:
+                return hit
         envelope = self._read_envelope(key)
-        return envelope.get("value") if envelope is not None else None
+        if envelope is None:
+            return None
+        value = envelope.get("value")
+        # Warm the mirror on the sync disk hit too (same accelerator contract
+        # as aget): a hot URL must stop touching disk after the first read.
+        expires = envelope.get("expires")
+        self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
+        return value
 
     def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:
         """Return the ``cached_at`` timestamp for a valid (unexpired) entry.
@@ -220,23 +269,14 @@ class ContentCache:
                 # entry for this key is kept; TTL governs its staleness.
                 return
             old_size = self._index_sizes.get(key, 0)
-            atomic_write_text(path, data)
+            self._write_data(path, data)
             self._index[key] = path
             self._index.move_to_end(key)
             self._index_sizes[key] = len(data)
             self._index_total_bytes += len(data) - old_size
-            # Mirror small values into the in-memory value cache (#7).
-            # Gate on the SERIALIZED size: shallow sys.getsizeof(dict) sees
-            # only the container, so multi-MB entries passed the old gate
-            # (final review #1) and the mirror became the RAM exhaustion path.
-            if len(data) < self._MEMORY_CACHE_MAX_SIZE:
-                self._memory_cache[key] = (expires, value)
-                self._memory_cache.move_to_end(key)
-                if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
-                    self._memory_cache.popitem(last=False)
-            else:
-                # A large value must not linger in the small-value cache.
-                self._memory_cache.pop(key, None)
+            # Mirror small values into the in-memory value cache (#7), under
+            # the same gate + count cap as every other mirror write.
+            self._remember_memory_locked(key, value, expires, len(data))
         # Enforce count + byte limits after write, using the in-memory index
         # (no glob). NOTE: this call briefly releases ``self._lock`` between
         # the write and the eviction (re-acquired inside ``_enforce_limits``).
@@ -245,44 +285,22 @@ class ContentCache:
         # valid and consistent; only the eviction is one step behind.
         self._enforce_limits()
 
-    def _write_envelope(self, path: Path, envelope: dict[str, Any]) -> None:
-        """Persist the envelope to disk (json.dumps of large HTML-sized values)."""
-        atomic_write_text(path, json.dumps(envelope))
-
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
         """Async ``get``: offload the (potentially large) on-disk envelope read
         and JSON parse to a worker thread so the event loop is never stalled
         (adversarial perf #1.2 / #2.2)."""
         with self._lock:
-            if key in self._memory_cache:
-                expires, value = self._memory_cache[key]
-                if expires is not None and self.clock() > expires:
-                    self._memory_cache.pop(key, None)
-                else:
-                    self._memory_cache.move_to_end(key)
-                    if key in self._index:
-                        self._index.move_to_end(key)
-                    return value
+            hit = self._memory_hit_locked(key)
+            if hit is not None:
+                return hit
         # Disk read + JSON parse off the loop.
         envelope = await asyncio.to_thread(self._read_envelope, key)
         if envelope is None:
             return None
         value = envelope.get("value")
         expires = envelope.get("expires")
-        # Gate on the same serialized-size measure as the write sites. On a
-        # cold read (key absent from the in-process index) `_index_sizes`
-        # reports 0, which let any multi-MB envelope into the 100-entry RAM
-        # mirror (H2); size from the serialized envelope on disk instead.
-        entry_size = self._index_sizes.get(key)
-        if entry_size is None:
-            try:
-                entry_size = self._path_for(key).stat().st_size
-            except OSError:
-                entry_size = self._MEMORY_CACHE_MAX_SIZE
-        if value is not None and entry_size < self._MEMORY_CACHE_MAX_SIZE:
-            with self._lock:
-                self._memory_cache[key] = (expires, value)
-                self._memory_cache.move_to_end(key)
+        with self._lock:
+            self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
         return value
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
@@ -305,25 +323,13 @@ class ContentCache:
                 return
             prior_path = self._index.get(key)
             prior_size = self._index_sizes.get(key, 0)
-            self._index[key] = path
-            self._index.move_to_end(key)
-            self._index_sizes[key] = size
-            self._index_total_bytes += size - prior_size
-            # Same serialized-size gate as set() (final review #1).
-            if size < self._MEMORY_CACHE_MAX_SIZE:
-                self._memory_cache[key] = (expires, value)
-                self._memory_cache.move_to_end(key)
-                if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
-                    self._memory_cache.popitem(last=False)
-            else:
-                # A large value must not linger in the small-value cache.
-                self._memory_cache.pop(key, None)
         try:
             await asyncio.to_thread(self._write_data, path, data)
         except BaseException:
             # Roll the index/accounting back so aget() never consults a path
             # that was never written, and a surviving older entry stays
-            # reachable (N1).
+            # reachable (N1). The RAM mirror is rolled back too (or dropped):
+            # it must never serve a value that failed to persist.
             with self._lock:
                 if prior_path is None:
                     self._index.pop(key, None)
@@ -334,7 +340,15 @@ class ContentCache:
                     self._index[key] = prior_path
                     self._index_sizes[key] = prior_size
                     self._index_total_bytes += prior_size - size
+                    self._memory_cache.pop(key, None)
             raise
+        with self._lock:
+            self._index[key] = path
+            self._index.move_to_end(key)
+            self._index_sizes[key] = size
+            self._index_total_bytes += size - prior_size
+            # Mirror only after the write commits, under the shared gate.
+            self._remember_memory_locked(key, value, expires, size)
         # Enforce count + byte limits after write, using the in-memory index
         # (no glob). NOTE: this call briefly releases ``self._lock`` between
         # the write and the eviction (re-acquired inside ``_enforce_limits``).

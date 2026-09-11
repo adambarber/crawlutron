@@ -58,17 +58,18 @@ class TestContentCacheByteBudget:
     async def test_aset_oversized_never_written(self, tmp_path, monkeypatch):
         """N1: the async path must refuse oversized entries before any disk
         write -- the payload must not transiently hit disk (crash window).
-        Mirrors set(): pre-serialize, size-check under the lock, then write."""
+        Mirrors set(): pre-serialize, size-check under the lock, then write.
+        The spy sits on ``_write_data``, the seam the real code uses."""
         cache = _make_cache(tmp_path, max_entry_bytes=200)
         calls: list[str] = []
 
-        real_write = cache._write_envelope
+        real_write = cache._write_data
 
-        def spy_write(path, envelope):
+        def spy_write(path, data):
             calls.append(str(path))
-            real_write(path, envelope)
+            real_write(path, data)
 
-        monkeypatch.setattr(cache, "_write_envelope", spy_write)
+        monkeypatch.setattr(cache, "_write_data", spy_write)
         await cache.aset("big", {"body": "x" * 10_000}, ttl=60)
         assert calls == []
         assert list(tmp_path.glob("*.json")) == []
@@ -120,3 +121,61 @@ class TestContentCacheByteBudget:
         assert cache._index_sizes["k"] == path.stat().st_size
         assert cache._index_total_bytes == path.stat().st_size
         assert _json.loads(path.read_text())["value"] == {"body": "v" * 300}
+
+    def test_set_routes_through_write_seam(self, tmp_path, monkeypatch):
+        """#1733 twins: the sync write must go through _write_data like aset, so
+        a failure is observable/testable at the same seam (a spy on an inline
+        atomic_write_text call site is silently vacuous)."""
+        cache = _make_cache(tmp_path)
+
+        def boom(path, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_write_data", boom)
+        with pytest.raises(OSError):
+            cache.set("k", {"body": "v"}, ttl=60)
+        assert "k" not in cache._index
+
+    async def test_aget_cold_reads_honor_mirror_count_cap(self, tmp_path):
+        """#1733 twins: aget's disk-hit mirror enforces the same
+        _MEMORY_CACHE_MAX cap as set/aset — otherwise repeated cold reads of
+        distinct small keys grow the RAM mirror without bound."""
+        cache = _make_cache(tmp_path, max_entry_bytes=10_000, max_total_bytes=10_000_000)
+        keys = [f"k{i}" for i in range(cache._MEMORY_CACHE_MAX + 50)]
+        for key in keys:
+            await cache.aset(key, {"body": key}, ttl=60)
+        cache._memory_cache.clear()  # simulate a cold process with a warm disk
+        for key in keys:
+            assert await cache.aget(key) == {"body": key}
+        assert len(cache._memory_cache) <= cache._MEMORY_CACHE_MAX
+        for key in keys[-cache._MEMORY_CACHE_MAX :]:
+            assert key in cache._memory_cache  # the cap must evict OLDEST, not block new
+
+    def test_get_disk_hit_mirrors_small_value(self, tmp_path):
+        """#1733 twins: a hot URL read through the SYNC path warms the RAM
+        mirror exactly like the async path (the accelerator contract is
+        method-independent)."""
+        cache = _make_cache(tmp_path, max_entry_bytes=10_000)
+        cache.set("hot", {"body": "small"}, ttl=60)
+        cache._memory_cache.clear()
+        assert cache.get("hot") == {"body": "small"}
+        assert "hot" in cache._memory_cache
+
+    async def test_aset_write_failure_rolls_back_stale_mirror(self, tmp_path, monkeypatch):
+        """#1733 twins: when the async disk write fails with a surviving older
+        entry, the in-memory mirror must not keep serving the value that was
+        never persisted — rollback covers RAM, not just the index."""
+        cache = _make_cache(tmp_path, max_entry_bytes=10_000)
+        await cache.aset("k", {"body": "old"}, ttl=60)
+        real_write = cache._write_data
+
+        def boom(path, data):
+            if "new" in data:
+                raise OSError("disk full")
+            real_write(path, data)
+
+        monkeypatch.setattr(cache, "_write_data", boom)
+        with pytest.raises(OSError):
+            await cache.aset("k", {"body": "new"}, ttl=60)
+        assert await cache.aget("k") == {"body": "old"}
+        assert cache.get("k") == {"body": "old"}

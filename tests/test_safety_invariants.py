@@ -495,3 +495,56 @@ def test_crawl_response_chokepoint_detector_bites():
     assert len(offenders) == 1, offenders
     stored = ast.parse("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n")
     assert not _crawl_response_construction_offenders(stored, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# ContentCache mirror twins (jscpd #2 class)
+# ---------------------------------------------------------------------------
+
+_CACHE_TWIN_METHODS = {"get", "aget", "set", "aset"}
+
+
+def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag public cache twin methods touching ``_memory_cache`` directly.
+
+    The RAM mirror's probe/store logic must live in the _*_locked helpers so
+    the sync and async paths cannot drift (aget once lost the LRU count cap,
+    and the pre-write mirror never rolled back — both invisible twins)."""
+    offenders: list[str] = []
+    for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+        if fn.name not in _CACHE_TWIN_METHODS:
+            continue
+        for sub in ast.walk(fn):
+            if (
+                isinstance(sub, ast.Subscript)
+                and isinstance(sub.value, ast.Attribute)
+                and sub.value.attr == "_memory_cache"
+            ):
+                offenders.append(
+                    offender(path, fn.lineno, f"{fn.name}() reads/writes _memory_cache directly")
+                )
+                break
+    return offenders
+
+
+def test_memory_cache_only_via_locked_helpers():
+    """get/set/aget/aset never touch the raw RAM-mirror dict."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_memory_cache_twin_offenders(tree, path))
+    assert not offenders, "Use _take_memory_locked/_remember_memory_locked: " + ", ".join(offenders)
+
+
+def test_memory_cache_twin_detector_bites():
+    """Synthetic drifted twin fires; helper-shaped code stays clean."""
+    bad = ast.parse(
+        "class C:\n    async def aget(self, key):\n        with self._lock:\n"
+        "            if key in self._memory_cache:\n"
+        "                return self._memory_cache[key][1]\n"
+    )
+    offenders = _memory_cache_twin_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "aget" in offenders[0], offenders
+    good = ast.parse(
+        "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n"
+    )
+    assert not _memory_cache_twin_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
