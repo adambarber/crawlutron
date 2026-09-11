@@ -30,7 +30,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import build_unified_result
+from app.api.response_shaping import build_unified_result, frontier_link_url
 from app.crawl.job_store import JobKind, JobStatus, JobStore
 
 logger = logging.getLogger(__name__)
@@ -201,7 +201,7 @@ async def _run_job(
                 if failed:
                     job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
                 for link in item.get("discovered_links") or []:
-                    link_url = link.get("url") if isinstance(link, dict) else str(link)
+                    link_url = frontier_link_url(link)
                     if not link_url:
                         continue
                     if link_url not in job.visited and link_url not in job.frontier:

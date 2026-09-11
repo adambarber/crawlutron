@@ -9,6 +9,8 @@ Public surface:
     :func:`build_unified_result` — engine-result dict → UnifiedCrawlResult.
     :func:`render_result_to_unified` — browser-render result dict → unified dict.
     :func:`build_unified_crawl_response` — wrap a list of results.
+    :func:`frontier_link_url` — the only frontier/visited-eligible link field
+        (validated ``normalized_url``; raw hrefs are unqueue-able).
 """
 
 from __future__ import annotations
@@ -137,6 +139,23 @@ def render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
         "discovered_links": [],
         "next_page_url": None,
     }
+
+
+def frontier_link_url(link: Any) -> str | None:
+    """The only link field eligible for frontier/visited use: the validated URL.
+
+    Extraction can legitimately emit a raw ``url`` href (``/rel``, ``#frag``,
+    scheme-relative) alongside the SafeUrl-policy-validated ``normalized_url``.
+    Frontier and visited sets are keyed on absolute, validated URLs, so the raw
+    ``url`` must never enter them. A link without a usable ``normalized_url``
+    (or a non-link string) yields None: unqueue-able, not a raw-href fallback.
+    """
+    if not isinstance(link, dict):
+        return None
+    normalized = link.get("normalized_url")
+    if isinstance(normalized, str) and normalized:
+        return normalized
+    return None
 
 
 def build_unified_crawl_response(

@@ -370,3 +370,87 @@ def test_no_inline_pinned_url_composition():
                     ):
                         offenders.append(offender(path, node.lineno, f"f-string interpolates {expr.id}"))
     assert not offenders, "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# Frontier raw-href sinks (H1 class)
+# ---------------------------------------------------------------------------
+
+
+def _url_key_reads(node: ast.AST) -> bool:
+    """True if the subtree reads dict key ``"url"`` (the unvalidated raw href)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            if (
+                isinstance(f, ast.Attribute)
+                and f.attr == "get"
+                and sub.args
+                and isinstance(sub.args[0], ast.Constant)
+                and sub.args[0].value == "url"
+            ):
+                return True
+        elif isinstance(sub, ast.Subscript):
+            if isinstance(sub.slice, ast.Constant) and sub.slice.value == "url":
+                return True
+    return False
+
+
+def _frontier_sink_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag ``*.frontier.append(x)`` where ``x`` (or its same-function binding)
+    reads the raw ``"url"`` key instead of going through frontier_link_url()."""
+    offenders: list[str] = []
+    for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+        tainted: set[str] = set()
+        for assign in (a for a in ast.walk(fn) if isinstance(a, ast.Assign | ast.AnnAssign)):
+            value = assign.value
+            if value is None or _frontier_link_url_call(value):
+                continue
+            if _url_key_reads(value):
+                targets = [assign.target] if isinstance(assign, ast.AnnAssign) else assign.targets
+                for t in targets:
+                    if isinstance(t, ast.Name):
+                        tainted.add(t.id)
+        for call in (c for c in ast.walk(fn) if isinstance(c, ast.Call)):
+            f = call.func
+            if (
+                isinstance(f, ast.Attribute)
+                and f.attr in ("append", "appendleft", "extend")
+                and isinstance(f.value, ast.Attribute)
+                and f.value.attr == "frontier"
+            ):
+                for arg in call.args:
+                    if _url_key_reads(arg) or (isinstance(arg, ast.Name) and arg.id in tainted):
+                        offenders.append(offender(path, call.lineno, f"raw href into frontier.{f.attr}"))
+    return offenders
+
+
+def _frontier_link_url_call(node: ast.AST) -> bool:
+    """True if the subtree's root or any call node is frontier_link_url(...)."""
+    return any(
+        isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == "frontier_link_url"
+        for sub in ast.walk(node)
+    )
+
+
+def test_no_raw_href_frontier_sinks():
+    """The frontier only ever carries frontier_link_url()-validated URLs (H1)."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_frontier_sink_offenders(tree, path))
+    assert not offenders, "Read normalized_url via frontier_link_url(), never raw url: " + ", ".join(
+        offenders
+    )
+
+
+def test_raw_href_frontier_detector_bites():
+    """Prove the detector fires on the historical H1 shape."""
+    bad = ast.parse(
+        "async def _run(job, item):\n"
+        "    for link in item.get('discovered_links') or []:\n"
+        "        link_url = link.get('url') if isinstance(link, dict) else str(link)\n"
+        "        if link_url:\n"
+        "            job.frontier.append(link_url)\n"
+    )
+    offenders = _frontier_sink_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 1 and "frontier.append" in offenders[0], offenders

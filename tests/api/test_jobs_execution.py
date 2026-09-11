@@ -21,27 +21,35 @@ from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from app.settings import CrawlerSettings
 
 
-def _link(url: str, source_url: str) -> dict:
-    """Engine-shaped DiscoveredLink dump (raw strings fail build_unified_result)."""
+def _link(url: str, source_url: str, *, normalized: str | None = None) -> dict:
+    """Engine-shaped DiscoveredLink dump (raw strings fail build_unified_result).
+
+    ``url`` is the RAW href as discovered in markup; ``normalized`` is the
+    SafeUrl-policy-validated absolute URL the engine derives from it. They
+    differ exactly the way extraction.py:634-635 can make them differ — the
+    frontier must only ever see the normalized one.
+    """
     return {
         "url": url,
-        "normalized_url": url,
+        "normalized_url": normalized if normalized is not None else url,
         "text": "",
         "rel": [],
         "source_url": source_url,
-        "host": url.split("//", 1)[-1].split("/", 1)[0],
+        "host": (normalized or url).split("//", 1)[-1].split("/", 1)[0],
         "is_same_host": True,
     }
 
 
-def _canned_result(url: str, *, status: str = "success", links: list[str] | None = None) -> dict:
+def _canned_result(
+    url: str, *, status: str = "success", links: list[str] | None = None, raw_links: list[dict] | None = None
+) -> dict:
     return {
         "original_url": url,
         "normalized_url": url,
         "final_url": url,
         "status": status,
         "classification": "rendered" if status == "success" else "site_error",
-        "discovered_links": [_link(link, url) for link in links or []],
+        "discovered_links": [_link(link, url) for link in links or []] + (raw_links or []),
     }
 
 
@@ -144,6 +152,53 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_failed"] == 0
         # Discovered link b was crawled in a follow-up batch.
         assert len(job.results) == 2
+
+    async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
+        """H1: the frontier must carry the validated URL, never the raw href.
+
+        extraction.py can legitimately emit url="/rel" with normalized_url set
+        to the resolved absolute URL; a runner that reads ``url`` re-queues
+        unvalidated hrefs and dedupes them inconsistently against visited URLs.
+        """
+        divergent = _link("/rel", "http://example.test/a", normalized="https://ok.test/abs")
+        install = _fake_execute(
+            [
+                _canned_result("http://example.test/a", raw_links=[divergent]),
+            ]
+        )
+        crawled: list[list[str]] = []
+
+        async def recording_execute(payload_dict, *, settings, shutdown_event):
+            urls = payload_dict.get("urls") or [payload_dict.get("url")]
+            crawled.append(list(urls))
+            return await install(payload_dict, settings=settings, shutdown_event=shutdown_event)
+
+        job_runner.install_execute_crawl(recording_execute)
+        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
+        job_id = resp.json()["job_id"]
+        assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
+
+        job = job_store.load(job_id)
+        assert "https://ok.test/abs" in job.visited
+        assert "/rel" not in job.visited
+        assert all("/rel" not in batch for batch in crawled)
+
+    async def test_frontier_skips_unnormalizable_links(self, client, job_store, real_sleeps):
+        """A link without a validated normalized_url is never queue-eligible."""
+        empty = {"url": "http://evil.test/x", "normalized_url": ""}
+        bare = "http://legacy.test/string-link"
+        job_runner.install_execute_crawl(
+            _fake_execute([_canned_result("http://example.test/a", raw_links=[empty], links=[])])
+        )
+        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
+        job_id = resp.json()["job_id"]
+        # The string link rides in a second result so a regression that queues
+        # raw values is observable before completion too.
+        assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
+        job = job_store.load(job_id)
+        assert "http://evil.test/x" not in job.visited
+        assert bare not in job.visited
+        assert job.stats["total_discovered"] == 0
 
     async def test_pause_retains_frontier_and_resume_finishes(self, client, job_store, real_sleeps):
         hang = asyncio.Event()
