@@ -161,6 +161,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   multi-tenant opt-in requirement explicitly so silent cross-tenant
   cookie leakage is harder to cargo-cult.
 
+### Round 7 hardening (adversarial review + jscpd duplication audit)
+- **Frontier carries only validated URLs (H1)** (app/api/job_runner.py,
+  app/api/response_shaping.py): whole-site job expansion enqueued the raw
+  discovered `url` href while the SafeUrl-validated `normalized_url` sat
+  unused one field away, so the frontier and the visited dedupe keyed on
+  different strings for the same page. New `frontier_link_url()` chokepoint
+  returns only the validated field; an AST drift detector bans raw-href
+  frontier sinks tree-wide.
+- **Pinned-URL unification (H4/H5)** (SafeUrl.connect()): every
+  pinned-IP composition (HTTP fetcher, document extractor, webhook
+  delivery) routes through one chokepoint with IPv6 bracketing and
+  per-hop re-validation; `final_url`/cookies report the logical URL, not
+  the pinned IP. Drift invariant requires every `SafeUrl.parse` site to
+  commit to a `pin` decision.
+- **Env-core consolidation (H1-OSS)**: all `BROWSER_CRAWLER_*` numeric
+  reads (including the 25 in `CrawlerSettings.from_mapping`) flow through
+  `get_env_int/float`/`get_mapping_int/float` — bad strings can never
+  reach arithmetic; the bool parser fails closed.
+- **Capped webhook response drain (M3/L4)**: webhook delivery drains via
+  `read_capped_async` (10 MiB) instead of unbuffered `client.post` bodies.
+- **Single scope matcher (M10)**: engine/recursive's duplicated
+  `_scope_allows` deduped into `app/crawl/scope_match.py`; one definition
+  enforced by drift test.
+- **Result shaping cannot drift (jscpd #1)**: every
+  `UnifiedCrawlResponse`-with-results path (async runner, webhooks, both
+  crawl_endpoint branches, render, MCP `tools/call`) now flows through
+  `build_unified_crawl_response`; REST, job, webhook, and MCP payloads
+  cannot diverge (#1715). The webhooks DI seam shrank 7 to 5 globals —
+  shaper hooks existed only to be bypassed.
+- **ContentCache mirror twins collapsed (jscpd #2)**: one locked probe and
+  one locked store replace four hand-copied blocks. The twins had been
+  hiding three real bugs: `aget` cold reads skipped the RAM-mirror entry
+  cap (unbounded growth), `aset` mirrored before the disk write so a
+  failed write left a stale mirror serving an unpersisted value, and the
+  sync `get` never warmed the mirror the async path populated.
+- **Error envelope factory (jscpd #3)**: 18 hand-rolled
+  `{code, message, details}` dicts across 8 endpoint files replaced by
+  `error_envelope`/`http_error`. Wire-visible effect: three error bodies
+  that silently omitted `details` now always carry it (contract already
+  documented it); the triplicated browser-pool 503 message is one
+  constant. Envelope literals outside the sanctioned module fail CI.
+
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
   `CONTRIBUTING.md`, `.github/workflows/ci.yml`, `Makefile`,
