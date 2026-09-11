@@ -1,19 +1,13 @@
 """Discovery diagnostics must reuse robots Sitemap directives passed from the
 engine instead of re-fetching /robots.txt (#4)."""
 
+from _testkit import make_fetch
+
 from app.crawl.strategies.http import _discovery_diagnostics
-from app.models import HttpFetchResult
 
 
 def _resp(url, body, ctype):
-    return HttpFetchResult(
-        url=url,
-        final_url=url,
-        status_code=200,
-        headers={"content-type": ctype},
-        body=body.encode("utf-8"),
-        elapsed_ms=1,
-    )
+    return make_fetch(url=url, final_url=url, status=200, ctype=ctype, body=body.encode("utf-8"))
 
 
 async def _fake_fetcher(calls, url, headers, timeout, max_content_length=50 * 1024 * 1024):

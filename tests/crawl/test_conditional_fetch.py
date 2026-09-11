@@ -5,9 +5,10 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
+from _testkit import make_fetch
+
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _http_strategy_result
-from app.models import HttpFetchResult
 
 
 def _html(body: str) -> str:
@@ -29,13 +30,12 @@ async def _run_http(fetcher, validators=None):
 def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         headers_out.update(headers)
-        return HttpFetchResult(
+        return make_fetch(
             url=url,
             final_url=url,
-            status_code=200,
+            status=200,
             headers={"content-type": "text/html", **(extra_headers or {})},
             body=_html(body).encode(),
-            elapsed_ms=1,
         )
 
     return fetcher
@@ -66,14 +66,7 @@ async def test_caller_validator_304_yields_not_modified():
     """A 304 against caller-owned validators is not_modified: no body exists."""
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return HttpFetchResult(
-            url=url,
-            final_url=url,
-            status_code=304,
-            headers={},
-            body=b"",
-            elapsed_ms=1,
-        )
+        return make_fetch(url=url, final_url=url, status=304, headers={}, body=b"")
 
     result = await _run_http(fetcher, validators={"if_none_match": '"v1"'})
     assert result.status == "success"
@@ -87,17 +80,16 @@ async def test_caller_validator_304_yields_not_modified():
 
 async def test_success_result_surfaces_origin_validators():
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return HttpFetchResult(
+        return make_fetch(
             url=url,
             final_url=url,
-            status_code=200,
+            status=200,
             headers={
                 "content-type": "text/html",
                 "etag": '"abc123"',
                 "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
             },
             body=_html("fresh").encode(),
-            elapsed_ms=1,
         )
 
     result = await _run_http(fetcher)
@@ -116,14 +108,7 @@ async def test_engine_routes_validators_by_url(real_sleeps):
             seen_headers[path] = dict(headers)
             status = 304 if (path == "/etagged" and headers.get("If-None-Match") == '"v9"') else 200
             body = _html(f"page {path}").encode() if status == 200 else b""
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=status,
-                headers={"content-type": "text/html"},
-                body=body,
-                elapsed_ms=1,
-            )
+            return make_fetch(url=url, final_url=url, status=status, ctype="text/html", body=body)
 
         return fetcher
 
@@ -229,15 +214,12 @@ async def test_decompression_failure_flagged_and_downgraded():
     real_body = bytes(compressed)
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return HttpFetchResult(
+        return make_fetch(
             url=url,
             final_url=url,
-            status_code=200,
-            # Advertise gzip but deliver corrupt stream (decompressor will
-            # silently pass bytes through).
+            status=200,
             headers={"content-type": "text/html", "content-encoding": "gzip"},
             body=real_body,
-            elapsed_ms=1,
         )
 
     result = await _run_http(fetcher)

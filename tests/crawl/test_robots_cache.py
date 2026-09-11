@@ -7,6 +7,8 @@ kept growing the cache. A module-level _cap_robots_cache evicts the oldest
 entries by insertion order once over the limit.
 """
 
+from _testkit import make_fetch
+
 from app.bounded_ttl import BoundedTTLCache
 
 
@@ -37,7 +39,6 @@ async def test_purge_handles_production_shaped_entries():
 
     import app.crawl.engine as em
     from app.crawl.engine import ROBOTS_CACHE_MAX_ENTRIES, crawl_request
-    from app.models import HttpFetchResult
     from app.settings import CrawlerSettings
 
     em.robots_cache.clear()
@@ -51,13 +52,12 @@ async def test_purge_handles_production_shaped_entries():
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             is_robots = url.endswith("/robots.txt")
             body = b"User-agent: *\nAllow: /\n" if is_robots else b"<html><body>hi</body></html>"
-            return HttpFetchResult(
+            return make_fetch(
                 url=url,
                 final_url=url,
-                status_code=200,
-                headers={"content-type": "text/plain" if is_robots else "text/html"},
+                status=200,
+                ctype="text/plain" if is_robots else "text/html",
                 body=body,
-                elapsed_ms=1,
             )
 
         result = await crawl_request(
@@ -87,15 +87,12 @@ def test_failure_ttl_is_60s_not_600s():
     import time
 
     import app.crawl.engine as em
-    from app.crawl.strategies.http import HttpFetchResult
 
     em.robots_cache.clear()
     try:
 
         async def bad_robots(url, headers, timeout, max_content_length=0):
-            return HttpFetchResult(
-                url=url, final_url=url, status_code=500, headers={}, body=b"fail", elapsed_ms=1
-            )
+            return make_fetch(url=url, final_url=url, status=500, headers={}, body=b"fail")
 
         # Direct seam: drive via internal fetch (test doesn't need full crawl)
         # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals.

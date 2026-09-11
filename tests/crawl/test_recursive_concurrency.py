@@ -8,8 +8,9 @@ no rate limiting).
 import asyncio
 from urllib.parse import urlparse
 
+from _testkit import make_fetch
+
 from app.crawl.engine import crawl_request
-from app.models import HttpFetchResult
 from app.settings import CrawlerSettings
 
 
@@ -32,13 +33,8 @@ async def test_recursive_crawl_fetches_links_concurrently(real_sleeps):
         max_inflight["n"] = max(max_inflight["n"], inflight["n"])
         await asyncio.sleep(0.05)  # simulate network latency
         inflight["n"] -= 1
-        return HttpFetchResult(
-            url=url,
-            final_url=url,
-            status_code=200,
-            headers={"content-type": "text/html"},
-            body=_page_html(path).encode(),
-            elapsed_ms=1,
+        return make_fetch(
+            url=url, final_url=url, status=200, ctype="text/html", body=_page_html(path).encode()
         )
 
     payload = {

@@ -160,14 +160,24 @@ def make_fetch(
     ctype="text/html; charset=utf-8",
     final_url="http://example.com/",
     url="http://example.com/",
+    headers=None,
+    decompression_failed=False,
 ):
+    """The sanctioned HttpFetchResult fake.
+
+    Tests must not hand-build the frozen dataclass (#1797): a new field
+    (like ``decompression_failed``) lands once here instead of rippling
+    through every fixture. ``headers`` overrides the ctype shorthand when a
+    test needs conditional/encoding headers.
+    """
     return HttpFetchResult(
         url=url,
         final_url=final_url,
         status_code=status,
-        headers={"content-type": ctype},
+        headers={"content-type": ctype} if headers is None else headers,
         body=body,
         elapsed_ms=1,
+        decompression_failed=decompression_failed,
     )
 
 

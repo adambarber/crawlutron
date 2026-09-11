@@ -8,30 +8,25 @@
   docstring itself promises token matching. One token everywhere.
 """
 
+from _testkit import make_fetch
+
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.engine import crawl_request
-from app.models import HttpFetchResult
 from app.settings import CrawlerSettings
 
 
 def _make_fetcher(robots_status: int, robots_body: str = ""):
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         if url.endswith("/robots.txt"):
-            return HttpFetchResult(
+            return make_fetch(
                 url=url,
                 final_url=url,
-                status_code=robots_status,
-                headers={"content-type": "text/plain"},
+                status=robots_status,
+                ctype="text/plain",
                 body=robots_body.encode("utf-8"),
-                elapsed_ms=1,
             )
-        return HttpFetchResult(
-            url=url,
-            final_url=url,
-            status_code=200,
-            headers={"content-type": "text/html"},
-            body=b"<html><body>hi</body></html>",
-            elapsed_ms=1,
+        return make_fetch(
+            url=url, final_url=url, status=200, ctype="text/html", body=b"<html><body>hi</body></html>"
         )
 
     return fetcher

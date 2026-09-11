@@ -1,6 +1,8 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
+from _testkit import make_fetch
+
 from app.crawl.engine import _execute_crawl_chain
 from app.models import CrawlResult
 
@@ -45,15 +47,12 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
     async def cffi_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         calls.append(("cffi", dict(headers)))
         if "incap_ses" in headers.get("Cookie", ""):
-            from app.models import HttpFetchResult
-
-            return HttpFetchResult(
+            return make_fetch(
                 url=url,
                 final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
+                status=200,
+                ctype="text/html",
                 body=b"<html><body>cffi success</body></html>",
-                elapsed_ms=1,
             )
         return type(
             "R",

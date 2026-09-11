@@ -1,5 +1,7 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
+from _testkit import make_fetch
+
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.strategies.http import (
@@ -7,7 +9,6 @@ from app.crawl.strategies.http import (
     _http_strategy_result,
     _looks_like_binary_body,
 )
-from app.models import HttpFetchResult
 
 
 async def _run(**kwargs):
@@ -17,14 +18,7 @@ async def _run(**kwargs):
 def _html_fetcher(html: str):
     # Returns an async fetcher that serves a fixed HTML body for any URL.
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return HttpFetchResult(
-            url=url,
-            final_url=url,
-            status_code=200,
-            headers={"content-type": "text/html"},
-            body=html.encode("utf-8"),
-            elapsed_ms=1,
-        )
+        return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=html.encode("utf-8"))
 
     return fetcher
 
@@ -69,13 +63,12 @@ class TestHttpStrategy:
 
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             recorded.append((url, headers))
-            return HttpFetchResult(
+            return make_fetch(
                 url=url,
                 final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
+                status=200,
+                ctype="text/html",
                 body=b"<html><body><a href='/p'>p</a></body></html>",
-                elapsed_ms=1,
             )
 
         cache = HttpCache()
@@ -267,13 +260,8 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
     monkeypatch.setattr(http_mod, "_discovery_diagnostics", fake_diag)
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return HttpFetchResult(
-            url=url,
-            final_url=url,
-            status_code=200,
-            headers={"content-type": "text/html"},
-            body=b"<html><body>x</body></html>",
-            elapsed_ms=1,
+        return make_fetch(
+            url=url, final_url=url, status=200, ctype="text/html", body=b"<html><body>x</body></html>"
         )
 
     kwargs = dict(

@@ -12,6 +12,7 @@ import base64
 import sys
 
 import httpx
+from _testkit import make_fetch
 from helpers.server import EtagHandler
 
 from app.crawl.cache import HttpCache
@@ -211,8 +212,6 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     """Recursive crawl_request reuses the content cache for seed AND discovered pages (#5)."""
     from urllib.parse import urlparse
 
-    from app.crawl.strategies.http import HttpFetchResult
-
     fetched_pages: list[str] = []
 
     def site_fetcher(pages):
@@ -223,14 +222,7 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
             status, body, ctype = pages.get(p, (404, b"<html></html>", "text/html"))
             if isinstance(body, str):
                 body = body.encode()
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=status,
-                headers={"content-type": ctype},
-                body=body,
-                elapsed_ms=1,
-            )
+            return make_fetch(url=url, final_url=url, status=status, ctype=ctype, body=body)
 
         return fetcher
 

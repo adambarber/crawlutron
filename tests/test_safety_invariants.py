@@ -16,6 +16,7 @@ from chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
     STRATEGIES_DIR,
+    TESTS_DIR,
     app_python_files,
     app_trees,
     file_tree,
@@ -741,3 +742,44 @@ def test_robots_scanner_detector_bites():
         "        yield raw.strip()\n"
     )
     assert not _robots_scanner_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Test-fake construction (jscpd #6: sanctioned builders over hand-built fakes)
+# ---------------------------------------------------------------------------
+
+_FAKE_BUILDER_SANCTIONED = frozenset({"_testkit.py"})
+
+
+def _testkit_builder_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a test file hand-building a model the testkit already fabricates.
+
+    HttpFetchResult's field set is the crawl contract; a fixture that spells
+    it out by hand silently diverges when the contract grows (the exact
+    drift #1797 is about). _testkit.make_fetch is the sanctioned builder.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "HttpFetchResult":
+            offenders.append(
+                offender(path, node.lineno, "use _testkit.make_fetch instead of HttpFetchResult(...)")
+            )
+    return offenders
+
+
+def test_tests_do_not_hand_build_http_fetch_results():
+    """Every fetch fake comes from the one sanctioned builder."""
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        if path.name in _FAKE_BUILDER_SANCTIONED:
+            continue
+        offenders.extend(_testkit_builder_offenders(tree, path))
+    assert not offenders, "Use _testkit.make_fetch(): " + ", ".join(offenders)
+
+
+def test_fetch_builder_detector_bites():
+    bad = ast.parse("def f():\n    return HttpFetchResult(url='u')\n")
+    offenders = _testkit_builder_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    good = ast.parse("def f():\n    return make_fetch(url='u')\n")
+    assert not _testkit_builder_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")

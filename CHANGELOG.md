@@ -217,6 +217,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   back to star, agents accumulate across non-consumed lines) pinned by
   characterization tests. Detector bans a second `lstrip(BOM)+splitlines()`
   scan.
+- **One sanctioned fetch fake (jscpd test-side)**: the 25 hand-built
+  `HttpFetchResult(...)` fixtures across 14 test files now come from
+  `_testkit.make_fetch`, which grew `headers`/`decompression_failed`
+  passthroughs. No assertion changed; the win is that the next contract
+  field lands in one builder instead of rippling through every fixture.
+  Detector fails CI on a test that re-inlines the dataclass.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

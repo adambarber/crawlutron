@@ -1,8 +1,9 @@
 """robots.txt cache must be shared across separate crawl_request calls (#9)."""
 
+from _testkit import make_fetch
+
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from app.models import HttpFetchResult
 
 
 async def test_robots_cache_shared_across_requests():
@@ -19,21 +20,19 @@ async def test_robots_cache_shared_across_requests():
         async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             if url.endswith("/robots.txt"):
                 calls["robots"] += 1
-                return HttpFetchResult(
+                return make_fetch(
                     url=url,
                     final_url=url,
-                    status_code=200,
-                    headers={"content-type": "text/plain"},
+                    status=200,
+                    ctype="text/plain",
                     body=b"User-agent: *\nDisallow: /secret\n",
-                    elapsed_ms=1,
                 )
-            return HttpFetchResult(
+            return make_fetch(
                 url=url,
                 final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
+                status=200,
+                ctype="text/html",
                 body=b"<html><body>hi</body></html>",
-                elapsed_ms=1,
             )
 
         return fetcher

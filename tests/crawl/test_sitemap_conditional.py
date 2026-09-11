@@ -1,7 +1,8 @@
 """Sitemap fetches must send conditional requests and reuse the cache on 304 (#5)."""
 
+from _testkit import make_fetch
+
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
-from app.models import HttpFetchResult
 
 
 def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml"):
@@ -10,13 +11,12 @@ def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml
         headers["etag"] = etag
     if last_modified:
         headers["last-modified"] = last_modified
-    return HttpFetchResult(
+    return make_fetch(
         url="http://x.test/sitemap.xml",
         final_url="http://x.test/sitemap.xml",
-        status_code=status,
+        status=status,
         headers=headers,
         body=body.encode("utf-8"),
-        elapsed_ms=1,
     )
 
 

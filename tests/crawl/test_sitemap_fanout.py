@@ -9,18 +9,18 @@ which would serialize the fan-out and mask the explosion).
 
 import asyncio
 
+from _testkit import make_fetch
+
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
-from app.models import HttpFetchResult
 
 
 def _resp(body: str):
-    return HttpFetchResult(
+    return make_fetch(
         url="http://fanout.test/sitemap.xml",
         final_url="http://fanout.test/sitemap.xml",
-        status_code=200,
-        headers={"content-type": "application/xml"},
+        status=200,
+        ctype="application/xml",
         body=body.encode("utf-8"),
-        elapsed_ms=1,
     )
 
 

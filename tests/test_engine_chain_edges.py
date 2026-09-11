@@ -1,5 +1,6 @@
 """Engine chain edge cases: result shaping, payload policy, strategy chain, budgets, robots."""
 
+from _testkit import make_fetch
 from coverage_helpers import *
 
 
@@ -160,20 +161,12 @@ class TestEngineChainEdges:
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", spy)
 
         def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
-            from app.crawl.strategies.http import HttpFetchResult
 
             if url.endswith("/robots.txt"):
                 body = b"User-agent: *\nCrawl-delay: 2\n"
             else:
                 body = b"<html><body>ok</body></html>"
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=body,
-                elapsed_ms=1,
-            )
+            return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
 
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -208,18 +201,10 @@ class TestEngineChainEdges:
         """When include_html is False the raw HTML is not retained in the result."""
         from app.crawl import engine as engine_mod
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import HttpFetchResult
 
         def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
             body = b"<html><body>some page content</body></html>"
-            return HttpFetchResult(
-                url=url,
-                final_url=url,
-                status_code=200,
-                headers={"content-type": "text/html"},
-                body=body,
-                elapsed_ms=1,
-            )
+            return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
 
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],

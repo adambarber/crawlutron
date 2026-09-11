@@ -195,7 +195,9 @@ class TestCollectResults:
     def test_clips_whitespace_and_long_fields(self):
         from app.search.providers import _MAX_TEXT_LENGTH, _collect_results
 
-        items = [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}]
+        items = [
+            {"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}
+        ]
         results = _collect_results(items, url_key="url", title_key="title", description_key="content")
         assert results[0].title == "a b"
         assert results[0].description.endswith("…")
