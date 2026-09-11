@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from fastapi import HTTPException
-
+from app.api.exceptions import http_error
 from app.api_models import SearchRequest, SearchResponse, SearchResultItem
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
@@ -31,10 +30,7 @@ async def search(
             provider = get_search_provider(settings)
         except SearchProviderUnavailable as error:
             logger.warning("search_request_unavailable", extra={"error": str(error)})
-            raise HTTPException(
-                status_code=503,
-                detail={"code": "search_provider_unavailable", "message": str(error), "details": {}},
-            ) from error
+            raise http_error(503, "search_provider_unavailable", str(error)) from error
         limit = max(1, min(payload.limit or settings.search_limit_default, settings.search_limit_max))
         started = time.monotonic()
         try:
@@ -45,10 +41,7 @@ async def search(
                 "search_request_provider_error",
                 extra={"provider": provider.name, "error": str(error)},
             )
-            raise HTTPException(
-                status_code=502,
-                detail={"code": "search_provider_error", "message": str(error), "details": {}},
-            ) from error
+            raise http_error(502, "search_provider_error", str(error)) from error
         elapsed_ms = (time.monotonic() - started) * 1000
         get_metrics().observe_search(provider=provider.name, results=len(results), elapsed_ms=elapsed_ms)
         logger.info(

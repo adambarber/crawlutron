@@ -548,3 +548,64 @@ def test_memory_cache_twin_detector_bites():
         "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n"
     )
     assert not _memory_cache_twin_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Error-envelope shape (jscpd #3 class)
+# ---------------------------------------------------------------------------
+
+# app/api/exceptions.py owns the envelope; it is the sanctioned definition
+# (exclude matches by file *name*, matching app_trees' own semantics).
+ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}
+
+
+def _dict_keys(node: ast.Dict) -> set[str]:
+    return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+
+def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag hand-rolled error envelopes; the factory is the only definition.
+
+    Two shapes: a ``HTTPException(detail={...code, message...})`` literal (the
+    pre-factory form, with or without ``details``) and any dict carrying all
+    three envelope keys anywhere (catches JSONResponse/return-value variants).
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "HTTPException":
+            for kw in node.keywords:
+                if (
+                    kw.arg == "detail"
+                    and isinstance(kw.value, ast.Dict)
+                    and {"code", "message"} <= _dict_keys(kw.value)
+                ):
+                    offenders.append(offender(path, node.lineno, "HTTPException detail= envelope literal"))
+        elif isinstance(node, ast.Dict) and {"code", "message", "details"} <= _dict_keys(node):
+            offenders.append(offender(path, node.lineno, "error envelope dict literal"))
+    return offenders
+
+
+def test_no_hand_rolled_error_envelopes():
+    """Every HTTP error body flows through error_envelope/http_error (#1722)."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=ENVELOPE_SANCTIONED):
+        offenders.extend(_envelope_dict_offenders(tree, path))
+    assert not offenders, "Use app.api.exceptions.http_error/browser_pool_unavailable: " + ", ".join(
+        offenders
+    )
+
+
+def test_envelope_detector_bites():
+    """Both drift shapes fire; factory-shaped code stays clean."""
+    bad = ast.parse(
+        "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
+        "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
+    )
+    offenders = _envelope_dict_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 2, offenders
+    good = ast.parse(
+        "from app.api.exceptions import http_error\n"
+        "raise http_error(404, 'not_found', 'gone')\n"
+        "response = build_thing({'code': 1, 'message': 'x'})\n"
+    )
+    assert not _envelope_dict_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")

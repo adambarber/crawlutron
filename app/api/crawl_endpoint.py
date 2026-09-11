@@ -17,10 +17,11 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse, Response
 
 from app.api.crawl_executor import execute_crawl
+from app.api.exceptions import http_error
 from app.api.response_shaping import build_unified_crawl_response
 from app.api.webhooks import validate_webhook_url
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
@@ -47,10 +48,7 @@ async def crawl(
             try:
                 serialize_results([], payload.output_format)
             except ValueError as error:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "validation_error", "message": str(error), "details": {}},
-                ) from error
+                raise http_error(422, "validation_error", str(error)) from error
         payload_dict = payload.model_dump(exclude_none=True)
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
@@ -58,10 +56,7 @@ async def crawl(
             if webhook_url and (
                 not isinstance(webhook_url, str) or not webhook_url.startswith(("http://", "https://"))
             ):
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "validation_error", "message": "Invalid webhook_url", "details": {}},
-                )
+                raise http_error(422, "validation_error", "Invalid webhook_url")
             if webhook_url:
                 validate_webhook_url(webhook_url)
             request_id = f"crawl_{uuid.uuid4().hex[:12]}"
@@ -112,22 +107,17 @@ async def crawl(
                     [u.model_dump() for u in response_model.results], output_format
                 )
             except ValueError as error:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "validation_error", "message": str(error), "details": {}},
-                ) from error
+                raise http_error(422, "validation_error", str(error)) from error
             return Response(content=body, media_type=media_type)
         return response_model
     except ValueError as error:
         get_metrics().observe_crawl(errors=1)
         logger.warning("crawl_request_rejected", extra={"error": str(error)})
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": "Request validation failed",
-                "details": {"errors": [{"msg": str(error)}]},
-            },
+        raise http_error(
+            422,
+            "validation_error",
+            "Request validation failed",
+            {"errors": [{"msg": str(error)}]},
         ) from error
     finally:
         readiness_state.end_request()
@@ -146,22 +136,13 @@ async def get_crawl_result(
     if job is not None and job.kind == JobKind.SINGLE_SHOT:
         if job.results:
             return UnifiedCrawlResponse(**job.results[0])
-        raise HTTPException(
-            status_code=202,
-            detail={
-                "code": "pending",
-                "message": f"Job {request_id} is still {job.status.value}",
-                "details": {"status": job.status.value},
-            },
+        raise http_error(
+            202,
+            "pending",
+            f"Job {request_id} is still {job.status.value}",
+            {"status": job.status.value},
         )
-    raise HTTPException(
-        status_code=404,
-        detail={
-            "code": "not_found",
-            "message": f"Unknown or expired request_id: {request_id}",
-            "details": {},
-        },
-    )
+    raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
 
 
 __all__ = ["crawl", "get_crawl_result"]

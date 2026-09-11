@@ -8,10 +8,11 @@ JobStore operations.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.api import job_runner
 from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from app.api.exceptions import http_error
 from app.api.main_helpers import _build_job_status
 from app.api_models import (
     CrawlerError,
@@ -26,17 +27,11 @@ router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
 
 def _raise_not_found(job_id: str) -> None:
-    raise HTTPException(
-        status_code=404,
-        detail={"code": "not_found", "message": f"Unknown job_id: {job_id}", "details": {}},
-    )
+    raise http_error(404, "not_found", f"Unknown job_id: {job_id}")
 
 
 def _raise_conflict(message: str) -> None:
-    raise HTTPException(
-        status_code=409,
-        detail={"code": "invalid_state", "message": message, "details": {}},
-    )
+    raise http_error(409, "invalid_state", message)
 
 
 @router.post(
@@ -118,10 +113,7 @@ async def control_job(
 ) -> JobStatusResponse:
     action = payload.action.lower()
     if action not in {"pause", "resume", "cancel"}:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "invalid_action", "message": f"Unknown action: {action}"},
-        )
+        raise http_error(422, "invalid_action", f"Unknown action: {action}")
     if job_store.load(job_id) is None:
         _raise_not_found(job_id)
 

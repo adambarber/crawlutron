@@ -18,6 +18,8 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from app.api.exceptions import error_envelope
+
 _MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024
 
 
@@ -29,11 +31,11 @@ async def limit_request_body(request: Request, call_next):
             if int(content_length) > _MAX_REQUEST_BODY_BYTES:
                 return JSONResponse(
                     status_code=413,
-                    content={
-                        "code": "request_too_large",
-                        "message": "Request body exceeds the maximum allowed size",
-                        "details": {"max_bytes": _MAX_REQUEST_BODY_BYTES},
-                    },
+                    content=error_envelope(
+                        "request_too_large",
+                        "Request body exceeds the maximum allowed size",
+                        {"max_bytes": _MAX_REQUEST_BODY_BYTES},
+                    ),
                 )
         except ValueError:
             pass

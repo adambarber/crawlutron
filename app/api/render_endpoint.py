@@ -15,8 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import HTTPException
-
+from app.api.exceptions import browser_pool_unavailable, http_error
 from app.api.render import render_request
 from app.api.response_shaping import (
     build_unified_crawl_response,
@@ -43,13 +42,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
         # instead of an AttributeError 500 from inside the worker.
         pool = get_browser_pool()
         if pool is None:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "browser_pool_unavailable",
-                    "message": "Browser pool is not initialized; the service is starting up or shutting down.",
-                },
-            )
+            raise browser_pool_unavailable()
         pooled_worker = PooledBrowserWorker(pool)
         try:
             result = await render_request(
@@ -59,13 +52,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             )
         except BrowserPoolExhaustedError as error:
             logger.warning("render_request_pool_exhausted", extra={"error": str(error)})
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "browser_pool_unavailable",
-                    "message": str(error),
-                },
-            ) from error
+            raise browser_pool_unavailable(str(error)) from error
         logger.info(
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
@@ -78,10 +65,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
         )
     except ValueError as error:
         logger.warning("render_request_rejected", extra={"error": str(error)})
-        raise HTTPException(
-            status_code=400,
-            detail={"code": str(error), "message": str(error), "details": {}},
-        ) from error
+        raise http_error(400, str(error), str(error)) from error
     finally:
         readiness_state.end_request()
 

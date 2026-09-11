@@ -11,8 +11,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import HTTPException
-
+from app.api.exceptions import browser_pool_unavailable
 from app.constants import BROWSER_STRATEGIES
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
@@ -63,13 +62,7 @@ async def execute_crawl(
             )
     pool = get_browser_pool()
     if pool is None and _request_needs_browser(payload_dict):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "browser_pool_unavailable",
-                "message": "Browser pool is not initialized; the service is starting up or shutting down.",
-            },
-        )
+        raise browser_pool_unavailable()
     pooled_worker = PooledBrowserWorker(pool) if pool is not None else None
     return await crawl_request(
         payload_dict,

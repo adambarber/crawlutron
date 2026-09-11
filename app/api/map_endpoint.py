@@ -12,9 +12,8 @@ import asyncio
 import logging
 import time
 
-from fastapi import HTTPException
-
 from app.api.crawl_executor import execute_crawl
+from app.api.exceptions import http_error
 from app.api_models import MapRequest
 from app.constants import MAX_DISCOVERED_LINKS
 from app.health.readiness import READINESS_STATE as readiness_state
@@ -60,13 +59,11 @@ async def map_site(
         return build_site_map(result)
     except ValueError as error:
         logger.warning("map_request_rejected", extra={"error": str(error)})
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": "Request validation failed",
-                "details": {"errors": [{"msg": str(error)}]},
-            },
+        raise http_error(
+            422,
+            "validation_error",
+            "Request validation failed",
+            {"errors": [{"msg": str(error)}]},
         ) from error
     finally:
         readiness_state.end_request()
