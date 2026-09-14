@@ -26,6 +26,7 @@ from app.api.webhooks import validate_webhook_url
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
 from app.crawl.job_store import JobKind
+from app.crawl.payload_helpers import checked_payload_urls
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 from app.output_formats import serialize_results
@@ -50,6 +51,12 @@ async def crawl(
             except ValueError as error:
                 raise http_error(422, "validation_error", str(error)) from error
         payload_dict = payload.model_dump(exclude_none=True)
+        # L4: gate the batch size at the boundary, before the 202 is ever
+        # returned. The async branch otherwise accepts an oversized batch and
+        # only fails it inside the detached background task, where the caller
+        # can no longer see why. Same chokepoint the engine uses, so sync and
+        # async cannot drift.
+        checked_payload_urls(payload_dict, settings.max_batch_size)
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
         if async_mode or webhook_url:

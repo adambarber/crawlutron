@@ -369,8 +369,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   single `_declared_length_exceeds` chokepoint now parses it, treating
   malformed/negative/absent as "unknown size" (skip the pre-flight; the
   streamed running cap still bounds the body). The scripted httpx mock
-  transport moved to `_testkit` (dedup). A guard pins that both fetchers use
-  the predicate and never reintroduce the bare `int()`.
+  transport moved to `_testkit` (dedup). A tree-wide AST invariant
+  (`test_header_numbers_are_converted_under_guard`) fails CI on any unguarded
+  `int()`/`float()` of a header-derived value, exempting conversion sites
+  inside `try/except ValueError` — so the same class can't silently reappear
+  at a new fetcher.
+- **Async batch size rejected at the boundary (L4)**
+  (app/api/crawl_endpoint.py, app/crawl/payload_helpers.py, app/crawl/engine.py,
+  app/api/render.py): the async crawl path returned 202 before checking
+  `max_batch_size`, so an oversized batch was silently accepted and only
+  failed inside the detached background task — the caller could never see
+  why. A `checked_payload_urls` chokepoint (dedup + cap in one call) now
+  validates before the 202 in the endpoint and inside `execute_crawl`, so
+  sync and async share one gate and cannot drift on batch admission.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

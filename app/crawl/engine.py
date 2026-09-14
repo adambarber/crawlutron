@@ -67,7 +67,7 @@ from app.crawl.extraction import (
     extract_js_endpoints,
 )
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
-from app.crawl.payload_helpers import _payload_policy, _payload_urls
+from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.result_helpers import (
     _failed_engine_result,
@@ -746,9 +746,9 @@ async def crawl_request(
     spill_path: str | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
-    urls = _payload_urls(payload)
-    if len(urls) > active_settings.max_batch_size:
-        raise ValueError("batch_size_exceeded")
+    # L4: the batch cap is enforced by the same gate the async endpoint uses
+    # before accepting, so sync and async cannot drift on oversized batches.
+    urls = checked_payload_urls(payload, active_settings.max_batch_size)
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
     cffi = cffi_fetcher or _default_cffi_fetcher

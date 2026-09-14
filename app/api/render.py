@@ -10,8 +10,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.crawl.engine import _call_worker, _payload_urls
+from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
+from app.crawl.payload_helpers import _payload_urls
 from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings

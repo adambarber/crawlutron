@@ -38,7 +38,6 @@ from app.crawl.engine import (
     _call_worker,
     _execute_crawl_chain,
     _payload_policy,
-    _payload_urls,
     crawl_request,
 )
 from app.crawl.extraction import (
@@ -47,6 +46,7 @@ from app.crawl.extraction import (
     _extract_frames,
     _FrameCollector,
 )
+from app.crawl.payload_helpers import _payload_urls
 from app.crawl.strategies.http import (
     _cookie_header_for_url,
     _fetch_with_retries,
@@ -292,6 +292,16 @@ class TestCrawlRequest:
         }
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher, browser_worker=None)
+
+    def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
+        """One chokepoint returns in-range urls and rejects oversized batches (L4)."""
+        from app.crawl.payload_helpers import checked_payload_urls
+
+        within = {"urls": ["http://example.com/a", "http://example.com/a", "http://example.com/b"]}
+        assert checked_payload_urls(within, 10) == ["http://example.com/a", "http://example.com/b"]
+        oversized = {"urls": [f"http://example.com/{i}" for i in range(11)]}
+        with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
+            checked_payload_urls(oversized, 10)
 
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}

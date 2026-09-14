@@ -26,6 +26,15 @@ class TestAsyncCrawlApi:
         assert body["status_url"] == f"/v1/crawl/{body['request_id']}"
         assert body["webhook_url"] is None
 
+    async def test_v1_crawl_async_mode_over_batch_size_returns_422(self):
+        """L4: an oversized batch is rejected at accept-time, never 202'd then failed async."""
+        from app.settings import CrawlerSettings
+
+        urls = [f"{self.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
+        resp = await self.client.post("/v1/crawl", json={"urls": urls, "async_mode": True})
+        assert resp.status_code == 422, resp.text
+        assert "batch_size_exceeded" in resp.text
+
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
         resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))

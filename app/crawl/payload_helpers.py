@@ -47,6 +47,21 @@ def _payload_urls(payload: dict[str, Any]) -> list[str]:
     raise ValueError("missing_url")
 
 
+def checked_payload_urls(payload: dict[str, Any], max_batch_size: int) -> list[str]:
+    """Deduplicated URL batch, rejected if it exceeds the batch cap (L4).
+
+    The single gate shared by the engine (sync) and the crawl endpoint (async
+    accept path): the async handler must call this *before* returning 202 so
+    an oversized batch is rejected at the boundary instead of being accepted
+    and failing inside the detached background task, where the caller can no
+    longer see why.
+    """
+    urls = _payload_urls(payload)
+    if len(urls) > max_batch_size:
+        raise ValueError("batch_size_exceeded")
+    return urls
+
+
 def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[str, Any]:
     policy = payload.get("policy") or {}
     if not isinstance(policy, dict):
@@ -126,4 +141,4 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     }
 
 
-__all__ = ["_payload_urls", "_payload_policy", "SUPPORTED_EXTRACTION_METHODS"]
+__all__ = ["_payload_urls", "checked_payload_urls", "_payload_policy", "SUPPORTED_EXTRACTION_METHODS"]
