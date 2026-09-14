@@ -78,8 +78,6 @@ class BoundedTTLCache(Generic[K, V]):
                 return None
             self._entries.move_to_end(key)
             return entry[1]
-        """Value without the LRU touch (expiry still applies)."""
-        return self._entry_if_fresh(key, touch=False)
 
     def put(self, key: K, value: V, *, ttl: float | None = None) -> None:
         """Insert/refresh under the lock, evicting LRU beyond max_entries."""
