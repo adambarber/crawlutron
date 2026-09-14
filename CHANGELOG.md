@@ -271,6 +271,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `self._lock` while `aget()` held it, so the multi-step mirror/index store
   raced concurrent writers. The store now runs under the lock on both paths;
   a regression test pins the contract.
+- **One failed item counts once (M3)** (app/api/job_runner.py): an item that
+  failed `build_unified_result` AND carried `status=="failed"` incremented
+  the batch `failed` counter twice. The status-failed count now applies only
+  to built items; a dropped item counts exactly once either way.
+- **Dead code in `BoundedTTLCache.get_stale` (H3)** (app/bounded_ttl.py):
+  a stale `peek` docstring + `return` sat unreachable after the method's real
+  returns (the file always parsed — severity was hygiene, not HIGH). Deleted.
 - **One sanctioned test poller (jscpd test-side)** (tests/_testkit.py,
   tests/api/test_async_crawl.py, tests/test_safety_invariants.py):
   `poll_until` is the single predicate poller — the hand-rolled

@@ -174,6 +174,38 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
 
+    async def test_failed_item_failing_to_build_counts_once(self, client, job_store, real_sleeps):
+        """M3: an item that fails to build AND carries status=failed counts once.
+
+        build_unified_result requires original_url; an item with a resolvable
+        URL but no original_url raises inside the try, and its
+        status=="failed" must not add a second count for the same item.
+        """
+
+        async def _execute(payload_dict, *, settings, shutdown_event):
+            return {
+                "results": [
+                    {
+                        "normalized_url": "http://example.test/a",
+                        "final_url": "http://example.test/a",
+                        "status": "failed",
+                        "classification": "site_error",
+                    }
+                ],
+                "submitted_count": 1,
+                "policy_schema_version": "test",
+            }
+
+        job_runner.install_execute_crawl(_execute)
+        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
+        job_id = resp.json()["job_id"]
+
+        status = await _wait_status(job_store, job_id, {"completed", "failed"})
+        assert status == "completed"
+        job = job_store.load(job_id)
+        assert job.stats["total_crawled"] == 1
+        assert job.stats["total_failed"] == 1
+
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
         """H1: the frontier must carry the validated URL, never the raw href.
 

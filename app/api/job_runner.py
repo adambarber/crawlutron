@@ -192,11 +192,11 @@ async def _run_job(
                     unified = None
                 if unified is not None:
                     job.results.append(unified.model_dump())
+                    if item.get("status") == "failed":
+                        failed += 1
                 else:
                     failed += 1  # a dropped item is a failed crawl, not silence
                 job.visited.add(url)
-                if item.get("status") == "failed":
-                    failed += 1
                 job.stats["total_crawled"] = len(job.visited)
                 for link in item.get("discovered_links") or []:
                     link_url = frontier_link_url(link)
