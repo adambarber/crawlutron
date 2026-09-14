@@ -1,39 +1,10 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
-import asyncio
-
 import pytest
+from _testkit import poll_until
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER
-
-
-async def _poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1):
-    """Poll ``predicate`` until it returns truthy or ``timeout`` expires.
-
-    Replaces the previous ``for _ in range(20): await asyncio.sleep(0.5)``
-    pattern: faster minimum polling, real timeout via ``asyncio.wait_for``,
-    and a single ``pytest.fail`` site that names the failing condition.
-    Predicates can be sync or async; async predicates are awaited.
-    """
-
-    async def _runner() -> bool:
-        deadline = asyncio.get_event_loop().time() + timeout
-        while True:
-            value = predicate()
-            if asyncio.iscoroutine(value):
-                value = await value
-            if value:
-                return True
-            if asyncio.get_event_loop().time() >= deadline:
-                return False
-            await asyncio.sleep(interval)
-
-    try:
-        ok = await asyncio.wait_for(_runner(), timeout=timeout + 1.0)
-    except TimeoutError:
-        ok = False
-    return ok
 
 
 class TestAsyncCrawlApi:
@@ -90,8 +61,11 @@ class TestAsyncCrawlApi:
             assert "status" in data["details"]
             return False
 
-        assert await _poll_until(_poll_status, timeout=10.0, interval=0.1), (
-            "Timed out waiting for async crawl to complete"
+        await poll_until(
+            _poll_status,
+            timeout=10.0,
+            interval=0.1,
+            message="Timed out waiting for async crawl to complete",
         )
 
     async def test_v1_crawl_async_mode_with_webhook_delivers(self):
@@ -105,8 +79,11 @@ class TestAsyncCrawlApi:
         request_id = resp.json()["request_id"]
 
         # Wait for webhook delivery (faster polling, real timeout).
-        assert await _poll_until(lambda: len(WEBHOOK_RECEIVED) == 1, timeout=10.0, interval=0.1), (
-            "Webhook not delivered in time"
+        await poll_until(
+            lambda: len(WEBHOOK_RECEIVED) == 1,
+            timeout=10.0,
+            interval=0.1,
+            message="Webhook not delivered in time",
         )
 
         delivered = delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
@@ -131,8 +108,11 @@ class TestAsyncCrawlApi:
             status_resp = await self.client.get(f"/v1/crawl/{request_id}")
             return status_resp.status_code == 200
 
-        assert await _poll_until(_wait_done, timeout=10.0, interval=0.1), (
-            "Async crawl did not complete in time"
+        await poll_until(
+            _wait_done,
+            timeout=10.0,
+            interval=0.1,
+            message="Async crawl did not complete in time",
         )
 
         # Verify job exists in job_store with SINGLE_SHOT kind
@@ -180,8 +160,11 @@ class TestAsyncCrawlApi:
             status_resp = await self.client.get(f"/v1/crawl/{request_id}")
             return status_resp.status_code == 200
 
-        assert await _poll_until(_wait_done, timeout=15.0, interval=0.1), (
-            "Async crawl did not complete in time"
+        await poll_until(
+            _wait_done,
+            timeout=15.0,
+            interval=0.1,
+            message="Async crawl did not complete in time",
         )
         job = job_store.load(request_id)
         assert job.stats["total_failed"] == 1
@@ -209,8 +192,11 @@ class TestAsyncCrawlApi:
             assert status_resp.status_code == 202, f"Unexpected status: {status_resp.status_code}"
             return False
 
-        assert await _poll_until(_wait_done, timeout=15.0, interval=0.1), (
-            "Timed out waiting for async batch crawl to complete"
+        await poll_until(
+            _wait_done,
+            timeout=15.0,
+            interval=0.1,
+            message="Timed out waiting for async batch crawl to complete",
         )
 
     async def test_v1_crawl_webhook_backward_compat(self):
@@ -225,8 +211,11 @@ class TestAsyncCrawlApi:
         assert "request_id" in body
 
         # Wait for webhook.
-        assert await _poll_until(lambda: len(WEBHOOK_RECEIVED) == 1, timeout=10.0, interval=0.1), (
-            "Webhook not delivered in time"
+        await poll_until(
+            lambda: len(WEBHOOK_RECEIVED) == 1,
+            timeout=10.0,
+            interval=0.1,
+            message="Webhook not delivered in time",
         )
 
         delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
@@ -264,8 +253,11 @@ class TestAsyncCrawlApi:
                 return False
             return True
 
-        assert await _poll_until(_wait_all, timeout=15.0, interval=0.1), (
-            "Async concurrent-limit test did not complete in time"
+        await poll_until(
+            _wait_all,
+            timeout=15.0,
+            interval=0.1,
+            message="Async concurrent-limit test did not complete in time",
         )
 
 

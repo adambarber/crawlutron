@@ -838,6 +838,84 @@ def test_fetch_builder_detector_bites():
 
 
 # ---------------------------------------------------------------------------
+# Poll-loop reimplementation (jscpd test-side drift, sibling to the fake
+# builder finding): _testkit.poll_until is the sanctioned predicate poller.
+# A hand-rolled ``while True`` poller that awaits ``asyncio.wait_for`` without
+# a ``pytest.fail`` termination silently returns False on timeout, diverging
+# from the one that names the failing condition. Flag the shape.
+# ---------------------------------------------------------------------------
+
+
+def _call_node_names(node: ast.AST) -> set[str]:
+    """Names of every call target under ``node`` (e.g. ``pytest.fail``)."""
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            try:
+                names.add(ast.unparse(child.func))
+            except Exception:
+                pass
+    return names
+
+
+def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        src = ast.dump(node)
+        has_while_true = any(
+            isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in ast.walk(node)
+        )
+        if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
+            continue
+        # The sanctioned _testkit.poll_until terminates with pytest.fail. A
+        # docstring may *claim* a fail; only a real call node counts.
+        if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
+            continue
+        offenders.append(
+            offender(path, node.lineno, "use _testkit.poll_until instead of a hand-rolled poll loop")
+        )
+    return offenders
+
+
+def test_tests_do_not_relinline_poll_loop():
+    """One sanctioned poller; tests must not re-roll their own."""
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        if path.name in _FAKE_BUILDER_SANCTIONED:
+            continue
+        offenders.extend(_poll_loop_offenders(tree, path))
+    assert not offenders, "Use _testkit.poll_until: " + "; ".join(offenders)
+
+
+def test_poll_loop_detector_bites():
+    bad = ast.parse(
+        "async def _poll_until(pred, *, timeout=10.0):\n"
+        "    async def _runner():\n"
+        "        while True:\n"
+        "            v = pred()\n"
+        "            if asyncio.iscoroutine(v):\n"
+        "                v = await v\n"
+        "            if v:\n"
+        "                return True\n"
+        "    return await asyncio.wait_for(_runner(), timeout=timeout)\n"
+    )
+    offenders = _poll_loop_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    good = ast.parse(
+        "async def poll_until(pred, *, timeout=10.0, message=None):\n"
+        "    async def _runner():\n"
+        "        while True:\n"
+        "            if pred():\n"
+        "                return True\n"
+        "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
+        "    pytest.fail(message)\n"
+    )
+    assert not _poll_loop_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
 # Decompression bomb guard (jscpd #5 family / H2 closure)
 # ---------------------------------------------------------------------------
 

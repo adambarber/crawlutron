@@ -264,6 +264,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   clamping to 1 (pinned by parametrized behavior tests; garbage now also
   logs). The detector gains shape 3: any `int`/`float` of a name assigned
   directly from `os.environ.get`/`getenv`/subscript, bite-proven.
+- **One sanctioned test poller (jscpd test-side)** (tests/_testkit.py,
+  tests/api/test_async_crawl.py, tests/test_safety_invariants.py):
+  `poll_until` is the single predicate poller — the hand-rolled
+  `while True` + `asyncio.wait_for` loop in `test_async_crawl.py` returned
+  a bare bool on timeout instead of failing with the condition named, so
+  every re-inlined copy silently diverges from the sanctioned
+  timeout/fail contract. The copy is migrated to
+  `poll_until(..., message=...)`; a tree-wide detector bans the shape in
+  tests (only a real `pytest.fail` call node counts — a docstring claim
+  does not), bite-proven in both directions.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
