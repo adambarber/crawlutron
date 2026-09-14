@@ -86,3 +86,30 @@ def test_concurrent_cookie_writes_do_not_raise():
     for t in threads:
         t.join()
     assert not errors, errors
+
+
+def test_cookie_jar_evicts_oldest_host_past_cap():
+    """The jar is module-global and long-lived: distinct (namespace, host)
+    slots are LRU-bounded so every crawled host cannot accumulate forever."""
+    from app.crawl.strategies.http import _COOKIE_JAR_MAX_HOSTS
+
+    jar = CookieJar()
+    for i in range(_COOKIE_JAR_MAX_HOSTS + 5):
+        jar.add_cookie_header(f"http://host{i}.example/", f"k=v{i}; Path=/")
+    assert len(jar._cookies) == _COOKIE_JAR_MAX_HOSTS
+    newest = _COOKIE_JAR_MAX_HOSTS + 4
+    assert jar.cookie_header_for(f"http://host{newest}.example/") == f"k=v{newest}"
+
+
+def test_cookie_jar_read_refreshes_host_recency():
+    """Reading a host's cookies marks it recently used: a read host survives
+    the next eviction instead of the oldest-unread slot."""
+    from app.crawl.strategies.http import _COOKIE_JAR_MAX_HOSTS
+
+    jar = CookieJar()
+    for i in range(_COOKIE_JAR_MAX_HOSTS):
+        jar.add_cookie_header(f"http://host{i}.example/", f"k=v{i}; Path=/")
+    assert jar.cookie_header_for("http://host0.example/") == "k=v0"
+    jar.add_cookie_header("http://fresh.example/", "k=fresh; Path=/")
+    assert jar.cookie_header_for("http://host0.example/") == "k=v0"
+    assert len(jar._cookies) == _COOKIE_JAR_MAX_HOSTS

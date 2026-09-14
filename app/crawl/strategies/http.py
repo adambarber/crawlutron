@@ -15,6 +15,7 @@ import socket
 import ssl
 import threading
 import time
+from collections import OrderedDict
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,12 @@ async def close_async_http_client() -> None:
         await client.aclose()
 
 
+# Cap on distinct (namespace, host) cookie slots. The jar is module-global
+# and long-lived: without eviction every crawled host accumulates forever
+# (the DNS/robots/sitemap caches are all bounded; the jar was the outlier).
+_COOKIE_JAR_MAX_HOSTS = 1024
+
+
 class CookieJar:
     """In-memory cookie jar (Feature: Persistent Cookie Jars).
 
@@ -344,7 +351,9 @@ class CookieJar:
     """
 
     def __init__(self) -> None:
-        self._cookies: dict[str, dict[str, dict[str, str]]] = {}
+        # OrderedDict: insertion order doubles as the eviction order for the
+        # (namespace, host) LRU cap (R1) — plain dict has no move_to_end.
+        self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
         # No per-namespace isolation is enforced here -- callers opt in by
         # passing a non-empty ``namespace``. The shared default is preserved
         # so existing single-tenant callers see no change.
@@ -373,6 +382,11 @@ class CookieJar:
             target = self._cookies.setdefault(ns_key, {})
             for cookie in jar.values():
                 target[cookie.key] = cookie.value
+            # LRU: a stored host survives while it is written or read; past
+            # the cap the oldest-unread slot is evicted (R1).
+            self._cookies.move_to_end(ns_key)
+            while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
+                self._cookies.popitem(last=False)
 
     def cookie_header_for(self, url: str, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header string for the given URL's domain.
@@ -384,6 +398,8 @@ class CookieJar:
         ns_key = self._ns_key(namespace, host)
         with self._lock:
             domain_cookies = dict(self._cookies.get(ns_key, {}))
+            if ns_key in self._cookies:
+                self._cookies.move_to_end(ns_key)
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
