@@ -67,7 +67,10 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         from app.constants import MAX_CONTENT_LENGTH_BYTES
 
         policy = _payload_policy(
-            {"url": "https://example.com/", "policy": {"limits": {"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES}}},
+            {
+                "url": "https://example.com/",
+                "policy": {"limits": {"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES}},
+            },
             CrawlerSettings.from_mapping({}),
         )
         assert policy["limits"]["max_content_length_bytes"] == MAX_CONTENT_LENGTH_BYTES
