@@ -381,7 +381,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   failed inside the detached background task — the caller could never see
   why. A `checked_payload_urls` chokepoint (dedup + cap in one call) now
   validates before the 202 in the endpoint and inside `execute_crawl`, so
-  sync and async share one gate and cannot drift on batch admission.
+   sync and async share one gate and cannot drift on batch admission.
+- **Bounded retry backoff in `_fetch_with_retries` (L3)**
+  (app/crawl/strategies/http.py): a failing fetch retried back-to-back with no
+  wait, hammering an origin that is down or rate-limiting. Now `_retry_backoff_seconds`
+  inserts a capped exponential gap (base 0.25s, doubling, ceiling 2.0s) between
+  attempts, so the retry budget widens gaps instead of busy-looping, and a large
+  `max_retries` can never park a URL past the per-retry ceiling.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

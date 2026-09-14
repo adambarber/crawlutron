@@ -1,5 +1,6 @@
 """Real tests for service.py logic (no mocks; inject fakes for network)."""
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -54,6 +55,7 @@ from app.crawl.strategies.http import (
     _http_strategy_result,
     _looks_like_binary_body,
     _retry_after_seconds,
+    _retry_backoff_seconds,
     _select_fingerprint,
 )
 from app.settings import CrawlerSettings
@@ -122,6 +124,41 @@ class TestFetchRetries:
     async def test_fetch_with_retries_reraises_after_exhaustion(self) -> None:
         with pytest.raises(ConnectionError):
             await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
+
+    def test_retry_backoff_is_exponential_and_capped(self) -> None:
+        """Each retry gap doubles from the base and plateaus at the ceiling (L3)."""
+        from app.crawl.strategies.http import _RETRY_BACKOFF_CAP_SECONDS
+
+        assert _retry_backoff_seconds(1) == pytest.approx(0.25)
+        assert _retry_backoff_seconds(2) == pytest.approx(0.5)
+        assert _retry_backoff_seconds(3) == pytest.approx(1.0)
+        assert _retry_backoff_seconds(4) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
+        # Deep retry budgets never exceed the ceiling.
+        assert _retry_backoff_seconds(20) == pytest.approx(_RETRY_BACKOFF_CAP_SECONDS)
+
+    async def test_retries_wait_between_attempts(self, monkeypatch) -> None:
+        """A failing fetch is retried after a bounded backoff gap, not hammered."""
+        sleeps: list[float] = []
+
+        async def _rec_sleep(delay):
+            sleeps.append(delay)
+
+        monkeypatch.setattr(asyncio, "sleep", _rec_sleep)
+
+        state = {"n": 0}
+
+        async def _flaky(url, headers, timeout_seconds, max_content_length):
+            state["n"] += 1
+            if state["n"] < 3:
+                raise ConnectionError("transient")
+            return "ok"
+
+        response, meta = await _fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
+        assert response == "ok"
+        assert meta["attempts"] == 3
+        # Gaps happen only between attempts (2 retries -> 2 waits), increasing
+        # and within the ceiling.
+        assert sleeps == pytest.approx([0.25, 0.5])
 
 
 class TestPureParsing:

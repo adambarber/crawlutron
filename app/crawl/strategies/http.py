@@ -1222,6 +1222,20 @@ def _content_metrics(text: str | None, html: str | None) -> dict[str, int | floa
     }
 
 
+_RETRY_BACKOFF_BASE_SECONDS = 0.25
+_RETRY_BACKOFF_CAP_SECONDS = 2.0
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """Capped exponential gap before the retry following a failed ``attempt``.
+
+    Doubles from the base and plateaus at the ceiling (L3): one failing origin
+    must not be hammered back-to-back, yet the wait stays bounded so a large
+    ``max_retries`` budget cannot park a URL for minutes.
+    """
+    return min(_RETRY_BACKOFF_CAP_SECONDS, _RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1)))
+
+
 def _retry_after_seconds(headers: dict[str, str]) -> int | None:
     value = headers.get("retry-after")
     if not value:
@@ -1254,6 +1268,11 @@ async def _fetch_with_retries(
             transient_errors.append(_classify_error_code(error))
             if attempt >= max_attempts:
                 raise
+            # L3: back off between attempts (capped exponential) so a failing
+            # or rate-limiting origin sees widening gaps instead of a tight
+            # hammering loop. The gap is bounded so a large retry budget can
+            # never park a URL beyond the per-retry ceiling.
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
 
 
 def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
