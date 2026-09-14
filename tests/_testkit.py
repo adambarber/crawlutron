@@ -311,6 +311,28 @@ def build_pinned_renderer(monkeypatch, page):
     return renderer
 
 
+def pinned_renderer(monkeypatch, *, pinned=("http://1.2.3.4:80/", {"Host": "example.com"})):
+    """BrowserFakePage + pinned renderer wired for Host-override navigation.
+
+    The Host-override navigation tests share this setup: ``_build_pinned_request``
+    returns the pinned target and Host header, and the page records
+    ``set_extra_http_headers`` calls for post-navigation assertions.
+    """
+    import app.crawl.strategies.browser as browser_mod
+
+    page = BrowserFakePage()
+    renderer = build_pinned_renderer(monkeypatch, page)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", lambda url, headers: pinned)
+    return page, renderer
+
+
+def provider_results(*items) -> str:
+    """JSON body for ``fake_provider_http`` shaped like a keyed-provider response."""
+    import json
+
+    return json.dumps({"results": list(items)})
+
+
 async def poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1, message: str | None = None):
     """Poll ``predicate`` until truthy or ``timeout`` expires.
 
@@ -372,3 +394,23 @@ def make_crawl_payload(
     }
     payload.update(extra)
     return payload
+
+
+def extract_function_body(source: str, name: str) -> str:
+    """Extract just the body of an async function ``name`` at any indent.
+
+    AST-text tests (source-fingerprint assertions) share this helper so the
+    regex contract lives in one place instead of per test file.
+    """
+    import re
+
+    pattern = re.compile(
+        r"^[ \t]*async def "
+        + re.escape(name)
+        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(source)
+    if not match:
+        raise AssertionError(f"Could not find function {name}")
+    return match.group(0)

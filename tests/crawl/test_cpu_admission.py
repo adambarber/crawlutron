@@ -160,33 +160,31 @@ async def test_cpu_gate_returns_immediately_under_target(monkeypatch):
 # --- combined ResourceGate ---
 
 
-async def test_resource_gate_waits_while_either_saturated(monkeypatch):
+def _saturated_gate(monkeypatch, *, cpu_ratio, memory_ratio):
+    """ResourceGate with pinned sampler ratios and a recording fake sleep."""
     gate = ResourceGate()
     gate.memory.max_wait_seconds = 0.05
     gate.cpu.max_wait_seconds = 0.05
-    # Memory idle, CPU saturated -> gate must still wait (either resource binds).
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.99)
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: memory_ratio)
     waited = []
 
     async def fake_sleep(seconds):
         waited.append(seconds)
 
     monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    return gate, waited
+
+
+async def test_resource_gate_waits_while_either_saturated(monkeypatch):
+    gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
+    # Memory idle, CPU saturated -> gate must still wait (either resource binds).
     await gate.wait_while_saturated(max_wait_seconds=10)
     assert waited, "ResourceGate returned without waiting while CPU was saturated"
 
 
 async def test_resource_gate_returns_when_both_idle(monkeypatch):
-    gate = ResourceGate()
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
-    waited = []
-
-    async def fake_sleep(seconds):
-        waited.append(seconds)
-
-    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.0, memory_ratio=0.0)
     await gate.wait_while_saturated(max_wait_seconds=10)
     assert waited == []
 

@@ -99,21 +99,23 @@ async def test_gate_returns_immediately_under_target():
         monkeypatch.undo()
 
 
-async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypatch):
-    """Integration: with the memory sampler pinned at 99% usage, the engine pauses
-    dispatch (gate waits) yet the crawl still completes. The combined ResourceGate
-    is exercised; CPU is pinned idle so only memory drives the throttle."""
+async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
+    """Run the two-page fixture crawl with pinned gate ratios.
+
+    Returns the (envelope, waits) pair: the combined ResourceGate is
+    exercised with only the pinned resource driving the throttle.
+    """
     from _testkit import site_fetcher
 
     import app.crawl.engine as engine_mod
+    from app.crawl.cache import HttpCache
     from app.resource_pressure import ResourceGate
 
     gate = ResourceGate()
     gate.memory.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
     gate.cpu.max_wait_seconds = 0.05
-    # Pin memory saturated, CPU idle, so the throttle is attributable to memory.
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.99)
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: memory_ratio)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
     waits = []
 
     async def fake_sleep(seconds):
@@ -129,8 +131,16 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
     out = await engine_mod.crawl_request(
         {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}},
         http_fetcher=site_fetcher(pages),
-        cache=__import__("app.crawl.cache", fromlist=["HttpCache"]).HttpCache(),
+        cache=HttpCache(),
     )
+    return out, waits
+
+
+async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypatch):
+    """Integration: with the memory sampler pinned at 99% usage, the engine pauses
+    dispatch (gate waits) yet the crawl still completes. The combined ResourceGate
+    is exercised; CPU is pinned idle so only memory drives the throttle."""
+    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=0.0, memory_ratio=0.99)
     assert {r["normalized_url"] for r in out["results"]} == {
         "http://example.com",
         "http://example.com/a",
@@ -141,34 +151,7 @@ async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypa
 async def test_engine_throttles_batches_under_cpu_pressure(tmp_path, monkeypatch):
     """Integration: with the CPU sampler pinned at 99% of quota, the engine pauses
     dispatch (gate waits) yet the crawl still completes. Mirrors the memory test."""
-    from _testkit import site_fetcher
-
-    import app.crawl.engine as engine_mod
-    from app.resource_pressure import ResourceGate
-
-    gate = ResourceGate()
-    gate.memory.max_wait_seconds = 0.05
-    gate.cpu.max_wait_seconds = 0.05
-    # Pin CPU saturated, memory idle, so the throttle is attributable to CPU.
-    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.99)
-    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
-    waits = []
-
-    async def fake_sleep(seconds):
-        waits.append(seconds)
-
-    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
-    monkeypatch.setattr(engine_mod, "_resource_gate", gate)
-
-    pages = {
-        "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
-        "/a": (200, "<html>a</html>", "text/html"),
-    }
-    out = await engine_mod.crawl_request(
-        {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}},
-        http_fetcher=site_fetcher(pages),
-        cache=__import__("app.crawl.cache", fromlist=["HttpCache"]).HttpCache(),
-    )
+    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
     assert {r["normalized_url"] for r in out["results"]} == {
         "http://example.com",
         "http://example.com/a",

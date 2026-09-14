@@ -4,7 +4,7 @@ pytestmark = pytest.mark.browser
 
 import urllib.request
 
-from _testkit import BrowserFakePage, build_pinned_renderer
+from _testkit import BrowserFakePage, build_pinned_renderer, pinned_renderer
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
@@ -86,13 +86,7 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
 
 
 async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
-    page = BrowserFakePage()
-    renderer = build_pinned_renderer(monkeypatch, page)
-    monkeypatch.setattr(
-        browser_mod,
-        "_build_pinned_request",
-        lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
-    )
+    page, renderer = pinned_renderer(monkeypatch)
     result = await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"

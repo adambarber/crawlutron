@@ -28,6 +28,7 @@ class TestServiceRenderRequest:
         assert out["results"][0]["status"] == "disallowed"
 
     async def test_render_request_duplicate_urls_return_one_result_each(self):
+        """Exact-duplicate URLs in one request collapse to a single submission."""
         from app.settings import CrawlerSettings
 
         out = await render_request(
@@ -35,16 +36,17 @@ class TestServiceRenderRequest:
             settings=CrawlerSettings.from_mapping(),
             worker=_worker(),
         )
-        assert out["submitted_count"] == 2
-        assert len(out["results"]) == 2
-        assert all(item["status"] == "success" for item in out["results"])
+        assert out["submitted_count"] == 1
+        assert len(out["results"]) == 1
+        assert out["results"][0]["status"] == "success"
 
     async def test_render_request_batch_exceeded(self):
         from app.settings import CrawlerSettings
 
         with pytest.raises(ValueError):
             await render_request(
-                {"urls": ["http://127.0.0.1:1/x"] * 1000},
+                # Distinct URLs: the cap counts unique URLs after dedup.
+                {"urls": [f"http://127.0.0.1:1/x{i}" for i in range(1000)]},
                 settings=CrawlerSettings.from_mapping(),
                 worker=_worker(),
             )

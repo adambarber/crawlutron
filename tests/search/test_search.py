@@ -12,6 +12,7 @@ import os
 from unittest import mock
 
 import pytest
+from _testkit import provider_results
 
 from app.search.providers import (
     BraveProvider,
@@ -262,7 +263,7 @@ class TestSearchEndpoint:
         override_settings(search_provider="tavily", tavily_api_key="test-key")
         fake_provider_http(
             200,
-            json.dumps({"results": [{"title": "A", "url": "https://example.gov/a", "content": "desc"}]}),
+            provider_results({"title": "A", "url": "https://example.gov/a", "content": "desc"}),
         )
         resp = await async_client.post("/v1/search", json={"query": "worcester", "limit": 3})
         assert resp.status_code == 200
@@ -359,30 +360,8 @@ class TestProviderHttpCaps:
         import app.search.providers as providers_mod
 
         small = json.dumps({"results": []}).encode()
-
-        class _Body:
-            async def aiter_bytes(self):
-                yield small
-
-        class _Resp:
-            status_code = 200
-            encoding = "utf-8"
-
-            def aiter_bytes(self):
-                return _Body().aiter_bytes()
-
-        class _Stream:
-            async def __aenter__(self):
-                return _Resp()
-
-            async def __aexit__(self, *args):
-                return False
-
-        class _Client:
-            def stream(self, *a, **k):
-                return _Stream()
-
-        with mock.patch.object(providers_mod, "get_async_http_client", return_value=_Client()):
+        client = _FakeStreamClient(_FakeStreamResponse(small))
+        with mock.patch.object(providers_mod, "get_async_http_client", return_value=client):
             status, body = await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
         assert status == 200
         assert json.loads(body) == {"results": []}
@@ -390,30 +369,12 @@ class TestProviderHttpCaps:
     async def test_search_unbounded_body_is_refused(self):
         import app.search.providers as providers_mod
 
-        class _Body:
-            async def aiter_bytes(self):
-                while True:
-                    yield b"x" * 65536
+        def _drip():
+            while True:
+                yield b"x" * 65536
 
-        class _Resp:
-            status_code = 200
-            encoding = "utf-8"
-
-            def aiter_bytes(self):
-                return _Body().aiter_bytes()
-
-        class _Stream:
-            async def __aenter__(self):
-                return _Resp()
-
-            async def __aexit__(self, *args):
-                return False
-
-        class _Client:
-            def stream(self, *a, **k):
-                return _Stream()
-
-        with mock.patch.object(providers_mod, "get_async_http_client", return_value=_Client()):
+        client = _FakeStreamClient(_FakeStreamResponse(_drip()))
+        with mock.patch.object(providers_mod, "get_async_http_client", return_value=client):
             with pytest.raises(SearchProviderError, match="[Ee]xceed"):
                 await _provider_http("GET", "http://example.test/", timeout_seconds=5.0)
 
@@ -429,13 +390,19 @@ class _FakeStreamResponse:
     to an attribute httpx does not have (500 on every real search request).
     """
 
-    def __init__(self, body: bytes, encoding: str | None = "utf-8"):
-        self._body = body
+    def __init__(self, body, encoding: str | None = "utf-8"):
+        # ``body`` is bytes for a single yield, or an iterable of chunks for
+        # multi-chunk streams (the cap tests drip unbounded input) — the real
+        # httpx surface yields chunks, so the fake does too.
+        if isinstance(body, (bytes, bytearray)):
+            body = [bytes(body)]
+        self._chunks = body
         self.encoding = encoding
         self.status_code = 200
 
     async def aiter_bytes(self):
-        yield self._body
+        for chunk in self._chunks:
+            yield chunk
 
 
 class _FakeStreamClient:

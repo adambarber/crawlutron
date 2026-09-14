@@ -36,6 +36,14 @@ def _doc_pages():
     }
 
 
+async def _crawl_example_site(pages):
+    """Crawl the example fixture site; return the (envelope, fetched urls) pair."""
+    fetcher, fetched = _recording_fetcher(pages)
+    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
+    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    return out, fetched
+
+
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     pages = {
         "/": (
@@ -77,9 +85,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
         ),
         "/local": (200, "<html>l</html>", "text/html"),
     }
-    fetcher, fetched = _recording_fetcher(pages)
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
-    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    out, fetched = await _crawl_example_site(pages)
     crawled = {r["normalized_url"] for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any("pinterest.com" in u or "x.com/" in u for u in fetched), fetched
@@ -92,9 +98,7 @@ async def test_skip_list_hosts_recorded_but_never_enqueued():
 async def test_document_urls_recorded_but_not_fetched_by_default():
     # PDFs/CSVs/etc yield no HTML links: record their URLs when advertised,
     # but never spend bandwidth downloading them during URL discovery.
-    fetcher, fetched = _recording_fetcher(_doc_pages())
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
-    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    out, fetched = await _crawl_example_site(_doc_pages())
     crawled = {r["normalized_url"] for r in out["results"]}
     assert crawled == {"http://example.com", "http://example.com/local"}
     assert not any(u.endswith(".pdf") for u in fetched)

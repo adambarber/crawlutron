@@ -9,24 +9,11 @@ Findings addressed:
 - C3: per-chunk ``headers`` (HTTP/1.1 trailers) are preserved across truncation.
 """
 
-import re
 from unittest.mock import MagicMock
 
+from _testkit import extract_function_body
+
 from app.crawl.strategies import http as http_mod
-
-
-def _extract_function_body(source: str, name: str) -> str:
-    """Extract just the body of an async function ``name`` at any indent."""
-    pattern = re.compile(
-        r"^[ \t]*async def "
-        + re.escape(name)
-        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    m = pattern.search(source)
-    if not m:
-        raise AssertionError(f"Could not find function {name}")
-    return m.group(0)
 
 
 # ---- B1: cap pops oldest and calls sync close() ----
@@ -97,7 +84,7 @@ def test_body_size_middleware_preserves_per_chunk_headers():
     src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
-    body = _extract_function_body(source, "_capped_receive")
+    body = extract_function_body(source, "_capped_receive")
     non_comment = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("#"))
     assert "{**message" in non_comment
     assert "dict(message)" not in non_comment
@@ -107,5 +94,5 @@ def test_body_size_middleware_truncation_keeps_more_body_false():
     src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
-    body = _extract_function_body(source, "_capped_receive")
+    body = extract_function_body(source, "_capped_receive")
     assert '"more_body": False' in body

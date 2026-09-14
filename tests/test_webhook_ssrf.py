@@ -6,6 +6,7 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 """
 
 import socket
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -22,6 +23,67 @@ from app.api.webhooks import (
 from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
+
+
+def _fake_httpx_client(capture=None, body=b""):
+    """httpx.AsyncClient double used by the delivery tests.
+
+    Records ``stream()`` args into ``capture`` and yields ``body`` as the
+    response; the delivery path aliases httpx at import time, so the same
+    double works whether delivery goes through ``_deliver_webhook`` or
+    ``deliver_pinned_webhook``.
+    """
+
+    class _Response:
+        def __init__(self):
+            self.status_code = 200
+
+        async def aiter_bytes(self):
+            yield body
+
+    class _StreamCtx:
+        async def __aenter__(self):
+            return _Response()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return False  # httpx's __aexit__ never suppresses
+
+        def stream(self, method, url, content=None, headers=None):
+            if capture is not None:
+                capture["url"] = url
+                capture["headers"] = headers
+            return _StreamCtx()
+
+    return _Client
+
+
+def _pinned_webhook_client(capture=None, body=b""):
+    """Patch httpx.AsyncClient (recording/capped double) + DNS pin for delivery tests."""
+    original = httpx.AsyncClient
+    httpx.AsyncClient = _fake_httpx_client(capture=capture, body=body)
+
+    @contextmanager
+    def _patched():
+        try:
+            with patch(
+                "socket.getaddrinfo",
+                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
+            ):
+                yield
+        finally:
+            httpx.AsyncClient = original
+
+    return _patched()
 
 
 class TestWebhookUrlValidation:
@@ -59,64 +121,23 @@ class TestWebhookDeliveryPinning:
         hostname, and preserve the original Host header (DNS-rebinding safe)."""
         block_private_targets(monkeypatch)
         captured = {}
+        with _pinned_webhook_client(capture=captured):
+            # Initialize webhook module-level state with a fake crawl_request.
+            import asyncio
 
-        class _MockResponse:
-            def __init__(self):
-                self.status_code = 200
-
-            async def aiter_bytes(self):
-                yield b""
-
-        class _Client:
-            def __init__(self, *args, **kwargs):
-                # Store args to verify timeout etc.
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return False  # httpx's __aexit__ never suppresses
-
-            def stream(self, method, url, content=None, headers=None):
-                captured["url"] = url
-                captured["headers"] = headers
-                return _StreamCtx()
-
-        class _StreamCtx:
-            async def __aenter__(self):
-                return _MockResponse()
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return False
-
-        # httpx.AsyncClient is imported lazily inside deliver_pinned_webhook, so
-        # monkeypatching the module-level httpx module covers all entry points.
-        import asyncio
-
-        _original_async_client = httpx.AsyncClient
-        httpx.AsyncClient = _Client
-        try:
-            with patch(
-                "socket.getaddrinfo",
-                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
-            ):
-                # Initialize webhook module-level state with a fake crawl_request.
-                set_webhook_dependencies(
-                    webhook_semaphore=asyncio.Semaphore(1),
-                    shutdown_event=asyncio.Event(),
-                    crawl_request_fn=AsyncMock(return_value={"results": []}),
-                    pool_getter=lambda: MagicMock(),
-                    get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
+            set_webhook_dependencies(
+                webhook_semaphore=asyncio.Semaphore(1),
+                shutdown_event=asyncio.Event(),
+                crawl_request_fn=AsyncMock(return_value={"results": []}),
+                pool_getter=lambda: MagicMock(),
+                get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
+            )
+            try:
+                await _deliver_webhook(
+                    "http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock()
                 )
-                try:
-                    await _deliver_webhook(
-                        "http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock()
-                    )
-                finally:
-                    clear_webhook_dependencies()
-        finally:
-            httpx.AsyncClient = _original_async_client
+            finally:
+                clear_webhook_dependencies()
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured
@@ -129,46 +150,8 @@ class TestWebhookDeliveryPinning:
 
         block_private_targets(monkeypatch)
         captured = {}
-
-        class _MockResponse:
-            def __init__(self):
-                self.status_code = 200
-
-            async def aiter_bytes(self):
-                yield b""
-
-        class _Client:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return False  # httpx's __aexit__ never suppresses
-
-            def stream(self, method, url, content=None, headers=None):
-                captured["url"] = url
-                captured["headers"] = headers
-                return _StreamCtx()
-
-        class _StreamCtx:
-            async def __aenter__(self):
-                return _MockResponse()
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return False
-
-        _original_async_client = httpx.AsyncClient
-        httpx.AsyncClient = _Client
-        try:
-            with patch(
-                "socket.getaddrinfo",
-                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
-            ):
-                await deliver_pinned_webhook("https://webhook.example.com/cb", b"{}")
-        finally:
-            httpx.AsyncClient = _original_async_client
+        with _pinned_webhook_client(capture=captured):
+            await deliver_pinned_webhook("https://webhook.example.com/cb", b"{}")
 
         assert captured["url"] == "https://webhook.example.com/cb", captured
         assert "8.8.8.8" not in captured["url"], captured
@@ -183,43 +166,8 @@ class TestWebhookDeliveryPinning:
 
         block_private_targets(monkeypatch)
         big_body = b"x" * (_max_webhook_size() + 1)
-
-        class _StreamResponse:
-            status_code = 200
-
-            async def aiter_bytes(self):
-                yield big_body
-
-        class _StreamCtx:
-            async def __aenter__(self):
-                return _StreamResponse()
-
-            async def __aexit__(self, *exc):
-                return False
-
-        class _StreamClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, exc_type, exc_val, exc_tb):
-                return False  # httpx's __aexit__ never suppresses body exceptions
-
-            def stream(self, method, url, **kwargs):
-                return _StreamCtx()
-
-        _original_async_client = httpx.AsyncClient
-        httpx.AsyncClient = _StreamClient
-        try:
-            with patch(
-                "socket.getaddrinfo",
-                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
-            ):
-                with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
-                    await deliver_pinned_webhook("http://webhook.example.com/cb", b"{}")
-        finally:
-            httpx.AsyncClient = _original_async_client
+        with _pinned_webhook_client(body=big_body):
+            with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
+                await deliver_pinned_webhook("http://webhook.example.com/cb", b"{}")
 
         assert any("webhook_response_too_large" in r.message for r in caplog.records), caplog.text

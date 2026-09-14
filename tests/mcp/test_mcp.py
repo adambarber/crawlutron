@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from _testkit import provider_results
 
 _PROTOCOL_VERSION = "2026-07-28"
 
@@ -52,6 +53,19 @@ def _headers(body: dict, **overrides) -> dict:
 
 async def _mcp(client, body: dict, headers: dict | None = None):
     return await client.post("/mcp", json=body, headers=_headers(body, **(headers or {})))
+
+
+async def _tool_call(client, name: str, arguments: dict) -> dict:
+    """Invoke one MCP tool; return its structuredContent on success."""
+    resp = await _mcp(
+        client,
+        _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
+    )
+    assert resp.status_code == 200
+    result = resp.json()["result"]
+    assert result["resultType"] == "complete"
+    assert result["isError"] is False
+    return result["structuredContent"]
 
 
 class TestRequestMetadataValidation:
@@ -191,7 +205,7 @@ class TestToolsCall:
         override_settings(search_provider="tavily", tavily_api_key="test-key")
         fake_provider_http(
             200,
-            json.dumps({"results": [{"title": "A", "url": "https://example.gov/a", "content": "desc"}]}),
+            provider_results({"title": "A", "url": "https://example.gov/a", "content": "desc"}),
         )
         body = _body(
             "tools/call",
@@ -211,39 +225,14 @@ class TestToolsCall:
         # No policy supplied: the full default strategy chain (direct HTTP,
         # CFFI impersonation, headless + headed browser) must be accepted over
         # MCP; the engine picks the first working strategy.
-        body = _body(
-            "tools/call",
-            params={
-                "name": "crawl",
-                "arguments": {"url": f"{base_url}/"},
-                "_meta": {**_META},
-            },
-        )
-        resp = await _mcp(async_client, body)
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert result["resultType"] == "complete"
-        assert result["isError"] is False
-        sc = result["structuredContent"]
+        sc = await _tool_call(async_client, "crawl", {"url": f"{base_url}/"})
         assert sc["success"] is True
         assert sc["results"][0]["classification"] in ("success", "rendered")
 
     async def test_map_tool_returns_frontier(self, async_client, base_url, browser_pool_stub):
         # Default policy: the full strategy chain is reachable over MCP.
-        body = _body(
-            "tools/call",
-            params={
-                "name": "map",
-                "arguments": {"url": f"{base_url}/"},
-                "_meta": {**_META},
-            },
-        )
-        resp = await _mcp(async_client, body)
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert result["resultType"] == "complete"
-        assert result["isError"] is False
-        assert isinstance(result["structuredContent"]["all_urls"], list)
+        sc = await _tool_call(async_client, "map", {"url": f"{base_url}/"})
+        assert isinstance(sc["all_urls"], list)
 
     async def test_crawl_tool_rejects_async_delivery(self, async_client, base_url):
         body = _body(

@@ -289,7 +289,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   strings now collapse to their first occurrence (order-preserving) at the
   chokepoint both `crawl_request` and `render_request` share, and the
   batch-size check counts unique URLs. Wire effect: a duplicated URL yields
-  one result instead of N.
+  one result instead of N. The two render tests asserting the old
+  no-dedup counts were updated to the new contract.
 - **O(1) frontier membership (M2)** (app/api/job_runner.py): dedup scanned
   the persisted frontier list per link (quadratic on wide crawls). A
   transient membership set mirrors the list — rebuilt on first use after
@@ -307,6 +308,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   settled prologue were hand-copied per file. New `_testkit.make_crawl_payload`
   and a local `_run_job_to_completed` prologue own them; call sites pass
   only their intentional variants. Zero assertions changed.
+- **Remaining test-side duplicates consolidated (jscpd)** (tests/):
+  per-file setup factories folded into one home each — `_testkit.pinned_renderer`
+  (Host-override navigation), `_testkit.provider_results` (keyed-provider
+  response bodies), `_testkit.extract_function_body` (source-fingerprint
+  assertions); local helpers dedupe the webhook delivery DNS-pin prologue and
+  the MCP `_tool_call` invocation; LRU/recursion/scope/admission/extraction
+  test prologues share one builder. One clone pair is kept by design:
+  the `render_router`/`search/router` “pure router” boilerplate is the
+  idiomatic FastAPI file shape — a shared factory would obscure the trivial
+  wiring, so the convention stays.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

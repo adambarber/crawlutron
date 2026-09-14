@@ -6,21 +6,7 @@ When the client sends a Transfer-Encoding: chunked request with multiple
 2. After truncation, ``Connection: close`` is set on the response.
 """
 
-
-def _extract_function_body(source: str, name: str) -> str:
-    """Extract just the body of an async function ``name`` at any indent."""
-    import re
-
-    pattern = re.compile(
-        r"^[ \t]*async def "
-        + re.escape(name)
-        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    m = pattern.search(source)
-    if not m:
-        raise AssertionError(f"Could not find function {name}")
-    return m.group(0)
+from _testkit import extract_function_body
 
 
 def test_chunked_request_under_cap_is_not_rejected_pre_emptively():
@@ -45,7 +31,7 @@ def test_chunked_request_drain_continues_after_truncation():
     original_receive() so the ASGI server's socket buffer empties."""
     with open("app/api/middleware.py") as f:
         source = f.read()
-    body = _extract_function_body(source, "_capped_receive")
+    body = extract_function_body(source, "_capped_receive")
     assert "drain_after_truncate" in body
     assert "already_drained" in body
 

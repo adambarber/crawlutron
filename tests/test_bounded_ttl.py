@@ -5,6 +5,15 @@ import threading
 from app.bounded_ttl import BoundedTTLCache
 
 
+def _lru_with_a_b():
+    """BoundedTTLCache (max_entries=2) pre-loaded with a and b."""
+    clock = {"now": 1000.0}
+    cache = BoundedTTLCache(max_entries=2, ttl=100.0, clock=lambda: clock["now"])
+    cache.put("a", 1)
+    cache.put("b", 2)
+    return cache
+
+
 class TestContract:
     def test_get_put_roundtrip_and_ttl_expiry(self):
         clock = {"now": 1000.0}
@@ -34,10 +43,7 @@ class TestContract:
         assert cache.get_stale("missing") is None
 
     def test_lru_eviction_beyond_max_entries(self):
-        clock = {"now": 1000.0}
-        cache = BoundedTTLCache(max_entries=2, ttl=100.0, clock=lambda: clock["now"])
-        cache.put("a", 1)
-        cache.put("b", 2)
+        cache = _lru_with_a_b()
         assert cache.get("a") == 1  # refresh a's recency
         cache.put("c", 3)  # evicts b (LRU), not a
         assert cache.get("b") is None
@@ -55,10 +61,7 @@ class TestContract:
         assert cache.get("b") == 2
 
     def test_peek_does_not_refresh_recency(self):
-        clock = {"now": 1000.0}
-        cache = BoundedTTLCache(max_entries=2, ttl=100.0, clock=lambda: clock["now"])
-        cache.put("a", 1)
-        cache.put("b", 2)
+        cache = _lru_with_a_b()
         assert cache.peek("a") == 1  # no recency refresh
         cache.put("c", 3)  # evicts a (still oldest)
         assert cache.get("a") is None

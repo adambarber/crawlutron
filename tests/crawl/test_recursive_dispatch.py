@@ -91,14 +91,17 @@ async def _run(
     max_pages=10,
     global_concurrency=4,
     seed_sitemaps=False,
+    robots_allows=None,
 ):
     if gate is None:
         gate = _Gate()
     spill = _Spill()
     scheduler = _Scheduler()
 
-    async def robots_allows(url):
-        return True
+    if robots_allows is None:
+
+        async def robots_allows(url):
+            return True
 
     await run_recursive_crawl(
         jobs=jobs,
@@ -173,31 +176,11 @@ async def test_robots_disallows_discovered_link_silently():
         links = [_link("http://a/blocked")] if job.normalized_url == "http://a/" else []
         return _make_result(job.normalized_url, links)
 
-    async def robots_allows(url):
+    async def allows(url):
         return url != "http://a/blocked"
 
     jobs = [CrawlTask(index=0, original_url="http://a/", normalized_url="http://a/", domain="a")]
-    spill = _Spill()
-    scheduler = _Scheduler()
-    await run_recursive_crawl(
-        jobs=jobs,
-        scheduler=scheduler,
-        worker=worker,
-        robots_allows=robots_allows,
-        robots_disallowed=lambda job: _make_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
-        spill=spill,
-        shutdown_event=asyncio.Event(),
-        max_depth=2,
-        max_pages=10,
-        respect_robots=True,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
-        global_concurrency=4,
-        seed_sitemaps=False,
-        resource_gate=_Gate(),
-    )
+    spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
     assert seen == ["http://a/"]  # the blocked link was never crawled
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/"}
 
@@ -210,32 +193,12 @@ async def test_robots_disallows_initial_job_as_skip():
         seen.append(job.normalized_url)
         return _make_result(job.normalized_url)
 
-    async def robots_allows(url):
+    async def allows(url):
         return url != "http://a/blocked"
 
     jobs = [
         CrawlTask(index=0, original_url="http://a/blocked", normalized_url="http://a/blocked", domain="a")
     ]
-    spill = _Spill()
-    scheduler = _Scheduler()
-    await run_recursive_crawl(
-        jobs=jobs,
-        scheduler=scheduler,
-        worker=worker,
-        robots_allows=robots_allows,
-        robots_disallowed=lambda job: _make_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
-        spill=spill,
-        shutdown_event=asyncio.Event(),
-        max_depth=2,
-        max_pages=10,
-        respect_robots=True,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
-        global_concurrency=4,
-        seed_sitemaps=False,
-        resource_gate=_Gate(),
-    )
+    spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
     assert seen == []  # worker never invoked
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/blocked"}
