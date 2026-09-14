@@ -16,6 +16,24 @@ def _make_cache(tmp_path, **kwargs):
     return ContentCache(str(tmp_path), **kwargs)
 
 
+def _fail_writes(cache, monkeypatch, *, only_when=None):
+    """Patch ``_write_data`` to raise OSError.
+
+    With ``only_when`` set, writes whose serialized data lacks that substring
+    still hit the real writer, so a prior entry persists and only the targeted
+    write fails. Shared by the write-failure/rollback tests (one seam, not a
+    ``boom`` fake cloned per test).
+    """
+    real_write = cache._write_data
+
+    def boom(path, data):
+        if only_when is None or only_when in data:
+            raise OSError("disk full")
+        real_write(path, data)
+
+    monkeypatch.setattr(cache, "_write_data", boom)
+
+
 class TestContentCacheByteBudget:
     def test_oversized_entry_is_refused(self, tmp_path):
         cache = _make_cache(tmp_path, max_entry_bytes=200)
@@ -167,14 +185,7 @@ class TestContentCacheByteBudget:
         never persisted — rollback covers RAM, not just the index."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         await cache.aset("k", {"body": "old"}, ttl=60)
-        real_write = cache._write_data
-
-        def boom(path, data):
-            if "new" in data:
-                raise OSError("disk full")
-            real_write(path, data)
-
-        monkeypatch.setattr(cache, "_write_data", boom)
+        _fail_writes(cache, monkeypatch, only_when="new")
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new"}, ttl=60)
         assert await cache.aget("k") == {"body": "old"}
@@ -192,10 +203,7 @@ class TestContentCacheByteBudget:
         total_before = cache._index_total_bytes
         assert total_before == sum(cache._index_sizes.values()) > 0
 
-        def boom(path, data):
-            raise OSError("disk full")
-
-        monkeypatch.setattr(cache, "_write_data", boom)
+        _fail_writes(cache, monkeypatch)
         with pytest.raises(OSError):
             await cache.aset("ghost", {"body": "g" * 300}, ttl=60)
         assert "ghost" not in cache._index
@@ -209,14 +217,7 @@ class TestContentCacheByteBudget:
         await cache.aset("k", {"body": "old"}, ttl=60)
         total_before = cache._index_total_bytes
         assert cache._index_sizes["k"] > 0
-        real_write = cache._write_data
-
-        def boom(path, data):
-            if "new" in data:
-                raise OSError("disk full")
-            real_write(path, data)
-
-        monkeypatch.setattr(cache, "_write_data", boom)
+        _fail_writes(cache, monkeypatch, only_when="new")
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new" * 100}, ttl=60)
         assert cache._index_total_bytes == total_before
