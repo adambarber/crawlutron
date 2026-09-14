@@ -351,6 +351,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   field. `MAX_CONTENT_LENGTH_BYTES` (1 GiB) is now the hard ceiling: rejected
   at policy normalization (mirroring the existing `max_rps` bound, never
   silently clamped) and rejected at the pydantic boundary via `le=` (422).
+- **Exact byte accounting on a failed `aset` write (L1)**
+  (app/crawl/content_cache.py): the failure rollback mutated `_index_total_bytes`
+  with a delta that had never been applied (bytes enter the total only at
+  commit) — a new key's `total -= size` subtracted uncounted bytes (a `max(0,`
+  `…)` clamp hid it only on an empty cache) and an existing key's
+  `+= prior_size - size` drove the total to a negative. Since `_write_data` is
+  `atomic_write_text` (prior file byte-identical on failure) and nothing
+  mutates index/sizes/total/mirror before the write, the rollback is reduced to
+  `raise`, and the commit now re-reads `old_size` under the lock — race-safe,
+  matching sync `set()`. Two new tests pin `total == sum(sizes)` across a
+  failed new-key and existing-key write.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

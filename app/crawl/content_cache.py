@@ -324,32 +324,24 @@ class ContentCache:
                 # Refuse before any disk write (N1): the payload never hits
                 # disk and any still-valid older entry is kept (N5).
                 return
-            prior_path = self._index.get(key)
-            prior_size = self._index_sizes.get(key, 0)
         try:
             await asyncio.to_thread(self._write_data, path, data)
         except BaseException:
-            # Roll the index/accounting back so aget() never consults a path
-            # that was never written, and a surviving older entry stays
-            # reachable (N1). The RAM mirror is rolled back too (or dropped):
-            # it must never serve a value that failed to persist.
-            with self._lock:
-                if prior_path is None:
-                    self._index.pop(key, None)
-                    self._index_sizes.pop(key, None)
-                    self._index_total_bytes = max(0, self._index_total_bytes - size)
-                    self._memory_cache.pop(key, None)
-                else:
-                    self._index[key] = prior_path
-                    self._index_sizes[key] = prior_size
-                    self._index_total_bytes += prior_size - size
-                    self._memory_cache.pop(key, None)
+            # Nothing above mutated the index, byte totals, or RAM mirror before
+            # this point, and atomic_write_text leaves the prior file byte-
+            # identical on failure — so the pre-write state is already exactly
+            # consistent. A prior valid entry stays reachable and a new key
+            # stays absent; there is nothing to roll back. Just propagate (N1).
             raise
         with self._lock:
+            # Read the prior size under the commit lock (like sync set()), so a
+            # concurrent commit between the size-check and here can't leave the
+            # byte total off by the stale delta.
+            old_size = self._index_sizes.get(key, 0)
             self._index[key] = path
             self._index.move_to_end(key)
             self._index_sizes[key] = size
-            self._index_total_bytes += size - prior_size
+            self._index_total_bytes += size - old_size
             # Mirror only after the write commits, under the shared gate.
             self._remember_memory_locked(key, value, expires, size)
         # Enforce count + byte limits after write, using the in-memory index

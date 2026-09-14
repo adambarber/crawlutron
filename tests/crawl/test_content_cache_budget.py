@@ -179,3 +179,46 @@ class TestContentCacheByteBudget:
             await cache.aset("k", {"body": "new"}, ttl=60)
         assert await cache.aget("k") == {"body": "old"}
         assert cache.get("k") == {"body": "old"}
+
+    async def test_aset_new_key_write_failure_preserves_byte_total(self, tmp_path, monkeypatch):
+        """L1: a failed write of a NEW key must not move _index_total_bytes.
+
+        Bytes enter the total only at commit (after a successful write), so the
+        old rollback's `total -= size` decremented bytes that were never added;
+        the max(0, ...) clamp only hid it when the cache was otherwise empty."
+        """
+        cache = _make_cache(tmp_path, max_entry_bytes=10_000)
+        await cache.aset("keep", {"body": "v" * 200}, ttl=60)  # counts once, stays
+        total_before = cache._index_total_bytes
+        assert total_before == sum(cache._index_sizes.values()) > 0
+
+        def boom(path, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cache, "_write_data", boom)
+        with pytest.raises(OSError):
+            await cache.aset("ghost", {"body": "g" * 300}, ttl=60)
+        assert "ghost" not in cache._index
+        assert cache._index_total_bytes == total_before
+        assert cache._index_total_bytes == sum(cache._index_sizes.values())
+
+    async def test_aset_existing_key_write_failure_preserves_byte_total(self, tmp_path, monkeypatch):
+        """L1: an existing key whose re-write fails keeps its prior bytes counted
+        (the old rollback applied a spurious `prior_size - size` delta)."""
+        cache = _make_cache(tmp_path, max_entry_bytes=10_000)
+        await cache.aset("k", {"body": "old"}, ttl=60)
+        total_before = cache._index_total_bytes
+        assert cache._index_sizes["k"] > 0
+        real_write = cache._write_data
+
+        def boom(path, data):
+            if "new" in data:
+                raise OSError("disk full")
+            real_write(path, data)
+
+        monkeypatch.setattr(cache, "_write_data", boom)
+        with pytest.raises(OSError):
+            await cache.aset("k", {"body": "new" * 100}, ttl=60)
+        assert cache._index_total_bytes == total_before
+        assert cache._index_total_bytes == sum(cache._index_sizes.values())
+        assert await cache.aget("k") == {"body": "old"}
