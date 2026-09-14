@@ -19,6 +19,7 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
+    MAX_CONTENT_LENGTH_BYTES,
     MAX_DISCOVERED_LINKS,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
@@ -207,7 +208,8 @@ class CrawlPolicyLimits(BaseModel):
     max_content_length_bytes: int | None = Field(
         None,
         ge=0,
-        description="Maximum content size in bytes per response. Omit (recommended) to let the service scale the per-page cap against its RAM budget and concurrency; set an explicit value only when a host needs a hard cap regardless of parallelism.",
+        le=MAX_CONTENT_LENGTH_BYTES,
+        description="Maximum content size in bytes per response. Omit (recommended) to let the service scale the per-page cap against its RAM budget and concurrency; set an explicit value only when a host needs a hard cap regardless of parallelism. Capped at MAX_CONTENT_LENGTH_BYTES.",
     )
     total_url_budget_seconds: float = Field(
         DEFAULT_TOTAL_URL_BUDGET_SECONDS,

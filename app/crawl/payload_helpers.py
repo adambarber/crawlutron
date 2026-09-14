@@ -15,6 +15,7 @@ from app.constants import (
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_STRATEGIES,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    MAX_CONTENT_LENGTH_BYTES,
     MAX_RATE_LIMIT_RPS,
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
@@ -91,7 +92,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
         if not 0.0 <= max_rps <= MAX_RATE_LIMIT_RPS:
             raise ValueError("invalid_policy_limits")
         max_content_length_bytes = int(limits.get("max_content_length_bytes", 0) or 0)
-        if max_content_length_bytes < 0:
+        if not 0 <= max_content_length_bytes <= MAX_CONTENT_LENGTH_BYTES:
             raise ValueError("invalid_policy_limits")
     except (TypeError, ValueError):
         raise ValueError("invalid_policy_limits") from None

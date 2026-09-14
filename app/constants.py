@@ -137,6 +137,12 @@ DEFAULT_CHALLENGE_WAIT_SECONDS: int = 15
 
 # Per-response body size bound.
 DEFAULT_MAX_CONTENT_LENGTH_BYTES: int = 10 * 1024 * 1024
+# Hard ceiling a caller may set for a single page's body cap. Above it an
+# explicit ``max_content_length_bytes`` would disable the concurrency-scaled
+# RAM budget and inflate the decompression bound — so it is rejected, not
+# honored (matches max_rps). Set to the default total RAM budget: one page
+# may never outgrow the whole in-flight allowance.
+MAX_CONTENT_LENGTH_BYTES: int = 1 * 1024 * 1024 * 1024
 DISCOVERY_BODY_MAX_BYTES: int = 8 * 1024 * 1024
 
 # Per-strategy timeout / retry budgets.

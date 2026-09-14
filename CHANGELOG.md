@@ -342,7 +342,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   timeout/fail contract. The copy is migrated to
   `poll_until(..., message=...)`; a tree-wide detector bans the shape in
   tests (only a real `pytest.fail` call node counts — a docstring claim
-  does not), bite-proven in both directions.
+   does not), bite-proven in both directions.
+- **Ceiling on explicit `max_content_length_bytes` (M2)**
+  (app/constants.py, app/crawl/payload_helpers.py, app/api_models.py): an
+  oversized per-page cap (e.g. `10**12`) was honored verbatim by
+  `_effective_max_content_length`, disabling the RAM-budget scaling AND
+  inflating the decompression bound — two chokepoints defeated by one caller
+  field. `MAX_CONTENT_LENGTH_BYTES` (1 GiB) is now the hard ceiling: rejected
+  at policy normalization (mirroring the existing `max_rps` bound, never
+  silently clamped) and rejected at the pydantic boundary via `le=` (422).
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

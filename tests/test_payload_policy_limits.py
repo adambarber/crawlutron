@@ -46,6 +46,43 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         )
         assert policy["limits"]["max_content_length_bytes"] == 1024
 
+    def test_max_content_length_above_ceiling_rejected(self):
+        # An explicit cap must not be a caller-controlled RAM/decompression
+        # override: over the hard ceiling it is rejected, like max_rps, never
+        # silently clamped into a different contract (M2).
+        import pytest
+
+        from app.constants import MAX_CONTENT_LENGTH_BYTES
+
+        with pytest.raises(ValueError):
+            _payload_policy(
+                {
+                    "url": "https://example.com/",
+                    "policy": {"limits": {"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES + 1}},
+                },
+                CrawlerSettings.from_mapping({}),
+            )
+
+    def test_max_content_length_at_ceiling_survives(self):
+        from app.constants import MAX_CONTENT_LENGTH_BYTES
+
+        policy = _payload_policy(
+            {"url": "https://example.com/", "policy": {"limits": {"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES}}},
+            CrawlerSettings.from_mapping({}),
+        )
+        assert policy["limits"]["max_content_length_bytes"] == MAX_CONTENT_LENGTH_BYTES
+
+    def test_max_content_length_above_ceiling_is_a_validation_error(self):
+        # The pydantic boundary must 422 oversized caps (le= on the model).
+        import pytest
+        from pydantic import ValidationError
+
+        from app.api_models import CrawlPolicyLimits
+        from app.constants import MAX_CONTENT_LENGTH_BYTES
+
+        with pytest.raises(ValidationError):
+            CrawlPolicyLimits(max_content_length_bytes=MAX_CONTENT_LENGTH_BYTES + 1)
+
     def test_max_content_length_default_keeps_ram_scaling(self):
         # Default (absent) must remain 0 = "not explicitly set", so the
         # concurrency-scaled RAM budget in _effective_max_content_length
