@@ -59,6 +59,7 @@ class CrawlJobState:
     # Whole-site fields (used when kind == WHOLE_SITE)
     frontier: list[str] = field(default_factory=list)  # URLs pending crawl
     visited: set[str] = field(default_factory=set)  # URLs already crawled
+    in_flight: list[str] = field(default_factory=list)  # batch inside the engine call
     # Single-shot fields (used when kind == SINGLE_SHOT)
     # root_url holds the first URL (or "" for batch); results holds completed crawl results
     results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
@@ -118,6 +119,7 @@ class JobStore:
                 status TEXT NOT NULL,           -- JobStatus enum value
                 frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of URLs
                 visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of URLs
+                in_flight TEXT NOT NULL DEFAULT '[]',      -- JSON array: batch inside the engine call
                 results TEXT NOT NULL DEFAULT '[]',       -- JSON array of result objects
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -131,6 +133,12 @@ class JobStore:
             self._conn.commit()
         except sqlite3.OperationalError:
             # Column already exists; ignore
+            pass
+        # Migration: add in_flight column for mid-batch crash recovery (re-queue).
+        try:
+            self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN in_flight TEXT NOT NULL DEFAULT '[]'")
+            self._conn.commit()
+        except sqlite3.OperationalError:
             pass
         self._conn.commit()
 
@@ -148,6 +156,7 @@ class JobStore:
             updated_at=row[9],
             error=row[10],
             stats=json.loads(row[11]),
+            in_flight=json.loads(row[12]),
         )
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
@@ -190,8 +199,8 @@ class JobStore:
         self._conn.execute(
             """
             INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
-                                    created_at, updated_at, error, stats)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    created_at, updated_at, error, stats, in_flight)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(job_id) DO UPDATE SET
                 kind=excluded.kind,
                 root_url=excluded.root_url,
@@ -202,7 +211,8 @@ class JobStore:
                 results=excluded.results,
                 updated_at=excluded.updated_at,
                 error=excluded.error,
-                stats=excluded.stats
+                stats=excluded.stats,
+                in_flight=excluded.in_flight
         """,
             (
                 job.job_id,
@@ -217,6 +227,7 @@ class JobStore:
                 job.updated_at,
                 job.error,
                 json.dumps(job.stats, separators=(",", ":"), default=_json_default),
+                json.dumps(job.in_flight, separators=(",", ":"), default=_json_default),
             ),
         )
         self._conn.commit()
@@ -226,7 +237,7 @@ class JobStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT job_id, kind, root_url, policy, status, frontier, visited, results, "
-                "created_at, updated_at, error, stats FROM crawl_jobs WHERE job_id = ?",
+                "created_at, updated_at, error, stats, in_flight FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:

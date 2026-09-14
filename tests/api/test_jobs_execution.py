@@ -143,6 +143,54 @@ def client(job_store):
     return AsyncClient(transport=transport, base_url="http://test")
 
 
+class TestCrashRecovery:
+    """A process killed mid-engine-call must not silently drop the in-flight batch.
+
+    ``_run_job`` write-aheads the frontier pop (so the reload-each-iteration loop
+    can't refetch the same batch), which means the persisted state right after a
+    crash is: the batch removed from ``frontier`` but not yet recorded to
+    ``visited``/``results``. Recovery must re-queue that batch and re-crawl it
+    (at-least-once; visited + the content cache keep the re-fetch cheap), rather
+    than observing an empty frontier and marking the job COMPLETED with 0 pages.
+    """
+
+    async def test_crash_recovery_requeues_the_in_flight_batch(self, job_store, real_sleeps):
+        # Persisted state exactly as a hard kill during the first engine call leaves it:
+        # root popped (frontier empty), recorded as in_flight, nothing visited, RUNNING.
+        job = job_store.create("http://example.test/a", {})
+        job.frontier = []
+        job.in_flight = ["http://example.test/a"]
+        job.status = JobStatus.RUNNING
+        job_store.save(job)
+
+        job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")]))
+        await job_runner.recover_and_start_pending_jobs(
+            job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
+        )
+        assert await _wait_status(job_store, job.job_id, {"completed", "failed"}) == "completed"
+
+        job = job_store.load(job.job_id)
+        assert job.visited == {"http://example.test/a"}, "in-flight batch was dropped, not re-crawled"
+        assert job.in_flight == []
+
+    async def test_normal_completion_clears_in_flight(self, client, job_store, real_sleeps):
+        # A healthy run must not leave a stale in_flight that would double-crawl on a
+        # later resume: the batch is cleared in the same save that records its results.
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            "http://example.test/a",
+            _fake_execute(
+                [
+                    _canned_result("http://example.test/a", links=["http://example.test/b"]),
+                    _canned_result("http://example.test/b"),
+                ]
+            ),
+        )
+        assert job.visited == {"http://example.test/a", "http://example.test/b"}
+        assert job.in_flight == []
+
+
 class TestWholeSiteJobExecution:
     async def test_create_runs_to_completed(self, client, job_store, real_sleeps):
         job_runner.install_execute_crawl(

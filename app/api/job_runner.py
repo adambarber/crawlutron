@@ -166,6 +166,15 @@ async def _run_job(
     job = job_store.load(job_id)
     if job is None:
         return
+    if job.in_flight:
+        # Re-queue a batch that was popped (write-ahead) but never recorded because
+        # the process died inside the engine call. At-least-once: visited + the
+        # content cache make the re-fetch cheap and non-duplicating, so a crash
+        # resumes instead of silently completing with the batch lost.
+        for url in job.in_flight:
+            if url not in job.visited and url not in _frontier_set(job):
+                _frontier_add(job, url)
+        job.in_flight = []
     job.status = JobStatus.RUNNING
     job_store.save(job)
 
@@ -183,11 +192,15 @@ async def _run_job(
 
             batch = _pop_frontier(job)
             if not batch:
+                job.in_flight = []  # clean terminal state even if a crash left it set
                 job.status = JobStatus.COMPLETED
                 job_store.save(job)
                 return
             # Write-ahead the pop: the post-engine reload must see the
             # shrunk frontier or the loop refetches the same batch forever.
+            # Record the batch as in_flight in the same save so a crash before
+            # the results commit re-queues exactly these urls (at-least-once).
+            job.in_flight = list(batch)
             job_store.save(job)
 
             payload: dict[str, Any] = {
@@ -236,6 +249,7 @@ async def _run_job(
             # the loop, or every item re-adds the running total (1+2+...+n).
             if failed:
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
+            job.in_flight = []  # batch committed; a later resume must not re-crawl it
             job_store.save(job)
 
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:

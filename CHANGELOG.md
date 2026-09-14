@@ -435,7 +435,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
    "callers own dedupe" and "5 MB → 5 MB" for the gzip-bomb test — both corrected to
    the real behavior (canonical within-request dedup + within-TTL reuse; a ~1 KB →
    1 MB gzip bomb plus deflate/brotli cases). Contract tests assert the new
-   advertised fields.
+    advertised fields.
+ - **Durable whole-site jobs no longer lose the in-flight batch on a mid-crawl
+   crash** (app/api/job_runner.py, app/crawl/job_store.py): exercising restart
+   behaviour exposed that `_run_job` write-aheads the frontier pop (so the
+   reload-each-iteration loop can't refetch a batch) but records results/
+   `visited` only *after* the ~engine call, so a process killed mid-batch left
+   the batch neither visited nor queued — on recovery `_pop_frontier` returned
+   empty and the job was marked `COMPLETED` with **0 pages**. The persisted
+   `CrawlJobState` now carries an `in_flight` list (schema `+ migration`, set in
+   the same write-ahead save that removes the batch and cleared when its results
+   commit); `_run_job` re-queues any non-empty `in_flight` onto the frontier at
+   entry, so a crash resumes with at-least-once delivery (the `visited` set and
+   content cache keep the re-fetch cheap and non-duplicating). This closes the
+   #1834 "loses only in-flight work" claim — previously it also *dropped* it and
+   falsely completed. A `TestCrashRecovery` test encodes the exact persisted
+   post-pop/pre-record state and asserts recovery re-crawls it (the detection
+   gap: nothing previously asserted in-flight durability).
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):
