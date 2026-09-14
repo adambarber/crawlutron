@@ -235,8 +235,11 @@ class ContentCache:
         value = envelope.get("value")
         # Warm the mirror on the sync disk hit too (same accelerator contract
         # as aget): a hot URL must stop touching disk after the first read.
+        # The mirror/index update runs under the lock, exactly like aget, so
+        # the multi-step store stays atomic against concurrent writers.
         expires = envelope.get("expires")
-        self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
+        with self._lock:
+            self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
         return value
 
     def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:

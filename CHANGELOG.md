@@ -264,6 +264,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   clamping to 1 (pinned by parametrized behavior tests; garbage now also
   logs). The detector gains shape 3: any `int`/`float` of a name assigned
   directly from `os.environ.get`/`getenv`/subscript, bite-proven.
+
+### Round 8 hardening (codebase-review fix stream)
+- **Sync `get()` honors the mirror lock contract (M1)**
+  (app/crawl/content_cache.py): `get()` warmed the RAM mirror outside
+  `self._lock` while `aget()` held it, so the multi-step mirror/index store
+  raced concurrent writers. The store now runs under the lock on both paths;
+  a regression test pins the contract.
 - **One sanctioned test poller (jscpd test-side)** (tests/_testkit.py,
   tests/api/test_async_crawl.py, tests/test_safety_invariants.py):
   `poll_until` is the single predicate poller — the hand-rolled

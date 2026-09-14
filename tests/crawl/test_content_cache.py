@@ -81,6 +81,28 @@ def test_prune_removes_only_expired(tmp_path):
     assert c.get("a") is None
 
 
+def test_get_holds_lock_while_updating_memory_mirror(tmp_path, monkeypatch):
+    """Sync get() warms the RAM mirror under the lock, exactly like aget().
+
+    ``_remember_memory_locked`` requires the caller to hold ``self._lock``;
+    the sync disk-hit path honors the same contract as the async one so the
+    mirror/index update stays atomic against concurrent set/aset/get.
+    """
+    c = ContentCache(cache_dir=tmp_path / "m", default_ttl=3600)
+    c.set("k", {"v": 1})
+    c._memory_cache.clear()  # force the disk-hit path on the next get()
+    held = []
+    original = ContentCache._remember_memory_locked
+
+    def recording(self, key, value, expires, size):
+        held.append(self._lock.locked())
+        return original(self, key, value, expires, size)
+
+    monkeypatch.setattr(ContentCache, "_remember_memory_locked", recording)
+    assert c.get("k") == {"v": 1}
+    assert held == [True]
+
+
 # --------------------------- integration: real server, no mocks ---------------------------
 
 
