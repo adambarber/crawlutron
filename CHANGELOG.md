@@ -388,8 +388,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (app/crawl/strategies/http.py): a failing fetch retried back-to-back with no
   wait, hammering an origin that is down or rate-limiting. Now `_retry_backoff_seconds`
   inserts a capped exponential gap (base 0.25s, doubling, ceiling 2.0s) between
-  attempts, so the retry budget widens gaps instead of busy-looping, and a large
-  `max_retries` can never park a URL past the per-retry ceiling.
+   attempts, so the retry budget widens gaps instead of busy-looping, and a large
+   `max_retries` can never park a URL past the per-retry ceiling.
+ - **Two new same-day drift detectors** (tests/test_safety_invariants.py), closing
+   enforcement gaps rather than just the bugs:
+   - `test_locked_cache_helpers_are_called_under_the_lock` — any `_*_locked` cache
+     helper must be invoked inside a `with …lock` block. The twin detector only
+     caught raw `_memory_cache` access, so the M1 class (`get()` calling
+     `_remember_memory_locked` off-lock while `aget()` held it) slipped past; this
+     makes an unlocked `_*_locked` call a tree-wide failure. Non-vacuously sees all
+     nine real call sites in `content_cache.py`, all correctly guarded.
+   - `test_decompression_reaches_only_through_the_chokepoint` — no `app` module may
+     import or call `gzip`/`zlib`/`brotli` directly; body decoding must route through
+     the capped `decompress_body` chokepoint. The existing cap sweep guards the
+     chokepoint's callers; this guards the bypass around it (a re-introduced
+     header-trusting, uncapped decompress). Both ship `*_bites` proofs.
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):

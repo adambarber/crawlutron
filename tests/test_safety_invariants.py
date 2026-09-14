@@ -608,6 +608,79 @@ def test_memory_cache_twin_detector_bites():
 
 
 # ---------------------------------------------------------------------------
+# Lock ownership: a *_locked helper presumes the caller holds the lock (M1)
+# ---------------------------------------------------------------------------
+
+
+def _is_locked_helper_name(name: str | None) -> bool:
+    return bool(name) and name.startswith("_") and name.endswith("_locked")
+
+
+def _references_lock(expr: ast.expr) -> bool:
+    """True for ``self._lock`` / ``some_lock`` style context expressions."""
+    target = expr.func if isinstance(expr, ast.Call) else expr
+    if isinstance(target, ast.Attribute):
+        return "lock" in target.attr.lower()
+    if isinstance(target, ast.Name):
+        return "lock" in target.id.lower()
+    return False
+
+
+def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a call to a ``_*_locked`` helper not lexically inside a lock ``with``.
+
+    The ``_*_locked`` cache helpers assume the caller already holds ``self._lock``
+    (they touch shared index/RAM state with no internal acquisition). ``get()``
+    once called ``_remember_memory_locked`` off-lock while ``aget()`` held it —
+    the exact sync/async drift the twin detector can't see, because the call site
+    is helper-shaped and only the *lock ownership* was wrong. This closes that by
+    making an unlocked ``_*_locked`` call a hard failure anywhere in ``app``.
+    """
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fname = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+        if not _is_locked_helper_name(fname):
+            continue
+        under_lock = False
+        cur: ast.AST | None = parents.get(node)
+        while cur is not None:
+            if isinstance(cur, (ast.With, ast.AsyncWith)) and any(
+                _references_lock(item.context_expr) for item in cur.items
+            ):
+                under_lock = True
+                break
+            cur = parents.get(cur)
+        if not under_lock:
+            offenders.append(offender(path, node.lineno, f"{fname}() called outside a lock context manager"))
+    return offenders
+
+
+def test_locked_cache_helpers_are_called_under_the_lock():
+    """M1 class: every ``_*_locked`` call sits inside a ``with ...lock`` block."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_locked_calls_outside_lock_offenders(tree, path))
+    assert not offenders, "call *_locked helpers inside `with self._lock`: " + ", ".join(offenders)
+
+
+def test_locked_helper_lock_ownership_detector_bites():
+    """An off-lock *_locked call fires; the guarded form stays clean."""
+    bad = ast.parse("class C:\n    def get(self, key):\n        return self._remember_memory_locked(key)\n")
+    offenders = _locked_calls_outside_lock_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
+    assert len(offenders) == 1 and "_remember_memory_locked" in offenders[0], offenders
+    good = ast.parse(
+        "class C:\n    def get(self, key):\n        with self._lock:\n            return self._remember_memory_locked(key)\n"
+    )
+    assert not _locked_calls_outside_lock_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
 # Error-envelope shape (jscpd #3 class)
 # ---------------------------------------------------------------------------
 
@@ -962,6 +1035,91 @@ def test_decompress_cap_detector_bites():
     assert len(offenders) == 1, offenders
     good = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n")
     assert not _decompress_cap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Decompression reaches only through the capped chokepoint (legacy #3)
+# ---------------------------------------------------------------------------
+
+# The codecs app/crawl/decompression.py imports to implement decompress_body.
+_DECOMPRESS_CODECS = frozenset({"gzip", "zlib", "brotli"})
+_DECOMPRESS_CODEC_METHODS = frozenset({"decompress", "decompressobj", "GzipFile", "Decompressor"})
+
+
+def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag raw stdlib decompression (import or call) outside the chokepoint.
+
+    All body decoding must route through ``decompression.decompress_body``, which
+    makes ``max_output_bytes`` mandatory and returns input unchanged on decoder
+    error (so a forged ``Content-Encoding`` cannot expand or corrupt unbounded).
+    A module that imports or calls ``gzip``/``zlib``/``brotli`` directly can
+    re-introduce the header-trusting, uncapped decompress the legacy cleanup
+    removed — the ``_decompress_cap`` sweep only guards the chokepoint's own
+    callers, so this closes the bypass around it.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in _DECOMPRESS_CODECS:
+                    offenders.append(
+                        offender(
+                            path,
+                            node.lineno,
+                            f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
+                        )
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS:
+                offenders.append(
+                    offender(
+                        path,
+                        node.lineno,
+                        f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
+                    )
+                )
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id in _DECOMPRESS_CODECS
+                and func.attr in _DECOMPRESS_CODEC_METHODS
+            ):
+                offenders.append(
+                    offender(
+                        path,
+                        node.lineno,
+                        f"calls {func.value.id}.{func.attr}() directly (bypasses decompress_body)",
+                    )
+                )
+    return offenders
+
+
+def test_decompression_reaches_only_through_the_chokepoint():
+    """No app module touches gzip/zlib/brotli except the decompression chokepoint."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED):
+        offenders.extend(_decompress_bypass_offenders(tree, path))
+    assert not offenders, "decompress only via decompression.decompress_body(): " + ", ".join(offenders)
+
+
+def test_decompress_bypass_detector_bites():
+    """A header-driven raw decompress fires on both import and call."""
+    bad = ast.parse(
+        "import gzip\n"
+        "def f(raw, hdr):\n"
+        "    if 'gzip' in hdr.get('content-encoding', ''):\n"
+        "        return gzip.decompress(raw)\n"
+    )
+    offenders = _decompress_bypass_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 2, offenders
+    good = ast.parse(
+        "from app.crawl.decompression import decompress_body\n"
+        "def f(raw, hdr):\n"
+        "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n"
+    )
+    assert not _decompress_bypass_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
