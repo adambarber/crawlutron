@@ -328,7 +328,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   non-finite values (a parse-level rule), and `set_domain_min_delay` clamps
   finite values to the existing politeness ceiling (`_MAX_COOLDOWN_WAIT`)
   at the write — the chokepoint where a delay becomes a scheduler wait. The
-  ceiling lives only in the scheduler; the parser never clamps.
+  ceiling lives only in the scheduler; the parser never clamps. A tree-wide AST
+  invariant (`test_domain_politeness_floor_is_committed_only_via_the_setter`)
+  fails CI if `_domain_min_delay` is ever written outside the clamped setter.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

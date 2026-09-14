@@ -1110,3 +1110,62 @@ def test_header_int_detector_bites():
         "def _declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n"
     )
     assert not _unguarded_header_int_offenders(param_based, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Robots politeness floor is committed only through the bounded setter (M1)
+# ---------------------------------------------------------------------------
+
+
+def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag direct writes to ``_domain_min_delay`` outside ``set_domain_min_delay``.
+
+    The robots Crawl-delay floor is clamped to a finite politeness ceiling only
+    in ``set_domain_min_delay``; a bare ``self._domain_min_delay[...] = ...``
+    anywhere else (even ``+=``) bypasses that bound and can drop an
+    ``inf``/huge value straight into ``asyncio.sleep`` (the M1 hang).
+    """
+    offenders: list[str] = []
+    for func in (
+        node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        if func.name == "set_domain_min_delay":
+            continue
+        for node in ast.walk(func):
+            if not isinstance(node, (ast.Assign, ast.AugAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Attribute)
+                    and target.value.attr == "_domain_min_delay"
+                ):
+                    offenders.append(
+                        offender(path, node.lineno, f"unbounded write to _domain_min_delay in {func.name}()")
+                    )
+    return offenders
+
+
+def test_domain_politeness_floor_is_committed_only_via_the_setter():
+    """Only set_domain_min_delay writes _domain_min_delay (M1 chokepoint)."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_unbounded_domain_delay_writes(tree, path))
+    assert not offenders, (
+        "commit the Crawl-delay floor through the clamped set_domain_min_delay: " + ", ".join(offenders)
+    )
+
+
+def test_domain_delay_detector_bites():
+    bad = ast.parse(
+        "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
+        "    def bump(self):\n        self._domain_min_delay['y'] += 1\n"
+    )
+    offenders = _unbounded_domain_delay_writes(bad, REPO_ROOT / "app" / "_synthetic.py")
+    assert len(offenders) == 2, offenders
+    good = ast.parse(
+        "class S:\n    def set_domain_min_delay(self, d, s):\n        self._domain_min_delay[d] = min(s, 300.0)\n"
+        "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n"
+    )
+    assert not _unbounded_domain_delay_writes(good, REPO_ROOT / "app" / "_synthetic.py")
