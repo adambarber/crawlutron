@@ -41,9 +41,25 @@ services:
       BROWSER_CRAWLER_TAVILY_API_KEY: "${BROWSER_CRAWLER_TAVILY_API_KEY:-}"
       # BROWSER_CRAWLER_BRAVE_API_KEY: ""
       # BROWSER_CRAWLER_SERPER_API_KEY: ""
+      # Belt over the image's baked value: guarantee ORT telemetry is off even if
+      # this service is ever pointed at an image built before that ENV landed.
+      # Zero-telemetry posture; see docs/references/browser-crawler-telemetry.md.
+      ORT_DISABLE_TELEMETRY: "1"
     volumes:
       - ./logs:/app/logs
       - ./cache:/app/cache
+    # Telemetry egress blackhole. ORT_DISABLE_TELEMETRY handles onnxruntime; this
+    # is the un-bypassable chokepoint for the sinks that have NO opt-out flag
+    # (Playwright 1DS, a future ORT, camoufox's App-Insights path). These hosts
+    # are never crawl targets, so sinkholing to 0.0.0.0 cannot affect the crawler
+    # itself. See docs/references/browser-crawler-telemetry.md.
+    extra_hosts:
+      - "mobile.events.data.microsoft.com:0.0.0.0"
+      - "browser.events.data.microsoft.com:0.0.0.0"
+      - "default.events.data.microsoft.com:0.0.0.0"
+      - "settings-win.data.microsoft.com:0.0.0.0"
+      - "dc.services.visualstudio.com:0.0.0.0"
+      - "rt.services.visualstudio.com:0.0.0.0"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
       interval: 30s

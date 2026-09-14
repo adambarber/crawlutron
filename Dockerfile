@@ -80,6 +80,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BROWSER_CRAWLER_CONTENT_CACHE_ENABLED=true \
     BROWSER_CRAWLER_CACHE_DIR=/app/cache \
     BROWSER_CRAWLER_CACHE_TTL_SECONDS=3600 \
+    # Zero telemetry is a hard posture for this service. ONNX Runtime (pulled in
+    # transitively by magika, used for ML content-type inference) is the one
+    # component here that has a native opt-out flag, so we set it at the source.
+    # Playwright ships no telemetry in this version and camoufox only phone-homes
+    # on demand; the compose extra_hosts sinkhole is the un-bypassable chokepoint
+    # for any of those that lack a flag. See
+    # docs/references/browser-crawler-telemetry.md.
+    ORT_DISABLE_TELEMETRY=1 \
     # Bound glibc malloc arenas: concurrent lxml/trafilatura parsing otherwise
     # inflates resident memory via arena fragmentation.
     MALLOC_ARENA_MAX=2

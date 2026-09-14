@@ -391,6 +391,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   attempts, so the retry budget widens gaps instead of busy-looping, and a large
   `max_retries` can never park a URL past the per-retry ceiling.
 
+### Deployment posture
+- **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):
+  `ORT_DISABLE_TELEMETRY=1` disables onnxruntime's native client telemetry (via
+  magika) at lib load, and the Microsoft OneCollector / App-Insights host family
+  is sinkholed to `0.0.0.0` via `extra_hosts` as the un-bypassable egress
+  chokepoint for libraries with no opt-out flag (Playwright's driver ships none
+  in this version; camoufox phone-homes only on explicit operator action).
+  Posture and verification documented in
+  docs/references/browser-crawler-telemetry.md.
+
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
   `CONTRIBUTING.md`, `.github/workflows/ci.yml`, `Makefile`,
