@@ -362,6 +362,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `raise`, and the commit now re-reads `old_size` under the lock — race-safe,
   matching sync `set()`. Two new tests pin `total == sum(sizes)` across a
   failed new-key and existing-key write.
+- **Hostile `Content-Length` can't crash a fetch (L2)**
+  (app/crawl/strategies/http.py): both fetchers pre-checked the declared body
+  size with a bare `int(content_length)`, so a crafted `Content-Length: abc`
+  raised out of the fetch and turned one response into that URL's failure. A
+  single `_declared_length_exceeds` chokepoint now parses it, treating
+  malformed/negative/absent as "unknown size" (skip the pre-flight; the
+  streamed running cap still bounds the body). The scripted httpx mock
+  transport moved to `_testkit` (dedup). A guard pins that both fetchers use
+  the predicate and never reintroduce the bare `int()`.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,

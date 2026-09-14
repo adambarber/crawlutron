@@ -1003,3 +1003,110 @@ def test_id_mint_detector_bites():
     assert len(offenders) == 2, offenders  # uuid4 call AND hex slice
     good = ast.parse("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n")
     assert not _id_mint_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Header ints are guarded (L2): a hostile header must never crash a fetch
+# ---------------------------------------------------------------------------
+
+
+def _is_int_or_float_call(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"int", "float"}
+
+
+def _reads_headers(node: ast.AST) -> bool:
+    """True for ``x.headers.get(...)`` or ``x.headers[...]`` -- a raw header read."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        source = node.func.value
+        return node.func.attr == "get" and isinstance(source, ast.Attribute) and source.attr == "headers"
+    if isinstance(node, ast.Subscript):
+        return isinstance(node.value, ast.Attribute) and node.value.attr == "headers"
+    return False
+
+
+def _catches_value_error(node: ast.Try) -> bool:
+    """True if any handler catches ValueError (incl. via a tuple/Exception)."""
+    for handler in node.handlers:
+        exc = handler.type
+        names = (
+            {elt.id for elt in exc.elts if isinstance(elt, ast.Name)}
+            if isinstance(exc, ast.Tuple)
+            else {exc.id}
+            if isinstance(exc, ast.Name)
+            else set()
+        )
+        if names & {"ValueError", "Exception", "BaseException"}:
+            return True
+    return False
+
+
+def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag ``int``/``float`` of a header-derived value outside a try/except ValueError.
+
+    Parsing a ``Content-Length`` (or any header) into a number without guarding
+    the conversion is the L2 class: one crafted ``Content-Length: abc`` raises
+    out of the fetcher and fails the whole request. The safe shapes either go
+    through a guard predicate (the arg is a parameter, not an in-scope header
+    read) or wrap the ``int()`` in ``try/except ValueError`` (middleware's
+    request-cap check). Tree-wide because any module can grow a header read.
+    """
+    offenders: list[str] = []
+    for func in _functions_with(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        header_names = {
+            target.id
+            for node in ast.walk(func)
+            if isinstance(node, ast.Assign) and _reads_headers(node.value)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        guarded = {
+            id(sub)
+            for node in ast.walk(func)
+            if isinstance(node, ast.Try) and _catches_value_error(node)
+            for sub in ast.walk(node)
+            if _is_int_or_float_call(sub)
+        }
+        for node in ast.walk(func):
+            if not _is_int_or_float_call(node) or id(node) in guarded or not node.args:
+                continue
+            arg = node.args[0]
+            is_derived = _reads_headers(arg) or (isinstance(arg, ast.Name) and arg.id in header_names)
+            if is_derived:
+                offenders.append(
+                    offender(path, node.lineno, f"{func.name}() parses a header number unguarded")
+                )
+    return offenders
+
+
+def test_header_numbers_are_converted_under_guard():
+    """No unguarded int()/float() on a header value anywhere in app/ (L2)."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_unguarded_header_int_offenders(tree, path))
+    assert not offenders, "parse header numbers through a guard or try/except ValueError: " + ", ".join(
+        offenders
+    )
+
+
+def test_header_int_detector_bites():
+    bad = ast.parse(
+        "async def fetcher(resp):\n    content_length = resp.headers.get('content-length')\n"
+        "    return int(content_length) > 100\n"
+    )
+    offenders = _unguarded_header_int_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    inline_bad = ast.parse(
+        "async def fetcher(resp):\n    return int(resp.headers.get('content-length', 0)) > 100\n"
+    )
+    assert _unguarded_header_int_offenders(inline_bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    guarded = ast.parse(
+        "def guard(value):\n    try:\n        return int(value)\n    except ValueError:\n        return 0\n"
+    )
+    assert not _unguarded_header_int_offenders(guarded, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    # A sanitizer takes a parameter, not a live header read -- never flagged.
+    param_based = ast.parse(
+        "def _declared_length_exceeds(header_value, limit):\n    return int(header_value) > limit\n"
+    )
+    assert not _unguarded_header_int_offenders(param_based, REPO_ROOT / "app" / "crawl" / "_synthetic.py")

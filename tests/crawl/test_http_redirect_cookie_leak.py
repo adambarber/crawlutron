@@ -1,52 +1,6 @@
-from urllib.parse import urlparse
+from _testkit import MockResponse, patch_http_fetcher_transport
 
-import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.http import _default_http_fetcher
-
-
-class MockResponse:
-    def __init__(self, status_code, headers, content=b""):
-        self.status_code = status_code
-        self.headers = headers
-        self._content = content
-        self.url = "http://example.com/"
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        return False
-
-    async def aiter_raw(self):
-        yield self._content
-
-
-class MockClient:
-    def __init__(self, responses):
-        self.responses = responses
-        self.call_count = 0
-        self.captured_headers = []
-
-    def stream(self, method, url, headers, timeout, follow_redirects):
-        self.call_count += 1
-        self.captured_headers.append(dict(headers))
-        resp = self.responses[self.call_count - 1]
-        resp.url = url
-        return resp
-
-
-def _patch_fetch_transport(monkeypatch, responses):
-    """Route _default_http_fetcher through a scripted mock client."""
-    mock_client = MockClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
-    monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(
-        http_mod,
-        "_resolve_and_pin_host",
-        lambda url: (urlparse(url).hostname, "1.2.3.4"),
-    )
-    return mock_client
-
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
 
@@ -57,7 +11,7 @@ async def _fetch_with_redirect(monkeypatch, redirect_location):
         MockResponse(302, {"location": redirect_location}, b""),
         MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
     ]
-    mock_client = _patch_fetch_transport(monkeypatch, responses)
+    mock_client = patch_http_fetcher_transport(monkeypatch, responses)
     result = await _default_http_fetcher("http://example.com/", dict(SENSITIVE_HEADERS), 30)
     return mock_client, result
 

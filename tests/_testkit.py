@@ -414,3 +414,55 @@ def extract_function_body(source: str, name: str) -> str:
     if not match:
         raise AssertionError(f"Could not find function {name}")
     return match.group(0)
+
+
+class MockResponse:
+    """Scripted httpx streaming response for ``_default_http_fetcher`` tests."""
+
+    def __init__(self, status_code, headers, content=b""):
+        self.status_code = status_code
+        self.headers = headers
+        self._content = content
+        self.url = "http://example.com/"
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def aiter_raw(self):
+        yield self._content
+
+
+class MockClient:
+    def __init__(self, responses):
+        self.responses = responses
+        self.call_count = 0
+        self.captured_headers = []
+
+    def stream(self, method, url, headers, timeout, follow_redirects):
+        self.call_count += 1
+        self.captured_headers.append(dict(headers))
+        resp = self.responses[self.call_count - 1]
+        resp.url = url
+        return resp
+
+
+def patch_http_fetcher_transport(monkeypatch, responses):
+    """Route ``_default_http_fetcher`` through a scripted mock client.
+
+    Neutralizes SSRF/DNS so the fetcher can be driven against canned responses
+    (per-hop headers land in ``MockClient.captured_headers``).
+    """
+    import app.crawl.strategies.http as http_mod
+
+    mock_client = MockClient(responses)
+    monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
+    monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
+    monkeypatch.setattr(
+        http_mod,
+        "_resolve_and_pin_host",
+        lambda url: (urlparse(url).hostname, "1.2.3.4"),
+    )
+    return mock_client

@@ -604,6 +604,23 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
 
 
+def _declared_length_exceeds(header_value: str | None, limit: int) -> bool:
+    """True iff a ``Content-Length`` header parses to an int strictly over ``limit``.
+
+    A malformed, negative, or absent value reads as "unknown size" and returns
+    False (L2) -- it must never raise. Skipping the pre-flight rejection is
+    safe: the streamed running cap still bounds the actual body, so a hostile
+    ``Content-Length: abc`` cannot crash the fetch or spoof a pass.
+    """
+    if not header_value:
+        return False
+    try:
+        declared = int(header_value)
+    except ValueError:
+        return False
+    return declared > limit
+
+
 def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
     """Standard 413 (payload too large) result for size/cap violations.
 
@@ -722,7 +739,7 @@ async def _default_http_fetcher(
                 "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
             ) as response:
                 content_length = response.headers.get("content-length")
-                if content_length and int(content_length) > max_content_length:
+                if _declared_length_exceeds(content_length, max_content_length):
                     return _http_413(url, current_url, started)
                 status_code = response.status_code
                 location = response.headers.get("location")
@@ -832,7 +849,7 @@ async def _default_cffi_fetcher(
                     return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
                 # Content-length check (#5)
                 content_length = response.headers.get("content-length")
-                if content_length and int(content_length) > max_content_length:
+                if _declared_length_exceeds(content_length, max_content_length):
                     await response.aclose()  # N8: release the curl handle
                     return HttpFetchResult(
                         url=url,
