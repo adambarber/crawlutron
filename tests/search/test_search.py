@@ -98,6 +98,17 @@ class TestProviderParsing:
         assert results[0].title == "S"
         assert results[0].description == "s snippet"
 
+    async def test_keyed_providers_transmit_their_configured_key(self, fake_provider_http):
+        """Each keyed provider sends the key it was constructed with."""
+        capture: list = []
+        fake_provider_http(200, json.dumps({"results": []}), capture=capture)
+        await TavilyProvider("tavily-key").search("x", 1, 5.0)
+        await BraveProvider("brave-key").search("x", 1, 5.0)
+        await SerperProvider("serper-key").search("x", 1, 5.0)
+        assert capture[0]["json_body"]["api_key"] == "tavily-key"
+        assert capture[1]["headers"]["X-Subscription-Token"] == "brave-key"
+        assert capture[2]["headers"]["X-API-KEY"] == "serper-key"
+
     async def test_duckduckgo_parses_html_and_unwraps_redirect(self, fake_provider_http):
         from urllib.parse import quote
 

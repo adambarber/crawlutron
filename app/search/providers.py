@@ -172,13 +172,23 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
     return f"{provider} HTTP {status}" + (f": {detail}" if detail else "")
 
 
-class TavilyProvider:
-    """Tavily Search API (api.tavily.com). Free tier ~1000 credits/month."""
+class _ApiKeyProvider:
+    """Shared credential slot for the keyed providers (Tavily/Brave/Serper).
 
-    name = "tavily"
+    The three providers differ only in endpoint, shape, and key names; the
+    constructor contract is one place so a fourth provider cannot drift it.
+    """
+
+    name: str
 
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
+
+
+class TavilyProvider(_ApiKeyProvider):
+    """Tavily Search API (api.tavily.com). Free tier ~1000 credits/month."""
+
+    name = "tavily"
 
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
         status, body = await _provider_http(
@@ -203,13 +213,10 @@ class TavilyProvider:
         )
 
 
-class BraveProvider:
+class BraveProvider(_ApiKeyProvider):
     """Brave Search API (api.search.brave.com). Free tier 2000 queries/month."""
 
     name = "brave"
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
 
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
         status, body = await _provider_http(
@@ -230,13 +237,10 @@ class BraveProvider:
         )
 
 
-class SerperProvider:
+class SerperProvider(_ApiKeyProvider):
     """Serper.dev Google SERP proxy. Free tier 2500 queries."""
 
     name = "serper"
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
 
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
         status, body = await _provider_http(

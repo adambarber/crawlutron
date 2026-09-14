@@ -278,6 +278,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Dead code in `BoundedTTLCache.get_stale` (H3)** (app/bounded_ttl.py):
   a stale `peek` docstring + `return` sat unreachable after the method's real
   returns (the file always parsed — severity was hygiene, not HIGH). Deleted.
+- **One keyed-provider constructor (jscpd)** (app/search/providers.py):
+  Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
+  `_ApiKeyProvider` base owns the credential slot; a contract test pins that
+  each provider transmits the key it was built with.
 - **One sanctioned test poller (jscpd test-side)** (tests/_testkit.py,
   tests/api/test_async_crawl.py, tests/test_safety_invariants.py):
   `poll_until` is the single predicate poller — the hand-rolled
