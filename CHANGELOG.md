@@ -302,6 +302,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chokepoint (widened to attribute-held `DiscoveredLink` dataclasses — same
   validated field, raw href never consulted). Existing map/job/MCP tests
   pin the preserved shapes.
+- **Shared test drive mechanics (jscpd test-side)** (tests/_testkit.py,
+  tests/api/): the `/v1/crawl` payload builder and the drive-a-job-to-
+  settled prologue were hand-copied per file. New `_testkit.make_crawl_payload`
+  and a local `_run_job_to_completed` prologue own them; call sites pass
+  only their intentional variants. Zero assertions changed.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

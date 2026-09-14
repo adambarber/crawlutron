@@ -108,6 +108,21 @@ async def _wait_until(job_store: JobStore, job_id: str, predicate, timeout: floa
     raise AssertionError(f"predicate never satisfied; last={job_store.load(job_id)}")
 
 
+async def _run_job_to_completed(client, job_store, root_url: str, execute, policy: dict | None = None):
+    """Drive one job to COMPLETED with a faked engine; return the loaded row.
+
+    Shared prologue for execution-accounting tests. The per-test assertions
+    on visited/stats/results stay in each test; only the drive-to-settled
+    mechanics live here.
+    """
+    job_runner.install_execute_crawl(execute)
+    resp = await client.post("/v1/jobs", json={"root_url": root_url, "policy": policy or {}})
+    job_id = resp.json()["job_id"]
+    status = await _wait_status(job_store, job_id, {"completed", "failed"})
+    assert status == "completed"
+    return job_store.load(job_id)
+
+
 @pytest.fixture(autouse=True)
 def _fresh_runner():
     job_runner.reset_job_runner()
@@ -156,21 +171,18 @@ class TestWholeSiteJobExecution:
     async def test_total_failed_counts_once_per_failed_item(self, client, job_store, real_sleeps):
         # Batch 2 submits b and c, both fail: the per-item `failed` counter is
         # cumulative, so adding it inside the loop once reported 1+2=3.
-        job_runner.install_execute_crawl(
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            "http://example.test/a",
             _fake_execute(
                 [
                     _canned_result(
                         "http://example.test/a", links=["http://example.test/b", "http://example.test/c"]
                     )
                 ]
-            )
+            ),
         )
-        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
-        job_id = resp.json()["job_id"]
-
-        status = await _wait_status(job_store, job_id, {"completed", "failed"})
-        assert status == "completed"
-        job = job_store.load(job_id)
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
 
@@ -196,13 +208,7 @@ class TestWholeSiteJobExecution:
                 "policy_schema_version": "test",
             }
 
-        job_runner.install_execute_crawl(_execute)
-        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
-        job_id = resp.json()["job_id"]
-
-        status = await _wait_status(job_store, job_id, {"completed", "failed"})
-        assert status == "completed"
-        job = job_store.load(job_id)
+        job = await _run_job_to_completed(client, job_store, "http://example.test/a", _execute)
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 1
 
@@ -211,18 +217,15 @@ class TestWholeSiteJobExecution:
     ):
         """M2: a 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
-        job_runner.install_execute_crawl(
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            "http://example.test/a",
             _fake_execute(
                 [_canned_result("http://example.test/a", links=leaves)]
                 + [_canned_result(url) for url in leaves]
-            )
+            ),
         )
-        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
-        job_id = resp.json()["job_id"]
-
-        status = await _wait_status(job_store, job_id, {"completed", "failed"})
-        assert status == "completed"
-        job = job_store.load(job_id)
         assert job.stats["total_discovered"] == 25
         assert job.stats["total_crawled"] == 26
         assert len(job.results) == 26

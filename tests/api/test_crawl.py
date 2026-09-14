@@ -5,6 +5,7 @@ import json
 import time
 
 import pytest
+from _testkit import make_crawl_payload
 from helpers import browser_available
 from helpers.server import WEBHOOK_RECEIVED
 
@@ -21,19 +22,8 @@ class TestCrawlApi:
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
-    def _crawl_payload(self, **extra):
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        payload.update(extra)
-        return payload
-
     async def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self):
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload())
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/"))
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert "request_id" in body
@@ -57,7 +47,7 @@ class TestCrawlApi:
         assert result["next_page_url"] == f"{self.base}/page2"
 
     async def test_v1_crawl_batch_returns_one_result_per_url(self):
-        payload = self._crawl_payload(urls=[f"{self.base}/", f"{self.base}/page2"])
+        payload = make_crawl_payload(f"{self.base}/", urls=[f"{self.base}/", f"{self.base}/page2"])
         payload.pop("url")
         resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 200
@@ -67,12 +57,13 @@ class TestCrawlApi:
         assert "Example Org" in body["results"][0]["markdown"]
 
     async def test_v1_crawl_discovery_includes_robots_and_sitemap(self):
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
                 "discovery": {"robots": True, "sitemaps": True, "feeds": True},
                 "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            }
+            },
         )
         resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 200
@@ -86,7 +77,7 @@ class TestCrawlApi:
         assert "/page2" in diagnostics["discovery"]["sitemap_urls"]
 
     async def test_v1_crawl_404_is_classified_not_found(self):
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(url=f"{self.base}/missing"))
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/missing"))
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert result["status"] == "failed"
@@ -106,7 +97,8 @@ class TestCrawlApi:
         # Here the fixture serves on 127.0.0.1 (loopback), so the in-page
         # links cannot match ``^https://example\.com``; every discovered link
         # is therefore out of scope and is still reported back to the caller.
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             policy={
                 "strategies": [HTTP_DECLARED_CRAWLER],
                 "scope_regex": r"^https://example\.com",
@@ -149,7 +141,7 @@ class TestCrawlApi:
         assert "results" in delivered
 
     async def test_metrics_endpoint_exposes_prometheus_text(self):
-        await self.client.post("/v1/crawl", json=self._crawl_payload())
+        await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/"))
         resp = await self.client.get("/metrics")
         assert resp.status_code == 200, resp.text
         assert "crawler_crawl_requests_total" in resp.text
@@ -157,7 +149,9 @@ class TestCrawlApi:
 
     async def test_v1_crawl_jsonl_output_format(self):
         # #17: output_format=jsonl returns newline-delimited JSON (one object per URL).
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="jsonl"))
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="jsonl")
+        )
         assert resp.status_code == 200, resp.text
         assert "application/x-ndjson" in resp.headers.get("content-type", "")
         lines = [ln for ln in resp.text.splitlines() if ln.strip()]
@@ -168,14 +162,18 @@ class TestCrawlApi:
         assert obj["classification"] == "rendered"
 
     async def test_v1_crawl_markdown_output_format(self):
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="markdown"))
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="markdown")
+        )
         assert resp.status_code == 200, resp.text
         assert "text/markdown" in resp.headers.get("content-type", "")
         assert f"# {self.base}" in resp.text
         assert "Example Org" in resp.text
 
     async def test_v1_crawl_csv_output_format(self):
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="csv"))
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="csv")
+        )
         assert resp.status_code == 200, resp.text
         assert "text/csv" in resp.headers.get("content-type", "")
         rows = [ln for ln in resp.text.splitlines() if ln.strip()]
@@ -183,7 +181,9 @@ class TestCrawlApi:
         assert len(rows) == 2  # header + one result
 
     async def test_v1_crawl_unsupported_output_format_rejected(self):
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(output_format="xml"))
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", output_format="xml")
+        )
         assert resp.status_code == 422
 
 
@@ -396,23 +396,16 @@ class TestCookiePersistenceApi:
         # Save cookies on teardown
         _GLOBAL_COOKIE_JAR.save_to_file(str(self.cookie_file))
 
-    def _crawl_payload(self, url: str, **extra):
-        payload = {
-            "url": url,
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        payload.update(extra)
-        return payload
-
     async def test_cookie_persistence_across_requests(self):
         # First request: sets a cookie
-        resp1 = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/set-cookie"))
+        resp1 = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
+        )
         assert resp1.status_code == 200, resp1.text
         # Second request: should send the cookie back
-        resp2 = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/check-cookie"))
+        resp2 = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
+        )
         assert resp2.status_code == 200, resp2.text
         body2 = resp2.json()
         result = body2["results"][0]
@@ -421,9 +414,13 @@ class TestCookiePersistenceApi:
 
     async def test_cookie_persistence_survives_restart(self):
         # First crawl sets cookie
-        await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/set-cookie"))
+        await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
+        )
         # Second crawl verifies cookie is sent
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(f"{self.base}/check-cookie"))
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
+        )
         assert resp.status_code == 200
         result = resp.json()["results"][0]
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")

@@ -341,3 +341,34 @@ async def poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1,
     if not ok:
         pytest.fail(message or f"poll_until timed out after {timeout}s")
     return True
+
+
+def make_crawl_payload(
+    url: str,
+    *,
+    strategies: list[str] | None = None,
+    timeout_seconds: int = 10,
+    max_retries: int = 0,
+    max_discovered_links: int = 50,
+    **extra: Any,
+) -> dict[str, Any]:
+    """The sanctioned /v1/crawl request-payload builder.
+
+    The default strategy/limits triple was hand-copied per API test file and
+    already risked silent divergence; a new default lands once here. Callers
+    with intentional variants (e.g. cookie tests pinning max_discovered_links)
+    pass them explicitly. ``extra`` carries endpoint flags like async_mode.
+    """
+    payload: dict[str, Any] = {
+        "url": url,
+        "policy": {
+            "strategies": strategies if strategies is not None else [HTTP_DECLARED_CRAWLER],
+            "limits": {
+                "timeout_seconds": timeout_seconds,
+                "max_retries": max_retries,
+                "max_discovered_links": max_discovered_links,
+            },
+        },
+    }
+    payload.update(extra)
+    return payload

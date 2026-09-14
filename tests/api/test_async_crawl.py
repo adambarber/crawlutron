@@ -1,10 +1,8 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
 import pytest
-from _testkit import poll_until
+from _testkit import make_crawl_payload, poll_until
 from helpers.server import WEBHOOK_RECEIVED
-
-from app.constants import HTTP_DECLARED_CRAWLER
 
 
 class TestAsyncCrawlApi:
@@ -16,20 +14,9 @@ class TestAsyncCrawlApi:
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
 
-    def _crawl_payload(self, **extra):
-        payload = {
-            "url": f"{self.base}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        payload.update(extra)
-        return payload
-
     async def test_v1_crawl_async_mode_returns_202(self):
         """async_mode=true returns 202 with request_id and status_url."""
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(async_mode=True))
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))
         assert resp.status_code == 202, resp.text
         body = resp.json()
         assert body["status"] == "accepted"
@@ -41,7 +28,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(async_mode=True))
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))
         assert resp.status_code == 202
         request_id = resp.json()["request_id"]
 
@@ -70,7 +57,8 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_with_webhook_delivers(self):
         """async_mode with webhook_url delivers result to webhook on completion."""
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             async_mode=True,
             webhook_url=f"{self.base}/webhook_sink",
         )
@@ -99,7 +87,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_results_persisted_in_job_store(self):
         """Async crawl results are persisted in job_store (single source of truth)."""
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(async_mode=True))
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))
         assert resp.status_code == 202
         request_id = resp.json()["request_id"]
 
@@ -133,7 +121,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_sync_mode_still_works(self):
         """Default sync mode (async_mode=false) still returns results directly."""
-        resp = await self.client.post("/v1/crawl", json=self._crawl_payload(async_mode=False))
+        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=False))
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["success"] is True
@@ -147,7 +135,8 @@ class TestAsyncCrawlApi:
         # One page fetches fine, one 404s (failed). A dead host would not
         # work here: post-M7, robots fetch errors fail closed to
         # robots_disallowed/skipped instead of reaching the fetch.
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             urls=[f"{self.base}/", f"{self.base}/no-such-page-xyz"],
             async_mode=True,
         )
@@ -172,7 +161,8 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_batch_urls(self):
         """async_mode works with batch urls."""
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             urls=[f"{self.base}/", f"{self.base}/page2"],
             async_mode=True,
         )
@@ -201,7 +191,8 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_webhook_backward_compat(self):
         """webhook_url without async_mode still works (backward compat)."""
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             webhook_url=f"{self.base}/webhook_sink",
         )
         resp = await self.client.post("/v1/crawl", json=payload)
@@ -223,7 +214,8 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_invalid_webhook_rejected(self):
         """Invalid webhook_url is rejected at accept time."""
-        payload = self._crawl_payload(
+        payload = make_crawl_payload(
+            f"{self.base}/",
             async_mode=True,
             webhook_url="not-a-valid-url",
         )
@@ -236,7 +228,9 @@ class TestAsyncCrawlApi:
         # Fire multiple async crawls
         request_ids = []
         for _ in range(3):
-            resp = await self.client.post("/v1/crawl", json=self._crawl_payload(async_mode=True))
+            resp = await self.client.post(
+                "/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True)
+            )
             assert resp.status_code == 202
             request_ids.append(resp.json()["request_id"])
 
