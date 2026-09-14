@@ -128,6 +128,21 @@ class TestCrawlDelayParser:
         text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: browser-crawler\nCrawl-delay: soon\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 3.0
 
+    def test_inf_and_overflow_delays_are_dropped(self):
+        # 1e999 overflows float to inf; a hostile robots.txt must not be
+        # able to install a non-finite politeness floor. The parser rejects
+        # non-finite numbers outright (the scheduler clamps finite ones).
+        for raw in ("1e999", "inf", "nan"):
+            text = f"User-agent: browser-crawler\nCrawl-delay: {raw}\n"
+            assert parse_robots_crawl_delay(text, token=TOKEN) is None, raw
+
+    def test_huge_finite_delay_is_parsed_verbatim(self):
+        # The parser does not clamp: bounding the wait is the scheduler's
+        # enforcement job (chokepoint), so a finite value passes through
+        # untouched and the scheduler clamps it at the write.
+        text = "User-agent: browser-crawler\nCrawl-delay: 1e9\n"
+        assert parse_robots_crawl_delay(text, token=TOKEN) == 1e9
+
 
 class TestSitemapParser:
     def test_collects_values_in_order_without_grouping(self):

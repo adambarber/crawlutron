@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import time
 from collections import defaultdict
@@ -185,9 +186,16 @@ class DomainScheduler:
         return max(base, self._domain_min_delay.get(domain, 0.0))
 
     def set_domain_min_delay(self, domain: str, seconds: float) -> None:
-        """Enforce a minimum inter-request delay for a domain (robots Crawl-delay)."""
-        if seconds and seconds > 0:
-            self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), float(seconds))
+        """Enforce a minimum inter-request delay for a domain (robots Crawl-delay).
+
+        Non-finite values are ignored and finite values are clamped to the
+        politeness ceiling so a hostile robots.txt cannot install an unbounded
+        per-domain floor (M1) — the cap is enforced at the write, the
+        chokepoint where a delay becomes a scheduler wait.
+        """
+        if seconds and seconds > 0 and math.isfinite(seconds):
+            clamped = min(float(seconds), _MAX_COOLDOWN_WAIT)
+            self._domain_min_delay[domain] = max(self._domain_min_delay.get(domain, 0.0), clamped)
 
     def _purge_expired(self) -> None:
         """Drop cooldown and circuit-breaker entries that have already elapsed."""

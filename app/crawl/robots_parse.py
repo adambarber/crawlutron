@@ -16,6 +16,7 @@ is shared here so a robots-parsing fix lands once.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -113,11 +114,14 @@ def parse_robots_crawl_delay(text: str, *, token: str = USER_AGENT_TOKEN) -> flo
     """Seconds from the governing group's last valid ``Crawl-delay``.
 
     An empty value never opens a group (the gate the rules parser does not
-    share), non-numeric and negative values are dropped, and the last valid
-    value in a group wins — matching the old overwrite-on-valid scan. A
-    token-matched group whose values are all invalid yields no delay and
-    falls back to the star group, exactly as the old ``best_delay is None →
-    star_delay`` return did.
+    share), non-numeric, negative and non-finite values are dropped, and the
+    last valid value in a group wins — matching the old overwrite-on-valid
+    scan. A token-matched group whose values are all invalid yields no delay
+    and falls back to the star group, exactly as the old ``best_delay is None
+    → star_delay`` return did. Non-finite numbers (``inf``/``nan``, or a
+    value that overflows to ``inf``) are rejected here so a hostile robots.txt
+    can never install an unbounded politeness floor; the scheduler clamps
+    finite values to the politeness ceiling at the write.
     """
     groups = robots_groups(text, lambda key, value: key == "crawl-delay" and value != "")
     best, star = select_robots_values(groups, token)
@@ -129,7 +133,7 @@ def parse_robots_crawl_delay(text: str, *, token: str = USER_AGENT_TOKEN) -> flo
                 parsed = float(raw)
             except ValueError:
                 continue
-            if parsed >= 0:
+            if parsed >= 0 and math.isfinite(parsed):
                 delay = parsed
         return delay
 

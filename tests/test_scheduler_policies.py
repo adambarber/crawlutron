@@ -119,6 +119,23 @@ class TestSchedulerPolicies:
 
         assert _parse_robots_crawl_delay("User-agent: *\nDisallow: /\n") is None
 
+    def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
+        """M1: a huge (finite) robots Crawl-delay must not install an
+        unbounded politeness floor — the scheduler clamps it at the write."""
+        from app.scheduler import _MAX_COOLDOWN_WAIT, DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        scheduler.set_domain_min_delay("example.com", 1e12)
+        assert scheduler.current_delay("example.com") == _MAX_COOLDOWN_WAIT
+
+    def test_set_domain_min_delay_ignores_non_finite(self):
+        """M1: inf/nan must never become a stored politeness floor."""
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        scheduler.set_domain_min_delay("example.com", float("inf"))
+        assert "example.com" not in scheduler._domain_min_delay
+
     async def test_run_streams_results_via_on_result(self):
         """Adversarial perf #3.1: with ``on_result`` set, each completed result is
         delivered immediately (a fast job is delivered before a slow one) and

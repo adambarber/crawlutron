@@ -318,6 +318,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the `render_router`/`search/router` “pure router” boilerplate is the
   idiomatic FastAPI file shape — a shared factory would obscure the trivial
   wiring, so the convention stays.
+
+### Round 9 hardening (adversarial review)
+- **Bound the robots Crawl-delay politeness floor (M1)**
+  (app/crawl/robots_parse.py, app/scheduler.py): a hostile robots.txt could
+  return `Crawl-delay: 1e999` (overflows to `inf`), which was stored
+  uncapped and turned into `asyncio.sleep(inf)` **outside** the per-URL
+  budget — hanging the whole scheduler gather. The parser now rejects
+  non-finite values (a parse-level rule), and `set_domain_min_delay` clamps
+  finite values to the existing politeness ceiling (`_MAX_COOLDOWN_WAIT`)
+  at the write — the chokepoint where a delay becomes a scheduler wait. The
+  ceiling lives only in the scheduler; the parser never clamps.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that
