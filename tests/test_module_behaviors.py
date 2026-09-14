@@ -129,6 +129,26 @@ class TestCapabilitiesPayload:
         assert "async_mode" in timing["large_crawl_guidance"]
 
 
+class TestCapabilitiesWireContract:
+    """Serialize through the real endpoint, not the raw dict.
+
+    ``response_model=CapabilitiesResponse`` silently filters any top-level key the
+    model does not declare; the payload-dict tests above cannot see that, so a new
+    advertised block would ship green in tests yet be absent on the wire.
+    """
+
+    async def test_capabilities_endpoint_advertises_crawl_timing(self, async_client):
+        resp = await async_client.get("/v1/capabilities")
+        assert resp.status_code == 200
+        body = resp.json()
+        timing = body.get("crawl_timing")
+        assert timing is not None, "crawl_timing dropped by CapabilitiesResponse response_model"
+        assert timing["per_url_budget_seconds"] == body["default_limits"]["total_url_budget_seconds"]
+        assert timing["sync_has_server_time_ceiling"] is False
+        assert "async_mode" in timing["large_crawl_guidance"]
+        assert body["features"]["async_mode"] is True
+
+
 class TestAgentHintsPayload:
     def test_agent_hints_payload_structure(self):
         payload = agent_hints_payload()
