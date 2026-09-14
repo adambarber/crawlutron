@@ -181,7 +181,7 @@ class CrawlPolicyLimits(BaseModel):
         DEFAULT_MAX_DISCOVERED_LINKS,
         ge=0,
         le=MAX_DISCOVERED_LINKS,
-        description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own frontier queueing, dedupe, persistence, and recursion.",
+        description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own cross-run frontier queueing, dedupe, persistence, and recursion (the service collapses URLs that normalize to the same page within a request).",
     )
     respect_robots: bool = Field(
         True,

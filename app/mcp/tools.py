@@ -218,7 +218,8 @@ TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Discover the URL frontier reachable from a root URL: in-page discovered links plus "
             "the URLs advertised via robots.txt sitemaps and feeds. Returns the de-duplicated "
-            "frontier; callers own recursion, dedupe, persistence, and host-policy decisions."
+            "frontier; callers own cross-run recursion, frontier persistence, and host-policy decisions. "
+            "Within a request the service already collapses URLs that normalize to the same page."
         ),
         input_schema={
             "type": "object",
