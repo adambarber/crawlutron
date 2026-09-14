@@ -283,6 +283,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   now an `OrderedDict` with an LRU cap (`_COOKIE_JAR_MAX_HOSTS = 1024`,
   refreshed on write and read); regression tests pin the bound and the
   read-refresh recency.
+- **Batch URLs dedupe exact duplicates (wire-visible)**
+  (app/crawl/payload_helpers.py): `_payload_urls` returned the list as-is,
+  so identical URLs in one request each ran the full engine. Exact-duplicate
+  strings now collapse to their first occurrence (order-preserving) at the
+  chokepoint both `crawl_request` and `render_request` share, and the
+  batch-size check counts unique URLs. Wire effect: a duplicated URL yields
+  one result instead of N.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

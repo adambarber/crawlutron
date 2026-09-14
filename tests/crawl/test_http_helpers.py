@@ -74,6 +74,12 @@ class TestValidationHelpers:
         assert _payload_urls({"url": "http://x/"}) == ["http://x/"]
         assert _payload_urls({"urls": ["http://x/", "http://y/"]}) == ["http://x/", "http://y/"]
 
+    def test_payload_urls_dedupes_exact_duplicates(self) -> None:
+        assert _payload_urls({"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]}) == [
+            "http://x/",
+            "http://y/",
+        ]
+
     def test_render_options_error(self) -> None:
         with pytest.raises(ValueError, match=r"^invalid_options$"):
             _render_options({"options": "bad"}, CrawlerSettings.from_mapping())
@@ -279,7 +285,9 @@ class TestCrawlRequest:
     async def test_batch_size_exceeded(self) -> None:
         settings = CrawlerSettings.from_mapping()
         payload = {
-            "urls": ["http://example.com/"] * (settings.max_batch_size + 1),
+            # Distinct URLs: the cap counts unique URLs (exact duplicates
+            # collapse in _payload_urls before this check).
+            "urls": [f"http://example.com/{i}" for i in range(settings.max_batch_size + 1)],
             "policy": {"strategies": [HTTP_DECLARED_CRAWLER]},
         }
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):

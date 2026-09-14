@@ -29,11 +29,18 @@ DEFAULT_MAX_PAGES = 100
 
 
 def _payload_urls(payload: dict[str, Any]) -> list[str]:
+    """Extract the request URL batch, collapsing exact duplicates.
+
+    Identical URL strings in one request crawl the same page, so only the
+    first occurrence is kept (order-preserving). Both the engine and the
+    render paths inherit the dedup here, and the batch-size check downstream
+    counts unique URLs.
+    """
     if "urls" in payload:
         urls = payload["urls"]
         if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
             raise ValueError("invalid_urls")
-        return urls
+        return list(dict.fromkeys(urls))
     if "url" in payload and isinstance(payload["url"], str):
         return [payload["url"]]
     raise ValueError("missing_url")
