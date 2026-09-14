@@ -212,9 +212,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 1
 
-    async def test_wide_fanout_crawls_every_discovered_url_once(
-        self, client, job_store, real_sleeps
-    ):
+    async def test_wide_fanout_crawls_every_discovered_url_once(self, client, job_store, real_sleeps):
         """M2: a 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
         job = await _run_job_to_completed(

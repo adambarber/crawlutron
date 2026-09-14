@@ -183,12 +183,16 @@ def test_lock_detector_bites():
         "import threading\n\n_async_gate = threading.RLock()\n\n"
         "async def go():\n    with _async_gate:\n        await x()\n"
     )
-    assert _lock_bodies_with_awaits(bound, REPO_ROOT / "app" / "_synthetic.py"), "threading-bound name escaped"
+    assert _lock_bodies_with_awaits(bound, REPO_ROOT / "app" / "_synthetic.py"), (
+        "threading-bound name escaped"
+    )
     asyncio_ok = ast.parse(
         "import asyncio\n\nclass C:\n    def __init__(self):\n        self._lock = asyncio.Lock()\n"
         "    async def go(self):\n        async with self._lock:\n            await x()\n"
     )
-    assert not _lock_bodies_with_awaits(asyncio_ok, REPO_ROOT / "app" / "_synthetic.py"), "asyncio lock flagged"
+    assert not _lock_bodies_with_awaits(asyncio_ok, REPO_ROOT / "app" / "_synthetic.py"), (
+        "asyncio lock flagged"
+    )
     plain_ok = ast.parse("def go():\n    with open('f'):\n        pass\n")
     assert not _lock_bodies_with_awaits(plain_ok, REPO_ROOT / "app" / "_synthetic.py")
 
