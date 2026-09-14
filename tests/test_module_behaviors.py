@@ -119,6 +119,15 @@ class TestCapabilitiesPayload:
         assert len(payload["supported_strategies"]) > 0
         assert "HTTP_DECLARED_CRAWLER" in payload["supported_strategies"]
 
+    def test_capabilities_advertises_time_budget_and_async(self):
+        settings = CrawlerSettings.from_mapping()
+        payload = capabilities_payload(settings)
+        assert payload["default_limits"]["total_url_budget_seconds"] > 0
+        assert payload["features"]["async_mode"] is True
+        timing = payload["crawl_timing"]
+        assert timing["per_url_budget_seconds"] == payload["default_limits"]["total_url_budget_seconds"]
+        assert "async_mode" in timing["large_crawl_guidance"]
+
 
 class TestAgentHintsPayload:
     def test_agent_hints_payload_structure(self):
@@ -138,6 +147,12 @@ class TestAgentHintsPayload:
         payload = agent_hints_payload()
         assert len(payload["example_policies"]) > 0
         assert "browser_fallback" in payload["example_policies"]
+
+    def test_agent_hints_advertises_async_and_page_identity(self):
+        payload = agent_hints_payload()
+        guidance = " ".join(payload["guidance"]).lower()
+        assert "async_mode" in guidance
+        assert "same page" in guidance
 
     # EXAMPLE_POLICIES is imported by the module header; keep a reference so
     # linting does not flag the re-export while the payload tests cover content.
@@ -162,3 +177,12 @@ class TestDiscoveryPayload:
         assert "openapi" in payload["links"]
         assert "capabilities" in payload["links"]
         assert "agent_hints" in payload["links"]
+
+    def test_discovery_advertises_async_and_job_surfaces(self):
+        payload = discovery_payload()
+        assert payload["links"]["result_retrieval"] == "/v1/crawl/{request_id}"
+        assert payload["links"]["jobs"] == "/v1/jobs"
+        assert payload["links"]["map"] == "/v1/map"
+        recommended = " ".join(payload["recommended_endpoints"])
+        assert "GET /v1/crawl/{request_id}" in recommended
+        assert "POST /v1/jobs" in recommended

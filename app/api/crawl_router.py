@@ -35,7 +35,13 @@ router = APIRouter(tags=["Crawler"])
         "trafilatura, or document); extraction is orthogonal to the fetch strategy. "
         "Returns LLM-friendly condensed Markdown output with metadata for LLM-friendly consumption. "
         "Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
-        "and max_discovered_links; omit limits to use defaults from /v1/capabilities. Use request_profile for "
+        "max_discovered_links, and the recursion bounds max_depth and max_pages; omit limits to use defaults from "
+        "/v1/capabilities. A synchronous request has no server-side time ceiling - duration scales with max_depth, "
+        "max_pages, per-domain politeness delays, and the per-URL total_url_budget_seconds (which fails one tarpit URL, "
+        "not the crawl). For large or recursive crawls set async_mode=true (or webhook_url) for an immediate 202 with a "
+        "status_url to poll at GET /v1/crawl/{request_id}, or use POST /v1/jobs for durable resumable whole-site jobs. "
+        "Within a request the service never crawls the same page twice: submitted URLs are deduped by canonical page "
+        "identity, and fetches are reused within the content-cache TTL. Use request_profile for "
         "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "
         "per-host cookies. Use browser_profile for browser state, viewport, and resource_mode. Use discovery for "
         "robots, sitemaps, and feeds diagnostics. The service records per-URL provenance, selected strategy, raw "
@@ -47,7 +53,10 @@ router = APIRouter(tags=["Crawler"])
     ),
     responses={
         200: {"model": UnifiedCrawlResponse, "description": "Successful crawl results (JSON output format)."},
-        202: {"model": CrawlerError, "description": "Accepted for async webhook delivery; check status_url."},
+        202: {
+            "model": CrawlerError,
+            "description": "Accepted for async delivery (async_mode or webhook_url); check status_url.",
+        },
         422: {"model": CrawlerError, "description": "Invalid crawl request or unsupported output format."},
     },
     openapi_extra={

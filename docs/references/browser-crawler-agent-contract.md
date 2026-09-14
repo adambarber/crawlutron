@@ -79,6 +79,9 @@ Policy fields agents may send:
 - `limits.max_retries`
 - `limits.challenge_wait_seconds`
 - `limits.max_discovered_links`
+- `limits.max_depth`
+- `limits.max_pages`
+- `limits.total_url_budget_seconds`
 - `headers`
 - `request_profile`
 - `browser_profile`
@@ -143,8 +146,15 @@ Persist these fields downstream for auditability and policy review:
 
 Completed `/v1/crawl` responses are stored under their `request_id` (default
 retention: 1 hour / 1000 entries) and retrievable at `GET /v1/crawl/{request_id}` —
-the same URL advertised as `status_url` in webhook-accepted 202 responses.
-Use this to recover results if your HTTP connection drops mid-response.
+the same URL advertised as `status_url` in `async_mode`/webhook-accepted 202
+responses. A synchronous `POST /v1/crawl` has **no server-side time ceiling**: it
+returns only when the whole bounded recursion finishes, so its duration scales with
+`max_depth`, `max_pages`, per-domain politeness delays, and the per-URL budget
+(`limits.total_url_budget_seconds`, which fails a single tarpit URL, not the crawl).
+For large or recursive crawls, submit with `async_mode=true` (or `webhook_url`) to
+get an immediate 202 + `status_url` and poll it, or use `POST /v1/jobs` for durable,
+resumable whole-site jobs. Use `GET /v1/crawl/{request_id}` both to poll an async
+result and to recover a result if your HTTP connection drops mid-response.
 
 ## Diagnostics Interpretation
 
@@ -191,10 +201,13 @@ success. Do not treat HTTP 200 alone as success.
 ## Link and Discovery Boundaries
 
 The service reports bounded `discovered_links`, frame URLs, form metadata,
-sitemap candidates, and feed candidates. It does not own recursive frontier
-expansion, dedupe, persistence, form submission, pagination state, or
-application-specific scope rules. Caller applications own those
-responsibilities.
+sitemap candidates, and feed candidates. It guarantees "never the same page twice"
+*within a request* — submitted URLs are deduped by canonical page identity (host
+case, default port, fragment, trailing slash, UTM/tracking params, and query-param
+order are normalized), and successful fetches are reused across requests within the
+content-cache TTL. It does not own *cross-run* recursive frontier expansion, frontier
+dedupe/persistence, form submission, pagination state, or application-specific scope
+rules. Caller applications own those responsibilities.
 
 Use `discovered_link_count` and `discovered_links_truncated` to decide whether
 to rerun with a higher `limits.max_discovered_links` value. Treat discovered

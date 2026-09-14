@@ -415,8 +415,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   keeps its raw key so it stays a distinct entry and request-target validation
   remains the caller's job. A tree-wide AST invariant
   (`test_batch_dedup_keys_on_canonical_page_identity`) fails CI on any `dict.fromkeys`
-  batch dedup that doesn't route through the canonicalizer; it ships a `*_bites`
-  proof and is non-vacuous (`dict.fromkeys` appears nowhere else in `app/`).
+   batch dedup that doesn't route through the canonicalizer; it ships a `*_bites`
+   proof and is non-vacuous (`dict.fromkeys` appears nowhere else in `app/`).
+ - **Self-describing contract: latency, async, and the dedup guarantee are now
+   advertised** (app/discovery/{capabilities,agent_hints,well_known}.py,
+   app/api/crawl_router.py): `/v1/capabilities` previously omitted the one real time
+   ceiling (`total_url_budget_seconds`) and never mentioned `async_mode`, so a caller
+   sizing an integration had no machine-readable way to learn that a synchronous
+   `/v1/crawl` has **no server-side time ceiling** (duration scales with `max_pages`,
+   depth, politeness delays, and the per-URL budget). Capabilities now advertise
+   `default_limits.total_url_budget_seconds`, a `features.async_mode` flag, and a
+   `crawl_timing` block (`per_url_budget_seconds`, `sync_has_server_time_ceiling`, and
+   a `large_crawl_guidance` pointing to `async_mode` + `status_url` polling / `POST
+   /v1/jobs` for long crawls). `/v1/agent-hints` gains async + page-identity guidance;
+   `/.well-known/crawler-service` links `/v1/map`, `/v1/jobs`, and
+   `GET /v1/crawl/{request_id}`. The `/v1/crawl` OpenAPI description was corrected the
+   same way (its `202` said "webhook" only, now "`async_mode` or `webhook_url`").
+   Doc fidelity: the README and `browser-crawler-agent-contract.md` still claimed
+   "callers own dedupe" and "5 MB → 5 MB" for the gzip-bomb test — both corrected to
+   the real behavior (canonical within-request dedup + within-TTL reuse; a ~1 KB →
+   1 MB gzip bomb plus deflate/brotli cases). Contract tests assert the new
+   advertised fields.
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):

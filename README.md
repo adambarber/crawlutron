@@ -65,9 +65,9 @@ to defeat:
   requests, per-chunk trailers, body-size drain, `_ResultSpill` FD leak,
   DNS-cache lock, robots-cache lock, per-tenant cookie namespace,
   `parse_bool_env` parsing edge cases, webhook TOCTOU consolidation.
-- **Decompression bomb tests** — a real gzip bomb (`5 MB` compressed
-  → `5 MB` expanded) verifies the decompression guard rejects before
-  OOM.
+- **Decompression bomb tests** — a real gzip bomb (`~1 KB` compressed →
+  `1 MB` expanded), plus deflate and brotli bomb cases, verify the decompression
+  guard rejects over-cap output before OOM.
 - **SSRF tests** (`tests/test_ssrf_*`, `tests/crawl/test_ssrf_*`) — DNS
   pinning, route-level interception, WebSocket guard, hostname pinning
   even after a redirect chain, IPv6 private range blocking.
@@ -236,14 +236,29 @@ Every crawl result carries a `classification` from a fixed enum of **30 values**
   Set `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` to disable it (local testing only).
 - **robots.txt** is respected by default (`respect_robots`). Disallowed targets
   return `robots_disallowed`.
-- **Recursion / frontier** is best-effort and caller-owned: discovered links,
-  sitemaps, and feeds are reported; the caller owns queueing, dedupe, persistence,
-  and host-policy decisions. `max_depth`, `max_pages`, `max_discovered_links`,
-  and `scope_regex` bound discovery.
+- **Recursion / frontier** is best-effort and caller-owned for *cross-run* work:
+  discovered links, sitemaps, and feeds are reported; the caller owns cross-request
+  frontier queueing, persistence, and host-policy decisions. `max_depth`, `max_pages`,
+  `max_discovered_links`, and `scope_regex` bound discovery. **Within a request the
+  service guarantees "never the same page twice":** submitted URLs are deduped by
+  canonical page identity (host case, default port, fragment, trailing slash,
+  UTM/tracking params, and query-param order are normalized), and successful fetches
+  are reused across requests within the content-cache TTL.
+- **Crawl duration & async**: a synchronous `POST /v1/crawl` has **no server-side
+  time ceiling** — it returns only when the whole bounded recursion finishes, so
+  duration scales with `max_depth`, `max_pages`, per-domain politeness delays, and
+  the per-URL budget (`limits.total_url_budget_seconds`, default 180s, which fails a
+  single tarpit URL, not the crawl). For large or recursive crawls send
+  `async_mode=true` (or `webhook_url`) to get an immediate `202` + `status_url`, then
+  poll `GET /v1/crawl/{request_id}`; or use `POST /v1/jobs` for durable, resumable,
+  pause/cancel-able whole-site jobs. Read timeouts on the sync path must cover the
+  chosen policy and batch size.
 - **Rate limiting** is enforced via `global_concurrency`, `per_domain_concurrency`,
   and `per_domain_delay_ms`. Exceeding `max_batch_size` is rejected.
-- **Webhooks**: provide `webhook_url` to receive results asynchronously (the request
-  returns `202 Accepted` immediately).
+- **Webhooks / async**: provide `webhook_url` to receive results asynchronously, or
+  `async_mode=true` to get a `202 Accepted` with a `status_url` to poll
+  `GET /v1/crawl/{request_id}`. Both return immediately instead of blocking on the
+  crawl.
 - **Conditional GETs**: `HTTP_DECLARED_CRAWLER` sends `If-None-Match` /
   `If-Modified-Since` when prior ETags are known, returning `not_modified` on a `304`.
 - **Resource self-tuning** (`#self-tuning`): the engine senses its own cgroup

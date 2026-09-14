@@ -16,6 +16,7 @@ from app.api_models import (
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
+    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
 )
 from app.search import active_search_provider_name, configured_search_providers
 from app.settings import CrawlerSettings
@@ -60,6 +61,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "max_retries": settings.default_max_retries,
             "challenge_wait_seconds": DEFAULT_CHALLENGE_WAIT_SECONDS,
             "max_discovered_links": DEFAULT_MAX_DISCOVERED_LINKS,
+            "total_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
             "global_concurrency": settings.global_concurrency,
             "per_domain_concurrency": settings.per_domain_concurrency,
             "per_domain_delay_ms": settings.per_domain_delay_ms,
@@ -79,6 +81,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "browser_profiles": True,
             "web_search": True,
             "mcp": True,
+            "async_mode": True,
             "captcha_solving": False,
             "proxy_rotation": False,
             "identity_rotation": False,
@@ -104,6 +107,17 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
         "mcp": {
             "endpoint": "/mcp",
             "protocol_versions": ["2026-07-28"],
+        },
+        "crawl_timing": {
+            "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+            "sync_has_server_time_ceiling": False,
+            "large_crawl_guidance": (
+                "Synchronous POST /v1/crawl has no server-side time ceiling; its "
+                "duration scales with max_depth, max_pages, per-domain politeness "
+                "delays, and the per-URL budget above. For large or recursive crawls, "
+                "set async_mode=true (or webhook_url) to receive an immediate 202 with "
+                "a status_url, then poll GET /v1/crawl/{request_id} for the result."
+            ),
         },
         "openapi_url": "/openapi.json",
         "swagger_ui_url": "/docs",
