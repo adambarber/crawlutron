@@ -290,6 +290,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chokepoint both `crawl_request` and `render_request` share, and the
   batch-size check counts unique URLs. Wire effect: a duplicated URL yields
   one result instead of N.
+- **O(1) frontier membership (M2)** (app/api/job_runner.py): dedup scanned
+  the persisted frontier list per link (quadratic on wide crawls). A
+  transient membership set mirrors the list — rebuilt on first use after
+  every store load, synced by `_pop_frontier`/`_frontier_add` — while the
+  list stays the crash-safe source of truth. A 25-link fan-out test pins the
+  multi-batch contract.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

@@ -206,6 +206,28 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 1
 
+    async def test_wide_fanout_crawls_every_discovered_url_once(
+        self, client, job_store, real_sleeps
+    ):
+        """M2: a 25-link fan-out across batches discovers and crawls each URL."""
+        leaves = [f"http://example.test/l{i}" for i in range(25)]
+        job_runner.install_execute_crawl(
+            _fake_execute(
+                [_canned_result("http://example.test/a", links=leaves)]
+                + [_canned_result(url) for url in leaves]
+            )
+        )
+        resp = await client.post("/v1/jobs", json={"root_url": "http://example.test/a", "policy": {}})
+        job_id = resp.json()["job_id"]
+
+        status = await _wait_status(job_store, job_id, {"completed", "failed"})
+        assert status == "completed"
+        job = job_store.load(job_id)
+        assert job.stats["total_discovered"] == 25
+        assert job.stats["total_crawled"] == 26
+        assert len(job.results) == 26
+        assert job.frontier == []
+
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
         """H1: the frontier must carry the validated URL, never the raw href.
 

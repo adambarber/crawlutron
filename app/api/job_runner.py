@@ -126,7 +126,34 @@ def _pop_frontier(job: Any) -> list[str]:
     """Pop up to BATCH_SIZE urls off the persisted frontier (in order)."""
     batch = job.frontier[:BATCH_SIZE]
     del job.frontier[: len(batch)]
+    known = job.__dict__.get("_frontier_set")
+    if known is not None:
+        for url in batch:
+            known.discard(url)
     return batch
+
+
+def _frontier_set(job: Any) -> set[str]:
+    """O(1) membership mirror of ``job.frontier`` for dedup checks (M2).
+
+    The persisted frontier stays a plain list (JSON-serializable, crash-safe);
+    the set is transient — rebuilt on first use after every store load — and
+    self-heals if its size ever disagrees with the list. All mutations flow
+    through ``_pop_frontier``/``_frontier_add`` so the mirror is exact.
+    """
+    known = job.__dict__.get("_frontier_set")
+    if known is None or len(known) != len(job.frontier):
+        known = set(job.frontier)
+        job.__dict__["_frontier_set"] = known
+    return known
+
+
+def _frontier_add(job: Any, url: str) -> None:
+    """Append to the persisted frontier and its membership mirror."""
+    job.frontier.append(url)
+    known = job.__dict__.get("_frontier_set")
+    if known is not None:
+        known.add(url)
 
 
 async def _run_job(
@@ -202,8 +229,8 @@ async def _run_job(
                     link_url = frontier_link_url(link)
                     if not link_url:
                         continue
-                    if link_url not in job.visited and link_url not in job.frontier:
-                        job.frontier.append(link_url)
+                    if link_url not in job.visited and link_url not in _frontier_set(job):
+                        _frontier_add(job, link_url)
                         job.stats["total_discovered"] += 1
             # `failed` accumulates across the batch: merge it once, outside
             # the loop, or every item re-adds the running total (1+2+...+n).
