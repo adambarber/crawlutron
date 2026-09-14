@@ -149,10 +149,13 @@ def frontier_link_url(link: Any) -> str | None:
     Frontier and visited sets are keyed on absolute, validated URLs, so the raw
     ``url`` must never enter them. A link without a usable ``normalized_url``
     (or a non-link string) yields None: unqueue-able, not a raw-href fallback.
+    Attribute-held links (e.g. ``DiscoveredLink`` dataclasses) read the same
+    validated field; the raw href is never consulted in any shape.
     """
-    if not isinstance(link, dict):
-        return None
-    normalized = link.get("normalized_url")
+    if isinstance(link, dict):
+        normalized = link.get("normalized_url")
+    else:
+        normalized = getattr(link, "normalized_url", None)
     if isinstance(normalized, str) and normalized:
         return normalized
     return None

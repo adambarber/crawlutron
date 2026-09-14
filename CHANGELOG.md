@@ -296,6 +296,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every store load, synced by `_pop_frontier`/`_frontier_add` — while the
   list stays the crash-safe source of truth. A 25-link fan-out test pins the
   multi-batch contract.
+- **Map reads links through `frontier_link_url` (L1)** (app/map.py,
+  app/api/response_shaping.py): the site-map had its own link-URL reader
+  with a raw-href fallback. It now uses the validated-`normalized_url`
+  chokepoint (widened to attribute-held `DiscoveredLink` dataclasses — same
+  validated field, raw href never consulted). Existing map/job/MCP tests
+  pin the preserved shapes.
 - **One keyed-provider constructor (jscpd)** (app/search/providers.py):
   Tavily/Brave/Serper each re-inlined `__init__` storing `api_key`. A shared
   `_ApiKeyProvider` base owns the credential slot; a contract test pins that

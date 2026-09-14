@@ -12,11 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _link_url(link: Any) -> str | None:
-    if isinstance(link, dict):
-        return link.get("normalized_url") or link.get("url")
-    return getattr(link, "normalized_url", None) or getattr(link, "url", None)
+from app.api.response_shaping import frontier_link_url
 
 
 def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
@@ -59,7 +55,7 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
 
     links: list[str] = []
     for link in result.get("discovered_links", []) or []:
-        url = _normalize(_link_url(link))
+        url = _normalize(frontier_link_url(link))
         if url:
             links.append(url)
 
