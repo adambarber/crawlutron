@@ -21,6 +21,7 @@ from app.constants import (
     SUPPORTED_STRATEGIES,
 )
 from app.settings import CrawlerSettings
+from app.validation import normalize_public_http_url
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
@@ -30,18 +31,33 @@ DEFAULT_MAX_PAGES = 100
 
 
 def _payload_urls(payload: dict[str, Any]) -> list[str]:
-    """Extract the request URL batch, collapsing exact duplicates.
+    """Extract the request URL batch, collapsing duplicates by page identity.
 
-    Identical URL strings in one request crawl the same page, so only the
-    first occurrence is kept (order-preserving). Both the engine and the
-    render paths inherit the dedup here, and the batch-size check downstream
-    counts unique URLs.
+    ``normalize_public_http_url`` is the single source of truth for what counts
+    as the "same page" (fragment / trailing-slash / tracking-param / param-order
+    variants all canonicalize identically), so dedup here must key on that
+    canonical form -- not the raw string. Identical pages crawl once; the first
+    occurrence is kept, order-preserving. Both the engine and the render paths
+    inherit the dedup here, and the batch-size check downstream counts unique
+    pages. A value the canonicalizer rejects (non-http, or a private target under
+    the SSRF guard) is not silently dropped: it keeps its raw key so it stays a
+    distinct entry, and request-target validation remains the caller's job.
     """
     if "urls" in payload:
         urls = payload["urls"]
         if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
             raise ValueError("invalid_urls")
-        return list(dict.fromkeys(urls))
+        seen: set[str] = set()
+        unique: list[str] = []
+        for url in urls:
+            try:
+                key = normalize_public_http_url(url)
+            except ValueError:
+                key = url
+            if key not in seen:
+                seen.add(key)
+                unique.append(url)
+        return unique
     if "url" in payload and isinstance(payload["url"], str):
         return [payload["url"]]
     raise ValueError("missing_url")

@@ -402,7 +402,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      import or call `gzip`/`zlib`/`brotli` directly; body decoding must route through
      the capped `decompress_body` chokepoint. The existing cap sweep guards the
      chokepoint's callers; this guards the bypass around it (a re-introduced
-     header-trusting, uncapped decompress). Both ship `*_bites` proofs.
+      header-trusting, uncapped decompress). Both ship `*_bites` proofs.
+- **Page-identity dedup at the batch chokepoint ("never crawl the same page
+  twice")** (app/crawl/payload_helpers.py): `_payload_urls` collapsed only *exact*
+  duplicate strings, so a request carrying both `.../x` and `.../x/?utm_source=tw`
+  — the same page under `normalize_public_http_url`, the service's declared single
+  source of truth for page identity — still crawled twice. The chokepoint now dedups
+  on the canonical key: fragment / trailing-slash / tracking-param / param-order
+  variants collapse, first occurrence wins, order preserved — matching the identity
+  already used by the visited set, the frontier, and the content-cache key. An
+  un-canonicalizable value (non-http, or a private target under the SSRF guard)
+  keeps its raw key so it stays a distinct entry and request-target validation
+  remains the caller's job. A tree-wide AST invariant
+  (`test_batch_dedup_keys_on_canonical_page_identity`) fails CI on any `dict.fromkeys`
+  batch dedup that doesn't route through the canonicalizer; it ships a `*_bites`
+  proof and is non-vacuous (`dict.fromkeys` appears nowhere else in `app/`).
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):

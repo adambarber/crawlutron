@@ -82,6 +82,26 @@ class TestValidationHelpers:
             "http://y/",
         ]
 
+    def test_payload_urls_dedupes_by_canonical_page_identity(self) -> None:
+        # ``normalize_public_http_url`` already treats fragment / trailing-slash /
+        # tracking-param / param-order variants as the SAME page. The batch chokepoint
+        # must dedup on that identity, not the raw string -- otherwise a request
+        # carrying both ``.../x`` and ``.../x/?utm_source=tw`` crawls one page twice.
+        urls = [
+            "https://a.gov/x",
+            "https://a.gov/x/#section",  # fragment dropped -> same page
+            "https://a.gov/x/?utm_source=tw",  # tracking param dropped -> same page
+            "https://a.gov/x/",  # trailing slash stripped -> same page
+            "https://a.gov/y?a=1&b=2",
+            "https://a.gov/y?b=2&a=1",  # param order only -> same page
+            "https://a.gov/z",
+        ]
+        assert _payload_urls({"urls": urls}) == [
+            "https://a.gov/x",
+            "https://a.gov/y?a=1&b=2",
+            "https://a.gov/z",
+        ]
+
     def test_render_options_error(self) -> None:
         with pytest.raises(ValueError, match=r"^invalid_options$"):
             _render_options({"options": "bad"}, CrawlerSettings.from_mapping())

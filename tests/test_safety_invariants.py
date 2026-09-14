@@ -251,6 +251,73 @@ def test_no_hand_rolled_redirect_hops():
     assert not offenders, "Use SafeUrl.redirect_hop for redirect hops: " + ", ".join(offenders)
 
 
+_CANONICALIZER = frozenset({"normalize_public_http_url"})
+
+
+def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag ``dict.fromkeys`` batch dedup that keys on raw values.
+
+    The url-batch dedup at ``_payload_urls`` must collapse duplicates by
+    canonical page identity (``normalize_public_http_url``) -- not the raw
+    string -- or a request carrying both ``.../x`` and ``.../x/?utm_source=tw``
+    crawls one page twice. Every ordered-dedup via ``dict.fromkeys`` must sit
+    inside a function that also routes through the canonicalizer, so a new
+    raw-key dedup fails the suite the moment it lands.
+    """
+    offenders: list[str] = []
+    for func in _functions_with(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        uses_fromkeys = any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "fromkeys"
+            and isinstance(n.func.value, ast.Name)
+            and n.func.value.id == "dict"
+            for n in ast.walk(func)
+        )
+        if not uses_fromkeys:
+            continue
+        canonicalizes = any(
+            isinstance(n, ast.Name)
+            and n.id in _CANONICALIZER
+            or isinstance(n, ast.Attribute)
+            and n.attr in _CANONICALIZER
+            for n in ast.walk(func)
+        )
+        if not canonicalizes:
+            offenders.append(
+                offender(
+                    path,
+                    func.lineno,
+                    f"{func.name}() dedups a batch with dict.fromkeys, not the canonicalizer",
+                )
+            )
+    return offenders
+
+
+def test_batch_dedup_keys_on_canonical_page_identity():
+    """URL-batch dedup must collapse by ``normalize_public_http_url``, never raw strings."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_raw_batch_dedup_offenders(tree, path))
+    assert not offenders, (
+        "dedup url batches via normalize_public_http_url, not raw dict.fromkeys: " + ", ".join(offenders)
+    )
+
+
+def test_batch_dedup_detector_bites():
+    raw = ast.parse("def _payload_urls(payload):\n    return list(dict.fromkeys(payload['urls']))\n")
+    assert _raw_batch_dedup_offenders(raw, REPO_ROOT / "app" / "crawl" / "_synthetic.py"), (
+        "detector missed raw dict.fromkeys dedup"
+    )
+    good = ast.parse(
+        "def _payload_urls(payload):\n"
+        "    return [u for u in payload['urls'] if normalize_public_http_url(u) not in seen]\n"
+    )
+    assert not _raw_batch_dedup_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
 def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag an unbounded body acquisition on a response-like object.
 
