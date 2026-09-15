@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from collections.abc import Mapping
+from functools import lru_cache
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
@@ -120,25 +121,12 @@ def normalize_public_http_url(url: str) -> str:
     # private-network guard via env var rather than relaxing it by default.
     # Inverted-by-default: any value not explicitly recognized as truthy keeps
     # the SSRF guard ON, mirroring ``settings._parse_bool_env_value`` so the
-    # two paths agree on what counts as "on".
-    allow_private = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
-    if not allow_private:
-        if host in PRIVATE_HOSTS:
-            raise ValueError("private_network_target")
-        try:
-            address = ipaddress.ip_address(host)
-        except ValueError:
-            address = None
-        if address is None:
-            # Resolver-numeric forms ipaddress rejects (L4): classify the
-            # packed value with the same predicate set.
-            numeric = _resolver_numeric_ipv4(host)
-            if numeric is not None:
-                address = ipaddress.ip_address(numeric)
-        if address is not None and (
-            address.is_private or address.is_loopback or address.is_link_local or address.is_reserved
-        ):
-            raise ValueError("private_network_target")
+    # two paths agree on what counts as "on". Both layers below are memoized
+    # (perf tier-2 T2) because this function runs per anchor: the env decision
+    # is keyed on its raw value (so any change is visible on the very next
+    # call) and the host verdict is a pure function of the canonical host.
+    if not _allow_private_targets() and not _host_is_public(host):
+        raise ValueError("private_network_target")
 
     default_port = 80 if parsed.scheme == "http" else 443
     port = parsed.port
@@ -160,6 +148,56 @@ def normalize_public_http_url(url: str) -> str:
 
 def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
+
+
+# (raw env value, parsed decision) for BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS.
+# Value-keyed, not time-keyed: an env change (including a test monkeypatch)
+# takes effect on the very next call; an unchanged value skips the parse.
+_PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
+
+
+def _allow_private_targets() -> bool:
+    """Memoized read of the private-target escape hatch (inverted default).
+
+    The raw env value is the cache key, so unrecognized values keep resolving
+    to ``False`` (guard ON) through the same ``parse_bool_env`` chokepoint and
+    every distinct value change is honored immediately.
+    """
+    global _PRIVATE_TARGET_DECISION
+    raw = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS")
+    cached = _PRIVATE_TARGET_DECISION
+    if cached is not None and cached[0] == raw:
+        return cached[1]
+    decision = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
+    _PRIVATE_TARGET_DECISION = (raw, decision)
+    return decision
+
+
+@lru_cache(maxsize=8192)
+def _host_is_public(host: str) -> bool:
+    """SSRF verdict for one canonical host (bounded memo, pure function).
+
+    Deterministic for a given host and independent of the env hatch (only
+    consulted while the guard is ON), so cache entries never go stale. The
+    bound keeps attacker-influenced host floods from growing memory.
+    """
+    if host in PRIVATE_HOSTS:
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = None
+    if address is None:
+        # Resolver-numeric forms ipaddress rejects (L4): classify the
+        # packed value with the same predicate set.
+        numeric = _resolver_numeric_ipv4(host)
+        if numeric is not None:
+            address = ipaddress.ip_address(numeric)
+    if address is not None and (
+        address.is_private or address.is_loopback or address.is_link_local or address.is_reserved
+    ):
+        return False
+    return True
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:

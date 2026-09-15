@@ -73,6 +73,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   branches. The hot path (pooled client alive on the current loop) consults
   env zero times per fetch; every rebuild still reads operator pool limits
   fresh, and loop-change rebuild/pending-close semantics are unchanged.
+- **Normalization guard memoized (tier-2 T2)** (app/validation.py):
+  `normalize_public_http_url` now consults the
+  `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` decision through a raw-value-keyed
+  memo (any env change, including tests, is visible on the very next call;
+  unrecognized values keep the guard ON) and classifies hosts through a
+  bounded pure-function `lru_cache` verdict — per-anchor normalization no
+  longer pays an env parse plus an `ipaddress` exception per call. Resolver-
+  numeric forms (`2130706433`, `0x7f000001`) keep their private verdict.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
