@@ -173,6 +173,16 @@ def _allow_private_targets() -> bool:
     return decision
 
 
+def _reset_guard_memo() -> None:
+    """Drop the memoized env decision (tests that count parse calls only).
+
+    Host verdicts are a pure function of the host and never go stale, so the
+    verdict memo deliberately is not touched here.
+    """
+    global _PRIVATE_TARGET_DECISION
+    _PRIVATE_TARGET_DECISION = None
+
+
 @lru_cache(maxsize=8192)
 def _host_is_public(host: str) -> bool:
     """SSRF verdict for one canonical host (bounded memo, pure function).

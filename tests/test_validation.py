@@ -44,6 +44,8 @@ class TestNormalizationGuardMemoization:
         import app.validation as validation
 
         counts = {"env": 0, "ip": 0}
+
+        validation._reset_guard_memo()
         real_bool = validation.parse_bool_env
         real_ip = ipaddress.ip_address
 
