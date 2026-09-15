@@ -60,6 +60,7 @@ class CrawlJobState:
     frontier: list[str] = field(default_factory=list)  # URLs pending crawl
     visited: set[str] = field(default_factory=set)  # URLs already crawled
     in_flight: list[str] = field(default_factory=list)  # batch inside the engine call
+    transient_retries: dict[str, int] = field(default_factory=dict)  # url -> transient retry count
     # Single-shot fields (used when kind == SINGLE_SHOT)
     # root_url holds the first URL (or "" for batch); results holds completed crawl results
     results: list[dict[str, Any]] = field(default_factory=list)  # Completed results
@@ -120,6 +121,7 @@ class JobStore:
                 frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of URLs
                 visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of URLs
                 in_flight TEXT NOT NULL DEFAULT '[]',      -- JSON array: batch inside the engine call
+                transient_retries TEXT NOT NULL DEFAULT '{}', -- JSON dict: url -> transient retry count
                 results TEXT NOT NULL DEFAULT '[]',       -- JSON array of result objects
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
@@ -140,6 +142,14 @@ class JobStore:
             self._conn.commit()
         except sqlite3.OperationalError:
             pass
+        # Migration: add transient_retries for bounded whole-site transient retries.
+        try:
+            self._conn.execute(
+                "ALTER TABLE crawl_jobs ADD COLUMN transient_retries TEXT NOT NULL DEFAULT '{}'"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass
         self._conn.commit()
 
     def _row_to_job(self, row) -> CrawlJobState:
@@ -157,6 +167,7 @@ class JobStore:
             error=row[10],
             stats=json.loads(row[11]),
             in_flight=json.loads(row[12]),
+            transient_retries=json.loads(row[13]),
         )
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
@@ -198,9 +209,9 @@ class JobStore:
         job.updated_at = time.time()
         self._conn.execute(
             """
-            INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
-                                    created_at, updated_at, error, stats, in_flight)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
+                                          created_at, updated_at, error, stats, in_flight, transient_retries)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(job_id) DO UPDATE SET
                 kind=excluded.kind,
                 root_url=excluded.root_url,
@@ -211,9 +222,10 @@ class JobStore:
                 results=excluded.results,
                 updated_at=excluded.updated_at,
                 error=excluded.error,
-                stats=excluded.stats,
-                in_flight=excluded.in_flight
-        """,
+                      stats=excluded.stats,
+                      in_flight=excluded.in_flight,
+                      transient_retries=excluded.transient_retries
+              """,
             (
                 job.job_id,
                 job.kind.value,
@@ -228,6 +240,7 @@ class JobStore:
                 job.error,
                 json.dumps(job.stats, separators=(",", ":"), default=_json_default),
                 json.dumps(job.in_flight, separators=(",", ":"), default=_json_default),
+                json.dumps(job.transient_retries, separators=(",", ":"), default=_json_default),
             ),
         )
         self._conn.commit()
@@ -237,7 +250,7 @@ class JobStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT job_id, kind, root_url, policy, status, frontier, visited, results, "
-                "created_at, updated_at, error, stats, in_flight FROM crawl_jobs WHERE job_id = ?",
+                "created_at, updated_at, error, stats, in_flight, transient_retries FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:

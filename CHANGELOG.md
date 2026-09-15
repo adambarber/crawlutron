@@ -450,8 +450,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
    content cache keep the re-fetch cheap and non-duplicating). This closes the
    #1834 "loses only in-flight work" claim — previously it also *dropped* it and
    falsely completed. A `TestCrashRecovery` test encodes the exact persisted
-   post-pop/pre-record state and asserts recovery re-crawls it (the detection
-   gap: nothing previously asserted in-flight durability).
+    post-pop/pre-record state and asserts recovery re-crawls it (the detection
+    gap: nothing previously asserted in-flight durability).
+  - **Transient failures no longer drain a whole-site frontier** (app/api/job_runner.py,
+    app/crawl/job_store.py, app/constants.py): the runner marked *every* popped URL
+    visited unconditionally, so a page that failed for a *transient* reason
+    (network/dns/tls/timeout/browser crash — the long-dead but now-live
+    `TRANSIENT_CLASSIFICATIONS`) was counted done and never re-queued. A whole-site
+    job whose links fail during a network outage therefore drained to a seed-only
+    `COMPLETED` — the exact 185 one-page towns from the 351-municipality exercise.
+    `_run_job` now re-queues a transiently-failed URL (and a popped URL with no
+    returned item) to the back of the frontier instead of visiting it, bounded by
+    `MAX_URL_TRANSIENT_ATTEMPTS` (3) via a persisted `transient_retries` map so a
+    permanently-dead page can't spin forever — on exhaustion it is recorded terminal
+    with `error="retries_exhausted"`. Permanent failures (`not_found`/`site_error`/
+    `gone`) stay terminal-once: a known-missing page is an answer, not a blip. New
+    tree-wide detector `test_whole_site_visited_commit_is_transient_gated` forbids any
+    `job.visited.add()` not gated on `TRANSIENT_CLASSIFICATIONS` (the local per-request
+    `visited` set is deliberately out of scope), with a paired `*_bites` test.
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):

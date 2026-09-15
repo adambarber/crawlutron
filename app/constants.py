@@ -150,6 +150,15 @@ DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
 DEFAULT_MAX_RETRIES: int = 2
 MAX_RETRIES: int = 5
 
+# Durable whole-site retry cap: how many times a frontier batch may hand a URL to
+# the engine when it fails for a TRANSIENT reason (network/dns/tls/timeout/browser
+# crash). Such a URL is re-queued, not marked visited, so a network outage can't
+# drain a whole-site job to a seed-only "completed". After this many attempts the
+# URL is recorded terminal (error="retries_exhausted") so a permanently-dead page
+# can't spin the frontier forever. Distinct from MAX_RETRIES (in-call strategy
+# retries); this bounds ACROSS-batch durable retries.
+MAX_URL_TRANSIENT_ATTEMPTS: int = 3
+
 # Hard per-URL ceiling over the ENTIRE strategy chain (all strategies x retries
 # plus browser challenge waits). Guards against poisoned/tarpit URLs that would
 # otherwise hold a concurrency slot for many minutes while the resource gate

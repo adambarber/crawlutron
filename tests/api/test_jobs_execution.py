@@ -41,16 +41,59 @@ def _link(url: str, source_url: str, *, normalized: str | None = None) -> dict:
 
 
 def _canned_result(
-    url: str, *, status: str = "success", links: list[str] | None = None, raw_links: list[dict] | None = None
+    url: str,
+    *,
+    status: str = "success",
+    links: list[str] | None = None,
+    raw_links: list[dict] | None = None,
+    classification: str | None = None,
 ) -> dict:
     return {
         "original_url": url,
         "normalized_url": url,
         "final_url": url,
         "status": status,
-        "classification": "rendered" if status == "success" else "site_error",
+        "classification": classification or ("rendered" if status == "success" else "site_error"),
         "discovered_links": [_link(link, url) for link in links or []] + (raw_links or []),
     }
+
+
+def _fake_execute_scripted(
+    scripts: dict[str, list[dict]],
+    *,
+    attempts: dict[str, int] | None = None,
+    hang: asyncio.Event | None = None,
+):
+    """Engine stand-in that replays a per-URL script, then repeats the last entry.
+
+    Each URL maps to a list of canned results consumed one per engine call, so a
+    test can make a URL fail transiently a few times then succeed. ``attempts``
+    (when given) tallies how many times each URL is handed to the engine.
+    """
+
+    async def _execute(payload_dict, *, settings, shutdown_event):
+        if hang is not None and not hang.is_set():
+            await hang.wait()
+        urls = payload_dict.get("urls") or [payload_dict.get("url")]
+        results = []
+        for u in urls:
+            seq = scripts.get(u)
+            if seq is None:
+                entry = _canned_result(u)
+            elif len(seq) > 1:
+                entry = seq.pop(0)
+            else:
+                entry = seq[0]  # repeat the final scripted outcome
+            if attempts is not None:
+                attempts[u] = attempts.get(u, 0) + 1
+            results.append(entry)
+        return {
+            "results": results,
+            "submitted_count": len(urls),
+            "policy_schema_version": "test",
+        }
+
+    return _execute
 
 
 def _fake_execute(results: list[dict], *, hang: asyncio.Event | None = None):
@@ -276,6 +319,88 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 26
         assert len(job.results) == 26
         assert job.frontier == []
+
+
+class TestTransientFailureRequeue:
+    """A page that can't be reached for a *transient* reason (network/dns/tls/
+    timeout/browser crash) must not be counted done or drain the frontier — it is
+    re-queued for a bounded number of retries, while a *permanent* failure
+    (not_found/site_error/gone) is recorded terminal immediately. Otherwise a
+    whole-site job whose links fail while the network is down would mark itself
+    COMPLETED having crawled only the seed."""
+
+    _CAP = 3  # MAX_URL_TRANSIENT_ATTEMPTS
+
+    async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store, real_sleeps):
+        root = "http://example.test/a"
+        attempts: dict[str, int] = {}
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            root,
+            _fake_execute_scripted(
+                {
+                    root: [
+                        _canned_result(root, status="failed", classification="network_error"),
+                        _canned_result(root, status="failed", classification="dns_error"),
+                        _canned_result(root, status="success"),
+                    ]
+                },
+                attempts=attempts,
+            ),
+        )
+        # The two early failures must not have finalized the page; the crawl
+        # retried and the single committed outcome is the eventual success.
+        assert job.status == JobStatus.COMPLETED
+        assert attempts[root] == 3
+        assert job.visited == {root}
+        assert len(job.results) == 1
+        assert job.results[0]["status"] == "success"
+        assert job.stats["total_crawled"] == 1
+        assert job.stats["total_failed"] == 0
+
+    async def test_transient_retries_are_bounded_then_terminal(self, client, job_store, real_sleeps):
+        root = "http://example.test/a"
+        attempts: dict[str, int] = {}
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            root,
+            _fake_execute_scripted(
+                {root: [_canned_result(root, status="failed", classification="network_error")]},
+                attempts=attempts,
+            ),
+        )
+        # A permanently-flaky page is attempted exactly the cap (not forever, not
+        # once), then recorded as a terminal failure so the whole-site job can end.
+        assert job.status == JobStatus.COMPLETED
+        assert attempts[root] == self._CAP
+        assert job.visited == {root}
+        assert len(job.results) == 1
+        assert job.results[0]["status"] == "failed"
+        assert job.results[0]["error"] == "retries_exhausted"
+        assert job.stats["total_failed"] == 1
+        assert job.frontier == []
+
+    async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store, real_sleeps):
+        root = "http://example.test/a"
+        attempts: dict[str, int] = {}
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            root,
+            _fake_execute_scripted(
+                {root: [_canned_result(root, status="failed", classification="not_found")]},
+                attempts=attempts,
+            ),
+        )
+        # "Page is gone" is an answer, not a transient blip: recorded once, not retried.
+        assert job.status == JobStatus.COMPLETED
+        assert attempts[root] == 1
+        assert job.visited == {root}
+        assert job.results[0]["status"] == "failed"
+        assert job.results[0]["classification"] == "not_found"
+        assert job.stats["total_failed"] == 1
 
     async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
         """H1: the frontier must carry the validated URL, never the raw href.

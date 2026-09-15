@@ -31,7 +31,9 @@ from typing import Any
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import build_unified_result, frontier_link_url
+from app.constants import MAX_URL_TRANSIENT_ATTEMPTS
 from app.crawl.job_store import JobKind, JobStatus, JobStore
+from app.crawl.strategies.browser import TRANSIENT_CLASSIFICATIONS
 
 logger = logging.getLogger(__name__)
 
@@ -222,10 +224,48 @@ async def _run_job(
                 return
 
             failed = 0
-            for item in items:
-                url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-                if not url:
+            resolved = {
+                (it.get("final_url") or it.get("normalized_url") or it.get("original_url")): it
+                for it in items
+            }
+            for url in batch:
+                item = resolved.get(url)
+                if item is None:
+                    outcome = "transient"  # no outcome for a popped URL is not a definitive answer
+                elif item.get("status") != "failed":
+                    outcome = "success"
+                elif item.get("classification") in TRANSIENT_CLASSIFICATIONS:
+                    outcome = "transient"
+                else:
+                    outcome = "terminal_failed"
+
+                if (
+                    outcome == "transient"
+                    and job.transient_retries.get(url, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS
+                ):
+                    # Unreachable for now (network/dns/tls/timeout/crash): re-queue for a
+                    # later batch or the next connected window, and do NOT mark visited.
+                    # Committing it as done is what let a whole-site job drain to a
+                    # seed-only "completed" while the network was down.
+                    job.transient_retries[url] = job.transient_retries.get(url, 0) + 1
+                    if url not in _frontier_set(job):
+                        _frontier_add(job, url)
                     continue
+
+                # Terminal outcome: success, permanent failure, or transient retries
+                # exhausted after MAX_URL_TRANSIENT_ATTEMPTS (bounded, so a
+                # permanently-dead page can't spin the frontier forever).
+                job.transient_retries.pop(url, None)
+                job.visited.add(url)
+                if item is None:
+                    failed += 1
+                    continue
+                exhausted = outcome == "transient"
+                if exhausted:
+                    # Transient failure, but the durable retry budget is spent: record it
+                    # terminal so the whole-site job can finish. build_unified_result
+                    # propagates this item.error into the committed result.
+                    item = {**item, "status": "failed", "error": "retries_exhausted"}
                 try:
                     unified = build_unified_result(item)
                 except Exception:
@@ -236,8 +276,6 @@ async def _run_job(
                         failed += 1
                 else:
                     failed += 1  # a dropped item is a failed crawl, not silence
-                job.visited.add(url)
-                job.stats["total_crawled"] = len(job.visited)
                 for link in item.get("discovered_links") or []:
                     link_url = frontier_link_url(link)
                     if not link_url:
@@ -245,6 +283,7 @@ async def _run_job(
                     if link_url not in job.visited and link_url not in _frontier_set(job):
                         _frontier_add(job, link_url)
                         job.stats["total_discovered"] += 1
+            job.stats["total_crawled"] = len(job.visited)
             # `failed` accumulates across the batch: merge it once, outside
             # the loop, or every item re-adds the running total (1+2+...+n).
             if failed:

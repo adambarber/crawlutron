@@ -1394,3 +1394,73 @@ def test_domain_delay_detector_bites():
         "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n"
     )
     assert not _unbounded_domain_delay_writes(good, REPO_ROOT / "app" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Whole-site frontier must not drain on transient failure
+# ---------------------------------------------------------------------------
+
+
+def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag committing a *whole-site* URL to ``job.visited`` without the gate.
+
+    A URL that fails for a transient reason (network/dns/tls/timeout/crash) must
+    be re-queued, not marked visited: committing it is what let a network outage
+    drain a whole-site frontier to a seed-only ``COMPLETED``. Keyed on the
+    persisted ``job.visited`` receiver so the local per-request ``visited`` set
+    (recursive/fetch_helpers) — a different thing, where retrying the same failed
+    URL within one crawl is pointless — is not matched.
+    """
+    offenders: list[str] = []
+    for func in _functions_with(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        commits = [
+            n
+            for n in ast.walk(func)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "add"
+            and isinstance(n.func.value, ast.Attribute)
+            and n.func.value.attr == "visited"
+            and isinstance(n.func.value.value, ast.Name)
+            and n.func.value.value.id == "job"
+        ]
+        if not commits:
+            continue
+        gated = any(isinstance(n, ast.Name) and n.id == "TRANSIENT_CLASSIFICATIONS" for n in ast.walk(func))
+        if not gated:
+            offenders.append(
+                offender(
+                    path,
+                    commits[0].lineno,
+                    "job.visited.add() without the TRANSIENT_CLASSIFICATIONS re-queue gate",
+                )
+            )
+    return offenders
+
+
+def test_whole_site_visited_commit_is_transient_gated():
+    """A transiently-failed whole-site URL is re-queued, never counted done."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_ungated_job_visited_offenders(tree, path))
+    assert not offenders, (
+        "gate every job.visited.add on TRANSIENT_CLASSIFICATIONS (re-queue transient failures): "
+        + ", ".join(offenders)
+    )
+
+
+def test_whole_site_visited_gate_detector_bites():
+    """An unguarded whole-site visited commit fires; the gated form stays clean."""
+    bad = ast.parse("def run(job):\n    for url in batch:\n        job.visited.add(url)\n")
+    offenders = _ungated_job_visited_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
+    assert len(offenders) == 1 and "TRANSIENT_CLASSIFICATIONS" in offenders[0], offenders
+    good = ast.parse(
+        "def run(job, outcome, TRANSIENT_CLASSIFICATIONS):\n"
+        "    for url in batch:\n"
+        "        if outcome in TRANSIENT_CLASSIFICATIONS:\n"
+        "            continue\n"
+        "        job.visited.add(url)\n"
+    )
+    assert not _ungated_job_visited_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
