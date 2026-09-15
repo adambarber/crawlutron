@@ -631,6 +631,12 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
 
 _SPILL_PREFIX = "bc-spill-"
 
+# Cadence gate for _ResultSpill's stale-spill sweep (perf tier-2 T5): at most
+# one temp-dir scan per interval per process; None means "never scanned",
+# forcing the first construction to sweep immediately.
+_SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
+_LAST_SPILL_GC_MONOTONIC: float | None = None
+
 
 class _ResultSpill:
     """Append-only NDJSON spill of page results (#2-stream).
@@ -668,12 +674,24 @@ class _ResultSpill:
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop (adversarial #1.3).
         self._write_lock = asyncio.Lock()
-        try:
-            self._gc_stale_spills(gc_age_seconds)
-        except Exception:
-            # GC failure must not abort the spill (adversarial #result-spill
-            # review). The next spill instance will retry.
-            pass
+        global _LAST_SPILL_GC_MONOTONIC
+        now_mono = time.monotonic()
+        if (
+            _LAST_SPILL_GC_MONOTONIC is None
+            or now_mono - _LAST_SPILL_GC_MONOTONIC >= _SPILL_GC_MIN_INTERVAL_SECONDS
+        ):
+            # Cadence gate (perf tier-2 T5): the temp-dir sweep is O(dir) and
+            # ran per crawl request. The None-initial stamp guarantees the
+            # first construction in a process always scans, so spill files
+            # orphaned by killed runs are still reclaimed; the age predicate
+            # below still protects active spills from early unlink.
+            _LAST_SPILL_GC_MONOTONIC = now_mono
+            try:
+                self._gc_stale_spills(gc_age_seconds)
+            except Exception:
+                # GC failure must not abort the spill (adversarial #result-spill
+                # review). The next interval boundary will retry.
+                pass
 
     def _gc_stale_spills(self, max_age: float) -> None:
         """Delete spill files older than ``max_age`` from the system temp dir.
