@@ -110,6 +110,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   ``asyncio.to_thread(_stale_seeds, ...)`` call. Key composition, the full
   strategy chain, and the fail-open contract (unreadable/expired/missing →
   not fresh → URL still crawled) are untouched.
+- **Cooldown purge amortized off the per-429 path (tier-2 T8)**
+  (app/scheduler.py): every rate-limited result reaches
+  ``set_domain_cooldown``, which rebuilt both the cooldown and circuit dicts
+  per call — quadratic in the number of 429s. The purge now fires at most once
+  per 100 sets (``run`` keeps its up-front purge), the two clocks stay
+  separate, only expired entries drop, and a domain's own fresh cooldown is
+  never removed.
 - **ContentCache unlinks moved off the lock (tier-2 T6)**
   (app/crawl/content_cache.py): `_drop_locked` (and the TTL-expiry path in
   `_read_envelope`) now mutate the index, byte accounting, and RAM mirror

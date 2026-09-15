@@ -38,6 +38,11 @@ class _TokenBucket:
 # Upper bound on how long any single job will sleep on a domain cooldown.
 _MAX_COOLDOWN_WAIT = 300.0
 
+# T8: purge the cooldown/circuit mappings at most once per this many
+# set_domain_cooldown calls, so a crawl with many 429s does not rebuild both
+# dicts on every rate-limited result. ``run`` still purges up front.
+_COOLDOWN_PURGE_INTERVAL = 100
+
 
 class DomainScheduler:
     def __init__(
@@ -101,15 +106,26 @@ class DomainScheduler:
         # re-climbing the ladder from the cheapest strategy.
         self._domain_strategy_pins: dict[str, str] = {}
 
+        # T8: every rate-limited result calls set_domain_cooldown; purging both
+        # dicts per call made a crawl with many 429s quadratic. The purge is
+        # amortized to one per ``_COOLDOWN_PURGE_INTERVAL`` sets (``run`` still
+        # purges up front), so the mappings stay bounded without per-429 work.
+        self._sets_since_purge = 0
+
     def set_domain_cooldown(self, domain: str, seconds: float) -> None:
         """Set a cooldown period for a domain after a rate limit (429) response.
 
-        Also purges any other domain cooldowns that have already elapsed so the
-        mapping cannot leak memory across a long-lived service.
+        Also purges domain cooldowns/circuits that have already elapsed, so the
+        mappings cannot leak memory across a long-lived service — but on an
+        amortized cadence (T8), since every rate-limited result reaches here
+        and rebuilding both dicts per call is quadratic in the number of 429s.
         """
         if seconds > 0:
             self._domain_cooldowns[domain] = time.time() + seconds
-        self._purge_expired()
+        self._sets_since_purge += 1
+        if self._sets_since_purge >= _COOLDOWN_PURGE_INTERVAL:
+            self._sets_since_purge = 0
+            self._purge_expired()
 
     def record_success(self, domain: str) -> None:
         """Reset the failure counter (and exponential backoff) for a domain."""
