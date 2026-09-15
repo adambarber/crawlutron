@@ -24,7 +24,7 @@ from starlette.requests import Request
 
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error
-from app.api.response_shaping import build_unified_crawl_response
+from app.api.response_shaping import abuild_unified_crawl_response
 from app.api.webhooks import validate_webhook_url
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
@@ -128,7 +128,7 @@ async def crawl(
             elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
         )
         logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
-        response_model = build_unified_crawl_response(
+        response_model = await abuild_unified_crawl_response(
             result.get("results", []),
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
