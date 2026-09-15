@@ -112,14 +112,10 @@ from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
-    _detect_pagination,
-    _extract_discovered_links,
     _extract_document,
     _extract_html,
-    _html_diagnostics,
-    _parse_html_tree,
     extract_content,
-    extract_js_endpoints,
+    extract_post_fetch_discovery,
 )
 from app.crawl.result_helpers import _binary_no_text_result, _make_engine_result
 from app.models import CrawlStrategyAttempt, EngineCrawlResult, HttpFetchResult
@@ -1856,16 +1852,23 @@ async def _http_strategy_result(
         discovery = policy.get("discovery") or {}
         _max_depth = int((policy.get("limits") or {}).get("max_depth") or 0)
         _want_discovery_links = bool(discovery) or _max_depth > 0
-        # #11: parse the page HTML at most once and reuse the single lxml tree
-        # for the frames/forms diagnostics and the link extraction below.
-        # Only parse when discovery is requested or this is a recursive crawl
-        # that expands the frontier from the extracted links (B1).
-        tree = _parse_html_tree(html) if _want_discovery_links and html else None
-        # #2: _html_diagnostics (frames/forms via an lxml parse) is only needed
-        # for structural discovery. Skip it when discovery is not requested so
-        # content-only crawls avoid a redundant HTML parse per page.
+        # Post-fetch discovery (perf #9): the lxml parse + link/frame/form/
+        # JS/pagination passes run in a worker thread (single parse, shared
+        # tree inside). Only plain data returns; egress filtering below is
+        # unchanged. Frames/forms stay gated on explicit discovery (B1) and
+        # links on the recursive/frontier need, exactly as before.
+        post_fetch = await asyncio.to_thread(
+            extract_post_fetch_discovery,
+            html,
+            response.final_url,
+            js_base_url=normalized_url,
+            max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
+            include_diagnostics=bool(discovery),
+            include_links=status == "success" and _want_discovery_links,
+            include_js_endpoints=bool(discovery),
+        )
         if discovery:
-            diagnostics.update(_html_diagnostics(html, response.final_url, tree=tree))
+            diagnostics.update(post_fetch["diagnostics"])
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
@@ -1898,7 +1901,7 @@ async def _http_strategy_result(
         # may leave the service (no javascript:, file:, link-local oddities).
         # JS-endpoint extraction is discovery-oriented; skip it for
         # content-only crawls (B1).
-        raw_endpoints = extract_js_endpoints(html, normalized_url) if discovery else []
+        raw_endpoints = post_fetch["js_endpoints"]
         diagnostics["js_endpoints"] = [
             {**endpoint, "url": clean}
             for endpoint in raw_endpoints
@@ -1909,7 +1912,7 @@ async def _http_strategy_result(
         # standard result field (returned even without discovery mode), so it is
         # always computed. Only the heavier discovery-only extras below are
         # gated on `discovery` (B1).
-        next_page_url = _detect_pagination(html, response.final_url)
+        next_page_url = post_fetch["next_page_url"]
         # Egress filter (public_url_or_none): _detect_pagination already
         # resolves against final_url, so this only drops non-http(s).
         next_page_url = public_url_or_none(next_page_url) if next_page_url else None
@@ -1939,15 +1942,9 @@ async def _http_strategy_result(
         # discovered_links is consumed by frontier expansion and by discovery
         # consumers; content-only crawls (no discovery, depth 0) skip the
         # extraction entirely and return empty links (#2-fix).
-        if status == "success" and _want_discovery_links:
-            discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
-                html,
-                response.final_url,
-                max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
-                tree=tree,
-            )
-        else:
-            discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
+        discovered_links = post_fetch["discovered_links"]
+        discovered_link_count = post_fetch["discovered_link_count"]
+        discovered_links_truncated = post_fetch["discovered_links_truncated"]
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]

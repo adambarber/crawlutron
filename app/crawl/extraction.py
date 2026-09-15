@@ -773,6 +773,49 @@ def _extract_discovered_links(
     return links, total_count, total_count > len(links)
 
 
+def extract_post_fetch_discovery(
+    html: str | None,
+    final_url: str | None,
+    *,
+    js_base_url: str | None = None,
+    max_links: int = 250,
+    include_diagnostics: bool = False,
+    include_links: bool = False,
+    include_js_endpoints: bool = False,
+) -> dict[str, Any]:
+    """Sync post-fetch discovery block for the strategy result builders (perf #9).
+
+    Parses the HTML once and derives frames/forms diagnostics, discovered
+    links, raw JS endpoints, and the pagination hint in one pass. Pure CPU
+    work with no I/O: both builders run it via ``asyncio.to_thread`` so page
+    parsing never parks the event loop. Returns only plain data (dicts,
+    lists, strings, DiscoveredLink values) -- the lxml tree never escapes.
+    Egress filtering (``public_url_or_none``) stays at the call sites so
+    each builder keeps its exact filter contract.
+    """
+    tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
+    diagnostics = _html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
+    if include_links:
+        discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
+            html, final_url, max_links=max_links, tree=tree
+        )
+    else:
+        discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
+    js_endpoints = (
+        extract_js_endpoints(html, js_base_url if js_base_url is not None else final_url)
+        if include_js_endpoints
+        else []
+    )
+    return {
+        "diagnostics": diagnostics,
+        "discovered_links": discovered_links,
+        "discovered_link_count": discovered_link_count,
+        "discovered_links_truncated": discovered_links_truncated,
+        "js_endpoints": js_endpoints,
+        "next_page_url": _detect_pagination(html, final_url),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Katana-inspired advanced discovery
 # ---------------------------------------------------------------------------

@@ -57,14 +57,13 @@ _resource_gate = ResourceGate()
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
-    _detect_pagination,
-    _extract_discovered_links,
+    _extract_discovered_links as _extract_discovered_links,  # re-export: suite uses this namespace
+)
+from app.crawl.extraction import (
     _extract_document,
     _extract_html,
-    _html_diagnostics,
-    _parse_html_tree,
     extract_content,
-    extract_js_endpoints,
+    extract_post_fetch_discovery,
 )
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
@@ -210,11 +209,20 @@ async def _browser_strategy_result(
         markdown = None
         extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
 
+    # Post-fetch discovery (perf #9): the lxml parse + link/frame/form/JS/
+    # pagination passes run in a worker thread (single parse, shared tree
+    # inside). Only plain data returns; egress filtering below is unchanged.
+    post_fetch = await asyncio.to_thread(
+        extract_post_fetch_discovery,
+        result.html,
+        result.final_url,
+        js_base_url=result.final_url,
+        max_links=policy["limits"]["max_discovered_links"],
+        include_diagnostics=True,
+        include_links=result.status == "success",
+        include_js_endpoints=True,
+    )
     # Surface browser-captured dynamic discovery (XHR/fetch) into diagnostics.
-    # #11: parse the page HTML once and reuse the single lxml tree for the
-    # frames/forms diagnostics AND the discovered-link extraction instead of
-    # reparsing the same bytes in each pass.
-    tree = _parse_html_tree(result.html)
     diagnostics: dict[str, Any] = {
         "browser_profile": policy.get("browser_profile") or {},
         "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
@@ -222,7 +230,7 @@ async def _browser_strategy_result(
             "visible_text_length": len((text or "").strip()),
             "html_length": len((result.html or "").strip()),
         },
-        **_html_diagnostics(result.html, result.final_url, tree=tree),
+        **post_fetch["diagnostics"],
     }
     intercepted = result.metadata.get("intercepted_xhr")
     if intercepted:
@@ -232,19 +240,15 @@ async def _browser_strategy_result(
         diagnostics["screenshot"] = screenshot
 
     quality = _quality_score(result.status, result.classification, text, result.html, None)
-    discovered_links, discovered_link_count, discovered_links_truncated = (
-        _extract_discovered_links(
-            result.html, result.final_url, max_links=policy["limits"]["max_discovered_links"], tree=tree
-        )
-        if result.status == "success"
-        else ([], 0, False)
-    )
-    next_page_url = _detect_pagination(result.html, result.final_url)
+    discovered_links = post_fetch["discovered_links"]
+    discovered_link_count = post_fetch["discovered_link_count"]
+    discovered_links_truncated = post_fetch["discovered_links_truncated"]
+    next_page_url = post_fetch["next_page_url"]
     if next_page_url:
         diagnostics["next_page_url"] = next_page_url
     diagnostics["js_endpoints"] = [
         {**endpoint, "url": clean}
-        for endpoint in extract_js_endpoints(result.html, result.final_url)
+        for endpoint in post_fetch["js_endpoints"]
         if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=result.final_url))
         is not None
     ]

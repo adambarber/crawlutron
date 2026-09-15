@@ -66,6 +66,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `TEST_MARKITDOWN_*` seam is snapshotted per task parent-side (persistent
   workers would otherwise see spawn-time env); all extraction-bounds tests
   pass unchanged.
+- **Sync post-fetch parsing off the loop (throughput #9)**
+  (app/crawl/extraction.py, app/crawl/engine.py,
+  app/crawl/strategies/http.py): new `extract_post_fetch_discovery` parses
+  once and derives frames/forms, discovered links, JS endpoints, and the
+  pagination hint; both strategy result builders run it via
+  `asyncio.to_thread` and keep their exact gating/egress-filter contracts.
+  Only plain data returns (the lxml tree never escapes).
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
