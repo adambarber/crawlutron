@@ -95,6 +95,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `itertools.islice` instead of materializing the full key list (up to 100k)
   per over-cap store. Same FIFO insertion-order victims, still snapshot-
   before-pop, still entirely under `self._lock`.
+- **Spill-GC cadence gate (tier-2 T5)** (app/crawl/engine.py):
+  `_ResultSpill` no longer runs its stale-spill sweep (`os.listdir` of the
+  temp dir plus per-file `getmtime`) on every crawl request. A module-global
+  monotonic stamp bounds it to one sweep per 300 s per process, and the first
+  construction always sweeps, so leftovers from killed runs are still
+  reclaimed early. The `gc_age_seconds` floor is untouched: no active spill is
+  ever unlinked.
+
+### Fixed
+- **Doc-pool child-death assertion now checks the real invariant (M8)**
+  (app/crawl/extraction.py, tests/crawl/test_extraction_bounds.py):
+  `test_extract_document_child_death_returns_empty` asserted
+  `multiprocessing.active_children() == []` — a process-global invariant the
+  persistent pool legitimately violates, since it is sized at 2 and keeps
+  idle workers alive across calls. Under random ordering it failed ~40% of
+  runs whenever a prior test left a healthy idle worker pooled. Replaced with
+  the per-worker contract via a tests-only `_doc_pool_health()` snapshot: no
+  worker left marked busy mid-task, and every dead worker is reaped (exitcode
+  set) rather than a zombie. No production behavior changed.
+- **Env-decision memo is resettable by tests (tier-2 T2 follow-up)**
+  (app/validation.py, tests/test_validation.py): the memoization added for T2
+  is process-global, so a value cached by one test made another's first call
+  hit the cache and look un-scanned. Added `_reset_guard_memo()` and the
+  spill-GC counterpart for the T5 stamp; the affected tests reset before
+  measuring, keeping the memo's production contract (raw-value-keyed, so any
+  env change is visible on the next call) intact.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

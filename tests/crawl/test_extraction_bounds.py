@@ -39,14 +39,20 @@ async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
 async def test_extract_document_child_death_returns_empty(monkeypatch):
     """A worker that dies before sending (segfault) yields empty extraction,
     not an unhandled EOFError, and leaves no zombie behind (M8)."""
-    import multiprocessing
 
     monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
     monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
     result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
     assert result.text is None
     assert result.markdown is None
-    assert multiprocessing.active_children() == []
+
+    # M8 is per worker, not process-global: the pool is persistent and sized
+    # above one, so an idle worker from an earlier extraction legitimately
+    # stays alive. The dead worker must be reaped (no zombie) and no worker
+    # may be left orphaned mid-task.
+    for alive, reaped, busy in ext_mod._doc_pool_health():
+        assert not busy, "worker left marked busy after a child death"
+        assert alive or reaped, "zombie worker left in the pool after a child death"
 
 
 async def test_extract_document_output_capped_at_5mb(monkeypatch):

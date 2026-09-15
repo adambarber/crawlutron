@@ -257,6 +257,21 @@ def _doc_pool_pids() -> list[int]:
         return [worker.proc.pid for worker in _DOC_POOL or [] if worker.proc.pid]
 
 
+def _doc_pool_health() -> list[tuple[bool, bool, bool]]:
+    """Per-worker ``(alive, reaped, busy)`` snapshot (tests only).
+
+    The pool is persistent and sized above one, so idle workers legitimately
+    stay alive across calls; the recoverable-failure contract is per worker,
+    not process-global: a worker that died must be reaped (exitcode set, not a
+    zombie) and no worker may be left marked busy mid-task.
+    """
+    with _POOL_LOCK:
+        return [
+            (worker.proc.is_alive(), worker.proc.exitcode is not None, worker.busy)
+            for worker in _DOC_POOL or []
+        ]
+
+
 async def _shutdown_doc_extraction_executor() -> None:
     """Terminate persistent document-extraction workers (lifespan/test teardown)."""
     with _POOL_LOCK:
