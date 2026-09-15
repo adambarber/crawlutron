@@ -25,6 +25,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `asyncio.to_thread`, matching the neighboring document/full-pipeline
   extractions. `strategies/browser.py` needed no change: its `_extract_html`
   is already async browser I/O (`page.content()`), not a CPU parse.
+- **Shared curl_cffi session (throughput #4)**
+  (app/crawl/strategies/http.py, app/main.py, tests/conftest.py):
+  `_default_cffi_fetcher` reuses one `AsyncSession` per event loop
+  (`get_cffi_session`, mirroring `get_async_http_client` with loop-change
+  rebuild) instead of building one per request; the per-request timeout now
+  travels on `get()` and the stream handle is released after STREAM_END so
+  the shared session can serve the next request. Shutdown closes it via
+  `close_cffi_session` (lifespan + test reset). The streaming-cap fake now
+  records construction (shared protocol has no per-request enter).
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
