@@ -102,6 +102,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   construction always sweeps, so leftovers from killed runs are still
   reclaimed early. The `gc_age_seconds` floor is untouched: no active spill is
   ever unlinked.
+- **ContentCache unlinks moved off the lock (tier-2 T6)**
+  (app/crawl/content_cache.py): `_drop_locked` (and the TTL-expiry path in
+  `_read_envelope`) now mutate the index, byte accounting, and RAM mirror
+  under the lock while collecting the doomed `(key, path)` pairs; the unlinks
+  run in `_unlink_doomed` after release, so disk I/O never blocks the
+  event-loop thread that contends on the lock. `_unlink_doomed` re-validates
+  each pair under the lock first: `_path_for` is deterministic, so a key re-set
+  between eviction and unlink reuses the same path and a blind unlink would
+  destroy the live entry — a still-registered path is spared. LRU order,
+  byte accounting, and the "never evict the just-written entry" contract are
+  unchanged; `prune`/`clear` (cold maintenance paths) keep their inline
+  unlinks.
 
 ### Fixed
 - **Doc-pool child-death assertion now checks the real invariant (M8)**

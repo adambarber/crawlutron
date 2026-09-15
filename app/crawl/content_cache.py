@@ -91,18 +91,37 @@ class ContentCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
 
-    def _drop_locked(self, key: str) -> None:
-        """Remove one entry from the index, byte accounting, RAM and disk."""
+    def _drop_locked(self, key: str, doomed: list[tuple[str, Path]]) -> None:
+        """Remove one entry from the index, byte accounting and RAM.
+
+        Caller must hold ``self._lock``. The on-disk file is appended to
+        ``doomed`` as a ``(key, path)`` pair for unlinking after the lock is
+        released — disk I/O must never hold the lock, since the event-loop
+        thread contends on it (``aget``/``aset``).
+        """
         old_path = self._index.pop(key, None)
         freed = self._index_sizes.pop(key, 0)
         self._index_total_bytes = max(0, self._index_total_bytes - freed)
         if old_path is not None:
-            try:
-                old_path.unlink()
-            except OSError:
-                pass
+            doomed.append((key, old_path))
         # Keep the memory value cache consistent with evicted disk keys.
         self._memory_cache.pop(key, None)
+
+    def _unlink_doomed(self, doomed: list[tuple[str, Path]]) -> None:
+        """Unlink evicted files after the lock is released.
+
+        Re-validate under the lock first: a key re-set after its eviction
+        reuses this exact path (``_path_for`` is deterministic), so unlinking
+        blindly would destroy a live entry. A still-registered path is spared.
+        """
+        for key, path in doomed:
+            with self._lock:
+                if self._index.get(key) == path:
+                    continue
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     def _over_limits(self) -> bool:
         over_count = (
@@ -123,10 +142,12 @@ class ContentCache:
         previous implementation that listed and stat() every cache file on each
         write (#5).
         """
+        doomed: list[tuple[str, Path]] = []
         with self._lock:
             while self._index and self._over_limits():
                 oldest_key = next(iter(self._index))
-                self._drop_locked(oldest_key)
+                self._drop_locked(oldest_key, doomed)
+        self._unlink_doomed(doomed)
 
     def _enforce_max_entries(self) -> None:
         """Backward-compatible alias for the count+byte enforcement."""
@@ -141,33 +162,34 @@ class ContentCache:
         TTL-expiry logic lives in exactly one place.
         """
         path = self._path_for(key)
-        with self._lock:
-            if key in self._index:
-                try:
-                    envelope = json.loads(path.read_text())
-                except (ValueError, OSError):
+        doomed: list[tuple[str, Path]] = []
+        try:
+            with self._lock:
+                if key in self._index:
+                    try:
+                        envelope = json.loads(path.read_text())
+                    except (ValueError, OSError):
+                        self._index.pop(key, None)
+                        return None
+                else:
+                    if not path.exists():
+                        return None
+                    try:
+                        envelope = json.loads(path.read_text())
+                    except (ValueError, OSError):
+                        return None
+                    # Lazily register a cold on-disk entry into the index.
+                    self._index[key] = path
+                expires = envelope.get("expires")
+                if expires is not None and self.clock() > expires:
+                    doomed.append((key, path))
                     self._index.pop(key, None)
                     return None
-            else:
-                if not path.exists():
-                    return None
-                try:
-                    envelope = json.loads(path.read_text())
-                except (ValueError, OSError):
-                    return None
-                # Lazily register a cold on-disk entry into the index.
-                self._index[key] = path
-            expires = envelope.get("expires")
-            if expires is not None and self.clock() > expires:
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
-                self._index.pop(key, None)
-                return None
-            # Mark recently used (LRU) by moving to the end of the ordered index.
-            self._index.move_to_end(key)
-            return envelope
+                # Mark recently used (LRU) by moving to the end of the ordered index.
+                self._index.move_to_end(key)
+                return envelope
+        finally:
+            self._unlink_doomed(doomed)
 
     def _memory_hit_locked(self, key: str) -> Any | None:
         """RAM-mirror probe (callers must hold ``self._lock``).
