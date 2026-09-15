@@ -67,6 +67,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pagination hint; both strategy result builders run it via
   `asyncio.to_thread` and keep their exact gating/egress-filter contracts.
   Only plain data returns (the lxml tree never escapes).
+- **Per-fetch env scan hoisted off the httpx path (tier-2 T1)**
+  (app/crawl/strategies/http.py): `get_async_http_client` now defers the
+  `CrawlerSettings.from_mapping()` env walk to the actual construction
+  branches. The hot path (pooled client alive on the current loop) consults
+  env zero times per fetch; every rebuild still reads operator pool limits
+  fresh, and loop-change rebuild/pending-close semantics are unchanged.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

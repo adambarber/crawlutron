@@ -265,8 +265,6 @@ def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.Asyn
     example when a test harness drives many ``asyncio.run`` calls in sequence).
     """
     global _DEFAULT_HTTP_CLIENT
-    if settings is None:
-        settings = _default_settings()
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -274,11 +272,25 @@ def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.Asyn
     # Guard construction so concurrent first-time callers cannot both build a
     # client and leak one (the httpx client is reused across requests).
     with _HTTP_CLIENT_INIT_LOCK:
-        if _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed:
-            _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
-        elif getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is not loop:
-            old_client = _DEFAULT_HTTP_CLIENT
-            _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
+        rebuild = _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed
+        superseded = None
+        if not rebuild:
+            if getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is loop:
+                # Hot path (perf review 1.1): the pooled client is alive on the
+                # current loop, so no settings are consulted at all. Settings
+                # are pool configuration consumed only at construction; walking
+                # the full env per fetch bought nothing on this branch because
+                # a reused client carries the limits it was built with.
+                return _DEFAULT_HTTP_CLIENT
+            superseded = _DEFAULT_HTTP_CLIENT
+            rebuild = True
+        if settings is None:
+            # Deferred env walk: paid only when a client is actually built,
+            # so operator pool limits are read fresh at every rebuild.
+            settings = _default_settings()
+        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
+        if superseded is not None:
+            old_client = superseded
             # Close the superseded client to avoid leaking its sockets/fds:
             # queue it for a guaranteed close on the next live-loop fetch, and
             # also try the immediate best-effort schedule.
