@@ -57,6 +57,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `lazy_scroll_delay_seconds`, `cookie_harvest_timeout_seconds`). Shipped
   defaults are byte-identical (3 / 1s / 5.0s); ready-state and challenge
   behavior are untouched.
+- **Persistent markitdown pool (throughput #8)** (app/crawl/extraction.py):
+  `_extract_document` is served by persistent pool workers (spawned on
+  demand up to `BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS`) instead of one
+  process per document; markitdown imports once per worker lifetime.
+  Timeout-kill semantics kept: a hung/dead worker is terminated and reaped
+  per task, its slot respawned on next acquisition. The hermetic
+  `TEST_MARKITDOWN_*` seam is snapshotted per task parent-side (persistent
+  workers would otherwise see spawn-time env); all extraction-bounds tests
+  pass unchanged.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
