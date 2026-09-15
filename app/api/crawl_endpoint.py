@@ -12,12 +12,15 @@ The ``READINESS_STATE`` singleton is imported directly so the
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from collections.abc import Awaitable
 from typing import Any
 
 from fastapi import BackgroundTasks
 from fastapi.responses import JSONResponse, Response
+from starlette.requests import Request
 
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error
@@ -34,6 +37,27 @@ from app.output_formats import serialize_results
 logger = logging.getLogger(__name__)
 
 
+async def await_or_client_gone(work: Awaitable[Any], request: Request, *, poll_interval: float = 0.25) -> Any:
+    """Await the sync crawl but cancel it if the client disconnects first.
+
+    A synchronous ``/v1/crawl`` would otherwise run to completion to feed a
+    result nobody will read (the client-abandon case). Starlette does not cancel
+    a normal handler on disconnect, so we poll ``is_disconnected`` alongside the
+    crawl and cancel the work, letting the engine's cancellation cleanup free
+    the slot/browser. The fast path costs nothing: a finished crawl returns
+    before the first poll sleep.
+    """
+    task = asyncio.ensure_future(work)
+    while True:
+        if task.done():
+            return await task
+        if await request.is_disconnected():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise http_error(499, "client_disconnected", "Client disconnected before the crawl completed")
+        await asyncio.sleep(poll_interval)
+
+
 async def crawl(
     payload: CrawlRequest,
     background_tasks: BackgroundTasks,
@@ -41,6 +65,7 @@ async def crawl(
     job_store,
     result_store,
     shutdown_event,
+    request: Request | None = None,
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     readiness_state.begin_request()
@@ -91,7 +116,13 @@ async def crawl(
                 },
             )
         _crawl_started = time.monotonic()
-        result = await execute_crawl(payload_dict, settings=settings, shutdown_event=shutdown_event)
+        # Disconnect-aware sync crawl: if the caller has gone away, halt the
+        # engine call instead of crawling to completion for a dead client.
+        crawl_awaitable = execute_crawl(payload_dict, settings=settings, shutdown_event=shutdown_event)
+        if request is None:
+            result = await crawl_awaitable
+        else:
+            result = await await_or_client_gone(crawl_awaitable, request)
         get_metrics().observe_crawl(
             results=result.get("results", []),
             elapsed_ms=(time.monotonic() - _crawl_started) * 1000,

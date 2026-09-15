@@ -10,6 +10,7 @@ FastAPI machinery.
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends
+from starlette.requests import Request
 
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
@@ -85,6 +86,7 @@ router = APIRouter(tags=["Crawler"])
     },
 )
 async def crawl(
+    request: Request,
     background_tasks: BackgroundTasks,
     payload: CrawlRequest = Body(
         ...,
@@ -107,6 +109,7 @@ async def crawl(
         job_store=job_store,
         result_store=result_store,
         shutdown_event=shutdown_event,
+        request=request,
     )
 
 

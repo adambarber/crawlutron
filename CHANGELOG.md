@@ -468,6 +468,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     tree-wide detector `test_whole_site_visited_commit_is_transient_gated` forbids any
     `job.visited.add()` not gated on `TRANSIENT_CLASSIFICATIONS` (the local per-request
     `visited` set is deliberately out of scope), with a paired `*_bites` test.
+  - **Sync `/v1/crawl` halts when the client disconnects** (app/api/crawl_endpoint.py,
+    app/api/crawl_router.py): FastAPI does not cancel a running handler on disconnect,
+    so an abandoned sync crawl ran to completion to feed a result nobody would read
+    (the 283-abandon shape). The sync branch now races the engine call against
+    `request.is_disconnected()` and cancels the crawl, letting the engine's existing
+    cancellation cleanup free the slot/browser; a 499 `client_disconnected` is raised
+    instead of a phantom 200. Covered by `tests/api/test_sync_disconnect_halt.py`
+    (cancel-on-disconnect, result passthrough, error propagation; `real_sleeps`
+    because the watcher depends on genuine loop yielding).
 
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):
