@@ -49,6 +49,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   COMPLETED jobs persist `frontier == []` as before. The JSON row shape is
   unchanged; per-batch `json.dumps` save cost is untouched (needs the
   out-of-scope results-table redesign to improve).
+- **Browser fixed-overhead knobs are configurable, defaults frozen
+  (throughput #7)** (app/constants.py, app/settings.py,
+  app/crawl/strategies/browser.py, .env.example): lazy-scroll steps/delay
+  and the cookie-harvest wait are now settable via env/CrawlerSettings and
+  per-render `browser_profile` keys (`lazy_scroll_steps`,
+  `lazy_scroll_delay_seconds`, `cookie_harvest_timeout_seconds`). Shipped
+  defaults are byte-identical (3 / 1s / 5.0s); ready-state and challenge
+  behavior are untouched.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
