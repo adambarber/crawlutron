@@ -629,6 +629,21 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
     return False
 
 
+def _stale_seeds(
+    candidates: list[tuple[str, str | None]],
+    content_cache: Any,
+    policy: dict[str, Any],
+) -> set[str]:
+    """Batch the sitemap freshness filter (call from a worker thread).
+
+    Each verdict reads and parses the candidate's envelope from disk, so a big
+    sitemap must not pay that cost on the event loop: :func:`_seed_is_fresh`
+    stays fail-open (unreadable/expired/missing entries are not fresh, so the
+    URL is still crawled) and the key composition is untouched.
+    """
+    return {url for url, lastmod in candidates if _seed_is_fresh(url, lastmod, content_cache, policy)}
+
+
 _SPILL_PREFIX = "bc-spill-"
 
 # Cadence gate for _ResultSpill's stale-spill sweep (perf tier-2 T5): at most
@@ -1022,7 +1037,7 @@ async def _crawl_request_impl(
             sitemap_url = urljoin(origin, "/sitemap.xml")
             # Recursive: follows sitemap indexes down to page URLs.
             found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
-            normalized_seeds: list[str] = []
+            candidates: list[tuple[str, str | None]] = []
             for loc, lastmod in found:
                 try:
                     normalized_seed = normalize_public_http_url(loc)
@@ -1030,12 +1045,16 @@ async def _crawl_request_impl(
                     continue
                 if scope_pattern is not None and not _scope_allows(scope_pattern, normalized_seed):
                     continue
-                # #3: skip URLs whose content we already cache and that the
-                # sitemap says have not changed since we cached them.
-                if _seed_is_fresh(normalized_seed, lastmod, content_cache, policy):
-                    continue
-                normalized_seeds.append(normalized_seed)
-            return normalized_seeds
+                candidates.append((normalized_seed, lastmod))
+            # #3: skip URLs whose content we already cache and that the
+            # sitemap says have not changed since we cached them. Each check
+            # reads+parses the envelope from disk, so the whole batch runs off
+            # the event loop in one worker thread (perf tier-2 T7).
+            if candidates:
+                stale = await asyncio.to_thread(_stale_seeds, candidates, content_cache, policy)
+            else:
+                stale = set()
+            return [url for url, _lastmod in candidates if url not in stale]
 
         per_job = await asyncio.gather(*[seeds_for(job) for job in jobs])
         return [seed for seeds in per_job for seed in seeds]

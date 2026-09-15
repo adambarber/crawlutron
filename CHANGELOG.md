@@ -102,6 +102,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   construction always sweeps, so leftovers from killed runs are still
   reclaimed early. The `gc_age_seconds` floor is untouched: no active spill is
   ever unlinked.
+- **Sitemap freshness seeding batched off the event loop (tier-2 T7)**
+  (app/crawl/engine.py): each freshness verdict reads and parses the
+  candidate's envelope from disk, so filtering a big sitemap inline stalled
+  every concurrent crawl. ``seeds_for`` now collects the normalized,
+  scope-filtered candidates and runs the whole batch through one
+  ``asyncio.to_thread(_stale_seeds, ...)`` call. Key composition, the full
+  strategy chain, and the fail-open contract (unreadable/expired/missing →
+  not fresh → URL still crawled) are untouched.
 - **ContentCache unlinks moved off the lock (tier-2 T6)**
   (app/crawl/content_cache.py): `_drop_locked` (and the TTL-expiry path in
   `_read_envelope`) now mutate the index, byte accounting, and RAM mirror
