@@ -81,6 +81,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bounded pure-function `lru_cache` verdict — per-anchor normalization no
   longer pays an env parse plus an `ipaddress` exception per call. Resolver-
   numeric forms (`2130706433`, `0x7f000001`) keep their private verdict.
+- **Single batch-gate pass per request (tier-2 T3)**
+  (app/crawl/payload_helpers.py, app/crawl/engine.py,
+  app/api/crawl_endpoint.py, app/api/crawl_executor.py,
+  app/api/async_crawl_runner.py): `checked_payload_urls` gained an optional
+  forwarded-batch parameter and the endpoint hands its gated result through
+  `execute_crawl`/`run_async_crawl` into `crawl_request`, so a request's URL
+  batch is parsed once instead of at both the boundary gate and the engine.
+  A forwarded batch skips re-derivation but not the cap: the boundary gate
+  and the engine-internal ceiling both still reject oversized batches.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

@@ -38,6 +38,7 @@ async def execute_crawl(
     *,
     settings,
     shutdown_event: asyncio.Event,
+    urls: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run a crawl shared by ``/v1/crawl`` and ``/v1/map``.
 
@@ -46,6 +47,9 @@ async def execute_crawl(
 
     Pool guard: only raises ``browser_pool_unavailable`` 503 when the pool
     is None AND the request actually needs a browser strategy.
+
+    ``urls`` forwards the caller's already-gated batch (tier-2 T3) so the
+    engine skips re-deriving it; the cap still applies there.
     """
     target_url = payload_dict.get("url")
     if isinstance(target_url, str):
@@ -57,6 +61,7 @@ async def execute_crawl(
             return await crawl_request(
                 payload_dict,
                 settings=settings,
+                urls=urls,
                 browser_worker=None,
                 shutdown_event=shutdown_event,
             )
@@ -67,6 +72,7 @@ async def execute_crawl(
     return await crawl_request(
         payload_dict,
         settings=settings,
+        urls=urls,
         browser_worker=pooled_worker,
         shutdown_event=shutdown_event,
     )

@@ -750,6 +750,7 @@ async def crawl_request(
     payload: dict[str, Any],
     *,
     settings: CrawlerSettings | None = None,
+    urls: list[str] | None = None,
     browser_worker: CrawlWorker | None = None,
     http_fetcher: HttpFetcher | None = None,
     cffi_fetcher: HttpFetcher | None = None,
@@ -762,7 +763,8 @@ async def crawl_request(
     active_settings = settings or CrawlerSettings.from_mapping()
     # L4: the batch cap is enforced by the same gate the async endpoint uses
     # before accepting, so sync and async cannot drift on oversized batches.
-    urls = checked_payload_urls(payload, active_settings.max_batch_size)
+    # A forwarded batch (tier-2 T3) skips re-derivation but not the cap.
+    urls = checked_payload_urls(payload, active_settings.max_batch_size, urls=urls)
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or _default_http_fetcher
     cffi = cffi_fetcher or _default_cffi_fetcher

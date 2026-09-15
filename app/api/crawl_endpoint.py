@@ -81,7 +81,7 @@ async def crawl(
         # only fails it inside the detached background task, where the caller
         # can no longer see why. Same chokepoint the engine uses, so sync and
         # async cannot drift.
-        checked_payload_urls(payload_dict, settings.max_batch_size)
+        checked = checked_payload_urls(payload_dict, settings.max_batch_size)
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
         if async_mode or webhook_url:
@@ -104,6 +104,7 @@ async def crawl(
                 job_store,
                 result_store,
                 shutdown_event,
+                urls=checked,
             )
             get_metrics().observe_crawl(accepted=True)
             return JSONResponse(
@@ -118,7 +119,9 @@ async def crawl(
         _crawl_started = time.monotonic()
         # Disconnect-aware sync crawl: if the caller has gone away, halt the
         # engine call instead of crawling to completion for a dead client.
-        crawl_awaitable = execute_crawl(payload_dict, settings=settings, shutdown_event=shutdown_event)
+        crawl_awaitable = execute_crawl(
+            payload_dict, settings=settings, shutdown_event=shutdown_event, urls=checked
+        )
         if request is None:
             result = await crawl_awaitable
         else:

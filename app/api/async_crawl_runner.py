@@ -54,11 +54,13 @@ async def run_async_crawl(
     job_store,
     result_store,
     shutdown_event: asyncio.Event,
+    urls: list[str] | None = None,
 ) -> None:
     """Run a single-shot crawl in the background, persisting results to job_store.
 
     Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED.
     If ``webhook_url`` is provided, POSTs the result on completion.
+    ``urls`` carries the endpoint's already-gated batch forward (tier-2 T3).
     """
     # Load job and mark RUNNING
     job = job_store.load(request_id)
@@ -74,6 +76,7 @@ async def run_async_crawl(
                 payload_dict,
                 settings=crawl_settings,
                 shutdown_event=shutdown_event,
+                urls=urls,
             )
             result["request_id"] = request_id
             get_metrics().observe_crawl(results=result.get("results", []))

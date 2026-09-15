@@ -63,7 +63,9 @@ def _payload_urls(payload: dict[str, Any]) -> list[str]:
     raise ValueError("missing_url")
 
 
-def checked_payload_urls(payload: dict[str, Any], max_batch_size: int) -> list[str]:
+def checked_payload_urls(
+    payload: dict[str, Any], max_batch_size: int, *, urls: list[str] | None = None
+) -> list[str]:
     """Deduplicated URL batch, rejected if it exceeds the batch cap (L4).
 
     The single gate shared by the engine (sync) and the crawl endpoint (async
@@ -71,8 +73,15 @@ def checked_payload_urls(payload: dict[str, Any], max_batch_size: int) -> list[s
     an oversized batch is rejected at the boundary instead of being accepted
     and failing inside the detached background task, where the caller can no
     longer see why.
+
+    ``urls`` carries an already-derived batch forward (tier-2 T3): the
+    endpoint gate parses the payload once and hands the result to the engine,
+    so a request never parses the same batch twice. A forwarded batch skips
+    re-derivation but not the cap -- supplying urls cannot smuggle an
+    oversized batch past the ceiling.
     """
-    urls = _payload_urls(payload)
+    if urls is None:
+        urls = _payload_urls(payload)
     if len(urls) > max_batch_size:
         raise ValueError("batch_size_exceeded")
     return urls

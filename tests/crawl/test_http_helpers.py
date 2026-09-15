@@ -28,6 +28,7 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
     HTTP_DECLARED_CRAWLER,
 )
+from app.crawl.cache import HttpCache
 from app.crawl.document_text import (
     _collect_document_item_lines,
     _document_item_range,
@@ -359,6 +360,46 @@ class TestCrawlRequest:
         oversized = {"urls": [f"http://example.com/{i}" for i in range(11)]}
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
             checked_payload_urls(oversized, 10)
+
+    def test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving(self) -> None:
+        """Tier-2 T3: the endpoint gate's result may be handed to the engine so
+        the batch is parsed once per request. A forwarded batch is returned as
+        the job set without re-deriving from the payload..."""
+        from app.crawl.payload_helpers import checked_payload_urls
+
+        forwarded = ["http://example.com/a", "http://example.com/b"]
+        oversized_payload = {"urls": [f"http://example.com/{i}" for i in range(11)]}
+        assert checked_payload_urls(oversized_payload, 10, urls=forwarded) == forwarded
+
+    def test_forwarded_batch_still_faces_the_cap(self) -> None:
+        """...but the cap still applies to a forwarded batch (invariant: the
+        engine-internal ceiling cannot be bypassed by supplying urls)."""
+        from app.crawl.payload_helpers import checked_payload_urls
+
+        forwarded = [f"http://example.com/{i}" for i in range(11)]
+        with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
+            checked_payload_urls({"url": "http://example.com/x"}, 10, urls=forwarded)
+
+    async def test_crawl_request_consumes_the_forwarded_batch(self) -> None:
+        """Engine handoff: with urls supplied, those URLs become the job set --
+        the engine does not re-run _payload_urls over the payload."""
+        fetched: list[str] = []
+
+        async def spy_fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
+            fetched.append(url)
+            return make_fetch(url=url, final_url=url)
+
+        policy = make_base_policy()
+        policy["limits"] = {**policy.get("limits", {}), "respect_robots": False}
+        result = await crawl_request(
+            {"urls": ["http://example.com/a", "http://example.com/a/?utm_source=tw"], "policy": policy},
+            urls=["http://example.com/a"],
+            http_fetcher=spy_fetcher,
+            cache=HttpCache(),
+        )
+        assert fetched == ["http://example.com/a"]
+        assert result["submitted_count"] == 1
+        assert result["results"][0]["status"] == "success"
 
     async def test_invalid_url_raises(self) -> None:
         payload = {"url": "not a url", "policy": {"strategies": [HTTP_DECLARED_CRAWLER]}}
