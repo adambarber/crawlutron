@@ -12,6 +12,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `robots_allows`/`robots_crawl_delay` checks instead of awaiting them one
   URL at a time. Same closures, same `robots_cache` chokepoint and SSRF
   semantics; in-batch duplicates keep visit-once behavior.
+- **LLM metadata off the event loop (throughput #2)**
+  (app/api/response_shaping.py): new additive `aformat_crawl_item` /
+  `abuild_unified_result` / `abuild_unified_crawl_response` offload the
+  per-item lxml metadata parse with `asyncio.to_thread` (items gathered
+  concurrently) and are now used by the async runner, render, webhook, MCP,
+  and job-runner paths. Sync shapers are unchanged. `crawl_endpoint.py` is
+  owned by another stream and keeps the sync call until it adopts the seam.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

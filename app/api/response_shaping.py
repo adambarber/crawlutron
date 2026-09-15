@@ -15,6 +15,7 @@ Public surface:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.api_models import PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
@@ -43,6 +44,67 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     if not text:
         return None, {}
     return text, {}
+
+
+async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
+    """Async :func:`format_crawl_item`: the LLM metadata parse leaves the loop.
+
+    ``_extract_llm_metadata`` builds a second lxml tree per item; on a batch
+    of N results the sync path parks the event loop N times. The parse is
+    offloaded with :func:`asyncio.to_thread` (perf throughput #2). Results
+    without HTML take the same early returns as the sync version (no thread
+    hop). Byte-identical to :func:`format_crawl_item` for every item shape.
+    """
+    from app.crawl.llm_format import _extract_llm_metadata
+
+    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+    html = item.get("html")
+    markdown = item.get("markdown")
+    if markdown:
+        if html and url:
+            return markdown, await asyncio.to_thread(_extract_llm_metadata, html, url)
+        return markdown, {}
+    text = item.get("text")
+    if not text:
+        return None, {}
+    return text, {}
+
+
+async def abuild_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+    """Async :func:`build_unified_result` (metadata parse off the event loop)."""
+    markdown, metadata_dict = await aformat_crawl_item(item)
+    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
+    metadata = PageMetadata(
+        **{key: value for key, value in metadata_dict.items() if key in PageMetadata.model_fields}
+    )
+    if metadata.source_url is None:
+        metadata.source_url = url
+    return UnifiedCrawlResult(
+        original_url=item["original_url"],
+        normalized_url=item.get("normalized_url"),
+        final_url=item.get("final_url"),
+        status=item["status"],
+        classification=item["classification"],
+        selected_strategy=item.get("selected_strategy"),
+        attempted_strategies=item.get("attempted_strategies", []),
+        error=item.get("error"),
+        markdown=markdown,
+        metadata=metadata,
+        html=item.get("html"),
+        text=item.get("text"),
+        quality_score=item.get("quality_score", 0.0),
+        classification_evidence=item.get("classification_evidence", []),
+        http_status=item.get("http_status"),
+        headers=item.get("headers", {}),
+        content_type=item.get("content_type"),
+        extraction_method=item.get("extraction_method"),
+        diagnostics=item.get("diagnostics", {}),
+        discovered_link_count=item.get("discovered_link_count", 0),
+        discovered_links_truncated=item.get("discovered_links_truncated", False),
+        discovered_links=item.get("discovered_links", []),
+        next_page_url=item.get("next_page_url"),
+        validators=item.get("validators") or None,
+    )
 
 
 def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
@@ -179,7 +241,34 @@ def build_unified_crawl_response(
     )
 
 
+async def abuild_unified_crawl_response(
+    results: list[dict[str, Any]],
+    *,
+    request_id: str = "",
+    policy_schema_version: str = "",
+    success: bool = True,
+    submitted_count: int | None = None,
+) -> UnifiedCrawlResponse:
+    """Async :func:`build_unified_crawl_response` for use inside async endpoints.
+
+    Per-item shaping is gathered concurrently; each item's LLM metadata parse
+    is offloaded off the event loop (perf throughput #2). Async endpoints
+    should prefer this; the sync version stays for sync callers and tests.
+    """
+    shaped = await asyncio.gather(*(abuild_unified_result(item) for item in results))
+    return UnifiedCrawlResponse(
+        request_id=request_id,
+        submitted_count=submitted_count if submitted_count is not None else len(results),
+        policy_schema_version=policy_schema_version,
+        success=success,
+        results=list(shaped),
+    )
+
+
 __all__ = [
+    "aformat_crawl_item",
+    "abuild_unified_result",
+    "abuild_unified_crawl_response",
     "format_crawl_item",
     "build_unified_result",
     "render_result_to_unified",

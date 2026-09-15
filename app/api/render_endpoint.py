@@ -18,7 +18,7 @@ import logging
 from app.api.exceptions import browser_pool_unavailable, http_error
 from app.api.render import render_request
 from app.api.response_shaping import (
-    build_unified_crawl_response,
+    abuild_unified_crawl_response,
     render_result_to_unified,
 )
 from app.api_models import POLICY_SCHEMA_VERSION, RenderRequest, UnifiedCrawlResponse
@@ -57,7 +57,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
-        return build_unified_crawl_response(
+        return await abuild_unified_crawl_response(
             [render_result_to_unified(item) for item in result.get("results", [])],
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
