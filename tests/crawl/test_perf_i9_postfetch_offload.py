@@ -1,4 +1,4 @@
-"""Perf item 9 (RED): sync post-fetch parsing must leave the event loop.
+"""Perf item 9: sync post-fetch parsing must leave the event loop.
 
 ``_parse_html_tree`` / ``_html_diagnostics`` / ``_extract_discovered_links`` /
 ``extract_js_endpoints`` / ``_detect_pagination`` run synchronously in both
@@ -7,6 +7,13 @@ strategy result builders. The post-fetch block must move to
 """
 
 import asyncio
+
+from tests._testkit import (
+    http_strategy_policy,
+    install_to_thread_spy,
+    invoke_browser_strategy,
+    invoke_http_strategy,
+)
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -21,33 +28,6 @@ HTML = (
 )
 
 
-def _install_to_thread_spy(monkeypatch):
-    import functools
-
-    seen: list[str] = []
-    orig = asyncio.to_thread
-
-    async def spy(fn, *args, **kwargs):
-        if isinstance(fn, functools.partial):
-            seen.append(getattr(fn.func, "__name__", repr(fn.func)))
-        else:
-            seen.append(getattr(fn, "__name__", repr(fn)))
-        return await orig(fn, *args, **kwargs)
-
-    monkeypatch.setattr(asyncio, "to_thread", spy)
-    return seen
-
-
-def _policy():
-    return {
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
-        "extraction": "full",
-        "headers": {},
-        "discovery": {"links": True},
-        "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-    }
-
-
 def _page_resp(url):
     class Resp:
         status_code = 200
@@ -60,19 +40,11 @@ def _page_resp(url):
 
 
 async def test_http_post_fetch_block_runs_off_loop(monkeypatch):
-    from app.crawl.strategies.http import _http_strategy_result
-
-    seen = _install_to_thread_spy(monkeypatch)
-
-    async def fetcher(url, headers, timeout, max_content_length=0):
-        return _page_resp(url)
-
-    result = await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=_policy(),
-        http_fetcher=fetcher,
+    seen = install_to_thread_spy(monkeypatch)
+    result = await invoke_http_strategy(
+        monkeypatch,
+        policy=http_strategy_policy(extraction="full", discovery=True),
+        resp=_page_resp,
     )
     assert result.status == "success"
     assert "extract_post_fetch_discovery" in seen
@@ -89,31 +61,12 @@ async def test_http_post_fetch_block_runs_off_loop(monkeypatch):
 
 
 async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
-    from app.crawl.engine import _browser_strategy_result
-    from app.models import CrawlResult
-
-    seen = _install_to_thread_spy(monkeypatch)
-
-    async def browser_worker(job):
-        return CrawlResult(
-            url=job.url,
-            status="success",
-            classification="rendered",
-            final_url=job.url,
-            html=HTML,
-            text="page one page two next page body copy",
-            attempts=1,
-            elapsed_ms=5,
-            domain="example.com",
-            metadata={},
-        )
-
-    result = await _browser_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="BROWSER_HEADLESS",
-        policy=_policy(),
-        browser_worker=browser_worker,
+    seen = install_to_thread_spy(monkeypatch)
+    result = await invoke_browser_strategy(
+        monkeypatch,
+        policy=http_strategy_policy(extraction="full", discovery=True),
+        html=HTML,
+        text="page one page two next page body copy",
     )
     assert result.status == "success"
     assert "extract_post_fetch_discovery" in seen

@@ -466,3 +466,137 @@ def patch_http_fetcher_transport(monkeypatch, responses):
         lambda url: (urlparse(url).hostname, "1.2.3.4"),
     )
     return mock_client
+
+
+def install_to_thread_spy(monkeypatch):
+    """Record every function offloaded via ``asyncio.to_thread``; still run it."""
+    import asyncio
+    import functools
+
+    seen: list[str] = []
+    orig = asyncio.to_thread
+
+    async def spy(fn, *args, **kwargs):
+        if isinstance(fn, functools.partial):
+            seen.append(getattr(fn.func, "__name__", repr(fn.func)))
+        else:
+            seen.append(getattr(fn, "__name__", repr(fn)))
+        return await orig(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy)
+    return seen
+
+
+def make_engine_result(url: str, links=()):
+    """Minimal success ``EngineCrawlResult`` for recursive/dispatch unit tests."""
+    from app.models import EngineCrawlResult
+
+    return EngineCrawlResult(
+        original_url=url,
+        normalized_url=url,
+        final_url=url,
+        status="success",
+        classification="rendered",
+        selected_strategy="HTTP_DECLARED_CRAWLER",
+        attempted_strategies=[],
+        http_status=200,
+        headers={},
+        content_type="text/html",
+        html="<html></html>",
+        text="t",
+        extraction_method="http_html",
+        quality_score=1.0,
+        discovered_links=list(links),
+    )
+
+
+class Spill:
+    """In-memory result spill for recursive-dispatch tests (same contract as
+    :class:`app.crawl.engine._ResultSpill` for the test-only surface)."""
+
+    def __init__(self):
+        self.writes: dict[int, Any] = {}
+
+    def write(self, index: int, result: Any) -> None:
+        self.writes[index] = result
+
+    def load_ordered(self) -> list[Any]:
+        return [self.writes[i] for i in sorted(self.writes)]
+
+
+def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = None) -> dict:
+    """Minimal HTTP-strategy policy for direct ``_http_strategy_result`` tests."""
+    policy: dict[str, Any] = {
+        "strategies": ["HTTP_DECLARED_CRAWLER"],
+        "extraction": extraction,
+        "headers": {},
+        "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
+    }
+    if discovery is not None:
+        policy["discovery"] = {"links": True} if discovery else {}
+    return policy
+
+
+async def invoke_http_strategy(
+    monkeypatch: Any,
+    *,
+    policy: dict[str, Any],
+    resp: Any,
+    dedupe_patch: bool = False,
+    global_concurrency: int | None = None,
+    cap_capture: list[int] | None = None,
+) -> Any:
+    """Drive ``_http_strategy_result`` with an in-memory response object."""
+    from app.crawl.strategies.http import _http_strategy_result
+
+    if dedupe_patch:
+        import trafilatura.core
+
+        monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
+
+    async def fetcher(url, headers, timeout, max_content_length=0):
+        if cap_capture is not None:
+            cap_capture.append(max_content_length)
+        return resp(url)
+
+    kwargs: dict[str, Any] = {}
+    if global_concurrency is not None:
+        kwargs["global_concurrency"] = global_concurrency
+    return await _http_strategy_result(
+        original_url="http://example.com/",
+        normalized_url="http://example.com/",
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy=policy,
+        http_fetcher=fetcher,
+        **kwargs,
+    )
+
+
+async def invoke_browser_strategy(
+    monkeypatch: Any, *, policy: dict[str, Any], html: str, text: str = "Hello world"
+) -> Any:
+    """Drive ``_browser_strategy_result`` with an in-memory browser worker."""
+    from app.crawl.engine import _browser_strategy_result
+    from app.models import CrawlResult
+
+    async def browser_worker(job):
+        return CrawlResult(
+            url=job.url,
+            status="success",
+            classification="rendered",
+            final_url=job.url,
+            html=html,
+            text=text,
+            attempts=1,
+            elapsed_ms=5,
+            domain="example.com",
+            metadata={},
+        )
+
+    return await _browser_strategy_result(
+        original_url="http://example.com/",
+        normalized_url="http://example.com/",
+        strategy="BROWSER_HEADLESS",
+        policy=policy,
+        browser_worker=browser_worker,
+    )

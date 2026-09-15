@@ -9,43 +9,13 @@ contract: overlapping checks must be observable via an in-flight counter.
 import asyncio
 
 from app.crawl.recursive import run_recursive_crawl
-from app.models import CrawlTask, DiscoveredLink, EngineCrawlResult
-
-
-def _make_result(url: str, links=()):
-    return EngineCrawlResult(
-        original_url=url,
-        normalized_url=url,
-        final_url=url,
-        status="success",
-        classification="rendered",
-        selected_strategy="HTTP_DECLARED_CRAWLER",
-        attempted_strategies=[],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="<html></html>",
-        text="t",
-        extraction_method="http_html",
-        quality_score=1.0,
-        discovered_links=list(links),
-    )
+from app.models import CrawlTask, DiscoveredLink
+from tests._testkit import Spill, make_engine_result
 
 
 def _make_job(index: int, host: str) -> CrawlTask:
     url = f"http://{host}/page{index}"
     return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
-
-
-class _Spill:
-    def __init__(self):
-        self.writes = {}
-
-    def write(self, index, result):
-        self.writes[index] = result
-
-    def load_ordered(self):
-        return [self.writes[i] for i in sorted(self.writes)]
 
 
 class _Scheduler:
@@ -95,14 +65,14 @@ def _tracker(delay=0.02):
 
 
 async def _drive(jobs, worker, allows, crawl_delay, **kwargs):
-    spill = _Spill()
+    spill = Spill()
     await run_recursive_crawl(
         jobs=jobs,
         scheduler=_Scheduler(),
         worker=worker,
         robots_allows=allows,
         robots_crawl_delay=crawl_delay,
-        robots_disallowed=lambda job: _make_result(job.normalized_url),
+        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
         sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
         spill=spill,
         shutdown_event=asyncio.Event(),
@@ -126,7 +96,7 @@ async def test_recursive_batch_robots_checks_run_concurrently(real_sleeps):
     jobs = [_make_job(i, f"host{i}.example") for i in range(5)]
 
     async def worker(job):
-        return _make_result(job.normalized_url)
+        return make_engine_result(job.normalized_url)
 
     await _drive(jobs, worker, allows, crawl_delay)
     assert state["calls"] == 5
@@ -152,8 +122,8 @@ async def test_recursive_link_robots_checks_run_concurrently(real_sleeps):
 
     async def worker(job):
         if job.normalized_url == "http://seed.example/page0":
-            return _make_result(job.normalized_url, links=links)
-        return _make_result(job.normalized_url)
+            return make_engine_result(job.normalized_url, links=links)
+        return make_engine_result(job.normalized_url)
 
     await _drive(jobs, worker, allows, crawl_delay, max_depth=1)
     assert state["calls"] >= 6  # seed batch screen + 5 discovered links
@@ -235,16 +205,16 @@ async def test_recursive_screen_no_robots_calls_when_disrespected():
     jobs = [_make_job(i, f"nr{i}.example") for i in range(3)]
 
     async def worker(job):
-        return _make_result(job.normalized_url)
+        return make_engine_result(job.normalized_url)
 
-    spill = _Spill()
+    spill = Spill()
     await run_recursive_crawl(
         jobs=jobs,
         scheduler=_Scheduler(),
         worker=worker,
         robots_allows=allows,
         robots_crawl_delay=None,
-        robots_disallowed=lambda job: _make_result(job.normalized_url),
+        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
         sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
         spill=spill,
         shutdown_event=asyncio.Event(),
@@ -271,7 +241,7 @@ async def test_recursive_batch_duplicate_url_crawled_once():
 
     async def worker(job):
         seen.append(job.normalized_url)
-        return _make_result(job.normalized_url)
+        return make_engine_result(job.normalized_url)
 
     await _drive(jobs, worker, allows, crawl_delay)
     assert seen == ["http://dup.example/page0"]

@@ -1,4 +1,4 @@
-"""Perf item 5 (RED): the per-page body cap must use the real concurrency.
+"""Perf item 5: the per-page body cap must use the real concurrency.
 
 ``_effective_max_content_length`` scales the cap down as concurrency rises,
 but ``_http_strategy_result`` never passes its concurrency, so the cap always
@@ -7,17 +7,12 @@ falls back to the settings floor (default 4 -> 10 MiB) while real dispatch
 be threaded from the engine's active settings to the call site.
 """
 
+import pytest
+
+from tests._testkit import http_strategy_policy, invoke_http_strategy
+
 EXPECTED_SCALED = (1024**3) // 512  # RAM budget (1 GiB) / concurrency
 DEFAULT_CAP = 10 * 1024 * 1024
-
-
-def _policy():
-    return {
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
-        "extraction": "full",
-        "headers": {},
-        "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-    }
 
 
 def _page_resp(url):
@@ -31,47 +26,25 @@ def _page_resp(url):
     return Resp()
 
 
-async def test_http_strategy_result_scales_cap_with_passed_concurrency():
-    """Explicit concurrency reaches the fetcher as a scaled-down cap."""
-    from app.crawl.strategies.http import _http_strategy_result
-
+@pytest.mark.parametrize(
+    ("global_concurrency", "expected_cap"),
+    [
+        (512, EXPECTED_SCALED),
+        (None, DEFAULT_CAP),
+    ],
+)
+async def test_http_strategy_result_cap_follows_concurrency(monkeypatch, global_concurrency, expected_cap):
+    """Explicit concurrency scales the cap; omitted keeps the settings floor."""
     seen: list[int] = []
-
-    async def fetcher(url, headers, timeout, max_content_length=0):
-        seen.append(max_content_length)
-        return _page_resp(url)
-
-    result = await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=_policy(),
-        http_fetcher=fetcher,
-        global_concurrency=512,
+    result = await invoke_http_strategy(
+        monkeypatch,
+        policy=http_strategy_policy(extraction="full"),
+        resp=_page_resp,
+        global_concurrency=global_concurrency,
+        cap_capture=seen,
     )
     assert result.status == "success"
-    assert seen == [EXPECTED_SCALED]
-
-
-async def test_http_strategy_result_default_preserves_settings_floor():
-    """No concurrency passed -> old settings-floor behavior (10 MiB default)."""
-    from app.crawl.strategies.http import _http_strategy_result
-
-    seen: list[int] = []
-
-    async def fetcher(url, headers, timeout, max_content_length=0):
-        seen.append(max_content_length)
-        return _page_resp(url)
-
-    result = await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=_policy(),
-        http_fetcher=fetcher,
-    )
-    assert result.status == "success"
-    assert seen == [DEFAULT_CAP]
+    assert seen == [expected_cap]
 
 
 async def test_crawl_request_threads_active_concurrency_to_fetcher():

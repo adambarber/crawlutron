@@ -8,38 +8,8 @@ full engine (the reason the dispatch was extracted from ``crawl_request``).
 import asyncio
 
 from app.crawl.recursive import run_recursive_crawl
-from app.models import CrawlTask, DiscoveredLink, EngineCrawlResult
-
-
-def _make_result(url: str, links=()):
-    return EngineCrawlResult(
-        original_url=url,
-        normalized_url=url,
-        final_url=url,
-        status="success",
-        classification="rendered",
-        selected_strategy="HTTP_DECLARED_CRAWLER",
-        attempted_strategies=[],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="<html></html>",
-        text="t",
-        extraction_method="http_html",
-        quality_score=1.0,
-        discovered_links=list(links),
-    )
-
-
-class _Spill:
-    def __init__(self):
-        self.writes = {}
-
-    def write(self, index, result):
-        self.writes[index] = result
-
-    def load_ordered(self):
-        return [self.writes[i] for i in sorted(self.writes)]
+from app.models import CrawlTask, DiscoveredLink
+from tests._testkit import Spill, make_engine_result
 
 
 class _Scheduler:
@@ -95,7 +65,7 @@ async def _run(
 ):
     if gate is None:
         gate = _Gate()
-    spill = _Spill()
+    spill = Spill()
     scheduler = _Scheduler()
 
     if robots_allows is None:
@@ -108,7 +78,7 @@ async def _run(
         scheduler=scheduler,
         worker=worker,
         robots_allows=robots_allows,
-        robots_disallowed=lambda job: _make_result(job.normalized_url),
+        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
         sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
         spill=spill,
         shutdown_event=asyncio.Event(),
@@ -127,7 +97,7 @@ async def _run(
 
 async def test_dispatches_single_page_and_consults_gate():
     async def worker(job):
-        return _make_result(job.normalized_url)
+        return make_engine_result(job.normalized_url)
 
     jobs = [CrawlTask(index=0, original_url="http://a/", normalized_url="http://a/", domain="a")]
     spill, scheduler, gate = await _run(jobs, worker)
@@ -141,7 +111,7 @@ async def test_expands_frontier_from_discovered_links():
         return [_link("http://a/1"), _link("http://a/2")] if url == "http://a/" else []
 
     async def worker(job):
-        return _make_result(job.normalized_url, _links_for(job.normalized_url))
+        return make_engine_result(job.normalized_url, _links_for(job.normalized_url))
 
     jobs = [CrawlTask(index=0, original_url="http://a/", normalized_url="http://a/", domain="a")]
     spill, scheduler, _ = await _run(jobs, worker)
@@ -159,7 +129,7 @@ async def test_gate_scale_shrinks_batch_but_still_crawls_all():
     # still be crawled, just across more scheduler runs.
     async def worker(job):
         links = [_link("http://a/1"), _link("http://a/2")] if job.normalized_url == "http://a/" else []
-        return _make_result(job.normalized_url, links)
+        return make_engine_result(job.normalized_url, links)
 
     jobs = [CrawlTask(index=0, original_url="http://a/", normalized_url="http://a/", domain="a")]
     spill, scheduler, _ = await _run(jobs, worker, gate=_Gate(scale=0.0))
@@ -174,7 +144,7 @@ async def test_robots_disallows_discovered_link_silently():
     async def worker(job):
         seen.append(job.normalized_url)
         links = [_link("http://a/blocked")] if job.normalized_url == "http://a/" else []
-        return _make_result(job.normalized_url, links)
+        return make_engine_result(job.normalized_url, links)
 
     async def allows(url):
         return url != "http://a/blocked"
@@ -191,7 +161,7 @@ async def test_robots_disallows_initial_job_as_skip():
 
     async def worker(job):
         seen.append(job.normalized_url)
-        return _make_result(job.normalized_url)
+        return make_engine_result(job.normalized_url)
 
     async def allows(url):
         return url != "http://a/blocked"

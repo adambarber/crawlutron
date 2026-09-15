@@ -47,64 +47,21 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
 
 
 async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-    """Async :func:`format_crawl_item`: the LLM metadata parse leaves the loop.
+    """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
 
     ``_extract_llm_metadata`` builds a second lxml tree per item; on a batch
-    of N results the sync path parks the event loop N times. The parse is
-    offloaded with :func:`asyncio.to_thread` (perf throughput #2). Results
-    without HTML take the same early returns as the sync version (no thread
-    hop). Byte-identical to :func:`format_crawl_item` for every item shape.
+    of N results the sync path parks the event loop N times. The async path
+    runs the identical sync formatter in a worker thread (perf throughput
+    #2). Results without HTML take the same early returns (no thread hop
+    cost beyond the wrapper). Byte-identical to :func:`format_crawl_item`
+    for every item shape.
     """
-    from app.crawl.llm_format import _extract_llm_metadata
-
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    html = item.get("html")
-    markdown = item.get("markdown")
-    if markdown:
-        if html and url:
-            return markdown, await asyncio.to_thread(_extract_llm_metadata, html, url)
-        return markdown, {}
-    text = item.get("text")
-    if not text:
-        return None, {}
-    return text, {}
+    return await asyncio.to_thread(format_crawl_item, item)
 
 
 async def abuild_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
-    """Async :func:`build_unified_result` (metadata parse off the event loop)."""
-    markdown, metadata_dict = await aformat_crawl_item(item)
-    url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
-    metadata = PageMetadata(
-        **{key: value for key, value in metadata_dict.items() if key in PageMetadata.model_fields}
-    )
-    if metadata.source_url is None:
-        metadata.source_url = url
-    return UnifiedCrawlResult(
-        original_url=item["original_url"],
-        normalized_url=item.get("normalized_url"),
-        final_url=item.get("final_url"),
-        status=item["status"],
-        classification=item["classification"],
-        selected_strategy=item.get("selected_strategy"),
-        attempted_strategies=item.get("attempted_strategies", []),
-        error=item.get("error"),
-        markdown=markdown,
-        metadata=metadata,
-        html=item.get("html"),
-        text=item.get("text"),
-        quality_score=item.get("quality_score", 0.0),
-        classification_evidence=item.get("classification_evidence", []),
-        http_status=item.get("http_status"),
-        headers=item.get("headers", {}),
-        content_type=item.get("content_type"),
-        extraction_method=item.get("extraction_method"),
-        diagnostics=item.get("diagnostics", {}),
-        discovered_link_count=item.get("discovered_link_count", 0),
-        discovered_links_truncated=item.get("discovered_links_truncated", False),
-        discovered_links=item.get("discovered_links", []),
-        next_page_url=item.get("next_page_url"),
-        validators=item.get("validators") or None,
-    )
+    """Async :func:`build_unified_result` (whole mapping off the event loop)."""
+    return await asyncio.to_thread(build_unified_result, item)
 
 
 def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:

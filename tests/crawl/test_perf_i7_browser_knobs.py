@@ -5,6 +5,8 @@ Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded
 defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 """
 
+import pytest
+
 from app.crawl.strategies.browser import BrowserRenderer
 
 
@@ -23,30 +25,24 @@ def _settings(**overrides):
     return CrawlerSettings(**overrides)
 
 
-async def test_lazy_scroll_uses_settings_values():
-    """Settings-provided steps/delay drive the scroll (not the 3 x 1s consts)."""
+@pytest.mark.parametrize(
+    ("profile", "expected_evaluates", "expected_sleeps"),
+    [
+        ({}, 1, [0.25]),
+        ({"lazy_scroll_steps": 2, "lazy_scroll_delay_seconds": 0.5}, 2, [0.5, 0.5]),
+    ],
+)
+async def test_lazy_scroll_follows_settings_or_profile(profile, expected_evaluates, expected_sleeps):
+    """Settings-provided steps/delay drive the scroll; a browser_profile overrides."""
     sleeps: list[float] = []
     renderer = BrowserRenderer(
         sleep=lambda seconds: sleeps.append(seconds),
         settings=_settings(browser_lazy_scroll_steps=1, browser_lazy_scroll_delay_seconds=0.25),
     )
     page = _FakePage()
-    await renderer._lazy_load_scroll(page)
-    assert page.evaluates == 1
-    assert sleeps == [0.25]
-
-
-async def test_lazy_scroll_profile_overrides_settings():
-    """Per-request browser_profile (policy) beats the renderer settings."""
-    sleeps: list[float] = []
-    renderer = BrowserRenderer(
-        sleep=lambda seconds: sleeps.append(seconds),
-        settings=_settings(browser_lazy_scroll_steps=1, browser_lazy_scroll_delay_seconds=0.25),
-    )
-    page = _FakePage()
-    await renderer._lazy_load_scroll(page, {"lazy_scroll_steps": 2, "lazy_scroll_delay_seconds": 0.5})
-    assert page.evaluates == 2
-    assert sleeps == [0.5, 0.5]
+    await renderer._lazy_load_scroll(page, profile)
+    assert page.evaluates == expected_evaluates
+    assert sleeps == expected_sleeps
 
 
 async def test_lazy_scroll_zero_steps_skips_work():

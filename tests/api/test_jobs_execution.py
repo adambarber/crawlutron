@@ -9,6 +9,7 @@ These tests drive the real router + runner with a faked ``execute_crawl``
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -164,6 +165,25 @@ async def _run_job_to_completed(client, job_store, root_url: str, execute, polic
     status = await _wait_status(job_store, job_id, {"completed", "failed"})
     assert status == "completed"
     return job_store.load(job_id)
+
+
+async def _run_scripted_job(
+    client, job_store, root_url: str, sequence: list[dict]
+) -> tuple[Any, dict[str, int]]:
+    """Drive a whole-site job through a scripted per-URL sequence; return (row, attempts).
+
+    Shared setup for the transient-retry accounting tests: the URL is popped,
+    the engine returns ``sequence`` in order across attempts, and the test
+    asserts on the final visited/results/stats/frontier state.
+    """
+    attempts: dict[str, int] = {}
+    job = await _run_job_to_completed(
+        client,
+        job_store,
+        root_url,
+        _fake_execute_scripted({root_url: sequence}, attempts=attempts),
+    )
+    return job, attempts
 
 
 @pytest.fixture(autouse=True)
@@ -333,21 +353,15 @@ class TestTransientFailureRequeue:
 
     async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store, real_sleeps):
         root = "http://example.test/a"
-        attempts: dict[str, int] = {}
-        job = await _run_job_to_completed(
+        job, attempts = await _run_scripted_job(
             client,
             job_store,
             root,
-            _fake_execute_scripted(
-                {
-                    root: [
-                        _canned_result(root, status="failed", classification="network_error"),
-                        _canned_result(root, status="failed", classification="dns_error"),
-                        _canned_result(root, status="success"),
-                    ]
-                },
-                attempts=attempts,
-            ),
+            [
+                _canned_result(root, status="failed", classification="network_error"),
+                _canned_result(root, status="failed", classification="dns_error"),
+                _canned_result(root, status="success"),
+            ],
         )
         # The two early failures must not have finalized the page; the crawl
         # retried and the single committed outcome is the eventual success.
@@ -361,15 +375,11 @@ class TestTransientFailureRequeue:
 
     async def test_transient_retries_are_bounded_then_terminal(self, client, job_store, real_sleeps):
         root = "http://example.test/a"
-        attempts: dict[str, int] = {}
-        job = await _run_job_to_completed(
+        job, attempts = await _run_scripted_job(
             client,
             job_store,
             root,
-            _fake_execute_scripted(
-                {root: [_canned_result(root, status="failed", classification="network_error")]},
-                attempts=attempts,
-            ),
+            [_canned_result(root, status="failed", classification="network_error")],
         )
         # A permanently-flaky page is attempted exactly the cap (not forever, not
         # once), then recorded as a terminal failure so the whole-site job can end.
@@ -384,15 +394,11 @@ class TestTransientFailureRequeue:
 
     async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store, real_sleeps):
         root = "http://example.test/a"
-        attempts: dict[str, int] = {}
-        job = await _run_job_to_completed(
+        job, attempts = await _run_scripted_job(
             client,
             job_store,
             root,
-            _fake_execute_scripted(
-                {root: [_canned_result(root, status="failed", classification="not_found")]},
-                attempts=attempts,
-            ),
+            [_canned_result(root, status="failed", classification="not_found")],
         )
         # "Page is gone" is an answer, not a transient blip: recorded once, not retried.
         assert job.status == JobStatus.COMPLETED
