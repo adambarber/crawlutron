@@ -90,6 +90,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   batch is parsed once instead of at both the boundary gate and the engine.
   A forwarded batch skips re-derivation but not the cap: the boundary gate
   and the engine-internal ceiling both still reject oversized batches.
+- **HttpCache eviction snapshot bounded to the overflow (tier-2 T4)**
+  (app/crawl/cache.py): `_evict_if_needed` draws the doomed keys through
+  `itertools.islice` instead of materializing the full key list (up to 100k)
+  per over-cap store. Same FIFO insertion-order victims, still snapshot-
+  before-pop, still entirely under `self._lock`.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

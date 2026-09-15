@@ -22,6 +22,7 @@ Design notes:
 
 from __future__ import annotations
 
+import itertools
 import threading
 import time
 from collections.abc import Callable
@@ -61,8 +62,12 @@ class HttpCache:
         if len(self._data) > self._max_entries:
             # Fork/insert order is the same as this dict's iteration order, so
             # drop the earliest-inserted entries (FIFO) to bound memory.
+            # (perf tier-2 T4) the snapshot is bounded to the overflow itself:
+            # drawing `over` keys through islice avoids materializing the full
+            # key list (up to 100k) per store while still snapshotting before
+            # popping, so mutation never happens mid-iteration.
             over = len(self._data) - self._max_entries
-            for url in list(self._data)[:over]:
+            for url in list(itertools.islice(self._data, over)):
                 self._data.pop(url, None)
 
     def get(self, url: str) -> tuple[str | None, str | None]:
