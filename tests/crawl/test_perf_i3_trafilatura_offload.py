@@ -110,7 +110,18 @@ async def test_browser_trafilatura_extraction_runs_off_loop(monkeypatch):
 
 async def test_trafilatura_result_unchanged_by_offload(monkeypatch):
     """Offloading must not change the extracted text (same function, new thread)."""
+    # Hermetic against trafilatura's process-global body-dedup LRU: extracting
+    # the same body twice in a row diverges BY DESIGN (the first call takes
+    # trafilatura's output, the repeat is discarded as duplicate and falls
+    # back to markdownify, which renders the <title> trafilatura drops) -- so
+    # an equivalence check across two extractions would assert on dedup state,
+    # not on threading. Neutralize dedup for both calls; threading is the
+    # only variable under test.
+    import trafilatura.core
+
     from app.crawl.strategies.http import _http_strategy_result
+
+    monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
 
     async def fetcher(url, headers, timeout, max_content_length=0):
         return _resp(url)
