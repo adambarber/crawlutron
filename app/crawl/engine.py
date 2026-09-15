@@ -301,6 +301,7 @@ async def _execute_crawl_chain(
     domain: str = "",
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
     last_result: EngineCrawlResult | None = None
@@ -330,6 +331,7 @@ async def _execute_crawl_chain(
                 content_cache=content_cache,
                 caller_validators=caller_validators,
                 robots_sitemaps=robots_sitemaps,
+                global_concurrency=global_concurrency,
             )
         elif strategy in BROWSER_STRATEGIES:
             if browser_worker is None:
@@ -405,6 +407,7 @@ async def _execute_crawl_chain(
                     content_cache=content_cache,
                     caller_validators=caller_validators,
                     robots_sitemaps=robots_sitemaps,
+                    global_concurrency=global_concurrency,
                 )
                 attempts.extend(retry_result.attempted_strategies)
                 if retry_result.status == "success" and retry_result.quality_score > 0:
@@ -880,6 +883,7 @@ async def _crawl_request_impl(
                     http_fetcher=fetcher,
                     cffi_fetcher=cffi,
                     browser_worker=browser_worker,
+                    global_concurrency=active_settings.global_concurrency,
                     cache=cache or _SHARED_HTTP_CACHE,
                     # Content cache is opt-in (#5): only use the shared instance when explicitly
                     # enabled via settings, so test suites that fake per-test content for the

@@ -1556,6 +1556,7 @@ async def _http_strategy_result(
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
@@ -1572,7 +1573,9 @@ async def _http_strategy_result(
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
-    max_content_length = _effective_max_content_length(limits)
+    # The engine threads its live concurrency here (perf throughput #5) so the
+    # RAM-scaled cap tracks real dispatch instead of the settings floor.
+    max_content_length = _effective_max_content_length(limits, global_concurrency)
     base_headers = _headers_for_strategy(strategy, policy, normalized_url)
     request_headers = dict(base_headers)
     if cache is not None:

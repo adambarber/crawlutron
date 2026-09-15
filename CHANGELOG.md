@@ -34,6 +34,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the shared session can serve the next request. Shutdown closes it via
   `close_cffi_session` (lifespan + test reset). The streaming-cap fake now
   records construction (shared protocol has no per-request enter).
+- **RAM-scaled body cap uses live concurrency (throughput #5)**
+  (app/crawl/engine.py, app/crawl/strategies/http.py):
+  `_execute_crawl_chain`/`_http_strategy_result` accept the crawl's
+  `global_concurrency` (threaded from the engine's active settings) so
+  `_effective_max_content_length` scales the per-page cap to real dispatch
+  instead of always falling back to the settings floor. Omitted (tests,
+  direct callers) preserves the old floor behavior.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
