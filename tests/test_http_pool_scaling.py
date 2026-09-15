@@ -17,9 +17,20 @@ def test_small_limit_hits_floor():
 
 
 def test_3gib_limit_scales_up():
-    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(3 * 1024 * 1024 * 1024)):
-        assert settings_mod._default_http_max_connections() == 139
-        assert settings_mod._default_http_keepalive() == 69
+    limit = 3 * 1024 * 1024 * 1024
+    with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)):
+        # The pool ceiling must equal the admission's HTTP concurrency for the
+        # same limit + pool, whatever the per-task RAM estimate is (zero drift).
+        expected = max(
+            100,
+            settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
+        )
+        assert settings_mod._default_http_max_connections() == expected
+        assert settings_mod._default_http_keepalive() == max(20, min(128, expected // 2))
+        # With the honest per-task RAM estimate the 3 GiB derivation sits at the
+        # floor; the floor keeps the minimal-deployment pool usable (a bigger
+        # box still scales above it -- see test_huge_limit_is_capped).
+        assert expected >= 100
 
 
 def test_huge_limit_is_capped():

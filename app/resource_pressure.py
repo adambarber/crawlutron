@@ -422,7 +422,7 @@ class ResourceGate:
 # the HTTP path can scale to hundreds of concurrent pages while the browser tier
 # stays RAM-budgeted.
 
-_HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 12 * 1024 * 1024, lo=0)
+_HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
 _BROWSER_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
 _ADMIT_YIELD_SECONDS = get_env_float("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
 _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512, lo=1)
@@ -484,6 +484,10 @@ class AdmissionPolicy:
     browser_pool_reserve_bytes: int
     max_http_concurrency: int
     max_browser_concurrency: int
+    # The fraction of RAM ``derive_browser_pool_size`` assumed the pool may
+    # hold. The browser tier must not shrink against its own reserved usage
+    # (T9); only surplus usage beyond this fraction yields browser capacity.
+    browser_ram_fraction: float = _BROWSER_RAM_FRACTION
 
 
 def _build_admission_policy(
@@ -543,9 +547,17 @@ class WeightedAdmission:
         return max(0, int(self._p.max_http_concurrency * self.headroom_fraction()))
 
     def browser_capacity(self) -> int:
-        # Browsers hold most of the cgroup RAM, so the browser tier also shrinks
-        # with headroom -- never admit new browser renders when saturated.
-        return max(0, int(self._p.max_browser_concurrency * self.headroom_fraction()))
+        # Browsers hold most of the cgroup RAM, and that footprint is exactly
+        # what ``browser_pool_reserve_bytes`` reserved up front — so the tier
+        # must not shrink against its own reserved usage (double scaling, T9).
+        # Capacity is full while usage stays within the fraction the pool
+        # sizing assumed, then ramps down to zero as the box exhausts, and the
+        # CPU gate applies on top. Never admit new browser renders when
+        # saturated.
+        ratio = self._gate.memory_ratio()
+        span = max(1e-9, 1.0 - self._p.browser_ram_fraction)
+        usable = min(max(0.0, (1.0 - ratio) / span), 1.0 - self._gate.cpu_ratio())
+        return max(0, int(self._p.max_browser_concurrency * usable))
 
     async def admit(self, want_http: int, want_browser: int) -> tuple[int, int]:
         h = min(want_http, self.http_capacity())

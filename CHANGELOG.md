@@ -117,6 +117,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   per 100 sets (``run`` keeps its up-front purge), the two clocks stay
   separate, only expired entries drop, and a domain's own fresh cooldown is
   never removed.
+- **Admission sizing: honest per-task RAM + no browser double-scale
+  (tier-2 T9/T10)** (app/resource_pressure.py): the per-HTTP-task estimate
+  rises from 12 MiB to 48 MiB — a max-length body plus the
+  trafilatura/lxml parse state is 40+ MiB, so the old figure over-granted by
+  ~4x and the box swapped at the review's live scale. The estimate stays a
+  single env-overridable constant that both the admission ceiling and the
+  httpx pool sizing divide by, so the two cannot drift. Separately,
+  ``browser_capacity`` no longer shrinks against the pool's own reserved
+  footprint: capacity is full while usage stays within the fraction
+  ``derive_browser_pool_size`` assumed, ramps to zero as the box exhausts,
+  and the CPU gate still applies — browsers are never admitted when
+  saturated.
 - **ContentCache unlinks moved off the lock (tier-2 T6)**
   (app/crawl/content_cache.py): `_drop_locked` (and the TTL-expiry path in
   `_read_envelope`) now mutate the index, byte accounting, and RAM mirror

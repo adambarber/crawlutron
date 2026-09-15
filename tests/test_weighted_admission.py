@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from app.resource_pressure import (
+    _BROWSER_RAM_FRACTION,
     _BROWSER_TASK_RAM_BYTES,
     _HTTP_TASK_RAM_BYTES,
     WeightedAdmission,
@@ -71,8 +72,10 @@ class TestWeightedAdmission:
 
     async def test_admit_grants_all_when_headroom_full(self):
         a = WeightedAdmission(_FakeGate(mem=0.0, cpu=0.0), _policy())
-        h, b = await a.admit(want_http=50, want_browser=2)
-        assert h == 50
+        # Request exactly the tier ceiling so the claim ("grants everything
+        # asked while headroom is full") tracks the sizing default, whatever it is.
+        h, b = await a.admit(want_http=a._p.max_http_concurrency, want_browser=2)
+        assert h == a._p.max_http_concurrency
         assert b == 2
 
     async def test_admit_caps_browser_tier(self):
@@ -98,3 +101,52 @@ class TestWeightedAdmission:
         elapsed = asyncio.get_event_loop().time() - t0
         assert (h, b) == (0, 0)
         assert 0 < elapsed < 1.0  # yielded, did not block forever
+
+
+class TestBrowserTierDoesNotDoubleScale:
+    """T9: the browser pool's RAM is reserved up front, so the tier must not
+    shrink against its own reserved footprint — only usage beyond the fraction
+    the pool sizing already assumed should yield browser capacity."""
+
+    def test_full_capacity_while_within_the_reserved_fraction(self):
+        # Browsers using exactly the fraction derive_browser_pool_size assumed
+        # is the steady state, not pressure.
+        a = WeightedAdmission(_FakeGate(mem=_BROWSER_RAM_FRACTION, cpu=0.0), _policy())
+        assert a.browser_capacity() == a._p.max_browser_concurrency
+
+    def test_decays_only_for_usage_beyond_the_reserved_fraction(self):
+        a = WeightedAdmission(_FakeGate(mem=_BROWSER_RAM_FRACTION + 0.2, cpu=0.0), _policy())
+        # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60%
+        # of the tier still admits.
+        assert a.browser_capacity() == pytest.approx(a._p.max_browser_concurrency * 0.6, abs=1)
+
+    def test_never_admits_when_saturated(self):
+        a = WeightedAdmission(_FakeGate(mem=1.0, cpu=0.0), _policy())
+        assert a.browser_capacity() == 0
+
+    def test_cpu_saturation_still_shrinks_the_browser_tier(self):
+        a = WeightedAdmission(_FakeGate(mem=0.0, cpu=1.0), _policy())
+        assert a.browser_capacity() == 0
+
+
+class TestHTTPTaskRamEstimate:
+    """T10: the per-HTTP-task estimate must cover a real task — a max-length
+    body plus the trafilatura/lxml parse state — or admission over-grants and
+    the box swaps. 12 MiB measured optimistic at the review's live scale."""
+
+    def test_default_covers_a_max_body_plus_parse_state(self):
+        # A 10 MiB body plus lxml/trafilatura working set is 40+ MiB in practice.
+        assert _HTTP_TASK_RAM_BYTES >= 48 * 1024 * 1024
+
+    def test_http_ceiling_uses_the_same_bytes_as_admission(self):
+        # Zero drift: the pool ceiling and the admission policy divide by the
+        # same per-task estimate, whatever the default is.
+        p = _policy()
+        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes
+        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+
+    def test_the_3gib_default_still_admits_a_working_floor(self):
+        # The minimal-deployment default (3 GiB, 2 browsers) must still admit
+        # enough concurrent HTTP fetches for hundreds of pages per minute.
+        p = _policy()
+        assert p.max_http_concurrency >= 16
