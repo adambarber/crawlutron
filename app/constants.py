@@ -200,6 +200,15 @@ ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
 DEFAULT_MAX_BROWSER_RENDERS: int = 100
 DEFAULT_MAX_CONCURRENT_PAGES: int = 3
 
+# Browser fixed-overhead knobs (perf throughput #7, configurability only):
+# lazy-load scroll repetitions, the pause between scrolls, and the bounded
+# wait for the cookie harvest. Values equal the long-standing hardcoded
+# behavior (3 steps / 1s / 5.0s); change them via CrawlerSettings/env or the
+# per-request browser_profile, never by editing these defaults.
+DEFAULT_LAZY_SCROLL_STEPS: int = 3
+DEFAULT_LAZY_SCROLL_DELAY_SECONDS = 1
+DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS: float = 5.0
+
 # Browser pool: number of persistent browser instances to keep warm PER WORKER.
 # Each browser uses ~300MB (200MB binary + ~100MB WebExtensions).
 # With 4 uvicorn workers, default 1 per worker = 4 browsers total (~1.2GB,

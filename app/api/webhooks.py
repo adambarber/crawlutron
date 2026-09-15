@@ -23,7 +23,7 @@ import json
 import logging
 from typing import Any
 
-from app.api.response_shaping import build_unified_crawl_response
+from app.api.response_shaping import abuild_unified_crawl_response
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
@@ -200,11 +200,13 @@ async def run_and_deliver_webhook(
     )
     result["request_id"] = request_id
     _get_metrics_fn().observe_crawl(results=result.get("results", []))
-    response_payload = build_unified_crawl_response(
-        result.get("results", []),
-        request_id=request_id,
-        submitted_count=result.get("submitted_count"),
-        policy_schema_version=result.get("policy_schema_version", ""),
+    response_payload = (
+        await abuild_unified_crawl_response(
+            result.get("results", []),
+            request_id=request_id,
+            submitted_count=result.get("submitted_count"),
+            policy_schema_version=result.get("policy_schema_version", ""),
+        )
     ).model_dump()
     try:
         payload_bytes = json.dumps(response_payload, separators=(",", ":")).encode("utf-8")

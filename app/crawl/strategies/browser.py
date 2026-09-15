@@ -24,6 +24,9 @@ from app.classify import classify_page
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
+    DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
 )
@@ -181,14 +184,37 @@ TRANSIENT_CLASSIFICATIONS = {
 }
 FAILED_CLASSIFICATIONS = {"not_found", "site_error", "gone", "binary_no_text"}
 
-LAZY_SCROLL_STEPS = 3
-LAZY_SCROLL_DELAY_SECONDS = 1
+# Canonical defaults live in app.constants (single source of truth); these
+# module names stay as the settings-less fallback so existing references
+# (including the test-suite scroll disabler) keep working with identical values.
+LAZY_SCROLL_STEPS = DEFAULT_LAZY_SCROLL_STEPS
+LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 
 
 # Server-side clamp for caller-supplied action wait durations: a hostile
 # policy must not be able to park a render (or, pre-fix, the event loop)
 # for an arbitrary time.
 _MAX_ACTION_WAIT_SECONDS = 10.0
+
+
+def _profile_int(profile: dict[str, Any], key: str, default: int) -> int:
+    """Read a non-negative int knob from a browser_profile (never raises)."""
+    try:
+        value = int(profile.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    return max(0, value)
+
+
+def _profile_float(profile: dict[str, Any], key: str, default: float) -> float:
+    """Read a non-negative float knob from a browser_profile (never raises)."""
+    try:
+        value = float(profile.get(key, default))
+    except (TypeError, ValueError):
+        return default
+    if value != value:  # NaN: keep the default rather than poisoning waits
+        return default
+    return max(0.0, value)
 
 
 # Session cookies harvested from browser renders, keyed by registrable domain.
@@ -240,6 +266,21 @@ class BrowserRenderer:
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
+        # Fixed-overhead knobs (perf throughput #7, configurability only):
+        # operator settings when present, else the module defaults above
+        # (identical values). Per-request browser_profile keys override both
+        # at render time via _scroll_config_for/_harvest_timeout_for.
+        self._lazy_scroll_steps = (
+            settings.browser_lazy_scroll_steps if settings is not None else LAZY_SCROLL_STEPS
+        )
+        self._lazy_scroll_delay_seconds = (
+            settings.browser_lazy_scroll_delay_seconds if settings is not None else LAZY_SCROLL_DELAY_SECONDS
+        )
+        self._harvest_timeout_seconds = (
+            settings.browser_cookie_harvest_timeout_seconds
+            if settings is not None
+            else DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS
+        )
         self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
         # Reusable browser instance (#6): one browser per BrowserRenderer lifecycle.
@@ -472,7 +513,7 @@ class BrowserRenderer:
                 await self._run_action_chain(page, actions)
 
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
-            await self._lazy_load_scroll(page)
+            await self._lazy_load_scroll(page, options.browser_profile)
 
             # Shadow-DOM flattening (#25): inline open shadow roots so their links
             # and visible text are reachable by the standard HTML/text extractors.
@@ -540,7 +581,10 @@ class BrowserRenderer:
             # for the whole per-URL budget; fall back to cookieless (pre-M3
             # behavior) after a short bounded wait.
             try:
-                await asyncio.wait_for(self._harvest_session_cookies(page, url), timeout=5.0)
+                await asyncio.wait_for(
+                    self._harvest_session_cookies(page, url),
+                    timeout=self._harvest_timeout_for(options.browser_profile or {}),
+                )
             except TimeoutError:
                 pass
             await self._safe_close_page(page)
@@ -657,14 +701,28 @@ class BrowserRenderer:
 
         return on_response
 
-    async def _lazy_load_scroll(self, page: Any) -> None:
+    def _scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
+        """Resolve lazy-scroll steps/delay: policy profile beats settings (perf #7)."""
+        profile = browser_profile or {}
+        return (
+            _profile_int(profile, "lazy_scroll_steps", self._lazy_scroll_steps),
+            _profile_float(profile, "lazy_scroll_delay_seconds", self._lazy_scroll_delay_seconds),
+        )
+
+    def _harvest_timeout_for(self, browser_profile: dict[str, Any] | None) -> float:
+        """Resolve the cookie-harvest wait bound: policy profile beats settings."""
+        profile = browser_profile or {}
+        return _profile_float(profile, "cookie_harvest_timeout_seconds", self._harvest_timeout_seconds)
+
+    async def _lazy_load_scroll(self, page: Any, browser_profile: dict[str, Any] | None = None) -> None:
         """Scroll to the bottom repeatedly to trigger lazy-loaded content."""
-        for _ in range(LAZY_SCROLL_STEPS):
+        steps, delay = self._scroll_config_for(browser_profile)
+        for _ in range(steps):
             try:
                 await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
             except Exception:  # scrolling is best-effort
                 return
-            await self._async_sleep(LAZY_SCROLL_DELAY_SECONDS)
+            await self._async_sleep(delay)
 
     def _get_browser_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
         """Launch-only kwargs for the Camoufox/Playwright browser factory.

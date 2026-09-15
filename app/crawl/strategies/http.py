@@ -112,14 +112,10 @@ from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
-    _detect_pagination,
-    _extract_discovered_links,
     _extract_document,
     _extract_html,
-    _html_diagnostics,
-    _parse_html_tree,
     extract_content,
-    extract_js_endpoints,
+    extract_post_fetch_discovery,
 )
 from app.crawl.result_helpers import _binary_no_text_result, _make_engine_result
 from app.models import CrawlStrategyAttempt, EngineCrawlResult, HttpFetchResult
@@ -326,6 +322,89 @@ async def close_async_http_client() -> None:
     _DEFAULT_HTTP_CLIENT = None
     if client is not None and not client.is_closed:
         await client.aclose()
+
+
+# Shared curl_cffi TLS-impersonation session (one per running event loop).
+# A fresh AsyncSession per request rebuilt TLS state and the connection pool
+# every time; sharing it keeps warm connections and the impersonated
+# fingerprint across requests (perf throughput #4). Mirrors
+# get_async_http_client, including the loop-change rebuild.
+_DEFAULT_CFFI_SESSION: Any | None = None
+_CFFI_SESSION_INIT_LOCK = threading.Lock()
+
+
+def _build_cffi_session() -> Any:
+    """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout).
+
+    The per-request timeout travels on each ``get()`` call instead of the
+    session so one session serves every policy budget. Raises ImportError
+    when curl_cffi is unavailable (caller falls back to plain httpx).
+    """
+    import curl_cffi.requests as cffi_requests
+
+    session = cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET)
+    try:
+        session._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
+    except RuntimeError:
+        session._bound_loop = None  # type: ignore[attr-defined]
+    return session
+
+
+async def _safe_aclose_session(session: Any) -> None:
+    """Await a session close, swallowing failures (best-effort teardown)."""
+    try:
+        await session.close()
+    except Exception:
+        pass
+
+
+def _schedule_cffi_close(session: Any) -> None:
+    """Best-effort close of a loop-superseded shared cffi session."""
+    if session is None:
+        return
+    try:
+        asyncio.ensure_future(_safe_aclose_session(session))
+    except RuntimeError:
+        # No running loop available to schedule on; nothing safe to do.
+        pass
+
+
+def get_cffi_session() -> Any | None:
+    """Return the shared curl_cffi session bound to the current event loop.
+
+    Reused while the running loop is unchanged (warm TLS/connection pool),
+    transparently rebuilt when the loop changes. Returns ``None`` when
+    curl_cffi is not installed so callers fall back to plain httpx.
+    """
+    global _DEFAULT_CFFI_SESSION
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    with _CFFI_SESSION_INIT_LOCK:
+        if _DEFAULT_CFFI_SESSION is None:
+            try:
+                _DEFAULT_CFFI_SESSION = _build_cffi_session()
+            except ImportError:
+                return None
+        elif getattr(_DEFAULT_CFFI_SESSION, "_bound_loop", None) is not loop:
+            old_session = _DEFAULT_CFFI_SESSION
+            try:
+                _DEFAULT_CFFI_SESSION = _build_cffi_session()
+            except ImportError:
+                _DEFAULT_CFFI_SESSION = None
+                return None
+            _schedule_cffi_close(old_session)
+    return _DEFAULT_CFFI_SESSION
+
+
+async def close_cffi_session() -> None:
+    """Close the shared curl_cffi session on service shutdown / test reset."""
+    global _DEFAULT_CFFI_SESSION
+    session = _DEFAULT_CFFI_SESSION
+    _DEFAULT_CFFI_SESSION = None
+    if session is not None:
+        await _safe_aclose_session(session)
 
 
 # Cap on distinct (namespace, host) cookie slots. The jar is module-global
@@ -821,116 +900,108 @@ async def _default_cffi_fetcher(
     Falls back to plain httpx on any import/fetch failure.
     """
     try:
-        import curl_cffi.requests as cffi_requests
         from curl_cffi.requests.exceptions import RequestException
         from curl_cffi.requests.models import STREAM_END
     except ImportError:
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+    # Shared session (perf throughput #4): built once per event loop instead of
+    # per request. Unavailable (ImportError at build) -> plain httpx fallback.
+    # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
+    # AsyncClient does not exist; referencing it raises AttributeError
+    # and would silently degrade every impersonated fetch to plain httpx.
+    client = get_cffi_session()
+    if client is None:
+        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
     try:
-        # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
-        # AsyncClient does not exist; referencing it raises AttributeError
-        # and would silently degrade every impersonated fetch to plain httpx.
-        async with cffi_requests.AsyncSession(
-            impersonate=CFFI_IMPERSONATE_TARGET, timeout=float(timeout_seconds)
-        ) as client:
-            current_url = url
-            hops = 0
-            started = time.monotonic()
-            # Work with a copy of headers so we can mutate per-hop
-            request_headers = dict(headers)
+        current_url = url
+        hops = 0
+        started = time.monotonic()
+        # Work with a copy of headers so we can mutate per-hop
+        request_headers = dict(headers)
+        while True:
+            pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
+            try:
+                response = await client.get(
+                    pinned_url,
+                    headers=hop_headers,
+                    allow_redirects=False,
+                    stream=True,
+                    timeout=float(timeout_seconds),
+                )
+            except Exception:
+                # Fall back to plain httpx for this request on transport errors.
+                return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+            # Content-length check (#5)
+            content_length = response.headers.get("content-length")
+            if _declared_length_exceeds(content_length, max_content_length):
+                await response.aclose()  # N8: release the curl handle
+                return HttpFetchResult(
+                    url=url,
+                    final_url=current_url,
+                    status_code=413,
+                    headers={key.lower(): value for key, value in response.headers.items()},
+                    body=b"",
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                )
+            status_code = response.status_code
+            location = response.headers.get("location")
+            # SSRF-safe redirect: only follow within the hop budget; the next
+            # iteration re-validates + re-pins the target via _build_pinned_request.
+            redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
+            if redirect is not None:
+                await response.aclose()  # N8: release the curl handle
+                current_url, request_headers = redirect
+                hops += 1
+                continue
+            # N7: do not trust response.elapsed across curl_cffi versions
+            # (timedelta in a requests-compatible build would TypeError
+            # here and silently downgrade every fetch to httpx).
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            # Stream RAW bytes with a running cap (H1): a hostile origin
+            # can omit content-length and stream gigabytes (chunked).
+            # Abort with a 413 as soon as the cap is exceeded instead of
+            # buffering the whole body into memory first.
+            encoding = response.headers.get("content-encoding", "")
+            raw = bytearray()
+            # Consume the curl queue directly rather than
+            # response.aiter_content(): on curl_cffi 0.16 the wrapper's
+            # exception path awaits aclose(), which blocks forever on the
+            # very stalled-stream error it is trying to re-raise (the
+            # LOW_SPEED abort lands as a queue item but the wrapper wedges
+            # before delivering it). Reading the queue keeps the abort
+            # prompt and the failure reraise unblocked (H1).
             while True:
-                pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
+                # Bound the wait PER CHUNK, not per response (N-5): this
+                # mirrors httpx's read-timeout semantics -- an inter-chunk
+                # gap limit. A slow-drip origin (one byte per interval)
+                # can keep the stream alive up to max_content_length; the
+                # per-URL budget above bounds the total. Do not "fix"
+                # this into a total deadline without also bounding drips.
+                # queue.get() is pure asyncio, so wait_for cancellation is
+                # safe here (unlike cancelling curl's internal machinery).
                 try:
-                    response = await client.get(
-                        pinned_url, headers=hop_headers, allow_redirects=False, stream=True
+                    chunk = await asyncio.wait_for(
+                        response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
                     )
-                except Exception:
-                    # Fall back to plain httpx for this request on transport errors.
-                    return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
-                # Content-length check (#5)
-                content_length = response.headers.get("content-length")
-                if _declared_length_exceeds(content_length, max_content_length):
-                    await response.aclose()  # N8: release the curl handle
-                    return HttpFetchResult(
-                        url=url,
-                        final_url=current_url,
-                        status_code=413,
-                        headers={key.lower(): value for key, value in response.headers.items()},
-                        body=b"",
-                        elapsed_ms=int((time.monotonic() - started) * 1000),
-                    )
-                status_code = response.status_code
-                location = response.headers.get("location")
-                # SSRF-safe redirect: only follow within the hop budget; the next
-                # iteration re-validates + re-pins the target via _build_pinned_request.
-                redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
-                if redirect is not None:
-                    await response.aclose()  # N8: release the curl handle
-                    current_url, request_headers = redirect
-                    hops += 1
-                    continue
-                # N7: do not trust response.elapsed across curl_cffi versions
-                # (timedelta in a requests-compatible build would TypeError
-                # here and silently downgrade every fetch to httpx).
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                # Stream RAW bytes with a running cap (H1): a hostile origin
-                # can omit content-length and stream gigabytes (chunked).
-                # Abort with a 413 as soon as the cap is exceeded instead of
-                # buffering the whole body into memory first.
-                encoding = response.headers.get("content-encoding", "")
-                raw = bytearray()
-                # Consume the curl queue directly rather than
-                # response.aiter_content(): on curl_cffi 0.16 the wrapper's
-                # exception path awaits aclose(), which blocks forever on the
-                # very stalled-stream error it is trying to re-raise (the
-                # LOW_SPEED abort lands as a queue item but the wrapper wedges
-                # before delivering it). Reading the queue keeps the abort
-                # prompt and the failure reraise unblocked (H1).
-                while True:
-                    # Bound the wait PER CHUNK, not per response (N-5): this
-                    # mirrors httpx's read-timeout semantics -- an inter-chunk
-                    # gap limit. A slow-drip origin (one byte per interval)
-                    # can keep the stream alive up to max_content_length; the
-                    # per-URL budget above bounds the total. Do not "fix"
-                    # this into a total deadline without also bounding drips.
-                    # queue.get() is pure asyncio, so wait_for cancellation is
-                    # safe here (unlike cancelling curl's internal machinery).
-                    try:
-                        chunk = await asyncio.wait_for(
-                            response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
-                        )
-                    except TimeoutError as error:
-                        # Stall: release the handle WITHOUT awaiting. aclose()
-                        # joins the producer task, which is exactly the wedged
-                        # task being escaped; awaiting it hangs like the old
-                        # aiter_content() wrapper did (H1). A scheduled close
-                        # reclaims the handle; the session client bounds any leak.
-                        _release_stream_noblock(response)
-                        raise TimeoutError("cffi stream queue stalled") from error
-                    if isinstance(chunk, RequestException):
-                        raise chunk
-                    if chunk is STREAM_END:
-                        break
-                    raw.extend(chunk)
-                    if len(raw) > max_content_length:
-                        # Mid-stream abandon: same non-blocking release as the
-                        # stall path (awaiting aclose on a live producer is
-                        # safe pre-consumption, but here the producer may be a
-                        # hostile drip -- never wait on it).
-                        _release_stream_noblock(response)
-                        return HttpFetchResult(
-                            url=url,
-                            final_url=current_url,
-                            status_code=413,
-                            headers={key.lower(): value for key, value in response.headers.items()},
-                            body=b"",
-                            elapsed_ms=elapsed_ms,
-                        )
-                raw_bytes = bytes(raw)
-                # Decompress with a size cap (decompression-bomb guard).
-                try:
-                    body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
-                except DecompressionTooLargeError:
+                except TimeoutError as error:
+                    # Stall: release the handle WITHOUT awaiting. aclose()
+                    # joins the producer task, which is exactly the wedged
+                    # task being escaped; awaiting it hangs like the old
+                    # aiter_content() wrapper did (H1). A scheduled close
+                    # reclaims the handle; the session client bounds any leak.
+                    _release_stream_noblock(response)
+                    raise TimeoutError("cffi stream queue stalled") from error
+                if isinstance(chunk, RequestException):
+                    raise chunk
+                if chunk is STREAM_END:
+                    break
+                raw.extend(chunk)
+                if len(raw) > max_content_length:
+                    # Mid-stream abandon: same non-blocking release as the
+                    # stall path (awaiting aclose on a live producer is
+                    # safe pre-consumption, but here the producer may be a
+                    # hostile drip -- never wait on it).
+                    _release_stream_noblock(response)
                     return HttpFetchResult(
                         url=url,
                         final_url=current_url,
@@ -939,19 +1010,38 @@ async def _default_cffi_fetcher(
                         body=b"",
                         elapsed_ms=elapsed_ms,
                     )
-                cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
-                resp_headers = {key.lower(): value for key, value in response.headers.items()}
-                resp_headers.pop("content-encoding", None)
-                _store_set_cookies(current_url, response.headers)
+            # STREAM_END reached: the producer is done, so awaiting the close
+            # is safe (unlike the stall/abandon paths above) and required now
+            # that the session is shared -- the per-request `async with` used
+            # to release the handle implicitly. Without this the next streamed
+            # request on the shared session stalls on the busy handle (#4).
+            await response.aclose()
+            raw_bytes = bytes(raw)
+            # Decompress with a size cap (decompression-bomb guard).
+            try:
+                body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
+            except DecompressionTooLargeError:
                 return HttpFetchResult(
                     url=url,
                     final_url=current_url,
-                    status_code=status_code,
-                    headers=resp_headers,
-                    body=body,
+                    status_code=413,
+                    headers={key.lower(): value for key, value in response.headers.items()},
+                    body=b"",
                     elapsed_ms=elapsed_ms,
-                    decompression_failed=cffi_decompression_failed,
                 )
+            cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
+            resp_headers = {key.lower(): value for key, value in response.headers.items()}
+            resp_headers.pop("content-encoding", None)
+            _store_set_cookies(current_url, response.headers)
+            return HttpFetchResult(
+                url=url,
+                final_url=current_url,
+                status_code=status_code,
+                headers=resp_headers,
+                body=body,
+                elapsed_ms=elapsed_ms,
+                decompression_failed=cffi_decompression_failed,
+            )
     except Exception:  # any cffi failure falls back to plain httpx
         return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
 
@@ -1462,6 +1552,7 @@ async def _http_strategy_result(
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
     retry_diagnostics: dict[str, Any] = {"attempts": 0, "transient_errors": []}
@@ -1478,7 +1569,9 @@ async def _http_strategy_result(
     limits = policy.get("limits", {})
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
-    max_content_length = _effective_max_content_length(limits)
+    # The engine threads its live concurrency here (perf throughput #5) so the
+    # RAM-scaled cap tracks real dispatch instead of the settings floor.
+    max_content_length = _effective_max_content_length(limits, global_concurrency)
     base_headers = _headers_for_strategy(strategy, policy, normalized_url)
     request_headers = dict(base_headers)
     if cache is not None:
@@ -1656,7 +1749,10 @@ async def _http_strategy_result(
             extraction_method = EXTRACTION_METHOD_DOCUMENT
         elif extraction == EXTRACTION_TRAFILATURA:
             if is_html:
-                extracted = _extract_html(
+                # trafilatura is CPU-bound: keep it off the event loop like the
+                # neighboring document/full-pipeline extractions (perf throughput #3).
+                extracted = await asyncio.to_thread(
+                    _extract_html,
                     body_text,
                     response.final_url,
                     css_selector=policy.get("css_selector"),
@@ -1756,16 +1852,23 @@ async def _http_strategy_result(
         discovery = policy.get("discovery") or {}
         _max_depth = int((policy.get("limits") or {}).get("max_depth") or 0)
         _want_discovery_links = bool(discovery) or _max_depth > 0
-        # #11: parse the page HTML at most once and reuse the single lxml tree
-        # for the frames/forms diagnostics and the link extraction below.
-        # Only parse when discovery is requested or this is a recursive crawl
-        # that expands the frontier from the extracted links (B1).
-        tree = _parse_html_tree(html) if _want_discovery_links and html else None
-        # #2: _html_diagnostics (frames/forms via an lxml parse) is only needed
-        # for structural discovery. Skip it when discovery is not requested so
-        # content-only crawls avoid a redundant HTML parse per page.
+        # Post-fetch discovery (perf #9): the lxml parse + link/frame/form/
+        # JS/pagination passes run in a worker thread (single parse, shared
+        # tree inside). Only plain data returns; egress filtering below is
+        # unchanged. Frames/forms stay gated on explicit discovery (B1) and
+        # links on the recursive/frontier need, exactly as before.
+        post_fetch = await asyncio.to_thread(
+            extract_post_fetch_discovery,
+            html,
+            response.final_url,
+            js_base_url=normalized_url,
+            max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
+            include_diagnostics=bool(discovery),
+            include_links=status == "success" and _want_discovery_links,
+            include_js_endpoints=bool(discovery),
+        )
         if discovery:
-            diagnostics.update(_html_diagnostics(html, response.final_url, tree=tree))
+            diagnostics.update(post_fetch["diagnostics"])
         retry_after = _retry_after_seconds(headers)
         if retry_after is not None:
             diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
@@ -1798,7 +1901,7 @@ async def _http_strategy_result(
         # may leave the service (no javascript:, file:, link-local oddities).
         # JS-endpoint extraction is discovery-oriented; skip it for
         # content-only crawls (B1).
-        raw_endpoints = extract_js_endpoints(html, normalized_url) if discovery else []
+        raw_endpoints = post_fetch["js_endpoints"]
         diagnostics["js_endpoints"] = [
             {**endpoint, "url": clean}
             for endpoint in raw_endpoints
@@ -1809,7 +1912,7 @@ async def _http_strategy_result(
         # standard result field (returned even without discovery mode), so it is
         # always computed. Only the heavier discovery-only extras below are
         # gated on `discovery` (B1).
-        next_page_url = _detect_pagination(html, response.final_url)
+        next_page_url = post_fetch["next_page_url"]
         # Egress filter (public_url_or_none): _detect_pagination already
         # resolves against final_url, so this only drops non-http(s).
         next_page_url = public_url_or_none(next_page_url) if next_page_url else None
@@ -1839,15 +1942,9 @@ async def _http_strategy_result(
         # discovered_links is consumed by frontier expansion and by discovery
         # consumers; content-only crawls (no discovery, depth 0) skip the
         # extraction entirely and return empty links (#2-fix).
-        if status == "success" and _want_discovery_links:
-            discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
-                html,
-                response.final_url,
-                max_links=limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
-                tree=tree,
-            )
-        else:
-            discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
+        discovered_links = post_fetch["discovered_links"]
+        discovered_link_count = post_fetch["discovered_link_count"]
+        discovered_links_truncated = post_fetch["discovered_links_truncated"]
         attempt = CrawlStrategyAttempt(
             strategy=strategy,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]

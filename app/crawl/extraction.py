@@ -24,6 +24,7 @@ import multiprocessing
 import os
 import re
 import threading
+import time
 from html import unescape
 from typing import Any, NamedTuple
 from urllib.parse import urljoin, urlparse
@@ -53,12 +54,29 @@ def _doc_extraction_worker_count() -> int:
         return _DEFAULT_DOC_EXTRACTION_WORKERS
 
 
-# Document extraction (markitdown) runs in a SEPARATE PROCESS that is forcefully
-# killed on timeout (adversarial perf #3.2). A persistent process pool cannot
-# target a single timed-out future for termination, so each call spawns its own
-# short-lived process; a semaphore bounds how many run at once so memory stays
-# within the container ceiling. Defined after the worker-count helper above.
-_DOC_SEM = threading.Semaphore(_doc_extraction_worker_count())
+# Document extraction (markitdown) runs in a PERSISTENT pool of worker
+# processes (perf throughput #8). Each worker imports markitdown once (it
+# stays in the worker's sys.modules) and serves many documents, amortizing
+# the spawn + import cost of the old spawn-per-document design. Timeout-kill
+# semantics are kept per task (adversarial perf #3.2): a worker that exceeds
+# _EXTRACTION_DOC_TIMEOUT -- or dies mid-task -- is terminated and reaped
+# immediately, and its slot is respawned on the next acquisition, so a
+# pathological document can neither block the pool nor linger as a zombie.
+# Sized by _doc_extraction_worker_count() so memory stays within the
+# container ceiling. Defined after the worker-count helper above.
+class _DocWorker:
+    """One persistent markitdown worker: process + parent end of its task pipe."""
+
+    __slots__ = ("proc", "conn", "busy")
+
+    def __init__(self, proc, conn) -> None:
+        self.proc = proc
+        self.conn = conn
+        self.busy = False
+
+
+_POOL_LOCK = threading.Condition(threading.Lock())
+_DOC_POOL: list[_DocWorker] | None = None
 
 
 def _test_hooks_enabled() -> bool:
@@ -72,22 +90,61 @@ def _test_hooks_enabled() -> bool:
     return os.environ.get("BROWSER_CRAWLER_TEST_HOOKS") == "1"
 
 
-def _run_markitdown_in_process(body: bytes, conn) -> None:
-    """Worker-process entry: run markitdown and ship the result over ``conn``."""
-    # Support for test-induced child death (M8): exit without sending, as a
-    # worker segfaulting on hostile input would. Inherited via env so it
-    # works under both fork and spawn start methods.
-    if _test_hooks_enabled() and os.environ.get("TEST_MARKITDOWN_DIE") == "1":
-        try:
-            conn.close()
-        except Exception:
-            pass
-        os._exit(1)
+def _doc_task_hooks() -> dict | None:
+    """Snapshot the hermetic TEST_MARKITDOWN_* seam for one task (parent-side).
+
+    Workers are persistent: they would otherwise observe the env from their
+    spawn moment, not the caller's current test flags. The parent (which
+    always sees current env) snapshots the gated hooks per call and ships
+    them with the task; the worker honors the message, never its own env.
+    Returns None in production (gate off) so a stray test flag can never
+    alter real behavior (N10).
+    """
+    if not _test_hooks_enabled():
+        return None
+    return {
+        "die": os.environ.get("TEST_MARKITDOWN_DIE") == "1",
+        "hang": os.environ.get("TEST_MARKITDOWN_HANG") == "1",
+        "output": os.environ.get("TEST_MARKITDOWN_OUTPUT"),
+    }
+
+
+def _doc_worker_main(conn) -> None:
+    """Persistent worker entry: serve markitdown tasks until killed or orphaned.
+
+    Each task arrives as ``(body, hooks)``; hooks come from the parent's
+    per-call snapshot (never the worker's spawn-time env). A ``die`` hook
+    exits without sending (M8: a worker segfaulting on hostile input).
+    """
     try:
-        res = _markitdown_extract(body)
-        conn.send(("ok", res))
-    except Exception:
-        conn.send(("err", None))
+        while True:
+            try:
+                body, hooks = conn.recv()
+            except (EOFError, OSError):
+                return
+            if hooks is not None:
+                if hooks.get("die"):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    os._exit(1)
+                if hooks.get("hang"):
+                    time.sleep(10)  # Longer than any test timeout
+                if hooks.get("output") is not None:
+                    try:
+                        conn.send(("ok", hooks["output"]))
+                    except Exception:
+                        return
+                    continue
+            try:
+                md = _markitdown_extract(body)
+                conn.send(("ok", md))
+            except Exception:
+                try:
+                    conn.send(("err", None))
+                except Exception:
+                    return
     finally:
         try:
             conn.close()
@@ -108,21 +165,13 @@ def _terminate_doc_process(proc) -> None:
 
 
 def _markitdown_extract(body: bytes) -> str | None:
-    """Top-level picklable function for markitdown extraction in a worker process.
+    """Convert document bytes with markitdown (worker-side real path only).
 
-    Runs in a separate process so it can be forcefully killed on timeout.
+    Test hooks are NOT read here: the parent snapshots them per task and the
+    worker honors the shipped message, so persistent workers never observe
+    stale env. The MarkItDown import stays in the worker's sys.modules after
+    the first real task -- once per worker lifetime, not per document.
     """
-    # Support for test-induced hang simulation
-    if _test_hooks_enabled() and os.environ.get("TEST_MARKITDOWN_HANG") == "1":
-        import time
-
-        time.sleep(10)  # Longer than any test timeout
-
-    # Support for test output injection
-    test_output = os.environ.get("TEST_MARKITDOWN_OUTPUT")
-    if _test_hooks_enabled() and test_output is not None:
-        return test_output
-
     try:
         from markitdown import MarkItDown
     except ImportError:
@@ -131,13 +180,87 @@ def _markitdown_extract(body: bytes) -> str | None:
     return res.text_content if res is not None else None
 
 
-async def _shutdown_doc_extraction_executor() -> None:
-    """No persistent document-extraction pool to shut down.
+def _spawn_doc_worker() -> _DocWorker:
+    """Start one persistent worker and return its parent-side handle."""
+    parent_conn, child_conn = multiprocessing.Pipe(duplex=True)
+    proc = multiprocessing.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
+    proc.start()
+    child_conn.close()  # parent keeps only its end of the pipe
+    return _DocWorker(proc, parent_conn)
 
-    Each extraction spawns its own short-lived process (reaped on completion or
-    timeout), so nothing needs tearing down on service shutdown. Kept as a
-    no-op so any (future) shutdown caller stays valid.
+
+def _retire_doc_worker(worker: _DocWorker) -> None:
+    """Terminate and reap one worker, leaving its (dead) slot for respawn.
+
+    Respawn is deliberately lazy (next acquisition): the bounds suite
+    requires zero live children immediately after a timeout/child-death,
+    and a dead-idle slot costs nothing until the next document arrives.
     """
+    _terminate_doc_process(worker.proc)
+    try:
+        worker.conn.close()
+    except Exception:
+        pass
+
+
+def _teardown_doc_pool_locked() -> None:
+    """Terminate every pooled worker. Caller must hold ``_POOL_LOCK``."""
+    global _DOC_POOL
+    pool, _DOC_POOL = _DOC_POOL, None
+    for worker in pool or []:
+        _retire_doc_worker(worker)
+
+
+def _acquire_doc_worker() -> _DocWorker:
+    """Take an idle pool worker, spawning on demand up to the configured size.
+
+    The pool starts empty and grows only as concurrent demand requires: a
+    test doing one extraction owns exactly one worker, so the historical
+    zero-live-children-after-death invariant still holds. Dead idle slots
+    (retired after a timeout/child-death) are respawned in place here, so
+    normal acquisitions never observe them.
+    """
+    global _DOC_POOL
+    with _POOL_LOCK:
+        if _DOC_POOL is None:
+            _DOC_POOL = []
+        want = _doc_extraction_worker_count()
+        while True:
+            for worker in _DOC_POOL:
+                if not worker.busy and worker.proc.is_alive():
+                    worker.busy = True
+                    return worker
+            for index, worker in enumerate(_DOC_POOL):
+                if not worker.busy and not worker.proc.is_alive():
+                    _retire_doc_worker(worker)
+                    fresh = _spawn_doc_worker()
+                    fresh.busy = True
+                    _DOC_POOL[index] = fresh
+                    return fresh
+            if len(_DOC_POOL) < want:
+                fresh = _spawn_doc_worker()
+                fresh.busy = True
+                _DOC_POOL.append(fresh)
+                return fresh
+            _POOL_LOCK.wait()
+
+
+def _reset_doc_pool() -> None:
+    """Tear down the pool so the next extraction rebuilds it (tests only)."""
+    with _POOL_LOCK:
+        _teardown_doc_pool_locked()
+
+
+def _doc_pool_pids() -> list[int]:
+    """Live worker PIDs (tests only: proves persistence, not spawn-per-task)."""
+    with _POOL_LOCK:
+        return [worker.proc.pid for worker in _DOC_POOL or [] if worker.proc.pid]
+
+
+async def _shutdown_doc_extraction_executor() -> None:
+    """Terminate persistent document-extraction workers (lifespan/test teardown)."""
+    with _POOL_LOCK:
+        _teardown_doc_pool_locked()
 
 
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
@@ -374,10 +497,10 @@ def _extract_html(
 def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     """Extract markdown from document bytes with a wall-clock timeout (F5).
 
-    The markitdown conversion runs in a worker PROCESS with a hard timeout so
-    a pathological document cannot block the worker indefinitely and the
-    process can be forcefully killed. Output is also capped to prevent
-    unbounded memory growth.
+    The markitdown conversion runs on a persistent pool worker with a hard
+    per-task timeout so a pathological document cannot block the pool
+    indefinitely; the worker is forcefully killed and its slot respawned.
+    Output is also capped to prevent unbounded memory growth.
     """
     if not _EXTRACTION_DOC_ENABLED:
         return ExtractedContent(None, None)
@@ -388,40 +511,47 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
         )
         return ExtractedContent(None, None)
 
-    # Run markitdown in a worker process with a hard wall-clock timeout; on
-    # timeout the runaway process is forcefully terminated so it cannot linger
-    # as a zombie and starve the (bounded) extraction concurrency
-    # (adversarial perf #3.2). A semaphore bounds concurrent processes so memory
-    # stays within the container ceiling.
-    _DOC_SEM.acquire()
+    # Serve the document from the persistent pool with a hard wall-clock
+    # timeout per task; on timeout -- or if the worker died mid-task -- the
+    # runaway worker is forcefully terminated and reaped so it cannot linger
+    # as a zombie (adversarial perf #3.2), and its slot is respawned on the
+    # next acquisition. Pool size bounds concurrent processes so memory
+    # stays within the container ceiling (perf throughput #8).
+    worker = _acquire_doc_worker()
     try:
-        parent_conn, child_conn = multiprocessing.Pipe()
-        proc = multiprocessing.Process(target=_run_markitdown_in_process, args=(body, child_conn))
-        proc.start()
-        child_conn.close()  # parent keeps only its end of the pipe
-        md = None
         try:
-            if parent_conn.poll(_EXTRACTION_DOC_TIMEOUT):
-                try:
-                    _, md = parent_conn.recv()
-                except (EOFError, OSError):
-                    # The child died before sending (segfault on hostile
-                    # input): poll() reports EOF as readable, then recv()
-                    # raises. Graceful empty extraction, not an unhandled
-                    # error -- and reap the child on every path (M8).
-                    logger.warning("extraction_document_child_died")
-                    _terminate_doc_process(proc)
-                    return ExtractedContent(None, None)
-            else:
-                logger.warning("extraction_document_timeout")
-                _terminate_doc_process(proc)
+            worker.conn.send((body, _doc_task_hooks()))
+        except (EOFError, OSError):
+            # Send raced a worker death: reap the slot and report empty (M8).
+            logger.warning("extraction_document_child_died")
+            _retire_doc_worker(worker)
+            return ExtractedContent(None, None)
+        try:
+            ready = worker.conn.poll(_EXTRACTION_DOC_TIMEOUT)
+        except (EOFError, OSError):
+            logger.warning("extraction_document_child_died")
+            _retire_doc_worker(worker)
+            return ExtractedContent(None, None)
+        md = None
+        if ready:
+            try:
+                _, md = worker.conn.recv()
+            except (EOFError, OSError):
+                # The worker died before sending (segfault on hostile
+                # input): poll() reports EOF as readable, then recv()
+                # raises. Graceful empty extraction, not an unhandled
+                # error -- and retire the slot on every death path (M8).
+                logger.warning("extraction_document_child_died")
+                _retire_doc_worker(worker)
                 return ExtractedContent(None, None)
-        finally:
-            if proc.is_alive():
-                proc.join(timeout=2)
-            parent_conn.close()
+        else:
+            logger.warning("extraction_document_timeout")
+            _retire_doc_worker(worker)
+            return ExtractedContent(None, None)
     finally:
-        _DOC_SEM.release()
+        with _POOL_LOCK:
+            worker.busy = False
+            _POOL_LOCK.notify_all()
 
     if not md or not md.strip():
         return ExtractedContent(None, None)
@@ -641,6 +771,49 @@ def _extract_discovered_links(
             )
         )
     return links, total_count, total_count > len(links)
+
+
+def extract_post_fetch_discovery(
+    html: str | None,
+    final_url: str | None,
+    *,
+    js_base_url: str | None = None,
+    max_links: int = 250,
+    include_diagnostics: bool = False,
+    include_links: bool = False,
+    include_js_endpoints: bool = False,
+) -> dict[str, Any]:
+    """Sync post-fetch discovery block for the strategy result builders (perf #9).
+
+    Parses the HTML once and derives frames/forms diagnostics, discovered
+    links, raw JS endpoints, and the pagination hint in one pass. Pure CPU
+    work with no I/O: both builders run it via ``asyncio.to_thread`` so page
+    parsing never parks the event loop. Returns only plain data (dicts,
+    lists, strings, DiscoveredLink values) -- the lxml tree never escapes.
+    Egress filtering (``public_url_or_none``) stays at the call sites so
+    each builder keeps its exact filter contract.
+    """
+    tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
+    diagnostics = _html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
+    if include_links:
+        discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
+            html, final_url, max_links=max_links, tree=tree
+        )
+    else:
+        discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
+    js_endpoints = (
+        extract_js_endpoints(html, js_base_url if js_base_url is not None else final_url)
+        if include_js_endpoints
+        else []
+    )
+    return {
+        "diagnostics": diagnostics,
+        "discovered_links": discovered_links,
+        "discovered_link_count": discovered_link_count,
+        "discovered_links_truncated": discovered_links_truncated,
+        "js_endpoints": js_endpoints,
+        "next_page_url": _detect_pagination(html, final_url),
+    }
 
 
 # ---------------------------------------------------------------------------

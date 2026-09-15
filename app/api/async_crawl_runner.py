@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl
-from app.api.response_shaping import build_unified_crawl_response
+from app.api.response_shaping import abuild_unified_crawl_response
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
@@ -77,7 +77,7 @@ async def run_async_crawl(
             )
             result["request_id"] = request_id
             get_metrics().observe_crawl(results=result.get("results", []))
-            response_model = build_unified_crawl_response(
+            response_model = await abuild_unified_crawl_response(
                 result.get("results", []),
                 request_id=request_id,
                 submitted_count=result.get("submitted_count"),
@@ -125,7 +125,7 @@ async def run_async_crawl(
             job_store.save(job)
         if webhook_url:
             try:
-                error_payload = build_unified_crawl_response(
+                error_payload = await abuild_unified_crawl_response(
                     [], request_id=request_id, success=False
                 ).model_dump()
                 from app.api.webhooks import post_webhook

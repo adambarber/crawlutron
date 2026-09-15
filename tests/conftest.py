@@ -406,6 +406,20 @@ def _reset_global_http_state():
                 http_mod._DEFAULT_HTTP_CLIENT = None
     except Exception:
         pass
+    # Shared curl_cffi session (perf throughput #4): same loop-hygiene as the
+    # pooled httpx client so tests stay order-independent under asyncio.run.
+    try:
+        if http_mod._DEFAULT_CFFI_SESSION is not None:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    http_mod._DEFAULT_CFFI_SESSION = None
+                else:
+                    loop.run_until_complete(http_mod.close_cffi_session())
+            except RuntimeError:
+                http_mod._DEFAULT_CFFI_SESSION = None
+    except Exception:
+        pass
     # The real app's shutdown event is module-global and shared by every
     # ASGI test. A test that drives the real lifespan (shutdown) leaves it
     # SET; production never reuses a set event (fresh boot = fresh event),

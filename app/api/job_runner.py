@@ -30,7 +30,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import build_unified_result, frontier_link_url
+from app.api.response_shaping import abuild_unified_result, frontier_link_url
 from app.constants import MAX_URL_TRANSIENT_ATTEMPTS
 from app.crawl.job_store import JobKind, JobStatus, JobStore
 from app.crawl.strategies.browser import TRANSIENT_CLASSIFICATIONS
@@ -267,7 +267,7 @@ async def _run_job(
                     # propagates this item.error into the committed result.
                     item = {**item, "status": "failed", "error": "retries_exhausted"}
                 try:
-                    unified = build_unified_result(item)
+                    unified = await abuild_unified_result(item)
                 except Exception:
                     unified = None
                 if unified is not None:

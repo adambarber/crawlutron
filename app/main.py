@@ -139,11 +139,12 @@ if FastAPI is not None:
             _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
         clear_webhook_dependencies()
 
-        from app.crawl.strategies.http import close_async_http_client
+        from app.crawl.strategies.http import close_async_http_client, close_cffi_session
 
         from .crawl.engine import _resource_gate
 
         await close_async_http_client()
+        await close_cffi_session()
         await close_browser_pool()
         _resource_gate.close()
         # Symmetry with set_utilization_sampler(...): release the closed

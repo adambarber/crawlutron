@@ -56,6 +56,9 @@ class _FakeCffiClient:
     def __init__(self, body: bytes, **kwargs):
         self._body = body
         self.response = None
+        # Session acquisition is now construction (shared session, perf #4),
+        # not per-request __aenter__; record here so construction counts.
+        type(self).last_instance = self
 
     async def __aenter__(self):
         type(self).last_instance = self

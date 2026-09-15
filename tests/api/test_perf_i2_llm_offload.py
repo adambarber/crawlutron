@@ -1,0 +1,104 @@
+"""Perf item 2 (RED): LLM metadata extraction must leave the event loop.
+
+``format_crawl_item`` runs ``_extract_llm_metadata`` (a second lxml parse)
+synchronously for every result. The async endpoint path must offload that
+parse with ``asyncio.to_thread`` via the additive async shaping API.
+"""
+
+import asyncio
+
+from app.api.response_shaping import (
+    abuild_unified_crawl_response,
+    abuild_unified_result,
+    aformat_crawl_item,
+    build_unified_crawl_response,
+)
+
+
+def _html_item(i: int = 0) -> dict:
+    html = (
+        f"<html><head><title>Page {i}</title>"
+        '<meta name="description" content="desc here">'
+        "</head><body><p>Body text here</p></body></html>"
+    )
+    return {
+        "original_url": f"http://example.com/{i}",
+        "normalized_url": f"http://example.com/{i}",
+        "final_url": f"http://example.com/{i}",
+        "status": "success",
+        "classification": "rendered",
+        "html": html,
+        "markdown": "# Body text here",
+        "text": "Body text here",
+    }
+
+
+async def test_aformat_crawl_item_offloads_metadata_parse(monkeypatch):
+    """The lxml metadata parse runs in a worker thread, not on the loop."""
+    calls: list[tuple[str, str]] = []
+    from app.crawl import llm_format as llm_mod
+
+    real_fn = llm_mod._extract_llm_metadata
+
+    def spy(html, url):
+        calls.append((html, url))
+        return real_fn(html, url)
+
+    monkeypatch.setattr(llm_mod, "_extract_llm_metadata", spy)
+    seen_threads: set[int] = set()
+    loop_thread = asyncio.get_running_loop()
+
+    import threading
+
+    orig_to_thread = asyncio.to_thread
+
+    async def spy_to_thread(fn, *args, **kwargs):
+        seen_threads.add(threading.get_ident())
+        return await orig_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy_to_thread)
+    markdown, metadata = await aformat_crawl_item(_html_item())
+    assert markdown == "# Body text here"
+    assert metadata.get("title") == "Page 0"
+    assert metadata.get("source_url") == "http://example.com/0"
+    assert len(calls) == 1
+    # The parse ran off the event loop thread.
+    assert len(seen_threads) == 1
+    assert next(iter(seen_threads)) != loop_thread
+
+
+async def test_abuild_unified_crawl_response_matches_sync():
+    """Async shaping is byte-identical to the sync contract (all item shapes)."""
+    items = [
+        _html_item(0),
+        {
+            "original_url": "http://example.com/doc.pdf",
+            "status": "success",
+            "classification": "rendered",
+            "text": "pdf text",
+        },
+        {"original_url": "http://example.com/empty", "status": "failed", "classification": "not_found"},
+        {
+            "original_url": "http://example.com/csv",
+            "status": "success",
+            "classification": "rendered",
+            "markdown": "# H\n\nb",
+            "final_url": "http://example.com/csv",
+        },
+    ]
+    sync = build_unified_crawl_response(items, request_id="r", policy_schema_version="v")
+    async_ = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
+    assert async_.model_dump() == sync.model_dump()
+
+
+async def test_abuild_unified_result_single_item_matches_sync():
+    item = _html_item(3)
+    from app.api.response_shaping import build_unified_result
+
+    assert (await abuild_unified_result(item)).model_dump() == build_unified_result(item).model_dump()
+
+
+async def test_async_response_empty_results():
+    resp = await abuild_unified_crawl_response([], request_id="r")
+    assert resp.results == []
+    assert resp.request_id == "r"

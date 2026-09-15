@@ -5,6 +5,69 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Performance
+- **Concurrent robots screens (throughput #1)** (app/crawl/recursive.py,
+  app/crawl/engine.py): the recursive batch screen, discovered-link screen,
+  and the non-recursive batch screen now `asyncio.gather` their
+  `robots_allows`/`robots_crawl_delay` checks instead of awaiting them one
+  URL at a time. Same closures, same `robots_cache` chokepoint and SSRF
+  semantics; in-batch duplicates keep visit-once behavior.
+- **LLM metadata off the event loop (throughput #2)**
+  (app/api/response_shaping.py): new additive `aformat_crawl_item` /
+  `abuild_unified_result` / `abuild_unified_crawl_response` offload the
+  per-item lxml metadata parse with `asyncio.to_thread` (items gathered
+  concurrently) and are now used by the async runner, render, webhook, MCP,
+  and job-runner paths. Sync shapers are unchanged. `crawl_endpoint.py` is
+  owned by another stream and keeps the sync call until it adopts the seam.
+- **Sync trafilatura off the loop (throughput #3)**
+  (app/crawl/strategies/http.py, app/crawl/engine.py): both `_extract_html`
+  call sites (HTTP strategy result, browser strategy result) now run via
+  `asyncio.to_thread`, matching the neighboring document/full-pipeline
+  extractions. `strategies/browser.py` needed no change: its `_extract_html`
+  is already async browser I/O (`page.content()`), not a CPU parse.
+- **Shared curl_cffi session (throughput #4)**
+  (app/crawl/strategies/http.py, app/main.py, tests/conftest.py):
+  `_default_cffi_fetcher` reuses one `AsyncSession` per event loop
+  (`get_cffi_session`, mirroring `get_async_http_client` with loop-change
+  rebuild) instead of building one per request; the per-request timeout now
+  travels on `get()` and the stream handle is released after STREAM_END so
+  the shared session can serve the next request. Shutdown closes it via
+  `close_cffi_session` (lifespan + test reset). The streaming-cap fake now
+  records construction (shared protocol has no per-request enter).
+- **RAM-scaled body cap uses live concurrency (throughput #5)**
+  (app/crawl/engine.py, app/crawl/strategies/http.py):
+  `_execute_crawl_chain`/`_http_strategy_result` accept the crawl's
+  `global_concurrency` (threaded from the engine's active settings) so
+  `_effective_max_content_length` honors the operator-configured concurrency
+  instead of always re-reading defaults and falling back to the settings
+  floor. Omitted (tests, direct callers) preserves the old floor behavior.
+  True live-dispatch scaling (admission-derived concurrency) remains future
+  work -- this threads the configured value, not a measured one.
+- **Browser fixed-overhead knobs are configurable, defaults frozen
+  (throughput #7)** (app/constants.py, app/settings.py,
+  app/crawl/strategies/browser.py, .env.example): lazy-scroll steps/delay
+  and the cookie-harvest wait are now settable via env/CrawlerSettings and
+  per-render `browser_profile` keys (`lazy_scroll_steps`,
+  `lazy_scroll_delay_seconds`, `cookie_harvest_timeout_seconds`). Shipped
+  defaults are byte-identical (3 / 1s / 5.0s); ready-state and challenge
+  behavior are untouched.
+- **Persistent markitdown pool (throughput #8)** (app/crawl/extraction.py):
+  `_extract_document` is served by persistent pool workers (spawned on
+  demand up to `BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS`) instead of one
+  process per document; markitdown imports once per worker lifetime.
+  Timeout-kill semantics kept: a hung/dead worker is terminated and reaped
+  per task, its slot respawned on next acquisition. The hermetic
+  `TEST_MARKITDOWN_*` seam is snapshotted per task parent-side (persistent
+  workers would otherwise see spawn-time env); all extraction-bounds tests
+  pass unchanged.
+- **Sync post-fetch parsing off the loop (throughput #9)**
+  (app/crawl/extraction.py, app/crawl/engine.py,
+  app/crawl/strategies/http.py): new `extract_post_fetch_discovery` parses
+  once and derives frames/forms, discovered links, JS endpoints, and the
+  pagination hint; both strategy result builders run it via
+  `asyncio.to_thread` and keep their exact gating/egress-filter contracts.
+  Only plain data returns (the lxml tree never escapes).
+
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
   query via an operator-configured provider. Provider abstraction ships

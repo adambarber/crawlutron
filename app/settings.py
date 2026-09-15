@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from app.constants import (
     DEFAULT_BROWSER_POOL_SIZE,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
+    DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
+    DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
+    DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
 )
@@ -86,6 +89,14 @@ class CrawlerSettings:
     max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
     browser_pool_size: int = DEFAULT_BROWSER_POOL_SIZE
     challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
+    # Browser fixed-overhead knobs (perf throughput #7): configurability
+    # only -- defaults equal the hardcoded behavior (3 steps / 1s / 5.0s).
+    # Per-request ``browser_profile`` keys (``lazy_scroll_steps``,
+    # ``lazy_scroll_delay_seconds``, ``cookie_harvest_timeout_seconds``)
+    # override these per render.
+    browser_lazy_scroll_steps: int = DEFAULT_LAZY_SCROLL_STEPS
+    browser_lazy_scroll_delay_seconds: float = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
+    browser_cookie_harvest_timeout_seconds: float = DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS
     # Web search provider configuration (POST /v1/search). ``search_provider``
     # selects the backend: "auto" (default) picks the first configured keyed
     # provider in priority order (tavily -> brave -> serper) and falls back to
@@ -194,6 +205,21 @@ class CrawlerSettings:
             ),
             challenge_wait_seconds=get_mapping_int(
                 source, "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
+            ),
+            browser_lazy_scroll_steps=get_mapping_int(
+                source, "BROWSER_CRAWLER_LAZY_SCROLL_STEPS", cls.browser_lazy_scroll_steps, lo=0
+            ),
+            browser_lazy_scroll_delay_seconds=get_mapping_float(
+                source,
+                "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS",
+                cls.browser_lazy_scroll_delay_seconds,
+                lo=0.0,
+            ),
+            browser_cookie_harvest_timeout_seconds=get_mapping_float(
+                source,
+                "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS",
+                cls.browser_cookie_harvest_timeout_seconds,
+                lo=0.0,
             ),
             search_provider=source.get("BROWSER_CRAWLER_SEARCH_PROVIDER", cls.search_provider),
             tavily_api_key=source.get("BROWSER_CRAWLER_TAVILY_API_KEY", cls.tavily_api_key),
