@@ -41,14 +41,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `_effective_max_content_length` scales the per-page cap to real dispatch
   instead of always falling back to the settings floor. Omitted (tests,
   direct callers) preserves the old floor behavior.
-- **O(1) frontier pop without a schema change (throughput #6)**
-  (app/api/job_runner.py): `_pop_frontier` advances a transient head offset
-  instead of slice-deleting per batch (amortized O(1); the consumed prefix
-  is reclaimed every 256 slots), visited slots are skipped rather than
-  re-fetched, `_frontier_add` is idempotent (single-copy invariant), and
-  COMPLETED jobs persist `frontier == []` as before. The JSON row shape is
-  unchanged; per-batch `json.dumps` save cost is untouched (needs the
-  out-of-scope results-table redesign to improve).
 - **Browser fixed-overhead knobs are configurable, defaults frozen
   (throughput #7)** (app/constants.py, app/settings.py,
   app/crawl/strategies/browser.py, .env.example): lazy-scroll steps/delay
