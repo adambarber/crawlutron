@@ -262,15 +262,30 @@ class DomainScheduler:
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
-                results[job.index] = _failed_engine_result(
-                    original_url=job.url,
-                    normalized_url=job.normalized_url,
+                # Production jobs are CrawlTask (original_url + normalized_url);
+                # this module's CrawlJob annotation predates that and carries
+                # only ``url``. Read whichever pair the object actually has so
+                # the envelope is buildable on both shapes.
+                original_url = getattr(job, "original_url", None) or job.url
+                normalized_url = getattr(job, "normalized_url", None) or original_url
+                breaker_result = _failed_engine_result(
+                    original_url=original_url,
+                    normalized_url=normalized_url,
                     strategy="",
                     classification="network_error",
                     error="circuit_breaker_open",
                     diagnostics={"circuit_breaker": True, "error": "circuit_breaker_open"},
-                    next_page_url=None,
                 )
+                if on_result is not None:
+                    # In on_result mode ``results`` is None, so the failed
+                    # envelope must go through the same channel as normal
+                    # results. Writing results[job.index] here raised
+                    # TypeError, which gather(return_exceptions=True) swallowed
+                    # -- the job then got no envelope, was not spilled, and
+                    # silently vanished from /v1/crawl (H1).
+                    await on_result(job.index, breaker_result)
+                else:
+                    results[job.index] = breaker_result
                 return
 
             # Token bucket rate limiting (#1: Advanced Client-Side Rate Limiting)

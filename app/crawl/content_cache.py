@@ -169,7 +169,11 @@ class ContentCache:
                     try:
                         envelope = json.loads(path.read_text())
                     except (ValueError, OSError):
-                        self._index.pop(key, None)
+                        # Route through the same locked chokepoint that
+                        # accounts bytes: popping only ``_index`` here left
+                        # ``_index_sizes``/``_index_total_bytes`` counting a
+                        # dead entry forever (M1 phantom bytes).
+                        self._drop_locked(key, doomed)
                         return None
                 else:
                     if not path.exists():
@@ -182,8 +186,10 @@ class ContentCache:
                     self._index[key] = path
                 expires = envelope.get("expires")
                 if expires is not None and self.clock() > expires:
-                    doomed.append((key, path))
-                    self._index.pop(key, None)
+                    # Free the byte accounting too, not just the index slot
+                    # (M1): otherwise an expired read leaves phantom bytes that
+                    # keep ``_over_limits`` true and evict LIVE entries later.
+                    self._drop_locked(key, doomed)
                     return None
                 # Mark recently used (LRU) by moving to the end of the ordered index.
                 self._index.move_to_end(key)

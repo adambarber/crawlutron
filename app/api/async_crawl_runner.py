@@ -128,8 +128,10 @@ async def run_async_crawl(
             job_store.save(job)
         if webhook_url:
             try:
-                error_payload = await abuild_unified_crawl_response(
-                    [], request_id=request_id, success=False
+                error_payload = (
+                    await abuild_unified_crawl_response(
+                        [], request_id=request_id, success=False
+                    )
                 ).model_dump()
                 from app.api.webhooks import post_webhook
 
