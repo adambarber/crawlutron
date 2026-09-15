@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Performance
+- **Concurrent robots screens (throughput #1)** (app/crawl/recursive.py,
+  app/crawl/engine.py): the recursive batch screen, discovered-link screen,
+  and the non-recursive batch screen now `asyncio.gather` their
+  `robots_allows`/`robots_crawl_delay` checks instead of awaiting them one
+  URL at a time. Same closures, same `robots_cache` chokepoint and SSRF
+  semantics; in-batch duplicates keep visit-once behavior.
+
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
   query via an operator-configured provider. Provider abstraction ships

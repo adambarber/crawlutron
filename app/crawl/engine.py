@@ -68,7 +68,12 @@ from app.crawl.extraction import (
 )
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
-from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
+from app.crawl.recursive import (
+    RECURSIVE_RAMP_MAX,
+    _spill_write,
+    gather_robots_decisions,
+    run_recursive_crawl,
+)
 from app.crawl.result_helpers import (
     _failed_engine_result,
     _skipped_engine_result,
@@ -1036,17 +1041,27 @@ async def _crawl_request_impl(
 
     if not recursive:
         allowed_jobs: list[CrawlTask] = []
-        for job in jobs:
-            if respect_robots:
-                if not await _robots_allows_target(job.normalized_url):
-                    await _spill_write(spill, job.index, _robots_disallowed_result(job))
-                    continue
-                # Honor a host's robots Crawl-delay as a per-domain minimum
-                # inter-request delay (adversarial perf #2.6). Applied on top of
-                # the global/adaptive pacing inside the scheduler.
-                crawl_delay = await _robots_crawl_delay_for(job.normalized_url)
-                if crawl_delay and crawl_delay > 0:
-                    scheduler.set_domain_min_delay(job.domain, crawl_delay)
+        if respect_robots:
+            # Screen the whole batch concurrently (perf throughput #1): same
+            # _robots_allows_target/_robots_crawl_delay_for closures (same
+            # robots_cache chokepoint + SSRF semantics), only awaited via
+            # asyncio.gather instead of one-by-one.
+            decisions = await gather_robots_decisions(
+                [job.normalized_url for job in jobs],
+                _robots_allows_target,
+                _robots_crawl_delay_for,
+            )
+        else:
+            decisions = [(True, None)] * len(jobs)
+        for job, (allowed, crawl_delay) in zip(jobs, decisions, strict=True):
+            if respect_robots and not allowed:
+                await _spill_write(spill, job.index, _robots_disallowed_result(job))
+                continue
+            # Honor a host's robots Crawl-delay as a per-domain minimum
+            # inter-request delay (adversarial perf #2.6). Applied on top of
+            # the global/adaptive pacing inside the scheduler.
+            if respect_robots and crawl_delay and crawl_delay > 0:
+                scheduler.set_domain_min_delay(job.domain, crawl_delay)
             allowed_jobs.append(job)
 
         # #3.1: stream each completed result to disk immediately so peak RAM tracks

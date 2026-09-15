@@ -96,6 +96,31 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
         await res
 
 
+async def gather_robots_decisions(
+    urls: list[str],
+    robots_allows: Callable[[str], Awaitable[bool]],
+    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
+) -> list[tuple[bool, float | None]]:
+    """Screen a batch of URLs against robots concurrently (perf throughput #1).
+
+    Returns ``(allowed, crawl_delay)`` per URL in input order. The delay is
+    only fetched for allowed URLs, mirroring the old sequential flow. Callers
+    still route every check through the same ``robots_allows``/``robots_crawl_delay``
+    closures, so the ``robots_cache`` chokepoint and SSRF semantics are unchanged;
+    only the awaiting is concurrent. A same-origin concurrent miss may fetch
+    robots.txt twice (idempotent ``put``); per-origin results stay identical.
+    """
+
+    async def _check(url: str) -> tuple[bool, float | None]:
+        allowed = await robots_allows(url)
+        delay: float | None = None
+        if allowed and robots_crawl_delay is not None:
+            delay = await robots_crawl_delay(url)
+        return allowed, delay
+
+    return list(await asyncio.gather(*(_check(url) for url in urls)))
+
+
 def _count_strategy_tiers(scheduler, frontier, n):
     """Count HTTP vs browser tasks among the next ``n`` frontier entries.
 
@@ -265,22 +290,36 @@ async def run_recursive_crawl(
             batch_size = _admit_h + _admit_b
         batch = _pop_admitted(frontier, _admit_h, _admit_b, scheduler)
 
-        allowed_jobs: list[tuple[int, CrawlTask]] = []
+        # Dedupe the batch against visited AND itself (in input order) before
+        # screening: the old sequential loop marked visited as it went, so a
+        # repeated URL in one batch was crawled once. The concurrent screen
+        # below must see the same de-duplicated set.
+        pending: list[tuple[int, CrawlTask]] = []
+        seen_in_batch: set[str] = set()
         for depth, job in batch:
-            if job.normalized_url in visited:
+            if job.normalized_url in visited or job.normalized_url in seen_in_batch:
                 continue
-            if respect_robots and not await robots_allows(job.normalized_url):
+            seen_in_batch.add(job.normalized_url)
+            pending.append((depth, job))
+        if respect_robots:
+            decisions = await gather_robots_decisions(
+                [job.normalized_url for _, job in pending], robots_allows, robots_crawl_delay
+            )
+        else:
+            decisions = [(True, None)] * len(pending)
+        allowed_jobs: list[tuple[int, CrawlTask]] = []
+        for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
+            if respect_robots and not allowed:
                 await _spill_write(spill, job.index, robots_disallowed(job))
                 visited.add(job.normalized_url)
                 page_count += 1
                 continue
             # Honor a host's robots Crawl-delay as a per-domain minimum delay
             # (adversarial perf #2.6). Applied on top of the scheduler's global/
-            # adaptive pacing.
-            if respect_robots and robots_crawl_delay is not None:
-                delay = await robots_crawl_delay(job.normalized_url)
-                if delay and delay > 0:
-                    scheduler.set_domain_min_delay(job.domain, delay)
+            # adaptive pacing. Applied in batch order so same-domain races
+            # resolve deterministically (last write wins, as before).
+            if respect_robots and delay and delay > 0:
+                scheduler.set_domain_min_delay(job.domain, delay)
             allowed_jobs.append((depth, job))
             visited.add(job.normalized_url)
 
@@ -297,6 +336,12 @@ async def run_recursive_crawl(
             page_count += 1
             if depth >= max_depth:
                 continue
+            # Sync pre-filter first (visited/analytics/document/scope need no
+            # I/O), then screen the survivors' robots checks concurrently.
+            # Survivors past the max_pages break still get screened: the old
+            # sequential loop set crawl-delays before the break check too, and
+            # the extra checks are robots-cache hits in the common case.
+            candidates = []
             for link in result.discovered_links:
                 if link.normalized_url in visited:
                     continue
@@ -306,12 +351,18 @@ async def run_recursive_crawl(
                     continue
                 if scope_pattern is not None and not _scope_allows(scope_pattern, link.normalized_url):
                     continue
-                if respect_robots and not await robots_allows(link.normalized_url):
+                candidates.append(link)
+            if respect_robots:
+                link_decisions = await gather_robots_decisions(
+                    [link.normalized_url for link in candidates], robots_allows, robots_crawl_delay
+                )
+            else:
+                link_decisions = [(True, None)] * len(candidates)
+            for link, (link_allowed, link_delay) in zip(candidates, link_decisions, strict=True):
+                if respect_robots and not link_allowed:
                     continue
-                if respect_robots and robots_crawl_delay is not None:
-                    delay = await robots_crawl_delay(link.normalized_url)
-                    if delay and delay > 0:
-                        scheduler.set_domain_min_delay(link.host, delay)
+                if respect_robots and link_delay and link_delay > 0:
+                    scheduler.set_domain_min_delay(link.host, link_delay)
                 if max_pages and page_count + len(frontier) >= max_pages:
                     break
                 frontier.append(
