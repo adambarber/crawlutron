@@ -2118,7 +2118,19 @@ async def _http_strategy_result(
             diagnostics={
                 "retry": retry_diagnostics,
                 "runtime": {"elapsed_ms": elapsed_ms},
-                "request_profile": policy.get("request_profile") or {},
+                # Mirror the SUCCESS path's redaction contract exactly: only
+                # user_agent_family + cookie_jar leave the service. The raw
+                # profile can carry live cookies (the dict
+                # _cookie_header_for_url reads), fingerprint_seed and
+                # cookie_namespace, and diagnostics reach the API response,
+                # result store, persisted job.results and webhook payloads
+                # (H4).
+                "request_profile": {
+                    "user_agent_family": str(
+                        policy.get("request_profile", {}).get("user_agent_family", "generic_crawler")
+                    ),
+                    "cookie_jar": str(policy.get("request_profile", {}).get("cookie_jar", "none")),
+                },
             },
             error=error_code,
         )

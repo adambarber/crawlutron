@@ -136,7 +136,7 @@ async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
         )
         return
     try:
-        validate_webhook_url(webhook_url)
+        await validate_webhook_url_async(webhook_url)
         await deliver_pinned_webhook(webhook_url, payload_bytes)
     except Exception as exc:
         logger.warning(
@@ -160,6 +160,24 @@ def validate_webhook_url(webhook_url: str) -> None:
     from app.safe_url import SafeUrl
 
     SafeUrl.parse(webhook_url, pin=True)
+
+
+async def validate_webhook_url_async(webhook_url: str) -> None:
+    """Off-event-loop twin of :func:`validate_webhook_url` (M6).
+
+    ``SafeUrl.parse(pin=True)`` calls the synchronous ``socket.getaddrinfo``,
+    so running validation inline stalls the event loop whenever a
+    caller-chosen webhook hostname has a slow or blackholed resolver. Crawl
+    targets already offload the identical resolution off-thread via
+    ``_build_pinned_request_async``; this reuses that same dedicated
+    ``dns-resolve`` pool rather than inventing a second offload mechanism.
+    Every caller of ``validate_webhook_url`` is already async, so they route
+    here instead.
+    """
+    from app.crawl.strategies.http import _DNS_EXECUTOR
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(_DNS_EXECUTOR, validate_webhook_url, webhook_url)
 
 
 async def run_and_deliver_webhook(
@@ -190,7 +208,7 @@ async def run_and_deliver_webhook(
         raise RuntimeError(
             "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
         )
-    validate_webhook_url(webhook_url)
+    await validate_webhook_url_async(webhook_url)
     pooled_worker = PooledBrowserWorker(_pool_getter())
     result = await _crawl_request_fn(
         payload_dict,
@@ -247,6 +265,7 @@ __all__ = [
     "deliver_pinned_webhook",
     "post_webhook",
     "validate_webhook_url",
+    "validate_webhook_url_async",
     "run_and_deliver_webhook",
     "deliver_webhook",
 ]

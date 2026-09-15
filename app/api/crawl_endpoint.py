@@ -25,7 +25,7 @@ from starlette.requests import Request
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error
 from app.api.response_shaping import abuild_unified_crawl_response
-from app.api.webhooks import validate_webhook_url
+from app.api.webhooks import validate_webhook_url_async
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
 from app.crawl.job_store import JobKind
@@ -90,7 +90,7 @@ async def crawl(
             ):
                 raise http_error(422, "validation_error", "Invalid webhook_url")
             if webhook_url:
-                validate_webhook_url(webhook_url)
+                await validate_webhook_url_async(webhook_url)
             request_id = new_request_id()
             job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
             from app.api.async_crawl_runner import run_async_crawl

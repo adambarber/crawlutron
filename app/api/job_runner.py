@@ -224,10 +224,22 @@ async def _run_job(
                 return
 
             failed = 0
-            resolved = {
-                (it.get("final_url") or it.get("normalized_url") or it.get("original_url")): it
-                for it in items
-            }
+            # Index each item by every URL it is known by (final_url,
+            # normalized_url, original_url), first writer winning on
+            # collision. The frontier carries the PRE-redirect URL while the
+            # engine reports final_url, so a single-key index misses a
+            # redirected page -> outcome "transient" -> re-queued and
+            # re-crawled forever, then counted failed and dropped without its
+            # content ever reaching job.results (H2).
+            resolved: dict[str, dict[str, Any]] = {}
+            for it in items:
+                for key in (
+                    it.get("final_url"),
+                    it.get("normalized_url"),
+                    it.get("original_url"),
+                ):
+                    if key and key not in resolved:
+                        resolved[key] = it
             for url in batch:
                 item = resolved.get(url)
                 if item is None:
