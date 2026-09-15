@@ -57,9 +57,6 @@ _resource_gate = ResourceGate()
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
-    _extract_discovered_links as _extract_discovered_links,  # re-export: suite uses this namespace
-)
-from app.crawl.extraction import (
     _extract_document,
     _extract_html,
     extract_content,

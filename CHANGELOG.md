@@ -38,9 +38,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (app/crawl/engine.py, app/crawl/strategies/http.py):
   `_execute_crawl_chain`/`_http_strategy_result` accept the crawl's
   `global_concurrency` (threaded from the engine's active settings) so
-  `_effective_max_content_length` scales the per-page cap to real dispatch
-  instead of always falling back to the settings floor. Omitted (tests,
-  direct callers) preserves the old floor behavior.
+  `_effective_max_content_length` honors the operator-configured concurrency
+  instead of always re-reading defaults and falling back to the settings
+  floor. Omitted (tests, direct callers) preserves the old floor behavior.
+  True live-dispatch scaling (admission-derived concurrency) remains future
+  work -- this threads the configured value, not a measured one.
 - **Browser fixed-overhead knobs are configurable, defaults frozen
   (throughput #7)** (app/constants.py, app/settings.py,
   app/crawl/strategies/browser.py, .env.example): lazy-scroll steps/delay

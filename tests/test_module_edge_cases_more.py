@@ -347,7 +347,7 @@ class TestModuleEdgeCasesMore:
         assert "webhook_url" in result
 
     def test_engine_parse_robots_blank_line(self):
-        from app.crawl.engine import _extract_discovered_links
+        from app.crawl.extraction import _extract_discovered_links
 
         # Test link extraction with mixed quote styles (covers edge cases)
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
