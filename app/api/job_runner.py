@@ -124,14 +124,43 @@ async def recover_and_start_pending_jobs(
     return started
 
 
+# Consumed frontier slots reclaimed per slice-delete (perf throughput #6).
+# Popping only advances a transient head offset (amortized O(1)); the
+# consumed prefix is reclaimed in one O(n) slice-delete every this many
+# consumed slots. The persisted row stays a plain JSON URL list, so no
+# schema change is needed. 256 keeps the persisted stale prefix (and the
+# post-reload visited skip-scan) small while keeping compactions rare.
+_FRONTIER_COMPACT_THRESHOLD = 256
+
+
 def _pop_frontier(job: Any) -> list[str]:
-    """Pop up to BATCH_SIZE urls off the persisted frontier (in order)."""
-    batch = job.frontier[:BATCH_SIZE]
-    del job.frontier[: len(batch)]
-    known = job.__dict__.get("_frontier_set")
-    if known is not None:
-        for url in batch:
-            known.discard(url)
+    """Pop up to BATCH_SIZE unvisited urls off the persisted frontier (in order).
+
+    O(1) amortized: a transient ``_frontier_head`` offset advances past
+    consumed slots instead of slice-deleting them per batch. The head is
+    transient (a store reload loses it), so already-visited leading slots
+    are skipped on the fly -- committed batches mark visited in order, and
+    skipping them can never re-fetch a page (the old code re-popped visited
+    slots as live batches). The membership set still mirrors the persisted
+    list exactly, so every dedup guard keeps its meaning.
+    """
+    frontier = job.frontier
+    head = job.__dict__.get("_frontier_head", 0)
+    if head > len(frontier):
+        head = 0
+    visited = job.visited
+    batch: list[str] = []
+    size = len(frontier)
+    while head < size and len(batch) < BATCH_SIZE:
+        url = frontier[head]
+        head += 1
+        if url in visited:
+            continue
+        batch.append(url)
+    if head >= _FRONTIER_COMPACT_THRESHOLD:
+        del frontier[:head]
+        head = 0
+    job.__dict__["_frontier_head"] = head
     return batch
 
 
@@ -151,11 +180,19 @@ def _frontier_set(job: Any) -> set[str]:
 
 
 def _frontier_add(job: Any, url: str) -> None:
-    """Append to the persisted frontier and its membership mirror."""
+    """Append to the persisted frontier and its membership mirror.
+
+    Idempotent: an already-queued URL keeps its single slot instead of
+    growing a twin (which would inflate both the frontier and
+    ``total_discovered``). Every caller pre-checks membership; this makes
+    the single-copy invariant hold even when the mirror was rebuilt from a
+    stale-prefix list.
+    """
+    known = _frontier_set(job)
+    if url in known:
+        return
     job.frontier.append(url)
-    known = job.__dict__.get("_frontier_set")
-    if known is not None:
-        known.add(url)
+    known.add(url)
 
 
 async def _run_job(
@@ -195,6 +232,12 @@ async def _run_job(
             batch = _pop_frontier(job)
             if not batch:
                 job.in_flight = []  # clean terminal state even if a crash left it set
+                # Terminal: an empty batch means no unvisited URL remains
+                # anywhere in the frontier, so every leftover slot is a
+                # consumed/visited stale entry from the O(1) offset pops --
+                # drop them so the persisted terminal state stays exactly [].
+                del job.frontier[:]
+                job.__dict__.pop("_frontier_head", None)
                 job.status = JobStatus.COMPLETED
                 job_store.save(job)
                 return
