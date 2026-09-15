@@ -1656,7 +1656,10 @@ async def _http_strategy_result(
             extraction_method = EXTRACTION_METHOD_DOCUMENT
         elif extraction == EXTRACTION_TRAFILATURA:
             if is_html:
-                extracted = _extract_html(
+                # trafilatura is CPU-bound: keep it off the event loop like the
+                # neighboring document/full-pipeline extractions (perf throughput #3).
+                extracted = await asyncio.to_thread(
+                    _extract_html,
                     body_text,
                     response.final_url,
                     css_selector=policy.get("css_selector"),

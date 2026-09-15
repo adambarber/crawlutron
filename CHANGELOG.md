@@ -19,6 +19,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrently) and are now used by the async runner, render, webhook, MCP,
   and job-runner paths. Sync shapers are unchanged. `crawl_endpoint.py` is
   owned by another stream and keeps the sync call until it adopts the seam.
+- **Sync trafilatura off the loop (throughput #3)**
+  (app/crawl/strategies/http.py, app/crawl/engine.py): both `_extract_html`
+  call sites (HTTP strategy result, browser strategy result) now run via
+  `asyncio.to_thread`, matching the neighboring document/full-pipeline
+  extractions. `strategies/browser.py` needed no change: its `_extract_html`
+  is already async browser I/O (`page.content()`), not a CPU parse.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a

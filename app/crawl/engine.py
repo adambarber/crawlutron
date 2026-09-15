@@ -182,8 +182,13 @@ async def _browser_strategy_result(
             markdown = extracted.markdown
             extraction_method = EXTRACTION_METHOD_DOCUMENT
         elif extraction == EXTRACTION_TRAFILATURA:
-            extracted = _extract_html(
-                content, result.final_url, css_selector=policy.get("css_selector"), xpath=policy.get("xpath")
+            # trafilatura is CPU-bound: keep it off the event loop (perf throughput #3).
+            extracted = await asyncio.to_thread(
+                _extract_html,
+                content,
+                result.final_url,
+                css_selector=policy.get("css_selector"),
+                xpath=policy.get("xpath"),
             )
             text = extracted.text or ""
             markdown = extracted.markdown
