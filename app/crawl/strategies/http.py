@@ -16,6 +16,7 @@ import ssl
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -67,9 +68,8 @@ from app.constants import (
     EXTRACTION_METHOD_HTTP_HTML,
     EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
-    HTTP_BLOCKED_CLASSIFICATIONS,
     HTTP_CFFI_IMPERSONATE,
-    SUCCESS_CLASSIFICATIONS,
+    status_for_classification,
 )
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -203,23 +203,72 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
 
 
 async def _safe_aclose(client):
-    """Await the client\'s async close, swallowing failures.
+    """Await a pooled client's async close, swallowing failures.
 
     The client is being replaced (its event loop changed); any close error is
     irrelevant, so we ignore it rather than risk surfacing during shutdown.
+    Shared by every pooled kind: httpx exposes ``aclose``, curl_cffi exposes
+    ``close`` -- both coroutine methods, so one helper reaps either.
     """
     try:
-        await client.aclose()
+        close = getattr(client, "aclose", None) or client.close
+        await close()
     except Exception:
         pass
 
 
-# Superseded pooled clients awaiting a live event loop to be closed on.
+# Superseded loop-bound pooled clients awaiting a live event loop to be closed
+# on. Shared by every pooled kind (httpx.AsyncClient and curl_cffi.AsyncSession
+# are the same resource: a connection pool bound to one loop), so one bounded
+# backlog and one reaper cover both.
 # Bounded so a stream of superseded clients cannot grow the list without
 # bound if drains are delayed (adversarial review F-pending-client-close).
-_PENDING_CLIENT_CLOSE: list[httpx.AsyncClient] = []
+_PENDING_CLIENT_CLOSE: list[Any] = []
 _PENDING_CLIENT_CLOSE_MAX = 32
 _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
+
+
+def _queue_superseded_close(old_client: Any) -> Any | None:
+    """Track one superseded pooled client; return whatever the cap displaced.
+
+    The dedupe check lives inside the cap branch so a re-entrant append+pop
+    race cannot pop two distinct entries (adversarial review
+    F-pending-client-close B3). Returns the displaced object for the caller to
+    release *outside* the lock.
+    """
+    stale_to_release: Any | None = None
+    with _PENDING_CLIENT_CLOSE_LOCK:
+        already_queued = old_client in _PENDING_CLIENT_CLOSE
+        if not already_queued:
+            if len(_PENDING_CLIENT_CLOSE) >= _PENDING_CLIENT_CLOSE_MAX:
+                stale_to_release = _PENDING_CLIENT_CLOSE.pop(0)
+            _PENDING_CLIENT_CLOSE.append(old_client)
+    return stale_to_release
+
+
+def _release_dropped_client(stale_to_release: Any) -> None:
+    """Best-effort synchronous release of a client the cap had to displace.
+
+    Runs outside ``_PENDING_CLIENT_CLOSE_LOCK`` so a potentially slow
+    socket-close cannot block other clients entering that critical section
+    (adversarial review F-pending-client-close B-minor
+    lock-held-during-close). ``httpx.AsyncClient.close()`` is synchronous and
+    releases the httpcore pool without the async teardown path, so it also
+    works from a sync context and from inside a dying loop. A client whose only
+    close is a coroutine cannot be awaited from here: scheduling it would leak
+    a never-awaited coroutine, so its reference is simply dropped and GC
+    reclaims it once the owning loop is gone. Never fatal (e.g. a
+    half-constructed client).
+    """
+    if stale_to_release is None:
+        return
+    close = getattr(stale_to_release, "close", None)
+    if close is None or asyncio.iscoroutinefunction(close):
+        return
+    try:
+        close()
+    except Exception:
+        pass
 
 
 async def _drain_pending_client_closes() -> None:
@@ -245,7 +294,7 @@ def _schedule_client_close(client) -> None:
 
     ``get_async_http_client`` runs within an event loop, so we schedule the
     async ``aclose`` on the running loop instead of blocking. This prevents
-    leaking the old client\'s sockets/file descriptors when the loop changes
+    leaking the old client's sockets/file descriptors when the loop changes
     (e.g. repeated ``asyncio.run`` calls).
     """
     if client is None or getattr(client, "is_closed", True):
@@ -253,8 +302,136 @@ def _schedule_client_close(client) -> None:
     try:
         asyncio.ensure_future(_safe_aclose(client))
     except RuntimeError:
-        # No running loop available to schedule on; nothing safe to do.
+        # No running loop available to schedule on; nothing safe to do. The
+        # queued reference is what guarantees the eventual close.
         pass
+
+
+class _LoopBoundPooledClient:
+    """One pooled HTTP client per running event loop, released on loop change.
+
+    ``httpx.AsyncClient`` and curl_cffi's ``AsyncSession`` are pooled the same
+    way: built once for the running loop, reused while that loop lives, rebuilt
+    when the loop changes. The rebuild is the dangerous step -- the object being
+    replaced owns sockets on a loop that is already gone, and releasing it is
+    asynchronous. The only reliable pattern is the one implemented here:
+
+      1. hand the superseded client to the bounded, deduped pending-close queue
+         (:func:`_queue_superseded_close`), synchronously releasing whatever the
+         cap displaced, so the reference is tracked even with no loop running;
+      2. also schedule a best-effort close on the current loop
+         (:func:`_schedule_client_close`) for the case where the rebuild happens
+         on a live loop;
+      3. let the next fetch on a live loop drain the queue
+         (:func:`_drain_pending_client_closes`) -- that drain is what actually
+         releases the sockets once step 2 loses the race with loop shutdown.
+
+    Both pooled singletons are descriptors of this one lifecycle so they cannot
+    drift apart again: the cffi copy stopped at step 2 and leaked one TLS
+    session per loop change.
+
+    The pooled instance is kept in the module global named by ``slot`` rather
+    than on this object, because service teardown and the suites reset pooled
+    state by assigning that global. ``build`` is held as a late-bound lambda for
+    the same reason: a test that monkeypatches ``_build_async_client`` or
+    ``_build_cffi_session`` must still be observed.
+    """
+
+    __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot")
+
+    def __init__(
+        self,
+        *,
+        slot: str,
+        build: Callable[[CrawlerSettings | None], Any],
+        is_closed: Callable[[Any], bool],
+        lock: threading.Lock,
+        consults_settings: bool,
+    ) -> None:
+        self.slot = slot
+        self.build = build
+        self.is_closed = is_closed
+        self.lock = lock
+        self.consults_settings = consults_settings
+
+    # -- pooled instance: the module global named by ``slot`` ----------------
+
+    @property
+    def current(self) -> Any:
+        """The pooled client as the module global holds it (late-bound)."""
+        return globals()[self.slot]
+
+    def _set_current(self, value: Any) -> None:
+        globals()[self.slot] = value
+
+    def _supersede(self, superseded: Any) -> None:
+        """Track and best-effort-close a client that is being replaced."""
+        _release_dropped_client(_queue_superseded_close(superseded))
+        # ``_schedule_client_close`` guards on an ``is_closed`` attribute that
+        # only httpx publishes, so the descriptor decides reuse-safety for its
+        # own kind: without this a curl_cffi session (no such attribute) would
+        # be treated as already closed and never closed eagerly.
+        if not self.is_closed(superseded):
+            _schedule_client_close(superseded)
+
+    def _rebuild(self, settings: CrawlerSettings | None, superseded: Any) -> Any:
+        """Build the replacement, then release the old client. Lock held."""
+        if settings is None and self.consults_settings:
+            # Deferred env walk: paid only when a client is actually built, so
+            # operator pool limits are read fresh at every rebuild.
+            settings = _default_settings()
+        try:
+            built = self.build(settings)
+        except ImportError:
+            # Optional dependency went away: leave the slot empty (callers fall
+            # back to plain httpx) but still release the superseded client, or
+            # it would be dropped with no owner at all.
+            self._set_current(None)
+            if superseded is not None:
+                self._supersede(superseded)
+            return None
+        self._set_current(built)
+        if superseded is not None:
+            self._supersede(superseded)
+        return built
+
+    def get(self, settings: CrawlerSettings | None = None) -> Any:
+        """Return the pooled client bound to the current event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        with self.lock:
+            current = self.current
+            if current is None or self.is_closed(current):
+                # Nothing to release: never built, or already closed by someone
+                # else. A closed client owns no live sockets.
+                return self._rebuild(settings, None)
+            if getattr(current, "_bound_loop", None) is loop:
+                # Hot path (perf review 1.1): the pooled client is alive on the
+                # current loop, so no settings are consulted at all. Settings
+                # are pool configuration consumed only at construction; a
+                # reused client carries the limits it was built with.
+                return current
+            return self._rebuild(settings, current)
+
+    async def shutdown(self) -> None:
+        """Release the pooled client, and anything still queued, on teardown."""
+        await _drain_pending_client_closes()
+        current = self.current
+        self._set_current(None)
+        if current is not None:
+            await _safe_aclose(current)
+
+
+# The two pooled clients, described once and managed by the code above.
+_HTTP_CLIENT_SINGLETON = _LoopBoundPooledClient(
+    slot="_DEFAULT_HTTP_CLIENT",
+    build=lambda settings: _build_async_client(settings),
+    is_closed=lambda client: bool(client.is_closed),
+    lock=_HTTP_CLIENT_INIT_LOCK,
+    consults_settings=True,
+)
 
 
 def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
@@ -264,76 +441,12 @@ def get_async_http_client(settings: CrawlerSettings | None = None) -> httpx.Asyn
     connection pooling), and transparently rebuilt if the loop changes (for
     example when a test harness drives many ``asyncio.run`` calls in sequence).
     """
-    global _DEFAULT_HTTP_CLIENT
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    # Guard construction so concurrent first-time callers cannot both build a
-    # client and leak one (the httpx client is reused across requests).
-    with _HTTP_CLIENT_INIT_LOCK:
-        rebuild = _DEFAULT_HTTP_CLIENT is None or _DEFAULT_HTTP_CLIENT.is_closed
-        superseded = None
-        if not rebuild:
-            if getattr(_DEFAULT_HTTP_CLIENT, "_bound_loop", None) is loop:
-                # Hot path (perf review 1.1): the pooled client is alive on the
-                # current loop, so no settings are consulted at all. Settings
-                # are pool configuration consumed only at construction; walking
-                # the full env per fetch bought nothing on this branch because
-                # a reused client carries the limits it was built with.
-                return _DEFAULT_HTTP_CLIENT
-            superseded = _DEFAULT_HTTP_CLIENT
-            rebuild = True
-        if settings is None:
-            # Deferred env walk: paid only when a client is actually built,
-            # so operator pool limits are read fresh at every rebuild.
-            settings = _default_settings()
-        _DEFAULT_HTTP_CLIENT = _build_async_client(settings)
-        if superseded is not None:
-            old_client = superseded
-            # Close the superseded client to avoid leaking its sockets/fds:
-            # queue it for a guaranteed close on the next live-loop fetch, and
-            # also try the immediate best-effort schedule.
-            stale_to_release: object | None = None
-            with _PENDING_CLIENT_CLOSE_LOCK:
-                # Dedupe check inside the cap branch so a re-entrant
-                # append+pop race cannot pop two distinct entries
-                # (adversarial review F-pending-client-close B3).
-                already_queued = old_client in _PENDING_CLIENT_CLOSE
-                if not already_queued:
-                    if len(_PENDING_CLIENT_CLOSE) >= _PENDING_CLIENT_CLOSE_MAX:
-                        # Cap reached: drop the oldest pending reference and
-                        # release the lock BEFORE calling sync ``close()`` so
-                        # the (potentially slow) socket-close path cannot
-                        # block other clients trying to enter this critical
-                        # section (adversarial review F-pending-client-close
-                        # B-minor lock-held-during-close).
-                        stale_to_release = _PENDING_CLIENT_CLOSE.pop(0)
-                    _PENDING_CLIENT_CLOSE.append(old_client)
-            # Outside the lock: ``httpx.AsyncClient.close()`` is synchronous
-            # and releases the underlying httpcore connection pool without
-            # awaiting the async teardown path. We can release sockets even
-            # from sync contexts and from inside a dying loop. Falling back
-            # to a no-op when ``close`` raises (e.g. on a half-constructed
-            # client) lets GC reclaim the rest
-            # (adversarial review F-pending-client-close B1/B2).
-            if stale_to_release is not None:
-                try:
-                    stale_to_release.close()
-                except Exception:
-                    pass
-            _schedule_client_close(old_client)
-    return _DEFAULT_HTTP_CLIENT
+    return _HTTP_CLIENT_SINGLETON.get(settings)
 
 
 async def close_async_http_client() -> None:
     """Close the shared async client on service shutdown."""
-    global _DEFAULT_HTTP_CLIENT
-    await _drain_pending_client_closes()
-    client = _DEFAULT_HTTP_CLIENT
-    _DEFAULT_HTTP_CLIENT = None
-    if client is not None and not client.is_closed:
-        await client.aclose()
+    await _HTTP_CLIENT_SINGLETON.shutdown()
 
 
 # Shared curl_cffi TLS-impersonation session (one per running event loop).
@@ -362,23 +475,17 @@ def _build_cffi_session() -> Any:
     return session
 
 
-async def _safe_aclose_session(session: Any) -> None:
-    """Await a session close, swallowing failures (best-effort teardown)."""
-    try:
-        await session.close()
-    except Exception:
-        pass
-
-
-def _schedule_cffi_close(session: Any) -> None:
-    """Best-effort close of a loop-superseded shared cffi session."""
-    if session is None:
-        return
-    try:
-        asyncio.ensure_future(_safe_aclose_session(session))
-    except RuntimeError:
-        # No running loop available to schedule on; nothing safe to do.
-        pass
+_CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
+    slot="_DEFAULT_CFFI_SESSION",
+    build=lambda settings: _build_cffi_session(),
+    # AsyncSession publishes no is_closed flag and nothing else closes it in
+    # process, so only the loop identity decides whether it is reusable.
+    is_closed=lambda session: False,
+    lock=_CFFI_SESSION_INIT_LOCK,
+    # The session carries no pool limits (the per-request timeout travels on
+    # each get()), so a rebuild must not pay a settings/env walk.
+    consults_settings=False,
+)
 
 
 def get_cffi_session() -> Any | None:
@@ -387,36 +494,18 @@ def get_cffi_session() -> Any | None:
     Reused while the running loop is unchanged (warm TLS/connection pool),
     transparently rebuilt when the loop changes. Returns ``None`` when
     curl_cffi is not installed so callers fall back to plain httpx.
+
+    A session superseded by a loop change is tracked in the shared bounded
+    pending-close queue and drained by the next fetch on a live loop -- the
+    same discipline the pooled httpx client has, which this path used to
+    approximate with a best-effort task on the loop that was already exiting.
     """
-    global _DEFAULT_CFFI_SESSION
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    with _CFFI_SESSION_INIT_LOCK:
-        if _DEFAULT_CFFI_SESSION is None:
-            try:
-                _DEFAULT_CFFI_SESSION = _build_cffi_session()
-            except ImportError:
-                return None
-        elif getattr(_DEFAULT_CFFI_SESSION, "_bound_loop", None) is not loop:
-            old_session = _DEFAULT_CFFI_SESSION
-            try:
-                _DEFAULT_CFFI_SESSION = _build_cffi_session()
-            except ImportError:
-                _DEFAULT_CFFI_SESSION = None
-                return None
-            _schedule_cffi_close(old_session)
-    return _DEFAULT_CFFI_SESSION
+    return _CFFI_SESSION_SINGLETON.get()
 
 
 async def close_cffi_session() -> None:
     """Close the shared curl_cffi session on service shutdown / test reset."""
-    global _DEFAULT_CFFI_SESSION
-    session = _DEFAULT_CFFI_SESSION
-    _DEFAULT_CFFI_SESSION = None
-    if session is not None:
-        await _safe_aclose_session(session)
+    await _CFFI_SESSION_SINGLETON.shutdown()
 
 
 # Cap on distinct (namespace, host) cookie slots. The jar is module-global
@@ -911,6 +1000,9 @@ async def _default_cffi_fetcher(
     (F1) and sensitive-header stripping on cross-domain redirects (Fix 3).
     Falls back to plain httpx on any import/fetch failure.
     """
+    # Same release point as the http fetcher: any pooled client superseded by a
+    # loop change (either kind) is closed here, on this live loop.
+    await _drain_pending_client_closes()
     try:
         from curl_cffi.requests.exceptions import RequestException
         from curl_cffi.requests.models import STREAM_END
@@ -1268,13 +1360,13 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None)
 
 
 def _status_for_classification(classification: str) -> str:
-    if classification in SUCCESS_CLASSIFICATIONS:
-        return "success"
-    if classification in HTTP_BLOCKED_CLASSIFICATIONS:
-        return "blocked"
-    if classification == "not_modified":
-        return "success"
-    return "failed"
+    """HTTP-path status for a classification.
+
+    Thin delegator kept for its existing importers; the mapping itself is the
+    shared ``app.constants`` table so the HTTP and browser strategies can never
+    disagree about the same label again.
+    """
+    return status_for_classification(classification)
 
 
 def _quality_score(

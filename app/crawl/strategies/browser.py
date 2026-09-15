@@ -15,20 +15,22 @@ import base64
 import json
 import logging
 import os
+import threading
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from typing import Any
 
+from app import constants as app_constants
 from app.classify import classify_page
 from app.constants import (
-    BROWSER_BLOCKED_CLASSIFICATIONS,
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS,
     DEFAULT_LAZY_SCROLL_DELAY_SECONDS,
     DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
+    status_for_classification,
 )
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.http import (
@@ -182,7 +184,13 @@ TRANSIENT_CLASSIFICATIONS = {
     "dns_error",
     "unknown_error",
 }
-FAILED_CLASSIFICATIONS = {"not_found", "site_error", "gone", "binary_no_text"}
+# The blocked/failed label groups live in app.constants now, alongside the
+# classification -> status table both strategies share, so the HTTP and browser
+# paths cannot disagree about a label again. These module names stay as
+# same-value aliases for existing references (the browser status suites, engine
+# wiring), exactly like the LAZY_SCROLL_* aliases below.
+BROWSER_BLOCKED_CLASSIFICATIONS = app_constants.BROWSER_BLOCKED_CLASSIFICATIONS
+FAILED_CLASSIFICATIONS = app_constants.FAILED_CLASSIFICATIONS
 
 # Canonical defaults live in app.constants (single source of truth); these
 # module names stay as the settings-less fallback so existing references
@@ -222,22 +230,126 @@ def _profile_float(profile: dict[str, Any], key: str, default: float) -> float:
 # Bounded with an LRU so a long-lived process crawling many domains cannot
 # grow this dict without bound (#6).
 _BROWSER_COOKIES_MAX = 500
-_BROWSER_COOKIES_BY_DOMAIN: OrderedDict[str, str] = OrderedDict()
+
+
+class _LockedDomainCookieStore(MutableMapping[str, str]):
+    """LRU cookie store whose every read and mutation is internally guarded.
+
+    The store is module-global and genuinely concurrent: the render path writes
+    harvested cookies while the crawl engine reads them for the cffi
+    cookie-bootstrap retry, from different tasks and threads. It used to be a
+    bare ``OrderedDict``, and the *read* path mutated it (``get`` then
+    ``move_to_end``): a concurrent write past the cap could evict the key in
+    between and make the touch raise ``KeyError`` on a live request.
+
+    The mapping is private and every operation acquires ``_lock`` for its whole
+    duration, so an unsynchronized access is not a state a caller can construct
+    -- the eviction can no longer interleave with a read.
+
+    Behaves as a read/write mapping (``len``, ``iter``, ``dict()``, ``pop``,
+    ``update``, ``clear``) for tests and teardown helpers; production traffic
+    goes through :func:`_store_browser_cookies` /
+    :func:`get_browser_cookies_for`, which own the LRU policy.
+    """
+
+    __slots__ = ("_data", "_lock", "_max_entries")
+
+    def __init__(self, max_entries: int) -> None:
+        # OrderedDict: insertion order doubles as the eviction order (plain
+        # dict has no move_to_end/popitem(last=False)).
+        self._data: OrderedDict[str, str] = OrderedDict()
+        self._lock = threading.Lock()
+        self._max_entries = max_entries
+
+    # -- production surface -------------------------------------------------
+
+    def store(self, domain: str, header: str) -> None:
+        """Record a harvested cookie header, evicting LRU entries past the cap.
+
+        Assignment and eviction happen under one acquisition, so a concurrent
+        reader can never observe the store over the cap, and the entry being
+        written cannot be the one evicted by its own insert.
+        """
+        with self._lock:
+            # Deliberately not move_to_end: re-storing a known domain updates
+            # the value in place, matching plain-mapping semantics.
+            self._data[domain] = header
+            while len(self._data) > self._max_entries:
+                self._data.popitem(last=False)
+
+    def touch_get(self, domain: str) -> str | None:
+        """Look up a domain and mark it most-recently-used when present.
+
+        Membership check, touch and value read are one critical section: this
+        is the operation that used to race ``popitem`` eviction.
+        """
+        with self._lock:
+            value = self._data.get(domain)
+            if value is not None:
+                self._data.move_to_end(domain)
+            return value
+
+    # -- mapping primitives (each one guarded) ------------------------------
+
+    def __getitem__(self, domain: str) -> str:
+        with self._lock:
+            return self._data[domain]
+
+    def __setitem__(self, domain: str, header: str) -> None:
+        with self._lock:
+            self._data[domain] = header
+
+    def __delitem__(self, domain: str) -> None:
+        with self._lock:
+            del self._data[domain]
+
+    def __iter__(self) -> Iterator[str]:
+        with self._lock:
+            return iter(list(self._data))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+    def __contains__(self, domain: object) -> bool:
+        with self._lock:
+            return domain in self._data
+
+    # ``MutableMapping`` derives these from the primitives above, which would
+    # take the lock once per step; single-acquisition versions keep a snapshot
+    # helper (test teardown, reset paths) from observing a half-applied op.
+
+    def pop(self, domain: str, *default: Any) -> Any:
+        with self._lock:
+            return self._data.pop(domain, *default)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+    def update(self, other: Any = (), **kwargs: str) -> None:
+        merged = dict(other)
+        if kwargs:
+            merged.update(kwargs)
+        with self._lock:
+            for domain, header in merged.items():
+                self._data[domain] = header
+
+    def __repr__(self) -> str:
+        with self._lock:
+            return f"{type(self).__name__}({dict(self._data)!r})"
+
+
+_BROWSER_COOKIES_BY_DOMAIN = _LockedDomainCookieStore(_BROWSER_COOKIES_MAX)
 
 
 def _store_browser_cookies(domain: str, header: str) -> None:
     """Record a harvested cookie header, evicting the LRU entry past the cap."""
-    _BROWSER_COOKIES_BY_DOMAIN[domain] = header
-    while len(_BROWSER_COOKIES_BY_DOMAIN) > _BROWSER_COOKIES_MAX:
-        _BROWSER_COOKIES_BY_DOMAIN.popitem(last=False)
+    _BROWSER_COOKIES_BY_DOMAIN.store(domain, header)
 
 
 def get_browser_cookies_for(domain: str) -> str | None:
-    val = _BROWSER_COOKIES_BY_DOMAIN.get(domain)
-    if val is not None:
-        # Touch for LRU: most-recently-used stays warmest.
-        _BROWSER_COOKIES_BY_DOMAIN.move_to_end(domain)
-    return val
+    return _BROWSER_COOKIES_BY_DOMAIN.touch_get(domain)
 
 
 class BrowserRenderer:
@@ -1014,10 +1126,10 @@ class BrowserRenderer:
         return url.split("?", 1)[0].lower().endswith(".pdf")
 
     def _status_for_classification(self, classification: str) -> str:
-        if classification == "rendered":
-            return "success"
-        if classification in BROWSER_BLOCKED_CLASSIFICATIONS:
-            return "blocked"
-        if classification in FAILED_CLASSIFICATIONS:
-            return "failed"
-        return "blocked"
+        """Browser-path status for a classification.
+
+        Thin delegator kept for existing callers/tests: the mapping is the
+        shared ``app.constants`` table, so a label can no longer mean
+        "blocked" here and "failed" on the HTTP path.
+        """
+        return status_for_classification(classification)

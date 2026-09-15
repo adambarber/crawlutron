@@ -67,12 +67,17 @@ def _doc_extraction_worker_count() -> int:
 class _DocWorker:
     """One persistent markitdown worker: process + parent end of its task pipe."""
 
-    __slots__ = ("proc", "conn", "busy")
+    __slots__ = ("proc", "conn", "busy", "retired")
 
     def __init__(self, proc, conn) -> None:
         self.proc = proc
         self.conn = conn
         self.busy = False
+        # True once the worker has been terminated. Termination is only
+        # best-effort, so a retired process can still report ``is_alive()``;
+        # "alive" is therefore not proof of "usable", and this flag -- not the
+        # process state -- is what keeps a retired worker out of circulation.
+        self.retired = False
 
 
 _POOL_LOCK = threading.Condition(threading.Lock())
@@ -152,14 +157,31 @@ def _doc_worker_main(conn) -> None:
             pass
 
 
+# Grace period for a document worker to honor SIGTERM before we escalate.
+_DOC_TERMINATE_GRACE_SECONDS = 5.0
+
+
 def _terminate_doc_process(proc) -> None:
-    """Force-kill a runaway document-extraction process and reap it."""
+    """Terminate a runaway document-extraction process and reap it.
+
+    SIGTERM is not sufficient on its own: a worker wedged in an
+    uninterruptible native conversion (or one whose library installed a signal
+    handler) absorbs it and keeps running, holding its pipe, its memory and its
+    pool slot for the life of the service. Escalate to SIGKILL, and join after
+    the kill so the reaped child cannot linger as a zombie.
+    """
     try:
         proc.terminate()
     except Exception:
         pass
     try:
-        proc.join(timeout=5)
+        proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
+    except Exception:
+        pass
+    try:
+        if proc.is_alive():
+            proc.kill()
+            proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
     except Exception:
         pass
 
@@ -195,7 +217,13 @@ def _retire_doc_worker(worker: _DocWorker) -> None:
     Respawn is deliberately lazy (next acquisition): the bounds suite
     requires zero live children immediately after a timeout/child-death,
     and a dead-idle slot costs nothing until the next document arrives.
+
+    The retired mark is set first, before anything slow, because retirement is
+    not always performed under ``_POOL_LOCK``: without it, the lazy window
+    between "terminated" and "respawned" would let an acquisition hand a doomed
+    worker straight back to the next caller.
     """
+    worker.retired = True
     _terminate_doc_process(worker.proc)
     try:
         worker.conn.close()
@@ -211,23 +239,33 @@ def _teardown_doc_pool_locked() -> None:
         _retire_doc_worker(worker)
 
 
-def _acquire_doc_worker() -> _DocWorker:
+def _acquire_doc_worker() -> _DocWorker | None:
     """Take an idle pool worker, spawning on demand up to the configured size.
 
     The pool starts empty and grows only as concurrent demand requires: a
     test doing one extraction owns exactly one worker, so the historical
     zero-live-children-after-death invariant still holds. Dead idle slots
     (retired after a timeout/child-death) are respawned in place here, so
-    normal acquisitions never observe them.
+    normal acquisitions never observe them. Retired slots are never handed
+    out, alive-report or not.
+
+    Returns ``None`` when no worker became available within
+    ``_EXTRACTION_DOC_ACQUIRE_TIMEOUT``. Callers must treat that as "document
+    extraction unavailable for this document" (the same degradation as a
+    per-task timeout): the alternative used to be waiting with no deadline, so
+    one busy flag that its holder never cleared -- an exception escaping
+    between acquisition and the releasing ``finally`` -- wedged every later
+    document extraction in the process.
     """
     global _DOC_POOL
+    deadline = time.monotonic() + _EXTRACTION_DOC_ACQUIRE_TIMEOUT
     with _POOL_LOCK:
         if _DOC_POOL is None:
             _DOC_POOL = []
         want = _doc_extraction_worker_count()
         while True:
             for worker in _DOC_POOL:
-                if not worker.busy and worker.proc.is_alive():
+                if not worker.busy and not worker.retired and worker.proc.is_alive():
                     worker.busy = True
                     return worker
             for index, worker in enumerate(_DOC_POOL):
@@ -242,7 +280,17 @@ def _acquire_doc_worker() -> _DocWorker:
                 fresh.busy = True
                 _DOC_POOL.append(fresh)
                 return fresh
-            _POOL_LOCK.wait()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "extraction_document_pool_unavailable",
+                    extra={"slots": len(_DOC_POOL), "workers": want},
+                )
+                return None
+            # Still a condition wait, not a poll loop: a release notifies and
+            # wakes immediately. The bounded re-check exists only so a stuck
+            # busy flag (nothing will ever notify) expires on its own.
+            _POOL_LOCK.wait(timeout=min(remaining, _DOC_ACQUIRE_RECHECK_SECONDS))
 
 
 def _reset_doc_pool() -> None:
@@ -286,6 +334,17 @@ _EXTRACTION_SELECTOR_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_SELECTO
 # Wall-clock bound (seconds) for document extraction (markitdown).
 # Override via BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT.
 _EXTRACTION_DOC_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", 10.0)
+
+# How long a caller waits for a free worker slot. A healthy pool releases a
+# worker when its own task hits _EXTRACTION_DOC_TIMEOUT, so a full round of the
+# pool is already generous; this bound exists for the unhealthy case, where a
+# busy flag is never cleared and an unbounded wait would take the whole pool
+# down with it. Override via BROWSER_CRAWLER_EXTRACTION_DOC_ACQUIRE_TIMEOUT.
+_EXTRACTION_DOC_ACQUIRE_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 90.0)
+
+# Re-check interval for a waiting acquirer (the escape hatch for "nothing will
+# ever notify"); releases still wake waiters immediately via notify_all.
+_DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
@@ -533,6 +592,10 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     # next acquisition. Pool size bounds concurrent processes so memory
     # stays within the container ceiling (perf throughput #8).
     worker = _acquire_doc_worker()
+    if worker is None:
+        # No slot within the acquire budget: degrade this document like every
+        # other document failure instead of wedging the request.
+        return ExtractedContent(None, None)
     try:
         try:
             worker.conn.send((body, _doc_task_hooks()))
@@ -565,6 +628,10 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
             return ExtractedContent(None, None)
     finally:
         with _POOL_LOCK:
+            # The worker may have been retired mid-task (timeout/child death).
+            # Clearing busy is still correct: ``retired``, not ``busy``, is what
+            # keeps a terminated worker out of circulation, and the notify lets
+            # waiters reach the slot's lazy respawn instead of sitting on it.
             worker.busy = False
             _POOL_LOCK.notify_all()
 

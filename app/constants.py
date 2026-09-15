@@ -116,6 +116,64 @@ BROWSER_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
     }
 )
 
+# Content was retrieved but yielded nothing usable (HTTP/browser status mappers
+# and the browser strategy's retry hints all key off this group).
+FAILED_CLASSIFICATIONS: frozenset[str] = frozenset({"not_found", "site_error", "gone", "binary_no_text"})
+
+# ---------------------------------------------------------------------------
+# Classification -> result status: THE single source of truth.
+#
+# This used to be two independent if-chains (``http._status_for_classification``
+# and ``BrowserRenderer._status_for_classification``) that agreed on the labels
+# they both recognized and disagreed on everything else: an unrecognized label
+# came back "failed" from the HTTP path and "blocked" from the browser path, so
+# the status a caller saw depended on which fetcher served the page. Both call
+# sites now delegate to :func:`status_for_classification`.
+#
+# Kept as a table rather than branches because it is also the seed of the
+# future per-classification metadata (retryability, escalation hints, metric
+# buckets): new columns land next to the status, not inside two conditionals.
+# ---------------------------------------------------------------------------
+CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
+    # Usable content, or freshness proved by the caller's own validators.
+    "rendered": "success",
+    "not_modified": "success",
+    # Anti-bot / consent / access walls: the page exists, we were kept out.
+    **dict.fromkeys(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS, "blocked"),
+    # Retrieved, but nothing a consumer can use.
+    **dict.fromkeys(FAILED_CLASSIFICATIONS, "failed"),
+}
+
+# Unknown-classification default: "blocked".
+#
+# WHY this is the safe one for a crawler:
+#  * It must never be "success". Success is the only status that gets a
+#    strategy pinned for the whole domain, feeds quality scoring, and is served
+#    from the content cache; defaulting an unrecognized label there would let a
+#    taxonomy change silently launder unknown pages into cached "good" results.
+#  * "failed" is an ASSERTIVE verdict -- it is what a page gets when the
+#    taxonomy knows it is dead (404/410/5xx/no-text) and it feeds job
+#    ``total_failed``. An unknown label is a label nobody has triaged yet, and
+#    reporting "this page is dead" because our enum is missing an entry
+#    discards content that may be perfectly crawlable on the next pass.
+#  * "blocked" is the non-assertive "we did not get usable content, reason
+#    unclassified" state: it is visible in results, keeps the URL eligible to be
+#    revisited, and cannot poison caches or strategy pinning. A label that
+#    deserves "failed" only ever reaches the default if someone forgot to list
+#    it -- which ``CLASSIFICATION_STATUS_BY_LABEL`` completeness tests pin.
+UNKNOWN_CLASSIFICATION_STATUS: str = "blocked"
+
+
+def status_for_classification(classification: str) -> str:
+    """Map a page classification onto the crawl result status.
+
+    Every classification a strategy can emit is an explicit key in
+    :data:`CLASSIFICATION_STATUS_BY_LABEL`; only labels outside the taxonomy
+    (or a classifier that has not been given a status) take
+    :data:`UNKNOWN_CLASSIFICATION_STATUS`.
+    """
+    return CLASSIFICATION_STATUS_BY_LABEL.get(classification, UNKNOWN_CLASSIFICATION_STATUS)
+
 
 # ---------------------------------------------------------------------------
 # Crawl policy limit defaults and hard caps.
