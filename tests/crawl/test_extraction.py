@@ -1,11 +1,21 @@
-"""Content extraction pipeline + Katana-inspired discovery (js_endpoints, pagination)."""
+"""Content extraction: markdown/text extraction, selector timeouts, bounds and single-pass parsing."""
 
 import asyncio
+import time
 
+import bs4
+import pytest
+from _testkit import *
+
+import app.crawl.extraction as ext_mod
+import app.crawl.extraction as extraction
+import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import (
     ExtractedContent,
     _detect_pagination,
+    _extract_document,
     _extract_html,
+    _extract_selected,
     _is_html,
     _looks_like_document,
     _text_from_html,
@@ -236,3 +246,399 @@ class TestLinkExtraction:
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
         links = _extract_discovered_links(html, None)
         assert len(links) > 0
+
+
+@pytest.fixture(autouse=True)
+def _reset_doc_extraction_pool():
+    """No persistent process pool to reset.
+
+    Each extraction call now spawns its own short-lived process (reaped on
+    completion or timeout), so there is nothing to tear down between tests. The
+    injected env flags (TEST_MARKITDOWN_HANG / TEST_MARKITDOWN_OUTPUT) are
+    reverted by the ``monkeypatch`` fixture at test teardown.
+    """
+    yield
+
+
+async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
+    """A document extraction exceeding the wall-clock timeout returns None (F5).
+
+    Uses ``real_sleeps`` because the slow extraction is simulated with a real
+    ``time.sleep`` which the autouse ``fast_sleeps`` no-ops.
+    """
+    # Use env var to signal test hang to the worker subprocess (inherited).
+    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    # Set short timeout - patch the module variable directly.
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
+
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert result.text is None
+    assert result.markdown is None
+
+    # Clean up
+    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
+
+
+async def test_extract_document_child_death_returns_empty(monkeypatch):
+    """A worker that dies before sending (segfault) yields empty extraction,
+    not an unhandled EOFError, and leaves no zombie behind (M8)."""
+
+    monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert result.text is None
+    assert result.markdown is None
+
+    # M8 is per worker, not process-global: the pool is persistent and sized
+    # above one, so an idle worker from an earlier extraction legitimately
+    # stays alive. The dead worker must be reaped (no zombie) and no worker
+    # may be left orphaned mid-task.
+    for alive, reaped, busy in ext_mod._doc_pool_health():
+        assert not busy, "worker left marked busy after a child death"
+        assert alive or reaped, "zombie worker left in the pool after a child death"
+
+
+async def test_extract_document_output_capped_at_5mb(monkeypatch):
+    """Extracted markdown is truncated to _MAX_EXTRACTED_MARKDOWN (F5)."""
+    # Use a smaller cap for faster test (10KB instead of 5MB)
+    test_cap = 10000
+    huge = "x" * (test_cap + 1000)
+
+    # Use env var to inject test data into the worker subprocess.
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", huge)
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    # Set the cap directly
+    monkeypatch.setattr(ext_mod, "_MAX_EXTRACTED_MARKDOWN", test_cap)
+
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert result.markdown is not None
+    assert len(result.markdown) == test_cap
+
+    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+
+
+async def test_extract_document_normal_works(monkeypatch):
+    """Normal extraction returns the markdown content."""
+    # Use env var to inject test data into the worker subprocess.
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert result.markdown == "## Hello Markdown"
+    assert result.text == "## Hello Markdown"
+
+    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+
+
+# ============================================================
+# Adversarial perf #3.2: document extraction runs in a process that is
+# forcefully killed on timeout (no lingering zombie / stalled pool).
+# ============================================================
+
+
+async def test_extract_document_process_pool_isolation(monkeypatch, real_sleeps):
+    """Document extraction runs in a separate process so a hang can be killed
+    and does not degrade the shared thread pool.
+    """
+    # Use a very short timeout - patch the module variable directly.
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
+
+    assert ext_mod._EXTRACTION_DOC_TIMEOUT == 0.01
+
+    # The subprocess will check this env var and hang if set.
+    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    # Should return None due to timeout (process killed).
+    assert result.text is None
+    assert result.markdown is None
+
+    # Clean up env var for other tests
+    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
+
+
+async def test_extract_document_process_pool_normal_works(monkeypatch):
+    """Normal document extraction still works with process isolation."""
+    # Use normal timeout - patch the module variable directly.
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
+    from app.crawl.extraction import _extract_document
+
+    # Don't set TEST_MARKITDOWN_HANG - normal operation.
+    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    # With fake bytes, markitdown returns something (or None for unparseable);
+    # the key is it doesn't crash.
+    assert isinstance(result, ext_mod.ExtractedContent)
+
+
+async def test_extract_document_recovers_after_timeout(monkeypatch, real_sleeps):
+    """After a timed-out (killed) extraction, the next call still works.
+
+    Adversarial perf #3.2: a killed worker must not leave a zombie that stalls
+    the (semaphore-bounded) extraction concurrency.
+    """
+    # First call hangs and is killed on timeout (short timeout, hang injected).
+    monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
+    hung = _extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
+    assert hung.text is None
+    monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
+
+    # Second call (same process / shared semaphore) must succeed. Use a normal
+    # timeout so the worker subprocess has time to spawn + import on spawn
+    # platforms (macOS) -- the point is that the killed first worker did not
+    # stall the bounded extraction concurrency.
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Recovered")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    recovered = _extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
+    assert recovered.markdown == "## Recovered"
+    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+
+
+async def test_test_hooks_inert_without_gate(monkeypatch):
+    """N10: TEST_MARKITDOWN_* flags are inert unless BROWSER_CRAWLER_TEST_HOOKS=1
+    is also set — production children must not honor stray test flags."""
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## hijacked")
+    monkeypatch.delenv("BROWSER_CRAWLER_TEST_HOOKS", raising=False)
+
+    ungated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert ungated.markdown != "## hijacked"
+
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    gated = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+    assert gated.markdown == "## hijacked"
+
+
+def test_css_selector_slow_must_not_hang(monkeypatch, real_sleeps):
+    monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
+    monkeypatch.setattr(
+        bs4.BeautifulSoup,
+        "select",
+        lambda self, selector: time.sleep(3) or [],
+    )
+    html = "<html><body><p class='x'>hi</p></body></html>"
+    start = time.monotonic()
+    result = _extract_selected(html, "http://example.com/", css_selector=".x")
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, "slow CSS selector was not bounded by the timeout"
+    assert result == ExtractedContent(None, None)
+
+
+def test_css_selector_fast_still_works(monkeypatch):
+    monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
+    html = "<html><body><p class='x'>hi</p></body></html>"
+    result = _extract_selected(html, "http://example.com/", css_selector=".x")
+    assert result.text is not None
+    assert "hi" in (result.text or "")
+
+
+class _SlowFakeTree:
+    def xpath(self, expr):
+        time.sleep(3)
+        return []
+
+
+def test_xpath_selector_slow_must_not_hang(monkeypatch, real_sleeps):
+    monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
+    monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: _SlowFakeTree())
+    html = "<html><body><p>x</p></body></html>"
+    start = time.monotonic()
+    result = _extract_selected(html, "http://example.com/", xpath="//p")
+    elapsed = time.monotonic() - start
+    assert elapsed < 1.0, "slow XPath was not bounded by the timeout"
+    assert result == ExtractedContent(None, None)
+
+
+def test_xpath_selector_fast_still_works(monkeypatch):
+    monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
+    html = "<html><body><p>x</p></body></html>"
+    result = _extract_selected(html, "http://example.com/", xpath="//p")
+    assert result.text is not None
+    assert "x" in (result.text or "")
+
+
+def _spy_parse(monkeypatch):
+    calls = {"n": 0}
+    real = extraction._parse_html_tree
+
+    def spy(html):
+        calls["n"] += 1
+        return real(html)
+
+    monkeypatch.setattr(extraction, "_parse_html_tree", spy)
+    return calls
+
+
+def test_html_diagnostics_parses_once(monkeypatch):
+    calls = _spy_parse(monkeypatch)
+    html = "<html><body><a href='/x'>x</a><form action='/s'><input name='q'></form></body></html>"
+    extraction._html_diagnostics(html, "http://example.com/")
+    assert calls["n"] == 1
+
+
+def test_shared_tree_parses_once_across_passes(monkeypatch):
+    calls = _spy_parse(monkeypatch)
+    html = (
+        "<html><body><a href='/x'>x</a><iframe src='/f'></iframe>"
+        "<form action='/s'><input name='q'></form></body></html>"
+    )
+    tree = extraction._parse_html_tree(html)
+    assert calls["n"] == 1
+    extraction._html_diagnostics(html, "http://example.com/", tree=tree)
+    links, _, _ = extraction._extract_discovered_links(html, "http://example.com/", tree=tree)
+    # frames, forms, and links all reused the single pre-parsed tree.
+    assert calls["n"] == 1
+    assert links
+
+
+class TestExtractionEdges:
+    """Cover remaining branches in extraction.py"""
+
+    def test_extract_content_with_css_selector(self):
+        from app.crawl.extraction import extract_content
+
+        html = '<div class="target">selected</div><div>ignored</div>'
+        result = extract_content(html.encode(), "text/html", "http://e.com/", css_selector=".target")
+        assert result.text == "selected"
+
+    def test_extract_content_with_xpath(self):
+        from app.crawl.extraction import extract_content
+
+        html = '<div class="target">selected</div><div>ignored</div>'
+        result = extract_content(html.encode(), "text/html", "http://e.com/", xpath='//div[@class="target"]')
+        assert result.text == "selected"
+
+    def test_html_to_markdown_markdownify_success(self):
+        from app.crawl.extraction import _html_to_markdown
+
+        text, md = _html_to_markdown("<p>hello <strong>world</strong></p>")
+        assert (text) is not None
+        assert (md) is not None
+        assert "world" in md
+
+    def test_html_to_markdown_markdownify_exception(self):
+        from app.crawl.extraction import _html_to_markdown
+
+        text, md = _html_to_markdown("<p>test</p>")
+        assert (text) is not None
+
+    def test_extract_selected_no_html(self):
+        from app.crawl.extraction import _extract_selected
+
+        result = _extract_selected("", "http://e.com/", css_selector=".x")
+        assert result.text is None or isinstance(result.text, str)
+        assert (result.markdown) is None
+
+    def test_extract_selected_css_selector_no_match(self):
+        from app.crawl.extraction import _extract_selected
+
+        result = _extract_selected("<div>content</div>", "http://e.com/", css_selector=".missing")
+        assert result.text is None or isinstance(result.text, str)
+        assert (result.markdown) is None
+
+    def test_extract_selected_xpath_no_match(self):
+        from app.crawl.extraction import _extract_selected
+
+        result = _extract_selected("<div>content</div>", "http://e.com/", xpath="//span")
+        assert result.text is None or isinstance(result.text, str)
+        assert (result.markdown) is None
+
+    def test_extract_selected_xpath_invalid(self):
+        from app.crawl.extraction import _extract_selected
+
+        result = _extract_selected("<div>content</div>", "http://e.com/", xpath="//[")
+        assert result.text is None or isinstance(result.text, str)
+
+    def test_extract_selected_xpath_string_node(self):
+        from app.crawl.extraction import _extract_selected
+
+        result = _extract_selected(
+            "<div><span>text1</span><span>text2</span></div>", "http://e.com/", xpath="//span/text()"
+        )
+        assert (result.text) is not None
+
+    def test_extract_html_trafilatura_exception(self):
+        from app.crawl.extraction import _extract_html
+
+        html = "<html><body><p>test content</p></body></html>"
+        result = _extract_html(html, "http://e.com/")
+        assert (result.text) is not None
+
+    def test_extract_html_markdownify_exception(self):
+        from app.crawl.extraction import _extract_html
+
+        html = "<html><body><p>plain text fallback</p></body></html>"
+        result = _extract_html(html, "http://e.com/")
+        assert (result.text) is not None
+
+    def test_extract_document_markitdown_import_error(self):
+        from app.crawl.extraction import _extract_document
+
+        result = _extract_document(b"fake pdf content", "http://e.com/doc.pdf")
+        assert (result.text) is not None
+
+    def test_extract_document_markitdown_exception(self):
+        from app.crawl.extraction import _extract_document
+
+        result = _extract_document(b"not a pdf", "http://e.com/doc.pdf")
+        assert result.text is None or isinstance(result.text, str)
+
+    def test_parse_html_tree_empty(self):
+        from app.crawl.extraction import _parse_html_tree
+
+        assert (_parse_html_tree("")) is None
+        assert (_parse_html_tree(None)) is None
+
+    def test_parse_html_tree_parser_error(self):
+        from app.crawl.extraction import _parse_html_tree
+
+        result = _parse_html_tree("<")
+        assert (result) is not None
+
+
+class TestExtractionGaps:
+    def test_nested_anchor(self):
+        # Real HTML parsers (lxml) flatten illegally-nested anchors into
+        # siblings, so both distinct hrefs are discovered as separate links
+        # rather than the inner one being swallowed by the outer.
+        links, _, _ = _extract_discovered_links(
+            '<a href="/x">outer <a href="/y">inner</a></a>',
+            "http://e.com/",
+        )
+        hrefs = {entry.normalized_url for entry in links}
+        assert "http://e.com/x" in hrefs
+        assert "http://e.com/y" in hrefs
+
+    def test_duplicate_href(self):
+        links, count, _ = _extract_discovered_links(
+            '<a href="/x">a</a><a href="/x">b</a>',
+            "http://e.com/",
+        )
+        assert len(links) == 1
+        assert count == 1
+
+    def test_max_links_truncation(self):
+        html = "".join(f'<a href="/{i}">x</a>' for i in range(5))
+        links, count, truncated = _extract_discovered_links(html, "http://e.com/", max_links=2)
+        assert len(links) == 2
+        assert truncated
+        assert count == 5
+
+    def test_html_diagnostics_frames_and_forms(self):
+        html = (
+            '<frameset><frame src="/a"></frameset>'
+            '<form action="/s" method="post"><input name="q" value="1"></form>'
+        )
+        diag = _html_diagnostics(html, "http://e.com/")
+        assert "frames" in diag
+        assert "forms" in diag
+        assert diag["frames"]
+        assert diag["forms"]
+
+    def test_js_endpoints(self):
+        html = '<script>fetch("/api/x");</script>'
+        endpoints = extract_js_endpoints(html)
+        assert {"url": "/api/x"} in endpoints

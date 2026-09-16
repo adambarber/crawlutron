@@ -1,6 +1,9 @@
-"""PDF/Office extraction behavior with a real PDF fixture (no mocks)."""
+"""Document model: text parsing, bytearray paths and document-level extraction edges."""
 
 from pathlib import Path
+
+from _testkit import *
+from _testkit import make_fetch
 
 from app.crawl.strategies.document import (
     _default_document_text_extractor,
@@ -202,3 +205,146 @@ class TestDocumentRedirectSsrf:
         md = _default_document_text_extractor(self.PDF_PATH)
         assert "Alice" in md
         assert "initial.test" in fetched
+
+
+async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
+    """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
+    from app.crawl.strategies.http import _http_strategy_result
+
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        # csv served WITHOUT compression -> decompress_body returns the raw
+        # buffer unchanged, which is a bytearray
+        return make_fetch(
+            url=url,
+            final_url=url,
+            status=200,
+            ctype="text/csv",
+            body=bytearray(b"name,age\nAlice,30\nBob,25"),
+        )
+
+    result = await _http_strategy_result(
+        original_url="https://sudbury.ma.us/x.csv",
+        normalized_url="https://sudbury.ma.us/x.csv",
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy={
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "limits": {"timeout_seconds": 10},
+            "headers": {},
+            "extraction": "document",
+        },
+        http_fetcher=fetcher,
+    )
+    assert result.status == "success", (result.status, result.classification)
+    assert "Alice" in (result.text or "")
+
+
+class TestDocumentExtractionEdges:
+    def test_format_table_empty(self):
+        assert _format_table([]) == ""
+
+    def test_extract_unreachable_url(self):
+        assert _default_document_text_extractor("http://127.0.0.1:1/nowhere.pdf") == ""
+
+    def test_extract_broken_pdf_from_server(self, base_url):
+        text = _default_document_text_extractor(base_url + "/broken.pdf")
+        assert text == ""
+
+    def test_oversized_pdf_body_yields_empty_text(self, base_url):
+        # N2: the read itself is capped. /sample_table.pdf is a real PDF far
+        # larger than the shrunken cap, so the extractor must fail closed
+        # (empty text) instead of buffering the whole body.
+        import app.crawl.extraction as extraction_mod
+
+        original_cap = extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES
+        extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES = 64
+        try:
+            text = _default_document_text_extractor(base_url + "/sample_table.pdf")
+        finally:
+            extraction_mod._EXTRACTION_DOC_MAX_INPUT_BYTES = original_cap
+        assert text == ""
+
+
+class TestDocumentTextParserEdges:
+    def test_range_action(self):
+        out = _format_extracted_document_text(
+            "1a - 1c Approve\n1a.\nBuild the thing\n1b.\nFix the bug\n1c.\nShip it",
+            source_url="http://x/",
+        )
+        assert "Action: Approve" in out
+
+    def test_action(self):
+        out = _format_extracted_document_text(
+            "2a Approve all\n2a.\nDetail line",
+            source_url="http://x/",
+        )
+        assert "Action: Approve all" in out
+
+    def test_section_title(self):
+        out = _format_extracted_document_text(
+            "1.\nSection Title\nBody text",
+            source_url="http://x/",
+        )
+        assert "1. Section Title" in out
+
+    def test_item_numbered_continuation(self):
+        out = _format_extracted_document_text(
+            "3a.\n3. Build the thing\n4. Fix it",
+            source_url="http://x/",
+        )
+        assert "3a. Build the thing" in out
+
+    def test_non_item_section_skipped(self):
+        out = _format_extracted_document_text(
+            "PUBLIC PARTICIPATION\nWe welcome comments",
+            source_url="http://x/",
+        )
+        assert "PUBLIC PARTICIPATION" not in out
+
+    def test_prose_merge(self):
+        out = _format_extracted_document_text(
+            "First sentence here.\nSecond sentence here.",
+            source_url="http://x/",
+        )
+        assert "First sentence here." in out
+        assert "Second sentence here." in out
+
+    def test_heading_join_skipped(self):
+        out = _format_extracted_document_text(
+            "INTRODUCTION\nBody continues here",
+            source_url="http://x/",
+        )
+        assert "INTRODUCTION" in out
+
+    def test_comma_join(self):
+        out = _format_extracted_document_text(
+            "First clause here.\n, and more detail",
+            source_url="http://x/",
+        )
+        assert ", and more detail" in out
+
+    def test_helpers_direct(self):
+        assert _looks_like_document_heading("INTRODUCTION")
+        assert not (_looks_like_document_heading("a normal sentence that is far too long to be a heading"))
+        assert _is_document_item_marker("1a.")
+        assert not (_is_document_item_marker("Section"))
+        assert _is_document_non_item_section("PUBLIC PARTICIPATION")
+        assert not (_is_document_non_item_section("Normal text"))
+        assert list(_document_item_range("1a", "1c")) == ["1a", "1b", "1c"]
+        assert _next_non_empty_document_line(["", "a", "b"], 0) == 1
+        assert (_next_non_empty_document_line(["", ""], 0)) is None
+        assert _join_document_paragraph_lines("a", "b") == "a b"
+        assert _join_document_paragraph_lines("a", ", b") == "a, b"
+        assert _should_join_document_paragraph("First clause here", "and continues the work")
+        lines, nxt = _collect_document_item_lines(["Build", "4. Fix it"], 0)
+        assert lines == ["Build", "Fix it"]
+        assert nxt == 2
+
+    def test_blank_line_skipped_in_formatter(self):
+        out = _format_extracted_document_text("Intro paragraph.\n\nSecond paragraph.", source_url="http://x/")
+        assert "Intro paragraph." in out
+        assert "Second paragraph." in out
+
+    def test_blank_line_skipped_in_collect(self):
+        lines, nxt = _collect_document_item_lines(["Build", "", "More detail"], 0)
+        assert lines == ["Build", "More detail"]
+        assert nxt == 3

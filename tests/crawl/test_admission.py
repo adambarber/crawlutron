@@ -1,7 +1,39 @@
-"""Resource-pressure admission and readiness gating."""
+"""Admission control: CPU and memory gates, weighted strategy admission and page-budget bounds."""
 
+import asyncio
+
+import pytest
+from _testkit import site_fetcher
+
+from app.constants import (
+    BROWSER_HEADLESS,
+    HTTP_DECLARED_CRAWLER,
+)
+from app.crawl.cache import HttpCache
+from app.crawl.engine import crawl_request
+from app.crawl.payload_helpers import _payload_policy
+from app.crawl.recursive import _batch_is_http_heavy, run_recursive_crawl
 from app.health.readiness import ReadinessState
+from app.memory_pressure import (
+    MemoryGate,
+    MemoryStats,
+    batch_scale,
+    read_memory_stats,
+)
 from app.metrics import get_metrics
+from app.models import CrawlTask, EngineCrawlResult
+from app.resource_pressure import (
+    _BROWSER_RAM_FRACTION,
+    _BROWSER_TASK_RAM_BYTES,
+    _HTTP_TASK_RAM_BYTES,
+    CpuGate,
+    ResourceGate,
+    WeightedAdmission,
+    _build_admission_policy,
+    read_cpu_quota,
+    read_cpu_usage_seconds,
+)
+from app.settings import CrawlerSettings
 
 
 class TestReadinessState:
@@ -48,3 +80,818 @@ class TestReadinessState:
         state.end_request()
         snap = state.snapshot()
         assert snap["active_requests"] == 0
+
+
+# --- sensing: quota ---
+
+
+def test_read_cpu_quota_v2(tmp_path):
+    cg = tmp_path / "cgroup"
+    cg.mkdir()
+    (cg / "cpu.max").write_text("200000 100000\n")  # 2 CPUs
+    assert read_cpu_quota(cgroup_root=str(cg)) == 2.0
+
+
+def test_read_cpu_quota_v2_max_is_unbounded(tmp_path):
+    cg = tmp_path / "cgroup"
+    cg.mkdir()
+    (cg / "cpu.max").write_text("max 100000\n")
+    assert read_cpu_quota(cgroup_root=str(cg)) is None
+
+
+def test_read_cpu_quota_v1(tmp_path):
+    cg = tmp_path / "cgroup" / "cpu"
+    cg.mkdir(parents=True)
+    (cg / "cpu.cfs_quota_us").write_text("150000\n")
+    (cg / "cpu.cfs_period_us").write_text("100000\n")
+    assert read_cpu_quota(cgroup_root=str(tmp_path / "cgroup")) == 1.5
+
+
+def test_read_cpu_quota_v1_unlimited(tmp_path):
+    cg = tmp_path / "cgroup" / "cpu"
+    cg.mkdir(parents=True)
+    (cg / "cpu.cfs_quota_us").write_text("-1\n")
+    (cg / "cpu.cfs_period_us").write_text("100000\n")
+    assert read_cpu_quota(cgroup_root=str(tmp_path / "cgroup")) is None
+
+
+def test_read_cpu_quota_missing_is_unbounded(tmp_path):
+    assert read_cpu_quota(cgroup_root=str(tmp_path / "does-not-exist")) is None
+
+
+# --- sensing: usage ---
+
+
+def test_read_cpu_usage_v2(tmp_path):
+    cg = tmp_path / "cgroup"
+    cg.mkdir()
+    (cg / "cpu.stat").write_text("usage_usec 5000000\nuser_usec 3000000\nsystem_usec 2000000\n")
+    assert read_cpu_usage_seconds(cgroup_root=str(cg)) == 5.0
+
+
+def test_read_cpu_usage_v1(tmp_path):
+    cg = tmp_path / "cgroup" / "cpuacct"
+    cg.mkdir(parents=True)
+    (cg / "cpuacct.usage").write_text("5000000000\n")  # 5 CPU-seconds
+    assert read_cpu_usage_seconds(cgroup_root=str(tmp_path / "cgroup")) == 5.0
+
+
+def test_read_cpu_usage_missing_is_none(tmp_path):
+    assert read_cpu_usage_seconds(cgroup_root=str(tmp_path / "nope")) is None
+
+
+# --- governance: rate sampling ---
+
+
+def _fake_clock_and_usage(monkeypatch, clock, usage):
+    monkeypatch.setattr("app.resource_pressure.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("app.resource_pressure.read_cpu_usage_seconds", lambda root="": usage[0])
+    monkeypatch.setattr("app.resource_pressure.read_cpu_quota", lambda root="": 2.0)
+
+
+def test_cpu_gate_full_speed_below_target(monkeypatch):
+    gate = CpuGate(target=0.90)
+    clock, usage = [0.0], [0.0]
+    _fake_clock_and_usage(monkeypatch, clock, usage)
+    assert gate.batch_scale_factor() == 1.0  # first sight -> 0 utilization
+    # 1.0 CPU-second over 1.0 wall-second on a 2-CPU budget -> 0.50 util (< target)
+    clock[0], usage[0] = 1.0, 1.0
+    assert gate.batch_scale_factor() == 1.0
+
+
+def test_cpu_gate_scales_between_target_and_hard(monkeypatch):
+    gate = CpuGate(target=0.90)
+    clock, usage = [0.0], [0.0]
+    _fake_clock_and_usage(monkeypatch, clock, usage)
+    gate.batch_scale_factor()  # initialize sample
+    # 1.85 CPU-seconds over 1.0 wall-second on 2 CPUs -> 0.925 util (mid soft zone)
+    clock[0], usage[0] = 1.0, 1.85
+    s = gate.batch_scale_factor()
+    assert 0.0 < s < 1.0
+    assert abs(s - 0.5) < 0.2
+
+
+def test_cpu_gate_zero_at_hard_ceiling(monkeypatch):
+    gate = CpuGate(target=0.90)
+    clock, usage = [0.0], [0.0]
+    _fake_clock_and_usage(monkeypatch, clock, usage)
+    gate.batch_scale_factor()
+    # 2.0 CPU-seconds over 1.0 wall-second on 2 CPUs -> 1.0 util (>= hard)
+    clock[0], usage[0] = 1.0, 2.0
+    assert gate.batch_scale_factor() == 0.0
+
+
+async def test_cpu_gate_unbounded_is_noop(monkeypatch):
+    """No cgroup quota and no manual budget -> never throttles."""
+    gate = CpuGate(target=0.90)
+    monkeypatch.setattr("app.resource_pressure.read_cpu_quota", lambda root="": None)
+    monkeypatch.setattr("app.resource_pressure.read_cpu_usage_seconds", lambda root="": 999.0)
+    assert gate.batch_scale_factor() == 1.0
+    waited = []
+
+    async def fake_sleep(s):
+        waited.append(s)
+
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert waited == []
+
+
+async def test_cpu_gate_blocks_above_hard_ceiling(monkeypatch):
+    gate = CpuGate(target=0.90)
+    samples = iter([0.99, 0.98, 0.80])
+    waits = []
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(gate, "_usage_ratio", lambda: next(samples))
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert len(waits) >= 2
+    assert waits[-1] <= 1.0
+
+
+async def test_cpu_gate_returns_immediately_under_target(monkeypatch):
+    gate = CpuGate(target=0.90)
+    monkeypatch.setattr(gate, "_usage_ratio", lambda: 0.50)
+    waited = []
+
+    async def fake_sleep(seconds):
+        waited.append(seconds)
+
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert waited == []
+
+
+# --- combined ResourceGate ---
+
+
+def _saturated_gate(monkeypatch, *, cpu_ratio, memory_ratio):
+    """ResourceGate with pinned sampler ratios and a recording fake sleep."""
+    gate = ResourceGate()
+    gate.memory.max_wait_seconds = 0.05
+    gate.cpu.max_wait_seconds = 0.05
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: memory_ratio)
+    waited = []
+
+    async def fake_sleep(seconds):
+        waited.append(seconds)
+
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    return gate, waited
+
+
+async def test_resource_gate_waits_while_either_saturated(monkeypatch):
+    gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
+    # Memory idle, CPU saturated -> gate must still wait (either resource binds).
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert waited, "ResourceGate returned without waiting while CPU was saturated"
+
+
+async def test_resource_gate_returns_when_both_idle(monkeypatch):
+    gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.0, memory_ratio=0.0)
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert waited == []
+
+
+def test_resource_gate_scale_is_min_of_resources(monkeypatch):
+    gate = ResourceGate()
+    # Memory at 99% -> scale 0; CPU idle -> scale 1. Combined must be 0.
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.99)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
+    assert gate.batch_scale_factor() == 0.0
+    # Flip: CPU saturated, memory idle -> still 0.
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.99)
+    assert gate.batch_scale_factor() == 0.0
+    # Both idle -> full speed.
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.0)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.0)
+    assert gate.batch_scale_factor() == 1.0
+
+
+def test_metrics_expose_resource_utilization_and_counters():
+    from app.metrics import get_metrics
+
+    text = get_metrics().as_prometheus()
+    assert "crawler_resource_memory_utilization" in text
+    assert "crawler_resource_cpu_utilization" in text
+    assert "crawler_resource_throttle_batches_total" in text
+    assert "crawler_resource_pause_seconds_total" in text
+    # Defaults render without error.
+    assert "crawler_resource_memory_utilization 0.0000" in text
+    assert "crawler_resource_cpu_utilization 0.0000" in text
+
+
+def test_cpu_gate_is_warm_only_after_sample(monkeypatch):
+    # Unbounded (no quota/budget) -> always warm, so the full multiplier is safe.
+    assert CpuGate().is_warm() is True
+
+    # Bounded via cpu_budget but with no sample yet -> cold start.
+    gate = CpuGate(cpu_budget=2.0)
+    assert gate.is_warm() is False
+
+    # Feed a real usage reading so the gate can take its first sample.
+    monkeypatch.setattr(
+        "app.resource_pressure.read_cpu_usage_seconds",
+        lambda root="/sys/fs/cgroup": 1.0,
+    )
+    gate.cpu_ratio()  # first sample establishes the baseline
+    assert gate.is_warm() is True
+
+
+# --- sensing ---
+
+
+def test_read_memory_stats_v2(tmp_path):
+    cg = tmp_path / "cgroup"
+    cg.mkdir()
+    (cg / "memory.max").write_text("3221225472\n")  # 3 GiB
+    (cg / "memory.current").write_text("1610612736\n")  # 1.5 GiB
+    stats = read_memory_stats(cgroup_root=str(cg))
+    assert stats == MemoryStats(total_bytes=3221225472, used_bytes=1610612736)
+
+
+def test_read_memory_stats_v2_max_string_falls_back_to_total_ram(tmp_path, monkeypatch):
+    cg = tmp_path / "cgroup"
+    cg.mkdir()
+    (cg / "memory.max").write_text("max\n")
+    (cg / "memory.current").write_text("104857600\n")
+    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 8 * 1024**3)
+    stats = read_memory_stats(cgroup_root=str(cg))
+    assert stats.total_bytes == 8 * 1024**3
+
+
+def test_read_memory_stats_v1(tmp_path):
+    cg = tmp_path / "cgroup" / "memory"
+    cg.mkdir(parents=True)
+    (cg / "memory.limit_in_bytes").write_text("2147483648\n")
+    (cg / "memory.usage_in_bytes").write_text("536870912\n")
+    stats = read_memory_stats(cgroup_root=str(tmp_path / "cgroup"))
+    assert stats.total_bytes == 2147483648
+    assert stats.used_bytes == 536870912
+
+
+def test_read_memory_stats_missing_files_falls_back_to_total_ram(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.memory_pressure._total_system_ram", lambda: 4 * 1024**3)
+    stats = read_memory_stats(cgroup_root=str(tmp_path / "does-not-exist"))
+    assert stats.total_bytes == 4 * 1024**3
+    assert stats.used_bytes == 0
+
+
+# --- governance ---
+
+
+def test_batch_scale_full_below_target():
+    assert batch_scale(used=0.80, total=1.0, target=0.92) == 1.0
+
+
+def test_batch_scale_scales_linearly_between_target_and_hard():
+    # halfway into the soft zone -> roughly half throughput
+    s = batch_scale(used=0.945, total=1.0, target=0.92)
+    assert 0.0 < s < 1.0
+    assert abs(s - 0.5) < 0.2
+
+
+def test_batch_scale_zero_at_hard_ceiling():
+    assert batch_scale(used=0.99, total=1.0, target=0.92) == 0.0
+
+
+async def test_gate_blocks_dispatch_above_hard_ceiling(monkeypatch):
+    """Above the hard ceiling the gate makes callers wait; it releases once
+    usage drains back under the target."""
+    gate = MemoryGate(target=0.92)
+    samples = iter([0.99, 0.98, 0.85])
+    waits = []
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr("app.memory_pressure.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(gate, "_usage_ratio", lambda: next(samples))
+
+    await gate.wait_while_saturated(max_wait_seconds=10)
+    assert len(waits) >= 2  # blocked until the third sample
+    assert waits[-1] <= 1.0  # short polling intervals, never long ones
+
+
+async def test_gate_returns_immediately_under_target():
+    gate = MemoryGate(target=0.92)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(gate, "_usage_ratio", lambda: 0.50)
+    try:
+        await gate.wait_while_saturated(max_wait_seconds=10)  # must not block
+    finally:
+        monkeypatch.undo()
+
+
+async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
+    """Run the two-page fixture crawl with pinned gate ratios.
+
+    Returns the (envelope, waits) pair: the combined ResourceGate is
+    exercised with only the pinned resource driving the throttle.
+    """
+    from _testkit import site_fetcher
+
+    import app.crawl.engine as engine_mod
+    from app.crawl.cache import HttpCache
+    from app.resource_pressure import ResourceGate
+
+    gate = ResourceGate()
+    gate.memory.max_wait_seconds = 0.05  # keep the suite fast; the pause still happens
+    gate.cpu.max_wait_seconds = 0.05
+    monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: memory_ratio)
+    monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
+    waits = []
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(engine_mod, "_resource_gate", gate)
+
+    pages = {
+        "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
+        "/a": (200, "<html>a</html>", "text/html"),
+    }
+    out = await engine_mod.crawl_request(
+        {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}},
+        http_fetcher=site_fetcher(pages),
+        cache=HttpCache(),
+    )
+    return out, waits
+
+
+async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypatch):
+    """Integration: with the memory sampler pinned at 99% usage, the engine pauses
+    dispatch (gate waits) yet the crawl still completes. The combined ResourceGate
+    is exercised; CPU is pinned idle so only memory drives the throttle."""
+    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=0.0, memory_ratio=0.99)
+    assert {r["normalized_url"] for r in out["results"]} == {
+        "http://example.com",
+        "http://example.com/a",
+    }
+    assert waits, "engine dispatched without consulting the resource gate"
+
+
+async def test_engine_throttles_batches_under_cpu_pressure(tmp_path, monkeypatch):
+    """Integration: with the CPU sampler pinned at 99% of quota, the engine pauses
+    dispatch (gate waits) yet the crawl still completes. Mirrors the memory test."""
+    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
+    assert {r["normalized_url"] for r in out["results"]} == {
+        "http://example.com",
+        "http://example.com/a",
+    }
+    assert waits, "engine dispatched without consulting the resource gate under CPU pressure"
+
+
+def test_direct_reads_do_not_perturb_slope(monkeypatch):
+    """L7: _usage_ratio() is read by readiness/metrics/waits between dispatch
+    scale computations. Those reads must not mutate the slope series, or a
+    single stray sample invents a climb that is not there."""
+    import time
+
+    import app.memory_pressure as mp
+
+    ratios = iter([0.5, 0.5, 0.1, 0.5, 0.5])
+    ticks = iter([0.0, 10.0, 20.0, 30.0, 40.0])
+    monkeypatch.setattr(
+        mp,
+        "read_memory_stats",
+        lambda cgroup_root="/sys/fs/cgroup": mp.MemoryStats(
+            total_bytes=1000, used_bytes=int(next(ratios) * 1000)
+        ),
+    )
+    monkeypatch.setattr(time, "monotonic", lambda: next(ticks))
+    gate = mp.MemoryGate(target=0.9, hard=1.0)
+    assert gate.leading_usage_ratio() == 0.5
+    assert gate.leading_usage_ratio() == 0.5
+    gate._usage_ratio()  # stray readiness/metrics read of a dip sample
+    assert gate.leading_usage_ratio() == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Pure helper: does the upcoming batch look HTTP-heavy?
+# ---------------------------------------------------------------------------
+class _HSScheduler:
+    """Fake scheduler exposing per-domain pinned strategies."""
+
+    def __init__(self, pins=None):
+        self.pins = dict(pins or {})
+        self.runs = 0
+
+    def get_pinned_strategy(self, domain):
+        return self.pins.get(domain)
+
+    async def run(self, jobs, worker):
+        self.runs += 1
+        return {job.index: await worker(job) for job in jobs}
+
+
+def _task(domain):
+    url = f"http://{domain}/"
+    return CrawlTask(index=0, original_url=url, normalized_url=url, domain=domain)
+
+
+class TestBatchIsHttpHeavy:
+    def test_all_http_pinned(self):
+        sched = _HSScheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
+        frontier = [(0, _task(f"site{i}.gov")) for i in range(4)]
+        assert _batch_is_http_heavy(sched, frontier, sample=8) is True
+
+    def test_majority_http_pinned(self):
+        # 2 of 3 pinned HTTP; the 3rd unpinned (not yet proven cheap)
+        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER, "b.gov": HTTP_DECLARED_CRAWLER})
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
+        assert _batch_is_http_heavy(sched, frontier, sample=8) is True
+
+    def test_half_or_less_not_http_heavy(self):
+        # 1 of 3 pinned HTTP -> not HTTP-heavy (conservative)
+        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER})
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
+        assert _batch_is_http_heavy(sched, frontier, sample=8) is False
+
+    def test_browser_pinned_counts_against(self):
+        # 2 browser-pinned, 1 HTTP-pinned -> not HTTP-heavy
+        sched = _HSScheduler(
+            {
+                "a.gov": BROWSER_HEADLESS,
+                "b.gov": BROWSER_HEADLESS,
+                "c.gov": HTTP_DECLARED_CRAWLER,
+            }
+        )
+        frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
+        assert _batch_is_http_heavy(sched, frontier, sample=8) is False
+
+    def test_no_pins_is_false(self):
+        sched = _HSScheduler({})  # cold start, nothing proven cheap
+        frontier = [(0, _task(f"site{i}.gov")) for i in range(4)]
+        assert _batch_is_http_heavy(sched, frontier, sample=8) is False
+
+    def test_empty_frontier_is_false(self):
+        sched = _HSScheduler({})
+        assert _batch_is_http_heavy(sched, [], sample=8) is False
+
+    def test_sample_window_limits_lookahead(self):
+        # Beyond the sample window the composition is not considered.
+        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER})
+        # first task unpinned, second pinned HTTP; sample=1 looks only at first
+        frontier = [(0, _task("z.gov")), (0, _task("a.gov"))]
+        assert _batch_is_http_heavy(sched, frontier, sample=1) is False
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher wiring: apply http_scale_factor for HTTP-heavy batches.
+# ---------------------------------------------------------------------------
+class _RecordingGate:
+    """Gate fake that records which scale method the dispatcher consulted."""
+
+    def __init__(self, batch=0.5, http=1.0):
+        self.batch = batch
+        self.http = http
+        self.calls = []
+        self.waits = 0
+
+    async def wait_while_saturated(self):
+        self.waits += 1
+
+    def batch_scale_factor(self):
+        self.calls.append("batch")
+        return self.batch
+
+    def http_scale_factor(self):
+        self.calls.append("http")
+        return self.http
+
+    def memory_ratio(self):
+        return 0.0
+
+    def cpu_ratio(self):
+        return 0.0
+
+
+class _Spill:
+    def __init__(self):
+        self.writes = {}
+
+    def write(self, index, result):
+        self.writes[index] = result
+
+
+def _mk_result(url):
+    return EngineCrawlResult(
+        original_url=url,
+        normalized_url=url,
+        final_url=url,
+        status="success",
+        classification="rendered",
+        selected_strategy="HTTP_DECLARED_CRAWLER",
+        attempted_strategies=[],
+        http_status=200,
+        headers={},
+        content_type="text/html",
+        html="",
+        text="t",
+        extraction_method="http_html",
+        quality_score=1.0,
+        discovered_links=[],
+    )
+
+
+async def _run_with_gate(sched, gate, jobs):
+    async def worker(job):
+        return _mk_result(job.normalized_url)
+
+    async def robots_allows(url):
+        return True
+
+    spill = _Spill()
+    await run_recursive_crawl(
+        jobs=jobs,
+        scheduler=sched,
+        worker=worker,
+        robots_allows=robots_allows,
+        robots_disallowed=lambda job: _mk_result(job.normalized_url),
+        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
+        spill=spill,
+        shutdown_event=asyncio.Event(),
+        max_depth=2,
+        max_pages=100,
+        respect_robots=True,
+        include_html=True,
+        want_document_bodies=False,
+        scope_pattern=None,
+        global_concurrency=4,
+        seed_sitemaps=False,
+        resource_gate=gate,
+    )
+    return spill
+
+
+class TestDispatcherStrategyAwareScaling:
+    async def test_http_heavy_batch_uses_http_scale(self):
+        # Two domains already proven HTTP (pinned) -> dispatcher consults http_scale_factor
+        sched = _HSScheduler(
+            {
+                "a.gov": HTTP_DECLARED_CRAWLER,
+                "b.gov": HTTP_DECLARED_CRAWLER,
+            }
+        )
+        jobs = [_task("a.gov"), _task("b.gov")]
+        gate = _RecordingGate(batch=0.0, http=1.0)
+        await _run_with_gate(sched, gate, jobs)
+
+        # The dispatcher consults http_scale_factor for an HTTP-heavy batch and
+        # uses its value (http=1.0) so both pages fit in one batch.
+        assert "http" in gate.calls
+        assert sched.runs == 1  # http scale 1.0 => both admitted at once
+
+    async def test_browser_bound_batch_uses_combined_scale(self):
+        # Browser-pinned domains -> dispatcher stays on the combined gate
+        sched = _HSScheduler(
+            {
+                "a.gov": BROWSER_HEADLESS,
+                "b.gov": BROWSER_HEADLESS,
+            }
+        )
+        jobs = [_task("a.gov"), _task("b.gov")]
+        gate = _RecordingGate(batch=1.0, http=1.0)
+        await _run_with_gate(sched, gate, jobs)
+
+        assert "batch" in gate.calls
+        assert "http" not in gate.calls
+
+    async def test_cold_unpinned_batch_stays_on_combined_scale(self):
+        # No pins yet (cold start) -> conservative combined gate (safety):
+        # unpinned tasks may escalate to browser, so do not ignore memory.
+        sched = _HSScheduler({})  # cold start
+        jobs = [_task("a.gov"), _task("b.gov")]
+        gate = _RecordingGate(batch=1.0, http=1.0)
+        await _run_with_gate(sched, gate, jobs)
+
+        assert "batch" in gate.calls
+        assert "http" not in gate.calls
+
+
+# ---------------------------------------------------------------------------
+# Gate semantics: HTTP scale escapes the browser-held-memory bottleneck.
+# ---------------------------------------------------------------------------
+class TestHttpScaleEscapesMemory:
+    def test_http_scale_ignores_memory_when_cpu_headroom(self, monkeypatch):
+        """CpuGate.headroom_fraction()."""
+        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
+        # Memory near the hard ceiling (0.89, held by browser processes); its
+        # scale would be ~0.43 -- it would throttle cheap HTTP work.
+        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.89)
+        # CPU has ample headroom (0.20 -> headroom 1.0 > 0.5).
+        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.20)
+
+        http_scale = gate.http_scale_factor()
+        memory_scale = gate.memory.batch_scale_factor()
+
+        # HTTP work is NOT memory-bound: it rides the CPU scale, escaping the
+        # browser-held-memory bottleneck that throttles browser-bound batches.
+        assert http_scale > memory_scale
+        assert memory_scale < 1.0  # memory gate would clamp browser work
+        assert http_scale == pytest.approx(1.0, rel=0.01)
+
+    def test_http_scale_respects_tight_cpu(self, monkeypatch):
+        """When CPU is itself tight, http_scale falls back to the combined gate."""
+        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
+        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.60)
+        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.93)  # headroom 0.4 < 0.5
+
+        http_scale = gate.http_scale_factor()
+        # combined batch_scale = min(cpu 0.4, mem 1.0) = 0.4
+        assert http_scale == pytest.approx(0.4, rel=0.01)
+
+    def test_http_scale_and_browser_scale_diverge(self, monkeypatch):
+        """Same resources: HTTP scale (CPU-driven) exceeds the combined/browser scale."""
+        gate = ResourceGate(target_mem=0.85, target_cpu=0.90, cpu_budget=4.0)
+        monkeypatch.setattr(gate.memory, "_usage_ratio", lambda: 0.89)  # falling off
+        monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: 0.30)  # headroom > 0.5
+
+        http_scale = gate.http_scale_factor()
+        browser_scale = gate.batch_scale_factor()
+        assert http_scale > browser_scale
+        assert browser_scale < 1.0
+        assert http_scale == pytest.approx(1.0, rel=0.01)
+
+
+async def test_max_pages_default_is_bounded_not_unlimited():
+    settings = CrawlerSettings()
+    policy = _payload_policy({"url": "http://example.com/", "policy": {}}, settings)
+    # DEFAULT_MAX_PAGES, not 0/"unlimited" (F4).
+    assert policy["limits"]["max_pages"] == 100
+
+
+async def test_max_pages_zero_falls_back_to_default():
+    settings = CrawlerSettings()
+    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, settings)
+    assert policy["limits"]["max_pages"] == 100
+
+
+async def test_max_pages_clamped_to_upper_bound():
+    settings = CrawlerSettings()
+    policy = _payload_policy(
+        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}}, settings
+    )
+    assert policy["limits"]["max_pages"] == 2000
+
+
+async def test_max_pages_positive_preserved():
+    settings = CrawlerSettings()
+    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, settings)
+    assert policy["limits"]["max_pages"] == 7
+
+
+async def test_max_pages_zero_bounded_at_engine():
+    # Wide fixture: root links to 150 leaf pages. With max_pages=0 the crawl
+    # must be bounded (DEFAULT_MAX_PAGES=100), not crawl all 151 reachable pages.
+    pages = {
+        "/": (200, "<html>" + "".join(f'<a href="/c{i}">c</a>' for i in range(150)) + "</html>", "text/html"),
+    }
+    for i in range(150):
+        pages[f"/c{i}"] = (200, f"<html>child {i}</html>", "text/html")
+    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 0}}}
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    results = out["results"]
+    assert 1 < len(results) <= 100
+    # Without the bound it would have crawled root + 150 children = 151.
+    assert len(results) < 151
+
+
+class _FakeGate:
+    def __init__(self, mem=0.0, cpu=0.0):
+        self._mem = mem
+        self._cpu = cpu
+
+    def memory_ratio(self):
+        return self._mem
+
+    def cpu_ratio(self):
+        return self._cpu
+
+
+def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3):
+    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=max_concurrent_pages)
+
+
+class TestPolicyDerivation:
+    def test_browser_pool_reserve_subtracted_from_limit(self):
+        # 3 GiB limit, 2 browsers * 700 MiB reserve -> HTTP ceiling from remainder.
+        p = _policy()
+        assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
+        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes
+        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+        # browser tier is capped at pool_size * max_concurrent_pages
+        assert p.max_browser_concurrency == 2 * 3
+
+    def test_http_ceiling_capped_at_hard_max(self):
+        huge = _build_admission_policy(1024 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3)
+        assert huge.max_http_concurrency <= 512
+
+    def test_smaller_limit_yields_smaller_http_ceiling(self):
+        small = _policy(limit=1024 * 1024 * 1024)  # 1 GiB
+        big = _policy(limit=3 * 1024 * 1024 * 1024)
+        assert small.max_http_concurrency < big.max_http_concurrency
+
+
+class TestWeightedAdmission:
+    def test_headroom_from_most_contended_resource(self):
+        gate = _FakeGate(mem=0.3, cpu=0.8)
+        a = WeightedAdmission(gate, _policy())
+        # min(1-0.3, 1-0.8) = 0.2
+        assert a.headroom_fraction() == pytest.approx(0.2)
+
+    def test_http_capacity_scales_with_headroom(self):
+        gate = _FakeGate(mem=0.0, cpu=0.0)
+        a = WeightedAdmission(gate, _policy())
+        assert a.http_capacity() == a._p.max_http_concurrency
+        gate2 = _FakeGate(mem=0.5, cpu=0.5)
+        a2 = WeightedAdmission(gate2, _policy())
+        assert a2.http_capacity() == pytest.approx(a._p.max_http_concurrency * 0.5, rel=0.01)
+
+    async def test_admit_grants_all_when_headroom_full(self):
+        a = WeightedAdmission(_FakeGate(mem=0.0, cpu=0.0), _policy())
+        # Request exactly the tier ceiling so the claim ("grants everything
+        # asked while headroom is full") tracks the sizing default, whatever it is.
+        h, b = await a.admit(want_http=a._p.max_http_concurrency, want_browser=2)
+        assert h == a._p.max_http_concurrency
+        assert b == 2
+
+    async def test_admit_caps_browser_tier(self):
+        # Want more browsers than the tier allows; HTTP still granted.
+        a = WeightedAdmission(_FakeGate(mem=0.0, cpu=0.0), _policy())
+        h, b = await a.admit(want_http=10, want_browser=99)
+        assert b == a.browser_capacity()  # capped
+        assert h == 10
+
+    async def test_admit_shrinks_http_under_memory_pressure(self):
+        a = WeightedAdmission(_FakeGate(mem=0.9, cpu=0.0), _policy())
+        h, b = await a.admit(want_http=200, want_browser=0)
+        # headroom 0.1 -> http capacity ~10% of ceiling
+        assert h < 200
+        assert h > 0
+
+    async def test_admit_yields_briefly_when_fully_saturated(self):
+        # Saturated (headroom 0) with demand -> returns (0,0) after a short yield
+        # instead of parking the whole crawl indefinitely.
+        a = WeightedAdmission(_FakeGate(mem=1.0, cpu=1.0), _policy())
+        t0 = asyncio.get_event_loop().time()
+        h, b = await a.admit(want_http=5, want_browser=1)
+        elapsed = asyncio.get_event_loop().time() - t0
+        assert (h, b) == (0, 0)
+        assert 0 < elapsed < 1.0  # yielded, did not block forever
+
+
+class TestBrowserTierDoesNotDoubleScale:
+    """T9: the browser pool's RAM is reserved up front, so the tier must not
+    shrink against its own reserved footprint — only usage beyond the fraction
+    the pool sizing already assumed should yield browser capacity."""
+
+    def test_full_capacity_while_within_the_reserved_fraction(self):
+        # Browsers using exactly the fraction derive_browser_pool_size assumed
+        # is the steady state, not pressure.
+        a = WeightedAdmission(_FakeGate(mem=_BROWSER_RAM_FRACTION, cpu=0.0), _policy())
+        assert a.browser_capacity() == a._p.max_browser_concurrency
+
+    def test_decays_only_for_usage_beyond_the_reserved_fraction(self):
+        a = WeightedAdmission(_FakeGate(mem=_BROWSER_RAM_FRACTION + 0.2, cpu=0.0), _policy())
+        # 20 points of surplus usage out of a 50-point ramp to exhaustion -> 60%
+        # of the tier still admits.
+        assert a.browser_capacity() == pytest.approx(a._p.max_browser_concurrency * 0.6, abs=1)
+
+    def test_never_admits_when_saturated(self):
+        a = WeightedAdmission(_FakeGate(mem=1.0, cpu=0.0), _policy())
+        assert a.browser_capacity() == 0
+
+    def test_cpu_saturation_still_shrinks_the_browser_tier(self):
+        a = WeightedAdmission(_FakeGate(mem=0.0, cpu=1.0), _policy())
+        assert a.browser_capacity() == 0
+
+
+class TestHTTPTaskRamEstimate:
+    """T10: the per-HTTP-task estimate must cover a real task — a max-length
+    body plus the trafilatura/lxml parse state — or admission over-grants and
+    the box swaps. 12 MiB measured optimistic at the review's live scale."""
+
+    def test_default_covers_a_max_body_plus_parse_state(self):
+        # A 10 MiB body plus lxml/trafilatura working set is 40+ MiB in practice.
+        assert _HTTP_TASK_RAM_BYTES >= 48 * 1024 * 1024
+
+    def test_http_ceiling_uses_the_same_bytes_as_admission(self):
+        # Zero drift: the pool ceiling and the admission policy divide by the
+        # same per-task estimate, whatever the default is.
+        p = _policy()
+        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes
+        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+
+    def test_the_3gib_default_still_admits_a_working_floor(self):
+        # The minimal-deployment default (3 GiB, 2 browsers) must still admit
+        # enough concurrent HTTP fetches for hundreds of pages per minute.
+        p = _policy()
+        assert p.max_http_concurrency >= 16
