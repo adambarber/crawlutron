@@ -75,8 +75,12 @@ def test_body_size_middleware_drains_after_truncation():
     src_path = "app/api/middleware.py"
     with open(src_path) as f:
         source = f.read()
-    assert "drain_after_truncate" in source
-    assert "already_drained" in source
+    # The wrapper keeps awaiting the underlying receive() after the cap is hit
+    # (so a reading app keeps consuming the socket) instead of caching a final
+    # message, and every post-cap receive hands the app an empty final chunk.
+    body = extract_function_body(source, "_capped_receive")
+    assert "message = await original_receive()" in body
+    assert "if truncated:" in body
 
 
 # ---- C3 ----

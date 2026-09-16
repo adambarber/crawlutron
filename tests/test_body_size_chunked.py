@@ -28,12 +28,15 @@ def test_chunked_request_truncation_sets_connection_close():
 
 def test_chunked_request_drain_continues_after_truncation():
     """After truncation the receive() wrapper must keep draining
-    original_receive() so the ASGI server's socket buffer empties."""
+    original_receive() so the ASGI server's socket buffer empties, and must
+    never admit another byte (B5: ``truncated`` is sticky)."""
     with open("app/api/middleware.py") as f:
         source = f.read()
     body = extract_function_body(source, "_capped_receive")
-    assert "drain_after_truncate" in body
-    assert "already_drained" in body
+    # The wrapper still awaits the underlying receive on every call (drain), ...
+    assert "message = await original_receive()" in body
+    # ... and short-circuits at the top once the cap was breached.
+    assert "if truncated:" in body
 
 
 def test_chunked_request_cap_is_16_mib():

@@ -42,30 +42,30 @@ async def limit_request_body(request: Request, call_next):
     original_receive = request.receive
     bytes_delivered = 0
     truncated = False
-    drain_after_truncate = False
-    already_drained = False
 
     async def _capped_receive() -> dict[str, object]:
-        nonlocal bytes_delivered, truncated, drain_after_truncate, already_drained
+        nonlocal bytes_delivered, truncated
         message = await original_receive()
         if message.get("type") != "http.request":
             return message
+        # Stay truncated for the rest of the stream. The app was already handed
+        # a final (more_body=False) truncated chunk, and the truncating chunk is
+        # not charged to ``bytes_delivered``, so a later receive() computing
+        # ``remaining = cap - bytes_delivered`` could still see a positive budget
+        # and admit bytes past the declared cap (B5). Every receive past the cap
+        # returns an empty final chunk, which also keeps draining
+        # original_receive() so the ASGI server's socket buffer empties (C1/C4).
+        if truncated:
+            return {**message, "body": b"", "more_body": False}
         body = message.get("body", b"") or b""
         if not body:
             return message
-        if drain_after_truncate and not already_drained:
-            already_drained = not message.get("more_body", False)
-            return {**message, "body": b"", "more_body": False}
         remaining = _MAX_REQUEST_BODY_BYTES - bytes_delivered
         if remaining <= 0:
             truncated = True
-            drain_after_truncate = True
-            already_drained = not message.get("more_body", False)
             return {**message, "body": b"", "more_body": False}
         if len(body) > remaining:
             truncated = True
-            drain_after_truncate = True
-            already_drained = not message.get("more_body", False)
             return {**message, "body": body[:remaining], "more_body": False}
         bytes_delivered += len(body)
         return message
