@@ -72,6 +72,50 @@ def _make_engine_result(
     )
 
 
+def _terminal_engine_result(
+    *,
+    original_url: str,
+    normalized_url: str,
+    strategy: str,
+    status: str,
+    classification: str,
+    error: str | None = None,
+    diagnostics: dict | None = None,
+    http_status: int | None = None,
+    final_url: str | None = None,
+) -> EngineCrawlResult:
+    """Construct a terminal (no payload) EngineCrawlResult with one attempt.
+
+    The three terminal outcomes -- failed, blocked, skipped -- differ only in
+    the status string and how the error defaults: a blocked result reports the
+    classification itself as the reason and a skipped result never carries a
+    final URL or status. The thin wrappers below pin those per-status defaults
+    so no call site has to spell them out.
+    """
+    if error is None:
+        error = classification
+    attempt = CrawlStrategyAttempt(
+        strategy=strategy,  # type: ignore[arg-type]
+        status=status,
+        classification=classification,
+        http_status=http_status,
+        content_type=None,
+        elapsed_ms=0,
+        error=error,
+    )
+    return _make_engine_result(
+        original_url=original_url,
+        normalized_url=normalized_url,
+        final_url=final_url,
+        status=status,
+        classification=classification,
+        attempt=attempt,
+        http_status=http_status,
+        error=error,
+        diagnostics=diagnostics or {},
+    )
+
+
 def _failed_engine_result(
     *,
     original_url: str,
@@ -84,25 +128,16 @@ def _failed_engine_result(
     final_url: str | None = None,
 ) -> EngineCrawlResult:
     """Construct a failed EngineCrawlResult with a single attempt."""
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
-        status="failed",
-        classification=classification,
-        http_status=http_status,
-        content_type=None,
-        elapsed_ms=0,
-        error=error,
-    )
-    return _make_engine_result(
+    return _terminal_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
-        final_url=final_url,
+        strategy=strategy,
         status="failed",
         classification=classification,
-        attempt=attempt,
-        http_status=http_status,
         error=error,
-        diagnostics=diagnostics or {},
+        diagnostics=diagnostics,
+        http_status=http_status,
+        final_url=final_url,
     )
 
 
@@ -116,25 +151,14 @@ def _blocked_engine_result(
     final_url: str | None = None,
 ) -> EngineCrawlResult:
     """Construct a blocked EngineCrawlResult with a single attempt (status=blocked)."""
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
-        status="blocked",
-        classification=classification,
-        http_status=http_status,
-        content_type=None,
-        elapsed_ms=0,
-        error=classification,
-    )
-    return _make_engine_result(
+    return _terminal_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
-        final_url=final_url,
+        strategy=strategy,
         status="blocked",
         classification=classification,
-        attempt=attempt,
         http_status=http_status,
-        error=classification,
-        diagnostics={},
+        final_url=final_url,
     )
 
 
@@ -148,25 +172,14 @@ def _skipped_engine_result(
     diagnostics: dict | None = None,
 ) -> EngineCrawlResult:
     """Construct a skipped EngineCrawlResult (e.g., robots_disallowed)."""
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
-        status="skipped",
-        classification=classification,
-        http_status=None,
-        content_type=None,
-        elapsed_ms=0,
-        error=error,
-    )
-    return _make_engine_result(
+    return _terminal_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
-        final_url=None,
+        strategy=strategy,
         status="skipped",
         classification=classification,
-        attempt=attempt,
-        http_status=None,
         error=error,
-        diagnostics=diagnostics or {},
+        diagnostics=diagnostics,
     )
 
 
