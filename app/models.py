@@ -35,6 +35,12 @@ Classification = Literal[
     "network_error",
     "connection_error",
     "http_status_error",
+    # Fetch-failure codes the HTTP strategy's error classifier emits; they are
+    # CrawlClassification members (see app.api_models) so they survive the
+    # strict enum field at response shaping (H3).
+    "payload_too_large",
+    "too_many_redirects",
+    "http_error",
     "value_error",
     "tls_error",
     "dns_error",

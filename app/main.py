@@ -146,6 +146,13 @@ if FastAPI is not None:
         await close_async_http_client()
         await close_cffi_session()
         await close_browser_pool()
+        # The persistent document-extraction subprocesses are the last pool:
+        # they are lazy and never touched by the shutdown above, so without
+        # this every markitdown worker (and its memory and pipes) outlived the
+        # process's own shutdown and was only reaped by the test fixture.
+        from .crawl.extraction import _shutdown_doc_extraction_executor
+
+        await _shutdown_doc_extraction_executor()
         _resource_gate.close()
         # Symmetry with set_utilization_sampler(...): release the closed
         # gate's ratio sampler so nothing dereferences it post-shutdown.

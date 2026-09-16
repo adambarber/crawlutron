@@ -40,22 +40,34 @@ class _PooledFake:
     ``close`` yields to the loop first, like a real socket teardown, so a close
     scheduled on a dying loop cannot be relied on to finish -- that is exactly
     the hole the pending-close queue exists to cover.
+
+    ``closer`` names the teardown attribute the real kind publishes, and the
+    shape differences between the two kinds are part of what is being pinned:
+    httpx exposes ``aclose`` plus an ``is_closed`` flag, while curl_cffi's
+    ``AsyncSession`` exposes ``close`` and NO ``is_closed`` at all. The cffi fake
+    must therefore not grow an ``is_closed`` -- doing so hides the fact that the
+    shared reaper's ``getattr(client, "is_closed", True)`` guard silently treats
+    every real session as already closed (D2). Each descriptor's own ``is_closed``
+    predicate is what decides reuse-safety.
     """
 
-    def __init__(self, closer: str) -> None:
+    def __init__(self, closer: str, *, publishes_is_closed: bool) -> None:
         setattr(self, closer, self._closed)
         self.closed = False
-        self.is_closed = False
         self._bound_loop = None
+        if publishes_is_closed:
+            # Only the kind that really has the flag may carry it.
+            self.is_closed = False
 
     async def _closed(self) -> None:
         await asyncio.sleep(0.02)
         self.closed = True
-        self.is_closed = True
+        if hasattr(self, "is_closed"):
+            self.is_closed = True
 
 
 def _build_httpx_fake(settings=None) -> _PooledFake:
-    client = _PooledFake("aclose")
+    client = _PooledFake("aclose", publishes_is_closed=True)
     try:
         client._bound_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -64,7 +76,9 @@ def _build_httpx_fake(settings=None) -> _PooledFake:
 
 
 def _build_cffi_fake(settings=None) -> _PooledFake:
-    session = _PooledFake("close")
+    # curl_cffi's AsyncSession publishes no is_closed attribute, so neither may
+    # this fake: see the class docstring.
+    session = _PooledFake("close", publishes_is_closed=False)
     try:
         session._bound_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -138,25 +152,73 @@ def test_queued_superseded_client_is_closed_by_the_next_drain(builder, getter, s
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
 def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fake, monkeypatch):
     """Re-superseding the same client must not double-queue it, and the backlog
-    must stop growing at the cap (a stream of loop changes cannot leak memory)."""
-    client = fake()
-    cap = http_mod._PENDING_CLIENT_CLOSE_MAX
-    for _ in range(3):
-        http_mod._queue_superseded_close(client)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        assert list(http_mod._PENDING_CLIENT_CLOSE).count(client) == 1
+    must stop growing at the cap (a stream of loop changes cannot leak memory).
 
-    extras = [fake() for _ in range(cap + 5)]
-    for extra in extras:
-        http_mod._queue_superseded_close(extra)
+    Driven through the real getter for each parametrized kind rather than by
+    calling the queue helper directly: the property under test is that *this
+    singleton's* supersession path dedupes and respects the cap, so a test that
+    never called the getter would prove nothing about the cffi parameter it is
+    nominally exercising. Each acquisition runs on its own freshly-created loop,
+    so every handover is a genuine loop change and therefore a genuine
+    supersede; the builder is a cycle, which lets the same client come round
+    again and be superseded a second time while still queued.
+    """
+    cap = http_mod._PENDING_CLIENT_CLOSE_MAX
+    built: list[_PooledFake] = []
+
+    def _build(*args, **kwargs):
+        instance = fake()
+        built.append(instance)
+        return instance
+
+    monkeypatch.setattr(http_mod, builder, _build)
+
+    def acquire_on_fresh_loop() -> _PooledFake:
+        loop = asyncio.new_event_loop()
+        try:
+
+            async def _get():
+                return getattr(http_mod, getter)()
+
+            return loop.run_until_complete(_get())
+        finally:
+            loop.close()
+
+    acquired = [acquire_on_fresh_loop() for _ in range(cap + 8)]
+
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
         queued = list(http_mod._PENDING_CLIENT_CLOSE)
+
+    # Every acquisition ran on its own loop, so each one superseded its
+    # predecessor: cap+7 supersessions must have been squeezed down to the cap,
+    # keeping the most recent ones.
     assert len(queued) <= cap, f"pending-close backlog grew past the cap: {len(queued)} > {cap}"
-    assert queued[-1] is extras[-1], "the newest superseded client must be retained"
+    assert acquired[-1] not in queued, "the current pooled client must not be queued for close"
+    assert acquired[-2] in queued, f"{getter} dropped the client it just superseded"
+    assert queued[-1] is acquired[-2], f"{getter} evicted the newest superseded client first"
+    assert len(set(id(item) for item in queued)) == len(queued), (
+        f"{getter} queued the same superseded client twice: dedupe is not holding"
+    )
+    for item in queued:
+        assert queued.count(item) == 1, f"{getter} double-queued a superseded client"
+
+    # Dedupe specifically: the queue helper is the thing that promises it, so
+    # re-presenting an already-queued client through the same kind must not add
+    # a second reference (a double-entry would let one client be closed twice
+    # and would eat two cap slots).
+    still_queued = queued[0]
+    before = len(queued)
+    assert http_mod._queue_superseded_close(still_queued) is None
+    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
+        after = list(http_mod._PENDING_CLIENT_CLOSE)
+    assert len(after) == before, f"{getter} double-queued a client already awaiting close"
+    assert after.count(still_queued) == 1
 
 
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter, slot, fake, monkeypatch, real_sleeps):
+def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(
+    builder, getter, slot, fake, monkeypatch, real_sleeps
+):
     """Inverse case: the queue must not have replaced the immediate close.
 
     When the handover happens on a loop that is still live -- the normal
@@ -181,6 +243,7 @@ def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter
 
     first, second = asyncio.run(_scenario())
     assert second is not first
+    assert getattr(http_mod, slot) is second, f"{getter} did not publish the rebuilt client in {slot}"
     assert first.closed is True, f"{getter} superseded a client without closing it on the live loop"
 
 

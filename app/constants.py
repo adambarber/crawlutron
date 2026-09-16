@@ -142,6 +142,20 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
     **dict.fromkeys(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS, "blocked"),
     # Retrieved, but nothing a consumer can use.
     **dict.fromkeys(FAILED_CLASSIFICATIONS, "failed"),
+    # Fetch-level failure codes the HTTP strategy's error classifier emits
+    # (H3). These are known-dead outcomes, not unclassified blocks: the
+    # strategy already reported status "failed" for the URL, and these must
+    # not fall through to the "blocked" default, which would disagree with
+    # the fetcher's own status and keep a dead page eligible for re-serve.
+    # Only the three codes this defect added are listed here; the older
+    # error codes (network_error/dns_error/...) pre-date this table's
+    # completeness and their correct statuses are nuanced (e.g.
+    # robots_disallowed is "disallowed", private_network_target is a policy
+    # refusal), so they are deliberately left to their documented default
+    # rather than being bulk-flipped to "failed" here.
+    "payload_too_large": "failed",
+    "too_many_redirects": "failed",
+    "http_error": "failed",
 }
 
 # Unknown-classification default: "blocked".

@@ -258,39 +258,66 @@ def _acquire_doc_worker() -> _DocWorker | None:
     document extraction in the process.
     """
     global _DOC_POOL
-    deadline = time.monotonic() + _EXTRACTION_DOC_ACQUIRE_TIMEOUT
-    with _POOL_LOCK:
-        if _DOC_POOL is None:
-            _DOC_POOL = []
-        want = _doc_extraction_worker_count()
-        while True:
-            for worker in _DOC_POOL:
-                if not worker.busy and not worker.retired and worker.proc.is_alive():
-                    worker.busy = True
-                    return worker
-            for index, worker in enumerate(_DOC_POOL):
-                if not worker.busy and not worker.proc.is_alive():
-                    _retire_doc_worker(worker)
+    # Dead slots discovered here are replaced under the lock but TERMINATED
+    # after it: the slot swap is instant, while the kill-escalation a
+    # retirement runs can take ~10s (SIGTERM -> join(5) -> SIGKILL -> join(5)).
+    # Running that under _POOL_LOCK would block every other acquisition and
+    # every release for the whole window. A replaced slot is unreachable from
+    # the pool the instant it is swapped out, so deferring only its teardown is
+    # safe; the list is drained in the finally below, before this returns.
+    dead_slots: list[_DocWorker] = []
+    try:
+        with _POOL_LOCK:
+            if _DOC_POOL is None:
+                _DOC_POOL = []
+            want = _doc_extraction_worker_count()
+            # The budget starts once the lock is actually held. A caller queued
+            # behind a slow in-lock operation would otherwise pay that wait out
+            # of a budget it never consumed, and could give up on a pool that
+            # had a free slot the whole time it was blocked.
+            deadline = time.monotonic() + _EXTRACTION_DOC_ACQUIRE_TIMEOUT
+            while True:
+                for worker in _DOC_POOL:
+                    if not worker.busy and not worker.retired and worker.proc.is_alive():
+                        worker.busy = True
+                        return worker
+                for index, worker in enumerate(_DOC_POOL):
+                    if not worker.busy and not worker.proc.is_alive():
+                        fresh = _spawn_doc_worker()
+                        fresh.busy = True
+                        _DOC_POOL[index] = fresh
+                        dead_slots.append(worker)
+                        return fresh
+                # A retired-but-undead slot (is_alive() stays True even after
+                # SIGKILL -- pathological) is skipped by both scans: the handout
+                # loop requires ``not retired`` and this respawn loop requires
+                # ``not is_alive()``. Nothing in the normal path can ever
+                # recover it, so it must not count against the size budget or
+                # the pool is permanently one worker short and every later
+                # acquire degrades to None.
+                usable = sum(1 for each in _DOC_POOL if not each.retired)
+                if usable < want:
                     fresh = _spawn_doc_worker()
                     fresh.busy = True
-                    _DOC_POOL[index] = fresh
+                    _DOC_POOL.append(fresh)
                     return fresh
-            if len(_DOC_POOL) < want:
-                fresh = _spawn_doc_worker()
-                fresh.busy = True
-                _DOC_POOL.append(fresh)
-                return fresh
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                logger.warning(
-                    "extraction_document_pool_unavailable",
-                    extra={"slots": len(_DOC_POOL), "workers": want},
-                )
-                return None
-            # Still a condition wait, not a poll loop: a release notifies and
-            # wakes immediately. The bounded re-check exists only so a stuck
-            # busy flag (nothing will ever notify) expires on its own.
-            _POOL_LOCK.wait(timeout=min(remaining, _DOC_ACQUIRE_RECHECK_SECONDS))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "extraction_document_pool_unavailable",
+                        extra={"slots": len(_DOC_POOL), "workers": want},
+                    )
+                    return None
+                # Still a condition wait, not a poll loop: a release notifies and
+                # wakes immediately. The bounded re-check exists only so a stuck
+                # busy flag (nothing will ever notify) expires on its own.
+                _POOL_LOCK.wait(timeout=min(remaining, _DOC_ACQUIRE_RECHECK_SECONDS))
+    finally:
+        # Teardown of any slot swapped out above, now that _POOL_LOCK is free.
+        # ``_retire_doc_worker`` marks retired, terminates and reaps; this path
+        # keeps the same retirement code as the timeout/child-death call sites.
+        for worker in dead_slots:
+            _retire_doc_worker(worker)
 
 
 def _reset_doc_pool() -> None:

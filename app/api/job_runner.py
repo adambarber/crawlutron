@@ -225,12 +225,23 @@ async def _run_job(
 
             failed = 0
             # Index each item by every URL it is known by (final_url,
-            # normalized_url, original_url), first writer winning on
-            # collision. The frontier carries the PRE-redirect URL while the
-            # engine reports final_url, so a single-key index misses a
-            # redirected page -> outcome "transient" -> re-queued and
-            # re-crawled forever, then counted failed and dropped without its
-            # content ever reaching job.results (H2).
+            # normalized_url, original_url). First writer WINS on collision
+            # (``key not in resolved``), deliberately not last-writer-wins:
+            # items arrive in submission order, so the first claimant of a key
+            # is the result that was actually crawled for that URL. Two
+            # distinct results can share a spelling -- one item's final_url can
+            # be another's original_url across a redirect -- and letting the
+            # later one overwrite would clobber the authoritative outcome: a
+            # real success flips to a failure (or vice versa), job counts drift
+            # from what was crawled, and a transient relabel re-queues a page
+            # that was already answered.
+            #
+            # The union itself exists because the frontier carries the
+            # PRE-redirect URL while the engine reports final_url, so a
+            # single-key index misses a redirected page -> outcome
+            # "transient" -> re-queued and re-crawled forever, then counted
+            # failed and dropped without its content ever reaching job.results
+            # (H2).
             resolved: dict[str, dict[str, Any]] = {}
             for it in items:
                 for key in (

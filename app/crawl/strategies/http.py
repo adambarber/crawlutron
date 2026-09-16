@@ -17,6 +17,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
+from http.cookiejar import CookieJar
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -176,6 +177,25 @@ def _default_settings() -> CrawlerSettings:
     return CrawlerSettings.from_mapping()
 
 
+class _NoStoreCookieJar(CookieJar):
+    """A cookie jar that never stores or replays anything (C2).
+
+    The long-lived httpx client would otherwise accumulate every Set-Cookie and
+    replay domain-matching cookies on later requests independently of the
+    namespaced ``_GLOBAL_COOKIE_JAR`` -- the same cross-tenant leak the cffi
+    session's ``discard_cookies`` closes. httpx has no such switch and its
+    ``Client.cookies`` property wraps any assigned value in a fresh
+    ``httpx.Cookies``, so the jar must be inert at construction:
+    ``httpx.Cookies`` adopts a passed-in ``CookieJar`` as its own ``jar``
+    rather than copying it, which is why this override survives the wrap. With
+    nothing stored there is nothing to replay and nothing to clobber the
+    namespaced ``Cookie:`` header the fetcher sets per request.
+    """
+
+    def extract_cookies(self, response, request=None):
+        return None
+
+
 def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient with configurable connection pool."""
     if settings is None:
@@ -194,6 +214,9 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
             keepalive_expiry=settings.http_keepalive_expiry,
         ),
         headers={"User-Agent": DEFAULT_USER_AGENT},
+        # C2: an inert jar, so cookies only ever flow through the namespaced
+        # _GLOBAL_COOKIE_JAR chokepoint.
+        cookies=_NoStoreCookieJar(),
     )
     try:
         client._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
@@ -227,6 +250,12 @@ _PENDING_CLIENT_CLOSE: list[Any] = []
 _PENDING_CLIENT_CLOSE_MAX = 32
 _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
 
+# Close tasks scheduled from synchronous context. asyncio keeps only a weak
+# reference to a running task, so without a strong owner a teardown scheduled
+# during a lock-held rebuild can be garbage collected before it runs to
+# completion. Entries are evicted by each task's own done callback.
+_INFLIGHT_CLIENT_CLOSES: set[asyncio.Future] = set()
+
 
 def _queue_superseded_close(old_client: Any) -> Any | None:
     """Track one superseded pooled client; return whatever the cap displaced.
@@ -246,29 +275,60 @@ def _queue_superseded_close(old_client: Any) -> Any | None:
     return stale_to_release
 
 
-def _release_dropped_client(stale_to_release: Any) -> None:
-    """Best-effort synchronous release of a client the cap had to displace.
+def _release_dropped_client(
+    stale_to_release: Any, *, is_closed: Callable[[Any], bool] | None = None
+) -> None:
+    """Best-effort release of a client the cap had to displace.
 
     Runs outside ``_PENDING_CLIENT_CLOSE_LOCK`` so a potentially slow
     socket-close cannot block other clients entering that critical section
     (adversarial review F-pending-client-close B-minor
-    lock-held-during-close). ``httpx.AsyncClient.close()`` is synchronous and
-    releases the httpcore pool without the async teardown path, so it also
-    works from a sync context and from inside a dying loop. A client whose only
-    close is a coroutine cannot be awaited from here: scheduling it would leak
-    a never-awaited coroutine, so its reference is simply dropped and GC
-    reclaims it once the owning loop is gone. Never fatal (e.g. a
-    half-constructed client).
+    lock-held-during-close).
+
+    What this actually does, per context:
+
+      * a synchronous ``close()`` is called directly when the kind publishes one
+        (neither pooled kind does today, but a future one may);
+      * otherwise, when an event loop is running, the async teardown is
+        scheduled on it through :func:`_schedule_client_close`, so the sockets
+        really are released instead of the reference being abandoned. Pass the
+        owning descriptor's ``is_closed`` so the same kind decides here as it
+        does on the eager path; without a descriptor the check falls back to
+        "closed only if the client says so".
+      * otherwise (no loop running) there is nothing that can run a coroutine,
+        so the reference is dropped and GC reclaims it once the owning loop is
+        gone. That is the only case that still degrades to a drop, and it is
+        reachable only when the cap fires from synchronous context.
+
+    Both pooled kinds expose only a coroutine teardown -- ``httpx.AsyncClient``
+    publishes ``aclose`` and no ``close``, and ``curl_cffi``'s ``AsyncSession.
+    close`` is itself a coroutine function -- so the earlier "synchronous close
+    that works from a dying loop" claim was not true of either: the guard below
+    used to reject coroutine closes and return, making the whole function a
+    no-op. Scheduling is safe here (unlike awaiting): the displaced client is no
+    longer reachable from the queue, and a scheduled-but-cancelled teardown is
+    still reclaimed by GC exactly as a dropped reference was.
+
+    Note this path is shared across kinds: because one queue holds both pooled
+    kinds under one cap, cffi churn can displace a queued httpx client and vice
+    versa. Each displaced client still gets the treatment above, so cross-kind
+    eviction cannot orphan a socket -- but a burst of one kind does crowd out
+    how many of the other can wait for a drain, which is why the release here is
+    real rather than a reference drop.
     """
     if stale_to_release is None:
         return
     close = getattr(stale_to_release, "close", None)
-    if close is None or asyncio.iscoroutinefunction(close):
+    if close is not None and not asyncio.iscoroutinefunction(close):
+        try:
+            close()
+        except Exception:
+            pass
         return
-    try:
-        close()
-    except Exception:
-        pass
+    _schedule_client_close(
+        stale_to_release,
+        is_closed=_client_is_closed if is_closed is None else is_closed,
+    )
 
 
 async def _drain_pending_client_closes() -> None:
@@ -289,22 +349,51 @@ async def _drain_pending_client_closes() -> None:
         await _safe_aclose(client)
 
 
-def _schedule_client_close(client) -> None:
+def _client_is_closed(client: Any) -> bool:
+    """Whether a pooled client reports itself closed, when it can say so.
+
+    Only used as a last-resort defensive check for callers that have no
+    descriptor to ask. An absent ``is_closed`` means "this kind cannot say",
+    which is NOT evidence of being closed -- treating it as such is what
+    silently disabled the eager close for every curl_cffi session (D2). So this
+    returns False for unknown shapes and lets the caller's own predicate decide.
+    """
+    return bool(getattr(client, "is_closed", False))
+
+
+def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
     """Best-effort asynchronous close of a superseded pooled HTTP client.
 
     ``get_async_http_client`` runs within an event loop, so we schedule the
     async ``aclose`` on the running loop instead of blocking. This prevents
     leaking the old client's sockets/file descriptors when the loop changes
     (e.g. repeated ``asyncio.run`` calls).
+
+    ``is_closed`` is required rather than inferred: only the descriptor that
+    owns a pooled kind knows how that kind reports being closed (httpx has a
+    flag, curl_cffi has nothing). Defaulting the question to "no attribute
+    means closed" made every session look already finished and skipped this
+    call entirely.
     """
-    if client is None or getattr(client, "is_closed", True):
+    if client is None or is_closed(client):
         return
     try:
-        asyncio.ensure_future(_safe_aclose(client))
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No running loop available to schedule on; nothing safe to do. The
+        # No running loop to schedule on. ``asyncio.ensure_future`` would not
+        # raise here -- with no current loop it silently builds one, parks the
+        # task on it, and leaves a coroutine that is never awaited (a
+        # DeprecationWarning plus an "Exception ignored in: <coroutine object
+        # _safe_aclose>" at GC). Declining to schedule is the honest no-op: the
         # queued reference is what guarantees the eventual close.
-        pass
+        return
+    task = loop.create_task(_safe_aclose(client))
+    # asyncio keeps only a weak reference to a running task, so a teardown
+    # scheduled from a synchronous rebuild could be garbage collected before it
+    # finished -- reproducing the leak this function exists to prevent. The done
+    # callback is what evicts again, so this set cannot grow without bound.
+    _INFLIGHT_CLIENT_CLOSES.add(task)
+    task.add_done_callback(_INFLIGHT_CLIENT_CLOSES.discard)
 
 
 class _LoopBoundPooledClient:
@@ -317,14 +406,20 @@ class _LoopBoundPooledClient:
     asynchronous. The only reliable pattern is the one implemented here:
 
       1. hand the superseded client to the bounded, deduped pending-close queue
-         (:func:`_queue_superseded_close`), synchronously releasing whatever the
-         cap displaced, so the reference is tracked even with no loop running;
-      2. also schedule a best-effort close on the current loop
+         (:func:`_queue_superseded_close`) so the reference is tracked even with
+         no loop running, and release whatever the cap displaced
+         (:func:`_release_dropped_client`) -- a synchronous close if that kind
+         publishes one, otherwise a close scheduled on the running loop;
+       2. also schedule a best-effort close on the current loop
          (:func:`_schedule_client_close`) for the case where the rebuild happens
          on a live loop;
-      3. let the next fetch on a live loop drain the queue
+       3. let the next fetch on a live loop drain the queue
          (:func:`_drain_pending_client_closes`) -- that drain is what actually
          releases the sockets once step 2 loses the race with loop shutdown.
+
+    Steps 1 and 2 are gated by this descriptor's ``is_closed`` predicate, never
+    by probing an attribute name: only the owning kind knows how it reports
+    being finished, and curl_cffi's session reports it in no way at all.
 
     Both pooled singletons are descriptors of this one lifecycle so they cannot
     drift apart again: the cffi copy stopped at step 2 and leaked one TLS
@@ -366,13 +461,13 @@ class _LoopBoundPooledClient:
 
     def _supersede(self, superseded: Any) -> None:
         """Track and best-effort-close a client that is being replaced."""
-        _release_dropped_client(_queue_superseded_close(superseded))
-        # ``_schedule_client_close`` guards on an ``is_closed`` attribute that
-        # only httpx publishes, so the descriptor decides reuse-safety for its
-        # own kind: without this a curl_cffi session (no such attribute) would
-        # be treated as already closed and never closed eagerly.
+        _release_dropped_client(_queue_superseded_close(superseded), is_closed=self.is_closed)
+        # The descriptor decides reuse-safety for its own kind: curl_cffi's
+        # session publishes no ``is_closed`` flag, so a shared attribute probe
+        # with a "missing means closed" default would classify every session as
+        # already finished and never close it eagerly.
         if not self.is_closed(superseded):
-            _schedule_client_close(superseded)
+            _schedule_client_close(superseded, is_closed=self.is_closed)
 
     def _rebuild(self, settings: CrawlerSettings | None, superseded: Any) -> Any:
         """Build the replacement, then release the old client. Lock held."""
@@ -467,7 +562,17 @@ def _build_cffi_session() -> Any:
     """
     import curl_cffi.requests as cffi_requests
 
-    session = cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET)
+    # discard_cookies=True (C2): the session ships a requests-compatible jar
+    # that would otherwise absorb every Set-Cookie and replay domain-matching
+    # cookies on later requests INDEPENDENTLY of the namespaced
+    # _GLOBAL_COOKIE_JAR -- the exact cross-tenant leak cookie_namespace exists
+    # to prevent -- and a replayed jar can also clobber the namespaced
+    # Cookie: header the fetcher builds per request. With discarding on, the
+    # jar is born empty and stays empty, so cookies flow only through the
+    # namespaced chokepoint: out via _cookie_header_for_url, in via
+    # _store_set_cookies. Sending is unaffected; curl still honors the Cookie
+    # header we set explicitly.
+    session = cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True)
     try:
         session._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
     except RuntimeError:
@@ -1074,46 +1179,59 @@ async def _default_cffi_fetcher(
             # LOW_SPEED abort lands as a queue item but the wrapper wedges
             # before delivering it). Reading the queue keeps the abort
             # prompt and the failure reraise unblocked (H1).
-            while True:
-                # Bound the wait PER CHUNK, not per response (N-5): this
-                # mirrors httpx's read-timeout semantics -- an inter-chunk
-                # gap limit. A slow-drip origin (one byte per interval)
-                # can keep the stream alive up to max_content_length; the
-                # per-URL budget above bounds the total. Do not "fix"
-                # this into a total deadline without also bounding drips.
-                # queue.get() is pure asyncio, so wait_for cancellation is
-                # safe here (unlike cancelling curl's internal machinery).
-                try:
-                    chunk = await asyncio.wait_for(
-                        response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
-                    )
-                except TimeoutError as error:
-                    # Stall: release the handle WITHOUT awaiting. aclose()
-                    # joins the producer task, which is exactly the wedged
-                    # task being escaped; awaiting it hangs like the old
-                    # aiter_content() wrapper did (H1). A scheduled close
-                    # reclaims the handle; the session client bounds any leak.
+            #
+            # Every exit out of this loop except STREAM_END is an abandon, and
+            # an abandoned handle is never reclaimed on its own now that the
+            # session is shared per loop: the error re-raise below and a
+            # cancellation of the queue wait (the engine's per-URL budget
+            # cancels in-flight fetches routinely) both used to leave it busy.
+            # ``stream_completed`` therefore gates a release-on-any-exit in the
+            # finally, using the same non-blocking path the stall and cap
+            # branches already used -- awaiting aclose here would join the
+            # hostile producer being escaped (H1).
+            stream_completed = False
+            try:
+                while True:
+                    # Bound the wait PER CHUNK, not per response (N-5): this
+                    # mirrors httpx's read-timeout semantics -- an inter-chunk
+                    # gap limit. A slow-drip origin (one byte per interval)
+                    # can keep the stream alive up to max_content_length; the
+                    # per-URL budget above bounds the total. Do not "fix"
+                    # this into a total deadline without also bounding drips.
+                    # queue.get() is pure asyncio, so wait_for cancellation is
+                    # safe here (unlike cancelling curl's internal machinery).
+                    try:
+                        chunk = await asyncio.wait_for(
+                            response.queue.get(), timeout=max(timeout_seconds + 5.0, 10.0)
+                        )
+                    except TimeoutError as error:
+                        # Stall: release the handle WITHOUT awaiting. aclose()
+                        # joins the producer task, which is exactly the wedged
+                        # task being escaped; awaiting it hangs like the old
+                        # aiter_content() wrapper did (H1). A scheduled close
+                        # reclaims the handle; the session client bounds any leak.
+                        raise TimeoutError("cffi stream queue stalled") from error
+                    if isinstance(chunk, RequestException):
+                        raise chunk
+                    if chunk is STREAM_END:
+                        stream_completed = True
+                        break
+                    raw.extend(chunk)
+                    if len(raw) > max_content_length:
+                        # Mid-stream abandon: a 413 out of the loop is still an
+                        # abandon, and the producer may be a hostile drip --
+                        # never wait on it. The finally releases the handle.
+                        return HttpFetchResult(
+                            url=url,
+                            final_url=current_url,
+                            status_code=413,
+                            headers={key.lower(): value for key, value in response.headers.items()},
+                            body=b"",
+                            elapsed_ms=elapsed_ms,
+                        )
+            finally:
+                if not stream_completed:
                     _release_stream_noblock(response)
-                    raise TimeoutError("cffi stream queue stalled") from error
-                if isinstance(chunk, RequestException):
-                    raise chunk
-                if chunk is STREAM_END:
-                    break
-                raw.extend(chunk)
-                if len(raw) > max_content_length:
-                    # Mid-stream abandon: same non-blocking release as the
-                    # stall path (awaiting aclose on a live producer is
-                    # safe pre-consumption, but here the producer may be a
-                    # hostile drip -- never wait on it).
-                    _release_stream_noblock(response)
-                    return HttpFetchResult(
-                        url=url,
-                        final_url=current_url,
-                        status_code=413,
-                        headers={key.lower(): value for key, value in response.headers.items()},
-                        body=b"",
-                        elapsed_ms=elapsed_ms,
-                    )
             # STREAM_END reached: the producer is done, so awaiting the close
             # is safe (unlike the stall/abandon paths above) and required now
             # that the session is shared -- the per-request `async with` used

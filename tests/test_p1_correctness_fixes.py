@@ -279,6 +279,11 @@ class TestM6WebhookValidationOffLoop:
     whole FastAPI loop. Crawl targets already offload the identical resolution
     via ``_build_pinned_request_async`` (a dedicated dns-resolve thread pool);
     webhook validation must reuse that off-thread path, not a second one.
+
+    D3 is the delivery-path twin: ``deliver_pinned_webhook`` re-parses through
+    the same chokepoint to close the validation->delivery TOCTOU, and that
+    parse ran inline too -- offloading validation while leaving delivery on the
+    loop would still stall every webhook callback.
     """
 
     async def test_post_webhook_validates_off_the_event_loop(self, monkeypatch):
@@ -308,6 +313,74 @@ class TestM6WebhookValidationOffLoop:
             )
             assert thread.name.startswith("dns-resolve"), (
                 f"validation did not reuse the dns-resolve pool (ran on {thread.name!r})"
+            )
+
+    async def test_deliver_pinned_webhook_parses_off_the_event_loop(self, monkeypatch):
+        """D3: the delivery parse must also leave the event loop.
+
+        Unlike the validation test above, delivery is NOT mocked away: the
+        whole point is that ``deliver_pinned_webhook`` itself reaches
+        ``SafeUrl.parse(pin=True)``. Only the network POST is stubbed, so a
+        parse left inline resolves on the loop thread and this fails.
+        """
+        import threading
+
+        from app.api.webhooks import deliver_pinned_webhook
+
+        block_private_targets(monkeypatch)
+        resolver_threads: list[threading.Thread] = []
+
+        def spy_getaddrinfo(host, *args, **kwargs):
+            resolver_threads.append(threading.current_thread())
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", spy_getaddrinfo)
+
+        # Stub only the HTTP client: SafeUrl.parse + connect() must still run,
+        # and connect() is pure (no I/O), so no network call is attempted.
+        delivered: list[tuple[str, str]] = []
+
+        class _FakeStreamResponse:
+            """A webhook response with no body: ``read_capped_async`` drains nothing."""
+
+            async def aiter_bytes(self):
+                for _ in ():
+                    yield b""
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc_info):
+                return False
+
+            def stream(self, method, url, **kwargs):
+                delivered.append((method, str(url)))
+                return _FakeStreamResponse()
+
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        await deliver_pinned_webhook("http://public.example.com/cb", b"{}")
+
+        assert delivered, "delivery never ran; the test is not exercising the delivery path"
+        assert resolver_threads, "socket.getaddrinfo was never called during delivery"
+        loop_thread = threading.current_thread()
+        for thread in resolver_threads:
+            assert thread is not loop_thread, (
+                f"delivery resolved DNS on the event-loop thread {thread.name!r}; "
+                "it must run on a dns-resolve worker thread"
+            )
+            assert thread.name.startswith("dns-resolve"), (
+                f"delivery did not reuse the dns-resolve pool (ran on {thread.name!r})"
             )
 
     async def test_validate_webhook_url_async_rejects_private(self, monkeypatch):

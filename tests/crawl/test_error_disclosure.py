@@ -67,3 +67,78 @@ async def test_http_strategy_result_hides_arbitrary_exception():
     assert "error_detail" not in res.diagnostics
     serialized = json.dumps(res.diagnostics, default=str)
     assert "/app/secret/path" not in serialized
+
+
+# H3: one representative exception per branch of _classify_error_code, paired
+# with the stable code that branch emits. Every one of these codes is stored
+# verbatim into CrawlStrategyAttempt.classification.
+_ERROR_CODE_CASES = (
+    (DecompressionTooLargeError("big"), "payload_too_large"),
+    (httpx.TooManyRedirects("loop"), "too_many_redirects"),
+    (httpx.HTTPError("base httpx failure"), "http_error"),
+    # Inverse cases: codes that were already valid enum members must stay that
+    # way -- extending the taxonomy must not regress them.
+    (httpx.ConnectError("down"), "connection_error"),
+    (ValueError("bad"), "value_error"),
+    (RuntimeError("unknown"), "network_error"),
+)
+
+# The three codes H3 adds to the taxonomy: known-dead fetch outcomes that must
+# land in the ONE status table (and as "failed", matching the status the
+# strategy already reported) instead of falling through to the default.
+_NEW_ERROR_CODES = (
+    "payload_too_large",
+    "too_many_redirects",
+    "http_error",
+)
+
+
+class TestH3ErrorCodesAreValidClassifications:
+    """H3: every emitted error code must be a ``CrawlClassification`` member.
+
+    The strategy layer stores the code straight into
+    ``CrawlStrategyAttempt.classification``. The internal attempt model is a
+    lenient dataclass (plain ``str``), so an invalid code sails through the
+    fetcher -- and then rejects at response shaping, where the field is the
+    strict ``CrawlClassification`` enum, failing the whole batch with a 422
+    instead of just the one URL. A code that is a member shapes cleanly.
+    """
+
+    async def test_strategy_error_codes_shape_through_the_response_model(self):
+        from app.api_models import StrategyAttempt
+
+        for exc, expected_code in _ERROR_CODE_CASES:
+            res = await _run(exc)
+            assert res.status == "failed"
+            attempt = res.attempted_strategies[0]
+            assert attempt.classification == expected_code, (
+                f"{type(exc).__name__} classified as {attempt.classification!r}, "
+                f"expected {expected_code!r}"
+            )
+            # The response-shaping gate: this is where a non-member code rejects
+            # and 422s the whole batch.
+            shaped = StrategyAttempt(
+                strategy=attempt.strategy,
+                status=attempt.status,
+                classification=attempt.classification,
+                elapsed_ms=attempt.elapsed_ms,
+            )
+            assert shaped.classification.value == expected_code
+
+    def test_every_emitted_error_code_is_an_explicit_status_table_entry(self):
+        """New codes integrate with the ONE status table, not a parallel map.
+
+        An error code with no entry falls through to the ``blocked`` default,
+        which is the wrong verdict for a fetch that is known-dead: it keeps the
+        URL eligible for re-crawl as if it were an unclassified block, and it
+        disagrees with the ``failed`` status the strategy already reported.
+        """
+        from app.constants import CLASSIFICATION_STATUS_BY_LABEL, status_for_classification
+
+        for code in _NEW_ERROR_CODES:
+            assert code in CLASSIFICATION_STATUS_BY_LABEL, (
+                f"error code {code!r} has no status entry; it would fall through "
+                "to the blocked default instead of the failed status the fetcher "
+                "reported"
+            )
+            assert status_for_classification(code) == "failed"

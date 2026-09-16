@@ -21,13 +21,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.api.response_shaping import abuild_unified_crawl_response
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
 from app.validation import get_env_int
+
+if TYPE_CHECKING:
+    from app.safe_url import SafeUrl
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +93,13 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     """
     import httpx
 
-    from app.safe_url import SafeUrl
-
-    # Re-parse through the chokepoint (normalize + check + pin in one
-    # place) rather than reimplementing urlparse/check/pin inline -- the
-    # manual composition is exactly the shape that produced the redirect
-    # findings. validate_webhook_url already ran at the edge; parsing again
-    # here closes the TOCTOU between validation and delivery.
-    safe = SafeUrl.parse(webhook_url, pin=True)
+    # Re-parse through the chokepoint (normalize + check + pin in one place)
+    # rather than reimplementing urlparse/check/pin inline -- the manual
+    # composition is exactly the shape that produced the redirect findings.
+    # validate_webhook_url already ran at the edge; parsing again here closes
+    # the TOCTOU between validation and delivery. The parse runs off the event
+    # loop (D3): see _parse_pinned_off_loop.
+    safe = await _parse_pinned_off_loop(webhook_url)
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
@@ -178,6 +180,29 @@ async def validate_webhook_url_async(webhook_url: str) -> None:
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(_DNS_EXECUTOR, validate_webhook_url, webhook_url)
+
+
+async def _parse_pinned_off_loop(webhook_url: str) -> SafeUrl:
+    """Off-event-loop ``SafeUrl.parse(webhook_url, pin=True)`` (D3).
+
+    The delivery path re-parses through the chokepoint to close the TOCTOU
+    between validation and delivery, and that parse is the SAME synchronous
+    ``getaddrinfo`` the validation twin offloads in M6. Running it inline would
+    stall the whole FastAPI loop on every webhook delivery -- the validation
+    path was offloaded and this one was missed -- so it reuses the ONE
+    ``dns-resolve`` pool rather than a second offload mechanism. Both the
+    validation and the delivery parse route through here or through
+    :func:`validate_webhook_url_async`; there is no third resolution path.
+    """
+    import functools
+
+    from app.crawl.strategies.http import _DNS_EXECUTOR
+    from app.safe_url import SafeUrl
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _DNS_EXECUTOR, functools.partial(SafeUrl.parse, webhook_url, pin=True)
+    )
 
 
 async def run_and_deliver_webhook(

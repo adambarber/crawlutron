@@ -89,6 +89,23 @@ class CrawlClassification(str, Enum):
     network_error = "network_error"
     connection_error = "connection_error"
     http_status_error = "http_status_error"
+    # Fetch-level failure codes emitted by the HTTP strategy's error classifier
+    # (``_classify_error_code``). They are members of the taxonomy (not
+    # internal-only strings) because they are stored verbatim in
+    # ``CrawlStrategyAttempt.classification`` and this field is the strict enum
+    # below at response shaping: a non-member code sails through the lenient
+    # internal dataclass and then rejects the whole batch with a 422. Keeping
+    # them public also lets a caller distinguish these outcomes:
+    #   * payload_too_large -- a decompression/content bomb exceeded the safety
+    #     cap, so the page's bytes were deliberately discarded;
+    #   * too_many_redirects -- a redirect loop, i.e. the page is unreachable by
+    #     following its own chain;
+    #   * http_error -- an httpx-level failure that is not a status, timeout,
+    #     redirect, connection or TLS error (the generic tail of the same
+    #     classifier, whose more specific branches map to the members above).
+    payload_too_large = "payload_too_large"
+    too_many_redirects = "too_many_redirects"
+    http_error = "http_error"
     value_error = "value_error"
     tls_error = "tls_error"
     dns_error = "dns_error"

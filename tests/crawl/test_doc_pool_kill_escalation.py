@@ -286,3 +286,153 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
     assert not thread.is_alive(), "_extract_document wedged waiting for a worker"
     result = result_box["result"]
     assert result.text is None and result.markdown is None
+
+
+# --- 4/5/6: D5 acquire refinements ---------------------------------------
+
+
+class _LockWatcherProc(_StubProc):
+    """A dead worker whose termination reports whether ``_POOL_LOCK`` was held.
+
+    The kill-escalation in ``_terminate_doc_process`` can take up to ~10s
+    (SIGTERM -> join(5) -> SIGKILL -> join(5)). Running it under the pool lock
+    blocks every other acquisition and every release for that whole window, so
+    the termination must happen off-lock. ``terminate`` is the first slow step
+    of that escalation, so it is where the lock state is observed.
+    """
+
+    def __init__(self, *, alive: bool = False) -> None:
+        super().__init__()
+        self._alive = alive
+        self.lock_held_during_terminate: list[bool] = []
+
+    def terminate(self) -> None:
+        free = ext_mod._POOL_LOCK.acquire(blocking=False)
+        try:
+            self.lock_held_during_terminate.append(not free)
+        finally:
+            if free:
+                ext_mod._POOL_LOCK.release()
+        super().terminate()
+
+
+def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool, real_sleeps):
+    """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
+
+    A caller blocked behind a slow in-lock operation must not find its whole
+    budget already spent when it finally enters -- it would then report "no
+    worker" for a pool that had a usable slot freed the entire time it waited.
+    The deadline is therefore computed after the lock is acquired.
+    """
+    bound = 0.5
+    fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
+    worker = _stub_worker(6060)
+    worker.busy = True
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [worker]
+
+    box: dict[str, object] = {}
+
+    def _acquire() -> None:
+        box["worker"] = ext_mod._acquire_doc_worker()
+
+    holder_ready = threading.Event()
+    holder_done = threading.Event()
+
+    def _hold_then_free() -> None:
+        # Hold the pool lock past the acquirer's bound: this is the
+        # blocked-behind-a-slow-retirement window. The slot is deliberately
+        # STILL busy at release, so an acquirer that enters must wait.
+        with ext_mod._POOL_LOCK:
+            holder_ready.set()
+            time.sleep(bound * 2)
+        # Let the acquirer enter and (post-fix) park on the condition, then
+        # free the slot and notify, exactly like a real release would.
+        time.sleep(bound / 2)
+        with ext_mod._POOL_LOCK:
+            worker.busy = False
+            ext_mod._POOL_LOCK.notify_all()
+        holder_done.set()
+
+    acquirer = threading.Thread(target=_acquire, daemon=True)
+    holder = threading.Thread(target=_hold_then_free, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=5), "the lock holder never started"
+    acquirer.start()
+    try:
+        acquirer.join(timeout=10)
+    finally:
+        holder_done.wait(timeout=10)
+        holder.join(timeout=10)
+
+    assert not acquirer.is_alive(), "_acquire_doc_worker wedged behind the lock holder"
+    assert box.get("worker") is worker, (
+        "acquire burned its whole budget waiting for the pool lock and then gave "
+        "up, even though a usable slot was freed while it waited"
+    )
+
+
+def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
+    """D5(b): the replaced worker's kill-escalation must not hold the pool lock.
+
+    The retirement is what can take ~10s; the slot swap itself is instant. The
+    pool lock only needs to cover the swap, so the termination is deferred until
+    after it. A probe in ``terminate`` proves the lock was free at that moment.
+    """
+    dead = ext_mod._DocWorker(_LockWatcherProc(alive=False), _StubConn())
+    dead.busy = False
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [dead]
+
+    replacement = _stub_worker(9090)
+
+    def _fake_spawn():
+        return replacement
+
+    fake_pool.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
+
+    worker = ext_mod._acquire_doc_worker()
+
+    assert worker is replacement, "the dead slot was not respawned"
+    assert worker.busy is True
+    assert dead.retired is True, "the replaced worker was never marked retired"
+    assert dead.proc.lock_held_during_terminate == [False], (
+        "the replaced worker was terminated while holding _POOL_LOCK; the "
+        "kill-escalation would block every other acquire and release"
+    )
+
+
+def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch):
+    """D5(c): a slot that will not die must not permanently shrink the pool.
+
+    A retired-but-still-``is_alive()`` slot is skipped by BOTH scans (handout
+    requires ``not retired``; respawn requires ``not is_alive``), so nothing in
+    the normal path can ever recover it. If it still counts toward the size
+    budget, the pool is one worker short forever and every later acquire
+    degrades to "no worker" instead of growing past the zombie slot.
+    """
+    # responds_to_sigterm=False models a worker nothing can kill: is_alive()
+    # stays True for the life of the process, and nothing here terminates it.
+    zombie = ext_mod._DocWorker(_StubProc(1111, responds_to_sigterm=False), _StubConn())
+    zombie.retired = True
+    zombie.busy = False
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [zombie]
+
+    replacement = _stub_worker(31337)
+    spawned = []
+
+    def _fake_spawn():
+        spawned.append(True)
+        return replacement
+
+    fake_pool.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
+
+    worker = ext_mod._acquire_doc_worker()
+
+    assert spawned, "the pool did not grow past the unkillable slot"
+    assert worker is replacement, (
+        "acquire gave up instead of growing: an unkillable slot permanently "
+        "consumed a pool-size budget"
+    )
