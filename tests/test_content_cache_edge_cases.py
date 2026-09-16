@@ -1,6 +1,6 @@
 """Content cache edge cases: eviction, corruption, budget accounting."""
 
-from coverage_helpers import _temp_cache
+from _testkit import _temp_cache
 
 
 class TestContentCacheEdgeCases:

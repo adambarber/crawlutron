@@ -1,6 +1,6 @@
 """URL and network policy validation: schemes, private networks, registrable domains."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestPolicyValidation:

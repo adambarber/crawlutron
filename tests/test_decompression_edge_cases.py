@@ -1,6 +1,6 @@
 """Decompression edge cases: bomb caps, chunked streams, corrupt payloads."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestDecompressionEdgeCases:

@@ -1,6 +1,6 @@
 """Cross-module edge cases (continued): charset fallbacks, OS errors, safe coercion."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestModuleEdgeCasesMore:

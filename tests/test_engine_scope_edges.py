@@ -1,6 +1,6 @@
 """Crawl-chain scope edge cases: robots disallow and skip continuation."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestEngineScopeEdges:

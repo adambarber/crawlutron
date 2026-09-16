@@ -1,6 +1,6 @@
 """HTTP body handling through a live server: caching, rate-limit cooldown, cffi."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestHttpBodyHandling:

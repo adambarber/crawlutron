@@ -1,6 +1,6 @@
 """Cross-module edge cases: cache, job store, decompression, scheduler, formats."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestModuleEdgeCases:

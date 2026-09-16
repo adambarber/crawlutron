@@ -1,7 +1,7 @@
 """Content-cache eviction: disk unlinks stay off the lock, and a key re-set
 between its eviction and the deferred unlink keeps its live file."""
 
-from coverage_helpers import _temp_cache
+from _testkit import _temp_cache
 
 
 class TestContentCacheUnlinkDiscipline:

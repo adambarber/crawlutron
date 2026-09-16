@@ -1,6 +1,6 @@
 """Payload helper edge cases: strategy validation and default handling."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestPayloadHelpersEdges:

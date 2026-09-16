@@ -1,6 +1,6 @@
 """Job store edge cases: corrupt rows, frontier persistence, state transitions."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestJobStoreEdges:

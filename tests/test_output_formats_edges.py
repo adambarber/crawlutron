@@ -1,6 +1,6 @@
 """Output format edge cases: CSV injection guards, unknown formats, defaults."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestOutputFormatsEdges:

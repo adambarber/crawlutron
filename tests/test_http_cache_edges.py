@@ -1,6 +1,6 @@
 """HTTP cache edge cases: TTL expiry, conditional revalidation, vary handling."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestHttpCacheEdges:

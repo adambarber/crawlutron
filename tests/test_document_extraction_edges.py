@@ -1,6 +1,6 @@
 """Document extraction edge cases: redirects, SSRF guards, timeouts."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestDocumentExtractionEdges:

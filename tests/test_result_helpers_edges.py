@@ -1,6 +1,6 @@
 """Result helper edge cases: classification fallbacks and evidence merging."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestResultHelpersEdges:

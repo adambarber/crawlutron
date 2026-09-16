@@ -1,6 +1,6 @@
 """TestLlmFormatEdges coverage tests (split from tests/test_coverage_gaps.py)."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestLlmFormatEdges:

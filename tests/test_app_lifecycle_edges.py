@@ -1,6 +1,6 @@
 """App lifecycle edge cases: import failures, lifespan startup/shutdown paths."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestAppLifecycleEdges:

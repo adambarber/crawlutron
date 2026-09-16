@@ -6,8 +6,14 @@ across several test modules (``site_fetcher``, ``block_private_targets``,
 duplication.
 """
 
+import asyncio
+import gzip
+import os
+import socket
 from typing import Any
 from urllib.parse import urlparse
+
+import pytest
 
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.strategies.http import HttpFetchResult
@@ -790,3 +796,218 @@ def browser_available() -> bool:
             return bool(path) and os.path.exists(path)
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Coverage-suite surface, consolidated from the former tests/coverage_helpers.py.
+#
+# Star-import suites (``from _testkit import *``) exercise app internals --
+# including underscore-prefixed functions -- so ``__all__`` below re-exports
+# the whole module namespace and those tests keep resolving the same names.
+# ---------------------------------------------------------------------------
+
+# allow loopback crawl targets in this process too
+os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
+
+from helpers.server import spawn_server
+
+from app.api.render import render_request
+from app.classify import classify_page_with_evidence
+from app.constants import (
+    BROWSER_HEADLESS,
+    EXTRACTION_DOCUMENT,
+    EXTRACTION_TRAFILATURA,
+    HTTP_CFFI_IMPERSONATE,
+)
+from app.crawl.decompression import decompress_body
+from app.crawl.document_text import (
+    _collect_document_item_lines,
+    _document_item_range,
+    _format_extracted_document_text,
+    _is_document_item_marker,
+    _is_document_non_item_section,
+    _join_document_paragraph_lines,
+    _looks_like_document_heading,
+    _next_non_empty_document_line,
+    _should_join_document_paragraph,
+)
+from app.crawl.engine import (
+    _execute_crawl_chain,
+    _payload_policy,
+)
+from app.crawl.extraction import (
+    _extract_discovered_links,
+    _html_diagnostics,
+    extract_js_endpoints,
+)
+from app.crawl.llm_format import _extract_llm_metadata
+from app.crawl.strategies.document import (
+    _default_document_text_extractor,
+    _format_table,
+)
+from app.crawl.strategies.http import (
+    _cookie_header_for_url,
+    _decode_body,
+    _default_http_fetcher,
+    _headers_for_strategy,
+    _quality_score,
+)
+from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
+from app.validation import (
+    get_env_int,
+    normalize_public_http_url,
+    public_url_or_none,
+    registrable_domain,
+)
+
+
+def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
+    def worker(job):
+        return CrawlResult(
+            url=job.url,
+            status=status,
+            classification=classification,
+            final_url=job.url,
+            html=html,
+            text=text,
+            attempts=1,
+            elapsed_ms=1,
+            domain="x",
+            metadata=metadata or {},
+        )
+
+    return worker
+
+
+def _policy(extra=None):
+    policy = {
+        "request_profile": {},
+        "headers": {},
+        "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
+    }
+    if extra:
+        policy.update(extra)
+    return policy
+
+
+def _temp_cache(ttl=1, clock_start=1000.0):
+    import tempfile
+
+    from app.crawl.content_cache import ContentCache
+
+    clock_vals = [clock_start]
+    return ContentCache(tempfile.mkdtemp(), default_ttl=ttl, clock=lambda: clock_vals[0]), clock_vals
+
+
+def _spawn_fetch(fn):
+    server = spawn_server()
+    try:
+        return fn(server)
+    finally:
+        server.stop()
+
+
+# Export every name in this module (including the underscore-prefixed app
+# internals above) so ``from _testkit import *`` keeps working for the suites
+# that were consolidated off the former coverage_helpers module.
+# Names re-exported for the star-import suites (``from _testkit import *``).
+# Kept explicit so the surface stays documented -- add a new factory here.
+__all__ = [
+    "Any",
+    "BROWSER_HEADLESS",
+    "BrowserFakeBrowser",
+    "BrowserFakePage",
+    "ContentCache",
+    "CrawlJob",
+    "CrawlResult",
+    "EXTRACTION_DOCUMENT",
+    "EXTRACTION_TRAFILATURA",
+    "HTTP_CFFI_IMPERSONATE",
+    "HTTP_DECLARED_CRAWLER",
+    "HttpCache",
+    "HttpFetchResult",
+    "JobStore",
+    "LLM_FORMAT_TEST_HTML",
+    "MockClient",
+    "MockResponse",
+    "RenderOptions",
+    "SCOPE_KEEP_DROP_PAGES",
+    "Spill",
+    "_async_return",
+    "_browser_noop",
+    "_collect_document_item_lines",
+    "_cookie_header_for_url",
+    "_decode_body",
+    "_default_document_text_extractor",
+    "_default_http_fetcher",
+    "_document_item_range",
+    "_execute_crawl_chain",
+    "_extract_discovered_links",
+    "_extract_llm_metadata",
+    "_fake_browser",
+    "_format_extracted_document_text",
+    "_format_table",
+    "_headers_for_strategy",
+    "_html_diagnostics",
+    "_is_document_item_marker",
+    "_is_document_non_item_section",
+    "_join_document_paragraph_lines",
+    "_looks_like_document_heading",
+    "_next_non_empty_document_line",
+    "_payload_policy",
+    "_policy",
+    "_quality_score",
+    "_should_join_document_paragraph",
+    "_spawn_fetch",
+    "_temp_cache",
+    "assert_dns_pinning_uses_first_resolution",
+    "assert_result_failed",
+    "assert_result_success",
+    "asyncio",
+    "block_private_targets",
+    "browser_available",
+    "build_payload",
+    "build_pinned_renderer",
+    "classify_page_with_evidence",
+    "crawl_homepage_async",
+    "crawl_request",
+    "decompress_body",
+    "extract_function_body",
+    "extract_js_endpoints",
+    "get_env_int",
+    "gzip",
+    "http_strategy_policy",
+    "install_to_thread_spy",
+    "invoke_browser_strategy",
+    "invoke_http_strategy",
+    "make_base_policy",
+    "make_content_cache",
+    "make_content_cache_with_entry",
+    "make_crawl_payload",
+    "make_engine_result",
+    "make_fetch",
+    "make_job",
+    "make_job_store",
+    "make_result",
+    "normalize_public_http_url",
+    "ok_fetcher",
+    "os",
+    "patch_http_fetcher_transport",
+    "pathlib",
+    "pinned_renderer",
+    "poll_until",
+    "provider_results",
+    "public_url_or_none",
+    "pytest",
+    "raise_fetcher",
+    "registrable_domain",
+    "render_request",
+    "run_crawl_async",
+    "run_job_control_test",
+    "run_scoped_crawl",
+    "site_fetcher",
+    "socket",
+    "spawn_server",
+    "to_dict",
+    "urlparse",
+]

@@ -1,6 +1,6 @@
 """Fetch helper edge cases: sitemap recursion, rate limiting, robots fetching."""
 
-from coverage_helpers import *
+from _testkit import *
 
 from app.constants import status_for_classification
 

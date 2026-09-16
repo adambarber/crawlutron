@@ -1,6 +1,6 @@
 """Scheduler policy units: token buckets, circuit breakers, robots crawl delays."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestSchedulerPolicies:

@@ -1,6 +1,6 @@
 """HTML comment handling in content classification."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestClassificationComments:

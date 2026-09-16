@@ -1,6 +1,6 @@
 """XHR/ajax interception edge cases in the browser worker."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestBrowserXhrEdgeCases:

@@ -1,6 +1,6 @@
 """Content extraction edge cases: markitdown worker, EOF handling, zombie reaping."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestExtractionEdges:

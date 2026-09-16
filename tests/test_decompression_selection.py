@@ -1,6 +1,6 @@
 """Per-encoding decompression failure handling and plain passthrough."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestDecompressionSelection:

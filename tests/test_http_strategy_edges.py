@@ -3,7 +3,7 @@
 import multiprocessing
 import os
 
-from coverage_helpers import *
+from _testkit import *
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
 

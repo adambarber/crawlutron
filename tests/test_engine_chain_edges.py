@@ -1,7 +1,6 @@
 """Engine chain edge cases: result shaping, payload policy, strategy chain, budgets, robots."""
 
-from _testkit import make_fetch
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestEngineChainEdges:

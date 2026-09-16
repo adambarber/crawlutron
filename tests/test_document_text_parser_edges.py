@@ -1,6 +1,6 @@
 """Document text parser edge cases: encoding, malformed HTML, empty documents."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestDocumentTextParserEdges:

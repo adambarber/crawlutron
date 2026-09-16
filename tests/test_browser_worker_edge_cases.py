@@ -1,6 +1,6 @@
 """Browser worker edge cases: rendering, XHR handling, consent, crash classification."""
 
-from coverage_helpers import *
+from _testkit import *
 
 
 class TestBrowserWorkerEdgeCases:
