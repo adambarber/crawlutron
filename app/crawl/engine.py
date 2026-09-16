@@ -125,7 +125,6 @@ async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
 # A single user-supplied scope_regex is applied to every discovered link.
 # Bound the work and refuse pathological patterns (ReDoS guard).
 _MAX_SCOPE_PATTERN_LEN = 256
-_MAX_SCOPE_LINKS = 5000
 
 
 def _compile_scope_regex_safe(scope_regex: str | None):

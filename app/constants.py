@@ -17,8 +17,7 @@ HTTP_DECLARED_CRAWLER: str = "HTTP_DECLARED_CRAWLER"
 HTTP_CFFI_IMPERSONATE: str = "HTTP_CFFI_IMPERSONATE"
 BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
 
-# Service version: single source of truth (L2). app.api_models.API_VERSION
-# aliases this so existing importers keep working.
+# Service version: single source of truth (L2), imported directly by callers.
 SERVICE_VERSION: str = "0.3.0"
 # Public-facing identity strings. Kept here so the same UA appears in both the
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
@@ -87,8 +86,6 @@ EXTRACTION_METHOD_BINARY_NO_TEXT: str = "binary_no_text"
 # and the test suite). Centralized so the HTTP vs browser blocked sets cannot
 # silently drift apart across modules.
 # ---------------------------------------------------------------------------
-SUCCESS_CLASSIFICATIONS: frozenset[str] = frozenset({"rendered"})
-
 HTTP_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
     {
         "captcha_detected",
@@ -257,7 +254,6 @@ SITEMAP_MAX_DEPTH: int = 3
 SITEMAP_MAX_URLS: int = 10_000
 SITEMAP_CACHE_TTL_SECONDS: float = DEFAULT_CACHE_TTL_SECONDS
 SITEMAP_CACHE_MAX_ENTRIES: int = 1000
-SITEMAP_CACHE_EVICT_BATCH: int = 200
 SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
 # Maximum child-sitemap fetches in flight per index level (H7). An index
 # lists every child before any max_urls accounting, so without chunking a

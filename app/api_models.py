@@ -23,13 +23,9 @@ from app.constants import (
     MAX_DISCOVERED_LINKS,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
-    SERVICE_VERSION,
 )
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
-# Service version lives in app.constants (base layer, no import cycle).
-API_VERSION = SERVICE_VERSION
-SERVICE_NAME = "browser-crawler"
 
 
 class CrawlStrategy(str, Enum):

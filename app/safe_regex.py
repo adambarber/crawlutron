@@ -13,8 +13,6 @@ class as curl_cffi under fast_sleeps, #1746).
 
 from __future__ import annotations
 
-import re
-
 import regex as _engine
 
 DEFAULT_MATCH_TIMEOUT_SECONDS = 0.5
@@ -74,8 +72,3 @@ def match_bounded(
 
 def search_bounded(compiled, text: str, *, timeout: float = DEFAULT_MATCH_TIMEOUT_SECONDS):
     return match_bounded(compiled, text, op="search", timeout=timeout)
-
-
-# Re-exported so callers can type-annotate without importing regex directly.
-Pattern = _engine.Pattern
-RegexError = re.error

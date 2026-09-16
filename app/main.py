@@ -16,7 +16,7 @@ from app.crawl.engine import crawl_request
 from app.logging_config import configure_service_logging
 from app.validation import get_env_float, get_env_int
 
-from .api_models import API_VERSION
+from .constants import SERVICE_VERSION
 from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (
@@ -171,7 +171,7 @@ if FastAPI is not None:
             "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall outcomes but does not bypass, solve, "
             "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
-        version=API_VERSION,
+        version=SERVICE_VERSION,
         contact={"name": "browser-crawler"},
         license_info={"name": "MIT License"},
         openapi_tags=[

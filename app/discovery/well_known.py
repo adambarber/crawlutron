@@ -4,13 +4,14 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import API_VERSION, POLICY_SCHEMA_VERSION, DiscoveryResponse
+from app.api_models import POLICY_SCHEMA_VERSION, DiscoveryResponse
+from app.constants import SERVICE_VERSION
 
 
 def discovery_payload() -> dict[str, Any]:
     return {
         "service": "browser-crawler",
-        "version": API_VERSION,
+        "version": SERVICE_VERSION,
         "policy_schema_version": POLICY_SCHEMA_VERSION,
         "links": {
             "openapi": "/openapi.json",
