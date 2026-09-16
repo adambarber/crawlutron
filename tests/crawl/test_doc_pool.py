@@ -1,25 +1,4 @@
-"""P0-4: the document pool must reap stubborn workers and never wedge.
-
-Three related defects in ``app/crawl/extraction.py``:
-
-1. ``_terminate_doc_process`` sent SIGTERM and joined once. A markitdown worker
-   stuck in an uninterruptible native call (or with a handler installed by the
-   library it is converting) ignores SIGTERM, so ``is_alive()`` never flipped:
-   the child kept its pipe and its memory for the life of the process.
-2. That same half-dead worker poisoned its slot. ``_acquire_doc_worker`` hands
-   out any slot that is idle and ``is_alive()`` -- which a SIGTERM survivor
-   truthfully reports -- so the pool kept serving a worker that could never
-   answer again, and the lazy-respawn branch (``not is_alive()``) could not
-   reach it either.
-3. ``_POOL_LOCK.wait()`` had no deadline, so one busy flag that was never
-   cleared (an exception escaping between acquire and the releasing ``finally``)
-   stopped *every* later document extraction, forever. ``BrowserPool.acquire``
-   is deadline-bounded; the document pool was not.
-
-The stubbed process below is how the project simulates a child that ignores
-SIGTERM (see ``_test_hooks_enabled``): a real stubborn child would need a
-signal-blocking helper process to be planted in the suite.
-"""
+"""Document extraction pool: worker lifecycle, kill escalation, teardown and process-pool reuse."""
 
 import threading
 import time
@@ -436,3 +415,201 @@ def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch
         "acquire gave up instead of growing: an unkillable slot permanently "
         "consumed a pool-size budget"
     )
+
+
+class _LifespanStubProc:
+    """``multiprocessing.Process`` stand-in that records its shutdown."""
+
+    def __init__(self) -> None:
+        self._alive = True
+        self.signals: list[str] = []
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    def terminate(self) -> None:
+        self.signals.append("SIGTERM")
+        self._alive = False
+
+    def kill(self) -> None:
+        self.signals.append("SIGKILL")
+        self._alive = False
+
+    def join(self, timeout=None) -> None:  # noqa: ARG002 - matches the real API
+        return None
+
+    @property
+    def exitcode(self) -> int | None:
+        return None if self._alive else -15
+
+    @property
+    def terminated(self) -> bool:
+        return bool(self.signals)
+
+
+class _LifespanStubConn:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+async def _noop() -> None:
+    return None
+
+
+@pytest.fixture
+def seeded_doc_pool(monkeypatch):
+    """A live document worker in the pool, restored afterwards."""
+    from app.crawl import extraction as ext_mod
+
+    worker = ext_mod._DocWorker(_LifespanStubProc(), _LifespanStubConn())
+    saved_pool = ext_mod._DOC_POOL
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [worker]
+    try:
+        yield worker
+    finally:
+        with ext_mod._POOL_LOCK:
+            ext_mod._DOC_POOL = saved_pool
+
+
+class TestLifespanDocPoolTeardown:
+    @pytest.mark.usefixtures("real_sleeps")
+    async def test_shutdown_retires_the_document_workers(self, monkeypatch, seeded_doc_pool):
+        """The document pool must be torn down by the production lifespan.
+
+        Asserted by effect, not by spying: a live worker is seeded into the pool
+        before the app runs, and shutdown must retire it and drop the pool. The
+        heavy client teardowns are stubbed only so the test does not start real
+        services; the document teardown itself runs for real.
+        """
+        from app import main as main_mod
+        from app.crawl import extraction as ext_mod
+        from app.crawl.strategies import http as http_mod
+        from app.health import readiness as readiness_mod
+        from app.health.readiness import ReadinessState
+
+        fresh = ReadinessState()
+        monkeypatch.setattr(readiness_mod, "READINESS_STATE", fresh)
+        monkeypatch.setattr(http_mod, "close_async_http_client", _noop)
+        monkeypatch.setattr(http_mod, "close_cffi_session", _noop)
+        monkeypatch.setattr(main_mod, "close_browser_pool", _noop)
+
+        worker = seeded_doc_pool
+
+        async with main_mod.app.router.lifespan_context(main_mod.app):
+            # Startup does not touch the document pool, and the worker must
+            # still be live inside the app: the teardown is a shutdown concern.
+            assert worker.proc.terminated is False, "startup retired a document worker"
+            with ext_mod._POOL_LOCK:
+                assert ext_mod._DOC_POOL == [worker]
+
+        assert worker.proc.terminated, (
+            "lifespan shutdown did not retire the document worker; the pool was "
+            "torn down only by the test fixture"
+        )
+        assert worker.conn.closed, "shutdown left the worker's pipe open"
+        with ext_mod._POOL_LOCK:
+            assert ext_mod._DOC_POOL is None, "the document pool survived shutdown"
+
+
+def _counted_spawns(monkeypatch):
+    """Count pool worker constructions parent-side (spawn-safe: no pickling)."""
+    import app.crawl.extraction as ext_mod
+
+    real_spawn = ext_mod._spawn_doc_worker
+    constructions = 0
+
+    def counting_spawn():
+        nonlocal constructions
+        constructions += 1
+        return real_spawn()
+
+    monkeypatch.setattr(ext_mod, "_spawn_doc_worker", counting_spawn)
+    return lambda: constructions
+
+
+def _use_single_worker(monkeypatch):
+    import app.crawl.extraction as ext_mod
+
+    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", "1")
+    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
+    ext_mod._reset_doc_pool()
+
+
+def _restore_pool():
+    import app.crawl.extraction as ext_mod
+
+    for var in ("TEST_MARKITDOWN_OUTPUT", "TEST_MARKITDOWN_HANG", "TEST_MARKITDOWN_DIE"):
+        ext_mod.os.environ.pop(var, None)
+    ext_mod.os.environ.pop("BROWSER_CRAWLER_TEST_HOOKS", None)
+    ext_mod.os.environ.pop("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", None)
+    ext_mod._reset_doc_pool()
+
+
+def test_doc_workers_persist_across_documents(monkeypatch):
+    """N documents cost one worker construction, not N spawns."""
+    import app.crawl.extraction as ext_mod
+
+    constructions = _counted_spawns(monkeypatch)
+    _use_single_worker(monkeypatch)
+    try:
+        for _ in range(3):
+            result = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
+            assert result.markdown == "## Hello Markdown"
+        assert constructions() == 1
+        assert len(ext_mod._doc_pool_pids()) == 1
+    finally:
+        _restore_pool()
+
+
+def test_doc_worker_pids_stable_across_tasks(monkeypatch):
+    """The same worker serves consecutive documents (no respawn churn)."""
+    import app.crawl.extraction as ext_mod
+
+    _use_single_worker(monkeypatch)
+    try:
+        ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/a.pdf")
+        first = ext_mod._doc_pool_pids()
+        ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/b.pdf")
+        second = ext_mod._doc_pool_pids()
+        assert first == second
+        assert all(pid > 0 for pid in first)
+    finally:
+        _restore_pool()
+
+
+def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
+    """A hung worker is killed on timeout; the pool serves the next document."""
+    import app.crawl.extraction as ext_mod
+
+    constructions = _counted_spawns(monkeypatch)
+    _use_single_worker(monkeypatch)
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.05)
+    try:
+        import time
+
+        monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
+        started = time.monotonic()
+        result = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/hang.pdf")
+        assert time.monotonic() - started < 5.0
+        assert result.text is None and result.markdown is None
+        hung_pids = ext_mod._doc_pool_pids()
+
+        monkeypatch.delenv("TEST_MARKITDOWN_HANG")
+        # Normal timeout for recovery: the respawned worker must boot (spawn
+        # platforms) before the task timeout starts mattering again.
+        monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 10.0)
+        recovered = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/ok.pdf")
+        assert recovered.markdown == "## Hello Markdown"
+        # The hung worker was killed and its slot respawned: exactly one
+        # replacement construction, pool back at one live worker.
+        assert constructions() == 2
+        live_pids = ext_mod._doc_pool_pids()
+        assert len(live_pids) == 1
+        assert live_pids != hung_pids
+    finally:
+        _restore_pool()
