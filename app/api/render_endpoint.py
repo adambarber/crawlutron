@@ -65,7 +65,10 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
         )
     except ValueError as error:
         logger.warning("render_request_rejected", extra={"error": str(error)})
-        raise http_error(400, str(error), str(error)) from error
+        # ``code`` is the machine-readable contract clients branch on and the
+        # ValueError text stays as the message. Emitting the text as the code
+        # made every new rejection reason a new, unenumerated wire value.
+        raise http_error(400, "validation_error", str(error)) from error
     finally:
         readiness_state.end_request()
 
