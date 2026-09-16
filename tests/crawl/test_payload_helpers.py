@@ -1,13 +1,6 @@
-"""Adversarial review H4: advertised policy limits must reach the engine.
+"""Payload helpers: policy construction, advertised limits and invalid-limit handling."""
 
-``CrawlPolicyLimits`` documents ``max_rps`` (token-bucket rate limiting) and
-``max_content_length_bytes`` (per-response body cap) and ``/v1/capabilities``
-advertises both. ``_payload_policy`` dropped both keys while normalizing, so
-``max_rps`` was always 0 (limiter dead through the API) and the explicit
-content-length override was unreachable. These tests pin the wiring at both
-boundaries: the normalized policy carries the values, and a crawl actually
-enforces the content cap.
-"""
+from _testkit import *
 
 from app.crawl.payload_helpers import _payload_policy
 from app.settings import CrawlerSettings
@@ -152,3 +145,20 @@ class TestMaxContentLengthBytesActuallyEnforced:
         item = result["results"][0]
         assert item["status"] == "failed"
         assert item["http_status"] == 413
+
+
+class TestPayloadHelpersEdges:
+    """Cover remaining branches in payload_helpers.py"""
+
+    def test_payload_policy_invalid_limits(self):
+        from app.crawl.payload_helpers import _payload_policy
+        from app.settings import CrawlerSettings
+
+        with pytest.raises(ValueError) as cm:
+            _payload_policy({"policy": {"limits": "not a dict"}}, CrawlerSettings.from_mapping())
+        assert str(cm.value) == "invalid_policy_limits"
+        with pytest.raises(ValueError) as cm:
+            _payload_policy(
+                {"policy": {"limits": {"max_depth": "not an int"}}}, CrawlerSettings.from_mapping()
+            )
+        assert str(cm.value) == "invalid_policy_limits"

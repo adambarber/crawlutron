@@ -1,9 +1,11 @@
-"""JobStore persistence, deletion and corruption behavior (no mocks).
+"""Job store: serialization, concurrency, purge and lifecycle edges."""
 
-Uses the shared ``job_store`` fixture (conftest.py) and pytest's ``tmp_path``
-instead of per-test ``tempfile.TemporaryDirectory`` boilerplate.
-"""
+import datetime
+import logging
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
+from _testkit import *
 from _testkit import make_job_store
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
@@ -157,3 +159,135 @@ class TestJobStoreCorruptRow:
             # load should catch the JSON decode error and return None
             result = store.load(job.job_id)
             assert (result) is None
+
+
+def _store(tmp_path=None):
+    # Use in-memory SQLite to avoid disk I/O and lock contention (speed).
+    return JobStore(":memory:")
+
+
+def test_jobstore_has_concurrency_guard():
+    store = _store()
+    # A lock must guard all connection use.
+    assert hasattr(store, "_lock")
+    lock = store._lock
+    assert hasattr(lock, "acquire") and hasattr(lock, "release")
+    # It must actually be usable as a mutex.
+    assert lock.acquire()
+    lock.release()
+    # SQLite must wait for the write lock rather than failing immediately.
+    timeout = store._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert timeout and timeout > 0
+
+
+def test_jobstore_concurrent_writes_do_not_raise_locked():
+    store = _store()
+    errors = []
+
+    def worker(i):
+        try:
+            job = store.create(f"http://example.com/{i}", {})
+            job.status = JobStatus.RUNNING
+            store.save(job)
+            store.load(job.job_id)
+            store.delete(job.job_id)
+        except Exception as exc:
+            errors.append(exc)
+
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        list(ex.map(worker, range(200)))
+
+    locked = [e for e in errors if isinstance(e, sqlite3.OperationalError)]
+    assert not locked, f"concurrent writes raised OperationalError: {locked[:3]}"
+    assert not errors, f"unexpected errors: {errors[:3]}"
+
+
+def _store_test_job_store_serialization(tmp_path):
+    return JobStore(str(tmp_path / "jobs.db"))
+
+
+def test_save_survives_non_serializable_results(tmp_path):
+    store = _store_test_job_store_serialization(tmp_path)
+    job = store.create("http://example.com/", {"strategies": ["HTTP_DECLARED_CRAWLER"]})
+    # results contain non-JSON-native types (datetime, bytes, set)
+    job.results = [
+        {"ts": datetime.datetime(2020, 1, 1, 12, 0, 0), "raw": b"\x00\x01binary", "tags": {1, 2, 3}},
+    ]
+    # Must not raise TypeError.
+    store.save(job)
+    loaded = store.load(job.job_id)
+    assert loaded is not None
+    # Values are safely stringified, not lost.
+    assert loaded.results[0]["ts"] == "2020-01-01T12:00:00"
+    assert isinstance(loaded.results[0]["tags"], list)
+
+
+def test_load_missing_returns_none_no_warning(tmp_path, caplog):
+    store = _store_test_job_store_serialization(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        assert store.load("does-not-exist") is None
+    assert not any("job_store_load_corrupt" in r.message for r in caplog.records)
+
+
+def test_load_logs_warning_on_corruption(tmp_path, caplog):
+    store = _store_test_job_store_serialization(tmp_path)
+    # Insert a row whose results column is not valid JSON.
+    store._conn.execute(
+        """
+        INSERT INTO crawl_jobs
+        (job_id, root_url, policy, status, frontier, visited, results,
+         created_at, updated_at, error, stats)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "corrupt-id",
+            "http://example.com/",
+            "{}",
+            "pending",
+            "[]",
+            "[]",
+            "{not valid json",
+            0.0,
+            0.0,
+            None,
+            "{}",
+        ),
+    )
+    store._conn.commit()
+    with caplog.at_level(logging.WARNING):
+        assert store.load("corrupt-id") is None
+    assert any("job_store_load_corrupt" in r.message for r in caplog.records)
+
+
+class TestJobStoreEdges:
+    """Cover remaining branches in job_store.py"""
+
+    def test_job_store_load_exception(self):
+        import pathlib
+        import tempfile
+
+        from app.crawl.job_store import JobStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = pathlib.Path(tmpdir) / "jobs.db"
+            store = JobStore(db_path)
+            import sqlite3
+
+            conn = sqlite3.connect(str(db_path))
+            conn.execute("DROP TABLE IF EXISTS jobs")
+            conn.commit()
+            conn.close()
+            result = store.load("nonexistent")
+            assert (result) is None
+
+    def test_job_store_close(self):
+        import pathlib
+        import tempfile
+
+        from app.crawl.job_store import JobStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = pathlib.Path(tmpdir) / "jobs.db"
+            store = JobStore(db_path)
+            store._conn.close()
+            store._conn.close()

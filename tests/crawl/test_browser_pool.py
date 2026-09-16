@@ -154,7 +154,7 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
     assert pool._pool_size == 1
 
 
-class TestBrowserWorkerEdgeCases:
+class TestWorkerExtractorErrorDegrades:
     """Cover remaining branches in browser.py"""
 
     async def test_browser_renderer_reset_browser_error(self):

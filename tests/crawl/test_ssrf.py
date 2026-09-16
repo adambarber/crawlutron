@@ -161,7 +161,7 @@ class TestSSRFProtection:
         assert calls["n"] == 1
 
 
-class TestSSrfDnsPinning:
+class TestSsrfDnsPinning:
     def test_resolves_once_and_pins_ip(self, monkeypatch):
         block_private_targets(monkeypatch)
         calls = []

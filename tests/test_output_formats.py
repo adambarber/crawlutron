@@ -1,11 +1,13 @@
-"""#17 Multiple output formats - pure serializer tests (no mocks)."""
+"""Output formats: field projection, CSV injection neutralization and envelope edges."""
 
 import json
 
+from _testkit import *
 from _testkit import pytest
 
 from app.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,
+    _csv_neutralize,
     serialize_results,
 )
 
@@ -166,3 +168,134 @@ class TestOutputFormatSafeCoercion:
 
         result = _safe(42)
         assert result == "42"
+
+
+def test_csv_neutralize_quotes_equals_prefix():
+    """= prefix is the most common formula trigger; must be quoted."""
+    assert _csv_neutralize("=cmd|'/c calc'!A1", "error") == "'=cmd|'/c calc'!A1"
+
+
+def test_csv_neutralize_handles_all_dangerous_prefixes():
+    for prefix in ("+", "-", "@"):
+        value = f"{prefix}payload"
+        assert _csv_neutralize(value, "error") == f"'{value}"
+    # TAB and CR are also dangerous; the literal-escape strings we pass.
+    for prefix in ("\t", "\r"):
+        value = f"{prefix}payload"
+        assert _csv_neutralize(value, "error") == f"'{value}"
+
+
+def test_csv_neutralize_passes_safe_values():
+    """Plain text and non-prefixed values must be returned unchanged."""
+    assert _csv_neutralize("plain text", "error") == "plain text"
+    assert _csv_neutralize("404 not found", "error") == "404 not found"
+    assert _csv_neutralize("see https://x/?q=test", "error") == "see https://x/?q=test"
+
+
+def test_csv_neutralize_skips_non_neutralized_columns():
+    """URL columns are returned unchanged so existing analyses still work."""
+    assert _csv_neutralize("=foo", "original_url") == "=foo"
+    assert _csv_neutralize("=foo", "normalized_url") == "=foo"
+    assert _csv_neutralize("=foo", "final_url") == "=foo"
+
+
+def test_csv_neutralize_handles_empty_value():
+    assert _csv_neutralize("", "error") == ""
+
+
+def test_serialize_results_csv_neutralizes_attacker_content():
+    """End-to-end: an error field that starts with = is quoted in the CSV."""
+    results = [{"original_url": "http://x/", "error": "=cmd|'/c calc'!A1"}]
+    body, media_type = serialize_results(results, "csv")
+    assert media_type == "text/csv; charset=utf-8"
+    # The formula trigger must be preceded by a single quote.
+    assert ",'=cmd" in body
+    # And the raw unescaped formula must NOT appear (it would mean the
+    # attacker payload was emitted unquoted).
+    assert (
+        "'" not in body.split("\n")[1].split(",")[1]
+        or "=cmd" not in body.split("\n")[1].split(",")[1]
+        or body.split("\n")[1].split(",")[1].startswith("'")
+    )
+
+
+def test_serialize_results_csv_preserves_url_columns():
+    """URL columns are NOT neutralized: =foo in a URL is a query separator."""
+    results = [{"original_url": "https://x/?q=foo&p=bar", "error": "ok"}]
+    body, _ = serialize_results(results, "csv")
+    assert "https://x/?q=foo&p=bar" in body
+
+
+class TestOutputFormatsEdges:
+    """Cover remaining branches in output_formats.py"""
+
+    def test_serialize_default_fallback(self):
+        from app.output_formats import _default
+
+        class CustomObj:
+            def __init__(self):
+                self.attr = "value"
+
+        obj = CustomObj()
+        result = _default(obj)
+        assert result == {"attr": "value"}
+
+    def test_serialize_results_json(self):
+        from app.output_formats import serialize_results
+
+        results = [{"url": "http://x/", "text": "content"}]
+        output, media_type = serialize_results(results, "json")
+        assert "http://x/" in output
+        assert media_type == "application/json"
+
+    def test_serialize_results_jsonl(self):
+        from app.output_formats import serialize_results
+
+        results = [{"url": "http://x/", "text": "content"}]
+        output, media_type = serialize_results(results, "jsonl")
+        assert "http://x/" in output
+        assert media_type == "application/x-ndjson"
+
+    def test_serialize_results_ndjson(self):
+        from app.output_formats import serialize_results
+
+        results = [{"url": "http://x/", "text": "content"}]
+        output, media_type = serialize_results(results, "ndjson")
+        assert "http://x/" in output
+        assert media_type == "application/x-ndjson"
+
+    def test_serialize_results_markdown(self):
+        from app.output_formats import serialize_results
+
+        results = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
+        output, media_type = serialize_results(results, "markdown")
+        assert "# Title" in output
+        assert media_type == "text/markdown; charset=utf-8"
+
+    def test_serialize_results_csv(self):
+        from app.output_formats import serialize_results
+
+        results = [
+            {
+                "original_url": "http://x/",
+                "normalized_url": "http://x/",
+                "final_url": "http://x/",
+                "status": "success",
+                "classification": "rendered",
+                "selected_strategy": "HTTP_DECLARED_CRAWLER",
+                "quality_score": 1.0,
+                "discovered_link_count": 0,
+                "error": None,
+                "http_status": 200,
+            }
+        ]
+        output, media_type = serialize_results(results, "csv")
+        assert "http://x/" in output
+        assert media_type == "text/csv; charset=utf-8"
+
+    def test_serialize_results_unknown_format(self):
+        from app.output_formats import serialize_results
+
+        results = [{"url": "http://x/", "text": "content"}]
+        with pytest.raises(ValueError):
+            serialize_results(results, "unknown")

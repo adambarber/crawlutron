@@ -1,4 +1,4 @@
-"""Result helper edge cases: classification fallbacks and evidence merging."""
+"""Result helpers: blocked, binary, failed and skipped engine results."""
 
 from _testkit import *
 

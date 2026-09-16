@@ -291,8 +291,8 @@ class TestDecompressionSelection:
         assert decompress_body(b"plain", "identity", max_output_bytes=10_000_000) == b"plain"
 
 
-class TestDecompressionEdgeCases:
-    """Cover remaining branches in decompression.py"""
+class TestBrotliImportErrorFallback:
+    """Brotli import failure degrades to raw bytes"""
 
     def test_decompress_body_brotli_import_error(self):
         from app.crawl.decompression import decompress_body

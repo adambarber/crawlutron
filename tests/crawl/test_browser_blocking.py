@@ -433,7 +433,7 @@ async def test_response_handler_caps_entries_and_payload_size():
     assert any(e.get("payload_truncated") for e in collected)
 
 
-class TestBrowserXhrEdgeCases:
+class TestXhrResponsePayloadCapture:
     async def test_json_payload_captured(self):
         from app.crawl.strategies.browser import BrowserRenderer
 

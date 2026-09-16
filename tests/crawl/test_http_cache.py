@@ -1,14 +1,44 @@
-"""Tests for the in-memory HttpCache replacement (#adversarial perf 1.1).
-
-The cache moved from a single blocking, lock-free SQLite connection to an
-in-memory dict with TTL + LRU. These tests pin the new guarantees: no blocking
-SQL on the event loop, thread-safe concurrent store/get, TTL expiry, and
-bounded / FIFO eviction.
-"""
+"""HTTP fetch cache: batched stores, memory mirror and envelope edges."""
 
 import threading
 
+from _testkit import *
+
 from app.crawl.cache import HttpCache
+
+
+def test_many_stores_all_retrievable():
+    cache = HttpCache()
+    for i in range(120):
+        cache.store(f"https://x/{i}", {"etag": f'"{i}"', "last-modified": "Wed, 01 Jan 2020 00:00:00 GMT"})
+    # Every stored entry must be retrievable regardless of commit cadence.
+    for i in range(120):
+        etag, lm = cache.get(f"https://x/{i}")
+        assert etag == f'"{i}"'
+        assert lm == "Wed, 01 Jan 2020 00:00:00 GMT"
+
+
+def test_store_upserts_on_conflict():
+    cache = HttpCache()
+    cache.store("https://x/a", {"etag": '"v1"'})
+    cache.store("https://x/a", {"etag": '"v2"'})
+    etag, _ = cache.get("https://x/a")
+    assert etag == '"v2"'
+
+
+class TestHttpCacheEdges:
+    def test_conditional_headers_include_last_modified(self):
+        c = HttpCache()
+        c.store("http://x/1", {"etag": "v1", "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT"})
+        headers = c.conditional_headers("http://x/1")
+        assert headers["If-None-Match"] == "v1"
+        assert headers["If-Modified-Since"] == "Wed, 01 Jan 2025 00:00:00 GMT"
+        c.close()
+
+    def test_close_idempotent(self):
+        c = HttpCache()
+        c.close()
+        c.close()
 
 
 class _Clock:

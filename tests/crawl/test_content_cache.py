@@ -781,8 +781,8 @@ def test_clear_clears_memory(tmp_path):
     assert len(c._memory_cache) == 0
 
 
-class TestContentCacheEdgeCases:
-    """Cover remaining branches in content_cache.py"""
+class TestContentCacheEntryLifecycle:
+    """Corrupted entries, expiry, prune/clear and async disk writes"""
 
     def test_content_cache_get_invalid_json(self):
         import pathlib
@@ -834,8 +834,8 @@ class TestContentCacheEdgeCases:
             assert (cache.get("key2")) is None
 
     async def test_aset_aget_roundtrip(self):
-        """Adversarial perf #1.2/#2.2: async disk cache stores and retrieves,
-        including a large (HTML-sized) value that hits the on-disk path."""
+        """Async disk cache stores and retrieves, including a large (HTML-sized)
+        value that hits the on-disk path."""
         import pathlib
         import tempfile
 
