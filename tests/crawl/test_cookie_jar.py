@@ -113,3 +113,11 @@ def test_cookie_jar_read_refreshes_host_recency():
     jar.add_cookie_header("http://fresh.example/", "k=fresh; Path=/")
     assert jar.cookie_header_for("http://host0.example/") == "k=v0"
     assert len(jar._cookies) == _COOKIE_JAR_MAX_HOSTS
+
+
+class TestCookieJarHeaderHandling:
+    def test_http_cookie_invalid(self):
+        from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+
+        # Call with invalid cookie header - should not raise
+        _GLOBAL_COOKIE_JAR.add_cookie_header({}, "http://example.com/")

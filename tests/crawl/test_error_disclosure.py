@@ -113,8 +113,7 @@ class TestEmittedErrorCodesAreValidClassifications:
             assert res.status == "failed"
             attempt = res.attempted_strategies[0]
             assert attempt.classification == expected_code, (
-                f"{type(exc).__name__} classified as {attempt.classification!r}, "
-                f"expected {expected_code!r}"
+                f"{type(exc).__name__} classified as {attempt.classification!r}, expected {expected_code!r}"
             )
             # The response-shaping gate: this is where a non-member code rejects
             # and 422s the whole batch.

@@ -12,7 +12,7 @@ import base64
 import sys
 
 import httpx
-from _testkit import make_fetch
+from _testkit import _temp_cache, make_content_cache_with_entry, make_fetch
 from helpers.server import EtagHandler
 
 from app.crawl.cache import HttpCache
@@ -311,3 +311,76 @@ async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
     got = await reader.aget("small-key")
     assert got == {"body": "tiny"}
     assert "small-key" in reader._memory_cache  # small: mirror is correct
+
+
+class TestContentCacheOverwrite:
+    def test_content_cache_set_overwrite(self):
+        cache, _ = _temp_cache(ttl=60)
+        cache.set("key", {"data": "first"})
+        cache.set("key", {"data": "second"})
+        assert cache.get("key") == {"data": "second"}
+
+
+class TestContentCacheCorruptEntry:
+    def test_content_cache_get_corrupt_json(self):
+        import tempfile
+
+        from app.crawl.content_cache import ContentCache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ContentCache(tmpdir, default_ttl=60)
+            cache_path = cache._path_for("testkey")
+            cache_path.write_text("{broken json")
+            result = cache.get("testkey")
+            assert (result) is None
+
+    def test_content_cache_prune_corrupt_entry(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            clock_vals = [1000.0]
+            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
+            # Write a corrupt file with the correct hash-based name - prune should skip it
+            bad_path = cache._path_for("badkey")
+            bad_path.write_text("not valid json")
+            clock_vals[0] = 1002.0  # advance past TTL
+            removed = cache.prune()
+            # Only key1 is expired and removable; corrupt file is skipped
+            assert removed == 1
+
+    def test_content_cache_prune_os_error(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            clock_vals = [1000.0]
+            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
+            clock_vals[0] = 1002.0
+            # Replace file with directory to cause OSError on read
+            cache_path = cache._path_for("key1")
+            cache_path.unlink()
+            cache_path.mkdir()
+            cache.prune()
+            cache_path.rmdir()
+
+    def test_content_cache_clear_os_error(self):
+        import tempfile
+
+        from app.crawl.content_cache import ContentCache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ContentCache(tmpdir, default_ttl=60)
+            cache.set("key1", {"data": "1"})
+            cache_path = cache._path_for("key1")
+            cache_path.unlink()
+            cache_path.mkdir()
+            cache.clear()
+            cache_path.rmdir()
+
+
+class TestSharedContentCache:
+    def test_engine_shared_content_cache(self):
+        from app.crawl.content_cache import ContentCache
+        from app.crawl.engine import _get_shared_content_cache
+
+        cache = _get_shared_content_cache()
+        assert isinstance(cache, ContentCache)

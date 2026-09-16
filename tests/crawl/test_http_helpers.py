@@ -545,3 +545,17 @@ class TestFingerprintInjectionRotation:
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
         h = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://a.com/")
         assert h["User-Agent"] == "forced"
+
+
+class TestQualityScore:
+    def test_http_quality_score_failed(self):
+        from app.crawl.strategies.http import _quality_score
+
+        score = _quality_score("failed", "network_error", None, None, None)
+        assert score == 0.0
+
+    def test_http_quality_score_empty_text(self):
+        from app.crawl.strategies.http import _quality_score
+
+        score = _quality_score("success", "rendered", "", None, 200)
+        assert score > 0.0

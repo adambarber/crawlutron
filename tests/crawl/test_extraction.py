@@ -193,3 +193,46 @@ async def test_extract_document_kill_switch(monkeypatch):
     out = await asyncio.to_thread(ex._extract_document, b"tiny", None)
     assert out.text is None and out.markdown is None
     assert not spawned
+
+
+class TestExtractionMethods:
+    def test_extraction_different_methods(self):
+        from app.crawl.extraction import extract_content
+
+        html = "<html><body><p>Hello world</p></body></html>"
+        for method, content_type in [
+            ("trafilatura", "text/html"),
+            ("document", "application/pdf"),
+            ("dom_text", "text/html"),
+            ("full", "text/html"),
+        ]:
+            result = extract_content(html, content_type, "http://example.com/", None, None)
+            assert (result) is not None
+
+
+class TestHtmlTreeParsing:
+    def test_extraction_parse_html_tree_error(self):
+        from app.crawl.extraction import _parse_html_tree
+
+        result = _parse_html_tree("{{invalid html")
+        # Should not raise - lxml is forgiving
+        assert (result) is not None
+
+
+class TestSelectedExtraction:
+    def test_extraction_selected_with_xpath(self):
+        from app.crawl.extraction import _extract_selected
+
+        html = "<html><body><div>Hello</div></body></html>"
+        result = _extract_selected(html, "http://x/", css_selector=None, xpath="//div/text()")
+        assert (result) is not None
+
+
+class TestLinkExtraction:
+    def test_engine_parse_robots_blank_line(self):
+        from app.crawl.extraction import _extract_discovered_links
+
+        # Test link extraction with mixed quote styles (covers edge cases)
+        html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
+        links = _extract_discovered_links(html, None)
+        assert len(links) > 0

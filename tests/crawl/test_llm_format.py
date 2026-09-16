@@ -2,6 +2,7 @@
 
 from _testkit import LLM_FORMAT_TEST_HTML
 
+from app.crawl.extraction import extract_content
 from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
 
 
@@ -78,3 +79,21 @@ class TestJsonLdExtraction:
         assert meta["title"] == "Test Page"
         assert meta["canonical_url"] == "https://example.com/c"
         assert meta["favicon"] == "https://example.com/f.ico"
+
+
+class TestLlmFormat:
+    def test_extract_llm_metadata_handles_empty(self):
+        meta = _extract_llm_metadata("", "https://example.com")
+        assert meta == {"source_url": "https://example.com"}
+
+    def test_extract_content_html_returns_markdown(self):
+        html = "<html><body><main>Content here</main></body></html>"
+        result = extract_content(html, "text/html", "https://example.com")
+        assert "Content here" in (result.markdown or "")
+
+    def test_text_from_html_strips_tags(self):
+        html = "<html><body><script>var x=1;</script><style>body{}</style><p>Hello</p></body></html>"
+        text = _text_from_html(html)
+        assert "Hello" in text
+        assert "var x" not in text
+        assert "body{}" not in text

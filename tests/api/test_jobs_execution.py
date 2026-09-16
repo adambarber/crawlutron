@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from _testkit import run_job_control_test
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -655,3 +656,33 @@ class TestWholeSiteRedirectedUrlResolution:
         assert finished.stats.get("total_failed", 0) == 0, finished.stats
         # And the frontier URL must be committed visited (not re-crawled).
         assert frontier_url in finished.visited, finished.visited
+
+
+class TestJobControlTransitions:
+    async def test_main_job_control_invalid_action(self):
+        from app.main import app, job_store
+
+        job = job_store.create("http://example.com/", {})
+        await run_job_control_test(app, job_store, job.job_id, "invalid_action", 422)
+        job_store.delete(job.job_id)
+
+    async def test_main_job_control_cancel_completed(self):
+        # H5: cancel from a terminal state is a state conflict (409), not a
+        # shape error (422) — the request shape is valid, the transition isn't.
+        from app.crawl.job_store import JobStatus
+        from app.main import app, job_store
+
+        job = job_store.create("http://example.com/", {})
+        # Set to completed
+        job.status = JobStatus.COMPLETED
+        job_store.save(job)
+        await run_job_control_test(app, job_store, job.job_id, "cancel", 409)
+        job_store.delete(job.job_id)
+
+    async def test_main_job_control_resume_not_paused(self):
+        # H5: resume requires PAUSED; from PENDING it is a state conflict.
+        from app.main import app, job_store
+
+        job = job_store.create("http://example.com/", {})
+        await run_job_control_test(app, job_store, job.job_id, "resume", 409)
+        job_store.delete(job.job_id)

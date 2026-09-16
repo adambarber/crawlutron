@@ -42,3 +42,22 @@ def test_empty_urls_list_with_url_rejected(model):
 def test_urls_only_empty_rejected(model):
     with pytest.raises(ValidationError):
         model(urls=[])
+
+
+class TestWebhookUrlValidation:
+    async def test_main_invalid_webhook_url(self):
+
+        import httpx
+        from httpx import AsyncClient
+
+        from app.main import app
+
+        async def test():
+            transport = httpx.ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}
+                )
+                assert resp.status_code == 422
+
+        await test()

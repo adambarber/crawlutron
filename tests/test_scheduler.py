@@ -166,3 +166,74 @@ class TestCircuitBreakerSpillsOnResult:
         assert result.classification == "network_error", result
         assert result.error == "circuit_breaker_open", result
         assert result.diagnostics.get("circuit_breaker") is True, result.diagnostics
+
+
+class TestSchedulerDomainState:
+    def test_scheduler_domain_cooldowns(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler.set_domain_cooldown("example.com", 10)
+        cooldowns = scheduler.domain_cooldowns
+        assert isinstance(cooldowns, dict)
+        assert "example.com" in cooldowns
+
+
+class TestSchedulerCircuitBreaker:
+    def test_scheduler_circuit_breaker_reset(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
+        )
+        # Trip the circuit breaker (threshold=5 by default)
+        for _ in range(5):
+            scheduler.record_failure("example.com")
+        assert scheduler.is_circuit_open("example.com")
+        # record_success resets failure counter; with cooldown=0, circuit is not open
+        scheduler.record_success("example.com")
+        assert scheduler._domain_failures.get("example.com", 0) == 0
+
+    def test_scheduler_record_success(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler.record_success("example.com")
+        assert scheduler._domain_failures.get("example.com", 0) == 0
+
+    def test_scheduler_is_circuit_open_false(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        assert not (scheduler.is_circuit_open("example.com"))
+
+
+class TestSchedulerLatencyEma:
+    def test_scheduler_record_latency_invalid(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        # None latency should be ignored (line 114: return)
+        scheduler.record_latency("example.com", None)
+        # Negative latency should be ignored
+        scheduler.record_latency("example.com", -1.0)
+        # Verify no latency was recorded
+        assert "example.com" not in scheduler._domain_latency_ema
+
+    def test_scheduler_record_latency_valid(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler.record_latency("example.com", 100.0)
+        assert "example.com" in scheduler._domain_latency_ema
+        assert abs(scheduler._domain_latency_ema["example.com"] - (100.0)) < 1e-07
+
+    def test_scheduler_record_latency_ema(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive_smoothing=0.5
+        )
+        scheduler.record_latency("example.com", 100.0)
+        scheduler.record_latency("example.com", 200.0)
+        assert abs(scheduler._domain_latency_ema["example.com"] - (150.0)) < 0.1

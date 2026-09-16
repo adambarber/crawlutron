@@ -2,6 +2,8 @@
 
 import json
 
+from _testkit import pytest
+
 from app.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,
     serialize_results,
@@ -99,3 +101,68 @@ def test_unsupported_format_raises():
         assert False, "expected ValueError"
     except ValueError as exc:
         assert str(exc) == "unsupported_output_format: xml"
+
+
+class TestOutputFormatDefaults:
+    def test_output_formats_default_with_dict(self):
+        from app.output_formats import _default
+
+        # Object with model_dump method
+        class FakeObj:
+            def model_dump(self):
+                return {"serialized": "true"}
+
+        result = _default(FakeObj())
+        assert result == {"serialized": "true"}
+
+    def test_output_formats_default_dict_method(self):
+        from app.output_formats import _default
+
+        class DictObj:
+            def dict(self):
+                return {"from_dict": "value"}
+
+        result = _default(DictObj())
+        assert result == {"from_dict": "value"}
+
+    def test_output_formats_default_str_fallback(self):
+        from app.output_formats import _default
+
+        result = _default(42)
+        assert result == "42"
+
+
+class TestOutputFormatSerialization:
+    def test_output_formats_serialize_unknown_format(self):
+        from app.output_formats import serialize_results
+
+        results = [{"original_url": "http://x/"}]
+        with pytest.raises(ValueError):
+            serialize_results(results, "unknown_format")
+
+
+class TestOutputFormatSafeCoercion:
+    def test_output_formats_safe_json(self):
+        from app.output_formats import _safe
+
+        val = {"nested": [1, 2, 3]}
+        result = _safe(val)
+        assert isinstance(result, str)
+
+    def test_output_formats_safe_none(self):
+        from app.output_formats import _safe
+
+        result = _safe(None)
+        assert result == ""
+
+    def test_output_formats_safe_string(self):
+        from app.output_formats import _safe
+
+        result = _safe("hello")
+        assert result == "hello"
+
+    def test_output_formats_safe_int(self):
+        from app.output_formats import _safe
+
+        result = _safe(42)
+        assert result == "42"

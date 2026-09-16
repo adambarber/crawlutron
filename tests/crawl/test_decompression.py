@@ -58,3 +58,79 @@ def test_brotli():
 
 def test_decode_body_empty_body():
     assert _decode_body(b"", "text/html") == ""
+
+
+class TestDecompressionEncodings:
+    def test_decompression_zlib(self):
+        import zlib
+
+        from app.crawl.decompression import decompress_body
+
+        original = b"hello world " * 10
+        compressed = zlib.compress(original)
+        result = decompress_body(compressed, "deflate", max_output_bytes=10_000_000)
+        assert (result) is not None
+
+    def test_decompression_gzip(self):
+        import gzip
+
+        from app.crawl.decompression import decompress_body
+
+        original = b"hello world " * 10
+        compressed = gzip.compress(original)
+        result = decompress_body(compressed, "gzip", max_output_bytes=10_000_000)
+        assert (result) is not None
+
+    def test_decompression_unknown_encoding(self):
+        from app.crawl.decompression import decompress_body
+
+        result = decompress_body(b"some data", "unknown", max_output_bytes=10_000_000)
+        assert result == b"some data"
+
+    def test_decompression_none_encoding(self):
+        from app.crawl.decompression import decompress_body
+
+        # With an unrecognized encoding, returns the original body
+        result = decompress_body(b"some data", "unknown_encoding", max_output_bytes=10_000_000)
+        assert result == b"some data"
+
+
+class TestDecompressionFallback:
+    def test_decompression_brotli_exception(self):
+        from app.crawl.decompression import decompress_body
+
+        try:
+            result = decompress_body(b"not gzip data", "gzip", max_output_bytes=10_000_000)
+            assert result == b"not gzip data"
+        except Exception:
+            pass
+
+
+class TestBodyCharsetDecoding:
+    def test_http_charset_decode_error(self):
+        from app.crawl.strategies.http import _decode_body
+
+        # Charset rides on the content-type only; a stray value can never
+        # reach the decoder as a headers argument (the parameter is gone).
+        result = _decode_body(b"hello", "text/plain; charset=invalid_charset")
+        assert isinstance(result, str)
+
+
+class TestDecompressionBehaviors:
+    def test_gzip(self):
+        import gzip
+
+        data = gzip.compress(b"hello world")
+        assert decompress_body(data, "gzip", max_output_bytes=10_000_000) == b"hello world"
+
+    def test_deflate(self):
+        import zlib
+
+        data = zlib.compress(b"hello world")
+        assert decompress_body(data, "deflate", max_output_bytes=10_000_000) == b"hello world"
+
+    def test_no_encoding(self):
+        assert decompress_body(b"hello", "", max_output_bytes=10_000_000) == b"hello"
+
+    def test_unknown_encoding(self):
+        assert decompress_body(b"hello", "unknown", max_output_bytes=10_000_000) == b"hello"

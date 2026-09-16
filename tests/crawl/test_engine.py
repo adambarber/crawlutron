@@ -147,3 +147,35 @@ def test_seed_freshness_uses_real_default_strategies():
             return cached_at if key == expected_key else None
 
     assert _seed_is_fresh(url, "2024-01-01", _StubCache(), policy) is True
+
+
+class TestCrawlRequestWebhook:
+    async def test_engine_crawl_request_with_webhook(self):
+        import asyncio
+
+        from app.crawl.engine import crawl_request
+        from app.settings import CrawlerSettings
+
+        payload = {
+            "url": "http://127.0.0.1:1/",
+            "policy": {
+                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "extraction": "full",
+                "headers": {},
+                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 5},
+                "request_profile": {},
+            },
+            "webhook_url": "http://webhook.invalid",
+        }
+
+        async def browser_worker(job):
+            return None
+
+        result = await crawl_request(
+            payload,
+            settings=CrawlerSettings.from_mapping(),
+            browser_worker=browser_worker,
+            shutdown_event=asyncio.Event(),
+            webhook_url="http://webhook.invalid",
+        )
+        assert "webhook_url" in result

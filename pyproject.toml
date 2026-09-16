@@ -110,8 +110,6 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # env/monkeypatch state before imports, and exercise security-sensitive shapes
 # (asserts, fake creds) that bandit/bugbear flag; strict hygiene does not apply.
 "tests/**" = ["E402", "F403", "F405", "S", "B"]
-# Coverage-gap suites reach into module internals by design (getattr seams).
-"tests/test_module_edge_cases_more.py" = ["F841"]
 # _testkit is the single home for shared test factories and re-exports the
 # coverage-suite surface (app internals) for star-import suites by design.
 "tests/_testkit.py" = ["F401"]

@@ -285,3 +285,40 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
     flat_disc = r_flat.diagnostics.get("discovery") or {}
     assert flat_disc.get("sitemap_urls") == ["https://x.test/sitemap.xml"]
     assert flat_disc.get("feeds") == ["https://x.test/feed"]
+
+
+class TestHttpStrategyRetry:
+    async def test_http_strategy_with_cffi_retry(self):
+        from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
+
+        call_count = [0]
+
+        def retry_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise ConnectionError("first attempt fails")
+
+            class Resp:
+                status_code = 200
+                headers = {"content-type": "text/html"}
+                body = b"<html><body>recovered</body></html>"
+                final_url = url
+                elapsed_ms = 10
+
+            return Resp()
+
+        result = await _http_strategy_result(
+            original_url="http://x/",
+            normalized_url="http://x/",
+            strategy="HTTP_DECLARED_CRAWLER",
+            policy={
+                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "extraction": "full",
+                "headers": {},
+                "limits": {"timeout_seconds": 5, "max_retries": 1, "max_discovered_links": 10},
+            },
+            http_fetcher=retry_fetcher,
+            cache=HttpCache(),
+        )
+        assert result.classification == "rendered"

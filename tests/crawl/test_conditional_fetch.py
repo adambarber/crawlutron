@@ -225,3 +225,36 @@ async def test_decompression_failure_flagged_and_downgraded():
     result = await _run_http(fetcher)
     assert result.diagnostics["decompression_failed"] is True
     assert result.quality_score <= 0.25
+
+
+class TestNotModifiedResponse:
+    async def test_http_strategy_not_modified(self):
+        from app.crawl.cache import HttpCache
+        from app.crawl.strategies.http import _http_strategy_result
+
+        def not_mod_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+            class Resp:
+                status_code = 304
+                headers = {"etag": "v1", "content-type": "text/html"}
+                body = b"not modified"
+                final_url = url
+                elapsed_ms = 10
+
+            return Resp()
+
+        cache = HttpCache()
+        cache.store("http://example.com/", {"etag": "v1"})
+        result = await _http_strategy_result(
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            strategy="HTTP_DECLARED_CRAWLER",
+            policy={
+                "strategies": ["HTTP_DECLARED_CRAWLER"],
+                "extraction": "full",
+                "headers": {},
+                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
+            },
+            http_fetcher=not_mod_fetcher,
+            cache=cache,
+        )
+        assert result.classification == "not_modified"

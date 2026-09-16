@@ -1,8 +1,10 @@
-"""#3+#14 JobStore - pure tests (no mocks).
+"""JobStore persistence, deletion and corruption behavior (no mocks).
 
 Uses the shared ``job_store`` fixture (conftest.py) and pytest's ``tmp_path``
 instead of per-test ``tempfile.TemporaryDirectory`` boilerplate.
 """
+
+from _testkit import make_job_store
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 
@@ -107,3 +109,51 @@ def test_ids_are_unique():
     store = JobStore(":memory:")
     ids = {store.create("https://example.com/", {"limits": {}}).job_id for _ in range(50)}
     assert len(ids) == 50
+
+
+class TestJobStoreLifecycle:
+    def test_job_store_update(self):
+        import pathlib
+        import tempfile
+
+        from app.crawl.job_store import JobStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = pathlib.Path(tmpdir) / "jobs.db"
+            store = JobStore(db_path)
+            job = store.create("http://example.com/", {})
+            store.save(job)
+            updated = store.load(job.job_id)
+            assert (updated) is not None
+
+    def test_job_store_delete(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = make_job_store(tmpdir)
+            job = store.create("http://example.com/", {})
+            deleted = store.delete(job.job_id)
+            assert deleted
+            assert (store.load(job.job_id)) is None
+            deleted = store.delete(job.job_id)
+            assert not (deleted)
+
+
+class TestJobStoreCorruptRow:
+    def test_job_store_load_corrupt_row(self):
+        import pathlib
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = make_job_store(tmpdir)
+            job = store.create("http://example.com/", {})
+            # Corrupt the policy JSON in the database
+            import sqlite3
+
+            conn = sqlite3.connect(str(pathlib.Path(tmpdir) / "jobs.db"))
+            conn.execute("UPDATE crawl_jobs SET policy = ? WHERE job_id = ?", ("invalid json{", job.job_id))
+            conn.commit()
+            conn.close()
+            # load should catch the JSON decode error and return None
+            result = store.load(job.job_id)
+            assert (result) is None

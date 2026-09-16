@@ -73,8 +73,7 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
     for module in (http_mod, browser_mod):
         source = inspect.getsource(module)
         assert "status_for_classification(" in source, (
-            f"{module.__name__} no longer resolves classifications through the "
-            f"shared app.constants table"
+            f"{module.__name__} no longer resolves classifications through the shared app.constants table"
         )
 
 
@@ -134,3 +133,17 @@ def test_known_group_statuses_are_unchanged(browser_resolver):
     for classification in FAILED_CLASSIFICATIONS:
         assert status_for_classification(classification) == "failed"
         assert browser_resolver(classification) == "failed"
+
+
+class TestStatusForClassification:
+    def test_http_status_not_found(self):
+        from app.constants import status_for_classification
+
+        status = status_for_classification("not_found")
+        assert status == "failed"
+
+    def test_http_status_site_error(self):
+        from app.constants import status_for_classification
+
+        status = status_for_classification("site_error")
+        assert status == "failed"
