@@ -21,7 +21,6 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterator, MutableMapping
 from typing import Any
 
-from app import constants as app_constants
 from app.classify import classify_page
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
@@ -186,11 +185,8 @@ TRANSIENT_CLASSIFICATIONS = {
 }
 # The blocked/failed label groups live in app.constants now, alongside the
 # classification -> status table both strategies share, so the HTTP and browser
-# paths cannot disagree about a label again. These module names stay as
-# same-value aliases for existing references (the browser status suites, engine
-# wiring), exactly like the LAZY_SCROLL_* aliases below.
-BROWSER_BLOCKED_CLASSIFICATIONS = app_constants.BROWSER_BLOCKED_CLASSIFICATIONS
-FAILED_CLASSIFICATIONS = app_constants.FAILED_CLASSIFICATIONS
+# paths cannot disagree about a label again. Importers use the constants
+# directly, exactly like the LAZY_SCROLL_* aliases below.
 
 # Canonical defaults live in app.constants (single source of truth); these
 # module names stay as the settings-less fallback so existing references

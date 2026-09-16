@@ -54,30 +54,20 @@ def test_missing_id_returns_none():
     assert store.get("crawl_nope") is None
 
 
-async def test_status_url_roundtrip_via_api():
+async def test_status_url_roundtrip_via_api(async_client):
     """The 202-advertised status_url now actually works end to end."""
-    from helpers import make_async_client
-
-    from app.main import app
-
-    async def run(client):
-        crawl_resp = await client.post(
-            "/v1/crawl",
-            json={"url": "http://127.0.0.1:1/x", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
-        )
-        assert crawl_resp.status_code == 200, crawl_resp.text
-        request_id = crawl_resp.json()["request_id"]
-        status = await client.get(f"/v1/crawl/{request_id}")
-        return status
-
-    async with make_async_client(app)() as client:
-        status = await run(client)
+    crawl_resp = await async_client.post(
+        "/v1/crawl",
+        json={"url": "http://127.0.0.1:1/x", "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]}},
+    )
+    assert crawl_resp.status_code == 200, crawl_resp.text
+    request_id = crawl_resp.json()["request_id"]
+    status = await async_client.get(f"/v1/crawl/{request_id}")
     assert status.status_code == 200, status.text
     body = status.json()
     assert body["request_id"].startswith("crawl_")
     assert "results" in body
 
     # Unknown id -> 404
-    async with make_async_client(app)() as client:
-        missing = await client.get("/v1/crawl/crawl_doesnotexist")
+    missing = await async_client.get("/v1/crawl/crawl_doesnotexist")
     assert missing.status_code == 404

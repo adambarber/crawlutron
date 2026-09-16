@@ -4,7 +4,7 @@ from coverage_helpers import *
 
 
 class TestServiceRenderRequest:
-    # Uses the module-level _worker factory.
+    # Uses the shared _fake_browser worker factory.
 
     async def test_render_request_success(self):
         from app.settings import CrawlerSettings
@@ -12,7 +12,7 @@ class TestServiceRenderRequest:
         out = await render_request(
             {"url": "http://127.0.0.1:1/x", "options": {"include_html": True}},
             settings=CrawlerSettings.from_mapping(),
-            worker=_worker(),
+            worker=_fake_browser(html="<html></html>", text="t"),
         )
         assert out["submitted_count"] == 1
         assert out["results"][0]["status"] == "success"
@@ -23,7 +23,7 @@ class TestServiceRenderRequest:
         out = await render_request(
             {"url": "not a url"},
             settings=CrawlerSettings.from_mapping(),
-            worker=_worker(),
+            worker=_fake_browser(html="<html></html>", text="t"),
         )
         assert out["results"][0]["status"] == "disallowed"
 
@@ -34,7 +34,7 @@ class TestServiceRenderRequest:
         out = await render_request(
             {"urls": ["http://127.0.0.1:1/x", "http://127.0.0.1:1/x"]},
             settings=CrawlerSettings.from_mapping(),
-            worker=_worker(),
+            worker=_fake_browser(html="<html></html>", text="t"),
         )
         assert out["submitted_count"] == 1
         assert len(out["results"]) == 1
@@ -48,5 +48,5 @@ class TestServiceRenderRequest:
                 # Distinct URLs: the cap counts unique URLs after dedup.
                 {"urls": [f"http://127.0.0.1:1/x{i}" for i in range(1000)]},
                 settings=CrawlerSettings.from_mapping(),
-                worker=_worker(),
+                worker=_fake_browser(html="<html></html>", text="t"),
             )

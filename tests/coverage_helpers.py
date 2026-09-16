@@ -22,11 +22,9 @@ import pytest
 os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
 
 from helpers import (
-    make_async_client,
     make_content_cache,
     make_content_cache_with_entry,
     make_job_store,
-    run_async_test,
     run_job_control_test,
 )
 from helpers.server import spawn_server
@@ -80,12 +78,12 @@ from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.validation import get_env_int, normalize_public_http_url, public_url_or_none, registrable_domain
 
 
-def _fake_browser(html=None, text="doc", metadata=None):
+def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
     def worker(job):
         return CrawlResult(
             url=job.url,
-            status="success",
-            classification="rendered",
+            status=status,
+            classification=classification,
             final_url=job.url,
             html=html,
             text=text,
@@ -93,24 +91,6 @@ def _fake_browser(html=None, text="doc", metadata=None):
             elapsed_ms=1,
             domain="x",
             metadata=metadata or {},
-        )
-
-    return worker
-
-
-def _worker(status="success", classification="rendered"):
-    def worker(job):
-        return CrawlResult(
-            url=job.url,
-            status=status,
-            classification=classification,
-            final_url=job.url,
-            html="<html></html>",
-            text="t",
-            attempts=1,
-            elapsed_ms=1,
-            domain="x",
-            metadata={},
         )
 
     return worker

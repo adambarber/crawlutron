@@ -74,46 +74,6 @@ async def crawl_homepage_async(
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
 
 
-# --- New helpers to reduce test duplication ---
-
-
-def make_async_client(app) -> Callable[[], Awaitable[httpx.AsyncClient]]:
-    """Create a factory for async test clients.
-
-    Usage:
-        async with make_async_client(app)() as client:
-            resp = await client.post("/v1/endpoint", json={...})
-
-    This avoids repeating the httpx.ASGITransport + AsyncClient boilerplate.
-    """
-
-    def _factory() -> httpx.AsyncClient:
-        transport = httpx.ASGITransport(app=app)
-        return httpx.AsyncClient(transport=transport, base_url="http://test")
-
-    return _factory
-
-
-async def run_async_test(
-    app,
-    test_fn: Callable[[httpx.AsyncClient], Awaitable[None]],
-) -> None:
-    """Run an async test function with a test client.
-
-    Usage:
-        async def test():
-            async with make_async_client(app)() as client:
-                resp = await client.post("/v1/endpoint", json={...})
-                assert resp.status_code == 200
-        run_async_test(app, test)
-
-    Or more simply:
-        await run_async_test(app, lambda client: client.post(...))
-    """
-    async with make_async_client(app)() as client:
-        await test_fn(client)
-
-
 def make_content_cache(tmpdir: str, *, default_ttl: float = 1, clock=None) -> ContentCache:
     """Create a ContentCache with test-friendly defaults.
 
@@ -160,12 +120,12 @@ async def run_job_control_test(
         job = job_store.create("http://example.com/", {})
         await run_job_control_test(app, job_store, job.job_id, "cancel", 422)
     """
-    import httpx
     from httpx import AsyncClient
 
-    async with make_async_client(app)() as client:
-        resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": action})
-        assert resp.status_code == expected_status
+    async with httpx.ASGITransport(app=app) as transport:
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": action})
+            assert resp.status_code == expected_status
 
 
 def make_content_cache_with_entry(

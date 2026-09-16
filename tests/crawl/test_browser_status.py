@@ -1,14 +1,14 @@
 import pytest
 
+from app.constants import (
+    BROWSER_BLOCKED_CLASSIFICATIONS,
+    FAILED_CLASSIFICATIONS,
+)
+from app.crawl.strategies.browser import BrowserRenderer
+
 pytestmark = pytest.mark.browser
 
 """Tests for browser.py module."""
-
-from app.crawl.strategies.browser import (
-    BROWSER_BLOCKED_CLASSIFICATIONS,
-    FAILED_CLASSIFICATIONS,
-    BrowserRenderer,
-)
 
 
 class TestBrowserRendererStatus:
