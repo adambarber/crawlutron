@@ -21,7 +21,7 @@ import pytest
 # allow loopback crawl targets in this process too
 os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
 
-from helpers import (
+from _testkit import (
     make_content_cache,
     make_content_cache_with_entry,
     make_job_store,

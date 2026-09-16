@@ -1,6 +1,6 @@
 """LLM-format metadata extraction, including JSON-LD (SOTA)."""
 
-from helpers import LLM_FORMAT_TEST_HTML
+from _testkit import LLM_FORMAT_TEST_HTML
 
 from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
 

@@ -151,7 +151,7 @@ def pytest_collection_modifyitems(config, items):
     Camoufox/Playwright instead of failing mid-suite. When a browser is present
     the marker is left intact so the tests actually execute.
     """
-    from helpers import browser_available
+    from _testkit import browser_available
 
     if browser_available():
         return
@@ -318,7 +318,7 @@ def base_policy():
 @pytest.fixture
 def job_store(tmp_path):
     """JobStore backed by a per-test SQLite db under ``tmp_path``."""
-    from helpers import make_job_store
+    from _testkit import make_job_store
 
     return make_job_store(str(tmp_path))
 

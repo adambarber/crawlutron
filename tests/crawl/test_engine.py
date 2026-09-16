@@ -3,7 +3,7 @@
 import urllib.error
 
 import pytest
-from helpers import browser_available
+from _testkit import browser_available
 
 from app.constants import BROWSER_HEADLESS, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
@@ -44,13 +44,13 @@ def make_result(links):
 
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):
-        from helpers import crawl_homepage_async
+        from _testkit import crawl_homepage_async
 
         response = await crawl_homepage_async(base_url)
         assert "Example Org" in response["results"][0]["markdown"]
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
-        from helpers import run_crawl_async
+        from _testkit import run_crawl_async
 
         url = f"{base_url}/with_etag"
         cache = HttpCache()
@@ -68,7 +68,7 @@ class TestEngineCrawlRequest:
         assert result["http_status"] == 304
 
     async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
-        from helpers import run_crawl_async
+        from _testkit import run_crawl_async
 
         payload = {
             "url": f"{base_url}/",

@@ -130,7 +130,7 @@ async def test_engine_routes_validators_by_url(real_sleeps):
 
 async def test_real_server_conditional_roundtrip(base_url):
     """Full roundtrip vs the real server: fetch -> validator -> revalidate 304."""
-    from helpers import run_crawl_async
+    from _testkit import run_crawl_async
 
     url = f"{base_url}/with_etag"
     first = await run_crawl_async({"url": url})

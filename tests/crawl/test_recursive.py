@@ -121,7 +121,7 @@ class TestRecursiveCrawl:
 
 class TestRecursiveCrawlServer:
     async def test_real_server_recursive_follows_links(self, base_url):
-        from helpers import run_crawl_async
+        from _testkit import run_crawl_async
 
         payload = {
             "url": f"{base_url}/",

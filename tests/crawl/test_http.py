@@ -203,7 +203,7 @@ class TestHttpStrategy:
         assert not _looks_like_binary_body(b"%PDF-1.4", "application/pdf", "http://x/a.pdf")
 
     async def test_crawl_request_async_returns_unified_results_dict(self, base_url):
-        from helpers import crawl_homepage_async
+        from _testkit import crawl_homepage_async
 
         response = await crawl_homepage_async(base_url)
         assert response["submitted_count"] == 1
