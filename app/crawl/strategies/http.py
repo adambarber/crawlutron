@@ -1480,16 +1480,6 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None)
     return body.decode("utf-8", errors="replace")
 
 
-def _status_for_classification(classification: str) -> str:
-    """HTTP-path status for a classification.
-
-    Thin delegator kept for its existing importers; the mapping itself is the
-    shared ``app.constants`` table so the HTTP and browser strategies can never
-    disagree about the same label again.
-    """
-    return status_for_classification(classification)
-
-
 def _quality_score(
     status: str, classification: str, text: str | None, html: str | None, http_status: int | None
 ) -> float:
@@ -2057,7 +2047,7 @@ async def _http_strategy_result(
                     "context": content_type or "",
                 }
             ]
-        status = _status_for_classification(classification)
+        status = status_for_classification(classification)
         diagnostics: dict[str, Any] = {
             "decompression_failed": bool(
                 strategy_decompression_failed or getattr(response, "decompression_failed", False)

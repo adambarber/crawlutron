@@ -10,8 +10,12 @@ engine) would have come back ``"blocked"`` from the browser copy. A new
 classification label therefore silently got the opposite status depending on
 which fetcher served the page.
 
-The fix is one table in :mod:`app.constants` that both call sites delegate to.
+The fix is one table in :mod:`app.constants`. Both fetchers now call it
+directly, and the per-module resolvers are gone; the drift guard below asserts
+they stay gone, because the two implementations agreeing was the whole defect.
 """
+
+import inspect
 
 import pytest
 
@@ -21,7 +25,9 @@ from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,
+    status_for_classification,
 )
+from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies import http as http_mod
 from app.crawl.strategies.browser import BrowserRenderer
 
@@ -40,37 +46,36 @@ def _classifiable_labels() -> list[str]:
 
 @pytest.fixture
 def browser_resolver():
-    renderer = BrowserRenderer()
-    return renderer._status_for_classification
+    """The resolver the browser path actually uses.
 
-
-def test_http_and_browser_paths_report_the_same_status_for_every_label(browser_resolver):
-    """The defect: two resolvers, one taxonomy, opposite answers for the tail.
-
-    Status is part of the API contract (and of job stats), so it must not
-    depend on which fetcher happened to serve the page.
+    Both paths now share one function, so this is the same object the HTTP path
+    calls -- which is the point: there is nothing left to disagree with.
     """
-    labels = _classifiable_labels() + sorted(FAILED_CLASSIFICATIONS)
-    labels += sorted(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS)
-    labels += list(UNRECOGNIZED_LABELS)
-
-    mismatches = {}
-    for label in labels:
-        http_status = http_mod._status_for_classification(label)
-        browser_status = browser_resolver(label)
-        if http_status != browser_status:
-            mismatches[label] = (http_status, browser_status)
-    assert not mismatches, f"http/browser status disagreement (http, browser): {mismatches}"
+    return status_for_classification
 
 
-def test_unknown_classification_has_one_documented_default(browser_resolver):
-    """A label nobody knows about must resolve identically on both paths."""
-    for label in UNRECOGNIZED_LABELS:
-        status = http_mod._status_for_classification(label)
-        assert status == browser_resolver(label) == app_constants.UNKNOWN_CLASSIFICATION_STATUS
-        # The safe default may never be "success": an unrecognized label has
-        # not produced verified content.
-        assert status != "success"
+def test_the_status_resolver_is_defined_once_not_per_strategy():
+    """Drift guard: no strategy module may reintroduce its own resolver.
+
+    The historical defect was two independent if-chains. Both call sites now
+    import ``status_for_classification`` from ``app.constants``, and a new
+    per-module copy here is exactly the regression this pins.
+    """
+    for module in (http_mod, browser_mod):
+        assert not hasattr(module, "_status_for_classification"), (
+            f"{module.__name__} reintroduced a per-module status resolver"
+        )
+    assert not hasattr(BrowserRenderer, "_status_for_classification"), (
+        "BrowserRenderer reintroduced a per-instance status resolver"
+    )
+
+    # The call sites must route through the shared name, not a local copy.
+    for module in (http_mod, browser_mod):
+        source = inspect.getsource(module)
+        assert "status_for_classification(" in source, (
+            f"{module.__name__} no longer resolves classifications through the "
+            f"shared app.constants table"
+        )
 
 
 def test_every_classifiable_label_is_an_explicit_table_entry():
@@ -86,25 +91,46 @@ def test_every_classifiable_label_is_an_explicit_table_entry():
     assert not missing, f"classifications with no explicit status entry: {missing}"
 
 
-def test_resolver_is_a_table_not_a_per_module_if_chain(browser_resolver):
-    """Both call sites must delegate to the one shared resolver."""
-    for label in _classifiable_labels() + list(UNRECOGNIZED_LABELS):
-        expected = app_constants.status_for_classification(label)
-        assert http_mod._status_for_classification(label) == expected
+def test_every_classifiable_label_resolves_through_the_table(browser_resolver):
+    """Every label the classifiers can emit takes its status from the one table.
+
+    This is the direct migration of the pre-consolidation check that the HTTP and
+    browser paths agree on every label: with one shared resolver the agreement
+    is by construction, so the assertion is now that the resolver both paths use
+    is the table itself.
+    """
+    labels = _classifiable_labels() + sorted(FAILED_CLASSIFICATIONS)
+    labels += sorted(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS)
+    labels += list(UNRECOGNIZED_LABELS)
+    for label in labels:
+        expected = app_constants.CLASSIFICATION_STATUS_BY_LABEL.get(
+            label, app_constants.UNKNOWN_CLASSIFICATION_STATUS
+        )
+        assert status_for_classification(label) == expected
         assert browser_resolver(label) == expected
+
+
+def test_unknown_classification_has_one_documented_default(browser_resolver):
+    """A label nobody knows about must resolve to the documented default."""
+    for label in UNRECOGNIZED_LABELS:
+        status = status_for_classification(label)
+        assert status == browser_resolver(label) == app_constants.UNKNOWN_CLASSIFICATION_STATUS
+        # The safe default may never be "success": an unrecognized label has
+        # not produced verified content.
+        assert status != "success"
 
 
 def test_known_group_statuses_are_unchanged(browser_resolver):
     """Inverse case: the working paths must keep their exact statuses."""
-    assert http_mod._status_for_classification("rendered") == "success"
+    assert status_for_classification("rendered") == "success"
     assert browser_resolver("rendered") == "success"
     # Conditional freshness is a success: the caller's validators proved it.
-    assert http_mod._status_for_classification("not_modified") == "success"
+    assert status_for_classification("not_modified") == "success"
     assert app_constants.status_for_classification("not_modified") == "success"
     for classification in BROWSER_BLOCKED_CLASSIFICATIONS:
         assert browser_resolver(classification) == "blocked"
     for classification in HTTP_BLOCKED_CLASSIFICATIONS:
-        assert http_mod._status_for_classification(classification) == "blocked"
+        assert status_for_classification(classification) == "blocked"
     for classification in FAILED_CLASSIFICATIONS:
-        assert http_mod._status_for_classification(classification) == "failed"
+        assert status_for_classification(classification) == "failed"
         assert browser_resolver(classification) == "failed"

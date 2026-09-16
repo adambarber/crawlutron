@@ -307,7 +307,12 @@ def build_pinned_renderer(monkeypatch, page):
         lambda self, page, options: _async_return(("<html>hi</html>", "hi", "ok", False)),
     )
     monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: False)
-    monkeypatch.setattr(BrowserRenderer, "_status_for_classification", lambda self, c: "success")
+    # Force the shared constants resolver (imported into the browser module's
+    # own namespace) so these fakes always report success regardless of the
+    # page content the fake transport returns.
+    from app.crawl.strategies import browser as browser_module
+
+    monkeypatch.setattr(browser_module, "status_for_classification", lambda c: "success")
     return renderer
 
 

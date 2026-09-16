@@ -72,7 +72,6 @@ from app.crawl.strategies.http import (
     _default_http_fetcher,
     _headers_for_strategy,
     _quality_score,
-    _status_for_classification,
 )
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.validation import get_env_int, normalize_public_http_url, public_url_or_none, registrable_domain

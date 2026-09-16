@@ -202,15 +202,15 @@ class TestModuleEdgeCasesMore:
         assert score > 0.0
 
     def test_http_status_not_found(self):
-        from app.crawl.strategies.http import _status_for_classification
+        from app.constants import status_for_classification
 
-        status = _status_for_classification("not_found")
+        status = status_for_classification("not_found")
         assert status == "failed"
 
     def test_http_status_site_error(self):
-        from app.crawl.strategies.http import _status_for_classification
+        from app.constants import status_for_classification
 
-        status = _status_for_classification("site_error")
+        status = status_for_classification("site_error")
         assert status == "failed"
 
     async def test_http_cffi_imersonate_result(self):

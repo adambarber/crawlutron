@@ -651,7 +651,7 @@ class BrowserRenderer:
                 classification = classify_page(html, text, title=title)
                 extraction_method = "pdf_text"
 
-            status = self._status_for_classification(classification)
+            status = status_for_classification(classification)
 
             metadata: dict[str, Any] = {
                 "title": await page.evaluate("() => document.title"),
@@ -1121,11 +1121,3 @@ class BrowserRenderer:
     def _looks_like_pdf(self, url: str) -> bool:
         return url.split("?", 1)[0].lower().endswith(".pdf")
 
-    def _status_for_classification(self, classification: str) -> str:
-        """Browser-path status for a classification.
-
-        Thin delegator kept for existing callers/tests: the mapping is the
-        shared ``app.constants`` table, so a label can no longer mean
-        "blocked" here and "failed" on the HTTP path.
-        """
-        return status_for_classification(classification)

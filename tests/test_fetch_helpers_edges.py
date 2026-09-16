@@ -2,6 +2,8 @@
 
 from coverage_helpers import *
 
+from app.constants import status_for_classification
+
 
 class TestFetchHelpersEdges:
     def test_cookie_header_per_host(self):
@@ -34,7 +36,7 @@ class TestFetchHelpersEdges:
         assert headers.get("Cookie") == "a=1"
 
     def test_status_for_not_modified(self):
-        assert _status_for_classification("not_modified") == "success"
+        assert status_for_classification("not_modified") == "success"
 
     def test_quality_frameset_low_text(self):
         score = _quality_score("success", "rendered", "tiny", "<frameset></frameset>", 200)
