@@ -115,7 +115,10 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 "tests/_testkit.py" = ["F401"]
 # Engine/strategy modules perform deferred heavy imports (optional browser
 # bindings) after module-level constants are computed; E402 is deliberate.
-"app/crawl/engine.py" = ["E402", "S110", "S112"]
+# ARG002: _MatchAll.match(path) accepts `path` for surface parity with the other
+# robots matcher classes (they dispatch on it) but the empty pattern matches
+# every path, so the parameter is intentionally unused.
+"app/crawl/engine.py" = ["E402", "S110", "S112", "ARG002"]
 # Robustness boundaries: best-effort probes/cleanup where silence is the
 # contract (worker reaps, optional-binding probes, webhook best-effort).
 "app/crawl/extraction.py" = ["S110"]

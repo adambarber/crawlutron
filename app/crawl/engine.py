@@ -477,7 +477,9 @@ class _MatchAll:
 
     __slots__ = ()
 
-    def match(self, path: str) -> bool:  # noqa: ARG002 - surface parity
+    def match(self, path: str) -> bool:
+        # `path` is accepted for surface parity with the other matcher classes,
+        # which dispatch on it; the empty pattern matches every path regardless.
         return True
 
 
