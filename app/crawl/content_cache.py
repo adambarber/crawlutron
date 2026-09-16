@@ -64,6 +64,12 @@ class ContentCache:
         # cannot bound disk use when one envelope holds a multi-MB body.
         self._index_sizes: dict[str, int] = {}
         self._index_total_bytes: int = 0
+        # Metadata mirror for cached_at_of(): (expires, cached_at) per live key,
+        # parallel to _index. Sitemap freshness checks run this for every key
+        # of a crawl and must not deserialize multi-MB envelopes to read a
+        # timestamp (P6). _read_envelope stays the single chokepoint for full
+        # reads and for every index mutation; this mirror only answers.
+        self._index_cached_at: dict[str, tuple[float | None, float | None]] = {}
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         # In-memory LRU index (key -> path) so eviction never globs/stats the
@@ -102,6 +108,8 @@ class ContentCache:
         old_path = self._index.pop(key, None)
         freed = self._index_sizes.pop(key, 0)
         self._index_total_bytes = max(0, self._index_total_bytes - freed)
+        # Stale freshness metadata must not outlive its entry.
+        self._index_cached_at.pop(key, None)
         if old_path is not None:
             doomed.append((key, old_path))
         # Keep the memory value cache consistent with evicted disk keys.
@@ -193,6 +201,9 @@ class ContentCache:
                     return None
                 # Mark recently used (LRU) by moving to the end of the ordered index.
                 self._index.move_to_end(key)
+                # Remember the freshness metadata so later cached_at_of()
+                # calls are answered without re-reading the envelope (P6).
+                self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
                 return envelope
         finally:
             self._unlink_doomed(doomed)
@@ -276,7 +287,20 @@ class ContentCache:
         Returns ``None`` if the key is missing, expired, or unreadable. Used by
         sitemap lastmod freshness checks to decide whether a cached page is
         newer than the sitemap's advertised last-modified time (#3).
+
+        Freshness is answered from the ``(expires, cached_at)`` metadata mirror
+        (P6) so a multi-MB envelope is never read and JSON-parsed just to read a
+        timestamp. A mirror miss, or an entry the mirror shows as expired, is
+        routed through :meth:`_read_envelope` -- the single chokepoint for full
+        reads and for every index mutation -- so the fast path can never answer
+        from metadata the slow path would have expired or evicted.
         """
+        with self._lock:
+            entry = self._index_cached_at.get(key)
+            if entry is not None:
+                expires, cached_at = entry
+                if expires is None or self.clock() <= expires:
+                    return cached_at
         envelope = self._read_envelope(key)
         return envelope.get("cached_at") if envelope is not None else None
 
@@ -305,6 +329,9 @@ class ContentCache:
             self._index.move_to_end(key)
             self._index_sizes[key] = len(data)
             self._index_total_bytes += len(data) - old_size
+            # Freshness metadata is known at write time; record it so later
+            # cached_at_of() calls never deserialize this envelope (P6).
+            self._index_cached_at[key] = (expires, envelope["cached_at"])
             # Mirror small values into the in-memory value cache (#7), under
             # the same gate + count cap as every other mirror write.
             self._remember_memory_locked(key, value, expires, len(data))
