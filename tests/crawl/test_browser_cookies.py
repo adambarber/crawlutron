@@ -1,17 +1,4 @@
-"""P0-1: the browser cookie store must be internally synchronized.
-
-``_BROWSER_COOKIES_BY_DOMAIN`` is a module-global LRU shared between the render
-path (which writes harvested cookies) and the crawl engine (which reads them
-for the cffi cookie-bootstrap retry). Historically it was a bare
-``OrderedDict`` with no lock anywhere in the module, and the *read* path
-mutated it: ``get(domain)`` followed by ``move_to_end(domain)``. A concurrent
-write past the cap evicts with ``popitem(last=False)``, so the eviction could
-land between the read and the touch and make ``move_to_end`` raise
-``KeyError`` -- inside a live crawl, on the request path.
-
-These tests are not marked ``browser``: the store is plain in-process state and
-needs no Camoufox/Playwright, so they run in the default fast suite.
-"""
+"""Browser cookie store: cap, LRU eviction, isolation and concurrency."""
 
 import threading
 import time
@@ -179,3 +166,88 @@ def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
     """Boundary: an absent domain is a plain miss (no touch, no exception)."""
     assert get_browser_cookies_for("absent.example") is None
     assert len(clean_cookie_store) == 0
+
+
+# The cache-cap tests spawn a real browser-context store, so they are gated.
+
+
+
+
+def _with_clean_cache(fn):
+    saved = dict(browser_mod._BROWSER_COOKIES_BY_DOMAIN)
+    browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
+    try:
+        fn()
+    finally:
+        browser_mod._BROWSER_COOKIES_BY_DOMAIN.clear()
+        browser_mod._BROWSER_COOKIES_BY_DOMAIN.update(saved)
+
+
+@pytest.mark.browser
+def test_cookie_cache_capped():
+    def run():
+        for i in range(600):
+            _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+        assert len(browser_mod._BROWSER_COOKIES_BY_DOMAIN) == _BROWSER_COOKIES_MAX
+        # Oldest entries were evicted; newest retained.
+        assert get_browser_cookies_for("d599.example") == "k599=v"
+        assert get_browser_cookies_for("d0.example") is None
+
+    _with_clean_cache(run)
+
+
+@pytest.mark.browser
+def test_lru_keeps_recently_used():
+    def run():
+        for i in range(_BROWSER_COOKIES_MAX + 50):
+            _store_browser_cookies(f"d{i}.example", f"k{i}=v")
+        # Touch an older-but-not-oldest entry; it should survive the next eviction.
+        get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example")
+        _store_browser_cookies("new.example", "new=v")
+        assert get_browser_cookies_for(f"d{_BROWSER_COOKIES_MAX}.example") == f"k{_BROWSER_COOKIES_MAX}=v"
+
+    _with_clean_cache(run)
+
+
+@pytest.mark.real_cffi
+@pytest.mark.usefixtures("real_sleeps")
+async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
+    """The impersonated session's own jar must be inert (store nothing, replay
+    nothing); a cookie it saw on one request must never come back on the next.
+
+    Two requests to the same domain is the whole leak: tenant A's Set-Cookie
+    becomes tenant B's ``Cookie:`` header when the jar replays by domain.
+    """
+    pytest.importorskip("curl_cffi")
+    from app.crawl.strategies.http import _build_cffi_session
+
+    session = _build_cffi_session()
+    try:
+        await session.get(base_url + "/set-cookie")
+        replayed = await session.get(base_url + "/check-cookie")
+    finally:
+        await session.close()
+
+    assert "session_id" not in replayed.text, (
+        f"the cffi session replayed a cookie its own jar absorbed: {replayed.text!r}"
+    )
+
+
+async def test_shared_httpx_client_does_not_replay_cookies_it_received(base_url):
+    """The long-lived httpx client shares the defect class, so the same chokepoint.
+
+    ``get_async_http_client`` serves every declared-crawler fetch and outlives
+    them all, so its jar accumulates across tenants for the life of the process.
+    """
+    from app.crawl.strategies.http import _build_async_client
+
+    client = _build_async_client(None)
+    try:
+        await client.get(base_url + "/set-cookie")
+        replayed = await client.get(base_url + "/check-cookie")
+    finally:
+        await client.aclose()
+
+    assert "session_id" not in replayed.text, (
+        f"the shared httpx client replayed a cookie its own jar absorbed: {replayed.text!r}"
+    )
