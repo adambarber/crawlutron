@@ -102,3 +102,40 @@ async def test_async_response_empty_results():
     resp = await abuild_unified_crawl_response([], request_id="r")
     assert resp.results == []
     assert resp.request_id == "r"
+
+
+async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatch):
+    """P5: one response must pay one thread-submission, not one per item.
+
+    Fanning N items to N ``asyncio.to_thread`` calls makes every batch carry N
+    Future/thread-dispatch overheads. The whole list is shaped in a single
+    offload; output stays byte-identical to the sync contract (the companion
+    test above pins that).
+    """
+    items = [_html_item(i) for i in range(4)]
+    calls = {"n": 0}
+    orig_to_thread = asyncio.to_thread
+
+    def spy(fn, *args, **kwargs):
+        calls["n"] += 1
+        return orig_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy)
+    resp = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
+    assert len(resp.results) == len(items)
+    assert calls["n"] == 1, f"expected one batched offload, got {calls['n']}"
+
+
+async def test_abuild_batches_offload_for_empty_results(monkeypatch):
+    """An empty batch offloads nothing and still answers the empty response."""
+    calls = {"n": 0}
+    orig_to_thread = asyncio.to_thread
+
+    def spy(fn, *args, **kwargs):
+        calls["n"] += 1
+        return orig_to_thread(fn, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", spy)
+    resp = await abuild_unified_crawl_response([], request_id="r")
+    assert resp.results == []
+    assert calls["n"] <= 1, f"empty batch must not fan out: {calls['n']}"

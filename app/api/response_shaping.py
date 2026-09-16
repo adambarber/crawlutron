@@ -198,6 +198,12 @@ def build_unified_crawl_response(
     )
 
 
+def _shape_all(results: list[dict[str, Any]]) -> list[UnifiedCrawlResult]:
+    """Shape a whole batch in one pass (the worker-thread side of
+    :func:`abuild_unified_crawl_response`)."""
+    return [build_unified_result(item) for item in results]
+
+
 async def abuild_unified_crawl_response(
     results: list[dict[str, Any]],
     *,
@@ -208,11 +214,13 @@ async def abuild_unified_crawl_response(
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
-    Per-item shaping is gathered concurrently; each item's LLM metadata parse
-    is offloaded off the event loop (perf throughput #2). Async endpoints
-    should prefer this; the sync version stays for sync callers and tests.
+    The whole batch is shaped in ONE event-loop offload (perf throughput #2):
+    fanning one ``to_thread`` per item made every response pay N Future +
+    thread-dispatch overheads, and the default executor serializes those
+    submissions anyway once N exceeds the pool. Output is identical to the
+    sync contract, which stays for sync callers and tests.
     """
-    shaped = await asyncio.gather(*(abuild_unified_result(item) for item in results))
+    shaped = await asyncio.to_thread(_shape_all, results) if results else []
     return UnifiedCrawlResponse(
         request_id=request_id,
         submitted_count=submitted_count if submitted_count is not None else len(results),
