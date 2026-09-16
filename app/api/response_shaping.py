@@ -30,6 +30,19 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     text). For HTML pages the HTML metadata is extracted from the raw markup; results
     without HTML fall back to the strategy's extracted ``text`` so the consumer always
     receives a consistent Markdown payload regardless of how the content was acquired.
+
+    PERF TODO (P2, deferred): this is the third HTML scan for an HTTP page -- the
+    strategy already parsed the body once for trafilatura (``_extract_html``) and
+    once more for link/frame/form discovery (``extract_post_fetch_discovery``, one
+    shared lxml tree). ``_extract_llm_metadata`` reparses here to read title/meta/
+    JSON-LD. The natural fix is to read the metadata from the discovery tree and
+    thread it to shaping; that is deferred because the engine result this shapes is
+    persisted (job store, recursive-crawl spill) and reaches the API response and
+    webhook payloads, so a carried-along field needs an explicit, audited exclusion
+    from every serialization site, and consuming the discovery tree would invert the
+    llm_format -> extraction lazy-import discipline (circular-import risk). The parse
+    is already off the event loop (aformat_crawl_item / the batched offload), so this
+    is CPU saved, not latency.
     """
     from app.crawl.llm_format import _extract_llm_metadata
 
