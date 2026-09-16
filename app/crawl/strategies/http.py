@@ -757,12 +757,15 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
     Rejects private, loopback, link-local, reserved, multicast and unspecified
     ranges, plus carrier-grade NAT (100.64.0.0/10), IPv6 unique-local
     (fc00::/7) and NAT64 (64:ff9b::/96) which older stdlib ``is_private`` does
-    not always cover (F7).
+    not always cover (F7). IPv6 wrappers around an IPv4 target are unwrapped
+    first (B3) so a wrapper cannot hide an IPv4 range this check rejects.
     """
     import ipaddress
 
+    from app.validation import _classified_ip_address
+
     try:
-        addr = ipaddress.ip_address(ip)
+        addr = _classified_ip_address(ipaddress.ip_address(ip))
     except ValueError:
         return True
     if addr.is_private or addr.is_loopback or addr.is_link_local:

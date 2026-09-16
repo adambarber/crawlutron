@@ -203,11 +203,44 @@ def _host_is_public(host: str) -> bool:
         numeric = _resolver_numeric_ipv4(host)
         if numeric is not None:
             address = ipaddress.ip_address(numeric)
-    if address is not None and (
-        address.is_private or address.is_loopback or address.is_link_local or address.is_reserved
-    ):
-        return False
+    if address is not None:
+        address = _classified_ip_address(address)
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+        ):
+            return False
     return True
+
+
+def _embedded_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
+    """Unwrap an IPv4 address hidden inside an IPv6 wrapper.
+
+    IPv4-mapped (``::ffff:0:0/96``), 6to4 (``2002::/16``) and Teredo
+    (``2001::/32``) all reach an IPv4 target, so the SSRF verdict must be taken
+    on the embedded IPv4 rather than the wrapper. Otherwise a wrapper hides
+    whatever the IPv4 range check rejects: ``::ffff:100.64.0.1`` wrapped a
+    carrier-grade NAT target and was classified public (B3). Returns ``None``
+    for native IPv6 and bare IPv4, meaning "classify ``addr`` as-is".
+    """
+    if not isinstance(addr, ipaddress.IPv6Address):
+        return None
+    embedded = addr.ipv4_mapped or addr.sixtofour
+    if embedded is None and addr.teredo is not None:
+        # Teredo exposes (server, client); the client is the reachable target.
+        embedded = addr.teredo[1]
+    return embedded
+
+
+def _classified_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
+    """Return the address an SSRF range verdict must be computed on.
+
+    The single chokepoint for IPv6-embedded IPv4 unwrapping so the mapped and
+    bare forms of a target can never diverge (B3).
+    """
+    return _embedded_ipv4(addr) or addr
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
