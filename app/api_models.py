@@ -23,6 +23,7 @@ from app.constants import (
     MAX_DISCOVERED_LINKS,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
+    CrawlClassification,
 )
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
@@ -58,58 +59,6 @@ class CrawlExtractionMethod(str, Enum):
     TRAFILATURA = EXTRACTION_TRAFILATURA
     DOCUMENT = EXTRACTION_DOCUMENT
     DOM = EXTRACTION_DOM
-
-
-class CrawlClassification(str, Enum):
-    """Normalized result classifications used across HTTP, browser, and document strategies."""
-
-    rendered = "rendered"
-    captcha_detected = "captcha_detected"
-    bot_challenge_detected = "bot_challenge_detected"
-    access_denied = "access_denied"
-    login_required = "login_required"
-    paywall_detected = "paywall_detected"
-    rate_limited = "rate_limited"
-    cookie_consent_required = "cookie_consent_required"
-    javascript_required = "javascript_required"
-    unsupported_browser = "unsupported_browser"
-    geolocation_blocked = "geolocation_blocked"
-    waf_challenge_detected = "waf_challenge_detected"
-    not_found = "not_found"
-    site_error = "site_error"
-    gone = "gone"
-    binary_no_text = "binary_no_text"
-    robots_disallowed = "robots_disallowed"
-    navigation_timeout = "navigation_timeout"
-    browser_crash = "browser_crash"
-    network_error = "network_error"
-    connection_error = "connection_error"
-    http_status_error = "http_status_error"
-    # Fetch-level failure codes emitted by the HTTP strategy's error classifier
-    # (``_classify_error_code``). They are members of the taxonomy (not
-    # internal-only strings) because they are stored verbatim in
-    # ``CrawlStrategyAttempt.classification`` and this field is the strict enum
-    # below at response shaping: a non-member code sails through the lenient
-    # internal dataclass and then rejects the whole batch with a 422. Keeping
-    # them public also lets a caller distinguish these outcomes:
-    #   * payload_too_large -- a decompression/content bomb exceeded the safety
-    #     cap, so the page's bytes were deliberately discarded;
-    #   * too_many_redirects -- a redirect loop, i.e. the page is unreachable by
-    #     following its own chain;
-    #   * http_error -- an httpx-level failure that is not a status, timeout,
-    #     redirect, connection or TLS error (the generic tail of the same
-    #     classifier, whose more specific branches map to the members above).
-    payload_too_large = "payload_too_large"
-    too_many_redirects = "too_many_redirects"
-    http_error = "http_error"
-    value_error = "value_error"
-    tls_error = "tls_error"
-    dns_error = "dns_error"
-    invalid_url = "invalid_url"
-    unsupported_scheme = "unsupported_scheme"
-    private_network_target = "private_network_target"
-    unknown_error = "unknown_error"
-    not_modified = "not_modified"
 
 
 class CrawlStatus(str, Enum):

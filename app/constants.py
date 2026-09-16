@@ -8,6 +8,7 @@ import the constant instead of typing the string literal.
 
 from __future__ import annotations
 
+from enum import Enum
 from urllib.parse import urlparse as _urlparse
 
 # ---------------------------------------------------------------------------
@@ -82,40 +83,114 @@ EXTRACTION_METHOD_BINARY_NO_TEXT: str = "binary_no_text"
 
 
 # ---------------------------------------------------------------------------
+# The classification taxonomy: THE single source of truth.
+#
+# Every classification any strategy can emit is a member of this enum, and the
+# groupings below are derived from it (member references, not a second string
+# copy) so adding a classification is a one-file change. The response models
+# import this enum directly; the /v1/capabilities advertisement is generated
+# from it.
+# ---------------------------------------------------------------------------
+
+
+class CrawlClassification(str, Enum):
+    """Normalized result classifications used across HTTP, browser, and document strategies."""
+
+    rendered = "rendered"
+    captcha_detected = "captcha_detected"
+    bot_challenge_detected = "bot_challenge_detected"
+    access_denied = "access_denied"
+    login_required = "login_required"
+    paywall_detected = "paywall_detected"
+    rate_limited = "rate_limited"
+    cookie_consent_required = "cookie_consent_required"
+    javascript_required = "javascript_required"
+    unsupported_browser = "unsupported_browser"
+    geolocation_blocked = "geolocation_blocked"
+    waf_challenge_detected = "waf_challenge_detected"
+    not_found = "not_found"
+    site_error = "site_error"
+    gone = "gone"
+    binary_no_text = "binary_no_text"
+    robots_disallowed = "robots_disallowed"
+    navigation_timeout = "navigation_timeout"
+    browser_crash = "browser_crash"
+    network_error = "network_error"
+    connection_error = "connection_error"
+    http_status_error = "http_status_error"
+    # Fetch-level failure codes emitted by the HTTP strategy's error classifier
+    # (``_classify_error_code``). They are members of the taxonomy (not
+    # internal-only strings) because they are stored verbatim in
+    # ``CrawlStrategyAttempt.classification`` and this field is the strict enum
+    # below at response shaping: a non-member code sails through the lenient
+    # internal dataclass and then rejects the whole batch with a 422. Keeping
+    # them public also lets a caller distinguish these outcomes:
+    #   * payload_too_large -- a decompression/content bomb exceeded the safety
+    #     cap, so the page's bytes were deliberately discarded;
+    #   * too_many_redirects -- a redirect loop, i.e. the page is unreachable by
+    #     following its own chain;
+    #   * http_error -- an httpx-level failure that is not a status, timeout,
+    #     redirect, connection or TLS error (the generic tail of the same
+    #     classifier, whose more specific branches map to the members above).
+    payload_too_large = "payload_too_large"
+    too_many_redirects = "too_many_redirects"
+    http_error = "http_error"
+    value_error = "value_error"
+    tls_error = "tls_error"
+    dns_error = "dns_error"
+    invalid_url = "invalid_url"
+    unsupported_scheme = "unsupported_scheme"
+    private_network_target = "private_network_target"
+    unknown_error = "unknown_error"
+    not_modified = "not_modified"
+
+
+# ---------------------------------------------------------------------------
 # Classification groupings (consumed by HTTP/browser strategy status mappers
 # and the test suite). Centralized so the HTTP vs browser blocked sets cannot
-# silently drift apart across modules.
+# silently drift apart across modules. Derived from the taxonomy above so a
+# grouping can never name a label the enum does not know about.
 # ---------------------------------------------------------------------------
 HTTP_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
-    {
-        "captcha_detected",
-        "bot_challenge_detected",
-        "access_denied",
-        "login_required",
-        "paywall_detected",
-        "rate_limited",
-        "cookie_consent_required",
-        "javascript_required",
-        "unsupported_browser",
-        "geolocation_blocked",
-        "waf_challenge_detected",
-    }
+    member.value
+    for member in (
+        CrawlClassification.captcha_detected,
+        CrawlClassification.bot_challenge_detected,
+        CrawlClassification.access_denied,
+        CrawlClassification.login_required,
+        CrawlClassification.paywall_detected,
+        CrawlClassification.rate_limited,
+        CrawlClassification.cookie_consent_required,
+        CrawlClassification.javascript_required,
+        CrawlClassification.unsupported_browser,
+        CrawlClassification.geolocation_blocked,
+        CrawlClassification.waf_challenge_detected,
+    )
 )
 
 BROWSER_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
-    {
-        "captcha_detected",
-        "bot_challenge_detected",
-        "access_denied",
-        "login_required",
-        "paywall_detected",
-        "rate_limited",
-    }
+    member.value
+    for member in (
+        CrawlClassification.captcha_detected,
+        CrawlClassification.bot_challenge_detected,
+        CrawlClassification.access_denied,
+        CrawlClassification.login_required,
+        CrawlClassification.paywall_detected,
+        CrawlClassification.rate_limited,
+    )
 )
 
 # Content was retrieved but yielded nothing usable (HTTP/browser status mappers
 # and the browser strategy's retry hints all key off this group).
-FAILED_CLASSIFICATIONS: frozenset[str] = frozenset({"not_found", "site_error", "gone", "binary_no_text"})
+FAILED_CLASSIFICATIONS: frozenset[str] = frozenset(
+    member.value
+    for member in (
+        CrawlClassification.not_found,
+        CrawlClassification.site_error,
+        CrawlClassification.gone,
+        CrawlClassification.binary_no_text,
+    )
+)
 
 # ---------------------------------------------------------------------------
 # Classification -> result status: THE single source of truth.
