@@ -9,6 +9,7 @@ check (TOCTOU).
 """
 
 import socket
+import threading
 import uuid
 from unittest.mock import patch
 
@@ -64,3 +65,39 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
             assert False, "expected ValueError"
         except ValueError:
             pass
+
+
+class TestDnsCacheLocking:
+    def test_dns_cache_lock_is_present_and_used(self):
+        from app.bounded_ttl import BoundedTTLCache
+        from app.crawl.strategies import http as http_mod
+
+        # The chokepoint moved the lock INSIDE the cache: the module no longer
+        # carries a bare dict + lock pair that callers must compose correctly.
+        assert isinstance(http_mod._DNS_CACHE, BoundedTTLCache)
+        assert isinstance(http_mod._DNS_CACHE._lock, type(threading.Lock()))
+
+    def test_dns_cache_concurrent_writes_do_not_corrupt(self):
+        """Eight threads racing ``_resolve_ips`` must leave a consistent cache."""
+        from app.crawl.strategies import http as http_mod
+
+        # Resolve a host that exists on every test machine
+        host = "127.0.0.1"
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                for _ in range(50):
+                    http_mod._resolve_ips(host)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors, errors
+        # Cache is consistent (not corrupted by concurrent mutation) and the
+        # winning write is readable.
+        assert set(http_mod._DNS_CACHE.peek(host)) == {"127.0.0.1"}

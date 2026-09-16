@@ -3,6 +3,8 @@
 import inspect
 import json
 
+from _testkit import os
+
 from app.crawl.engine import _ResultSpill
 
 
@@ -100,3 +102,30 @@ class TestSpillGcCadence:
         finally:
             spill.close()
             spill2.close()
+
+
+class TestSpillFileOwnership:
+    def test_result_spill_close_deletes_owned_file(self):
+        """Auto-created spill files are removed on close."""
+        from app.crawl.engine import _ResultSpill
+
+        spill = _ResultSpill()  # auto-owned path
+        path = spill.path
+        assert os.path.exists(path)
+        spill.close()
+        assert not os.path.exists(path), "Auto-owned spill file was not cleaned up"
+
+    def test_result_spill_keeps_caller_owned_path(self):
+        """Caller-supplied spill paths are NOT removed on close."""
+        import tempfile
+
+        from app.crawl.engine import _ResultSpill
+
+        target = os.path.join(tempfile.gettempdir(), "spill_keep_test.json")
+        try:
+            spill = _ResultSpill(target)
+            spill.close()
+            assert os.path.exists(target), "Caller-owned spill file was wrongly deleted"
+        finally:
+            if os.path.exists(target):
+                os.unlink(target)

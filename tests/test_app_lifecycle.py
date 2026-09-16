@@ -1,5 +1,17 @@
 """App lifecycle edge cases: import failures, lifespan startup/shutdown paths."""
 
+import inspect
+
+
+def _read_main_source() -> str:
+
+    from app import main as main_mod
+
+    return inspect.getsource(main_mod)
+
+
+
+
 from _testkit import *
 
 
@@ -61,3 +73,15 @@ class TestAppLifecycleEdges:
         import app.main as main_mod
 
         assert (main_mod.app) is not None
+
+
+class TestLifespanContextManager:
+    def test_lifespan_is_direct_contextmanager(self):
+        """The FastAPI lifespan must be a direct contextmanager, not ``_lifespan(None)``."""
+        src = _read_main_source()
+        # The old pattern was: lifespan=_lifespan(None) with def _lifespan(app: FastAPI)
+        assert "lifespan=_lifespan(None)" not in src
+        # The new pattern: a directly-decorated async context manager.
+        assert "@asynccontextmanager" in src
+        assert "async def _lifespan(_app: FastAPI)" in src
+        assert "lifespan=_lifespan" in src
