@@ -1,4 +1,4 @@
-"""Perf item 7 (RED): browser fixed overhead must be configurable, defaults fixed.
+"""Browser renderer fixed overhead must be configurable via render knobs.
 
 Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded
 (3 / 1s / 5.0s). They must be policy/env-configurable with byte-identical

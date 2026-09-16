@@ -15,7 +15,7 @@ from _testkit import assert_dns_pinning_uses_first_resolution, block_private_tar
 from app.crawl.strategies.http import _default_http_fetcher
 
 
-class TestDNSRebindingFix:
+class TestDNSRebindingProtection:
     def test_resolve_and_pin_host_uses_first_resolution(self, monkeypatch):
         """Even if a second resolution would rebound to a private IP, the pinned
         IP (first resolution) is what the connection uses."""

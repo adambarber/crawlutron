@@ -1,4 +1,4 @@
-"""Perf item 2 (RED): LLM metadata extraction must leave the event loop.
+"""LLM metadata extraction must leave the event loop.
 
 ``format_crawl_item`` runs ``_extract_llm_metadata`` (a second lxml parse)
 synchronously for every result. The async endpoint path must offload that

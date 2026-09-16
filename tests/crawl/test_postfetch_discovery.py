@@ -1,4 +1,4 @@
-"""Perf item 9: sync post-fetch parsing must leave the event loop.
+"""Sync post-fetch discovery parsing must leave the event loop.
 
 ``_parse_html_tree`` / ``_html_diagnostics`` / ``_extract_discovered_links`` /
 ``extract_js_endpoints`` / ``_detect_pagination`` run synchronously in both

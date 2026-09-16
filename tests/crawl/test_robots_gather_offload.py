@@ -1,4 +1,4 @@
-"""Perf item 1 (RED): robots checks must run concurrently, not sequentially.
+"""robots.txt gathering must run off the event loop (concurrent, not sequential).
 
 ``run_recursive_crawl`` (and the engine's non-recursive branch) await
 ``robots_allows``/``robots_crawl_delay`` one URL at a time, so a batch of N

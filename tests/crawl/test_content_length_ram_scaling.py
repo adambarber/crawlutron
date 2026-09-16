@@ -1,4 +1,4 @@
-"""Perf item 5: the per-page body cap must use the real concurrency.
+"""The per-page content-length body cap must scale with real concurrency.
 
 ``_effective_max_content_length`` scales the cap down as concurrency rises,
 but ``_http_strategy_result`` never passes its concurrency, so the cap always

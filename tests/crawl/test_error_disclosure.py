@@ -93,7 +93,7 @@ _NEW_ERROR_CODES = (
 )
 
 
-class TestH3ErrorCodesAreValidClassifications:
+class TestEmittedErrorCodesAreValidClassifications:
     """H3: every emitted error code must be a ``CrawlClassification`` member.
 
     The strategy layer stores the code straight into

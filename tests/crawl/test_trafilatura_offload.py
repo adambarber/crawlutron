@@ -1,4 +1,4 @@
-"""Perf item 3: sync trafilatura extraction must leave the event loop.
+"""Sync trafilatura extraction must leave the event loop.
 
 ``_http_strategy_result`` (strategies/http.py) and ``_browser_strategy_result``
 (engine.py) call ``_extract_html`` (trafilatura, CPU-bound) synchronously
