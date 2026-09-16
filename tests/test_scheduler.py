@@ -6,7 +6,7 @@ from typing import Any
 
 from _testkit import make_job, make_result
 
-from app.models import CrawlJob
+from app.models import CrawlJob, CrawlTask
 from app.scheduler import DomainScheduler
 
 
@@ -116,3 +116,53 @@ class TestAdaptiveThrottling:
         second = s.current_delay("example.com")
         assert abs(first - 1.0) < 1e-6
         assert abs(second - 0.55) < 1e-6
+
+
+class TestCircuitBreakerSpillsOnResult:
+    """with ``on_result`` set, an open circuit must spill the failed
+    envelope through ``on_result`` instead of writing ``results[index]``
+    (which is ``None`` in that mode -> TypeError, swallowed by
+    ``gather(..., return_exceptions=True)`` -> the URL silently vanishes).
+    """
+
+    async def test_open_circuit_spills_via_on_result(self):
+        from app.scheduler import DomainScheduler
+
+        scheduler = DomainScheduler(
+            global_limit=2,
+            per_domain_limit=1,
+            delay_seconds=0.0,
+            circuit_threshold=3,
+            circuit_cooldown_base=60.0,
+        )
+        # Trip the breaker by hitting the consecutive-failure threshold.
+        for _ in range(3):
+            scheduler.record_failure("example.com")
+        assert scheduler.is_circuit_open("example.com")
+
+        spilled: list[tuple[int, object]] = []
+
+        async def on_result(index, result):
+            spilled.append((index, result))
+
+        async def worker(job):  # pragma: no cover - must never run
+            raise AssertionError("worker must not run while the circuit is open")
+
+        job = CrawlTask(
+            index=0,
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            domain="example.com",
+        )
+        # The bug raises TypeError inside gather with return_exceptions=True,
+        # so run() returns normally but delivers nothing.
+        returned = await scheduler.run([job], worker, on_result=on_result)
+
+        assert returned is None, "on_result mode must return None"
+        assert len(spilled) == 1, f"expected 1 spilled result, got {len(spilled)}"
+        index, result = spilled[0]
+        assert index == 0
+        assert result.status == "failed", result
+        assert result.classification == "network_error", result
+        assert result.error == "circuit_breaker_open", result
+        assert result.diagnostics.get("circuit_breaker") is True, result.diagnostics

@@ -10,6 +10,7 @@ import json
 import socket
 
 import httpx
+from _testkit import http_strategy_policy, invoke_http_strategy
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.strategies.http import _classify_error_code, _http_strategy_result
@@ -142,3 +143,40 @@ class TestEmittedErrorCodesAreValidClassifications:
                 "reported"
             )
             assert status_for_classification(code) == "failed"
+
+
+class TestFailureDiagnosticsRedaction:
+    """the FAILURE path dumped the raw ``request_profile`` (which can carry
+    live cookies, fingerprint_seed, cookie_namespace) into diagnostics, while
+    the SUCCESS path exports only ``user_agent_family`` + ``cookie_jar``.
+    Diagnostics reach the API response, result store, persisted job.results and
+    webhook payloads, so the failure path must emit the same redacted shape.
+    """
+
+    async def test_failure_diagnostics_redact_request_profile(self, monkeypatch):
+
+        policy = http_strategy_policy()
+        # Seed the profile with exactly the sensitive fields the leak exposes.
+        policy["request_profile"] = {
+            "user_agent_family": "chrome",
+            "cookie_jar": "session-jar",
+            "cookies": {"session": "SECRET-TOKEN", "csrf": "abc"},
+            "fingerprint_seed": 12345,
+            "cookie_namespace": "tenant-secret",
+        }
+
+        def raising_resp(url):
+            raise ConnectionError("connection refused")
+
+        result = await invoke_http_strategy(monkeypatch, policy=policy, resp=raising_resp)
+
+        assert result.status == "failed", result.status
+        profile = result.diagnostics["request_profile"]
+
+        # Only the redacted keys the success path emits may appear.
+        assert set(profile.keys()) == {"user_agent_family", "cookie_jar"}, profile
+        assert profile["user_agent_family"] == "chrome", profile
+        assert profile["cookie_jar"] == "session-jar", profile
+        # Raw secrets must not survive anywhere in diagnostics.
+        for secret in ("SECRET-TOKEN", "fingerprint_seed", "cookie_namespace", "cookies"):
+            assert secret not in str(result.diagnostics), str(result.diagnostics)

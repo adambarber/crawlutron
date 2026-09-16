@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -599,3 +600,58 @@ class TestRunnerLifecycle:
         assert started == 2
         assert job_runner.is_running(job.job_id)
         await job_runner.shutdown_job_runner()
+
+
+class TestWholeSiteRedirectedUrlResolution:
+    """whole-site results are keyed by final_url but looked up by the
+    pre-redirect frontier URL, so a redirected page misses -> "transient" ->
+    re-queued forever, then counted failed and dropped: its content never
+    reaches job.results.
+    """
+
+    async def test_frontier_url_resolves_via_final_url(self, job_store, monkeypatch):
+        frontier_url = "http://example.com/page"
+        final_url = "https://example.com/page/"  # http->https + trailing slash
+
+        job = job_store.create(frontier_url, {"limits": {"max_depth": 1}})
+        job_id = job.job_id
+
+        call_count = {"n": 0}
+
+        async def fake_execute_crawl(payload, *, settings=None, shutdown_event=None, **kwargs):
+            call_count["n"] += 1
+            # The engine reports the item keyed by its own URLs; the frontier
+            # URL is the ORIGINAL (pre-redirect) one.
+            return {
+                "results": [
+                    {
+                        "original_url": frontier_url,
+                        "normalized_url": frontier_url,
+                        "final_url": final_url,
+                        "status": "success",
+                        "classification": "rendered",
+                        "selected_strategy": "HTTP_DECLARED_CRAWLER",
+                        "text": "page content",
+                        "markdown": "page content",
+                        "html": "<html><body>page content</body></html>",
+                        "extraction_method": "http_html",
+                        "quality_score": 1.0,
+                    }
+                ]
+            }
+
+        monkeypatch.setattr("app.api.job_runner._execute_crawl", fake_execute_crawl)
+
+        from app.api.job_runner import _run_job
+
+        await _run_job(job_id, job_store, MagicMock(), asyncio.Event())
+
+        finished = job_store.load(job_id)
+        assert finished is not None
+        # The content must land in job.results exactly once (success), not be
+        # re-queued until retries exhaust and then dropped.
+        assert len(finished.results) == 1, f"results={finished.results}"
+        assert finished.results[0]["status"] == "success", finished.results[0]
+        assert finished.stats.get("total_failed", 0) == 0, finished.stats
+        # And the frontier URL must be committed visited (not re-crawled).
+        assert frontier_url in finished.visited, finished.visited

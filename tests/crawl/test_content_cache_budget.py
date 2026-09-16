@@ -223,3 +223,69 @@ class TestContentCacheByteBudget:
         assert cache._index_total_bytes == total_before
         assert cache._index_total_bytes == sum(cache._index_sizes.values())
         assert await cache.aget("k") == {"body": "old"}
+
+
+class TestExpiredEntryFreesByteAccounting:
+    """reading an expired (or unreadable) entry popped ``_index`` but left
+    ``_index_sizes``/``_index_total_bytes`` untouched. The phantom bytes keep
+    ``_over_limits()`` true, so the next ``set()``'s ``_enforce_limits`` evicts
+    LIVE LRU entries it should not -- a sustained self-inflicted cache wipe-out
+    on a TTL-busy cache.
+    """
+
+    def test_expired_read_frees_byte_accounting(self, tmp_path):
+        from app.crawl.content_cache import ContentCache
+
+        now = [1000.0]
+        cache = ContentCache(
+            tmp_path / "cache",
+            default_ttl=10,
+            clock=lambda: now[0],
+            max_entries=100,
+            # Tight budget: two entries fit, three do not.
+            max_total_bytes=10_000,
+        )
+
+        cache.set("a", "x" * 100)
+        cache.set("b", "x" * 100)
+        size_a = cache._index_sizes["a"]
+        total_before = cache._index_total_bytes
+        assert total_before > 0
+
+        # Advance past the TTL and read the now-expired entry.
+        now[0] = 2000.0
+        assert cache.get("a") is None, "expired entry must read as None"
+
+        # The expired read must free A's byte accounting (via _drop_locked),
+        # not just the index entry.
+        assert cache._index_total_bytes == total_before - size_a, (
+            f"phantom bytes: total {cache._index_total_bytes} != "
+            f"{total_before - size_a} (expired entry's {size_a} bytes still counted)"
+        )
+
+    def test_set_after_expired_read_does_not_evict_live_entry(self, tmp_path):
+        from app.crawl.content_cache import ContentCache
+
+        now = [1000.0]
+        cache = ContentCache(
+            tmp_path / "cache",
+            default_ttl=10,
+            clock=lambda: now[0],
+            max_entries=100,
+            max_total_bytes=10_000,
+        )
+        cache.set("a", "x" * 100)
+        cache.set("b", "x" * 100)
+        # Budget for exactly two entries.
+        unit = cache._index_sizes["b"]
+        cache.max_total_bytes = 2 * unit + unit // 2
+
+        now[0] = 2000.0
+        assert cache.get("a") is None  # expired read frees A's bytes (or not)
+        now[0] = 1000.0  # keep B and C unexpired for the assertions
+
+        cache.set("c", "x" * 100)
+        # B is live and must not be sacrificed to phantom A bytes. Clear the
+        # RAM mirror so the assertion reads the disk-backed index, not RAM.
+        cache._memory_cache.clear()
+        assert cache.get("b") == "x" * 100, "live LRU entry evicted by phantom bytes"
