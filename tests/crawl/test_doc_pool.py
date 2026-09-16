@@ -435,7 +435,9 @@ class _LifespanStubProc:
         self.signals.append("SIGKILL")
         self._alive = False
 
-    def join(self, timeout=None) -> None:  # noqa: ARG002 - matches the real API
+    def join(self, timeout=None) -> None:
+        # The real worker join accepts an optional timeout; the stand-in ignores it.
+        _ = timeout
         return None
 
     @property
