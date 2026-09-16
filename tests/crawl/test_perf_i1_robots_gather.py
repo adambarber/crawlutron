@@ -20,7 +20,7 @@ def _make_job(index: int, host: str) -> CrawlTask:
 
 class _Scheduler:
     async def run(self, jobs, worker):
-        return [await worker(j) for j in jobs]
+        return {job.index: await worker(job) for job in jobs}
 
     def get_pinned_strategy(self, domain):
         return None

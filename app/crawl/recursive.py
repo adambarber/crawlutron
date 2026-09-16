@@ -26,6 +26,7 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
+from app.crawl.result_helpers import _failed_engine_result
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
@@ -324,10 +325,30 @@ async def run_recursive_crawl(
             visited.add(job.normalized_url)
 
         scheduled_results = (
-            await scheduler.run([job for _, job in allowed_jobs], worker) if allowed_jobs else []
+            await scheduler.run([job for _, job in allowed_jobs], worker) if allowed_jobs else {}
         )
 
-        for (depth, job), result in zip(allowed_jobs, scheduled_results, strict=False):
+        for depth, job in allowed_jobs:
+            # Align each result with its own job by index. ``scheduler.run``
+            # reports a ``job.index -> result`` mapping (completion order is
+            # arbitrary and a raised worker leaves a job absent), so a positional
+            # zip against ``allowed_jobs`` -- which ``_pop_admitted`` has already
+            # tier-reordered (HTTP first) -- would write each result to the
+            # wrong spill index whenever HTTP and browser tasks interleave, and
+            # shift every subsequent pairing after a failed job (B1).
+            result = scheduled_results.get(job.index)
+            if result is None:
+                # The worker raised and gather(return_exceptions=True) dropped
+                # the job. It still needs an envelope: without one the page is
+                # silently absent from the spill (and from /v1/crawl).
+                result = _failed_engine_result(
+                    original_url=job.original_url,
+                    normalized_url=job.normalized_url,
+                    strategy="",
+                    classification="network_error",
+                    error="worker_exception",
+                    diagnostics={"error": "worker_exception"},
+                )
             # Strip heavy payloads inside the loop so they are not retained
             # for the whole crawl when the caller did not ask for them (#1).
             if not include_html:

@@ -225,15 +225,21 @@ class DomainScheduler:
         jobs: list[CrawlJob],
         worker: SchedulerWorker,
         on_result: Callable[[int, EngineCrawlResult], Awaitable[None]] | None = None,
-    ) -> list[EngineCrawlResult] | None:
+    ) -> dict[int, EngineCrawlResult] | None:
         """Run ``jobs`` through ``worker``.
 
         When ``on_result`` is provided, each completed result is handed to it
         immediately (e.g. streamed to the on-disk result spill) and is NOT
         retained in memory -- peak RAM then tracks the in-flight set rather than
         the whole batch (adversarial perf #3.1). In that mode ``run`` returns
-        ``None``; otherwise it returns the ordered list of results (used by the
-        recursive frontier expansion).
+        ``None``; otherwise it returns a mapping of ``job.index -> result``.
+
+        The mapping is keyed by job index rather than positionally so callers
+        can align each result with its own job regardless of completion order,
+        and so the result store does not have to allocate a slot for every
+        index in the batch (a high-index batch would otherwise allocate a list
+        of ``max(index)`` entries). Jobs whose worker raised are absent from the
+        mapping; the caller decides how to represent them.
         """
         # Purge stale state up front so dicts cannot grow without bound.
         self._purge_expired()
@@ -241,11 +247,10 @@ class DomainScheduler:
         domain_gates: dict[str, asyncio.Semaphore] = defaultdict(
             lambda: asyncio.Semaphore(self._per_domain_limit),
         )
-        result_count = max((job.index for job in jobs), default=-1) + 1
         # Retain results in memory only when the caller needs them back
         # (recursive frontier expansion). With on_result set, results are spilled
         # per-job and never accumulated here, bounding batch RAM (#3.1).
-        results: list[EngineCrawlResult | None] | None = None if on_result else [None] * result_count
+        results: dict[int, EngineCrawlResult] | None = None if on_result else {}
 
         async def run_one(job: CrawlJob) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global
@@ -333,12 +338,12 @@ class DomainScheduler:
                         raise
 
         # return_exceptions=True: a single job failure must not cancel the
-        # other in-flight jobs (HIGH #6). Exceptions are captured here and the
-        # failing job is simply dropped from the results list.
+        # other in-flight jobs (HIGH #6). Exceptions are captured here; the
+        # failing job is simply absent from the returned mapping.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:
             return None
-        return [result for result in results if result is not None]  # type: ignore[return-value]
+        return results  # type: ignore[return-value]
 
     @property
     def domain_cooldowns(self) -> dict[str, float]:

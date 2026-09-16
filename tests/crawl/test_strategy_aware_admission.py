@@ -35,7 +35,7 @@ class _HSScheduler:
 
     async def run(self, jobs, worker):
         self.runs += 1
-        return [await worker(j) for j in jobs]
+        return {job.index: await worker(job) for job in jobs}
 
 
 def _task(domain):

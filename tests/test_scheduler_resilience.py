@@ -25,8 +25,8 @@ class TestSchedulerResilience:
 
         results = await scheduler.run(jobs, failing_worker)
         assert len(results) == 2, results
-        assert all(r.status == "success" for r in results)
-        assert {r.normalized_url for r in results} == {
+        assert all(r.status == "success" for r in results.values())
+        assert {r.normalized_url for r in results.values()} == {
             "http://example.com/0",
             "http://example.com/2",
         }

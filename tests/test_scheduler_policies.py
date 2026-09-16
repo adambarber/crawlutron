@@ -173,7 +173,7 @@ class TestSchedulerPolicies:
         # as they complete rather than being held until the whole batch finishes.
         assert on_result_order.index(1) < on_result_order.index(0)
 
-    async def test_run_returns_ordered_list_without_on_result(self):
+    async def test_run_returns_results_keyed_by_index_without_on_result(self):
         """Backward-compatible path (recursive frontier) still returns results."""
         from app.scheduler import DomainScheduler
         from tests._testkit import make_job, make_result
@@ -186,4 +186,8 @@ class TestSchedulerPolicies:
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
         ret = await sched.run(jobs, worker)
         assert ret is not None
-        assert [r.normalized_url for r in ret] == [f"http://h{i}.example.com/" for i in range(4)]
+        # Results are keyed by job index so callers align them with their own job.
+        assert sorted(ret) == [0, 1, 2, 3]
+        assert [ret[i].normalized_url for i in sorted(ret)] == [
+            f"http://h{i}.example.com/" for i in range(4)
+        ]

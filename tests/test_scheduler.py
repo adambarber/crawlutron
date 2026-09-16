@@ -39,11 +39,16 @@ class TestScheduler:
         assert results[0].status == "success"
         assert elapsed > 0.25
 
-    async def test_run_returns_results_in_order(self):
+    async def test_run_returns_results_keyed_by_job_index(self):
         scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
         results = await scheduler.run(jobs, ok_worker)
-        assert [r.normalized_url for r in results] == [f"http://example.com/{i}" for i in range(3)]
+        # run reports a job.index -> result mapping so callers align each result
+        # with its own job regardless of completion order (B1).
+        assert sorted(results) == [0, 1, 2]
+        assert [results[i].normalized_url for i in sorted(results)] == [
+            f"http://example.com/{i}" for i in range(3)
+        ]
 
     async def test_delay_applied_between_same_domain_jobs(self, real_sleeps):
         """This test needs real asyncio.sleep for timing verification."""

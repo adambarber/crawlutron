@@ -7,8 +7,10 @@ full engine (the reason the dispatch was extracted from ``crawl_request``).
 
 import asyncio
 
+from app.constants import BROWSER_HEADLESS
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
+from app.scheduler import DomainScheduler
 from tests._testkit import Spill, make_engine_result
 
 
@@ -18,7 +20,7 @@ class _Scheduler:
 
     async def run(self, jobs, worker):
         self.runs += 1
-        return [await worker(j) for j in jobs]
+        return {job.index: await worker(job) for job in jobs}
 
 
 class _Gate:
@@ -62,11 +64,13 @@ async def _run(
     global_concurrency=4,
     seed_sitemaps=False,
     robots_allows=None,
+    scheduler=None,
 ):
     if gate is None:
         gate = _Gate()
     spill = Spill()
-    scheduler = _Scheduler()
+    if scheduler is None:
+        scheduler = _Scheduler()
 
     if robots_allows is None:
 
@@ -172,3 +176,68 @@ async def test_robots_disallows_initial_job_as_skip():
     spill, _, _ = await _run(jobs, worker, robots_allows=allows, respect_robots=True)
     assert seen == []  # worker never invoked
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/blocked"}
+
+
+# ---------------------------------------------------------------------------
+# Result alignment (B1): the spill index must match the job that produced the
+# result, even when tiers interleave or a job fails.
+# ---------------------------------------------------------------------------
+def _tiered_job(index: int, host: str) -> CrawlTask:
+    url = f"http://{host}/"
+    return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
+
+
+async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
+    """A batch that interleaves HTTP and browser-pinned tasks must still write
+    each result to its own job index.
+
+    ``_pop_admitted`` emits tasks HTTP-first (tier order) while
+    ``DomainScheduler.run`` reports results in index order with failures
+    filtered out, so zipping the two mis-pairs every interleaved job.
+    """
+    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
+    scheduler.set_pinned_strategy("b1", BROWSER_HEADLESS)
+    scheduler.set_pinned_strategy("b2", BROWSER_HEADLESS)
+
+    # index/tier order deliberately interleaved: browser, http, browser, http
+    jobs = [
+        _tiered_job(0, "b1"),
+        _tiered_job(1, "h1"),
+        _tiered_job(2, "b2"),
+        _tiered_job(3, "h2"),
+    ]
+
+    async def worker(job):
+        # Result identity reflects the job that actually produced it.
+        return make_engine_result(job.normalized_url)
+
+    spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
+
+    assert set(spill.writes) == {0, 1, 2, 3}
+    for index, result in spill.writes.items():
+        expected = jobs[index].normalized_url
+        assert result.normalized_url == expected, (
+            f"spill[{index}] holds {result.normalized_url!r}, expected {expected!r}"
+        )
+
+
+async def test_failed_job_does_not_shift_other_results():
+    """A job whose worker raises must not shift the pairing of later jobs, and
+    must still receive its own failure envelope instead of vanishing."""
+    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
+    jobs = [_tiered_job(i, f"h{i}") for i in range(4)]
+
+    async def worker(job):
+        if job.index == 1:
+            raise RuntimeError("transient failure")
+        return make_engine_result(job.normalized_url)
+
+    spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
+
+    assert set(spill.writes) == {0, 1, 2, 3}
+    for index, result in spill.writes.items():
+        assert result.normalized_url == jobs[index].normalized_url, (
+            f"spill[{index}] holds {result.normalized_url!r}, "
+            f"expected {jobs[index].normalized_url!r}"
+        )
+    assert spill.writes[1].status == "failed"
