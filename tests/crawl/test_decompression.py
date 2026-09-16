@@ -12,18 +12,6 @@ from app.crawl.strategies.http import _decode_body
 _CAP = 10_000_000
 
 
-def test_gzip():
-    assert decompress_body(gzip.compress(b"hello world"), "gzip", max_output_bytes=_CAP) == b"hello world"
-
-
-def test_deflate():
-    assert decompress_body(zlib.compress(b"hello world"), "deflate", max_output_bytes=_CAP) == b"hello world"
-
-
-def test_no_encoding():
-    assert decompress_body(b"hello", "", max_output_bytes=_CAP) == b"hello"
-
-
 def test_cap_is_required_keyword():
     # H2 closure: the uncapped branch existed only as a default; making the
     # cap mandatory turns "forgot to bound a bomb" into a TypeError.
@@ -63,7 +51,6 @@ def test_decode_body_empty_body():
 
 class TestDecompressionEncodings:
     def test_decompression_zlib(self):
-        import zlib
 
         from app.crawl.decompression import decompress_body
 
@@ -125,7 +112,6 @@ class TestDecompressionBehaviors:
         assert decompress_body(data, "gzip", max_output_bytes=10_000_000) == b"hello world"
 
     def test_deflate(self):
-        import zlib
 
         data = zlib.compress(b"hello world")
         assert decompress_body(data, "deflate", max_output_bytes=10_000_000) == b"hello world"
@@ -233,7 +219,6 @@ def test_decompression_without_limit_is_rejected():
 
 
 def test_deflate_bomb_is_bounded():
-    import zlib
 
     bomb = zlib.compress(b"B" * 1_000_000)
     with pytest.raises(DecompressionTooLargeError):

@@ -57,12 +57,6 @@ def _clear():
 
 
 def test_get_browser_pool_returns_none_before_initialize():
-    _clear()
-    assert get_browser_pool() is None
-    _clear()
-
-
-def test_get_browser_pool_never_lazily_creates_divergent_pool():
     # Contract: calling getters before startup must NOT silently construct a
     # BrowserPool with settings-unaware default size. It must be None.
     _clear()

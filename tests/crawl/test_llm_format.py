@@ -19,15 +19,6 @@ class TestPageMetadata:
     def test_handles_empty(self):
         assert _extract_llm_metadata("", "https://example.com") == {"source_url": "https://example.com"}
 
-    def test_text_from_html_strips_scripts_and_tags(self):
-        html = (
-            "<html><body><p>Hello <b>World</b></p>"
-            "<script>ignore_me();</script><style>.x{color:red}</style>"
-            "</body></html>"
-        )
-        assert _text_from_html(html) == "Hello World"
-
-
 class TestJsonLdExtraction:
     def test_json_ld_populated_from_script_tag(self):
         html = (

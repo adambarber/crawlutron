@@ -58,16 +58,6 @@ def test_chunked_request_cap_is_16_mib():
     assert "_MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024" in source
 
 
-class TestBodySizeCap:
-    def test_body_size_cap_is_16_mib(self):
-        """The ASGI body cap must be 16 MiB."""
-
-        from app.api import middleware as mw_mod
-
-        src = inspect.getsource(mw_mod)
-        assert "_MAX_REQUEST_BODY_BYTES = 16 * 1024 * 1024" in src
-
-
 class TestBodySizeMiddlewareRegistration:
     def test_body_size_middleware_registered(self):
         """The middleware must be installed on the FastAPI app."""

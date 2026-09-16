@@ -198,6 +198,7 @@ class TestPureParsing:
         assert "Approve" in out
 
     def test_should_join_document_paragraph_heading(self) -> None:
+        # A heading line must never be joined to the next paragraph.
         assert _should_join_document_paragraph("Section A", "some prose") is False
 
     def test_next_non_empty_document_line_none(self) -> None:
@@ -437,10 +438,6 @@ class TestFetchHelperUtilities:
         )
         assert count == 1
         assert truncated is False
-
-    def test_should_join_document_paragraph_heading(self) -> None:
-        # A heading line must never be joined to the next paragraph.
-        assert _should_join_document_paragraph("CHAPTER ONE", "some prose") is False
 
     def test_collect_document_item_lines_breaks_on_public_participation(self) -> None:
         # A bare numbered marker followed by a non-item section breaks collection.
