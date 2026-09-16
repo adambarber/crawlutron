@@ -42,6 +42,20 @@ class TestFetchHelpersEdges:
         score = _quality_score("success", "rendered", "tiny", "<frameset></frameset>", 200)
         assert score <= 0.4
 
+    @pytest.mark.parametrize("text,html", [(None, None), ("", None), ("hi", "<p>x</p>"), ("a" * 30, "<html><body>x</body></html>")])
+    def test_quality_score_reuses_precomputed_metrics(self, text, html):
+        """Dup8: threading the diagnostics metrics in must not change the score."""
+        from app.crawl.strategies.http import _content_metrics
+
+        metrics = _content_metrics(text, html)
+        direct = _quality_score("success", "rendered", text, html, 200)
+        threaded = _quality_score("success", "rendered", text, html, 200, content_metrics=metrics)
+        assert threaded == direct
+
+    def test_quality_score_ignores_metrics_when_not_rendered(self):
+        """The early return must not read the metrics dict (None is never indexed)."""
+        assert _quality_score("failed", "network_error", None, None, None, content_metrics=None) == 0.0
+
     def test_decode_body_gzip_content_encoding(self):
         # Decompression happens at the capped chokepoint, then decode.
         body = gzip.compress(b"hello world")

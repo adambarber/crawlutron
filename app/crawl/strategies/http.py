@@ -1481,12 +1481,26 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None)
 
 
 def _quality_score(
-    status: str, classification: str, text: str | None, html: str | None, http_status: int | None
+    status: str,
+    classification: str,
+    text: str | None,
+    html: str | None,
+    http_status: int | None,
+    *,
+    content_metrics: dict | None = None,
 ) -> float:
     if status != "success" or classification != "rendered":
         return 0.0
-    text_length = len((text or "").strip())
-    html_length = len((html or "").strip())
+    # The caller already measured text/html for diagnostics; reuse those exact
+    # lengths instead of re-stripping the same two strings (the frameset
+    # predicate below is deliberately NOT taken from the metrics dict: the
+    # diagnostics tag scan and this substring check disagree on malformed tags).
+    if content_metrics is not None:
+        text_length = content_metrics["visible_text_length"]
+        html_length = content_metrics["html_length"]
+    else:
+        text_length = len((text or "").strip())
+        html_length = len((html or "").strip())
     normalized_html = (html or "").lower()
     has_frameset = "<frameset" in normalized_html or "<frame" in normalized_html
     score = 0.45
@@ -2060,7 +2074,7 @@ async def _http_strategy_result(
             },
             "retry": retry_diagnostics,
             "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
-            "content_metrics": _content_metrics(text, html),
+            "content_metrics": (content_metrics := _content_metrics(text, html)),
         }
         # Discovery is only requested when the caller opts in; recursive crawls
         # (max_depth > 0) also need discovered links to expand the frontier.
@@ -2133,7 +2147,9 @@ async def _http_strategy_result(
         next_page_url = public_url_or_none(next_page_url) if next_page_url else None
         if next_page_url:
             diagnostics["next_page_url"] = next_page_url
-        quality = _quality_score(status, classification, text, html, response.status_code)
+        quality = _quality_score(
+            status, classification, text, html, response.status_code, content_metrics=content_metrics
+        )
         # Surface origin validators so callers can revalidate cheaply later.
         if strategy_decompression_failed or getattr(response, "decompression_failed", False):
             # Garbage compressed bytes must not masquerade as high-quality content.
