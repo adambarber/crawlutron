@@ -19,6 +19,7 @@ import asyncio
 from typing import Any
 
 from app.api_models import PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
+from app.constants import CrawlClassification
 
 
 def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
@@ -213,8 +214,39 @@ def build_unified_crawl_response(
 
 def _shape_all(results: list[dict[str, Any]]) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
-    :func:`abuild_unified_crawl_response`)."""
-    return [build_unified_result(item) for item in results]
+    :func:`abuild_unified_crawl_response`).
+
+    One malformed item must not fail the batch: the job-runner path guards
+    per-item (a dropped item counts as a failed crawl, not silence), and the
+    endpoint must hold the same contract. The guard lives here rather than
+    at each caller so the two paths cannot drift apart again.
+    """
+    shaped: list[UnifiedCrawlResult] = []
+    for item in results:
+        try:
+            shaped.append(build_unified_result(item))
+        except Exception:
+            shaped.append(_failed_unified_result(item))
+    return shaped
+
+
+def _failed_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+    """A shape failure becomes a terminal failure for that item, not the batch.
+
+    Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
+    Fields that require no interpretation are carried through so the caller
+    still sees which URL failed.
+    """
+    url = item.get("normalized_url") or item.get("original_url") or ""
+    return UnifiedCrawlResult(
+        url=url,
+        original_url=item.get("original_url") or url,
+        normalized_url=url,
+        final_url=item.get("final_url"),
+        status="failed",
+        classification=CrawlClassification.unknown_error.value,
+        error=item.get("error") or "result_shaping_failed",
+    )
 
 
 async def abuild_unified_crawl_response(

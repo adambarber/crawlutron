@@ -199,3 +199,33 @@ class TestCallWorkerExecutesOnce:
         result = await _call_worker(worker, "job")
         assert len(calls) == 1
         assert result == "async-result"
+
+
+class TestShapeAllGuardsPerItem:
+    """One malformed item must not kill the whole batch at the endpoint.
+
+    The job runner guards per-item (abuild_unified_result in try/except,
+    dropping the item as a failed crawl). The endpoint's _shape_all had no
+    guard, so a single unshapable item raised and the endpoint 500'd the
+    entire batch -- the same primitive, two contracts. The fix lives at the
+    shaping primitive itself so both paths share one guard.
+    """
+
+    async def test_one_bad_item_does_not_fail_the_batch(self):
+        from app.api.response_shaping import abuild_unified_crawl_response, build_unified_result
+
+        good = _budget_item()
+        bad = {**good, "status": "not-a-real-status"}
+        # the bad item is genuinely unshapable
+        try:
+            build_unified_result(bad)
+            raise AssertionError("expected the malformed item to fail shaping")
+        except Exception:
+            pass
+
+        response = await abuild_unified_crawl_response(
+            [good, bad], request_id="r", submitted_count=2
+        )
+        assert len(response.results) == 2
+        assert response.results[0].classification == "url_budget_exceeded"
+        assert response.results[1].status == "failed"
