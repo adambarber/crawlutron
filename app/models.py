@@ -226,3 +226,14 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
         seen = seen | {oid}
         return [_to_jsonable_impl(v, seen) for v in value]
     return value
+
+
+class BrowserPoolExhaustedError(Exception):
+    """No renderer became available within the acquire timeout.
+
+    Lives in ``app.models`` (not ``browser_pool``) because the shared error
+    classifier in ``app.crawl.result_helpers`` must isinstance-check it
+    without importing a strategy module: browser_pool imports browser, and
+    browser imports result_helpers, so defining it there would create an
+    import cycle. ``browser_pool`` re-exports it for its existing importers.
+    """

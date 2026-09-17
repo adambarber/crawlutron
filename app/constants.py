@@ -118,20 +118,18 @@ class CrawlClassification(str, Enum):
     network_error = "network_error"
     connection_error = "connection_error"
     http_status_error = "http_status_error"
-    # Fetch-level failure codes emitted by the HTTP strategy's error classifier
-    # (``_classify_error_code``). They are members of the taxonomy (not
-    # internal-only strings) because they are stored verbatim in
-    # ``CrawlStrategyAttempt.classification`` and this field is the strict enum
-    # below at response shaping: a non-member code sails through the lenient
-    # internal dataclass and then rejects the whole batch with a 422. Keeping
-    # them public also lets a caller distinguish these outcomes:
-    #   * payload_too_large -- a decompression/content bomb exceeded the safety
-    #     cap, so the page's bytes were deliberately discarded;
-    #   * too_many_redirects -- a redirect loop, i.e. the page is unreachable by
-    #     following its own chain;
-    #   * http_error -- an httpx-level failure that is not a status, timeout,
-    #     redirect, connection or TLS error (the generic tail of the same
-    #     classifier, whose more specific branches map to the members above).
+    # Strategy-level failure codes emitted by the shared error classifier
+    # (``app.crawl.result_helpers._classify_error_code``). They are members of
+    # the taxonomy (not internal-only strings) because they are stored verbatim
+    # in ``CrawlStrategyAttempt.classification`` and this field is the strict
+    # enum at response shaping: a non-member code sails through the lenient
+    # internal dataclass and then rejects the whole batch with a 422.
+    #
+    # browser_pool_exhausted is deliberately distinct from network_error: it
+    # means the URL was never attempted because renderer capacity was
+    # unavailable, so the page is a retry candidate, not a dead page. The
+    # classifier and the retry decision both key off this label.
+    browser_pool_exhausted = "browser_pool_exhausted"
     payload_too_large = "payload_too_large"
     too_many_redirects = "too_many_redirects"
     http_error = "http_error"
@@ -228,6 +226,12 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
     "payload_too_large": "failed",
     "too_many_redirects": "failed",
     "http_error": "failed",
+    # Capacity, not a dead page: the URL was never attempted because no
+    # renderer was free. Reported as failed so the caller sees a terminal
+    # result for this pass, but diagnostics["retryable"] is True and the
+    # frontier layer re-queues it -- so this status describes the attempt,
+    # not the page.
+    "browser_pool_exhausted": "failed",
 }
 
 # Unknown-classification default: "blocked".

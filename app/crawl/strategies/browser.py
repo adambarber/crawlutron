@@ -31,11 +31,11 @@ from app.constants import (
     DEFAULT_MAX_CONCURRENT_PAGES,
     status_for_classification,
 )
+from app.crawl.result_helpers import _classify_error_code
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.http import (
     _build_pinned_request,
     _check_ssrf_protection,
-    _classify_error_code,
 )
 from app.json_safe import json_default
 from app.models import CrawlResult, RenderOptions
