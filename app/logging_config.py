@@ -75,6 +75,30 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+class _ServiceFieldFilter(logging.Filter):
+    """Stamp the service name onto records that did not already carry one.
+
+    Attached to the root handlers so a record emitted from any namespace (an
+    ``app.*`` module or a third-party library) carries the ``service`` field the
+    JSON formatter reports.
+    """
+
+    def __init__(self, service_name: str) -> None:
+        super().__init__()
+        self._service_name = service_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "service"):
+            record.service = self._service_name
+        return True
+
+
+# Marker on handlers this function owns, so a second call (uvicorn reload, a
+# re-import, or a test suite that already configures root) does not stack
+# duplicate JSON handlers on top of existing ones.
+_BC_OWNED_HANDLER = "_bc_service_handler"
+
+
 def configure_service_logging(
     *,
     service_name: str,
@@ -83,10 +107,15 @@ def configure_service_logging(
     log_file_max_bytes: int = 10 * 1024 * 1024,
     log_file_backup_count: int = 3,
 ) -> logging.Logger:
-    """Configure a service-named logger with JSON line output.
+    """Configure JSON line output for the whole service.
+
+    Handlers are attached to the root logger so every namespace reaches them;
+    the returned service-named logger is kept for callers that hold it (its
+    level mirrors the configured one).
 
     Args:
-        service_name: dotted name used for the logger and the ``service`` field.
+        service_name: value reported in the ``service`` field (and the name of
+            the logger returned to the caller).
         log_level: one of ``"debug"``/``"info"``/``"warning"``/``"error"``/``"critical"``.
         log_file_path: optional path to also tee logs to a rotating file. The
             file's parent directories are created automatically. ``None`` keeps
@@ -94,24 +123,39 @@ def configure_service_logging(
         log_file_max_bytes: maximum bytes per log file before rotation.
         log_file_backup_count: number of rotated files to keep.
     """
-    logger = logging.getLogger(service_name)
     level = getattr(logging, log_level.upper(), logging.INFO)
+    logger = logging.getLogger(service_name)
     logger.setLevel(level)
-    if not logger.handlers:
-        handler: logging.Handler = logging.StreamHandler()
-        handler.setFormatter(_JsonFormatter())
-        logger.addHandler(handler)
-        if log_file_path:
-            os.makedirs(os.path.dirname(log_file_path) or ".", exist_ok=True)
-            file_handler = logging.handlers.RotatingFileHandler(
-                log_file_path,
-                maxBytes=log_file_max_bytes,
-                backupCount=log_file_backup_count,
-                encoding="utf-8",
-            )
-            file_handler.setFormatter(_JsonFormatter())
-            logger.addHandler(file_handler)
-    logger.propagate = False
+    root = logging.getLogger()
+    root.setLevel(level)
+    # The stream sink is installed once only: uvicorn's --log-config may have
+    # already attached a JSON stream handler at process start (before the app
+    # is imported), and it uses the same formatter, so recognize it by class.
+    if not any(
+        isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.handlers.RotatingFileHandler)
+        and isinstance(handler.formatter, _JsonFormatter)
+        for handler in root.handlers
+    ):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(_JsonFormatter())
+        stream_handler.addFilter(_ServiceFieldFilter(service_name))
+        setattr(stream_handler, _BC_OWNED_HANDLER, True)
+        root.addHandler(stream_handler)
+    if log_file_path and not any(
+        isinstance(handler, logging.handlers.RotatingFileHandler) for handler in root.handlers
+    ):
+        os.makedirs(os.path.dirname(log_file_path) or ".", exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file_path,
+            maxBytes=log_file_max_bytes,
+            backupCount=log_file_backup_count,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(_JsonFormatter())
+        file_handler.addFilter(_ServiceFieldFilter(service_name))
+        setattr(file_handler, _BC_OWNED_HANDLER, True)
+        root.addHandler(file_handler)
     return logger
 
 

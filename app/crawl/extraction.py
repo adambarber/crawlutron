@@ -114,6 +114,18 @@ def _doc_task_hooks() -> dict | None:
     }
 
 
+def _configure_doc_worker_logging() -> None:
+    """Quiet expected parser chatter in the document worker.
+
+    The worker is a bare child process with no service logging, so without this
+    pdfminer logs a WARNING per font whose descriptor lacks a usable FontBBox
+    (common on real-world municipal PDFs). The text that parsed still extracts,
+    so the warning carries no signal; drop it at the source and keep ERROR+
+    visible.
+    """
+    logging.getLogger("pdfminer").setLevel(logging.ERROR)
+
+
 def _doc_worker_main(conn) -> None:
     """Persistent worker entry: serve markitdown tasks until killed or orphaned.
 
@@ -122,6 +134,7 @@ def _doc_worker_main(conn) -> None:
     exits without sending (M8: a worker segfaulting on hostile input).
     """
     try:
+        _configure_doc_worker_logging()
         while True:
             try:
                 body, hooks = conn.recv()

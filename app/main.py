@@ -70,8 +70,6 @@ logger = configure_service_logging(
 # via initialize_browser_pool); request handlers reach it through
 # get_browser_pool(). There is intentionally no second pool global here.
 shutdown_event = asyncio.Event()
-uvicorn_access_logger = logging.getLogger("uvicorn.access")
-uvicorn_access_logger.setLevel(logger.level)
 
 # Third-party extraction libraries log per-element WARNINGs that are expected
 # parser noise (e.g. trafilatura on <a> elements without href) and cannot be
