@@ -12,7 +12,6 @@ import logging
 import os
 import re
 import socket
-import ssl
 import threading
 import time
 from collections import OrderedDict
@@ -118,52 +117,18 @@ from app.crawl.extraction import (
     extract_content,
     extract_post_fetch_discovery,
 )
-from app.crawl.result_helpers import _binary_no_text_result, _make_engine_result
+from app.crawl.result_helpers import (
+    _binary_no_text_result,
+    _classify_error_code,
+    _engine_result_from_exception,
+    _make_engine_result,
+)
 from app.models import CrawlStrategyAttempt, EngineCrawlResult, HttpFetchResult
 
-
-def _classify_error_code(exc: BaseException) -> str:
-    """Map an internal exception to a stable, non-leaking error code.
-
-    Raw exception text can leak DNS hostnames, internal filesystem paths, or
-    stack detail. Callers must never see ``str(exc)``; these codes are safe to
-    surface in user-facing ``error``/``diagnostics`` fields.
-    """
-    if isinstance(exc, DecompressionTooLargeError):
-        return "payload_too_large"
-    if isinstance(exc, httpx.TooManyRedirects):
-        return "too_many_redirects"
-    if isinstance(
-        exc,
-        (
-            httpx.ConnectTimeout,
-            httpx.ReadTimeout,
-            httpx.WriteTimeout,
-            httpx.ConnectError,
-            httpx.ReadError,
-            httpx.WriteError,
-            httpx.RemoteProtocolError,
-            httpx.ProtocolError,
-            socket.gaierror,
-            socket.herror,
-            ConnectionError,
-            ConnectionRefusedError,
-            ConnectionResetError,
-            TimeoutError,
-            asyncio.TimeoutError,
-        ),
-    ):
-        return "connection_error"
-    if isinstance(exc, ssl.SSLError):
-        return "tls_error"
-    if isinstance(exc, httpx.HTTPStatusError):
-        return "http_status_error"
-    if isinstance(exc, httpx.HTTPError):
-        return "http_error"
-    if isinstance(exc, ValueError):
-        return "value_error"
-    return "network_error"
-
+# ``_classify_error_code`` is re-exported here for backward compatibility with
+# the many internal call sites in this module; its definition lives in
+# :mod:`app.crawl.result_helpers` because the taxonomy is strategy-neutral and
+# both strategies classify through it. New call sites must import from there.
 
 # Shared HTTP/2 connection-pooled async client (one per running event loop).
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
@@ -2216,33 +2181,18 @@ async def _http_strategy_result(
         )
     except Exception as error:
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        error_code = _classify_error_code(error)
-        # Never expose raw exception text in the API response (it can leak DNS
-        # names, internal filesystem paths, or stack detail). Surface only a
-        # stable code to the caller; the raw detail is logged server-side for
-        # debugging and is NOT returned in diagnostics.
-        logger.warning(
-            "http_strategy_result_error",
-            extra={"error_code": error_code, "error_detail": str(error)},
-        )
-        attempt = CrawlStrategyAttempt(
-            strategy=strategy,  # type: ignore[arg-type]
-            status="failed",
-            classification=error_code,
-            http_status=None,
-            content_type=None,
-            elapsed_ms=elapsed_ms,
-            error=error_code,
-        )
-        return _make_engine_result(
+        # Single chokepoint for "a strategy raised": classify, log with the
+        # stable code (raw detail server-side only), and build the redacted
+        # terminal result. This used to hand-build the result here, which
+        # drifted to classification="network_error" while error_code held the
+        # real code.
+        return _engine_result_from_exception(
+            error=error,
             original_url=original_url,
             normalized_url=normalized_url,
-            final_url=None,
-            status="failed",
-            classification="network_error",
-            attempt=attempt,
-            http_status=None,
-            diagnostics={
+            strategy=strategy,
+            elapsed_ms=elapsed_ms,
+            extra_diagnostics={
                 "retry": retry_diagnostics,
                 "runtime": {"elapsed_ms": elapsed_ms},
                 # Mirror the SUCCESS path's redaction contract exactly: only
@@ -2259,7 +2209,6 @@ async def _http_strategy_result(
                     "cookie_jar": str(policy.get("request_profile", {}).get("cookie_jar", "none")),
                 },
             },
-            error=error_code,
         )
 
 

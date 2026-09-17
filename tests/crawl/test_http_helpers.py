@@ -270,7 +270,11 @@ class TestHttpStrategyResult:
             assert (await self._run(status=status)).classification == classification, status
 
     async def test_network_error_handler(self) -> None:
-        assert_result_failed(await self._run(fetcher=raise_fetcher), "network_error")
+        # A raw ConnectionError classifies specifically as connection_error, not
+        # the generic network_error tail: the old broad-except sink hardcoded
+        # network_error and masked the real code; the shared primitive now
+        # surfaces it.
+        assert_result_failed(await self._run(fetcher=raise_fetcher), "connection_error")
 
     async def test_binary_body_short_circuits(self) -> None:
         result = await self._run(

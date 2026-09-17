@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
-from .crawl.result_helpers import _failed_engine_result
+from .crawl.result_helpers import _engine_result_from_exception, _failed_engine_result
 from .models import CrawlJob, EngineCrawlResult
 
 SchedulerWorker = Callable[[CrawlJob], Awaitable[EngineCrawlResult]]
@@ -333,9 +333,25 @@ class DomainScheduler:
                             await on_result(job.index, result)
                         else:
                             results[job.index] = result
-                    except Exception:
+                    except Exception as error:
                         self.record_failure(job.domain)
-                        raise
+                        # Chokepoint for "a worker raised": build a classified
+                        # terminal result HERE so no caller can ever observe an
+                        # absent job. Previously every caller improvised its own
+                        # envelope (recursive.py hand-built one; the sync
+                        # ``on_result`` path silently dropped the page), and the
+                        # two drifted in shape and classification.
+                        failed = _engine_result_from_exception(
+                            error=error,
+                            original_url=job.original_url,
+                            normalized_url=job.normalized_url,
+                            strategy="",
+                        )
+                        if on_result is not None:
+                            await on_result(job.index, failed)
+                        else:
+                            results[job.index] = failed
+                        return
 
         # return_exceptions=True: a single job failure must not cancel the
         # other in-flight jobs (HIGH #6). Exceptions are captured here; the

@@ -114,7 +114,12 @@ class TestHttpStrategyEdges:
             http_fetcher=failing_fetcher,
             cache=cache,
         )
-        assert result.classification == "network_error"
+        # A bare httpx.RequestError is the generic httpx-level tail of the
+        # classifier (more specific branches map to connection_error/tls_error
+        # etc.), so it lands on http_error. The old sink hardcoded
+        # network_error and masked this; the shared primitive surfaces the
+        # real code now.
+        assert result.classification == "http_error"
 
     async def test_http_strategy_result_httpx_http_status_error(self):
         from app.crawl.cache import HttpCache
@@ -146,7 +151,7 @@ class TestHttpStrategyEdges:
             http_fetcher=error_fetcher,
             cache=cache,
         )
-        assert result.classification == "network_error"
+        assert result.classification == "http_status_error"
 
     def test_decode_body_unicode_decode_error(self):
         from app.crawl.strategies.http import _decode_body

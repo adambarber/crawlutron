@@ -71,6 +71,7 @@ from app.crawl.recursive import (
     run_recursive_crawl,
 )
 from app.crawl.result_helpers import (
+    _engine_result_from_exception,
     _failed_engine_result,
     _skipped_engine_result,
 )
@@ -934,14 +935,17 @@ async def _crawl_request_impl(
                 ),
                 timeout=budget,
             )
-        except TimeoutError:
-            result = _failed_engine_result(
+        except TimeoutError as error:
+            # The budget raises bare TimeoutError; its classification is known
+            # precisely (not derivable from the exception type), so pass it
+            # through the primitive rather than hand-building a result.
+            result = _engine_result_from_exception(
+                error=error,
                 original_url=original_url,
                 normalized_url=normalized_url,
                 strategy="",
-                classification="network_error",
-                error="url_budget_exceeded",
-                diagnostics={"url_budget_seconds": budget, "error": "url_budget_exceeded"},
+                known_classification="url_budget_exceeded",
+                extra_diagnostics={"url_budget_seconds": budget},
             )
         return index, result
 

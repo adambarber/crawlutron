@@ -282,7 +282,9 @@ class TestEngineChainEdges:
         )
         result = response["results"][0]
         assert result["status"] == "failed"
-        assert result["classification"] == "network_error"
+        # The budget's classification is precise (url_budget_exceeded), not the
+        # generic network_error tail the old hand-built result hard-coded.
+        assert result["classification"] == "url_budget_exceeded"
         assert result["error"] == "url_budget_exceeded"
 
     async def test_rate_limited_sets_domain_cooldown(self):
