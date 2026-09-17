@@ -35,6 +35,10 @@ Classification = Literal[
     "network_error",
     "connection_error",
     "http_status_error",
+    # The per-URL budget overran: the host answered but the whole chain
+    # exceeded total_url_budget_seconds. A CrawlClassification member (see
+    # app/constants.py) so it survives the strict enum at response shaping.
+    "url_budget_exceeded",
     # Fetch-failure codes the HTTP strategy's error classifier emits; they are
     # CrawlClassification members (see app.api_models) so they survive the
     # strict enum field at response shaping (H3).

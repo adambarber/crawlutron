@@ -118,6 +118,14 @@ class CrawlClassification(str, Enum):
     network_error = "network_error"
     connection_error = "connection_error"
     http_status_error = "http_status_error"
+    # The per-URL budget's own signal: the page was alive but slower than the
+    # caller's total_url_budget_seconds. Genuinely distinct -- it is not
+    # network_error (the host answered) and not navigation_timeout (the whole
+    # chain overran, not one navigation). Was missing from the enum while the
+    # engine already emitted it as known_classification=, so the lenient
+    # internal dataclass accepted it and the strict enum at response shaping
+    # rejected the entire batch with a 500.
+    url_budget_exceeded = "url_budget_exceeded"
     # Strategy-level failure codes emitted by the shared error classifier
     # (``app.crawl.result_helpers._classify_error_code``). They are members of
     # the taxonomy (not internal-only strings) because they are stored verbatim
@@ -226,6 +234,7 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
     "payload_too_large": "failed",
     "too_many_redirects": "failed",
     "http_error": "failed",
+    "url_budget_exceeded": "failed",
     # Capacity, not a dead page: the URL was never attempted because no
     # renderer was free. Reported as failed so the caller sees a terminal
     # result for this pass, but diagnostics["retryable"] is True and the

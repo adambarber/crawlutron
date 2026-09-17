@@ -105,3 +105,54 @@ def test_primitive_default_classification_is_network_error():
         strategy="HTTP_DECLARED_CRAWLER",
     )
     assert result.classification == "network_error"
+
+
+class TestClassificationValueValidity:
+    """A classification the engine emits must survive response shaping.
+
+    The bug this class pins: ``url_budget_exceeded`` was passed as
+    ``known_classification`` -- a genuinely distinct signal -- but it was not a
+    ``CrawlClassification`` member. The lenient internal dataclass accepted it,
+    then ``_shape_all`` built a strict ``UnifiedCrawlResult`` and the whole
+    batch 500'd on one budget-exhausted URL. The unit tests read raw spill
+    dicts and never crossed the pydantic boundary, so the suite was green.
+    """
+
+    def test_url_budget_exceeded_is_a_taxonomy_member(self):
+        from app.constants import CrawlClassification
+
+        assert CrawlClassification.url_budget_exceeded.value == "url_budget_exceeded"
+
+    def test_budget_exceeded_result_survives_response_shaping(self):
+        """The boundary that rejected it: the strict enum on the wire model."""
+        from app.api.response_shaping import build_unified_result
+
+        item = _budget_item()
+        result = build_unified_result(item)
+        assert result.classification == "url_budget_exceeded"
+
+
+def _budget_item() -> dict:
+    """An engine result dict as produced by _engine_result_from_exception."""
+    from app.crawl.result_helpers import _engine_result_from_exception
+
+    result = _engine_result_from_exception(
+        error=TimeoutError("budget exhausted"),
+        original_url="https://a.example/slow",
+        normalized_url="https://a.example/slow",
+        strategy="HTTP_DECLARED_CRAWLER",
+        known_classification="url_budget_exceeded",
+        extra_diagnostics={"url_budget_seconds": 30},
+    )
+    return {
+        "original_url": "https://a.example/slow",
+        "normalized_url": "https://a.example/slow",
+        "final_url": "https://a.example/slow",
+        "status": "failed",
+        "classification": result.classification,
+        "selected_strategy": None,
+        "attempted_strategies": [asdict(attempt) for attempt in result.attempted_strategies],
+        "error": result.error,
+        "http_status": None,
+        "headers": {},
+    }

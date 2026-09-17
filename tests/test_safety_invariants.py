@@ -1623,3 +1623,71 @@ def test_classifier_lives_in_the_neutral_home():
                 raise AssertionError(
                     offender(path, node.lineno, "_classify_error_code defined outside result_helpers")
                 )
+
+
+# ---------------------------------------------------------------------------
+# Value-validity chokepoint (the meta-fix)
+#
+# The suite polices *routing* (a failed result must be built through the
+# chokepoint primitives) but never *value validity*: nothing verified the
+# classification string flowing through the primitive was a legal enum member.
+# That is how url_budget_exceeded shipped -- a genuinely distinct signal passed
+# as known_classification=, the lenient internal dataclass accepted it, and the
+# strict enum at response shaping rejected the whole batch with a 500. The
+# routing tests were green the entire time.
+#
+# This detector closes the class, not the instance: any classification handed
+# to the primitives as a literal must be a CrawlClassification member.
+# ---------------------------------------------------------------------------
+
+_CLASSIFICATION_VALUE_SOURCES = ("classification", "known_classification")
+def _non_member_classification_offenders(tree, path, *, members):
+    """A literal classification passed to a result primitive must be a member.
+
+    ``members`` is the live ``CrawlClassification`` value set. There is no
+    hand-maintained exemption list: such a list is precisely how a new code
+    ships as a non-member -- the list would have to be remembered and updated
+    in lockstep with the enum, and it never is. A non-literal (variable or
+    attribute access, e.g. CrawlClassification.x) is what callers should
+    write, and passes without comment.
+    """
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in (
+            "_failed_engine_result", "_make_engine_result", "_engine_result_from_exception",
+            "_skipped_engine_result",
+        )):
+            continue
+        for kw in node.keywords:
+            if kw.arg not in _CLASSIFICATION_VALUE_SOURCES:
+                continue
+            value = kw.value
+            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                continue
+            if value.value not in members:
+                yield offender(
+                    path, node.lineno,
+                    f"classification={value.value!r} is not a CrawlClassification member; "
+                    f"add it to the enum (app/constants.py) or route through the classifier",
+                )
+
+
+def test_engine_emitted_classifications_are_enum_members():
+    from app.constants import CrawlClassification
+
+    members = {m.value for m in CrawlClassification}
+    offenders = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_non_member_classification_offenders(tree, path, members=members))
+    assert not offenders, (
+        "a literal classification passed to a result primitive must be a "
+        "CrawlClassification member, or the strict enum at response shaping "
+        "rejects the whole batch: " + ", ".join(offenders)
+    )
+
+
+def test_non_member_classification_detector_bites():
+    bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
+    offenders = list(_non_member_classification_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
+    good = ast.parse('def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n')
+    assert not list(_non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
