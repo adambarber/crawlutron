@@ -1464,3 +1464,162 @@ def test_whole_site_visited_gate_detector_bites():
         "        job.visited.add(url)\n"
     )
     assert not _ungated_job_visited_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Error-handling chokepoint drift detectors
+#
+# A strategy that raises (rather than returning a classified result) falls to
+# the scheduler's blanket envelope and is misclassified, or in on_result mode
+# silently drops the page. Three invariants keep that from drifting back:
+#
+#   1. _engine_result_from_exception is the only place a strategy exception may
+#      become a result (no hand-rolled failed-result construction with a
+#      hardcoded classification outside the two legitimate config guards).
+#   2. BrowserPoolExhaustedError may only be caught by sanctioned sites
+#      (the render endpoints, which own the 503 transport response) -- never
+#      ad-hoc catch sites in the crawl path, which would re-derive retry
+#      semantics locally instead of reading the classification.
+#   3. _classify_error_code must be defined in result_helpers (neutral home),
+#      never in a strategy module; strategies reach for it, they don't own it.
+# ---------------------------------------------------------------------------
+
+# Classifications that a hand-rolled _failed_engine_result/_make_engine_result
+# may legitimately carry without going through the exception chokepoint:
+#   browser_crash / unsupported_strategy: the engine's config guards -- there
+#     is no exception to classify, the worker was never built
+#   binary_no_text: a fetched page whose body has no extractable text
+#   not_modified: a 304 cache hit (a *success*, built by the 304 path)
+# Everything else means a real exception was converted to a result by hand,
+# which is the drift the chokepoint exists to prevent.
+_ERROR_CHOKEPOINT_SANCTIONED = frozenset({"result_helpers.py"})
+
+
+_NON_EXCEPTION_CLASSIFICATIONS = frozenset(
+    {"browser_crash", "unsupported_strategy", "binary_no_text", "not_modified"}
+)
+
+
+def _has_error_field(node, expected) -> bool:
+    """The call carries the given taxonomy code in its ``error=`` kwarg."""
+    return any(
+        kw.arg == "error" and isinstance(kw.value, ast.Constant) and kw.value.value == expected
+        for kw in node.keywords
+    )
+
+
+def _hand_rolled_failed_result_offenders(tree, path):
+    """Failed-result construction with a hardcoded classification outside the
+    chokepoint and the engine's two config guards (no browser worker / unknown
+    strategy -- those have no exception to classify)."""
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("_failed_engine_result", "_make_engine_result")):
+            continue
+        status = None
+        for kw in node.keywords:
+            if kw.arg == "classification" and isinstance(kw.value, ast.Constant):
+                status = kw.value.value
+        if status in (None,) or status in _NON_EXCEPTION_CLASSIFICATIONS:
+            continue
+        # The engine's unsupported-strategy guard and the scheduler's
+        # circuit-breaker guard are policy decisions, not caught exceptions:
+        # they carry their own taxonomy code in the error field.
+        if status == "unknown_error" and _has_error_field(node, "unsupported_strategy"):
+            continue
+        if status == "network_error" and _has_error_field(node, "circuit_breaker_open"):
+            continue
+        yield offender(path, node.lineno, f"hand-rolled classification={status!r}; route through _engine_result_from_exception")
+
+
+def test_no_hand_rolled_failed_results_outside_the_chokepoint():
+    offenders = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_hand_rolled_failed_result_offenders(tree, path))
+    assert not offenders, (
+        "failed results with a hardcoded classification must go through "
+        "_engine_result_from_exception (the single exception->result chokepoint): "
+        + ", ".join(offenders)
+    )
+
+
+def test_hand_rolled_failed_result_detector_bites():
+    bad = ast.parse(
+        "def f():\n"
+        "    return _failed_engine_result(\n"
+        '        classification="network_error", error="worker_exception",\n'
+        "    )\n"
+    )
+    offenders = list(_hand_rolled_failed_result_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "_engine_result_from_exception" in offenders[0], offenders
+    good = ast.parse(
+        "def f():\n"
+        "    return _failed_engine_result(\n"
+        '        classification="browser_crash",\n'
+        "    )\n"
+    )
+    assert not list(_hand_rolled_failed_result_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
+
+
+_POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
+
+
+def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
+    """A catch of BrowserPoolExhaustedError outside the render transports and
+    the worker guard is a local re-derivation of retry semantics."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler) or node.type is None:
+            continue
+        names = []
+        t = node.type
+        if isinstance(t, ast.Name):
+            names.append(t.id)
+        elif isinstance(t, ast.Tuple):
+            names.extend(e.id for e in t.elts if isinstance(e, ast.Name))
+        if not any("BrowserPoolExhaustedError" in n for n in names):
+            continue
+        yield offender(path, node.lineno, "catching BrowserPoolExhaustedError; read the classification instead")
+
+
+def test_pool_exhaustion_catch_sites_are_sanctioned():
+    offenders = []
+    for path, tree in app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED):
+        offenders.extend(_unsanctioned_pool_exhaustion_catch_offenders(tree, path))
+    assert not offenders, (
+        "BrowserPoolExhaustedError may only be caught by the render transports "
+        "(503 response) and the browser worker guard; the crawl path reads the "
+        "browser_pool_exhausted classification: " + ", ".join(offenders)
+    )
+
+
+def test_pool_exhaustion_catch_detector_bites():
+    bad = ast.parse(
+        "async def f():\n"
+        "    try:\n"
+        "        await crawl()\n"
+        "    except BrowserPoolExhaustedError:\n"
+        "        return None\n"
+    )
+    offenders = list(_unsanctioned_pool_exhaustion_catch_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "classification" in offenders[0], offenders
+    good = ast.parse(
+        "async def f():\n"
+        "    result = await crawl()\n"
+        "    if result.classification == 'browser_pool_exhausted':\n"
+        "        requeue()\n"
+    )
+    assert not list(_unsanctioned_pool_exhaustion_catch_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
+
+
+def test_classifier_lives_in_the_neutral_home():
+    """_classify_error_code must be defined in result_helpers, not re-defined
+    in a strategy module (the old site, http.py, forced browser.py to import
+    across strategies)."""
+    for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == "_classify_error_code"
+            ):
+                raise AssertionError(
+                    offender(path, node.lineno, "_classify_error_code defined outside result_helpers")
+                )
