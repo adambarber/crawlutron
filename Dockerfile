@@ -134,6 +134,13 @@ COPY --from=camoufox-binary /camoufox-bundle /home/appuser/.cache/camoufox
 # ``app/logging_config.py`` (no external shared-tree copy is needed).
 COPY --chown=appuser:appuser app /app/app
 
+# uvicorn applies its logging config in ``Config.__init__`` -- BEFORE the app
+# is imported -- so the service's JSON sink must exist by then or uvicorn's own
+# startup lines stay plain text. This config installs the root JSON handler and
+# points uvicorn's loggers at it; ``app.main`` adds the env-configured rotating
+# file sink on import (and skips the stream handler as already present).
+COPY --chown=appuser:appuser uvicorn-log-config.json /app/uvicorn-log-config.json
+
 EXPOSE 8765
 
 # Add a healthcheck based on the FastAPI /health endpoint
@@ -143,7 +150,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Production command. The bind interface defaults to loopback (M15: the service
 # has no caller authentication); BROWSER_CRAWLER_HOST must be set explicitly to
 # expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools
@@ -162,4 +169,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 USER appuser
 
 # Development command with hot-reloading and debug logging
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --reload --log-level debug"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
