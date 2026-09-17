@@ -117,9 +117,14 @@ def _get_shared_content_cache() -> ContentCache:
 
 
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
-    result = worker(job)
-    if inspect.iscoroutine(result):
-        return await result
+    # Dispatch on the callable itself, never by invoking first and sniffing
+    # the return: the old shape ran worker(job) on the event-loop thread
+    # (blocking the loop and keeping side effects), found a non-coroutine,
+    # then called it a SECOND time via to_thread and discarded the first
+    # result. iscoroutinefunction sees through bound methods and objects
+    # whose type defines async __call__ (the render path's worker instance).
+    if inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__):
+        return await worker(job)
     return await asyncio.to_thread(worker, job)
 
 

@@ -156,3 +156,46 @@ def _budget_item() -> dict:
         "http_status": None,
         "headers": {},
     }
+
+
+class TestCallWorkerExecutesOnce:
+    """A sync worker must not be invoked twice.
+
+    The old shape ran worker(job) on the event-loop thread (blocking the loop
+    and keeping side effects), found a non-coroutine, then called it AGAIN via
+    asyncio.to_thread and discarded the first result. The first invocation's
+    side effects were kept and its return discarded. Production passes async
+    workers, so it never bit -- but it is a trap for the next sync worker, and
+    the first call blocked the loop for the full duration, which is exactly
+    what to_thread exists to avoid.
+    """
+
+    async def test_sync_worker_runs_once_off_loop(self):
+        import asyncio
+
+        from app.crawl.engine import _call_worker
+
+        calls: list[str] = []
+        loop_thread = asyncio.get_running_loop().run_in_executor(None, lambda: None)
+        await loop_thread
+
+        def worker(job):
+            calls.append(job)
+            return "result"
+
+        result = await _call_worker(worker, "job")
+        assert len(calls) == 1, f"sync worker invoked {len(calls)}x (side effects kept, result discarded)"
+        assert result == "result"
+
+    async def test_async_worker_awaits_directly(self):
+        from app.crawl.engine import _call_worker
+
+        calls: list[str] = []
+
+        async def worker(job):
+            calls.append(job)
+            return "async-result"
+
+        result = await _call_worker(worker, "job")
+        assert len(calls) == 1
+        assert result == "async-result"
