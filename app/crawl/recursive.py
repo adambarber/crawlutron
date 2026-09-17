@@ -26,13 +26,46 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
-from app.crawl.result_helpers import _failed_engine_result
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.scheduler import DomainScheduler
 from app.validation import registrable_domain
+
+# A pool-exhausted URL was never attempted: the page is fine, capacity was the
+# problem. The recursive loop re-queues it onto the frontier tail so the
+# at-least-once contract holds for capacity failures the same way it holds for
+# crash recovery (memory #1947). The cap stops a permanently oversubscribed
+# crawl from spinning one URL forever: after this many re-queues the URL fails
+# for real and the crawl degrades instead of livelocking.
+MAX_POOL_EXHAUSTION_REQUEUES = 3
+
+
+def requeue_pool_exhausted(
+    task: CrawlTask,
+    *,
+    depth: int,
+    frontier: deque[tuple[int, CrawlTask]],
+    attempts: dict[str, int],
+) -> bool:
+    """Re-queue a pool-exhausted task to the frontier tail, up to the cap.
+
+    Returns True when the task was re-queued (the caller must NOT record it as
+    a permanent failure) and False when the cap is exhausted (the caller lets
+    the classified result stand). ``attempts`` maps the normalized URL to how
+    many times it has already been re-queued and is mutated in place.
+    """
+    count = attempts.get(task.normalized_url, 0)
+    if count >= MAX_POOL_EXHAUSTION_REQUEUES:
+        return False
+    attempts[task.normalized_url] = count + 1
+    # Depth stays unchanged: a capacity retry is not a deeper crawl, and
+    # re-queueing at the tail preserves BFS order so an oversubscribed crawl
+    # does not starve the rest of the batch.
+    frontier.append((depth, task))
+    return True
+
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +237,9 @@ async def run_recursive_crawl(
     admission = admission or default_admission_policy(resource_gate)
 
     visited: set[str] = set()
+    # How many times each URL has been re-queued for pool exhaustion, so the
+    # cap in requeue_pool_exhausted can bound a permanently oversubscribed crawl.
+    pool_exhaustion_attempts: dict[str, int] = {}
     frontier: deque[tuple[int, CrawlTask]] = deque([(0, job) for job in jobs])
     next_index = len(jobs)
     page_count = 0
@@ -331,24 +367,25 @@ async def run_recursive_crawl(
         for depth, job in allowed_jobs:
             # Align each result with its own job by index. ``scheduler.run``
             # reports a ``job.index -> result`` mapping (completion order is
-            # arbitrary and a raised worker leaves a job absent), so a positional
-            # zip against ``allowed_jobs`` -- which ``_pop_admitted`` has already
-            # tier-reordered (HTTP first) -- would write each result to the
-            # wrong spill index whenever HTTP and browser tasks interleave, and
-            # shift every subsequent pairing after a failed job (B1).
-            result = scheduled_results.get(job.index)
-            if result is None:
-                # The worker raised and gather(return_exceptions=True) dropped
-                # the job. It still needs an envelope: without one the page is
-                # silently absent from the spill (and from /v1/crawl).
-                result = _failed_engine_result(
-                    original_url=job.original_url,
-                    normalized_url=job.normalized_url,
-                    strategy="",
-                    classification="network_error",
-                    error="worker_exception",
-                    diagnostics={"error": "worker_exception"},
-                )
+            # arbitrary), so a positional zip against ``allowed_jobs`` -- which
+            # ``_pop_admitted`` has already tier-reordered (HTTP first) -- would
+            # write each result to the wrong spill index whenever HTTP and
+            # browser tasks interleave, and shift every subsequent pairing after
+            # a failed job (B1).
+            #
+            # A job can never be absent from the mapping: the scheduler's
+            # worker-exception chokepoint builds a classified terminal result
+            # for any worker that raised.
+            result = scheduled_results[job.index]
+            # A pool-exhausted URL was never attempted: re-queue it to the
+            # frontier tail under the per-job cap (at-least-once for capacity
+            # failures) instead of recording a permanent page failure.
+            if result.classification == "browser_pool_exhausted" and requeue_pool_exhausted(
+                job, depth=depth, frontier=frontier, attempts=pool_exhaustion_attempts
+            ):
+                visited.discard(job.normalized_url)
+                page_count += 1
+                continue
             # Strip heavy payloads inside the loop so they are not retained
             # for the whole crawl when the caller did not ask for them (#1).
             if not include_html:

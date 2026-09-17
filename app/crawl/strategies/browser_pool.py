@@ -10,7 +10,9 @@ import asyncio
 import logging
 from typing import Any
 
+from app.crawl.result_helpers import _engine_result_from_exception
 from app.crawl.strategies.browser import BrowserRenderer
+from app.models import BrowserPoolExhaustedError  # noqa: F401 (re-exported; cycle-free home)
 from app.resource_pressure import (
     _BROWSER_RAM_FRACTION,
 )
@@ -21,9 +23,6 @@ from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 
-
-class BrowserPoolExhaustedError(Exception):
-    """Raised when no renderer becomes available within the acquire timeout."""
 
 
 # Default bound for BrowserPool.acquire (M12). Renders carry their own
@@ -134,11 +133,26 @@ class PooledBrowserWorker:
         self._pool = pool
 
     async def __call__(self, job: Any) -> Any:
-        renderer = await self._pool.acquire()
         try:
-            return await renderer.render(job.url, job.options)
-        finally:
-            self._pool.release(renderer)
+            renderer = await self._pool.acquire()
+            try:
+                return await renderer.render(job.url, job.options)
+            finally:
+                self._pool.release(renderer)
+        except Exception as error:
+            # Acquire (or, if a future renderer ever raises out of render,
+            # that too) must not escape: the crawl engine has no catch site,
+            # so an exception here falls to the scheduler's blanket envelope
+            # and is misclassified as network_error. Route it through the
+            # shared primitive so the result carries the real code
+            # (browser_pool_exhausted when the pool was the problem) and the
+            # at-least-once layer can act on it.
+            return _engine_result_from_exception(
+                error=error,
+                original_url=job.url,
+                normalized_url=job.url,
+                strategy="BROWSER_DECLARED_CRAWLER",
+            )
 
 
 # Global pool instance (initialized at startup)
