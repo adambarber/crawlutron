@@ -25,11 +25,13 @@ from app.models import CrawlTask, EngineCrawlResult
 from app.resource_pressure import (
     _BROWSER_RAM_FRACTION,
     _BROWSER_TASK_RAM_BYTES,
+    _DOC_TASK_RAM_BYTES,
     _HTTP_TASK_RAM_BYTES,
     CpuGate,
     ResourceGate,
     WeightedAdmission,
     _build_admission_policy,
+    default_admission_policy,
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
@@ -776,16 +778,27 @@ class _FakeGate:
         return self._cpu
 
 
-def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3):
-    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=max_concurrent_pages)
+def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, doc_workers=2):
+    return _build_admission_policy(
+        limit,
+        pool_size=pool_size,
+        max_concurrent_pages=max_concurrent_pages,
+        doc_workers=doc_workers,
+    )
 
 
 class TestPolicyDerivation:
     def test_browser_pool_reserve_subtracted_from_limit(self):
-        # 3 GiB limit, 2 browsers * 700 MiB reserve -> HTTP ceiling from remainder.
+        # 3 GiB limit, 2 browsers * 700 MiB reserve and the default doc pool,
+        # -> HTTP ceiling from the remainder.
         p = _policy()
         assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
-        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes
+        assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
+        free = (
+            (3 * 1024 * 1024 * 1024)
+            - p.browser_pool_reserve_bytes
+            - p.doc_pool_reserve_bytes
+        )
         assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
         # browser tier is capped at pool_size * max_concurrent_pages
         assert p.max_browser_concurrency == 2 * 3
@@ -798,6 +811,35 @@ class TestPolicyDerivation:
         small = _policy(limit=1024 * 1024 * 1024)  # 1 GiB
         big = _policy(limit=3 * 1024 * 1024 * 1024)
         assert small.max_http_concurrency < big.max_http_concurrency
+
+    def test_doc_pool_reserve_subtracted_from_limit(self):
+        # The persistent markitdown workers are a fixed RAM consumer exactly
+        # like the browser pool: each imports markitdown + the PDF/Office
+        # parsers once and stays alive. Admission that ignores them sizes HTTP
+        # concurrency from a budget that is already spent, which is the OOM
+        # path under a hard 3 GiB ceiling.
+        p = _policy(doc_workers=2)
+        assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
+        free = (
+            (3 * 1024 * 1024 * 1024)
+            - p.browser_pool_reserve_bytes
+            - p.doc_pool_reserve_bytes
+        )
+        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+
+    def test_doc_pool_reserve_lowers_the_http_ceiling(self):
+        # The reserve must actually bite: admitting with doc workers must
+        # admit strictly fewer concurrent HTTP tasks than without them.
+        without = _policy(doc_workers=0)
+        with_docs = _policy(doc_workers=2)
+        assert with_docs.max_http_concurrency < without.max_http_concurrency
+
+    def test_default_policy_reserves_the_default_doc_pool(self):
+        # default_admission_policy is the conservative fallback (3 GiB box);
+        # it must reserve the default doc worker count, not zero.
+        gate = ResourceGate()
+        wa = default_admission_policy(gate)
+        assert wa._p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
 
 
 class TestWeightedAdmission:
@@ -887,7 +929,11 @@ class TestHTTPTaskRamEstimate:
         # Zero drift: the pool ceiling and the admission policy divide by the
         # same per-task estimate, whatever the default is.
         p = _policy()
-        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes
+        free = (
+            (3 * 1024 * 1024 * 1024)
+            - p.browser_pool_reserve_bytes
+            - p.doc_pool_reserve_bytes
+        )
         assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
 
     def test_the_3gib_default_still_admits_a_working_floor(self):

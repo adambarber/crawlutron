@@ -48,7 +48,7 @@ from app.crawl.robots_parse import (
 )
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.memory_pressure import read_memory_stats
-from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy
+from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy, doc_worker_count
 from app.safe_regex import UnsafePattern, compile_untrusted
 
 logger = logging.getLogger(__name__)
@@ -1149,6 +1149,7 @@ async def _crawl_request_impl(
                 read_memory_stats().total_bytes or 0,
                 pool_size=derive_browser_pool_size(),
                 max_concurrent_pages=active_settings.max_concurrent_pages,
+                doc_workers=doc_worker_count(),
             ),
         )
         await run_recursive_crawl(

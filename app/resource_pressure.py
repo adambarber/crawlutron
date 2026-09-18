@@ -424,6 +424,16 @@ class ResourceGate:
 
 _HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
 _BROWSER_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
+# Persistent markitdown workers (app.crawl.extraction._DocWorker): each imports
+# markitdown plus the PDF/Office parsers once and stays alive for the process, so
+# this is a FIXED reservation, not a per-task estimate. Measured footprint is
+# 100-300 MiB apiece depending on which parsers get touched; the conservative
+# end is the default because the container ceiling is hard (docker-compose
+# mem_limit) and the failure mode is an OOM kill of the whole service.
+_DOC_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_DOC_TASK_RAM_BYTES", 300 * 1024 * 1024, lo=0)
+# Default persistent markitdown worker count; mirrors the 3 GiB container
+# ceiling the compose pins. Overridable via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS.
+_DEFAULT_DOC_WORKERS = 2
 _ADMIT_YIELD_SECONDS = get_env_float("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
 _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512, lo=1)
 
@@ -435,6 +445,21 @@ _MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512,
 _BROWSER_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
 _BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
 _MAX_DERIVED_POOL_SIZE = get_env_int("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", 4)
+
+
+def doc_worker_count() -> int:
+    """Configured persistent markitdown worker count (process pool size).
+
+    The single home for this count: ``app.crawl.extraction`` borrows it so the
+    pool it spawns is exactly the size admission reserved. Reading the env var
+    in two places would let the spawned pool and the RAM reservation drift
+    apart. A malformed value falls back to the default rather than aborting
+    startup -- extraction is a nicety, not a load-bearing path.
+    """
+    try:
+        return get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
+    except ValueError:
+        return _DEFAULT_DOC_WORKERS
 
 
 def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
@@ -462,15 +487,18 @@ def max_http_concurrency_for(
     *,
     http_task_bytes: int = _HTTP_TASK_RAM_BYTES,
     browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES,
+    doc_workers: int = 0,
+    doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
 ) -> int:
-    """Admission's HTTP concurrency ceiling for a given RAM limit + browser pool.
+    """Admission's HTTP concurrency ceiling for a given RAM limit + fixed pools.
 
-    Reserves the browser pool's fixed RAM, then divides the remainder by the
-    per-HTTP-task estimate. This is exactly the ceiling ``WeightedAdmission`` uses,
-    so the httpx connection pool can be bound to it with zero drift as RAM scales.
+    Reserves the browser pool's and the doc pool's fixed RAM, then divides the
+    remainder by the per-HTTP-task estimate. This is exactly the ceiling
+    ``WeightedAdmission`` uses, so the httpx connection pool can be bound to it
+    with zero drift as RAM scales.
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
-    reserve = pool_size * browser_task_bytes
+    reserve = pool_size * browser_task_bytes + doc_workers * doc_task_bytes
     free = max(0, limit - reserve)
     return max(1, min(_MAX_HTTP_CONCURRENCY, free // max(1, http_task_bytes)))
 
@@ -484,6 +512,10 @@ class AdmissionPolicy:
     browser_pool_reserve_bytes: int
     max_http_concurrency: int
     max_browser_concurrency: int
+    # The persistent markitdown worker pool is a fixed RAM consumer like the
+    # browser pool; its reservation is surfaced separately so a caller can see
+    # the budget that is already spent before any task is admitted.
+    doc_pool_reserve_bytes: int = 0
     # The fraction of RAM ``derive_browser_pool_size`` assumed the pool may
     # hold. The browser tier must not shrink against its own reserved usage
     # (T9); only surplus usage beyond this fraction yields browser capacity.
@@ -497,16 +529,25 @@ def _build_admission_policy(
     max_concurrent_pages: int,
     http_task_bytes: int = _HTTP_TASK_RAM_BYTES,
     browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES,
+    doc_workers: int = 0,
+    doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
 ) -> AdmissionPolicy:
-    """Derive an admission policy from the cgroup memory limit + browser pool.
+    """Derive an admission policy from the cgroup memory limit + fixed pools.
 
-    The browser pool's fixed RAM is reserved up front; the remaining RAM is
-    divided by the per-HTTP-task estimate to get the HTTP concurrency ceiling.
+    The browser pool's and the doc pool's fixed RAM is reserved up front; the
+    remaining RAM is divided by the per-HTTP-task estimate to get the HTTP
+    concurrency ceiling.
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
     browser_pool_reserve_bytes = pool_size * browser_task_bytes
+    doc_pool_reserve_bytes = doc_workers * doc_task_bytes
     max_http = max_http_concurrency_for(
-        limit, pool_size, http_task_bytes=http_task_bytes, browser_task_bytes=browser_task_bytes
+        limit,
+        pool_size,
+        http_task_bytes=http_task_bytes,
+        browser_task_bytes=browser_task_bytes,
+        doc_workers=doc_workers,
+        doc_task_bytes=doc_task_bytes,
     )
     return AdmissionPolicy(
         http_task_bytes=http_task_bytes,
@@ -514,18 +555,28 @@ def _build_admission_policy(
         browser_pool_reserve_bytes=browser_pool_reserve_bytes,
         max_http_concurrency=max_http,
         max_browser_concurrency=max(1, pool_size * max_concurrent_pages),
+        doc_pool_reserve_bytes=doc_pool_reserve_bytes,
     )
 
 
 def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
     """A conservative policy used when the caller does not supply one.
 
-    Assumes a 2-process browser pool (the 3 GiB default) so tests / minimal
-    deployments stay safe; production passes a policy built from the real pool.
+    Assumes a 2-process browser pool and the default doc worker count (the 3 GiB
+    default) so tests / minimal deployments stay safe; production passes a
+    policy built from the real pools.
     """
     stats = read_memory_stats()
     limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)
-    return WeightedAdmission(gate, _build_admission_policy(limit, pool_size=2, max_concurrent_pages=3))
+    return WeightedAdmission(
+        gate,
+        _build_admission_policy(
+            limit,
+            pool_size=2,
+            max_concurrent_pages=3,
+            doc_workers=doc_worker_count(),
+        ),
+    )
 
 
 class WeightedAdmission:

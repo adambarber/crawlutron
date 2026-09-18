@@ -31,6 +31,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _text_from_html
 from app.models import DiscoveredLink
+from app.resource_pressure import doc_worker_count
 from app.validation import get_env_float, get_env_int, public_url_or_none, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
@@ -43,15 +44,15 @@ _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thre
 # production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
 # Raise via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office
 # throughput is needed and the memory budget allows it.
-_DEFAULT_DOC_EXTRACTION_WORKERS = 2
+_DEFAULT_DOC_WORKERS = 2
 
 
+# The count lives in app.resource_pressure (the module admission reserves RAM
+# in) so the spawned pool can never drift from the reservation. Kept as a thin
+# delegation for call-site readability inside this module.
 def _doc_extraction_worker_count() -> int:
-    """Configured concurrency for markitdown extraction (process semaphore size)."""
-    try:
-        return get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_EXTRACTION_WORKERS, lo=1)
-    except ValueError:
-        return _DEFAULT_DOC_EXTRACTION_WORKERS
+    """Configured concurrency for markitdown extraction (process pool size)."""
+    return doc_worker_count()
 
 
 # Document extraction (markitdown) runs in a PERSISTENT pool of worker
@@ -62,8 +63,9 @@ def _doc_extraction_worker_count() -> int:
 # _EXTRACTION_DOC_TIMEOUT -- or dies mid-task -- is terminated and reaped
 # immediately, and its slot is respawned on the next acquisition, so a
 # pathological document can neither block the pool nor linger as a zombie.
-# Sized by _doc_extraction_worker_count() so memory stays within the
-# container ceiling. Defined after the worker-count helper above.
+# Sized by doc_worker_count() (app.resource_pressure -- the single home for the
+# count) so memory stays within the container ceiling. Defined after the
+# worker-count helper above.
 class _DocWorker:
     """One persistent markitdown worker: process + parent end of its task pipe."""
 
