@@ -1641,6 +1641,17 @@ def test_classifier_lives_in_the_neutral_home():
 # ---------------------------------------------------------------------------
 
 _CLASSIFICATION_VALUE_SOURCES = ("classification", "known_classification")
+_RESULT_PRIMITIVES = (
+    # engine-layer builders
+    "_failed_engine_result",
+    "_make_engine_result",
+    "_engine_result_from_exception",
+    "_skipped_engine_result",
+    # strategy/render-layer terminal CrawlResult chokepoint: the render path
+    # reaches the wire through the same lenient dataclass, so a non-member
+    # literal here is the same class of bug the engine list guards against
+    "_terminal_crawl_result",
+)
 def _non_member_classification_offenders(tree, path, *, members):
     """A literal classification passed to a result primitive must be a member.
 
@@ -1652,10 +1663,7 @@ def _non_member_classification_offenders(tree, path, *, members):
     write, and passes without comment.
     """
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in (
-            "_failed_engine_result", "_make_engine_result", "_engine_result_from_exception",
-            "_skipped_engine_result",
-        )):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _RESULT_PRIMITIVES):
             continue
         for kw in node.keywords:
             if kw.arg not in _CLASSIFICATION_VALUE_SOURCES:
@@ -1691,6 +1699,15 @@ def test_non_member_classification_detector_bites():
     assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
     good = ast.parse('def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n')
     assert not list(_non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+
+    # The terminal-CrawlResult chokepoint is covered too: the render path builds
+    # terminal results through it, so an unknown literal there reaches the wire
+    # through the same lenient dataclass that let url_budget_exceeded ship.
+    bad_terminal = ast.parse('def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n')
+    offenders = list(_non_member_classification_offenders(bad_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
+    good_terminal = ast.parse('def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n')
+    assert not list(_non_member_classification_offenders(good_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
 
 
 # ---------------------------------------------------------------------------
