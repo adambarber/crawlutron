@@ -1,3 +1,5 @@
+import logging
+
 """Content extraction: markdown/text extraction, selector timeouts, bounds and single-pass parsing."""
 
 import asyncio
@@ -642,3 +644,38 @@ class TestExtractionGaps:
         html = '<script>fetch("/api/x");</script>'
         endpoints = extract_js_endpoints(html)
         assert {"url": "/api/x"} in endpoints
+
+
+class TestTrafilaturaChatterIsSuppressed:
+    """The extractor must not emit ERROR-level records for benign inputs.
+
+    trafilatura logs ERROR from trafilatura.core and trafilatura.utils when
+    the HTML is empty, a fragment, or has no main content -- normal
+    conditions for a crawler, and the code already falls through to the
+    markdownify/plain-text fallbacks. At ERROR level on a run of ~2000 pages
+    this produced 2239 spurious records that crowded out real failures.
+    """
+
+    @pytest.mark.parametrize("html", ["", "<html><body></body></html>", "<div></div>"])
+    def test_empty_and_fragment_html_emits_no_trafilatura_error(self, html, caplog):
+        extraction._extract_html(html, url="http://example.com/")
+
+        trafilatura_records = [r for r in caplog.records if r.name.startswith("trafilatura")]
+        errors = [r for r in trafilatura_records if r.levelno >= logging.ERROR]
+        assert not errors, (
+            "trafilatura emitted ERROR records for a benign input; these are the "
+            "2239 spurious per-run records. Extract already falls back to "
+            "markdownify/plain text, so the record carries no signal."
+        )
+
+    def test_real_html_still_extracts_and_logs_no_error(self, caplog):
+        out = extraction._extract_html(
+            "<html><body><article><h1>Title</h1><p>Real body text here.</p></article></body></html>",
+            url="http://example.com/",
+        )
+        assert out.text and "Real body text" in out.text
+        errors = [
+            r for r in caplog.records
+            if r.name.startswith("trafilatura") and r.levelno >= logging.ERROR
+        ]
+        assert not errors

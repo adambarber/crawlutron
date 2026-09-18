@@ -570,6 +570,36 @@ def _extract_selected(
     return ExtractedContent(md or text, md or text)
 
 
+def _suppress_trafilatura_chatter() -> object:
+    """Silence trafilatura's ERROR-level chatter for benign inputs.
+
+    trafilatura logs ERROR from ``trafilatura.core`` and ``trafilatura.utils``
+    when the HTML is empty, a fragment, or has no main content. All three are
+    normal for a crawler (a robots page, a redirect stub, an empty 200), and
+    ``_extract_html`` already falls through to markdownify and then plain
+    text, so the record carries no diagnostic signal. At ERROR level across a
+    ~2000-page run it produced 2239 records that crowded out real failures.
+
+    Used as a context manager so the suppression is scoped to the extraction
+    call: a parse failure we did not route here stays loud.
+    """
+    loggers = [logging.getLogger(n) for n in ("trafilatura.core", "trafilatura.utils", "trafilatura.xml")]
+    prior = {logger: logger.level for logger in loggers}
+    for logger in loggers:
+        logger.setLevel(logging.CRITICAL)
+
+    class _Restore:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            for logger, level in prior.items():
+                logger.setLevel(level)
+            return False
+
+    return _Restore()
+
+
 def _extract_html(
     html: str,
     url: str | None,
@@ -581,17 +611,18 @@ def _extract_html(
     try:
         import trafilatura
 
-        md = trafilatura.extract(
-            html,
-            url=url,
-            output_format="markdown",
-            favor_recall=True,
-            include_comments=False,
-            include_tables=True,
-            include_formatting=True,
-            include_links=True,
-            deduplicate=True,
-        )
+        with _suppress_trafilatura_chatter():
+            md = trafilatura.extract(
+                html,
+                url=url,
+                output_format="markdown",
+                favor_recall=True,
+                include_comments=False,
+                include_tables=True,
+                include_formatting=True,
+                include_links=True,
+                deduplicate=True,
+            )
     except Exception:
         md = None
     if not md or not md.strip():
