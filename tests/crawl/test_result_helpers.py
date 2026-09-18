@@ -6,20 +6,6 @@ from _testkit import *
 class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
 
-    def test_blocked_engine_result(self):
-        from app.crawl.result_helpers import _blocked_engine_result
-
-        result = _blocked_engine_result(
-            original_url="http://x/",
-            normalized_url="http://x/",
-            strategy="HTTP_DECLARED_CRAWLER",
-            classification="blocked",
-            http_status=403,
-        )
-        assert result.status == "blocked"
-        assert result.classification == "blocked"
-        assert result.http_status == 403
-
     def test_binary_no_text_result(self):
         from app.crawl.result_helpers import _binary_no_text_result
 
@@ -88,21 +74,6 @@ class TestTerminalResultContract:
             "content_type": None,
             "elapsed_ms": 0,
         }
-
-    def test_blocked_engine_result_defaults_error_to_classification(self):
-        from app.crawl.result_helpers import _blocked_engine_result
-
-        result = _blocked_engine_result(
-            original_url="http://b/",
-            normalized_url="http://b/",
-            strategy="BROWSER_HEADLESS",
-            classification="captcha_detected",
-            http_status=403,
-        )
-        assert result.status == "blocked"
-        assert result.error == "captcha_detected"
-        assert self._attempt_fields(result)["error"] == "captcha_detected"
-        assert self._attempt_fields(result)["status"] == "blocked"
 
     def test_skipped_engine_result_never_carries_url_or_status(self):
         from app.crawl.result_helpers import _skipped_engine_result

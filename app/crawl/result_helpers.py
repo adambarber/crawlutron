@@ -264,27 +264,6 @@ def _failed_engine_result(
     )
 
 
-def _blocked_engine_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    strategy: str,
-    classification: str,
-    http_status: int | None = None,
-    final_url: str | None = None,
-) -> EngineCrawlResult:
-    """Construct a blocked EngineCrawlResult with a single attempt (status=blocked)."""
-    return _terminal_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
-        status="blocked",
-        classification=classification,
-        http_status=http_status,
-        final_url=final_url,
-    )
-
-
 def _skipped_engine_result(
     *,
     original_url: str,
