@@ -1920,3 +1920,71 @@ def test_raw_exception_error_detector_bites():
     assert _raw_exception_error_offenders(repr_shape, REPO_ROOT / "app" / "api" / "_synthetic.py")
     good = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n")
     assert not _raw_exception_error_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# JS-endpoint egress door: the filter must not be reinlined
+#
+# ``filter_js_endpoints`` is the single place a scraped JS endpoint survives or
+# is dropped. Both call sites used to carry the inline comprehension
+# (``{**endpoint, "url": clean} for ... if (clean := public_url_or_none(...))
+# is not None``) -- the shape that silently disappears the moment a consumer is
+# added in a hurry. This pins the comprehension to the chokepoint itself.
+# ---------------------------------------------------------------------------
+
+_JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
+
+
+def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag the inlined endpoint-filter comprehension outside its chokepoint.
+
+    The reinlined shape is a comprehension whose element spreads an existing
+    dict and rewrites its ``url`` key (``{**endpoint, "url": clean}``) -- a
+    None key in the dict is the ``**`` spread, and the rewritten ``url`` key is
+    what makes it an endpoint filter rather than an ordinary copy.
+    """
+    if path.name == "validation.py":
+        return []
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            continue
+        elt = node.elt
+        if not isinstance(elt, ast.Dict):
+            continue
+        if any(k is None for k in elt.keys) and any(
+            isinstance(k, ast.Constant) and k.value == "url" for k in elt.keys
+        ):
+            offenders.append(
+                offender(path, node.lineno, "inlined js_endpoints filter: use validation.filter_js_endpoints")
+            )
+    return offenders
+
+
+def test_js_endpoints_filter_is_not_reinlined():
+    """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED):
+        offenders.extend(_reinline_js_endpoints_filter_offenders(tree, path))
+    assert not offenders, "route endpoints through filter_js_endpoints: " + ", ".join(offenders)
+
+
+def test_reinline_js_endpoints_detector_bites():
+    """The historical inline shape fires; the chokepoint call stays clean."""
+    bad = ast.parse(
+        "def f(endpoints, base):\n"
+        '    return [{**e, "url": c} for e in endpoints\n'
+        '           if (c := public_url_or_none(e["url"])) is not None]\n'
+    )
+    offenders = _reinline_js_endpoints_filter_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "filter_js_endpoints" in offenders[0], offenders
+    good = ast.parse("def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n")
+    assert not _reinline_js_endpoints_filter_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    # The chokepoint's own comprehension really is the matched shape: the file
+    # exemption is what keeps the real tree clean, not a predicate that misses it.
+    validation = next(((path, tree) for path, tree in app_trees() if path.name == "validation.py"), None)
+    assert validation is not None
+    validation_path, validation_tree = validation
+    assert _reinline_js_endpoints_filter_offenders(validation_tree, validation_path) == []
+    hits = _reinline_js_endpoints_filter_offenders(validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(hits) == 1 and "filter_js_endpoints" in hits[0], hits
