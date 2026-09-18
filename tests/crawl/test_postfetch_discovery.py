@@ -105,3 +105,24 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     assert not _has_element(out)
     assert out["discovered_link_count"] == 3
     assert out["next_page_url"] == "http://example.com/next"
+
+
+async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
+    """The browser result must not surface an unfiltered attacker href.
+
+    ``_detect_pagination`` resolves an ``href`` out of attacker-controlled
+    HTML. The HTTP builder filtered the resolved URL before use; the browser
+    builder assigned it raw to both diagnostics and the result field, so a
+    ``javascript:`` rel=next escaped into the response. Egress now happens at
+    the producer, so every consumer is covered.
+    """
+    malicious = '<html><body><a rel="next" href="javascript:alert(1)">next</a></body></html>'
+    result = await invoke_browser_strategy(
+        monkeypatch,
+        policy=http_strategy_policy(extraction="full", discovery=True),
+        html=malicious,
+        text="body copy",
+    )
+    assert result.status == "success"
+    assert result.next_page_url is None
+    assert "next_page_url" not in result.diagnostics

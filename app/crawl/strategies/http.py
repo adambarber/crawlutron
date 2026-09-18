@@ -2107,9 +2107,6 @@ async def _http_strategy_result(
         # always computed. Only the heavier discovery-only extras below are
         # gated on `discovery` (B1).
         next_page_url = post_fetch["next_page_url"]
-        # Egress filter (public_url_or_none): _detect_pagination already
-        # resolves against final_url, so this only drops non-http(s).
-        next_page_url = public_url_or_none(next_page_url) if next_page_url else None
         if next_page_url:
             diagnostics["next_page_url"] = next_page_url
         quality = _quality_score(

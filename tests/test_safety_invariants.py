@@ -1768,3 +1768,88 @@ def test_normalize_or_none_detector_bites():
     assert len(offenders) == 1 and "safe_public_url_or_none" in offenders[0], offenders
     good = ast.parse("def f(u):\n    return safe_public_url_or_none(u)\n")
     assert not list(_normalize_or_none_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
+
+
+# ---------------------------------------------------------------------------
+# Unfiltered urljoin egress doors (H class)
+#
+# _detect_pagination read an href out of attacker-controlled HTML and returned
+# urljoin(final_url, href) raw. The HTTP consumer filtered it before use, the
+# browser consumer did not, so a javascript: rel=next reached the response.
+# Filtering moved to the producer; this keeps the next door from reopening.
+# ---------------------------------------------------------------------------
+
+_EGRESS_FILTERS = frozenset({"public_url_or_none", "safe_public_url_or_none"})
+
+
+def _is_urljoin_call(node: ast.AST) -> bool:
+    """True for a plain ``urljoin(...)`` call."""
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "urljoin"
+
+
+def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a function that returns a ``urljoin`` result with no egress filter.
+
+    Caught shapes: ``return urljoin(a, b)`` and ``u = urljoin(a, b); return u``.
+    A URL resolved out of untrusted text is an egress door as soon as a caller
+    trusts it, so the join and the filter belong together; the browser path
+    proved that "every consumer remembers to filter" does not scale.
+    ``app/safe_url.py`` composes ``urljoin`` inside the sanctioned
+    ``SafeUrl.parse``/``redirect_hop`` path, so it is exempt by file, matching
+    the other chokepoint-module exemptions.
+    """
+    if path.name == "safe_url.py":
+        return []
+    offenders: list[str] = []
+    for func in _functions_with(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        joined: set[str] = set()
+        returns_raw = False
+        returns_binding = False
+        for node in ast.walk(func):
+            if isinstance(node, ast.Assign) and _is_urljoin_call(node.value):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        joined.add(target.id)
+            elif isinstance(node, ast.Return):
+                if _is_urljoin_call(node.value):
+                    returns_raw = True
+                elif isinstance(node.value, ast.Name) and node.value.id in joined:
+                    returns_binding = True
+        if not (returns_raw or returns_binding):
+            continue
+        uses_filter = any(
+            (isinstance(n, ast.Name) and n.id in _EGRESS_FILTERS)
+            or (isinstance(n, ast.Attribute) and n.attr in _EGRESS_FILTERS)
+            for n in ast.walk(func)
+        )
+        if not uses_filter:
+            offenders.append(
+                offender(path, func.lineno, f"{func.name}() returns a urljoin with no egress filter")
+            )
+    return offenders
+
+
+def test_no_unfiltered_urljoin_returns():
+    """A URL joined from untrusted input is egress-filtered before it leaves."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_unfiltered_urljoin_return_offenders(tree, path))
+    assert not offenders, "filter joined URLs through public_url_or_none: " + ", ".join(offenders)
+
+
+def test_unfiltered_urljoin_detector_bites():
+    """The historical leak shape fires; the filtered and sanctioned shapes stay clean."""
+    raw = ast.parse("def _detect_pagination(html, final_url):\n    return urljoin(final_url, href)\n")
+    offenders = _unfiltered_urljoin_return_offenders(raw, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "no egress filter" in offenders[0], offenders
+    binding = ast.parse("def f(base, href):\n    u = urljoin(base, href)\n    return u\n")
+    assert _unfiltered_urljoin_return_offenders(binding, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    good = ast.parse(
+        "def f(href, final_url):\n    return public_url_or_none(href, resolve_against=final_url)\n"
+    )
+    assert not _unfiltered_urljoin_return_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    # safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
+    hop = ast.parse("def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n")
+    assert not _unfiltered_urljoin_return_offenders(hop, REPO_ROOT / "app" / "safe_url.py")

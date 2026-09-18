@@ -157,6 +157,29 @@ class TestKatanaDiscovery:
         html = '<a href="/page2">Next</a>'
         assert _detect_pagination(html, "https://example.com/") is None
 
+    def test_detect_pagination_drops_non_http_href(self):
+        # The href is attacker-controlled HTML: a non-http(s) rel=next must not
+        # escape into next_page_url. Egress filtering belongs at the producer
+        # so every consumer is covered, not just the ones that remember.
+        for bad in ("javascript:alert(1)", "data:text/html,<x>", "mailto:a@b.c"):
+            html = f'<a rel="next" href="{bad}">next</a>'
+            assert _detect_pagination(html, "https://example.com/list") is None
+
+    def test_detect_pagination_still_resolves_relative(self):
+        # The egress filter must not break legitimate relative pagination.
+        assert (
+            _detect_pagination('<a rel="next" href="/p2">n</a>', "https://example.com/list")
+            == "https://example.com/p2"
+        )
+
+    def test_detect_pagination_protocol_relative_resolves(self):
+        # //evil.com/x resolves against the page URL to https, so it survives
+        # the scheme filter exactly like the HTTP path already allowed.
+        assert (
+            _detect_pagination('<a rel="next" href="//example.com/p2">n</a>', "https://example.com/list")
+            == "https://example.com/p2"
+        )
+
 
 def _non_spawning_process():
     """A multiprocessing.Process double that records construction, never spawns."""

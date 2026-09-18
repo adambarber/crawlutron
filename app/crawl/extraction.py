@@ -31,7 +31,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _text_from_html
 from app.models import DiscoveredLink
-from app.validation import get_env_float, get_env_int, safe_public_url_or_none
+from app.validation import get_env_float, get_env_int, public_url_or_none, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -940,8 +940,11 @@ def extract_post_fetch_discovery(
     work with no I/O: both builders run it via ``asyncio.to_thread`` so page
     parsing never parks the event loop. Returns only plain data (dicts,
     lists, strings, DiscoveredLink values) -- the lxml tree never escapes.
-    Egress filtering (``public_url_or_none``) stays at the call sites so
-    each builder keeps its exact filter contract.
+    The pagination hint is egress-filtered HERE rather than at the call sites:
+    this block used to promise each builder would keep its own filter
+    contract, and the browser builder silently dropped it, so a
+    ``javascript:`` rel=next escaped into the response. Filtering at the
+    producer covers every consumer.
     """
     tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = _html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
@@ -1021,6 +1024,11 @@ def _detect_pagination(html: str | None, final_url: str | None) -> str | None:
     Checks both ``<a rel="next" href="...">`` and
     ``<link rel="next" href="...">`` and resolves the href against the
     final page URL. Returns ``None`` when no pagination hint is present.
+
+    The href is attacker-controlled HTML, so the resolved URL leaves the
+    service through the egress filter (``public_url_or_none``) HERE rather
+    than at each call site: a non-http(s) target (``javascript:``, ``data:``)
+    becomes ``None``, and a consumer that forgot to filter cannot leak it.
     """
     if not html or not final_url:
         return None
@@ -1031,5 +1039,5 @@ def _detect_pagination(html: str | None, final_url: str | None) -> str | None:
                 continue
             href_match = _HREF_RE.search(tag.group(0))
             if href_match:
-                return urljoin(final_url, href_match.group(1).strip())
+                return public_url_or_none(href_match.group(1).strip(), resolve_against=final_url)
     return None
