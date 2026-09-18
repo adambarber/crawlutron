@@ -12,7 +12,7 @@ from typing import Any
 
 from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
-from app.crawl.payload_helpers import _payload_urls
+from app.crawl.payload_helpers import checked_payload_urls
 from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -56,9 +56,10 @@ async def render_request(
 ) -> dict[str, Any]:
     """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
-    urls = _payload_urls(payload)
-    if len(urls) > active_settings.max_batch_size:
-        raise ValueError("batch_size_exceeded")
+    # The single shared batch gate (app.crawl.payload_helpers.checked_payload_urls):
+    # this route used to hand-roll the same cap against max_batch_size with a
+    # different failure shape, so the two gates could drift.
+    urls = checked_payload_urls(payload, active_settings.max_batch_size)
 
     options = _render_options(payload, active_settings)
     started = time.monotonic()
