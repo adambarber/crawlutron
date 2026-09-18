@@ -90,3 +90,37 @@ class TestTerminalResultContract:
         assert result.http_status is None
         assert self._attempt_fields(result)["http_status"] is None
         assert self._attempt_fields(result)["status"] == "skipped"
+
+
+class TestTerminalCrawlResult:
+    """The /v1/render wire terminal: no payload, and error is caller-supplied.
+
+    The browser failure path, the render disallowed path, and the render
+    worker-failure path share this shape. Pinning the fields proves the
+    collapse onto one primitive is behavior-preserving and that the result
+    never carries a payload (html/text/final_url are always None).
+    """
+
+    def test_no_payload_and_carries_error_verbatim(self):
+        from app.crawl.result_helpers import _terminal_crawl_result
+
+        result = _terminal_crawl_result(
+            url="http://x/page",
+            status="failed",
+            classification="site_error",
+            attempts=2,
+            elapsed_ms=42,
+            domain="x",
+            error="network_error",
+        )
+        assert result.url == "http://x/page"
+        assert result.status == "failed"
+        assert result.classification == "site_error"
+        assert result.attempts == 2
+        assert result.elapsed_ms == 42
+        assert result.domain == "x"
+        assert result.error == "network_error"
+        # A terminal result never carries page payload.
+        assert result.final_url is None
+        assert result.html is None
+        assert result.text is None

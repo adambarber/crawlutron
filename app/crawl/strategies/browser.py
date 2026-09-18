@@ -31,7 +31,7 @@ from app.constants import (
     DEFAULT_MAX_CONCURRENT_PAGES,
     status_for_classification,
 )
-from app.crawl.result_helpers import _classify_error_code
+from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.http import (
     _build_pinned_request,
@@ -1087,13 +1087,10 @@ class BrowserRenderer:
         started: float,
         error: str | None,
     ) -> CrawlResult:
-        return CrawlResult(
+        return _terminal_crawl_result(
             url=url,
-            status=status,  # type: ignore[arg-type]
-            classification=classification,  # type: ignore[arg-type]
-            final_url=None,
-            html=None,
-            text=None,
+            status=status,
+            classification=classification,
             attempts=attempts,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             domain=registrable_domain(url),

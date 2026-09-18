@@ -8,7 +8,7 @@ import ssl
 import httpx
 
 from app.crawl.decompression import DecompressionTooLargeError
-from app.models import BrowserPoolExhaustedError, CrawlStrategyAttempt, EngineCrawlResult
+from app.models import BrowserPoolExhaustedError, CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,41 @@ def _engine_result_from_exception(
         attempt_elapsed_ms=elapsed,
     )
 
+
+def _terminal_crawl_result(
+    *,
+    url: str,
+    status: str,
+    classification: str,
+    attempts: int,
+    elapsed_ms: int,
+    domain: str,
+    error: str | None,
+) -> CrawlResult:
+    """Construct a terminal (no-payload) CrawlResult -- the /v1/render wire shape.
+
+    Three sites hand-built this same ``final_url=None, html=None, text=None``
+    result: the browser strategy's failure path, the render endpoint's
+    robots-disallowed path, and its worker-failure path. The render copy
+    drifted: it set ``error=str(error)`` from a caught worker exception, and
+    ``to_dict`` is pure serialization, so raw exception text (DNS names,
+    filesystem paths, secrets) reached the response body. This primitive is
+    the single construction site; ``error`` must be a stable classification
+    (``_classify_error_code``), never raw exception text -- which is what the
+    browser path already passed correctly.
+    """
+    return CrawlResult(
+        url=url,
+        status=status,  # type: ignore[arg-type]
+        classification=classification,  # type: ignore[arg-type]
+        final_url=None,
+        html=None,
+        text=None,
+        attempts=attempts,
+        elapsed_ms=elapsed_ms,
+        domain=domain,
+        error=error,
+    )
 
 
 def _make_engine_result(

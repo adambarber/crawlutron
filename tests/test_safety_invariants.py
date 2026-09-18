@@ -1853,3 +1853,70 @@ def test_unfiltered_urljoin_detector_bites():
     # safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
     hop = ast.parse("def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n")
     assert not _unfiltered_urljoin_return_offenders(hop, REPO_ROOT / "app" / "safe_url.py")
+
+
+# ---------------------------------------------------------------------------
+# Raw exception text never reaches the wire (information disclosure)
+#
+# render.py built the worker-failure result with ``error=str(error)`` from a
+# caught exception, and ``to_dict`` is pure serialization -- so the raw text
+# (DNS names, filesystem paths, secrets) reached the /v1/render body verbatim.
+# ``_terminal_crawl_result`` is the sanctioned construction site and takes an
+# already-classified error; this keeps raw text from drifting back into any
+# error= field of a wire-visible result.
+# ---------------------------------------------------------------------------
+
+_TERMINAL_RESULT_SANCTIONED = frozenset({"result_helpers.py"})
+_RESULT_ERROR_SINKS = frozenset({"CrawlResult", "_terminal_crawl_result"})
+_EXCEPTION_NAMES = frozenset({"error", "exc", "exception", "err"})
+
+
+def _is_raw_exception_text(value: ast.expr) -> bool:
+    """True for ``str(exc)``/``repr(exc)`` or an f-string interpolating one."""
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in ("str", "repr"):
+        return True
+    if isinstance(value, ast.JoinedStr):
+        return any(
+            isinstance(part, ast.FormattedValue)
+            and isinstance(part.value, ast.Name)
+            and part.value.id in _EXCEPTION_NAMES
+            for part in value.values
+        )
+    return False
+
+
+def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a wire-visible result built with the raw text of an exception."""
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _RESULT_ERROR_SINKS
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "error" and _is_raw_exception_text(kw.value):
+                offenders.append(offender(path, node.lineno, f"{node.func.id}(error=<raw exception text>)"))
+    return offenders
+
+
+def test_no_raw_exception_text_in_result_error_field():
+    """The ``error`` field is a stable classification, never ``str(exc)``."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=_TERMINAL_RESULT_SANCTIONED):
+        offenders.extend(_raw_exception_error_offenders(tree, path))
+    assert not offenders, "classify via _classify_error_code, never raw exception text: " + ", ".join(offenders)
+
+
+def test_raw_exception_error_detector_bites():
+    """The leak shape fires on both sinks; the classified shape stays clean."""
+    direct = ast.parse("def f(exc):\n    return CrawlResult(error=str(exc))\n")
+    offenders = _raw_exception_error_offenders(direct, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 1 and "raw exception text" in offenders[0], offenders
+    via_primitive = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=str(exc))\n")
+    assert _raw_exception_error_offenders(via_primitive, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    fstring = ast.parse("def f(error):\n    return CrawlResult(error=f'failed: {error}')\n")
+    assert _raw_exception_error_offenders(fstring, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    repr_shape = ast.parse("def f(e):\n    return CrawlResult(error=repr(e))\n")
+    assert _raw_exception_error_offenders(repr_shape, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    good = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n")
+    assert not _raw_exception_error_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")

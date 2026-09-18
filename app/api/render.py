@@ -13,6 +13,7 @@ from typing import Any
 from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
+from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
 from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
@@ -34,13 +35,10 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
 
 def _disallowed_result(index_url: tuple[int, str], classification: str, elapsed_ms: int = 0) -> CrawlResult:
     index, url = index_url
-    return CrawlResult(
+    return _terminal_crawl_result(
         url=url,
         status="disallowed",
-        classification=classification,  # type: ignore[arg-type]
-        final_url=None,
-        html=None,
-        text=None,
+        classification=classification,
         attempts=0,
         elapsed_ms=elapsed_ms,
         domain="",
@@ -113,17 +111,17 @@ async def render_request(
             raise worker_errors[missing[0]]
         for index in missing:
             error = worker_errors.get(index)
-            by_index[index] = CrawlResult(
+            by_index[index] = _terminal_crawl_result(
                 url=urls[index],
                 status="failed",
-                classification="site_error",  # type: ignore[arg-type]
-                final_url=None,
-                html=None,
-                text=None,
+                classification="site_error",
                 attempts=0,
                 elapsed_ms=int((time.monotonic() - started) * 1000),
                 domain="",
-                error=str(error) if error is not None else "worker_failed",
+                # The wire-visible error must be a stable classification, never
+                # raw exception text: to_dict is pure serialization, so str(exc)
+                # would leak DNS names / paths / secrets straight into the body.
+                error=_classify_error_code(error) if error is not None else "worker_failed",
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]
