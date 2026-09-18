@@ -31,7 +31,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _text_from_html
 from app.models import DiscoveredLink
-from app.validation import get_env_float, get_env_int, normalize_public_http_url
+from app.validation import get_env_float, get_env_int, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -877,10 +877,7 @@ def _extract_discovered_links(
 ) -> tuple[list[Any], int, bool]:
     if not html or not source_url:
         return [], 0, False
-    try:
-        norm_source = normalize_public_http_url(source_url)
-    except ValueError:
-        norm_source = source_url
+    norm_source = safe_public_url_or_none(source_url) or source_url
     source_host = (urlparse(norm_source).hostname or "").lower()
     if tree is None:
         tree = _parse_html_tree(html)
@@ -901,10 +898,10 @@ def _extract_discovered_links(
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         try:
-            normalized_url = normalize_public_http_url(urljoin(source_url, href))
+            normalized_url = safe_public_url_or_none(urljoin(source_url, href))
         except ValueError:
             continue
-        if normalized_url in seen:
+        if not normalized_url or normalized_url in seen:
             continue
         seen.add(normalized_url)
         total_count += 1

@@ -45,13 +45,10 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
             return None
         from urllib.parse import urljoin
 
-        from app.validation import normalize_public_http_url
+        from app.validation import safe_public_url_or_none
 
         candidate = urljoin(root_url, u) if u.startswith("/") else u
-        try:
-            return normalize_public_http_url(candidate)
-        except ValueError:
-            return None
+        return safe_public_url_or_none(candidate)
 
     links: list[str] = []
     for link in result.get("discovered_links", []) or []:

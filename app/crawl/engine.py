@@ -95,7 +95,12 @@ from app.models import (
 from app.resource_pressure import derive_browser_pool_size
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url, public_url_or_none, registrable_domain
+from app.validation import (
+    normalize_public_http_url,
+    public_url_or_none,
+    registrable_domain,
+    safe_public_url_or_none,
+)
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -894,10 +899,7 @@ async def _crawl_request_impl(
         if not entry:
             continue
         validators_by_url[v_url] = entry
-        try:
-            validators_by_url.setdefault(normalize_public_http_url(v_url), entry)
-        except ValueError:
-            pass
+        validators_by_url.setdefault(safe_public_url_or_none(v_url) or v_url, entry)
 
     def _validators_for(job: CrawlTask) -> dict[str, str] | None:
         return validators_by_url.get(job.normalized_url) or validators_by_url.get(job.original_url)

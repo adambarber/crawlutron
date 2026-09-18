@@ -21,7 +21,7 @@ from app.constants import (
     SUPPORTED_STRATEGIES,
 )
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url
+from app.validation import safe_public_url_or_none
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
@@ -50,10 +50,12 @@ def _payload_urls(payload: dict[str, Any]) -> list[str]:
         seen: set[str] = set()
         unique: list[str] = []
         for url in urls:
-            try:
-                key = normalize_public_http_url(url)
-            except ValueError:
-                key = url
+            # Per the page-identity contract (#1926): batch dedupe collapses on
+            # the canonical key, but a value the normalizer rejects (non-http,
+            # private under SSRF) keeps its RAW key so request-target validation
+            # stays with the caller -- safe_public_url_or_none cannot drop it
+            # here the way it does on the egress doors.
+            key = safe_public_url_or_none(url) or url
             if key not in seen:
                 seen.add(key)
                 unique.append(url)

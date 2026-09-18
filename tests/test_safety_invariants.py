@@ -1691,3 +1691,80 @@ def test_non_member_classification_detector_bites():
     assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
     good = ast.parse('def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n')
     assert not list(_non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+
+
+# ---------------------------------------------------------------------------
+# Normalize-or-None chokepoint (jscpd #5 family)
+#
+# The same three-line wrapper -- try normalize_public_http_url(x) except
+# ValueError: return None -- was hand-rolled in three modules (search
+# providers, map, batch dedupe). Each is a URL egress door that must apply
+# the SSRF private-target policy; a new call site that skips the wrapper
+# silently drops the policy for its door.
+# ---------------------------------------------------------------------------
+
+_NORMALIZE_OR_NONE_OFFENDERS = frozenset(
+    {"normalize_public_http_url", "public_url_or_none", "safe_public_url_or_none"}
+)
+
+
+def _normalize_or_none_offenders(tree, path):
+    """A try/except ValueError around the normalizer outside the chokepoint."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        body_names = {
+            getattr(n.func, "id", None) or getattr(n.func, "attr", None)
+            for n in ast.walk(node)
+            if isinstance(n, ast.Call)
+        }
+        if "normalize_public_http_url" not in body_names:
+            continue
+        for handler in node.handlers:
+            if not (isinstance(handler.type, ast.Name) and handler.type.id == "ValueError"):
+                continue
+            # The re-inlined wrapper discards the exception: its body is a bare
+            # None, pass, or a raw fallback (``x`` returned unchanged). A site
+            # that re-raises, branches on the error text, or needs the
+            # normalized value for a second computation (registrable_domain,
+            # the error message) is a different contract and stays.
+            body = handler.body
+            if len(body) != 1:
+                continue
+            stmt = body[0]
+            is_discard = (
+                (isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
+                or isinstance(stmt, ast.Pass)
+                or (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Name)
+                    and isinstance(stmt.value, ast.Name)
+                    and stmt.value.id != stmt.targets[0].id)
+            )
+            if is_discard:
+                yield offender(
+                    path, node.lineno,
+                    "normalize_public_http_url + except ValueError re-inlined; "
+                    "use app.validation.safe_public_url_or_none",
+                )
+
+
+def test_normalize_or_none_is_not_reinlined():
+    offenders = []
+    # The chokepoint's own definition is the sanctioned site.
+    for path, tree in app_trees(exclude=frozenset({"validation.py"})):
+        offenders.extend(_normalize_or_none_offenders(tree, path))
+    assert not offenders, ", ".join(offenders)
+
+
+def test_normalize_or_none_detector_bites():
+    bad = ast.parse(
+        "def f(u):\n"
+        "    try:\n"
+        "        return normalize_public_http_url(u)\n"
+        "    except ValueError:\n"
+        "        return None\n"
+    )
+    offenders = list(_normalize_or_none_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "safe_public_url_or_none" in offenders[0], offenders
+    good = ast.parse("def f(u):\n    return safe_public_url_or_none(u)\n")
+    assert not list(_normalize_or_none_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))

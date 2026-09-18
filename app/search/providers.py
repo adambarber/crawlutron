@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http import get_async_http_client
 from app.timeouts import Timeouts
-from app.validation import normalize_public_http_url
+from app.validation import safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +120,7 @@ def _normalize_url(raw: str) -> str | None:
     a result that points at loopback or a private network is not a public URL
     a caller can legally crawl, so it is not advertised.
     """
-    try:
-        return normalize_public_http_url(raw)
-    except ValueError:
-        return None
+    return safe_public_url_or_none(raw)
 
 
 def _collect_results(

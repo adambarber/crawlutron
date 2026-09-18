@@ -462,3 +462,26 @@ def public_url_or_none(raw: str | None, *, resolve_against: str | None = None) -
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
     return candidate
+
+
+def safe_public_url_or_none(raw: str | None) -> str | None:
+    """The single normalize-or-None chokepoint for URL egress doors.
+
+    ``normalize_public_http_url`` raises ``ValueError`` on anything it rejects
+    (private networks under SSRF policy, non-http schemes, un-normalizable
+    input). Callers on egress doors -- search results, map links, batch dedupe,
+    sitemap seeds -- all want the same thing: the canonical public URL, or
+    ``None`` to drop the entry. Each one hand-rolled the same
+    ``try/except ValueError: return None``, which is how a new door ships
+    without the SSRF policy: the wrapper is easy to forget and easy to get
+    subtly wrong, and nothing tests the absence.
+
+    ``resolve_against`` is intentionally absent: callers that must resolve a
+    relative URL first do so via :func:`public_url_or_none`, then pass the
+    result here. Combining the two would make this function decide between
+    two egress contracts, and the policy must apply identically at every door.
+    """
+    try:
+        return normalize_public_http_url(raw)
+    except ValueError:
+        return None
