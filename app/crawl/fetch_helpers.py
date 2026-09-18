@@ -26,6 +26,47 @@ from app.crawl.strategies.http import _decode_body, _decompress_body
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
 
 
+async def _fetch_decode_discovery(
+    fetcher: Any,
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+) -> tuple[str | None, int | None, dict[str, str] | None]:
+    """Fetch, decompress, and decode a discovery body (robots.txt / sitemap.xml).
+
+    The single place the discovery fetch policy lives: sync or coroutine
+    fetcher, lowercase response headers, and a capped decompress so a hostile
+    origin cannot OOM the service with a gzip bomb
+    (``DISCOVERY_BODY_MAX_BYTES``). Returns ``(text, status, headers)``; the
+    header map is present even when the body is absent -- non-200, or a body
+    that blew the cap -- so the sitemap path can still read ETag/Last-Modified
+    while the robots path ignores it. ``(None, None, None)`` on
+    transport-level failure.
+    """
+    from app.crawl.decompression import DecompressionTooLargeError
+
+    try:
+        resp = fetcher(url, headers, timeout_seconds)
+        if inspect.iscoroutine(resp):
+            resp = await resp
+        status = resp.status_code
+        resp_headers = {key.lower(): value for key, value in resp.headers.items()}
+        if status == 200:
+            try:
+                body = _decompress_body(
+                    resp.body,
+                    resp_headers.get("content-encoding", ""),
+                    max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
+                )
+            except DecompressionTooLargeError:
+                return None, status, resp_headers
+            return _decode_body(body, resp_headers.get("content-type")), status, resp_headers
+        return None, status, resp_headers
+    except Exception:
+        pass
+    return None, None, None
+
+
 async def _fetch_and_decode(
     fetcher: Any,
     url: str,
@@ -39,28 +80,34 @@ async def _fetch_and_decode(
     robots handling treats differently (fail closed, M7). ``(None, None)``
     on transport-level failure.
     """
-    from app.crawl.decompression import DecompressionTooLargeError
+    text, status, _ = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
+    return text, status
 
-    try:
-        resp = fetcher(url, headers, timeout_seconds)
-        if inspect.iscoroutine(resp):
-            resp = await resp
-        status = resp.status_code
-        if status == 200:
-            resp_headers = {key.lower(): value for key, value in resp.headers.items()}
-            try:
-                body = _decompress_body(
-                    resp.body,
-                    resp_headers.get("content-encoding", ""),
-                    max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
-                )
-            except DecompressionTooLargeError:
-                return None, status
-            return _decode_body(body, resp_headers.get("content-type")), status
-        return None, status
-    except Exception:
-        pass
-    return None, None
+
+async def _fetch_text(
+    fetcher: Any,
+    url: str,
+    cond_headers: dict[str, str] | None,
+    timeout_seconds: int,
+) -> tuple[str | None, str | None, str | None, bool]:
+    """Fetch + decode a sitemap body, returning ``(text, etag, last_modified, not_modified)``.
+
+    The sitemap layer's only addition over the shared core is conditional
+    semantics: a 304 means the body is unchanged, so callers reuse a
+    previously resolved set instead of re-parsing. ETag/Last-Modified are
+    surfaced even when the body is absent (304, or a body that blew the
+    decompression cap) so the cache entry stays addressable.
+    """
+    text, status, resp_headers = await _fetch_decode_discovery(
+        fetcher, url, cond_headers or {}, timeout_seconds
+    )
+    if resp_headers is None or status not in (200, 304):
+        return None, None, None, False
+    etag = resp_headers.get("etag")
+    last_modified = resp_headers.get("last-modified")
+    if status == 304:
+        return None, etag, last_modified, True
+    return text, etag, last_modified, False
 
 
 # Sitemap cache: one locked, bounded, TTL'd store (app.bounded_ttl).
@@ -98,40 +145,10 @@ async def fetch_sitemap_urls(
     """
     import re as _re
 
-    from app.crawl.decompression import DecompressionTooLargeError
-
     loc_pattern = _re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", _re.IGNORECASE)
     lastmod_re = _re.compile(r"<lastmod>\s*([^<]+)\s*</lastmod>", _re.IGNORECASE)
     visited: set[str] = set()
     page_urls: set[tuple[str, str | None]] = set()
-
-    async def _fetch_text(url: str, cond_headers: dict[str, str] | None):
-        """Fetch + decode a sitemap body, returning (text, etag, last_modified, not_modified)."""
-        try:
-            resp = fetcher(url, cond_headers or {}, timeout_seconds)
-            if inspect.iscoroutine(resp):
-                resp = await resp
-            rh = {key.lower(): value for key, value in resp.headers.items()}
-            if resp.status_code == 304:
-                return None, rh.get("etag"), rh.get("last-modified"), True
-            if resp.status_code == 200:
-                try:
-                    body = _decompress_body(
-                        resp.body,
-                        rh.get("content-encoding", ""),
-                        max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
-                    )
-                except DecompressionTooLargeError:
-                    return None, rh.get("etag"), rh.get("last-modified"), False
-                return (
-                    _decode_body(body, rh.get("content-type")),
-                    rh.get("etag"),
-                    rh.get("last-modified"),
-                    False,
-                )
-        except Exception:
-            pass
-        return None, None, None, False
 
     async def recurse(current_url: str, depth: int, cond_headers: dict[str, str] | None = None):
         etag: str | None = None
@@ -139,7 +156,9 @@ async def fetch_sitemap_urls(
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
             return etag, last_modified
         visited.add(current_url)
-        text, etag, last_modified, not_modified = await _fetch_text(current_url, cond_headers)
+        text, etag, last_modified, not_modified = await _fetch_text(
+            fetcher, current_url, cond_headers, timeout_seconds
+        )
         if not_modified:
             # 304: reuse the previously resolved URLs for this exact URL.
             # get_stale (not get): the entry must be PRESENT, not fresh --
