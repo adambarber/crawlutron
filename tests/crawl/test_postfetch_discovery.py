@@ -126,3 +126,51 @@ async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
     assert result.status == "success"
     assert result.next_page_url is None
     assert "next_page_url" not in result.diagnostics
+
+
+async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
+    """The browser path must build its result through _make_engine_result.
+
+    The HTTP path routes through the shared builder; the browser path
+    hand-built EngineCrawlResult, silently relying on the ``validators``
+    default (a render has no etag). This pins every field the hand-build
+    produced for this page so routing through the shared builder is provably
+    behavior-preserving -- and a field that silently changes is caught here.
+    """
+    result = await invoke_browser_strategy(
+        monkeypatch,
+        policy=http_strategy_policy(extraction="full", discovery=True),
+        html=HTML,
+        text="page one page two next page body copy",
+    )
+    assert result.status == "success"
+    assert result.classification == "rendered"
+    assert result.selected_strategy == "BROWSER_HEADLESS"
+    # No HTTP layer on the browser path: these stay empty/None.
+    assert result.http_status is None
+    assert result.headers == {}
+    assert result.content_type is None
+    # A render carries no origin validators (no etag/last-modified); the field
+    # must be an empty dict, never None or absent.
+    assert result.validators == {}
+    assert result.error is None
+    assert result.html == HTML
+    assert isinstance(result.text, str)
+    assert "page one with enough words" in result.text
+    assert isinstance(result.markdown, str)
+    assert isinstance(result.extraction_method, str)
+    assert result.classification_evidence == []
+    assert result.discovered_link_count == 3
+    assert {link.normalized_url for link in result.discovered_links} == {
+        "http://example.com/p1",
+        "http://example.com/p2",
+        "http://example.com/next",
+    }
+    assert result.next_page_url == "http://example.com/next"
+    assert result.diagnostics["js_endpoints"] == [{"url": "http://example.com/api/data"}]
+    assert result.diagnostics["next_page_url"] == "http://example.com/next"
+    # One attempt, matching the HTTP path's single-attempt shape.
+    (attempt,) = result.attempted_strategies
+    assert attempt.strategy == "BROWSER_HEADLESS"
+    assert attempt.status == "success"
+    assert attempt.http_status is None

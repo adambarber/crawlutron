@@ -73,6 +73,7 @@ from app.crawl.recursive import (
 from app.crawl.result_helpers import (
     _engine_result_from_exception,
     _failed_engine_result,
+    _make_engine_result,
     _skipped_engine_result,
 )
 from app.crawl.strategies.http import (
@@ -265,14 +266,14 @@ async def _browser_strategy_result(
         elapsed_ms=result.elapsed_ms,
         error=result.error,
     )
-    return EngineCrawlResult(
+    return _make_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
         final_url=result.final_url,
         status=result.status,
         classification=result.classification,
         selected_strategy=strategy if result.status == "success" else None,  # type: ignore[arg-type]
-        attempted_strategies=[attempt],
+        attempt=attempt,
         http_status=None,
         headers={},
         content_type=None,
@@ -288,6 +289,11 @@ async def _browser_strategy_result(
         discovered_links=discovered_links,
         error=result.error,
         next_page_url=next_page_url,
+        # A browser render has no HTTP layer, so there is no etag/last-modified
+        # to surface: validators is empty by construction. Passed explicitly
+        # rather than inherited from the builder's default so the empty value
+        # stays a statement, not an omission.
+        validators={},
     )
 
 
