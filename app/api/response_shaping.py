@@ -239,12 +239,16 @@ def _failed_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     """
     url = item.get("normalized_url") or item.get("original_url") or ""
     return UnifiedCrawlResult(
-        url=url,
         original_url=item.get("original_url") or url,
         normalized_url=url,
         final_url=item.get("final_url"),
         status="failed",
-        classification=CrawlClassification.unknown_error.value,
+        # site_error is a FAILED_CLASSIFICATIONS member, so its status-table
+        # entry is "failed" -- this keeps (status, classification) consistent
+        # for any consumer that re-derives status from classification.
+        # unknown_error maps to "blocked", which would disagree with the
+        # hardcoded status above.
+        classification=CrawlClassification.site_error.value,
         error=item.get("error") or "result_shaping_failed",
     )
 

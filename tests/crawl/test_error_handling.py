@@ -229,3 +229,15 @@ class TestShapeAllGuardsPerItem:
         assert len(response.results) == 2
         assert response.results[0].classification == "url_budget_exceeded"
         assert response.results[1].status == "failed"
+
+    def test_fallback_status_and_classification_agree(self):
+        # The fallback hardcodes status="failed" and picks the classification
+        # independently. A consumer re-deriving status from classification
+        # (what CLASSIFICATION_STATUS_BY_LABEL exists to allow) must see the
+        # same value the fallback set, or the two paths describe different
+        # outcomes for the same item.
+        from app.api.response_shaping import _failed_unified_result
+        from app.constants import status_for_classification
+
+        result = _failed_unified_result({"normalized_url": "https://example.org/a"})
+        assert status_for_classification(result.classification) == result.status
