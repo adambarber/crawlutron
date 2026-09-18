@@ -425,3 +425,29 @@ class TestClassifyHtmlComments:
         # Regression guard: signals in VISIBLE text must still be detected.
         html = "<html><body>access denied</body></html>"
         assert classify_page(html, "access denied") == "access_denied"
+
+
+def test_wire_classification_literal_matches_the_enum():
+    """The ``Classification`` Literal in app.models is a hand-maintained second
+    copy of the enum.
+
+    url_budget_exceeded shipped as an enum member missing from the Literal, and
+    the value-validity detector could not catch it -- it checks call-site
+    literals against the enum, not the Literal against the enum. A member added
+    to the enum but forgotten in the Literal would still pass CI, which is the
+    exact duplication that produced the original defect.
+    """
+    import typing
+
+    from app import models
+    from app.constants import CrawlClassification
+
+    args = typing.get_args(models.Classification)
+    enum_values = {m.value for m in CrawlClassification}
+    literal_values = set(args)
+
+    assert literal_values == enum_values, (
+        f"Classification Literal drifted from CrawlClassification: "
+        f"missing from Literal={sorted(enum_values - literal_values)} "
+        f"stale in Literal={sorted(literal_values - enum_values)}"
+    )

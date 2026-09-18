@@ -53,6 +53,11 @@ Classification = Literal[
     "private_network_target",
     "unknown_error",
     "not_modified",
+    # A browser renderer slot was unavailable within the acquire bound, so the
+    # URL was not attempted; the frontier re-queues it (at-least-once). A
+    # CrawlClassification member so it survives the strict enum at response
+    # shaping.
+    "browser_pool_exhausted",
 ]
 
 CrawlStrategyName = Literal[
