@@ -18,6 +18,13 @@ services:
     image: browser-crawler:local
     container_name: browser-crawler
     restart: unless-stopped
+    # Pin the cgroup memory limit the RAM guardrail reads. Without this the
+    # container inherits the host/VM cgroup, so derive_browser_pool_size and
+    # _build_admission_policy size the browser pool and HTTP concurrency from a
+    # ceiling the container does not actually have -- admitting more in-flight
+    # work than 3 GiB can hold. Keep this in sync with the defaults documented
+    # in resource_pressure.py.
+    mem_limit: 3g
     ports:
       # Bind to loopback only; the service has no caller authentication by
       # design and must not be exposed to the network without a reverse
