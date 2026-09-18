@@ -18,6 +18,13 @@ services:
     image: browser-crawler:local
     container_name: browser-crawler
     restart: unless-stopped
+    # PID 1 must reap children. The service spawns long-lived subprocesses
+    # (persistent markitdown doc workers, Playwright browser drivers) whose
+    # parents can exit before them; without an init those orphans reparent to
+    # PID 1 and, when uvicorn is the PID 1, are never waited on -- they become
+    # zombies that docker cannot kill, and the container wedges irrecoverably
+    # (observed live: unkillable, port unbound, health dead for hours).
+    init: true
     # Pin the cgroup memory limit the RAM guardrail reads. Without this the
     # container inherits the host/VM cgroup, so derive_browser_pool_size and
     # _build_admission_policy size the browser pool and HTTP concurrency from a
