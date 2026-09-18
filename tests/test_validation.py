@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.validation import normalize_public_http_url
+from app.validation import filter_js_endpoints, normalize_public_http_url
 
 
 class TestDeepUrlNormalization:
@@ -107,3 +107,30 @@ class TestNormalizationGuardMemoization:
         # Repeated forms hit the memo but must keep rejecting.
         with pytest.raises(ValueError, match="private_network_target"):
             validation.normalize_public_http_url("http://2130706433/x")
+
+
+class TestFilterJsEndpoints:
+    """The single egress filter for the JS-endpoint discovery door.
+
+    ``extract_js_endpoints`` scrapes URLs out of attacker-controlled HTML/JS;
+    this filter is the one place an endpoint survives or is dropped, so a
+    consumer that forgot the old inline comprehension cannot leak one.
+    """
+
+    def test_drops_non_http_endpoint(self):
+        assert filter_js_endpoints([{"url": "javascript:alert(1)"}, {"url": "data:x"}]) == []
+
+    def test_resolves_relative_endpoint(self):
+        out = filter_js_endpoints([{"url": "/api/x"}], resolve_against="http://e.com/page")
+        assert out == [{"url": "http://e.com/api/x"}]
+
+    def test_preserves_extra_endpoint_fields(self):
+        out = filter_js_endpoints([{"url": "/api/x", "method": "POST"}], resolve_against="http://e.com/")
+        assert out == [{"url": "http://e.com/api/x", "method": "POST"}]
+
+    def test_relative_endpoint_without_base_is_dropped(self):
+        # Unresolved relatives are not http(s), so they cannot leave.
+        assert filter_js_endpoints([{"url": "/api/x"}]) == []
+
+    def test_empty_endpoints(self):
+        assert filter_js_endpoints([]) == []

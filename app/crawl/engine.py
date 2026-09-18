@@ -96,8 +96,8 @@ from app.resource_pressure import derive_browser_pool_size
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import (
+    filter_js_endpoints,
     normalize_public_http_url,
-    public_url_or_none,
     registrable_domain,
     safe_public_url_or_none,
 )
@@ -253,12 +253,9 @@ async def _browser_strategy_result(
     next_page_url = post_fetch["next_page_url"]
     if next_page_url:
         diagnostics["next_page_url"] = next_page_url
-    diagnostics["js_endpoints"] = [
-        {**endpoint, "url": clean}
-        for endpoint in post_fetch["js_endpoints"]
-        if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=result.final_url))
-        is not None
-    ]
+    diagnostics["js_endpoints"] = filter_js_endpoints(
+        post_fetch["js_endpoints"], resolve_against=result.final_url
+    )
     attempt = CrawlStrategyAttempt(
         strategy=strategy,  # type: ignore[arg-type]
         status=result.status,

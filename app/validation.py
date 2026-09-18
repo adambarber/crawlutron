@@ -464,6 +464,28 @@ def public_url_or_none(raw: str | None, *, resolve_against: str | None = None) -
     return candidate
 
 
+def filter_js_endpoints(
+    endpoints: list[dict[str, str]], *, resolve_against: str | None = None
+) -> list[dict[str, str]]:
+    """Egress filter for the JS-endpoint discovery door.
+
+    ``extract_js_endpoints`` scrapes URLs out of attacker-controlled HTML/JS
+    and hands back ``{"url": ...}`` dicts. Two builders (HTTP and browser)
+    each filtered that list with the same inline comprehension -- the shape
+    that drifts the moment a third consumer forgets the copy. This is the
+    single filter for the door: an endpoint survives only if its URL passes
+    :func:`public_url_or_none` (resolve relatives first, then accept only
+    http(s)), and the surviving endpoint carries the filtered URL so callers
+    never see the raw scraped string.
+    """
+    return [
+        {**endpoint, "url": clean}
+        for endpoint in endpoints
+        if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=resolve_against))
+        is not None
+    ]
+
+
 def safe_public_url_or_none(raw: str | None) -> str | None:
     """The single normalize-or-None chokepoint for URL egress doors.
 

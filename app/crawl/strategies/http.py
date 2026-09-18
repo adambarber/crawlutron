@@ -77,7 +77,7 @@ from app.crawl.document_text import (
     _format_extracted_document_text,
 )
 from app.timeouts import Timeouts
-from app.validation import get_env_int, public_url_or_none
+from app.validation import filter_js_endpoints, get_env_int
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -2096,12 +2096,7 @@ async def _http_strategy_result(
         # JS-endpoint extraction is discovery-oriented; skip it for
         # content-only crawls (B1).
         raw_endpoints = post_fetch["js_endpoints"]
-        diagnostics["js_endpoints"] = [
-            {**endpoint, "url": clean}
-            for endpoint in raw_endpoints
-            if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=response.final_url))
-            is not None
-        ]
+        diagnostics["js_endpoints"] = filter_js_endpoints(raw_endpoints, resolve_against=response.final_url)
         # Pagination detection stays on for all crawls: next_page_url is a
         # standard result field (returned even without discovery mode), so it is
         # always computed. Only the heavier discovery-only extras below are
