@@ -11,6 +11,7 @@ from dataclasses import asdict
 import httpx
 from _testkit import *
 
+from app.constants import BROWSER_HEADLESS
 from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models import EngineCrawlResult
@@ -90,7 +91,7 @@ def test_primitive_marks_pool_exhaustion_as_not_attempted():
         error=BrowserPoolExhaustedError("none free"),
         original_url="https://a.example/x",
         normalized_url="https://a.example/x",
-        strategy="BROWSER_DECLARED_CRAWLER",
+        strategy=BROWSER_HEADLESS,
     )
     assert result.classification == "browser_pool_exhausted"
     diagnostics = result.diagnostics or {}

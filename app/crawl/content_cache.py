@@ -97,7 +97,7 @@ class ContentCache:
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         return self.cache_dir / f"{self.namespace}.{digest}.json"
 
-    def _drop_locked(self, key: str, doomed: list[tuple[str, Path]]) -> None:
+    def _drop_locked(self, key: str, doomed: list[tuple[str | None, Path]]) -> None:
         """Remove one entry from the index, byte accounting and RAM.
 
         Caller must hold ``self._lock``. The on-disk file is appended to
@@ -115,21 +115,31 @@ class ContentCache:
         # Keep the memory value cache consistent with evicted disk keys.
         self._memory_cache.pop(key, None)
 
-    def _unlink_doomed(self, doomed: list[tuple[str, Path]]) -> None:
-        """Unlink evicted files after the lock is released.
+    def _unlink_doomed(self, doomed: list[tuple[str | None, Path]]) -> int:
+        """Unlink evicted/expired files after the lock is released.
 
         Re-validate under the lock first: a key re-set after its eviction
         reuses this exact path (``_path_for`` is deterministic), so unlinking
-        blindly would destroy a live entry. A still-registered path is spared.
+        blindly would destroy a live entry. A still-registered path is spared;
+        ``key is None`` marks a file no index entry owns and it is spared when
+        any live entry points at its path (a concurrent write revived it).
+
+        Returns the number of files actually removed.
         """
+        removed = 0
         for key, path in doomed:
             with self._lock:
-                if self._index.get(key) == path:
+                if key is not None:
+                    if self._index.get(key) == path:
+                        continue
+                elif path in self._index.values():
                     continue
             try:
                 path.unlink()
             except OSError:
-                pass
+                continue
+            removed += 1
+        return removed
 
     def _over_limits(self) -> bool:
         over_count = (
@@ -150,7 +160,7 @@ class ContentCache:
         previous implementation that listed and stat() every cache file on each
         write (#5).
         """
-        doomed: list[tuple[str, Path]] = []
+        doomed: list[tuple[str | None, Path]] = []
         with self._lock:
             while self._index and self._over_limits():
                 oldest_key = next(iter(self._index))
@@ -166,32 +176,42 @@ class ContentCache:
         """Return the unexpired envelope for ``key`` (registering it in the LRU
         index), or ``None`` if missing, expired, or unreadable.
 
-        Shared by :meth:`get` and :meth:`cached_at_of` so the envelope-read +
-        TTL-expiry logic lives in exactly one place.
+        Shared by :meth:`get`, :meth:`aget` and :meth:`cached_at_of` so the
+        envelope-read + TTL-expiry logic lives in exactly one place.
+
+        The file is read and parsed OUTSIDE ``self._lock``: the event-loop
+        thread contends on that lock (``aget``/``aset``), and a multi-MB
+        ``read_bytes`` + ``json.loads`` is exactly the work that must not hold
+        it. Only the RAM state — index membership, LRU recency, the freshness
+        mirror, byte accounting and the RAM value mirror — is touched under the
+        lock, the same collect-under-lock / act-after-release split as
+        ``_enforce_limits``/``_unlink_doomed``.
         """
         path = self._path_for(key)
-        doomed: list[tuple[str, Path]] = []
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            raw = None
+        envelope: dict[str, Any] | None = None
+        if raw is not None:
+            try:
+                envelope = json.loads(raw)
+            except ValueError:
+                envelope = None
+        doomed: list[tuple[str | None, Path]] = []
         try:
             with self._lock:
-                if key in self._index:
-                    try:
-                        envelope = json.loads(path.read_text())
-                    except (ValueError, OSError):
-                        # Route through the same locked chokepoint that
-                        # accounts bytes: popping only ``_index`` here left
-                        # ``_index_sizes``/``_index_total_bytes`` counting a
-                        # dead entry forever (M1 phantom bytes).
+                if raw is None:
+                    # No readable file. A stale index entry would keep counting
+                    # phantom bytes (M1), so free the accounting here too.
+                    if key in self._index:
                         self._drop_locked(key, doomed)
-                        return None
-                else:
-                    if not path.exists():
-                        return None
-                    try:
-                        envelope = json.loads(path.read_text())
-                    except (ValueError, OSError):
-                        return None
-                    # Lazily register a cold on-disk entry into the index.
-                    self._index[key] = path
+                    return None
+                if envelope is None:
+                    # Corrupt: the entry can never be served, so neither the
+                    # accounting nor the freshness mirror may keep it.
+                    self._drop_locked(key, doomed)
+                    return None
                 expires = envelope.get("expires")
                 if expires is not None and self.clock() > expires:
                     # Free the byte accounting too, not just the index slot
@@ -199,11 +219,34 @@ class ContentCache:
                     # keep ``_over_limits`` true and evict LIVE entries later.
                     self._drop_locked(key, doomed)
                     return None
+                if key not in self._index:
+                    # Lazily register a cold on-disk entry, with the exact byte
+                    # size just read (H2): the RAM-mirror gate and the byte
+                    # budget need a real size, and recording it here is what
+                    # keeps every size lookup off the disk path.
+                    self._index[key] = path
+                    self._index_total_bytes += len(raw) - self._index_sizes.pop(key, 0)
+                    self._index_sizes[key] = len(raw)
                 # Mark recently used (LRU) by moving to the end of the ordered index.
                 self._index.move_to_end(key)
-                # Remember the freshness metadata so later cached_at_of()
-                # calls are answered without re-reading the envelope (P6).
-                self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
+                # Both mirrors below are written from bytes read OFF the lock,
+                # so both must re-check currency under it: the read and the
+                # commit are not atomic, and a concurrent write that landed in
+                # between would otherwise let a superseded envelope shadow the
+                # newer one -- in the freshness metadata (a fabricated
+                # cached_at, or a stale ``expires=None`` making a live entry
+                # look never-expiring) and in the RAM value. A cold entry was
+                # registered just above with the exact size read, so it always
+                # passes; the guard is what keeps a warm entry honest.
+                if self._index_sizes.get(key) == len(raw):
+                    # Remember the freshness metadata so later cached_at_of()
+                    # calls are answered without re-reading the envelope (P6).
+                    self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
+                    # Warm the RAM mirror under the same lock (the accelerator
+                    # contract is method-independent); the gate uses the exact
+                    # bytes just read, so a cold read can never smuggle a
+                    # multi-MB value into the small-value mirror.
+                    self._remember_memory_locked(key, envelope.get("value"), expires, len(raw))
                 return envelope
         finally:
             self._unlink_doomed(doomed)
@@ -243,21 +286,6 @@ class ContentCache:
         if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
             self._memory_cache.popitem(last=False)
 
-    def _entry_size_on_disk_locked(self, key: str) -> int:
-        """Serialized size of ``key``'s envelope for the mirror gate.
-
-        Gate on the SERIALIZED size (H2): shallow sys.getsizeof sees only the
-        container. Falls back to the cap when the size cannot be established,
-        so an unknown-size entry can never sneak into the RAM mirror.
-        """
-        entry_size = self._index_sizes.get(key)
-        if entry_size is None:
-            try:
-                entry_size = self._path_for(key).stat().st_size
-            except OSError:
-                entry_size = self._MEMORY_CACHE_MAX_SIZE
-        return entry_size
-
     def get(self, key: str, ttl: int | None = None) -> Any | None:
         """Return the cached value if present and unexpired, else ``None``.
 
@@ -269,17 +297,7 @@ class ContentCache:
             if hit is not None:
                 return hit
         envelope = self._read_envelope(key)
-        if envelope is None:
-            return None
-        value = envelope.get("value")
-        # Warm the mirror on the sync disk hit too (same accelerator contract
-        # as aget): a hot URL must stop touching disk after the first read.
-        # The mirror/index update runs under the lock, exactly like aget, so
-        # the multi-step store stays atomic against concurrent writers.
-        expires = envelope.get("expires")
-        with self._lock:
-            self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
-        return value
+        return None if envelope is None else envelope.get("value")
 
     def cached_at_of(self, key: str, ttl: int | None = None) -> float | None:
         """Return the ``cached_at`` timestamp for a valid (unexpired) entry.
@@ -346,20 +364,16 @@ class ContentCache:
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
         """Async ``get``: offload the (potentially large) on-disk envelope read
         and JSON parse to a worker thread so the event loop is never stalled
-        (adversarial perf #1.2 / #2.2)."""
+        (adversarial perf #1.2 / #2.2). The read itself runs outside
+        ``self._lock`` (see ``_read_envelope``), so a concurrent ``aset`` is
+        not queued behind it."""
         with self._lock:
             hit = self._memory_hit_locked(key)
             if hit is not None:
                 return hit
-        # Disk read + JSON parse off the loop.
+        # Disk read + JSON parse off the loop, and off the lock.
         envelope = await asyncio.to_thread(self._read_envelope, key)
-        if envelope is None:
-            return None
-        value = envelope.get("value")
-        expires = envelope.get("expires")
-        with self._lock:
-            self._remember_memory_locked(key, value, expires, self._entry_size_on_disk_locked(key))
-        return value
+        return None if envelope is None else envelope.get("value")
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Async ``set`` with the same byte-budget contract (N1/H9): the value
@@ -414,54 +428,91 @@ class ContentCache:
 
     def prune(self) -> int:
         """Delete expired entries; return the number removed."""
-        removed = 0
         now = self.clock()
+        # Glob + read + parse OUTSIDE the lock: the event-loop thread contends
+        # on self._lock (aget/aset) and this is the multi-MB work. The RAM
+        # state is reconciled under the lock below, and the unlinks go through
+        # _unlink_doomed's re-validation afterwards.
+        expired: list[tuple[Path, int]] = []
+        surviving: dict[Path, int] = {}
+        for path in self.cache_dir.glob(f"{self.namespace}.*.json"):
+            try:
+                raw = path.read_bytes()
+            except OSError:
+                continue
+            try:
+                envelope = json.loads(raw)
+            except ValueError:
+                # Corrupt but present: keep the file (the read path drops it on
+                # the next access) and repair its recorded size below.
+                surviving[path] = len(raw)
+                continue
+            expires = envelope.get("expires")
+            if expires is not None and now > expires:
+                # The byte size rides the verdict: the verdict is applied under
+                # the lock below, and only against the entry these bytes still
+                # describe.
+                expired.append((path, len(raw)))
+            else:
+                surviving[path] = len(raw)
+
+        doomed: list[tuple[str | None, Path]] = []
         with self._lock:
-            for path in self.cache_dir.glob(f"{self.namespace}.*.json"):
-                try:
-                    envelope = json.loads(path.read_text())
-                except (ValueError, OSError):
-                    continue
-                expires = envelope.get("expires")
-                if expires is not None and now > expires:
-                    path.unlink()
-                    removed += 1
-            # Reconcile the index with what remains on disk, drop byte
-            # accounting for entries that are gone, and repair sizes for
-            # entries whose recorded size is unknown (N1: e.g. a crash
-            # between index insert and accounting update).
-            self._index = OrderedDict((k, v) for k, v in self._index.items() if v.exists())
-            repaired_total = 0
-            for k, v in self._index.items():
-                size = self._index_sizes.get(k)
-                if size is None:
-                    try:
-                        size = v.stat().st_size
-                    except OSError:
-                        size = 0
-                    self._index_sizes[k] = size
-                repaired_total += size
-            self._index_sizes = {k: s for k, s in self._index_sizes.items() if k in self._index}
-            self._index_total_bytes = repaired_total
+            # Map the verdicts onto the live index: a key re-set since the glob
+            # reuses the deterministic path, so the verdict must be
+            # re-validated before it is applied -- the bytes it was computed
+            # from were read off the lock (same currency guard
+            # _read_envelope applies to its mirror writes). A re-set during the
+            # scan has a new TTL and a new byte size; the old verdict describes
+            # bytes no entry holds and must not expire the live one.
+            by_path: dict[Path, str] = {p: k for k, p in self._index.items()}
+            for path, size in expired:
+                key = by_path.get(path)
+                if key is None:
+                    doomed.append((None, path))  # no index entry owns it
+                elif self._index_sizes.get(key) == size:
+                    self._drop_locked(key, doomed)
+                else:
+                    # A re-set landed during the scan. The file is spared (no
+                    # unlink) and the entry stays registered under its current
+                    # recorded size, so neither the verdict nor the disk
+                    # reconciliation below touches it.
+                    surviving[path] = self._index_sizes[key]
+            # Rebuild the index and the byte accounting from what survived on
+            # disk (N1). An entry whose file was unreadable or gone at glob
+            # time drops out; a later read re-registers it from disk, exactly
+            # like a warm restart.
+            live: OrderedDict[str, Path] = OrderedDict(
+                (k, p) for k, p in self._index.items() if p in surviving
+            )
+            for stale_key in [k for k in self._index if k not in live]:
+                self._index_cached_at.pop(stale_key, None)
+                self._memory_cache.pop(stale_key, None)
+            self._index = live
+            self._index_sizes = {k: surviving[p] for k, p in live.items()}
+            self._index_total_bytes = sum(self._index_sizes.values())
             # Drop expired in-memory value entries (TTL honored even in RAM).
             for _k in [k for k, (exp, _v) in self._memory_cache.items() if exp is not None and now > exp]:
                 self._memory_cache.pop(_k, None)
-        return removed
+        return self._unlink_doomed(doomed)
 
     def clear(self) -> int:
         """Delete all entries in this namespace; return the number removed."""
-        removed = 0
+        # Snapshot the files outside the lock; the RAM state is dropped under
+        # it and the unlinks run afterwards (disk I/O must never hold it).
+        paths = list(self.cache_dir.glob(f"{self.namespace}.*.json"))
+        doomed: list[tuple[str | None, Path]] = []
         with self._lock:
-            for path in self.cache_dir.glob(f"{self.namespace}.*.json"):
-                try:
-                    path.unlink()
-                    removed += 1
-                except OSError:
-                    continue
+            indexed: set[Path] = set()
+            for key, path in list(self._index.items()):
+                doomed.append((key, path))
+                indexed.add(path)
             # Drop the in-memory index so stale paths are not reused.
             self._index.clear()
             # Drop byte accounting and the in-memory value cache too.
             self._index_sizes.clear()
             self._index_total_bytes = 0
+            self._index_cached_at.clear()
             self._memory_cache.clear()
-        return removed
+        doomed.extend((None, path) for path in paths if path not in indexed)
+        return self._unlink_doomed(doomed)

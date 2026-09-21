@@ -248,9 +248,19 @@ class TestDiscoveryAndRenderApi:
         assert resp.status_code == 422
 
     async def test_v1_render_exhausted_pool_returns_503(self, monkeypatch):
-        # M12: when every renderer is wedged, the wait times out and the
-        # request surfaces as 503, not a hang or a 500.
+        # M12: when every renderer is wedged, the request surfaces as 503, not
+        # a hang or a 500.
+        #
+        # The fake mirrors the production worker's contract: pool exhaustion is
+        # caught and returned as a classified terminal CrawlResult, never
+        # raised (a raised exhaustion used to escape to the scheduler, whose
+        # envelope is the wrong shape for the render pipeline). So the 503 is
+        # reached through the real failure path -- render_request reading the
+        # browser_pool_exhausted classification off the result -- and not
+        # through the incidental route the old raising fake exploited.
         import app.api.render_endpoint as render_endpoint
+        from app.constants import BROWSER_HEADLESS
+        from app.crawl.result_helpers import _crawl_result_from_exception
         from app.crawl.strategies.browser_pool import (
             BrowserPoolExhaustedError,
             set_browser_pool,
@@ -261,7 +271,16 @@ class TestDiscoveryAndRenderApi:
                 pass
 
             async def __call__(self, job):
-                raise BrowserPoolExhaustedError("pool exhausted in test")
+                try:
+                    raise BrowserPoolExhaustedError("pool exhausted in test")
+                except Exception as error:
+                    return _crawl_result_from_exception(
+                        error=error,
+                        url=job.url,
+                        domain=job.domain,
+                        strategy=BROWSER_HEADLESS,
+                        elapsed_ms=0,
+                    )
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _ExhaustedWorker)
         old = set_browser_pool(object())
@@ -271,6 +290,51 @@ class TestDiscoveryAndRenderApi:
             set_browser_pool(old)
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
+
+    async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
+        # A render worker that raises a plain Exception (not pool exhaustion)
+        # lands in the scheduler's blanket envelope, which is an
+        # EngineCrawlResult -- the right shape for /v1/crawl, wrong for this
+        # pipeline: render_result_to_unified reads item["url"], which that
+        # shape does not carry, so the response used to die with a KeyError
+        # and surface as a 500. The render pipeline normalizes the shape at its
+        # single receive point and routes the endpoint through the same
+        # per-item shaping guard /v1/crawl has, so the failure degrades to a
+        # correctly-shaped terminal result instead.
+        #
+        # PooledBrowserWorker catches every Exception itself, so this is latent
+        # for the production worker -- but the P0 getattr fix silenced mypy's
+        # only static signal of the polymorphism, so nothing else catches a
+        # future caller that lets one escape.
+        import app.api.render_endpoint as render_endpoint
+        from app.crawl.strategies.browser_pool import set_browser_pool
+
+        secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
+
+        class _RaisingWorker:
+            def __init__(self, pool):
+                pass
+
+            async def __call__(self, job):
+                raise RuntimeError(f"boom: {secret}")
+
+        monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _RaisingWorker)
+        old = set_browser_pool(object())
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["submitted_count"] == 1
+        assert len(body["results"]) == 1, "the failing URL must not drop out of the batch"
+        item = body["results"][0]
+        assert item["original_url"] == "http://127.0.0.1:1/x", item
+        assert item["status"] == "failed", item
+        # RuntimeError classifies to the stable network_error code, and the
+        # raw text never reaches the wire.
+        assert item["classification"] == "network_error", item
+        assert secret not in resp.text, f"raw exception text leaked into the response: {resp.text!r}"
 
     async def test_v1_render_without_pool_returns_503(self):
         # M13: a None browser pool (startup/shutdown window) must surface as

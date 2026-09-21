@@ -246,7 +246,7 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
     from app.crawl.engine import _robots_pattern_to_regex
 
     pattern = "/*a*" * 30
-    matcher = _robots_pattern_to_regex(pattern)
+    matcher = _robots_pattern_to_regex("example.com", pattern)
     path = "/" + "b" * 2000 + "a"
 
     start = _time.perf_counter()
@@ -259,18 +259,49 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
 def test_pathological_pattern_match_parity_with_simple_cases():
     from app.crawl.engine import _robots_pattern_to_regex
 
-    m = _robots_pattern_to_regex("/*a*")
+    m = _robots_pattern_to_regex("example.com", "/*a*")
     assert m.match("/aaa") is True
     assert m.match("/b") is False
     assert m.match("/b/a") is True
-    m2 = _robots_pattern_to_regex("/page$")
+    m2 = _robots_pattern_to_regex("example.com", "/page$")
     assert m2.match("/page") is True
     assert m2.match("/page/x") is False
-    m3 = _robots_pattern_to_regex("a")
+    m3 = _robots_pattern_to_regex("example.com", "a")
     assert m3.match("abc") is True
     assert m3.match("xabc") is False
-    m4 = _robots_pattern_to_regex("")
+    m4 = _robots_pattern_to_regex("example.com", "")
     assert m4.match("anything") is True
+
+
+def test_pattern_cache_is_bound_per_host_so_one_site_cannot_evict_another():
+    """P2-E: the matcher cache used to be a process-global LRU keyed only on the
+    pattern string, so a hostile robots.txt spraying distinct patterns evicted
+    legitimate sites' matchers. Binding the key per host confines eviction to
+    the offending site: it can only evict its own entries."""
+    # Warm a legitimate site's matcher.
+    legit = _robots_pattern_to_regex("good.example", "/allowed/*")
+
+    # A hostile site sprays far more patterns than any per-host cap holds.
+    for i in range(3000):
+        _robots_pattern_to_regex("evil.example", f"/spam/{i}/*")
+
+    assert _robots_pattern_to_regex("good.example", "/allowed/*") is legit, (
+        "a hostile site's patterns evicted another host's cached matcher"
+    )
+
+
+def test_identical_patterns_on_different_hosts_are_isolated():
+    """The same pattern string on two hosts stays two independent cache slots:
+    per-host binding must not collapse distinct sites onto one entry."""
+    from app.crawl.engine import _robots_pattern_to_regex
+
+    a = _robots_pattern_to_regex("a.example", "/shared/*")
+    b = _robots_pattern_to_regex("b.example", "/shared/*")
+
+    assert a is not b, "two hosts collapsed onto one shared cache entry"
+    # Each host still caches its own matcher.
+    assert _robots_pattern_to_regex("a.example", "/shared/*") is a
+    assert _robots_pattern_to_regex("b.example", "/shared/*") is b
 
 
 def test_purge_removes_only_expired_production_tuples():
@@ -472,8 +503,8 @@ class TestRobotsFailClosed:
 
 
 def test_robots_pattern_to_regex_is_cached():
-    p1 = _robots_pattern_to_regex("/admin/*")
-    p2 = _robots_pattern_to_regex("/admin/*")
+    p1 = _robots_pattern_to_regex("example.com", "/admin/*")
+    p2 = _robots_pattern_to_regex("example.com", "/admin/*")
     # Same compiled object: no redundant recompilation.
     assert p1 is p2
 

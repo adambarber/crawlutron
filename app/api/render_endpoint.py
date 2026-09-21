@@ -57,11 +57,20 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
+        # The render results are adapted through the SAME per-item shape guard
+        # /v1/crawl uses: render_result_to_unified used to run unguarded in a
+        # list comprehension here, so a result dict the adapter could not read
+        # (the KeyError the scheduler's EngineCrawlResult envelope produced,
+        # which carries no "url") escaped as a 500 instead of degrading to a
+        # terminal failure for that item. _collect now normalizes the shape
+        # before it reaches this point; the guard is the defense-in-depth that
+        # keeps a future shape divergence a degraded item, not a 500.
         return await abuild_unified_crawl_response(
-            [render_result_to_unified(item) for item in result.get("results", [])],
+            result.get("results", []),
             request_id=result["request_id"],
             submitted_count=result["submitted_count"],
             policy_schema_version=POLICY_SCHEMA_VERSION,
+            adapt=render_result_to_unified,
         )
     except ValueError as error:
         logger.warning("render_request_rejected", extra={"error": str(error)})

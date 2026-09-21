@@ -33,8 +33,21 @@ def browser_pool_unavailable(message: str | None = None) -> HTTPException:
     return http_error(503, "browser_pool_unavailable", message or BROWSER_POOL_MESSAGE)
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """Standardize on the ``CrawlerError`` shape and strip pydantic internals."""
+async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Standardize on the ``CrawlerError`` shape and strip pydantic internals.
+
+    The parameter is typed ``Exception`` (Starlette's handler contract is
+    contravariant: a handler registered for a base type must accept any
+    subtype) rather than ``RequestValidationError``; the isinstance check
+    below keeps the pydantic-specific branch honest and routes anything else
+    to the generic envelope so an unexpected exception type cannot reach the
+    attribute access and 500.
+    """
+    if not isinstance(exc, RequestValidationError):
+        return JSONResponse(
+            status_code=500,
+            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+        )
     sanitized = [{"loc": err.get("loc"), "msg": err.get("msg")} for err in exc.errors()]
     return JSONResponse(
         status_code=422,
@@ -42,8 +55,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    """Unwrap FastAPI's ``{\"detail\": ...}`` envelope to ``{code, message, details}``."""
+async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Unwrap FastAPI's ``{"detail": ...}`` envelope to ``{code, message, details}``.
+
+    ``exc`` is ``Exception`` to satisfy Starlette's contravariant handler
+    registration; the isinstance check below preserves the FastAPI-specific
+    unwrap, and anything else degrades to a generic 500 instead of an
+    AttributeError on a handler that was registered to catch it.
+    """
+    if not isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=500,
+            content=error_envelope("internal_error", "Unhandled exception in request handling"),
+        )
     detail = getattr(exc, "detail", None)
     headers = getattr(exc, "headers", None)
     if isinstance(detail, dict) and "code" in detail and "message" in detail:

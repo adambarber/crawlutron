@@ -19,8 +19,16 @@ def _make_job(index: int, host: str) -> CrawlTask:
 
 
 class _Scheduler:
-    async def run(self, jobs, worker):
-        return {job.index: await worker(job) for job in jobs}
+    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
+        out = {}
+        for job in jobs:
+            try:
+                out[job.index] = await worker(job)
+            except Exception as error:
+                if failed_result is None:
+                    raise
+                out[job.index] = failed_result(job, error)
+        return out
 
     def get_pinned_strategy(self, domain):
         return None

@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
-from app.crawl.result_helpers import _engine_result_from_exception
+from app.constants import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
+from app.crawl.result_helpers import _crawl_result_from_exception
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import BrowserPoolExhaustedError  # noqa: F401 (re-exported; cycle-free home)
+from app.models import BrowserPoolExhaustedError, CrawlResult, CrawlStrategyName
 from app.resource_pressure import (
     _BROWSER_RAM_FRACTION,
 )
@@ -122,17 +124,54 @@ class BrowserPool:
             self._initialized = False
             logger.info("browser_pool_closed")
 
+    @property
+    def browser_strategy(self) -> CrawlStrategyName:
+        """The CrawlStrategy label for the renders this pool performs.
+
+        A pool's renderers are homogeneous (all built from one kwargs set), so
+        the first renderer's profile stands for the pool: the headed-warmed
+        profile is the one carrying warmup URLs, every other configuration is a
+        plain headless render. Before initialization the renderers do not exist
+        yet, so the constructor kwargs decide, and those default to the
+        headless profile. Exposed so a worker that fails before or during
+        acquire can label its terminal result with the browser mode it was
+        actually configured for, never an invented member.
+        """
+        warmup = self._renderer_kwargs.get("warmup_urls")
+        if self._renderers:
+            # The renderers resolve warmup URLs from the environment when the
+            # constructor did not pass them, so the live list is authoritative.
+            warmup = self._renderers[0].warmup_urls
+        if warmup:
+            return BROWSER_HEADED_WARMED
+        return BROWSER_HEADLESS
+
 
 class PooledBrowserWorker:
     """Callable that acquires a renderer from the pool, renders, and releases.
 
-    Used as the ``browser_worker`` callback in ``crawl_request``.
+    Used as the ``browser_worker`` callback in ``crawl_request`` and
+    ``render_request``. Its failure path returns the contracted
+    ``CrawlResult`` shape (classified through the shared chokepoint) rather
+    than raising: there is no catch site above it that can handle an
+    ``EngineCrawlResult``-shaped substitute.
     """
 
-    def __init__(self, pool: BrowserPool) -> None:
+    def __init__(self, pool: BrowserPool, *, strategy: CrawlStrategyName | None = None) -> None:
         self._pool = pool
+        # Explicit when the caller knows which chain entry it is rendering for;
+        # otherwise the pool's own renderer configuration supplies the real
+        # browser mode (headless, or headed-warmed when the profile carries
+        # warmup URLs). Never an invented strategy name.
+        self._strategy = strategy
 
-    async def __call__(self, job: Any) -> Any:
+    def _configured_strategy(self) -> CrawlStrategyName:
+        if self._strategy is not None:
+            return self._strategy
+        return self._pool.browser_strategy
+
+    async def __call__(self, job: Any) -> CrawlResult:
+        started = time.monotonic()
         try:
             renderer = await self._pool.acquire()
             try:
@@ -141,17 +180,20 @@ class PooledBrowserWorker:
                 self._pool.release(renderer)
         except Exception as error:
             # Acquire (or, if a future renderer ever raises out of render,
-            # that too) must not escape: the crawl engine has no catch site,
-            # so an exception here falls to the scheduler's blanket envelope
-            # and is misclassified as network_error. Route it through the
-            # shared primitive so the result carries the real code
-            # (browser_pool_exhausted when the pool was the problem) and the
-            # at-least-once layer can act on it.
-            return _engine_result_from_exception(
+            # that too) must not escape: the engine's browser consumer reads
+            # result.metadata/elapsed_ms (absent on EngineCrawlResult) and the
+            # render pipeline reads item["url"] (also absent), so an exception
+            # here used to land in the scheduler's blanket envelope, get
+            # misclassified as network_error, and lose the URL's at-least-once
+            # re-queue. Return the contracted CrawlResult shape instead,
+            # classified through the shared primitive so browser_pool_exhausted
+            # with retryable=True survives to the frontier layer.
+            return _crawl_result_from_exception(
                 error=error,
-                original_url=job.url,
-                normalized_url=job.url,
-                strategy="BROWSER_DECLARED_CRAWLER",
+                url=job.url,
+                domain=job.domain,
+                strategy=self._configured_strategy(),
+                elapsed_ms=int((time.monotonic() - started) * 1000),
             )
 
 

@@ -1,0 +1,383 @@
+"""P1 defect tier: blocking disk I/O, serialization and DNS held on the
+asyncio event loop, or run under a ``threading.Lock`` the loop contends on.
+
+Every test asserts an observable outcome — a concurrent lock holder or the
+event loop itself keeps making progress while the blocking work is in flight —
+rather than which internal helper happened to run. The blocking stubs spin on
+a counter only the event loop can advance, so the same work run on the loop
+fails on the observed count instead of on a wall-clock guess.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+import time
+from pathlib import Path
+
+import pytest
+from _testkit import HttpCache, make_job_store, site_fetcher
+
+import app.crawl.content_cache as cc
+from app.api.job_runner import _run_job
+from app.crawl.content_cache import ContentCache
+from app.crawl.engine import _ResultSpill, crawl_request
+from app.crawl.job_store import JobStatus
+
+
+class _LoopLiveness:
+    """A counter only the event loop can advance.
+
+    Blocking work spins on it from a worker thread and returns once the loop
+    has ticked ``needed`` times. The same work run *on* the loop observes zero
+    progress, so a fix that keeps it on the loop fails on the count.
+    """
+
+    def __init__(self, needed: int = 3) -> None:
+        self.needed = needed
+        self.ticks = 0
+
+    async def heartbeat(self) -> None:
+        for _ in range(600):
+            await asyncio.sleep(0.01)
+            self.ticks += 1
+
+    def wait_for_progress(self, timeout: float = 5.0) -> int:
+        """Blocking worker: return how far the loop advanced while we waited.
+
+        The baseline is snapshotted on entry, so the count can only be
+        satisfied by ticks that land WHILE the blocking work is in flight —
+        the same work run on the loop observes zero and fails on the count.
+        """
+        baseline = self.ticks
+        deadline = time.monotonic() + timeout
+        while self.ticks - baseline < self.needed:
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.01)
+        return self.ticks - baseline
+
+
+async def _wait_for(flag: threading.Event, *, timeout: float = 5.0, reason: str) -> None:
+    for _ in range(int(timeout / 0.02)):
+        if flag.is_set():
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail(f"{reason} (waited {timeout}s)")
+
+
+class TestContentCacheDiskIOOffTheLock:
+    """``ContentCache`` advertises that disk I/O never holds ``self._lock``;
+    the event-loop thread contends on that lock (``aget``/``aset``), so a
+    multi-MB read/parse, a prune scan, or a clear must run outside it."""
+
+    def _guard_disk_calls(self, monkeypatch, cache: ContentCache) -> list[str]:
+        """Record any cache-file syscall that runs while the lock is held."""
+        offenders: list[str] = []
+
+        def in_cache_dir(path: Path) -> bool:
+            if path == cache.cache_dir:
+                return True
+            return path.parent == cache.cache_dir and not path.name.startswith(".")
+
+        def guard(name: str, fn):
+            def wrapper(self, *args, **kwargs):
+                if in_cache_dir(self) and cache._lock.locked():
+                    offenders.append(name)
+                return fn(self, *args, **kwargs)
+
+            return wrapper
+
+        # read_text/read_bytes both: _read_envelope is the single chokepoint for
+        # full reads, and the guard must hold whichever syscall it uses.
+        monkeypatch.setattr(cc.Path, "read_text", guard("read_text", cc.Path.read_text))
+        monkeypatch.setattr(cc.Path, "read_bytes", guard("read_bytes", cc.Path.read_bytes))
+        monkeypatch.setattr(cc.Path, "stat", guard("stat", cc.Path.stat))
+        monkeypatch.setattr(cc.Path, "exists", guard("exists", cc.Path.exists))
+        monkeypatch.setattr(cc.Path, "unlink", guard("unlink", cc.Path.unlink))
+        monkeypatch.setattr(cc.Path, "glob", guard("glob", cc.Path.glob))
+        return offenders
+
+    async def test_envelope_read_does_not_hold_the_lock(
+        self, real_sleeps, monkeypatch, tmp_path
+    ) -> None:
+        cache = ContentCache(
+            str(tmp_path),
+            default_ttl=0,
+            max_entry_bytes=8 * 1024 * 1024,
+            max_total_bytes=64 * 1024 * 1024,
+        )
+        await cache.aset("big", {"body": "x" * (4 * 1024 * 1024)})
+        cache._memory_cache.clear()  # force the on-disk envelope read
+
+        release = threading.Event()
+        read_started = threading.Event()
+        real_read_text = Path.read_text
+        real_read_bytes = Path.read_bytes
+
+        def slow_read(self, *args, **kwargs):
+            if self.parent == cache.cache_dir and not self.name.startswith("."):
+                read_started.set()
+                release.wait(timeout=10)
+            return real_read_text(self, *args, **kwargs)
+
+        def slow_read_bytes(self, *args, **kwargs):
+            if self.parent == cache.cache_dir and not self.name.startswith("."):
+                read_started.set()
+                release.wait(timeout=10)
+            return real_read_bytes(self, *args, **kwargs)
+
+        monkeypatch.setattr(cc.Path, "read_text", slow_read)
+        monkeypatch.setattr(cc.Path, "read_bytes", slow_read_bytes)
+
+        async def scenario() -> bool:
+            reading = asyncio.ensure_future(cache.aget("big"))
+            await _wait_for(read_started, reason="the envelope read never started")
+            # A loop-side lock holder (aset's index commit) must be able to
+            # finish while the envelope read is still in flight.
+            writer = asyncio.ensure_future(cache.aset("other", {"v": 1}))
+            await asyncio.sleep(0.1)
+            writer_finished_while_reading = writer.done()
+            release.set()
+            await asyncio.wait_for(reading, timeout=5)
+            await asyncio.wait_for(writer, timeout=5)
+            return writer_finished_while_reading
+
+        assert await asyncio.wait_for(scenario(), timeout=15), (
+            "a concurrent lock holder was blocked for the whole envelope read"
+        )
+
+    def test_prune_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
+        now = [1000.0]
+        cache = ContentCache(
+            str(tmp_path), default_ttl=10, clock=lambda: now[0], max_entry_bytes=10_000
+        )
+        cache.set("a", {"body": "a" * 200})
+        cache.set("b", {"body": "b" * 200})
+        now[0] = 2000.0  # both entries are past their TTL
+
+        offenders = self._guard_disk_calls(monkeypatch, cache)
+        assert cache.prune() == 2
+        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
+        assert cache.get("a") is None and cache.get("b") is None
+
+    def test_prune_repairs_sizes_without_statting_under_the_lock(self, monkeypatch, tmp_path) -> None:
+        cache = ContentCache(str(tmp_path), default_ttl=60, max_entry_bytes=10_000)
+        cache.set("k", {"body": "v" * 300}, ttl=60)
+        cache._index_sizes.clear()  # crash residue: the recorded size was lost
+        offenders = self._guard_disk_calls(monkeypatch, cache)
+        assert cache.prune() == 0
+        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
+        path = cache._index["k"]
+        assert cache._index_sizes["k"] == path.stat().st_size
+
+    def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """The expiry verdict was computed from bytes read off the lock, so a
+        re-set that landed during the scan (same deterministic path, a new TTL)
+        must not be applied: the entry is live, and unlinking it destroys data.
+
+        The direct analogue of
+        :meth:`test_read_of_superseded_bytes_does_not_enter_the_mirror` for the
+        prune verdict: the mirror guard there and the verdict guard here are the
+        same currency check against the recorded index entry.
+        """
+        now = [1000.0]
+        cache = ContentCache(
+            str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000
+        )
+        cache.set("k", {"body": "a" * 100}, ttl=10)  # expires 1010
+        # The refresh a concurrent writer landed during the scan: a longer
+        # payload so the recorded byte size differs, and a TTL still live.
+        now[0] = 1005.0
+        cache.set("k", {"body": "b" * 200}, ttl=900)  # expires 1905
+        now[0] = 1020.0  # the OLD envelope is expired, the new one is live
+
+        # prune's glob reads the bytes as they were just before the refresh:
+        # an expired verdict computed from superseded bytes.
+        stale = json.dumps(
+            {"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}
+        ).encode()
+        assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
+        real_read_bytes = Path.read_bytes
+        serve_stale = True
+
+        def fake_read(self, *args, **kwargs):
+            if serve_stale and self == cache._path_for("k"):
+                return stale
+            return real_read_bytes(self, *args, **kwargs)
+
+        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        assert cache.prune() == 0, "a live entry refreshed during the scan was unlinked"
+        assert "k" in cache._index, "the live entry was expunged from the index"
+        # The live entry must still be servable from the bytes actually on disk.
+        serve_stale = False
+        cache._memory_cache.clear()  # force the on-disk envelope read
+        assert cache.get("k") == {"body": "b" * 200}
+
+    def test_stale_read_does_not_poison_the_freshness_mirror(self, monkeypatch, tmp_path) -> None:
+        """The freshness mirror is written from bytes read off the lock, so a
+        superseded read must not record its ``(expires, cached_at)``: a
+        fabricated timestamp and a stale ``expires=None`` (which makes a live
+        entry look never-expiring) both violate the module contract that the
+        fast path can never answer from metadata the slow path would have
+        expired.
+
+        The sibling value-mirror write in the same method is already guarded;
+        this is the same guard for the metadata mirror.
+        """
+        now = [1000.0]
+        cache = ContentCache(
+            str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000
+        )
+        cache.set("k", {"v": "old"})  # (expires, cached_at) = (1030.0, 1000.0)
+        real = cache._index_cached_at["k"]
+        assert real == (1030.0, 1000.0)
+        cache._memory_cache.clear()
+        cache._index_cached_at.clear()  # force the metadata to be re-read from disk
+
+        # Bytes that no longer match the recorded entry: a write landed between
+        # the read and the index commit. The stale envelope claims to never
+        # expire and to have been cached at 1.0.
+        stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
+        assert len(stale) != cache._index_sizes["k"]
+        real_read_bytes = Path.read_bytes
+        serve_stale = True
+
+        def fake_read(self, *args, **kwargs):
+            if serve_stale and self == cache._path_for("k"):
+                return stale
+            return real_read_bytes(self, *args, **kwargs)
+
+        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        assert cache.cached_at_of("k") == 1.0  # served the bytes that were read
+        # but the superseded read must not enter the freshness mirror: a
+        # fabricated cached_at=1.0 and a stale expires=None (which makes a live
+        # entry look never-expiring) both answer later lookups from metadata the
+        # slow path would have expired -- the mirror contract the value-mirror
+        # write already enforces.
+        assert "k" not in cache._index_cached_at, (
+            f"a superseded read poisoned the freshness mirror: {cache._index_cached_at.get('k')!r}"
+        )
+        # The real bytes still populate the mirror with the real metadata.
+        serve_stale = False
+        assert cache.cached_at_of("k") == 1000.0
+        assert cache._index_cached_at["k"] == real
+
+    def test_clear_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
+        cache = ContentCache(str(tmp_path), default_ttl=0)
+        cache.set("a", {"v": 1})
+        offenders = self._guard_disk_calls(monkeypatch, cache)
+        assert cache.clear() == 1
+        assert not offenders, f"disk I/O ran while holding the cache lock: {offenders}"
+        assert cache.get("a") is None
+
+
+class TestJobRunnerSavesOffTheEventLoop:
+    """``_run_job`` calls ``JobStore.save`` twice per batch; the JSON
+    serialization of the whole row and the SQLite commit are blocking work and
+    must not run on the event loop."""
+
+    async def test_save_does_not_block_the_event_loop(
+        self, real_sleeps, monkeypatch, tmp_path
+    ) -> None:
+        store = make_job_store(str(tmp_path))
+        job = store.create("http://example.com/", {})
+
+        liveness = _LoopLiveness()
+        observed: list[int] = [-1]  # loop progress seen by the blocking save
+        saved: list[JobStatus] = []
+        real_save = store.save
+
+        def slow_save(j):
+            saved.append(j.status)
+            # The blocking work JobStore.save does: json.dumps of every row
+            # field plus the SQLite commit. Only the event loop can advance
+            # liveness, so a save run ON the loop sees zero progress.
+            observed[0] = liveness.wait_for_progress()
+            real_save(j)
+
+        monkeypatch.setattr(store, "save", slow_save)
+        shutdown = asyncio.Event()
+        shutdown.set()  # exit at the first batch boundary, before any crawl
+
+        async def scenario() -> int:
+            hb = asyncio.ensure_future(liveness.heartbeat())
+            try:
+                runner = asyncio.ensure_future(_run_job(job.job_id, store, None, shutdown))
+                await asyncio.wait_for(runner, timeout=15)
+            finally:
+                hb.cancel()
+            return observed[0]
+
+        progress = await asyncio.wait_for(scenario(), timeout=20)
+        assert progress >= liveness.needed, (
+            f"the event loop made {progress} heartbeat ticks while a job-store save ran"
+        )
+        assert JobStatus.PAUSED in saved
+
+
+class TestSpillAssemblyOffTheEventLoop:
+    """``_crawl_request_impl`` reassembles the spilled results with
+    ``load_ordered``: a full file scan plus a ``json.loads`` per line. That is
+    blocking work and must not run on the event loop."""
+
+    async def test_load_ordered_does_not_block_the_event_loop(
+        self, real_sleeps, monkeypatch
+    ) -> None:
+        liveness = _LoopLiveness()
+        observed: list[int] = [-1]  # loop progress seen by the blocking read-back
+        real_load = _ResultSpill.load_ordered
+
+        def slow_load(self):
+            observed[0] = liveness.wait_for_progress()
+            return real_load(self)
+
+        monkeypatch.setattr(_ResultSpill, "load_ordered", slow_load)
+
+        pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
+        payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 5}}}
+
+        async def scenario() -> dict:
+            hb = asyncio.ensure_future(liveness.heartbeat())
+            try:
+                crawl = asyncio.ensure_future(
+                    crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+                )
+                out = await asyncio.wait_for(crawl, timeout=15)
+            finally:
+                hb.cancel()
+            return out
+
+        out = await asyncio.wait_for(scenario(), timeout=20)
+        assert observed[0] >= liveness.needed, (
+            f"the event loop made {observed[0]} heartbeat ticks "
+            "while the spilled results were read back"
+        )
+        assert len(out["results"]) == 1
+        assert out["results"][0]["original_url"] == "http://example.com/"
+
+    def test_read_of_superseded_bytes_does_not_enter_the_mirror(self, monkeypatch, tmp_path) -> None:
+        """The envelope read runs off the lock, so only a read that still
+        matches the recorded entry may warm the RAM mirror: otherwise a read
+        overlapping a concurrent write would shadow the newer value."""
+        cache = ContentCache(str(tmp_path), default_ttl=0, max_entry_bytes=10_000)
+        cache.set("k", {"v": "old"})
+        cache._memory_cache.clear()
+
+        # Bytes that no longer match the recorded entry: a write landed between
+        # the read and the index commit.
+        stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
+        assert len(stale) != cache._index_sizes["k"]
+        real_read_bytes = Path.read_bytes
+
+        def fake_read(self, *args, **kwargs):
+            if self == cache._path_for("k"):
+                return stale
+            return real_read_bytes(self, *args, **kwargs)
+
+        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        assert cache.get("k") == {"v": "stale"}  # served the bytes that were read
+        assert "k" not in cache._memory_cache  # but the stale read is not mirrored

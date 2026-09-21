@@ -13,6 +13,18 @@ class DecompressionTooLargeError(Exception):
     """
 
 
+def _passthrough(body: bytes | bytearray | memoryview) -> bytes:
+    """Return undecodable input as ``bytes`` without copying when it is already bytes.
+
+    The passthrough sites (gzip/deflate/brotli failure, missing brotli, and the
+    no-recognized-encoding tail) all return the caller's buffer; routing them
+    through one helper keeps the "do not trust the label" normalization in a
+    single place, so a passthrough cannot drift back into handing a caller a
+    ``memoryview`` over a buffer the caller may have reused.
+    """
+    return body if isinstance(body, bytes) else bytes(body)
+
+
 def _decompress_streaming(make_fileobj, compressed: bytes, max_output_bytes: int) -> bytes:
     """Decompress ``compressed`` in bounded chunks, raising on overflow."""
     out = bytearray()
@@ -45,18 +57,31 @@ def decompress_body(
     ``Content-Encoding`` header on the response), the original body is
     returned unchanged instead of raising. A genuine over-cap expansion
     raises :class:`DecompressionTooLargeError`.
+
+    ``body`` accepts any readable buffer (callers hold ``bytes``, ``bytearray``
+    from incremental assembly, or a ``memoryview`` over a transport buffer).
+    The passthrough branches return that same content normalized to ``bytes``:
+    a "do not trust the label" fallback for a transport that auto-decompressed
+    but left the header. Returning the caller's own buffer type would make the
+    return type polymorphic for no caller benefit -- every consumer
+    (``HttpFetchResult.body`` is ``bytes``, and
+    ``detect_decompression_failure`` compares against the original) reads it as
+    bytes -- so the normalization happens at this boundary instead of at each
+    passthrough site.
     """
     encoding = content_encoding.lower().strip()
 
     if "gzip" in encoding:
         try:
             return _decompress_streaming(
-                lambda data: gzip.GzipFile(fileobj=io.BytesIO(data)), body, max_output_bytes
+                lambda data: gzip.GzipFile(fileobj=io.BytesIO(data)),
+                _passthrough(body),
+                max_output_bytes,
             )
         except DecompressionTooLargeError:
             raise
         except Exception:
-            return body
+            return _passthrough(body)
 
     if "deflate" in encoding:
         try:
@@ -72,27 +97,27 @@ def decompress_body(
         except DecompressionTooLargeError:
             raise
         except Exception:
-            return body
+            return _passthrough(body)
 
     if "br" in encoding:
         try:
             import brotli
         except ImportError:
-            return body
+            return _passthrough(body)
         # Bounded brotli decompression. The brotli ecosystem has two
         # incompatible streaming APIs (google-brotli exposes .process(),
         # brotlicffi exposes .decompress(data, cap)) -- detect and use whichever
         # exists. Fall back to full decompress + post-hoc cap check.
         try:
-            d = brotli.Decompressor()
+            decoder: object | None = brotli.Decompressor()
         except Exception:
-            d = None
+            decoder = None
 
         try:
-            if d is not None and hasattr(d, "decompress"):
+            if decoder is not None and hasattr(decoder, "decompress"):
                 # brotlicffi-style bounded API
-                out = d.decompress(body, max_output_bytes + 1)
-            elif d is not None and hasattr(d, "process"):
+                decoded: bytes | bytearray = decoder.decompress(body, max_output_bytes + 1)
+            elif decoder is not None and hasattr(decoder, "process"):
                 # google-brotli streaming API: feed incrementally and stop
                 # past the cap (H6). A single process(body) call would
                 # materialize the entire bomb in RAM. Stopping early leaves
@@ -102,20 +127,20 @@ def decompress_body(
                 chunks = bytearray()
                 step = 16_384
                 for offset in range(0, len(body), step):
-                    chunks.extend(d.process(body[offset : offset + step]))
+                    chunks.extend(decoder.process(body[offset : offset + step]))
                     if len(chunks) > max_output_bytes:
                         break
-                out = bytes(chunks)
+                decoded = chunks
             else:
-                out = brotli.decompress(body)
+                decoded = brotli.decompress(body)
         except Exception:
-            return body
+            return _passthrough(body)
 
-        if len(out) > max_output_bytes:
+        if len(decoded) > max_output_bytes:
             raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
-        return bytes(out)
+        return bytes(decoded)
 
-    return body
+    return _passthrough(body)
 
 
 def detect_decompression_failure(

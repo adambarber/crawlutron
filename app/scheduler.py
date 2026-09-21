@@ -6,11 +6,82 @@ import random
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from typing import Protocol, TypeVar
 
-from .crawl.result_helpers import _engine_result_from_exception, _failed_engine_result
-from .models import CrawlJob, EngineCrawlResult
+from .crawl.scheduler_exceptions import _CircuitBreakerOpen
+from .models import ResultStatus
 
-SchedulerWorker = Callable[[CrawlJob], Awaitable[EngineCrawlResult]]
+
+class ScheduledJob(Protocol):
+    """The structural contract ``DomainScheduler.run`` actually depends on.
+
+    ``run`` is polymorphic over the job shape: the crawl pipeline submits
+    ``CrawlTask`` (original_url + normalized_url) and the render pipeline
+    submits ``CrawlJob`` (url). Declaring the parameter as ``CrawlJob`` hid
+    that -- the scheduler then read ``job.url`` in the two error-envelope
+    branches, which only exists on one of the two shapes, and the annotation
+    was the only thing standing between the crawl path and an
+    ``AttributeError`` inside a ``gather(return_exceptions=True)`` handler.
+
+    The members are read-only properties on purpose: the scheduler never
+    mutates a job, and a mutable-attribute protocol would reject the frozen
+    dataclasses both shapes actually are. The reporting URL is deliberately
+    NOT a member -- the two shapes carry it under different names, so callers
+    pass an accessor and the shape mapping stays at the pipeline boundary
+    that owns it.
+    """
+
+    @property
+    def index(self) -> int:
+        """Submission order; the key the caller aligns results against."""
+
+    @property
+    def domain(self) -> str:
+        """Registrable domain pacing/breakers are scoped to."""
+
+
+_Job = TypeVar("_Job", bound=ScheduledJob)
+class SchedulerResult(Protocol):
+    """What the domain scheduler reads off a worker's result.
+
+    The breaker, latency-estimator and failure-bookkeeping paths below consult
+    ``.status``; nothing else about the result shape is scheduler business.
+    Declaring the requirement as a protocol keeps ``run`` generic over the
+    crawl (``EngineCrawlResult``) and render (``CrawlResult``) pipelines
+    without naming either, and without a union leaking into the caller's type.
+    """
+
+    @property
+    def status(self) -> ResultStatus:
+        """Terminal status of this job's attempt."""
+
+
+_Result = TypeVar("_Result", bound=SchedulerResult)
+# The worker is parameterized on the job it accepts. The alias is written with
+# a bound TypeVar (not a contravariant one) because mypy cannot solve a
+# contravariant TypeVar from a bare-alias parameter -- it left the call sites
+# unsolved and silently widened to the protocol's own type.
+SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
+
+
+def _job_url(job: _Job, url_of: Callable[[_Job], str | None] | None) -> str:
+    """Read the reporting URL off a job without raising.
+
+    The accessor is caller-supplied because the two production shapes carry the
+    URL under different names (``CrawlTask.original_url`` / ``CrawlJob.url``).
+    When a caller omits it, the known field names are probed in order and only
+    then does the fallback degrade to ``str()`` -- the URL feeds the error
+    envelope a caller reads, never scheduling, so a repr is the last resort
+    rather than an acceptable answer.
+    """
+    explicit = url_of(job) if url_of is not None else None
+    if explicit:
+        return explicit
+    for field in ("original_url", "url", "normalized_url"):
+        value = getattr(job, field, None)
+        if isinstance(value, str):
+            return value
+    return str(job)
 
 
 class _TokenBucket:
@@ -222,10 +293,13 @@ class DomainScheduler:
 
     async def run(
         self,
-        jobs: list[CrawlJob],
-        worker: SchedulerWorker,
-        on_result: Callable[[int, EngineCrawlResult], Awaitable[None]] | None = None,
-    ) -> dict[int, EngineCrawlResult] | None:
+        jobs: list[_Job],
+        worker: SchedulerWorker[_Job, _Result],
+        on_result: Callable[[int, _Result], Awaitable[None]] | None = None,
+        *,
+        url_of: Callable[[_Job], str | None] | None = None,
+        failed_result: Callable[[_Job, BaseException], _Result],
+    ) -> dict[int, _Result] | None:
         """Run ``jobs`` through ``worker``.
 
         When ``on_result`` is provided, each completed result is handed to it
@@ -250,9 +324,23 @@ class DomainScheduler:
         # Retain results in memory only when the caller needs them back
         # (recursive frontier expansion). With on_result set, results are spilled
         # per-job and never accumulated here, bounding batch RAM (#3.1).
-        results: dict[int, EngineCrawlResult] | None = None if on_result else {}
+        results: dict[int, _Result] = {}
+        # ``on_result`` and the returned mapping are mutually exclusive delivery
+        # channels (spill-to-disk vs. in-memory). The single sink below keeps
+        # that invariant in one place: narrowing ``dict | None`` inside the
+        # closure could not track which branch held, and the two delivery
+        # channels had historically drifted (H1: a slot silently vanished).
+        #
+        # Both a worker's return and the failure envelopes are ``_Result``: the
+        # caller supplies ``failed_result`` so the shape a broken job gets is
+        # decided by the pipeline that owns the contract, not assumed here.
+        async def deliver(index: int, result: _Result) -> None:
+            if on_result is not None:
+                await on_result(index, result)
+            else:
+                results[index] = result
 
-        async def run_one(job: CrawlJob) -> None:
+        async def run_one(job: _Job) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global
             # semaphore, otherwise a single rate-limited domain would block
             # every other domain's concurrency slot (cooldown deadlock).
@@ -267,30 +355,21 @@ class DomainScheduler:
 
             # Circuit breaker: if open, skip the network request entirely.
             if self.is_circuit_open(job.domain):
-                # Production jobs are CrawlTask (original_url + normalized_url);
-                # this module's CrawlJob annotation predates that and carries
-                # only ``url``. Read whichever pair the object actually has so
-                # the envelope is buildable on both shapes.
-                original_url = getattr(job, "original_url", None) or job.url
-                normalized_url = getattr(job, "normalized_url", None) or original_url
-                breaker_result = _failed_engine_result(
-                    original_url=original_url,
-                    normalized_url=normalized_url,
-                    strategy="",
-                    classification="network_error",
-                    error="circuit_breaker_open",
-                    diagnostics={"circuit_breaker": True, "error": "circuit_breaker_open"},
+                # In on_result mode ``results`` stays empty, so the failed
+                # envelope must go through the same channel as normal results.
+                # Writing results[job.index] directly here raised TypeError,
+                # which gather(return_exceptions=True) swallowed -- the job
+                # then got no envelope, was not spilled, and silently vanished
+                # from /v1/crawl (H1).
+                #
+                # The classification and redaction this branch used to inline
+                # now live in the pipeline's ``failed_result``: the crawl
+                # pipeline keeps its network_error/circuit_breaker_open
+                # envelope, and the render pipeline builds its own shape.
+                await deliver(
+                    job.index,
+                    failed_result(job, _CircuitBreakerOpen(self._domain_cooldowns.get(job.domain))),
                 )
-                if on_result is not None:
-                    # In on_result mode ``results`` is None, so the failed
-                    # envelope must go through the same channel as normal
-                    # results. Writing results[job.index] here raised
-                    # TypeError, which gather(return_exceptions=True) swallowed
-                    # -- the job then got no envelope, was not spilled, and
-                    # silently vanished from /v1/crawl (H1).
-                    await on_result(job.index, breaker_result)
-                else:
-                    results[job.index] = breaker_result
                 return
 
             # Token bucket rate limiting (#1: Advanced Client-Side Rate Limiting)
@@ -328,11 +407,8 @@ class DomainScheduler:
                                 self.record_latency(job.domain, latency)
                         elif result.status in ("failed", "network_error"):
                             self.record_failure(job.domain)
-                        if on_result is not None:
-                            # Stream to the caller immediately; do not retain.
-                            await on_result(job.index, result)
-                        else:
-                            results[job.index] = result
+                        # Stream to the caller immediately; do not retain.
+                        await deliver(job.index, result)
                     except Exception as error:
                         self.record_failure(job.domain)
                         # Chokepoint for "a worker raised": build a classified
@@ -340,17 +416,10 @@ class DomainScheduler:
                         # absent job. Previously every caller improvised its own
                         # envelope (recursive.py hand-built one; the sync
                         # ``on_result`` path silently dropped the page), and the
-                        # two drifted in shape and classification.
-                        failed = _engine_result_from_exception(
-                            error=error,
-                            original_url=job.original_url,
-                            normalized_url=job.normalized_url,
-                            strategy="",
-                        )
-                        if on_result is not None:
-                            await on_result(job.index, failed)
-                        else:
-                            results[job.index] = failed
+                        # two drifted in shape and classification. The envelope
+                        # itself comes from ``failed_result`` so a pipeline
+                        # always gets back its own result shape.
+                        await deliver(job.index, failed_result(job, error))
                         return
 
         # return_exceptions=True: a single job failure must not cancel the
@@ -359,7 +428,7 @@ class DomainScheduler:
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:
             return None
-        return results  # type: ignore[return-value]
+        return results
 
     @property
     def domain_cooldowns(self) -> dict[str, float]:

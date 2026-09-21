@@ -9,17 +9,18 @@ FastAPI layer (``app.main``) calls into.
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 import json
 import logging
 import os
 import re
 import tempfile
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeAlias, TypeGuard, overload
 from urllib.parse import urljoin, urlparse
 
 from app.api_models import POLICY_SCHEMA_VERSION
@@ -83,14 +84,17 @@ from app.crawl.strategies.http import (
     _quality_score,
 )
 from app.models import (
+    AsyncCrawlWorker,
     CrawlJob,
     CrawlResult,
     CrawlStrategyAttempt,
+    CrawlStrategyName,
     CrawlTask,
     CrawlWorker,
     EngineCrawlResult,
     HttpFetcher,
     RenderOptions,
+    SyncCrawlWorker,
     to_dict,
 )
 from app.resource_pressure import derive_browser_pool_size
@@ -122,16 +126,71 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
+def _is_sync_worker(worker: CrawlWorker) -> TypeGuard[SyncCrawlWorker]:
+    """True when ``worker`` must run in a thread, not be awaited.
+
+    The inverse of ``_is_async_worker``, stated as its own positive guard:
+    a ``TypeGuard`` only narrows the branch it returns True for, so the sync
+    branch of ``_call_worker`` cannot rely on the negative of the async guard.
+    Both guards are computed from the same runtime probe, so exactly one is
+    True for any real worker and neither silently widens the other's member.
+    """
+    return not (inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__))
+
+
+def _is_async_worker(worker: CrawlWorker) -> TypeGuard[AsyncCrawlWorker]:
+    """True when ``worker`` must be awaited, not run in a thread.
+
+    Dispatches on the callable itself, never by invoking first and sniffing
+    the return: the old shape ran ``worker(job)`` on the event-loop thread
+    (blocking the loop and keeping side effects), found a non-coroutine, then
+    called it a SECOND time via ``to_thread`` and discarded the first result.
+    ``iscoroutinefunction`` sees through bound methods and objects whose type
+    defines ``async __call__`` (the render path's worker instance).
+
+    The ``TypeGuard`` carries the narrowing mypy cannot derive from
+    ``iscoroutinefunction`` alone; ``_is_sync_worker`` is the positive inverse
+    because a ``TypeGuard`` only narrows the branch it accepts.
+    """
+    return inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__)
+
+
+@overload
+async def _call_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
+
+
+@overload
+async def _call_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
+
+
 async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
-    # Dispatch on the callable itself, never by invoking first and sniffing
-    # the return: the old shape ran worker(job) on the event-loop thread
-    # (blocking the loop and keeping side effects), found a non-coroutine,
-    # then called it a SECOND time via to_thread and discarded the first
-    # result. iscoroutinefunction sees through bound methods and objects
-    # whose type defines async __call__ (the render path's worker instance).
-    if inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__):
-        return await worker(job)
-    return await asyncio.to_thread(worker, job)
+    # The two ``@overload``s above state the dispatch statically, and the two
+    # TypeGuards narrow the union inside; together each branch is typed against
+    # the union member it runs, so the runtime probe is visible to the type
+    # checker instead of hiding inside a bool it cannot see through. Both
+    # branches test positively (never the inverse of a guard) because a
+    # TypeGuard only narrows the case it accepts.
+    if _is_async_worker(worker):
+        return await _invoke_async_worker(worker, job)
+    if _is_sync_worker(worker):
+        return await asyncio.to_thread(_invoke_sync_worker, worker, job)
+    raise TypeError(f"worker is neither async nor sync: {type(worker)!r}")
+
+
+async def _invoke_async_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> CrawlResult:
+    """Run a coroutine-function worker on the event loop."""
+    return await worker(job)
+
+
+def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
+    """Run a synchronous worker off the event loop.
+
+    ``CrawlWorker`` is a union of the async and sync worker shapes, and the
+    ``iscoroutinefunction`` check above selects which member runs. The helper
+    states that per branch instead of casting, so a worker that is neither
+    shape surfaces here rather than being silently typed through.
+    """
+    return worker(job)
 
 
 # A single user-supplied scope_regex is applied to every discovered link.
@@ -162,7 +221,7 @@ async def _browser_strategy_result(
     *,
     original_url: str,
     normalized_url: str,
-    strategy: str,
+    strategy: CrawlStrategyName,
     policy: dict[str, Any],
     browser_worker: CrawlWorker,
 ) -> EngineCrawlResult:
@@ -258,7 +317,7 @@ async def _browser_strategy_result(
         post_fetch["js_endpoints"], resolve_against=result.final_url
     )
     attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
+        strategy=strategy,
         status=result.status,
         classification=result.classification,
         http_status=None,
@@ -272,7 +331,7 @@ async def _browser_strategy_result(
         final_url=result.final_url,
         status=result.status,
         classification=result.classification,
-        selected_strategy=strategy if result.status == "success" else None,  # type: ignore[arg-type]
+        selected_strategy=strategy if result.status == "success" else None,
         attempt=attempt,
         http_status=None,
         headers={},
@@ -509,8 +568,58 @@ class _PrefixMatcher:
         return path.startswith(self._prefix)
 
 
-@functools.lru_cache(maxsize=1024)
-def _robots_pattern_to_regex(pattern: str) -> re.Pattern[str] | _RobotsPathMatcher:
+# P2-E: matcher compilation is cached PER HOST. The cache this replaced was a
+# process-global LRU keyed only on the pattern string, and patterns come from
+# remotely-fetched robots.txt rules, so a hostile site spraying distinct
+# patterns pushed every other site's matchers out of the shared 1024-entry cap
+# and forced recompilation (plus a cache it fully controlled). Binding the key
+# to the host confines eviction to the offending site: it can only evict its
+# own entries. Each host gets its own bounded LRU, and the host table is itself
+# bounded and LRU-evicted so unbounded host cardinality cannot grow the
+# structure without bound.
+_ROBOTS_PATTERN_CACHE_PER_HOST = 1024
+_ROBOTS_PATTERN_CACHE_MAX_HOSTS = 1024
+
+
+class _RobotsPatternCache:
+    """Bounded per-host LRU of compiled robots path matchers."""
+
+    __slots__ = ("_hosts", "_lock")
+
+    def __init__(self) -> None:
+        self._hosts: OrderedDict[str, OrderedDict[str, RobotsMatcher]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, host: str, pattern: str) -> RobotsMatcher:
+        """Return the matcher for ``pattern``, cached under ``host``.
+
+        ``host`` is part of the key, never an optimization: the whole point is
+        that one host's entries are evictable only by that host.
+        """
+        with self._lock:
+            table = self._hosts.get(host)
+            if table is None:
+                table = OrderedDict()
+                self._hosts[host] = table
+                while len(self._hosts) > _ROBOTS_PATTERN_CACHE_MAX_HOSTS:
+                    self._hosts.popitem(last=False)
+            else:
+                self._hosts.move_to_end(host)
+            cached = table.get(pattern)
+            if cached is not None:
+                table.move_to_end(pattern)
+                return cached
+            matcher = _compile_robots_pattern(pattern)
+            table[pattern] = matcher
+            while len(table) > _ROBOTS_PATTERN_CACHE_PER_HOST:
+                table.popitem(last=False)
+            return matcher
+
+
+_robots_pattern_cache = _RobotsPatternCache()
+
+
+def _robots_pattern_to_regex(host: str, pattern: str) -> RobotsMatcher:
     """Translate a robots.txt path pattern to a linear-time matcher.
 
     Per RFC 9309 / Google's interpretation: ``*`` matches any sequence of
@@ -521,7 +630,25 @@ def _robots_pattern_to_regex(pattern: str) -> re.Pattern[str] | _RobotsPathMatch
     compiled regex (returns a bool), but with guaranteed linear time; the
     historical ``re`` translation backtracked exponentially on overlapping
     wildcards (adversarial review M-robots-redos).
+
+    ``host`` scopes the cache so a hostile robots.txt cannot evict another
+    site's matchers (P2-E); it is part of the identity of a cached entry, not
+    a hint.
     """
+    return _robots_pattern_cache.get(host, pattern)
+
+
+# The set of objects a robots path pattern can compile to. All three expose
+# the same ``.match(path) -> bool`` surface, which is the only thing a caller
+# ever does with the result; the union is the honest return type of both
+# ``_compile_robots_pattern`` and the per-host cache. Declaring only
+# ``re.Pattern | _RobotsPathMatcher`` omitted the degenerate empty-pattern and
+# wildcard-free fast paths, which are real returns, not unreachable ones.
+RobotsMatcher: TypeAlias = re.Pattern[str] | _RobotsPathMatcher | _MatchAll | _PrefixMatcher
+
+
+def _compile_robots_pattern(pattern: str) -> RobotsMatcher:
+    """The pure pattern translation, uncached (the per-host cache wraps it)."""
     if pattern == "":
         return _MatchAll()
     if "*" not in pattern and not (pattern.endswith("$") and len(pattern) > 1):
@@ -564,6 +691,9 @@ def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     path = parsed.path or "/"
     if parsed.query:
         path = f"{path}?{parsed.query}"
+    # The host scopes the matcher cache so a hostile robots.txt cannot evict
+    # another site's entries (P2-E).
+    host = parsed.hostname or ""
 
     # RFC 9309: an empty Disallow value permits all URLs for the group.
     if any((not is_allow) and pattern == "" for is_allow, pattern in rules):
@@ -574,7 +704,7 @@ def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     for is_allow, pattern in rules:
         if not pattern:
             continue
-        if _robots_pattern_to_regex(pattern).match(path):
+        if _robots_pattern_to_regex(host, pattern).match(path):
             plen = len(pattern)
             if plen > best_len:
                 best_len = plen
@@ -678,10 +808,19 @@ class _ResultSpill:
     killed runs are garbage-collected when the next crawl starts.
     """
 
-    def __init__(self, path: str | None = None, *, gc_age_seconds: float = 3600):
+    def __init__(
+        self,
+        path: str | None = None,
+        *,
+        gc_age_seconds: float = 3600,
+    ) -> None:
         self._own = path is None
+        # ``resolved`` is the concrete path on both branches (mkstemp fills in
+        # the temp path when the caller gave none), so it is the only value
+        # stored on ``self``: ``self.path`` is always a str a reader can open.
+        resolved: str
         if self._own:
-            fd, path = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
+            fd, resolved = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
             # An exception between mkstemp and fdopen would leak the raw fd
             # AND the on-disk file. Close the fd if fdopen fails (adversarial
             # review F-result-spill-fd-leak).
@@ -693,13 +832,15 @@ class _ResultSpill:
                 except OSError:
                     pass
                 try:
-                    os.unlink(path)
+                    os.unlink(resolved)
                 except OSError:
                     pass
                 raise
         else:
-            self._fh = open(path, "w", encoding="utf-8")
-        self.path = path
+            assert path is not None
+            resolved = path
+            self._fh = open(resolved, "w", encoding="utf-8")
+        self.path = resolved
         self.count = 0
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop (adversarial #1.3).
@@ -764,9 +905,12 @@ class _ResultSpill:
 
         Single pass: each parsed payload is placed directly into its index
         slot — no intermediate tuple list, no O(N log N) sort. The returned
-        list still materializes every result (the response contract needs
-        the complete ordered set in RAM); streaming consumers are the
-        documented escape hatch if that ever becomes a constraint.
+        list still materializes every result: the JSON response contract needs
+        the complete ordered set in RAM before the first byte can be written,
+        so that materialization is the caller's to pay (``_crawl_request_impl``
+        only offloads the file scan and the per-line parse off the event loop).
+        Streaming consumers are the documented escape hatch if the full-set
+        materialization ever becomes a constraint.
         """
         self._fh.flush()
         slots: dict[int, dict[str, Any]] = {}
@@ -948,12 +1092,14 @@ async def _crawl_request_impl(
         except TimeoutError as error:
             # The budget raises bare TimeoutError; its classification is known
             # precisely (not derivable from the exception type), so pass it
-            # through the primitive rather than hand-building a result.
+            # through the primitive rather than hand-building a result. The
+            # budget wraps the whole strategy chain, so no single strategy is
+            # implicated: None is the honest "no specific strategy" label.
             result = _engine_result_from_exception(
                 error=error,
                 original_url=original_url,
                 normalized_url=normalized_url,
-                strategy="",
+                strategy=None,
                 known_classification="url_budget_exceeded",
                 extra_diagnostics={"url_budget_seconds": budget},
             )
@@ -1137,7 +1283,17 @@ async def _crawl_request_impl(
             await _spill_write(spill, index, result)
 
         if allowed_jobs:
-            await scheduler.run(allowed_jobs, _worker, on_result=_spill_one)
+            await scheduler.run(
+                allowed_jobs,
+                _worker,
+                on_result=_spill_one,
+                failed_result=lambda job, exc: _engine_result_from_exception(
+                    error=exc,
+                    original_url=job.original_url,
+                    normalized_url=job.normalized_url,
+                    strategy=None,
+                ),
+            )
     else:
         # Two-tier weighted admission: size HTTP concurrency to the live RAM/CPU
         # headroom (RAM-derived from the cgroup limit and browser-pool reserve)
@@ -1180,7 +1336,11 @@ async def _crawl_request_impl(
         # value would let responses claim a contract the service never ran.
         "policy_schema_version": POLICY_SCHEMA_VERSION,
         # #2-stream: reassembled from the on-disk spill in submission order.
-        "results": spill.load_ordered(),
+        # The read-back is a blocking file scan plus a json.loads per line, so
+        # it runs in a worker thread; the in-RAM materialization is inherent to
+        # the response contract (see load_ordered) and is paid by the caller,
+        # not by the event loop.
+        "results": await asyncio.to_thread(spill.load_ordered),
     }
     if webhook_url is not None:
         response["webhook_url"] = webhook_url

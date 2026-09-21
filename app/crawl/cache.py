@@ -47,7 +47,7 @@ class HttpCache:
         self._lock = threading.Lock()
         # url -> (etag, last_modified, expires_at); OrderedDict insertion order
         # gives FIFO eviction for the LRU bound.
-        self._data: dict[str, tuple[str, str, float]] = {}
+        self._data: dict[str, tuple[str | None, str | None, float]] = {}
         self._closed = False
 
     def _purge_expired(self, now: float) -> None:

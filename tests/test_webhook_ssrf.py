@@ -171,3 +171,34 @@ class TestWebhookDeliveryPinning:
                 await deliver_pinned_webhook("http://webhook.example.com/cb", b"{}")
 
         assert any("webhook_response_too_large" in r.message for r in caplog.records), caplog.text
+
+
+def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
+    """P2-F: the cap is read 2-3 times per delivery and used to be re-read and
+    re-parsed from ``os.environ`` on every call. Caching it on the raw env value
+    parses once per distinct value while an override -- operator env, or a test
+    -- is still picked up on the very next call."""
+    from app.api import webhooks
+
+    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "1234")
+    assert webhooks._max_webhook_size() == 1234, "the override was not honored"
+
+    # A later change to the same env var is reflected without a reload.
+    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "4321")
+    assert webhooks._max_webhook_size() == 4321, "a cached value shadowed the new override"
+
+    # Removing the override restores the default, not a stale cached value.
+    monkeypatch.delenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE")
+    assert webhooks._max_webhook_size() == 10_485_760
+
+
+def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
+    """The ``lo=1`` floor survives the caching path: a zero/negative cap would
+    cap every delivery at nothing and silently drop all webhooks."""
+    from app.api import webhooks
+
+    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "0")
+    assert webhooks._max_webhook_size() == 1
+
+    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "not-an-int")
+    assert webhooks._max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"

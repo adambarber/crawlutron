@@ -92,13 +92,20 @@ class ResourceGauge:
 
     def __init__(
         self,
-        target: float | None,
+        target: float,
         *,
         hard: float | None = None,
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
+        # ``target`` is a plain float here, not optional: the gauge arithmetic
+        # below (ratio - target, hard - target) has no defined value without one,
+        # and ``ResourceGate()`` used to reach this constructor with None and
+        # raise TypeError inside ``_hard``. Callers that want the self-managed
+        # default resolve it in their own constructor (see ``MemoryGate`` /
+        # ``CpuGate``) before delegating, which is where the optional really
+        # belongs.
         self.target = target
         self.hard = self._hard(target) if hard is None else hard
         self.poll_seconds = poll_seconds

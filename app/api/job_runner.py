@@ -178,7 +178,9 @@ async def _run_job(
                 _frontier_add(job, url)
         job.in_flight = []
     job.status = JobStatus.RUNNING
-    job_store.save(job)
+    # JobStore.save json-dumps the whole row (frontier/visited/results/stats)
+    # and commits SQLite -- blocking work that must never run on the loop.
+    await asyncio.to_thread(job_store.save, job)
 
     try:
         while True:
@@ -189,21 +191,21 @@ async def _run_job(
                 return  # control transition already persisted by handler
             if shutdown_event.is_set():
                 job.status = JobStatus.PAUSED
-                job_store.save(job)
+                await asyncio.to_thread(job_store.save, job)
                 return
 
             batch = _pop_frontier(job)
             if not batch:
                 job.in_flight = []  # clean terminal state even if a crash left it set
                 job.status = JobStatus.COMPLETED
-                job_store.save(job)
+                await asyncio.to_thread(job_store.save, job)
                 return
             # Write-ahead the pop: the post-engine reload must see the
             # shrunk frontier or the loop refetches the same batch forever.
             # Record the batch as in_flight in the same save so a crash before
             # the results commit re-queues exactly these urls (at-least-once).
             job.in_flight = list(batch)
-            job_store.save(job)
+            await asyncio.to_thread(job_store.save, job)
 
             payload: dict[str, Any] = {
                 "urls": batch,
@@ -312,7 +314,7 @@ async def _run_job(
             if failed:
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
             job.in_flight = []  # batch committed; a later resume must not re-crawl it
-            job_store.save(job)
+            await asyncio.to_thread(job_store.save, job)
 
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
                 # Transition landed mid-batch: state is already persisted
@@ -327,7 +329,7 @@ async def _run_job(
         if job is not None and job.status == JobStatus.RUNNING:
             job.status = JobStatus.FAILED
             job.error = str(exc)
-            job_store.save(job)
+            await asyncio.to_thread(job_store.save, job)
 
 
 def start_job(
@@ -361,7 +363,7 @@ async def pause_job(job_id: str, job_store: JobStore) -> str:
     if job.status != JobStatus.RUNNING:
         return "conflict"
     job.status = JobStatus.PAUSED
-    job_store.save(job)
+    await asyncio.to_thread(job_store.save, job)
     return "ok"
 
 
@@ -373,7 +375,7 @@ async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_e
     if job.status != JobStatus.PAUSED:
         return "conflict"
     job.status = JobStatus.RUNNING
-    job_store.save(job)
+    await asyncio.to_thread(job_store.save, job)
     start_job(job_id, job_store, settings, shutdown_event)
     return "ok"
 
@@ -387,7 +389,7 @@ async def cancel_job(job_id: str, job_store: JobStore) -> str:
     if job.status not in {JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.PENDING}:
         return "conflict"
     job.status = JobStatus.CANCELLED
-    job_store.save(job)
+    await asyncio.to_thread(job_store.save, job)
     return "ok"
 
 

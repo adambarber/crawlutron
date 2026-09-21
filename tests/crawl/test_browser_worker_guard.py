@@ -5,6 +5,7 @@ from collections import deque
 import pytest
 from _testkit import *
 
+from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 
 
@@ -25,6 +26,10 @@ class TestBrowserWorkerGuard:
         from app.models import CrawlJob, RenderOptions
 
         class ExhaustedPool:
+            # The pool interface the worker reads on the failure path: the
+            # browser mode its renders would have run.
+            browser_strategy = BROWSER_HEADLESS
+
             async def acquire(self):
                 raise BrowserPoolExhaustedError("no renderer")
 
@@ -42,7 +47,10 @@ class TestBrowserWorkerGuard:
 
         assert result.status == "failed"
         assert result.classification == "browser_pool_exhausted"
-        assert (result.diagnostics or {}).get("retryable") is True
+        # The CrawlResult carries the retryable flag in its metadata (the
+        # engine path's equivalent lives in EngineCrawlResult.diagnostics);
+        # the render path surfaces it straight into the response diagnostics.
+        assert (result.metadata or {}).get("retryable") is True
 
 
 @pytest.mark.asyncio
@@ -70,3 +78,61 @@ class TestPoolExhaustionRequeue:
         attempts = {task.normalized_url: MAX_POOL_EXHAUSTION_REQUEUES}
         assert requeue_pool_exhausted(task, depth=1, frontier=frontier, attempts=attempts) is False
         assert len(frontier) == 1, "a capped URL must not be re-queued again"
+
+    async def test_pool_exhausted_url_is_requeued_through_the_real_crawl_path(self, base_url):
+        """End-to-end proof of the at-least-once contract this cluster is about.
+
+        An exhausted pool worker returns its classified ``CrawlResult``; the
+        engine's browser consumer reads it without an AttributeError; the
+        recursive loop keys on ``browser_pool_exhausted`` and re-queues the URL
+        to the frontier tail under the cap. That re-queue is observable here as
+        the worker being invoked once per try, and the classification surviving
+        to the final result. Before the worker honored its contracted shape the
+        classification was destroyed at the scheduler envelope (AttributeError
+        -> network_error) and the re-queue never fired.
+        """
+        from _testkit import run_crawl_async
+
+        from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES
+        from app.crawl.strategies.browser_pool import PooledBrowserWorker
+
+        class ExhaustedPool:
+            browser_strategy = BROWSER_HEADLESS
+
+            async def acquire(self):
+                raise BrowserPoolExhaustedError("no renderer")
+
+            def release(self, renderer):
+                pass
+
+        # The real production worker, not a stand-in: only the pool is faked
+        # (no browser binary in CI), so the guard, the chokepoint
+        # classification, and the engine consumption all run as in production.
+        pooled = PooledBrowserWorker(ExhaustedPool())
+        invocations: list[str] = []
+
+        async def browser_worker(job):
+            invocations.append(job.url)
+            return await pooled(job)
+
+        payload = {
+            "url": f"{base_url}/",
+            "policy": {
+                "strategies": [BROWSER_HEADLESS],
+                # max_depth > 0 selects the recursive dispatcher, which owns the
+                # pool-exhaustion frontier re-queue.
+                "limits": {
+                    "timeout_seconds": 10,
+                    "max_retries": 0,
+                    "max_discovered_links": 10,
+                    "max_depth": 1,
+                },
+            },
+        }
+        response = await run_crawl_async(payload, browser_worker=browser_worker)
+        result = response["results"][0]
+        assert result["status"] == "failed"
+        assert result["classification"] == "browser_pool_exhausted"
+        # One initial attempt plus the cap of frontier re-queues: the URL was
+        # retried at least once rather than recorded as a permanent failure.
+        assert len(invocations) == 1 + MAX_POOL_EXHAUSTION_REQUEUES, invocations

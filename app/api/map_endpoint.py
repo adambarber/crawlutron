@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 async def map_site(
     payload: MapRequest,
     settings=None,  # injected via Depends(get_settings)
-    shutdown_event: asyncio.Event = None,  # injected via Depends(get_shutdown_event)
+    shutdown_event: asyncio.Event | None = None,  # injected via Depends(get_shutdown_event)
 ) -> dict:
     """Map ``payload.root_url`` to its discovered-link frontier."""
     readiness_state.begin_request()

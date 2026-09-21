@@ -15,6 +15,9 @@ Behavior preserves the two adversarial-review fixes:
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
+from typing import Any
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -43,7 +46,7 @@ async def limit_request_body(request: Request, call_next):
     bytes_delivered = 0
     truncated = False
 
-    async def _capped_receive() -> dict[str, object]:
+    async def _capped_receive() -> MutableMapping[str, Any]:
         nonlocal bytes_delivered, truncated
         message = await original_receive()
         if message.get("type") != "http.request":
@@ -70,7 +73,7 @@ async def limit_request_body(request: Request, call_next):
         bytes_delivered += len(body)
         return message
 
-    request._receive = _capped_receive  # type: ignore[attr-defined]
+    request._receive = _capped_receive
     response = await call_next(request)
     if truncated:
         response.headers["Connection"] = "close"

@@ -121,3 +121,47 @@ class TestCookieJarHeaderHandling:
 
         # Call with invalid cookie header - should not raise
         _GLOBAL_COOKIE_JAR.add_cookie_header({}, "http://example.com/")
+
+
+class _RecordingResponse:
+    """Minimal ``httpx.Response`` stand-in carrying a Set-Cookie header.
+
+    ``_NoStoreCookieJar.extract_cookies`` ignores its arguments entirely, but
+    the fakes stay realistic so the test would still exercise the storing path
+    if the override were ever removed.
+    """
+
+    def __init__(self) -> None:
+        self.headers = {"Set-Cookie": "session=abc; Path=/"}
+
+
+class _RecordingRequest:
+    def __init__(self) -> None:
+        self.url = "http://example.com/"
+
+
+def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
+    """P2-B: ``_NoStoreCookieJar`` must subclass ``http.cookiejar.CookieJar``.
+
+    The module defines its own storing ``CookieJar`` further down, and the
+    inert jar's base is resolved at class-creation time. Binding it through the
+    aliased stdlib import makes the base independent of source ordering -- the
+    shadowing was load-bearing: moving the inert class below the storing one
+    would silently rebind its base and invert its purpose.
+    """
+    import http.cookiejar
+
+    from app.crawl.strategies import http as http_mod
+
+    assert issubclass(http_mod._NoStoreCookieJar, http.cookiejar.CookieJar)
+    # The project's own jar STORES cookies; the inert jar must not be one.
+    assert not issubclass(http_mod._NoStoreCookieJar, http_mod.CookieJar)
+
+
+def test_no_store_cookie_jar_never_stores_a_set_cookie():
+    """The inert jar must stay empty after a response carries a Set-Cookie."""
+    from app.crawl.strategies.http import _NoStoreCookieJar
+
+    jar = _NoStoreCookieJar()
+    assert jar.extract_cookies(_RecordingResponse(), _RecordingRequest()) is None
+    assert not list(jar), "the inert jar stored a cookie it must never replay"

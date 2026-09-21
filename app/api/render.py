@@ -13,8 +13,22 @@ from typing import Any
 from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
-from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
-from app.models import CrawlJob, CrawlResult, CrawlWorker, RenderOptions, to_dict
+from app.crawl.result_helpers import (
+    _classify_error_code,
+    _crawl_result_from_engine_result,
+    _failed_result_for,
+    _terminal_crawl_result,
+)
+from app.models import (
+    Classification,
+    CrawlJob,
+    CrawlResult,
+    CrawlWorker,
+    EngineCrawlResult,
+    RenderOptions,
+    as_classification,
+    to_dict,
+)
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import normalize_public_http_url, registrable_domain
@@ -33,7 +47,9 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
     )
 
 
-def _disallowed_result(index_url: tuple[int, str], classification: str, elapsed_ms: int = 0) -> CrawlResult:
+def _disallowed_result(
+    index_url: tuple[int, str], classification: Classification, elapsed_ms: int = 0
+) -> CrawlResult:
     index, url = index_url
     return _terminal_crawl_result(
         url=url,
@@ -43,6 +59,22 @@ def _disallowed_result(index_url: tuple[int, str], classification: str, elapsed_
         elapsed_ms=elapsed_ms,
         domain="",
         error=classification,
+    )
+
+
+def _failed_render_result(job: CrawlJob, exc: BaseException) -> CrawlResult:
+    """Render-pipeline failure envelope for the domain scheduler.
+
+    ``DomainScheduler.run`` is generic over the result shape a pipeline uses, so
+    it asks the pipeline how to represent a job it never ran (an open circuit
+    breaker) or whose worker raised. The crawl pipeline answers with an
+    ``EngineCrawlResult``; this one answers with the ``CrawlResult`` the
+    ``/v1/render`` contract is built on, adapting through the same converter
+    ``_collect`` uses so classification and redaction stay centralized.
+    """
+    return _crawl_result_from_engine_result(
+        _failed_result_for(job, exc, url_of=lambda j: j.url),
+        url=job.url,
     )
 
 
@@ -69,8 +101,16 @@ async def render_request(
             normalized = normalize_public_http_url(url)
             domain = registrable_domain(normalized)
         except ValueError as error:
+            # ``normalize_public_http_url`` raises with the taxonomy code itself
+            # (unsupported_scheme / invalid_url / private_network_target), so the
+            # code is already a classification member -- but ``str(exc)`` is
+            # unproven at this layer, and ``classification`` is a wire enum a
+            # caller can switch on. Accept it only if it names a real member;
+            # anything else is an untriaged refusal, not a page verdict.
+            code = str(error)
+            classification = as_classification(code, default="invalid_url")
             immediate_results[index] = _disallowed_result(
-                (index, url), str(error), int((time.monotonic() - started) * 1000)
+                (index, url), classification, int((time.monotonic() - started) * 1000)
             )
             continue
         jobs.append(CrawlJob(index=index, url=normalized, domain=domain, options=options))
@@ -92,25 +132,63 @@ async def render_request(
     by_index = dict(immediate_results)
     worker_errors: dict[int, BaseException] = {}
 
-    async def _collect(index: int, result: CrawlResult) -> None:
+    async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:
+        # The single point the render pipeline receives results. The scheduler's
+        # worker-exception envelope is an EngineCrawlResult (built inside the
+        # scheduler, which cannot know which pipeline it is serving): correct
+        # for /v1/crawl, but that shape carries no ``url``, and
+        # render_result_to_unified reads it -- so an unnormalized entry used to
+        # reach the endpoint and die with a KeyError. Normalize here so
+        # ``by_index`` holds only the contracted CrawlResult, whatever the
+        # scheduler handed back.
+        if not isinstance(result, CrawlResult):
+            result = _crawl_result_from_engine_result(result, url=urls[index])
         by_index[index] = result
 
-    async def _call_and_capture(job: CrawlJob):
+    async def _call_and_capture(job: CrawlJob) -> CrawlResult:
+        # Declared ``-> CrawlResult`` on purpose: the render pipeline's worker is
+        # a ``CrawlWorker`` (the /v1/render contract), never the engine's
+        # scheduler worker. The scheduler drives this through the
+        # ``SchedulerWorker`` alias, which returns ``EngineCrawlResult`` for the
+        # crawl pipeline -- and ``_collect`` converts either shape at the single
+        # boundary that consumes both, so this function stays honest about the
+        # one shape it actually returns.
         try:
             return await _call_worker(worker, job)
-        except Exception as error:
-            worker_errors[job.index] = error
+        except Exception as capture_error:
+            worker_errors[job.index] = capture_error
             raise
 
     if jobs:
-        await scheduler.run(jobs, _call_and_capture, on_result=_collect)
+        await scheduler.run(
+            jobs,
+            _call_and_capture,
+            on_result=_collect,
+            url_of=lambda job: job.url,
+            failed_result=_failed_render_result,
+        )
+
+    # M12: pool exhaustion is a capacity condition, not a per-URL page failure.
+    # The worker returns a classified terminal result instead of raising, so
+    # the 503 signal is read off the results: an exhausted slot means renderer
+    # capacity was unavailable, the request cannot be served at all, and the
+    # caller retries -- reporting a per-URL page failure for a capacity problem
+    # would be a lie the render path cannot take back (it has no frontier to
+    # re-queue onto). The classification is chokepoint-sourced, so this reads
+    # it and never re-derives it; the endpoint maps the error to the 503.
+    if any(r.classification == "browser_pool_exhausted" for r in by_index.values()):
+        raise BrowserPoolExhaustedError(
+            # Static text only: the endpoint puts this message on the wire, so
+            # it must carry no host/path/stack detail (the redaction contract).
+            "browser pool exhausted: no renderer became available within the acquire bound"
+        )
 
     missing = [index for index in range(len(urls)) if index not in by_index]
     if missing:
         if all(isinstance(worker_errors.get(index), BrowserPoolExhaustedError) for index in missing):
             raise worker_errors[missing[0]]
         for index in missing:
-            error = worker_errors.get(index)
+            worker_error = worker_errors.get(index)
             by_index[index] = _terminal_crawl_result(
                 url=urls[index],
                 status="failed",
@@ -121,7 +199,7 @@ async def render_request(
                 # The wire-visible error must be a stable classification, never
                 # raw exception text: to_dict is pure serialization, so str(exc)
                 # would leak DNS names / paths / secrets straight into the body.
-                error=_classify_error_code(error) if error is not None else "worker_failed",
+                error=_classify_error_code(worker_error) if worker_error is not None else "worker_failed",
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]

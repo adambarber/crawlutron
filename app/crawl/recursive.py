@@ -26,6 +26,7 @@ from app.constants import (
     is_analytics_host,
     is_document_url,
 )
+from app.crawl.result_helpers import _failed_result_for
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult
@@ -40,6 +41,17 @@ from app.validation import registrable_domain
 # crawl from spinning one URL forever: after this many re-queues the URL fails
 # for real and the crawl degrades instead of livelocking.
 MAX_POOL_EXHAUSTION_REQUEUES = 3
+
+
+def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
+    """Crawl-pipeline failure envelope for the domain scheduler.
+
+    ``DomainScheduler.run`` is generic over the result shape, so the pipeline
+    that owns the ``EngineCrawlResult`` contract supplies how a broken job is
+    represented. ``CrawlTask.original_url`` is the reporting URL for this
+    pipeline; the render pipeline passes its own accessor for ``CrawlJob.url``.
+    """
+    return _failed_result_for(job, exc, url_of=lambda j: j.original_url)
 
 
 def requeue_pool_exhausted(
@@ -185,7 +197,7 @@ def _pop_admitted(frontier, admit_h, admit_b, scheduler):
     if admit_h + admit_b == 0:
         return []
     get_pinned = getattr(scheduler, "get_pinned_strategy", None)
-    taken = []
+    taken: list[tuple[int, CrawlTask]] = []
     while frontier and len(taken) < admit_h + admit_b:
         taken.append(frontier.popleft())
     http_tasks: list = []
@@ -361,7 +373,13 @@ async def run_recursive_crawl(
             visited.add(job.normalized_url)
 
         scheduled_results = (
-            await scheduler.run([job for _, job in allowed_jobs], worker) if allowed_jobs else {}
+            await scheduler.run(
+                [job for _, job in allowed_jobs],
+                worker,
+                failed_result=_engine_envelope,
+            )
+            if allowed_jobs
+            else {}
         )
 
         for depth, job in allowed_jobs:
@@ -376,6 +394,11 @@ async def run_recursive_crawl(
             # A job can never be absent from the mapping: the scheduler's
             # worker-exception chokepoint builds a classified terminal result
             # for any worker that raised.
+            # ``scheduled_results`` is None only when the scheduler was asked to
+            # deliver nothing; this branch runs inside the loop that consumed the
+            # same jobs list, so a mapping is present by construction. Stating it
+            # locally keeps the lookup honest without a broad ``assert``.
+            assert scheduled_results is not None
             result = scheduled_results[job.index]
             # A pool-exhausted URL was never attempted: re-queue it to the
             # frontier tail under the per-job cap (at-least-once for capacity

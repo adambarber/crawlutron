@@ -26,7 +26,7 @@ import re
 import threading
 import time
 from html import unescape
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _text_from_html
@@ -285,6 +285,20 @@ def _acquire_doc_worker() -> _DocWorker | None:
         with _POOL_LOCK:
             if _DOC_POOL is None:
                 _DOC_POOL = []
+            # P2-D: reap retired slots before the scans. A retired slot has been
+            # terminated and can never be handed out again (the handout scan
+            # requires ``not retired``), so it must not keep occupying a pool
+            # entry. The respawn scan below only replaces a slot whose process
+            # is dead, which leaves a retired-but-still-``is_alive()`` slot
+            # (SIGKILL could not reap it -- pathological) skipped by BOTH scans
+            # and stranded in the pool forever: it held a PID while the size
+            # budget grew around it, and ``len(_DOC_POOL)`` drifted permanently
+            # above the usable count. Removing every retired slot here keeps the
+            # pool and the budget consistent; the termination and the process
+            # reap already ran when the slot was retired, so nothing live is
+            # dropped. Re-running this on every loop iteration also catches a
+            # slot retired by another thread while this acquirer waited.
+            _DOC_POOL = [each for each in _DOC_POOL if not each.retired]
             want = _doc_extraction_worker_count()
             # The budget starts once the lock is actually held. A caller queued
             # behind a slow in-lock operation would otherwise pay that wait out
@@ -303,13 +317,11 @@ def _acquire_doc_worker() -> _DocWorker | None:
                         _DOC_POOL[index] = fresh
                         dead_slots.append(worker)
                         return fresh
-                # A retired-but-undead slot (is_alive() stays True even after
-                # SIGKILL -- pathological) is skipped by both scans: the handout
-                # loop requires ``not retired`` and this respawn loop requires
-                # ``not is_alive()``. Nothing in the normal path can ever
-                # recover it, so it must not count against the size budget or
-                # the pool is permanently one worker short and every later
-                # acquire degrades to None.
+                # Retired slots were reaped above, so this is the live usable
+                # set; when it is short of the configured size the pool grows by
+                # one rather than degrading to "no worker" -- the failure mode
+                # the reaped zombie slot used to cause (a slot nothing could
+                # recover shrinking the pool permanently).
                 usable = sum(1 for each in _DOC_POOL if not each.retired)
                 if usable < want:
                     fresh = _spawn_doc_worker()
@@ -572,7 +584,28 @@ def _extract_selected(
     return ExtractedContent(md or text, md or text)
 
 
-def _suppress_trafilatura_chatter() -> object:
+class _LogRestorer:
+    """Restore logger levels a :func:`_suppress_trafilatura_chatter` call muted.
+
+    A module-level class (rather than one defined inside the function) so the
+    suppressor can declare it as its return type: an inner class would leave
+    the caller with ``object``, which has no ``__enter__``/``__exit__`` to type
+    the ``with`` block against.
+    """
+
+    def __init__(self, prior: dict[logging.Logger, int]) -> None:
+        self._prior = prior
+
+    def __enter__(self) -> _LogRestorer:
+        return self
+
+    def __exit__(self, *exc: object) -> Literal[False]:
+        for logger, level in self._prior.items():
+            logger.setLevel(level)
+        return False
+
+
+def _suppress_trafilatura_chatter() -> _LogRestorer:
     """Silence trafilatura's ERROR-level chatter for benign inputs.
 
     trafilatura logs ERROR from ``trafilatura.core`` and ``trafilatura.utils``
@@ -589,17 +622,7 @@ def _suppress_trafilatura_chatter() -> object:
     prior = {logger: logger.level for logger in loggers}
     for logger in loggers:
         logger.setLevel(logging.CRITICAL)
-
-    class _Restore:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            for logger, level in prior.items():
-                logger.setLevel(level)
-            return False
-
-    return _Restore()
+    return _LogRestorer(prior)
 
 
 def _extract_html(
@@ -911,6 +934,11 @@ def _extract_discovered_links(
             continue
         parsed = urlparse(normalized_url)
         text = re.sub(r"\s+", " ", unescape("".join(el.itertext()))).strip()
+        # ``urlparse().hostname`` is None for schemes without a host
+        # (``mailto:``, ``javascript:``). An unparseable host has no same-host
+        # comparison: record it empty and let the caller filter, instead of
+        # ``.lower()`` on a None that would drop the whole link batch.
+        host = parsed.hostname or ""
         links.append(
             DiscoveredLink(
                 url=href,
@@ -918,8 +946,8 @@ def _extract_discovered_links(
                 text=text,
                 rel=str(attrs.get("rel", "")).split(),
                 source_url=source_url,
-                host=parsed.hostname.lower(),
-                is_same_host=parsed.hostname.lower() == source_host,
+                host=host,
+                is_same_host=host.lower() == source_host,
             )
         )
     return links, total_count, total_count > len(links)

@@ -141,14 +141,17 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
             if quota_s == "max":
                 return None
             try:
-                quota, period = int(quota_s), int(period_s)
+                quota_v2, period_v2 = int(quota_s), int(period_s)
             except ValueError:
                 return None
-            if period > 0:
-                return quota / period
+            if period_v2 > 0:
+                return quota_v2 / period_v2
         return None
 
     # cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us; quota -1 means unlimited.
+    # ``quota``/``period`` are ``int | None`` here (the file may be missing on
+    # v2-only hosts); the v2 branch above uses its own names so the two reads
+    # never share a variable that has to be both.
     quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
     period = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
     if quota is not None and period is not None:
@@ -423,6 +426,18 @@ class ResourceGate:
 # stays RAM-budgeted.
 
 _HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
+# P2-H: the 700 MiB default reservation sits BELOW the measured RSS range for a
+# live renderer (~600-900 MiB once WebExtensions/Web Content are counted; see
+# app/crawl/strategies/browser_pool.py). That gap is deliberate, not an
+# oversight, and this comment exists so it is not "corrected" by reflex: the
+# reservation is the weight the weighted admission subtracts from the RAM
+# budget per browser task, and raising it toward the top of the measured range
+# lowers the number of concurrent browsers the admission will grant. Effective
+# browser concurrency is a capacity decision that trades throughput against the
+# hard container memory ceiling (docker-compose mem_limit; the failure mode is
+# an OOM kill of the whole service), so the number stays conservative while the
+# measured range straddles it. The right knob for that trade-off is here
+# (BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES), not a change to the default.
 _BROWSER_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
 # Persistent markitdown workers (app.crawl.extraction._DocWorker): each imports
 # markitdown plus the PDF/Office parsers once and stays alive for the process, so

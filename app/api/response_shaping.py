@@ -16,9 +16,10 @@ Public surface:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
-from app.api_models import PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
+from app.api_models import CrawlStatus, PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
 from app.constants import CrawlClassification
 
 
@@ -78,6 +79,37 @@ async def abuild_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     return await asyncio.to_thread(build_unified_result, item)
 
 
+def _coerce_status(value: Any) -> CrawlStatus:
+    """Read a per-URL status from an engine-result dict into the wire enum.
+
+    The engine's internal ``EngineCrawlResult.status`` is a ``ResultStatus``
+    literal and the spill round-trips it as a bare string; the wire model is
+    the strict enum. A value outside the taxonomy is "failed", not a
+    validation error -- the batch-shaping guard already degrades a malformed
+    item to a terminal failure, so reaching this with an unknown member means
+    the caller built a result the service itself never emits.
+    """
+    try:
+        return CrawlStatus(value)
+    except ValueError:
+        return CrawlStatus.failed
+
+
+def _coerce_classification(value: Any) -> CrawlClassification:
+    """Read a per-URL classification from an engine-result dict into the wire enum.
+
+    Mirrors :func:`_coerce_status`: the engine emits only taxonomy members, so
+    a value that is not one means a malformed item, and "site_error" keeps the
+    (status, classification) pair consistent (its status-table entry is
+    "failed") rather than pairing an arbitrary classification with the failed
+    status.
+    """
+    try:
+        return CrawlClassification(value)
+    except ValueError:
+        return CrawlClassification.site_error
+
+
 def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
 
@@ -97,8 +129,8 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
         original_url=item["original_url"],
         normalized_url=item.get("normalized_url"),
         final_url=item.get("final_url"),
-        status=item["status"],
-        classification=item["classification"],
+        status=_coerce_status(item["status"]),
+        classification=_coerce_classification(item["classification"]),
         selected_strategy=item.get("selected_strategy"),
         attempted_strategies=item.get("attempted_strategies", []),
         error=item.get("error"),
@@ -212,7 +244,7 @@ def build_unified_crawl_response(
     )
 
 
-def _shape_all(results: list[dict[str, Any]]) -> list[UnifiedCrawlResult]:
+def _shape_all(results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
     :func:`abuild_unified_crawl_response`).
 
@@ -220,11 +252,20 @@ def _shape_all(results: list[dict[str, Any]]) -> list[UnifiedCrawlResult]:
     per-item (a dropped item counts as a failed crawl, not silence), and the
     endpoint must hold the same contract. The guard lives here rather than
     at each caller so the two paths cannot drift apart again.
+
+    ``adapt`` is the optional per-item transform a pipeline applies before the
+    unified shaping (``/v1/render`` maps its browser-result dicts through
+    :func:`render_result_to_unified`). It runs INSIDE the same per-item guard,
+    so an item the adapter cannot read degrades to a terminal failure for that
+    item instead of failing the batch -- the same resilience ``/v1/crawl``
+    already had, now extended to the render endpoint's adaptation step, which
+    used to run unguarded in a list comprehension at the call site.
     """
     shaped: list[UnifiedCrawlResult] = []
     for item in results:
         try:
-            shaped.append(build_unified_result(item))
+            adapted = adapt(item) if adapt is not None else item
+            shaped.append(build_unified_result(adapted))
         except Exception:
             shaped.append(_failed_unified_result(item))
     return shaped
@@ -237,19 +278,36 @@ def _failed_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     Fields that require no interpretation are carried through so the caller
     still sees which URL failed.
     """
-    url = item.get("normalized_url") or item.get("original_url") or ""
+    url = item.get("normalized_url") or item.get("original_url") or item.get("url") or ""
     return UnifiedCrawlResult(
-        original_url=item.get("original_url") or url,
+        original_url=item.get("original_url") or item.get("url") or url,
         normalized_url=url,
         final_url=item.get("final_url"),
-        status="failed",
+        status=CrawlStatus.failed,
         # site_error is a FAILED_CLASSIFICATIONS member, so its status-table
         # entry is "failed" -- this keeps (status, classification) consistent
         # for any consumer that re-derives status from classification.
         # unknown_error maps to "blocked", which would disagree with the
         # hardcoded status above.
-        classification=CrawlClassification.site_error.value,
+        classification=CrawlClassification.site_error,
         error=item.get("error") or "result_shaping_failed",
+        # The remaining fields are declared without defaults in the pydantic
+        # model even though the runtime treats them as optional (a bare
+        # ``Field()`` accepts None), so state them explicitly: the item is
+        # already malformed, the only honest payload is "nothing was extracted".
+        selected_strategy=None,
+        attempted_strategies=[],
+        markdown=None,
+        html=None,
+        text=None,
+        quality_score=0.0,
+        http_status=None,
+        content_type=None,
+        extraction_method=None,
+        discovered_link_count=0,
+        discovered_links_truncated=False,
+        next_page_url=None,
+        validators=None,
     )
 
 
@@ -260,6 +318,7 @@ async def abuild_unified_crawl_response(
     policy_schema_version: str = "",
     success: bool = True,
     submitted_count: int | None = None,
+    adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
@@ -268,8 +327,11 @@ async def abuild_unified_crawl_response(
     thread-dispatch overheads, and the default executor serializes those
     submissions anyway once N exceeds the pool. Output is identical to the
     sync contract, which stays for sync callers and tests.
+
+    ``adapt`` reaches ``_shape_all``'s per-item guard, so an item the adapter
+    rejects degrades instead of failing the response.
     """
-    shaped = await asyncio.to_thread(_shape_all, results) if results else []
+    shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
     return UnifiedCrawlResponse(
         request_id=request_id,
         submitted_count=submitted_count if submitted_count is not None else len(results),

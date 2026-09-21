@@ -462,7 +462,9 @@ class DiscoveredLink(BaseModel):
 
 
 class StrategyAttempt(BaseModel):
-    strategy: CrawlStrategy = Field(description="Strategy attempted for this URL.")
+    # Optional: an envelope built after a worker raised before any strategy ran
+    # records None ("no strategy attempted") rather than fabricating a member.
+    strategy: CrawlStrategy | None = Field(description="Strategy attempted for this URL, or null when none was.")
     status: CrawlStatus = Field(description="Attempt-level status.")
     classification: CrawlClassification = Field(description="Attempt-level classification.")
     http_status: int | None = Field(

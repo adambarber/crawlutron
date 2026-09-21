@@ -16,7 +16,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from http.cookiejar import CookieJar
+from http.cookiejar import CookieJar as _StdlibCookieJar
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -91,19 +91,25 @@ def _serialize_response(resp: Any) -> dict[str, Any]:
     }
 
 
-def _rebuild_response(data: dict[str, Any]) -> Any:
-    """Reconstruct a minimal response object from a cached envelope."""
+def _rebuild_response(data: dict[str, Any]) -> HttpFetchResult:
+    """Reconstruct a minimal response object from a cached envelope.
 
-    class _CachedResponse:
-        pass
-
-    r = _CachedResponse()
-    r.status_code = data["status_code"]
-    r.headers = data["headers"]
-    r.body = base64.b64decode(data["body_b64"])
-    r.final_url = data["final_url"]
-    r.elapsed_ms = data.get("elapsed_ms", 0)
-    return r
+    The rebuilt object carries exactly the fields the caller reads
+    (``status_code``/``headers``/``body``/``final_url``/``elapsed_ms``) as a
+    declared dataclass: the previous inline class had no fields at all, so the
+    five attribute assignments were the only definition and every reader was
+    an untyped ``Any`` access. ``HttpFetchResult`` is the fetcher's real result
+    shape and matches field-for-field, including the optional
+    ``decompression_failed`` flag readers check via getattr.
+    """
+    return HttpFetchResult(
+        url=data.get("final_url", ""),
+        final_url=data["final_url"],
+        status_code=data["status_code"],
+        headers=data["headers"],
+        body=base64.b64decode(data["body_b64"]),
+        elapsed_ms=data.get("elapsed_ms", 0),
+    )
 
 
 from urllib.parse import urljoin
@@ -123,7 +129,13 @@ from app.crawl.result_helpers import (
     _engine_result_from_exception,
     _make_engine_result,
 )
-from app.models import CrawlStrategyAttempt, EngineCrawlResult, HttpFetchResult
+from app.models import (
+    CrawlStrategyAttempt,
+    CrawlStrategyName,
+    EngineCrawlResult,
+    HttpFetcher,
+    HttpFetchResult,
+)
 
 # ``_classify_error_code`` is re-exported here for backward compatibility with
 # the many internal call sites in this module; its definition lives in
@@ -142,7 +154,7 @@ def _default_settings() -> CrawlerSettings:
     return CrawlerSettings.from_mapping()
 
 
-class _NoStoreCookieJar(CookieJar):
+class _NoStoreCookieJar(_StdlibCookieJar):
     """A cookie jar that never stores or replays anything (C2).
 
     The long-lived httpx client would otherwise accumulate every Set-Cookie and
@@ -155,6 +167,14 @@ class _NoStoreCookieJar(CookieJar):
     rather than copying it, which is why this override survives the wrap. With
     nothing stored there is nothing to replay and nothing to clobber the
     namespaced ``Cookie:`` header the fetcher sets per request.
+
+    The base is deliberately the ALIASED stdlib jar (``_StdlibCookieJar``), not
+    the project's own ``CookieJar`` defined further down this module (P2-B):
+    this class is defined first, so its base resolves from whatever the
+    ``CookieJar`` name points at at class-creation time. Basing it on the alias
+    makes that resolution independent of source order -- rebinding the base to
+    the storing jar below would silently invert this class's purpose, and the
+    shadowing was load-bearing.
     """
 
     def extract_cookies(self, response, request=None):
@@ -537,7 +557,9 @@ def _build_cffi_session() -> Any:
     # namespaced chokepoint: out via _cookie_header_for_url, in via
     # _store_set_cookies. Sending is unaffected; curl still honors the Cookie
     # header we set explicitly.
-    session = cffi_requests.AsyncSession(impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True)
+    session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
+        impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True
+    )
     try:
         session._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
     except RuntimeError:
@@ -781,7 +803,12 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
         if cached is not None:
             return cached
     addrinfo = socket.getaddrinfo(hostname, None)
-    ips = [entry[4][0] for entry in addrinfo]
+    # The sockaddr's address slot is typed ``str | int | None`` (AF_INET6
+    # tuples carry a scope id in a later position, and the socket stub is
+    # intentionally loose), but a resolved address is always a string here;
+    # coerce per entry so the declared ``list[str]`` contract the SSRF check
+    # and the cache rely on is what the function actually delivers.
+    ips = [str(entry[4][0]) for entry in addrinfo]
     if use_cache:
         # Only the validation path populates the cache. The pinning path
         # resolves fresh and must never persist an IP here -- otherwise a
@@ -1533,7 +1560,7 @@ def _retry_after_seconds(headers: dict[str, str]) -> int | None:
 
 
 async def _fetch_with_retries(
-    fetcher: Any,
+    fetcher: HttpFetcher,
     url: str,
     headers: dict[str, str],
     timeout_seconds: int,
@@ -1557,6 +1584,12 @@ async def _fetch_with_retries(
             # hammering loop. The gap is bounded so a large retry budget can
             # never park a URL beyond the per-retry ceiling.
             await asyncio.sleep(_retry_backoff_seconds(attempt))
+    # ``max_attempts`` is floored at 1 above, so every call enters the loop and
+    # either returns a response or re-raises on its final attempt. This line is
+    # unreachable in practice; it is stated rather than left implicit because
+    # mypy cannot derive the loop's totality from the floor and would otherwise
+    # report a missing return that reads like a real fall-through.
+    raise AssertionError("unreachable: retry loop is total")
 
 
 def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> bool:
@@ -1688,6 +1721,17 @@ def _content_cache_key(
     Kept as a shared helper so engine.py can reconstruct the exact key a future
     fetch of ``normalized_url`` would use (for sitemap lastmod freshness checks,
     #3) without duplicating the key composition.
+
+    ``base_headers`` is serialized WHOLE, and that deliberately includes the
+    per-request ``Cookie`` header set by ``_headers_for_strategy`` (P2-G). The
+    comment at the call site documents the intentional EXCLUSION of the
+    conditional-revalidation headers; ``Cookie`` is the opposite case -- an
+    intentional INCLUSION, and a safety property rather than an optimization:
+    the cookie namespace is what separates one tenant's authenticated view of a
+    URL from another's, so a key that ignored ``Cookie`` could serve tenant A's
+    private page to tenant B straight out of tenant A's cache slot (cross-tenant
+    cache poisoning). The cookie header participates in the key exactly so that
+    differing credentials can never share a cache entry.
     """
     return ContentCache.make_key(
         "http",
@@ -1739,7 +1783,7 @@ async def _http_strategy_result(
     *,
     original_url: str,
     normalized_url: str,
-    strategy: str,
+    strategy: CrawlStrategyName,
     policy: dict[str, Any],
     http_fetcher: Any,
     cache: HttpCache | None = None,
@@ -1782,6 +1826,11 @@ async def _http_strategy_result(
     # re-downloading. The key is derived from the *base* request headers (excluding
     # HTTP conditional-revalidation headers) so it stays stable across crawls -- the
     # conditional headers only change the 304 handshake, never the payload.
+    #
+    # ``Cookie`` is the exception and STAYS in the key (P2-G): the cookie namespace
+    # is what separates one tenant's authenticated view of a URL from another's, so
+    # a key that dropped it could serve tenant A's private page to tenant B from A's
+    # cache slot. Differing credentials must never share an entry.
     ckey: str | None = None
     content_hit = False
     revalidated_304 = False
@@ -1847,18 +1896,27 @@ async def _http_strategy_result(
         # letter of HTTP but is trivially attacker-controlled content suppression;
         # treat it as a normal response body instead.
         resp_headers_304 = {key.lower(): value for key, value in response.headers.items()}
-        echoed_validators = {
-            "etag": resp_headers_304.get("etag")
-            or (caller_conditional.get("If-None-Match") if caller_conditional else None),
-            "last_modified": resp_headers_304.get("last-modified")
-            or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
+        echoed_validators: dict[str, str] = {
+            key: value
+            for key, value in (
+                (
+                    "etag",
+                    resp_headers_304.get("etag")
+                    or (caller_conditional.get("If-None-Match") if caller_conditional else None),
+                ),
+                (
+                    "last_modified",
+                    resp_headers_304.get("last-modified")
+                    or (caller_conditional.get("If-Modified-Since") if caller_conditional else None),
+                ),
+            )
+            if value
         }
-        echoed_validators = {k: v for k, v in echoed_validators.items() if v}
         sent_conditional = any(key in request_headers for key in ("If-None-Match", "If-Modified-Since"))
         if response.status_code == 304 and not revalidated_304 and sent_conditional:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             attempt = CrawlStrategyAttempt(
-                strategy=strategy,  # type: ignore[arg-type]
+                strategy=strategy,
                 status="success",
                 classification="not_modified",
                 http_status=304,
@@ -1877,7 +1935,7 @@ async def _http_strategy_result(
                 final_url=response.final_url,
                 status="success",
                 classification="not_modified",
-                selected_strategy=strategy,  # type: ignore[arg-type]
+                selected_strategy=strategy,
                 attempt=attempt,
                 http_status=304,
                 headers=response.headers,
@@ -2134,7 +2192,7 @@ async def _http_strategy_result(
         discovered_link_count = post_fetch["discovered_link_count"]
         discovered_links_truncated = post_fetch["discovered_links_truncated"]
         attempt = CrawlStrategyAttempt(
-            strategy=strategy,  # type: ignore[arg-type]
+            strategy=strategy,
             status=status,  # type: ignore[arg-type]
             classification=classification,  # type: ignore[arg-type]
             http_status=response.status_code,
@@ -2150,9 +2208,9 @@ async def _http_strategy_result(
             original_url=original_url,
             normalized_url=normalized_url,
             final_url=response.final_url,
-            status=status,  # type: ignore[arg-type]
-            classification=classification,  # type: ignore[arg-type]
-            selected_strategy=strategy if status == "success" else None,  # type: ignore[arg-type]
+            status=status,
+            classification=classification,
+            selected_strategy=strategy if status == "success" else None,
             attempt=attempt,
             http_status=response.status_code,
             headers=headers,

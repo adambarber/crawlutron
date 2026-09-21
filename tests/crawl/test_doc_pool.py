@@ -615,3 +615,59 @@ def test_doc_timeout_kills_and_pool_recovers(monkeypatch):
         assert live_pids != hung_pids
     finally:
         _restore_pool()
+
+
+def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
+    """D5(d)/P2-D: a retired slot whose process will not die is skipped by both
+    the handout scan (needs ``not retired``) and the respawn scan (needs
+    ``not is_alive``), so nothing can ever recover it. Leaving it in the pool
+    means it occupies a list slot -- and holds a PID -- forever while the size
+    budget grows around it. It must be reaped on the normal path, exactly like
+    full teardown does, so the pool and the budget stay consistent.
+    """
+    # responds_to_sigterm=False models a worker nothing can kill: is_alive()
+    # stays True for the life of the process.
+    zombie = ext_mod._DocWorker(_StubProc(1111, responds_to_sigterm=False), _StubConn())
+    zombie.retired = True
+    zombie.busy = False
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [zombie]
+
+    replacement = _stub_worker(31337)
+
+    fake_pool.setattr(ext_mod, "_spawn_doc_worker", lambda: replacement)
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
+
+    worker = ext_mod._acquire_doc_worker()
+
+    assert worker is replacement, "the pool did not grow past the unkillable slot"
+    assert zombie not in (ext_mod._DOC_POOL or []), (
+        "the retired-but-undead slot was left in the pool: it can never be "
+        "recovered and will occupy a slot for the life of the process"
+    )
+
+
+def test_a_retired_dead_slot_is_also_reaped_not_left_as_a_placeholder(fake_pool, monkeypatch):
+    """The reap is not conditional on the process being undead: a slot that was
+    retired after a normal timeout (process died and was reaped) must not
+    linger either. The pool and the budget stay consistent only when no retired
+    slot remains, so a later acquire sees ``len(pool) == usable``."""
+    retired = _stub_worker(2323)
+    retired.retired = True
+    retired.busy = False
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [retired]
+
+    replacement = _stub_worker(4242)
+    fake_pool.setattr(ext_mod, "_spawn_doc_worker", lambda: replacement)
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
+
+    worker = ext_mod._acquire_doc_worker()
+
+    assert worker is replacement
+    assert retired not in (ext_mod._DOC_POOL or []), (
+        "a retired slot was left in the pool as a placeholder instead of reaped"
+    )
+    assert all(not each.retired for each in ext_mod._DOC_POOL or []), (
+        "the pool holds a retired slot: the pool size and the usable budget have drifted apart"
+    )

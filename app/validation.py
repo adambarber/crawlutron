@@ -4,12 +4,27 @@ import ipaddress
 import logging
 import math
 import os
+import sys
 from collections.abc import Mapping
 from functools import lru_cache
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+
+if TYPE_CHECKING:
+    from publicsuffixlist import PublicSuffixList
+
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
+
+# Lazily-initialised public-suffix list. ``publicsuffixlist`` is an optional
+# dependency, and importing it (and building the table) is only worth paying
+# for when a URL actually needs its suffix resolved. ``_PSL_UNSET`` is the
+# sentinel that keeps "never attempted" distinct from "attempted and
+# unavailable" -- the accessor must keep trying in the first case and must
+# never re-attempt in the second, so a plain ``None`` cannot serve both.
+_PSL_UNSET = None
+_PSL: PublicSuffixList | None = _PSL_UNSET
 
 # Attribution/tracking query parameters that carry no content-identity
 # information. Dropping them lets URLs that differ only by UTM/tracking tags
@@ -397,10 +412,11 @@ def _public_suffix_list():
     the service never fails to import or gate without the dataset.
     """
     global _PSL
-    try:
+    # Read through the module object (not the bare name) so a caller that
+    # deletes the module attribute -- the test seam for "dataset was never
+    # loaded" -- is treated as uninitialised rather than raising NameError.
+    if getattr(sys.modules[__name__], "_PSL", _PSL_UNSET) is not _PSL_UNSET:
         return _PSL
-    except NameError:
-        pass
     try:
         from publicsuffixlist import PublicSuffixList
 
@@ -504,6 +520,8 @@ def safe_public_url_or_none(raw: str | None) -> str | None:
     two egress contracts, and the policy must apply identically at every door.
     """
     try:
+        if raw is None:
+            return None
         return normalize_public_http_url(raw)
     except ValueError:
         return None

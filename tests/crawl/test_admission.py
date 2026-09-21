@@ -42,31 +42,31 @@ class TestReadinessState:
     def test_initial_state_is_ready(self):
         state = ReadinessState()
         snap = state.snapshot()
-        assert snap["status"] == "ready"
-        assert snap["active_requests"] == 0
-        assert snap["saturated"] is False
+        assert snap.status == "ready"
+        assert snap.active_requests == 0
+        assert snap.saturated is False
 
     def test_begin_end_request(self):
         state = ReadinessState()
         state.begin_request()
         snap = state.snapshot()
-        assert snap["active_requests"] == 1
-        assert snap["saturated"] is False
+        assert snap.active_requests == 1
+        assert snap.saturated is False
         state.end_request()
         snap = state.snapshot()
-        assert snap["active_requests"] == 0
+        assert snap.active_requests == 0
 
     def test_saturated_when_memory_at_ceiling(self):
         metrics = get_metrics()
         metrics.resource_memory_utilization = 0.0
         metrics.resource_cpu_utilization = 0.0
         state = ReadinessState()
-        assert state.snapshot()["saturated"] is False
+        assert state.snapshot().saturated is False
         # Memory gate rides at 0.92; at/above target the service is saturated.
         metrics.resource_memory_utilization = 0.95
         snap = state.snapshot()
-        assert snap["saturated"] is True
-        assert snap["status"] == "saturated"
+        assert snap.saturated is True
+        assert snap.status == "saturated"
 
     def test_saturated_when_cpu_at_ceiling(self):
         metrics = get_metrics()
@@ -75,13 +75,13 @@ class TestReadinessState:
         state = ReadinessState()
         # CPU gate rides at 0.90; at/above target the service is saturated.
         metrics.resource_cpu_utilization = 0.93
-        assert state.snapshot()["saturated"] is True
+        assert state.snapshot().saturated is True
 
     def test_end_request_does_not_go_negative(self):
         state = ReadinessState()
         state.end_request()
         snap = state.snapshot()
-        assert snap["active_requests"] == 0
+        assert snap.active_requests == 0
 
 
 # --- sensing: quota ---
@@ -488,9 +488,20 @@ class _HSScheduler:
     def get_pinned_strategy(self, domain):
         return self.pins.get(domain)
 
-    async def run(self, jobs, worker):
+    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
         self.runs += 1
-        return {job.index: await worker(job) for job in jobs}
+        # Route a raising worker through the real envelope chokepoint when the
+        # caller supplies one, so the double honours the same contract the real
+        # scheduler does instead of silently dropping the failed job.
+        out = {}
+        for job in jobs:
+            try:
+                out[job.index] = await worker(job)
+            except Exception as error:
+                if failed_result is None:
+                    raise
+                out[job.index] = failed_result(job, error)
+        return out
 
 
 def _task(domain):

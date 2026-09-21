@@ -35,14 +35,48 @@ logger = logging.getLogger(__name__)
 # cannot spawn unbounded concurrent crawls and OOM the container
 # (adversarial review F-no-concurrency-cap).
 _WEBHOOK_CRAWL_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
+# P2-C: a lazily-built module-global asyncio.Semaphore binds to whichever event
+# loop first uses it, and asyncio's loop-bound primitives cannot be awaited from
+# a loop other than the one they were created on -- the same hazard
+# ``_LoopBoundPooledClient`` was built for in app.crawl.strategies.http. The
+# instance therefore tracks the loop it was built for and is rebuilt when the
+# running loop changes (for example a test harness driving many asyncio.run
+# calls in sequence).
+#
+# The pooled instance stays in this module global, and the builder stays a
+# separate late-bound function, for the same reasons the pooled client does:
+# service teardown and the suites reset pooled state by assigning the global,
+# and a test that monkeypatches ``_build_async_crawl_semaphore`` must still be
+# observed. Nothing is constructed at import time, so importing this module
+# never touches an event loop.
 _async_crawl_semaphore: asyncio.Semaphore | None = None
+_async_crawl_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _build_async_crawl_semaphore() -> asyncio.Semaphore:
+    """Construct the webhook-crawl semaphore.
+
+    Kept as its own module-level name (rather than inline in
+    ``_get_async_crawl_semaphore``) so tests can patch the builder and have a
+    rebuild observe it, mirroring the pooled clients' late-bound ``build``.
+    """
+    return asyncio.Semaphore(_WEBHOOK_CRAWL_CONCURRENCY)
 
 
 def _get_async_crawl_semaphore() -> asyncio.Semaphore:
-    """Lazily construct the async-crawl semaphore (avoids event-loop dep at import)."""
-    global _async_crawl_semaphore
-    if _async_crawl_semaphore is None:
-        _async_crawl_semaphore = asyncio.Semaphore(_WEBHOOK_CRAWL_CONCURRENCY)
+    """Return the webhook-crawl semaphore bound to the running event loop.
+
+    Lazily constructed (no event-loop dependency at import) and rebuilt when the
+    running loop is not the one the cached semaphore was built for.
+    """
+    global _async_crawl_semaphore, _async_crawl_semaphore_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _async_crawl_semaphore is None or _async_crawl_semaphore_loop is not loop:
+        _async_crawl_semaphore = _build_async_crawl_semaphore()
+        _async_crawl_semaphore_loop = loop
     return _async_crawl_semaphore
 
 

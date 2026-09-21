@@ -1647,6 +1647,10 @@ _RESULT_PRIMITIVES = (
     "_make_engine_result",
     "_engine_result_from_exception",
     "_skipped_engine_result",
+    # render-layer exception -> CrawlResult chokepoint: the browser pool worker
+    # returns this shape on failure, so a non-member strategy literal here is
+    # the same class of bug the engine list guards against
+    "_crawl_result_from_exception",
     # strategy/render-layer terminal CrawlResult chokepoint: the render path
     # reaches the wire through the same lenient dataclass, so a non-member
     # literal here is the same class of bug the engine list guards against
@@ -1708,6 +1712,110 @@ def test_non_member_classification_detector_bites():
     assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
     good_terminal = ast.parse('def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n')
     assert not list(_non_member_classification_offenders(good_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+
+
+# ---------------------------------------------------------------------------
+# Strategy-label validity chokepoint (the sibling of the value-validity one)
+#
+# The same class of bug hit the strategy axis: the browser pool worker labeled
+# its terminal result ``strategy="BROWSER_DECLARED_CRAWLER"`` -- a string that
+# is not a CrawlStrategy member -- while the scheduler's worker-exception
+# envelope and the engine's budget-timeout envelope both passed ``strategy=""``.
+# The internal CrawlStrategyName Literal and the strict CrawlStrategy enum on
+# the wire model reject both values; the only reason anything worked at all was
+# a pair of ``# type: ignore[arg-type]`` at the CrawlStrategyAttempt
+# construction sites plus _shape_all's silent catch, which threw away the real
+# classification and replaced it with site_error. A non-member strategy literal
+# must never reach a result primitive again.
+# ---------------------------------------------------------------------------
+
+_STRATEGY_VALUE_SOURCES = ("strategy",)
+
+
+def _non_member_strategy_offenders(tree, path, *, members):
+    """A literal strategy passed to a result primitive must be a real member.
+
+    ``members`` is the live ``CrawlStrategy`` value set. ``None`` is admitted
+    explicitly: it is the honest label for "no strategy was attempted" (an
+    envelope built after a worker raised, before any strategy ran), which is
+    not an invented member and not an empty string. There is no
+    hand-maintained exemption list -- such a list is precisely how the invented
+    name shipped, because it would have to be remembered and updated in
+    lockstep with the enum. A non-literal (variable, attribute, or module
+    constant) is what callers should write and passes without comment.
+    """
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in _RESULT_PRIMITIVES
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg not in _STRATEGY_VALUE_SOURCES:
+                continue
+            value = kw.value
+            if isinstance(value, ast.Constant) and value.value is None:
+                continue
+            if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+                continue
+            if value.value not in members:
+                yield offender(
+                    path,
+                    node.lineno,
+                    f"strategy={value.value!r} is not a CrawlStrategy member; "
+                    f"pass a real member, or None when no strategy was attempted",
+                )
+
+
+def test_engine_emitted_strategies_are_enum_members():
+    from app.api_models import CrawlStrategy
+
+    members = {m.value for m in CrawlStrategy}
+    offenders = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_non_member_strategy_offenders(tree, path, members=members))
+    assert not offenders, (
+        "a literal strategy passed to a result primitive must be a "
+        "CrawlStrategy member, or None when no strategy was attempted; the "
+        "strict enum on the wire model rejects anything else and the shaping "
+        "fallback silently overwrites the real classification: " + ", ".join(offenders)
+    )
+
+
+def test_non_member_strategy_detector_bites():
+    from app.api_models import CrawlStrategy
+
+    members = {m.value for m in CrawlStrategy}
+    # An invented member name -- exactly the shape that shipped on the browser
+    # worker's failure path.
+    bad = ast.parse(
+        'def f():\n    return _engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n'
+    )
+    offenders = list(
+        _non_member_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
+    assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
+    # The empty string is the same lie in cheaper clothing.
+    bad_empty = ast.parse('def f():\n    return _failed_engine_result(strategy="")\n')
+    offenders = list(
+        _non_member_strategy_offenders(bad_empty, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
+    assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
+    # None is admitted: it is the honest "no strategy attempted" label.
+    good_none = ast.parse("def f():\n    return _failed_engine_result(strategy=None)\n")
+    assert not list(
+        _non_member_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
+    # A real member literal and a non-literal both pass without comment.
+    good_member = ast.parse('def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n')
+    assert not list(
+        _non_member_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
+    good_var = ast.parse("def f(s):\n    return _crawl_result_from_exception(strategy=s)\n")
+    assert not list(
+        _non_member_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2005,3 +2113,438 @@ def test_reinline_js_endpoints_detector_bites():
     assert _reinline_js_endpoints_filter_offenders(validation_tree, validation_path) == []
     hits = _reinline_js_endpoints_filter_offenders(validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     assert len(hits) == 1 and "filter_js_endpoints" in hits[0], hits
+
+
+# ---------------------------------------------------------------------------
+# Chokepoint drift detectors for the P0-P2 fix tiers
+#
+# Each behavioral test below pins what the code DOES today; these pin the
+# CHOKEPOINT so a future edit that bypasses it turns the suite red instead of
+# silently reintroducing the defect. Same shape as the detectors above: an AST
+# walk over app/, a synthetic *_bites companion proving the predicate fires,
+# and no hand-maintained exemption list.
+# ---------------------------------------------------------------------------
+
+
+def _enclosing_defs(node: ast.AST, root: ast.AST) -> list[str]:
+    """The enclosing ``def``/``class`` names from innermost outward.
+
+    AST has no parent pointers, so a parent map is built per tree; the walk is
+    O(nodes) and the detectors call it only on a handful of matched nodes.
+    """
+    parents: dict[int, ast.AST] = {}
+    stack = [root]
+    while stack:
+        parent = stack.pop()
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+            stack.append(child)
+    names: list[str] = []
+    current: ast.AST | None = node
+    while current is not None:
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.append(current.name)
+        current = parents.get(id(current))
+    return names
+
+
+# --- 4a: the robots matcher compiler is reachable only via its host cache ----
+
+_ROBOTS_COMPILE = "_compile_robots_pattern"
+_ROBOTS_COMPILE_HOME = "_RobotsPatternCache"
+
+
+def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """``_compile_robots_pattern`` may be called only from ``_RobotsPatternCache.get``.
+
+    The pure pattern translation is the cheap half of the robots matcher; the
+    safety property is that every caller reaches it through the bounded
+    PER-HOST LRU. A second caller reintroduces a process-global matcher cache
+    keyed only on the pattern string -- patterns arrive from remotely-fetched
+    robots.txt, so a hostile site spraying distinct patterns would evict every
+    other site's matchers and control the whole cache (P2-E). The home method
+    is the single sanctioned call site; the module-level wrapper
+    (``_robots_pattern_to_regex``) goes through it too.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == _ROBOTS_COMPILE
+        ):
+            continue
+        scopes = _enclosing_defs(node, tree)
+        if _ROBOTS_COMPILE_HOME in scopes and "get" in scopes[: scopes.index(_ROBOTS_COMPILE_HOME) + 1]:
+            continue
+        offenders.append(
+            offender(
+                path,
+                node.lineno,
+                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through the"
+                " per-host cache so a hostile robots.txt cannot evict another site's matchers",
+            )
+        )
+    return offenders
+
+
+def test_robots_pattern_compile_lives_behind_the_per_host_cache():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_robots_compile_call_offenders(tree, path))
+    assert not offenders, ", ".join(offenders)
+
+
+def test_robots_pattern_compile_detector_bites():
+    # A direct caller -- exactly the shape that reintroduces a global,
+    # attacker-keyed matcher cache.
+    bad = ast.parse("def f(pattern):\n    return _compile_robots_pattern(pattern)\n")
+    offenders = list(_robots_compile_call_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "per-host cache" in offenders[0], offenders
+    # The sanctioned home passes.
+    good = ast.parse(
+        "class _RobotsPatternCache:\n"
+        "    def get(self, host, pattern):\n"
+        "        return _compile_robots_pattern(pattern)\n"
+    )
+    assert not _robots_compile_call_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
+    # A nested helper inside the home class is still inside the home scope.
+    nested = ast.parse(
+        "class _RobotsPatternCache:\n"
+        "    def get(self, host, pattern):\n"
+        "        def build():\n"
+        "            return _compile_robots_pattern(pattern)\n"
+        "        return build()\n"
+    )
+    assert not _robots_compile_call_offenders(nested, REPO_ROOT / "app" / "_synthetic.py")
+    # A same-named method on any OTHER class is not the home.
+    impostor = ast.parse(
+        "class OtherCache:\n"
+        "    def get(self, pattern):\n"
+        "        return _compile_robots_pattern(pattern)\n"
+    )
+    assert len(_robots_compile_call_offenders(impostor, REPO_ROOT / "app" / "_synthetic.py")) == 1
+
+
+# --- 4b: result-primitive status values are real ResultStatus members --------
+
+_STATUS_VALUE_SOURCES = ("status",)
+
+
+def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) -> list[str]:
+    """A literal ``status`` passed to a result primitive must be a real member.
+
+    Mirrors the classification/strategy detectors: ``status`` feeds the strict
+    wire enum on the unified result, so an invented literal is a KeyError or a
+    silent shaping failure waiting on a batch. ``members`` is the live
+    ``ResultStatus`` argument set, read at test time -- a hand-maintained
+    exemption list is precisely how an invented status would ship.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in _RESULT_PRIMITIVES
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg not in _STATUS_VALUE_SOURCES:
+                continue
+            value = kw.value
+            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                continue
+            if value.value not in members:
+                offenders.append(
+                    offender(
+                        path,
+                        node.lineno,
+                        f"status={value.value!r} is not a ResultStatus member; add it to the"
+                        " Literal (app/models.py) or derive it from an existing member",
+                    )
+                )
+    return offenders
+
+
+def test_result_primitives_emit_real_status_members():
+    from typing import get_args
+
+    from app.models import ResultStatus
+
+    members = set(get_args(ResultStatus))
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_non_member_status_offenders(tree, path, members=members))
+    assert not offenders, (
+        "a literal status passed to a result primitive must be a ResultStatus "
+        "member, or the strict enum on the wire model rejects the batch: " + ", ".join(offenders)
+    )
+
+
+def test_non_member_status_detector_bites():
+    from typing import get_args
+
+    from app.models import ResultStatus
+
+    members = set(get_args(ResultStatus))
+    bad = ast.parse('def f():\n    return _terminal_crawl_result(status="never_a_status")\n')
+    offenders = list(_non_member_status_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members))
+    assert len(offenders) == 1 and "ResultStatus member" in offenders[0], offenders
+    good = ast.parse('def f():\n    return _terminal_crawl_result(status="failed")\n')
+    assert not _non_member_status_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    # A non-literal (a variable or the caller's own status field) passes.
+    good_var = ast.parse("def f(s):\n    return _make_engine_result(status=s)\n")
+    assert not _non_member_status_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+
+
+# --- 4c: the webhook semaphore is touched only through its loop accessor -----
+
+_SEMAPHORE_GLOBALS = frozenset({"_async_crawl_semaphore", "_async_crawl_semaphore_loop"})
+_SEMAPHORE_ACCESSOR = "_get_async_crawl_semaphore"
+
+
+def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """The loop-bound semaphore module globals are touched only by the accessor.
+
+    ``_get_async_crawl_semaphore`` is the single home that binds the cached
+    instance to the running loop and rebuilds it when the loop changes; reading
+    or assigning the module global from anywhere else silently reintroduces a
+    loop-bound violation (a Semaphore awaited off the loop it was created on).
+    The module-level declaration has no enclosing function and is exempt.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id in _SEMAPHORE_GLOBALS):
+            continue
+        scopes = _enclosing_defs(node, tree)
+        if not scopes or _SEMAPHORE_ACCESSOR in scopes:
+            continue
+        offenders.append(
+            offender(
+                path,
+                node.lineno,
+                f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the"
+                " instance stays bound to the running loop",
+            )
+        )
+    return offenders
+
+
+def test_async_crawl_semaphore_globals_are_loop_bound():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_semaphore_global_touch_offenders(tree, path))
+    assert not offenders, ", ".join(offenders)
+
+
+def test_async_crawl_semaphore_loop_binding_detector_bites():
+    # A direct read from a random function -- the loop-bound bypass.
+    bad = ast.parse("async def f():\n    return _async_crawl_semaphore.acquire()\n")
+    offenders = list(_semaphore_global_touch_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "loop" in offenders[0], offenders
+    # A direct write is the same bypass.
+    bad_write = ast.parse("def f():\n    _async_crawl_semaphore = None\n")
+    assert list(_semaphore_global_touch_offenders(bad_write, REPO_ROOT / "app" / "_synthetic.py"))
+    # The module-level declaration is the definition, not a touch.
+    declaration = ast.parse("_async_crawl_semaphore: asyncio.Semaphore | None = None\n")
+    assert not _semaphore_global_touch_offenders(declaration, REPO_ROOT / "app" / "_synthetic.py")
+    # The accessor itself is exempt, including the companion loop global.
+    accessor = ast.parse(
+        "def _get_async_crawl_semaphore():\n"
+        "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
+        "    if _async_crawl_semaphore is None:\n"
+        "        _async_crawl_semaphore = _build_async_crawl_semaphore()\n"
+        "    return _async_crawl_semaphore\n"
+    )
+    assert not _semaphore_global_touch_offenders(accessor, REPO_ROOT / "app" / "_synthetic.py")
+
+
+# --- 4d: the doc pool reaps retired slots on every acquisition ---------------
+
+_DOC_POOL_NAME = "_DOC_POOL"
+_DOC_POOL_ACQUIRER = "_acquire_doc_worker"
+
+
+def _has_retired_attr(node: ast.AST) -> bool:
+    return any(isinstance(sub, ast.Attribute) and sub.attr == "retired" for sub in ast.walk(node))
+
+
+def _reaps_retired(value: ast.AST) -> bool:
+    """A ``_DOC_POOL = [... for each ... if not each.retired]`` style rebuild.
+
+    ``not each.retired`` parses as a ``UnaryOp(Not, ...)`` and an explicit
+    comparison as a ``Compare``; both shapes are admitted.
+    """
+    if not isinstance(value, ast.ListComp):
+        return False
+    for generator in value.generators:
+        for condition in generator.ifs:
+            for node in ast.walk(condition):
+                if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+                    if _has_retired_attr(node.operand):
+                        return True
+                if isinstance(node, ast.Compare):
+                    if any(_has_retired_attr(operand) for operand in (node.left, *node.comparators)):
+                        return True
+    return False
+
+
+def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """``_acquire_doc_worker`` must rebuild the pool without retired slots.
+
+    P2-D: a retired slot has been terminated and can never be handed out, so it
+    must not keep occupying a pool entry. The respawn scan only replaces a slot
+    whose process is dead, which leaves a retired-but-still-``is_alive()`` slot
+    skipped by both scans and stranded in the pool forever -- the entry count
+    drifted permanently above the usable count. Removing the reap filter is the
+    regression; this detector fails the suite when it goes.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef) and node.name == _DOC_POOL_ACQUIRER):
+            continue
+        if not any(
+            isinstance(child, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == _DOC_POOL_NAME for target in child.targets)
+            and _reaps_retired(child.value)
+            for child in ast.walk(node)
+        ):
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive"
+                    " slot would strand in the pool and inflate the size budget",
+                )
+            )
+    return offenders
+
+
+def test_doc_pool_acquirer_reaps_retired_slots():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_doc_pool_reap_offenders(tree, path))
+    assert not offenders, ", ".join(offenders)
+
+
+def test_doc_pool_reap_detector_bites():
+    # The acquirer without the reap filter: the regression the detector hunts.
+    bad = ast.parse(
+        "def _acquire_doc_worker():\n"
+        "    with _POOL_LOCK:\n"
+        "        want = _doc_extraction_worker_count()\n"
+        "        while True:\n"
+        "            for worker in _DOC_POOL:\n"
+        "                if not worker.busy:\n"
+        "                    return worker\n"
+    )
+    offenders = list(_doc_pool_reap_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py"))
+    assert len(offenders) == 1 and "retired" in offenders[0], offenders
+    # The real filter satisfies it.
+    good = ast.parse(
+        "def _acquire_doc_worker():\n"
+        "    with _POOL_LOCK:\n"
+        "        _DOC_POOL = [each for each in _DOC_POOL if not each.retired]\n"
+        "        return _DOC_POOL[0]\n"
+    )
+    assert not _doc_pool_reap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    # A pool rebuild that filters on something else is not the reap.
+    not_reap = ast.parse(
+        "def _acquire_doc_worker():\n"
+        "    with _POOL_LOCK:\n"
+        "        _DOC_POOL = [each for each in _DOC_POOL if not each.busy]\n"
+        "        return _DOC_POOL[0]\n"
+    )
+    assert list(_doc_pool_reap_offenders(not_reap, REPO_ROOT / "app" / "crawl" / "_synthetic.py"))
+
+
+# --- 4e (optional): the attempt dataclass is pinned at its construction site ---
+#
+# mypy cannot enforce this today: ``CrawlStrategyName`` is a ``Literal`` built
+# from module constants that are typed ``str`` (not ``Final`` with a literal
+# type), so mypy degrades the alias and reports no arg-type error -- which is
+# why the six ``# type: ignore[arg-type]`` comments the producers carried were
+# all dead (``warn_unused_ignores`` had already flagged the two in engine.py).
+# Honest annotations on the producers help a human reader; this detector is
+# what actually pins the class, at the point that matters: every construction
+# site, regardless of which builder feeds it.
+
+_ATTEMPT_CLASS = "CrawlStrategyAttempt"
+_ATTEMPT_STRATEGY_KWARG = "strategy"
+
+
+def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *, members) -> list[str]:
+    """A literal ``strategy=`` at a ``CrawlStrategyAttempt`` site must be a member.
+
+    Covers the class directly rather than the builder primitives, so a new
+    construction site anywhere in ``app/`` is policed without being registered
+    anywhere first. ``None`` is admitted: it is the honest label for "no
+    strategy was attempted". ``members`` is the live ``CrawlStrategyName``
+    argument set, read at test time.
+    """
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == _ATTEMPT_CLASS
+        ):
+            continue
+        for kw in node.keywords:
+            if kw.arg != _ATTEMPT_STRATEGY_KWARG:
+                continue
+            value = kw.value
+            if isinstance(value, ast.Constant) and value.value is None:
+                continue
+            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+                continue
+            if value.value not in members:
+                offenders.append(
+                    offender(
+                        path,
+                        node.lineno,
+                        f"strategy={value.value!r} is not a CrawlStrategyName member; pass a real"
+                        " member, or None when no strategy was attempted",
+                    )
+                )
+    return offenders
+
+
+def test_crawl_strategy_attempt_sites_use_real_members():
+    from typing import get_args
+
+    from app.models import CrawlStrategyName
+
+    members = set(get_args(CrawlStrategyName))
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_non_member_attempt_strategy_offenders(tree, path, members=members))
+    assert not offenders, (
+        "a literal strategy at a CrawlStrategyAttempt construction site must be a "
+        "CrawlStrategyName member, or None when no strategy was attempted: " + ", ".join(offenders)
+    )
+
+
+def test_crawl_strategy_attempt_detector_bites():
+    from typing import get_args
+
+    from app.models import CrawlStrategyName
+
+    members = set(get_args(CrawlStrategyName))
+    bad = ast.parse(
+        "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_DECLARED_CRAWLER', status='failed',"
+        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
+    )
+    offenders = list(_non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members))
+    assert len(offenders) == 1 and "CrawlStrategyName member" in offenders[0], offenders
+    # None is admitted -- the honest "no strategy attempted" label.
+    good_none = ast.parse(
+        "def f():\n    return CrawlStrategyAttempt(strategy=None, status='failed',"
+        " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
+    )
+    assert not _non_member_attempt_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    # A real member literal and a non-literal both pass.
+    good_member = ast.parse("def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_HEADLESS')\n")
+    assert not _non_member_attempt_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    good_var = ast.parse("def f(s):\n    return CrawlStrategyAttempt(strategy=s)\n")
+    assert not _non_member_attempt_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)

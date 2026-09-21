@@ -9,9 +9,9 @@ import the constant instead of typing the string literal.
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 from urllib.parse import urlparse as _urlparse
 
-# ---------------------------------------------------------------------------
 # Fetch strategies (how bytes are retrieved). Orthogonal to extraction.
 # ---------------------------------------------------------------------------
 HTTP_DECLARED_CRAWLER: str = "HTTP_DECLARED_CRAWLER"
@@ -138,6 +138,13 @@ class CrawlClassification(str, Enum):
     # unavailable, so the page is a retry candidate, not a dead page. The
     # classifier and the retry decision both key off this label.
     browser_pool_exhausted = "browser_pool_exhausted"
+    # A domain's breaker was open, so the URL was never attempted: like
+    # browser_pool_exhausted this is a capacity decision, not a dead page. A
+    # member of the taxonomy so the classifier's ``circuit_breaker_open`` code
+    # survives the strict enum at response shaping instead of being downgraded
+    # to site_error (which would make it indistinguishable from a real failure
+    # and hide the reason the attempt was skipped).
+    circuit_breaker_open = "circuit_breaker_open"
     payload_too_large = "payload_too_large"
     too_many_redirects = "too_many_redirects"
     http_error = "http_error"
@@ -199,6 +206,14 @@ FAILED_CLASSIFICATIONS: frozenset[str] = frozenset(
 )
 
 # ---------------------------------------------------------------------------
+# Crawl result status (the high-level outcome of a URL). Declared here because
+# :data:`CLASSIFICATION_STATUS_BY_LABEL` below maps every classification onto
+# one of these, and that table is the low-level constant. ``app.models``
+# re-exports the alias so dataclass fields keep a single name.
+# ---------------------------------------------------------------------------
+ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
+
+# ---------------------------------------------------------------------------
 # Classification -> result status: THE single source of truth.
 #
 # This used to be two independent if-chains (``http._status_for_classification``
@@ -212,7 +227,7 @@ FAILED_CLASSIFICATIONS: frozenset[str] = frozenset(
 # future per-classification metadata (retryability, escalation hints, metric
 # buckets): new columns land next to the status, not inside two conditionals.
 # ---------------------------------------------------------------------------
-CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
+CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # Usable content, or freshness proved by the caller's own validators.
     "rendered": "success",
     "not_modified": "success",
@@ -241,6 +256,9 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
     # frontier layer re-queues it -- so this status describes the attempt,
     # not the page.
     "browser_pool_exhausted": "failed",
+    # Capacity, not a dead page: the domain's breaker was open, so the URL was
+    # never attempted. Same retry contract as browser_pool_exhausted above.
+    "circuit_breaker_open": "failed",
 }
 
 # Unknown-classification default: "blocked".
@@ -260,10 +278,10 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, str] = {
 #    revisited, and cannot poison caches or strategy pinning. A label that
 #    deserves "failed" only ever reaches the default if someone forgot to list
 #    it -- which ``CLASSIFICATION_STATUS_BY_LABEL`` completeness tests pin.
-UNKNOWN_CLASSIFICATION_STATUS: str = "blocked"
+UNKNOWN_CLASSIFICATION_STATUS: ResultStatus = "blocked"
 
 
-def status_for_classification(classification: str) -> str:
+def status_for_classification(classification: str) -> ResultStatus:
     """Map a page classification onto the crawl result status.
 
     Every classification a strategy can emit is an explicit key in

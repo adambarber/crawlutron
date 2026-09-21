@@ -2,6 +2,7 @@
 
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -16,6 +17,22 @@ from app.metrics import get_metrics
 # ceiling, instead of a removed external concurrency knob.
 _MEMORY_SATURATION = 0.92
 _CPU_SATURATION = 0.90
+
+
+@dataclass(frozen=True)
+class ReadinessSnapshot:
+    """Typed view of the readiness state at one instant.
+
+    ``snapshot`` used to return ``dict[str, int | bool | str]``, which widened
+    every field to that union and made the ``ReadinessResponse`` construction
+    un-typecheckable: the caller had to assert each key held the right member.
+    Declaring the four fields pins the shape at the source instead.
+    """
+
+    status: str
+    active_requests: int
+    max_active_requests: int
+    saturated: bool
 
 
 class ReadinessState:
@@ -48,7 +65,7 @@ class ReadinessState:
         with self._lock:
             self._active_requests = max(0, self._active_requests - 1)
 
-    def snapshot(self) -> dict[str, int | int | bool | str]:
+    def snapshot(self) -> ReadinessSnapshot:
         with self._lock:
             active_requests = self._active_requests
             sampler = self._utilization_sampler
@@ -62,13 +79,13 @@ class ReadinessState:
             mem_util = float(getattr(metrics, "resource_memory_utilization", 0.0) or 0.0)
             cpu_util = float(getattr(metrics, "resource_cpu_utilization", 0.0) or 0.0)
         saturated = mem_util >= _MEMORY_SATURATION or cpu_util >= _CPU_SATURATION
-        return {
-            "status": "saturated" if saturated else "ready",
-            "active_requests": active_requests,
+        return ReadinessSnapshot(
+            status="saturated" if saturated else "ready",
+            active_requests=active_requests,
             # Self-managed: no fixed request cap. Saturation is resource-driven.
-            "max_active_requests": 0,
-            "saturated": saturated,
-        }
+            max_active_requests=0,
+            saturated=saturated,
+        )
 
 
 # Module-level singleton so routers outside this module (e.g. render, crawl,
@@ -121,12 +138,12 @@ def create_health_router() -> "tuple[APIRouter, ReadinessState]":
         """Readiness check - returns HTTP 503 when the self-managed guard is saturated."""
         snap = readiness_state.snapshot()
         return JSONResponse(
-            status_code=503 if snap["saturated"] else 200,
+            status_code=503 if snap.saturated else 200,
             content=ReadinessResponse(
-                status=snap["status"],
-                active_requests=snap["active_requests"],
-                max_active_requests=snap["max_active_requests"],
-                saturated=snap["saturated"],
+                status=snap.status,
+                active_requests=snap.active_requests,
+                max_active_requests=snap.max_active_requests,
+                saturated=snap.saturated,
             ).model_dump(),
         )
 

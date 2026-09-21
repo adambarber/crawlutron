@@ -9,12 +9,28 @@ import pytest
 from _testkit import *
 from _testkit import make_job, make_result
 
+from app.crawl.result_helpers import _failed_result_for
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
 from app.scheduler import DomainScheduler
 
 
 async def ok_worker(job: CrawlJob) -> Any:
     return make_result(job.url, job.domain)
+
+
+def _engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
+    """The crawl pipeline's real failure envelope.
+
+    Routes through the production ``_failed_result_for`` chokepoint rather than
+    re-building an envelope here: the classification, redaction and
+    ``normalized_url`` fallback are that function's contract, and a test-local
+    copy would silently drift from it (it already did twice). The URL accessor
+    is supplied here for the same reason production supplies one -- the two job
+    shapes carry it under different names.
+    """
+    return _failed_result_for(
+        job, error, url_of=lambda j: getattr(j, "original_url", None) or j.url
+    )
 
 
 class TestScheduler:
@@ -37,7 +53,7 @@ class TestScheduler:
         scheduler.set_domain_cooldown("example.com", 0.3)
         job = make_job(0, "http://example.com/")
         started = time.monotonic()
-        results = await scheduler.run([job], ok_worker)
+        results = await scheduler.run([job], ok_worker, failed_result=_engine_envelope)
         elapsed = time.monotonic() - started
         assert results[0].status == "success"
         assert elapsed > 0.25
@@ -45,7 +61,7 @@ class TestScheduler:
     async def test_run_returns_results_keyed_by_job_index(self):
         scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
-        results = await scheduler.run(jobs, ok_worker)
+        results = await scheduler.run(jobs, ok_worker, failed_result=_engine_envelope)
         # run reports a job.index -> result mapping so callers align each result
         # with its own job regardless of completion order (B1).
         assert sorted(results) == [0, 1, 2]
@@ -58,7 +74,7 @@ class TestScheduler:
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.1)
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
         started = time.monotonic()
-        await scheduler.run(jobs, ok_worker)
+        await scheduler.run(jobs, ok_worker, failed_result=_engine_envelope)
         elapsed = time.monotonic() - started
         assert elapsed >= 0.05
 
@@ -159,14 +175,19 @@ class TestCircuitBreakerSpillsOnResult:
         )
         # The bug raises TypeError inside gather with return_exceptions=True,
         # so run() returns normally but delivers nothing.
-        returned = await scheduler.run([job], worker, on_result=on_result)
+        returned = await scheduler.run([job], worker, on_result=on_result, failed_result=_engine_envelope)
 
         assert returned is None, "on_result mode must return None"
         assert len(spilled) == 1, f"expected 1 spilled result, got {len(spilled)}"
         index, result = spilled[0]
         assert index == 0
+        # The classification and the error agree: a breaker-open skip is a
+        # capacity decision, not a transport failure, so the taxonomy field
+        # callers key on must say so (it used to report "network_error" while
+        # error/diagnostics said "circuit_breaker_open", making the two
+        # indistinguishable from a real network failure).
         assert result.status == "failed", result
-        assert result.classification == "network_error", result
+        assert result.classification == "circuit_breaker_open", result
         assert result.error == "circuit_breaker_open", result
         assert result.diagnostics.get("circuit_breaker") is True, result.diagnostics
 
@@ -403,7 +424,7 @@ class TestSchedulerPolicies:
                 release_slow.set()
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(6)]
-        ret = await sched.run(jobs, worker, on_result=_on_result)
+        ret = await sched.run(jobs, worker, on_result=_on_result, failed_result=_engine_envelope)
         # Streaming mode returns None; the caller owns persistence (spill).
         assert ret is None
         # Every job was delivered exactly once.
@@ -423,7 +444,7 @@ class TestSchedulerPolicies:
             return make_result(job.url, job.domain)
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
-        ret = await sched.run(jobs, worker)
+        ret = await sched.run(jobs, worker, failed_result=_engine_envelope)
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
@@ -497,10 +518,18 @@ class TestSchedulerResilience:
                 raise RuntimeError("transient failure")
             return make_result(job.url, job.domain)
 
-        results = await scheduler.run(jobs, failing_worker)
-        assert len(results) == 2, results
-        assert all(r.status == "success" for r in results.values())
-        assert {r.normalized_url for r in results.values()} == {
+        results = await scheduler.run(jobs, failing_worker, failed_result=_engine_envelope)
+        # The failing job is not dropped: the chokepoint builds it a classified
+        # terminal envelope (reading the URL pair off whichever shape the job
+        # carries -- CrawlJob has only ``url``), so the caller never observes a
+        # missing slot and improvises a result off the raw error. The other
+        # jobs are unaffected.
+        assert len(results) == 3, results
+        assert results[1].status == "failed"
+        assert results[1].classification == "network_error"
+        assert results[1].normalized_url == "http://example.com/1"
+        assert all(r.status == "success" for i, r in results.items() if i != 1)
+        assert {r.normalized_url for i, r in results.items() if i != 1} == {
             "http://example.com/0",
             "http://example.com/2",
         }
@@ -535,7 +564,7 @@ async def test_domain_delay_does_not_block_other_domains(real_sleeps):
 
     t0 = time.monotonic()
     jobs = [_Job(0, "slow.example.com"), _Job(1, "fast.example.com")]
-    await scheduler.run(jobs, worker)
+    await scheduler.run(jobs, worker, failed_result=_engine_envelope)
 
     # fast.example.com must start immediately; with the old gate ordering it
     # waited >= 0.4s for the global slot burned by slow.example.com's delay.
@@ -559,7 +588,7 @@ async def _run_two_same_domain(delay: float = 0.1) -> float:
     )
     jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
     started = time.monotonic()
-    await scheduler.run(jobs, _ok)
+    await scheduler.run(jobs, _ok, failed_result=_engine_envelope)
     return time.monotonic() - started
 
 
@@ -580,7 +609,7 @@ async def test_real_sleeps_exercise_domain_cooldown(real_sleeps):
     scheduler.set_domain_cooldown("example.com", 0.3)
     job = make_job(0, "https://example.com/")
     started = time.monotonic()
-    results = await scheduler.run([job], _ok)
+    results = await scheduler.run([job], _ok, failed_result=_engine_envelope)
     elapsed = time.monotonic() - started
     assert results[0].status == "success"
     # The single job must await the ~0.3s cooldown before running.

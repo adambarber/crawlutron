@@ -18,9 +18,17 @@ class _Scheduler:
     def __init__(self):
         self.runs = 0
 
-    async def run(self, jobs, worker):
+    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
         self.runs += 1
-        return {job.index: await worker(job) for job in jobs}
+        out = {}
+        for job in jobs:
+            try:
+                out[job.index] = await worker(job)
+            except Exception as error:
+                if failed_result is None:
+                    raise
+                out[job.index] = failed_result(job, error)
+        return out
 
 
 class _Gate:

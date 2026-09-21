@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
+from app.models import Classification
+
+CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
         "login_required",
         (
@@ -91,7 +93,7 @@ CLASSIFICATION_SIGNATURES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def classify_page(html: str | None, text: str | None, *, title: str | None = None) -> str:
+def classify_page(html: str | None, text: str | None, *, title: str | None = None) -> Classification:
     classification, _evidence = classify_page_with_evidence(html, text, title=title)
     return classification
 
@@ -100,7 +102,7 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
 # municipal page never contains Cloudflare/captcha plumbing. Adapted from the
 # marker-tuple approach used by maigret (MIT) and cloudscraper (MIT); a single
 # marker hit is sufficient evidence.
-STRONG_CLASSIFICATION_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
         "bot_challenge_detected",
         (
@@ -142,7 +144,7 @@ SOFT_SINGLE_SIGNAL_CLASSIFICATIONS = frozenset(
 
 def classify_page_with_evidence(
     html: str | None, text: str | None, *, title: str | None = None
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[Classification, list[dict[str, Any]]]:
     stripped_html = _strip_html_noise(html).lower()
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
@@ -175,7 +177,7 @@ def classify_page_with_evidence(
     # matched signatures anywhere on the page) so a stray phrase cannot flip
     # an otherwise-benign result into strategy escalation.
     # Each entry: priority order, classification name, first evidence found.
-    matches: list[dict[str, Any]] = []
+    matches: list[tuple[Classification, dict[str, Any]]] = []
     for priority, (classification, signatures) in enumerate(CLASSIFICATION_SIGNATURES):
         for signature in signatures:
             for source, haystack in (
@@ -185,23 +187,33 @@ def classify_page_with_evidence(
                 index = haystack.find(signature)
                 if index >= 0:
                     matches.append(
-                        {
-                            "priority": priority,
-                            "classification": classification,
-                            "signature": signature,
-                            "source": source,
-                            "haystack": haystack,
-                            "index": index,
-                        }
+                        (
+                            classification,
+                            {
+                                "priority": priority,
+                                "classification": classification,
+                                "signature": signature,
+                                "source": source,
+                                "haystack": haystack,
+                                "index": index,
+                            },
+                        )
                     )
                     break  # earliest source is enough for this signature
     if not matches:
         return "rendered", []
 
-    distinct_classifications = {m["classification"] for m in matches}
-    best_priority = min(m["priority"] for m in matches)
-    chosen = min((m for m in matches if m["priority"] == best_priority), key=lambda m: m["index"])
-    classification = chosen["classification"]
+    distinct_classifications = {name for name, _match in matches}
+    best_priority = min(match["priority"] for _name, match in matches)
+    chosen = min(
+        (match for _name, match in matches if match["priority"] == best_priority),
+        key=lambda match: match["index"],
+    )
+    # The classification travels next to its match (see ``matches`` above) so it
+    # keeps its ``Classification`` type instead of being read back off an
+    # ``Any`` dict, which would widen a taxonomy member to plain ``str`` at the
+    # exact point the declared return has to hold.
+    classification = next(name for name, match in matches if match is chosen)
 
     # Corroboration: >= 2 independent signals anywhere on the page (either two
     # different block classifications, or two distinct phrases of the same one).
@@ -220,7 +232,9 @@ def classify_page_with_evidence(
     ]
 
 
-def _evidence(classification: str, signature: str, source: str, haystack: str, index: int) -> dict[str, str]:
+def _evidence(
+    classification: Classification, signature: str, source: str, haystack: str, index: int
+) -> dict[str, str]:
     start = max(0, index - 80)
     end = min(len(haystack), index + len(signature) + 120)
     context = " ".join(haystack[start:end].split())

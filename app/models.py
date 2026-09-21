@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from app.constants import (
     BROWSER_HEADED_WARMED,
     BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
+    ResultStatus,
 )
 
-ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
 Classification = Literal[
     "rendered",
     "captcha_detected",
@@ -58,7 +58,46 @@ Classification = Literal[
     # CrawlClassification member so it survives the strict enum at response
     # shaping.
     "browser_pool_exhausted",
+    # A domain's circuit breaker was open, so the URL was not attempted: a
+    # scheduler capacity decision, not a page outcome. A CrawlClassification
+    # member for the same reason -- a non-member code would reach the strict
+    # enum and be downgraded to site_error, hiding the skip reason.
+    "circuit_breaker_open",
 ]
+
+# The literal members as a runtime set. ``Classification`` crosses a string
+# boundary in a few places (an exception message carrying a taxonomy code, a
+# cached dict value), and narrowing one back to the Literal needs a membership
+# check against exactly these values -- derived from the alias so the set and
+# the enum cannot drift.
+CLASSIFICATION_MEMBERS: frozenset[str] = frozenset(get_args(Classification))
+
+
+def _is_classification(value: str) -> bool:
+    """Report whether ``value`` names a real :data:`Classification` member.
+
+    The taxonomy code an exception carries is a ``str`` at the point it is read
+    off ``str(exc)``; this membership check is what lets ``as_classification``
+    hand back the Literal instead of widening every consumer to ``str``.
+    """
+    return value in CLASSIFICATION_MEMBERS
+
+
+_CLASSIFICATION_TABLE: dict[str, Classification] = {name: name for name in get_args(Classification)}
+
+
+def as_classification(value: str, *, default: Classification = "unknown_error") -> Classification:
+    """Return ``value`` as a :data:`Classification`, or ``default`` if it is not one.
+
+    Callers that pull a code off a string boundary (an exception message, a
+    cached dict value) route through here rather than asserting, so an
+    untriaged code degrades to the documented default instead of widening the
+    classification type at every consumer. The table is built from the alias's
+    own members so the mapping and the enum cannot drift; its values are the
+    Literal members, which is what makes the return provably narrow.
+    """
+    return _CLASSIFICATION_TABLE.get(value, default)
+
 
 CrawlStrategyName = Literal[
     HTTP_DECLARED_CRAWLER,
@@ -117,7 +156,11 @@ class HttpFetchResult:
 
 @dataclass(frozen=True)
 class CrawlStrategyAttempt:
-    strategy: CrawlStrategyName
+    # Optional, not bare CrawlStrategyName: the worker-exception and
+    # budget-timeout envelopes are built after a failure that preceded any
+    # strategy attempt, and "no strategy was attempted" is not a strategy. The
+    # honest value there is None, and the wire model serializes it as null.
+    strategy: CrawlStrategyName | None
     status: ResultStatus
     classification: Classification
     http_status: int | None
@@ -188,8 +231,21 @@ class EngineCrawlResult:
 # service layers; `SchedulerWorker` (defined in app.scheduler) is the worker the
 # domain scheduler drives, which returns the internal engine result.
 # ---------------------------------------------------------------------------
-CrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult] | CrawlResult]
-HttpFetcher = Callable[[str, dict[str, str], int], Any]
+# The union is honest: a worker may be a coroutine function (the browser
+# strategies and render-path instances) or a plain synchronous function (some
+# HTTP/test workers). Callers MUST dispatch on the callable before invoking
+# (see ``_call_worker``) rather than awaiting the result blindly -- awaiting a
+# non-awaitable was the original double-invocation bug. The sync/async members
+# are broken out so the dispatch can narrow without a cast.
+SyncCrawlWorker = Callable[[CrawlJob], CrawlResult]
+AsyncCrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult]]
+CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
+# Four positional parameters: (url, headers, timeout_seconds, max_content_length).
+# Every concrete fetcher accepts the content-length cap
+# (_default_http_fetcher / _default_cffi_fetcher) and the retry wrapper passes
+# it positionally, so the alias must describe four parameters -- a caller typed
+# against it must be able to invoke the real fetcher it is handed (P2-A).
+HttpFetcher = Callable[[str, dict[str, str], int, int], Any]
 
 
 def to_dict(result: Any) -> dict[str, Any]:

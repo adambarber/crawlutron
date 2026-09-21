@@ -19,15 +19,17 @@ test cannot reinstate a drift-prone construction path).
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from app.api.response_shaping import abuild_unified_crawl_response
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
-from app.validation import get_env_int
+from app.validation import get_mapping_int
 
 if TYPE_CHECKING:
     from app.safe_url import SafeUrl
@@ -117,8 +119,31 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
                 )
 
 
+_WEBHOOK_SIZE_DEFAULT = 10_485_760
+
+
+@functools.lru_cache(maxsize=256)
+def _parse_webhook_size(raw: str | None) -> int:
+    """Parse one distinct raw env value into the bounded webhook cap (P2-F).
+
+    The parse -- and its never-raise contract plus the ``lo=1`` floor -- stays
+    in ``get_mapping_int``; caching on the raw string means the parse runs once
+    per distinct value while an override is still picked up on the next call.
+    """
+    mapping = {} if raw is None else {"BROWSER_CRAWLER_MAX_WEBHOOK_SIZE": raw}
+    return get_mapping_int(mapping, "BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
+
+
 def _max_webhook_size() -> int:
-    return get_env_int("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", 10_485_760, lo=1)
+    """The outbound webhook payload/response size cap.
+
+    Read 2-3 times per delivery, this used to re-read and re-parse
+    ``os.environ`` on every call (P2-F). It is cached on the raw env value, so
+    the parse runs once per distinct value; the key is the value itself, so an
+    override -- operator env, or a test -- is honored on the very next call
+    instead of being shadowed by a stale cached parse.
+    """
+    return _parse_webhook_size(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE"))
 
 
 async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
@@ -233,6 +258,16 @@ async def run_and_deliver_webhook(
         raise RuntimeError(
             "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
         )
+    # The ``any(...)`` guard above is the runtime check; these per-dependency
+    # asserts state the same fact for the type checker so the None branch is
+    # statically unreachable on every use below. Without them mypy keeps the
+    # module-level optional type and the delivery call sites read as
+    # "None not callable".
+    assert _webhook_semaphore is not None
+    assert _shutdown_event is not None
+    assert _crawl_request_fn is not None
+    assert _pool_getter is not None
+    assert _get_metrics_fn is not None
     await validate_webhook_url_async(webhook_url)
     pooled_worker = PooledBrowserWorker(_pool_getter())
     result = await _crawl_request_fn(

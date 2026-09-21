@@ -18,8 +18,17 @@ import os
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Iterator, MutableMapping
-from typing import Any
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    MutableMapping,
+)
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from _typeshed import SupportsKeysAndGetItem
 
 from app.classify import classify_page
 from app.constants import (
@@ -38,7 +47,8 @@ from app.crawl.strategies.http import (
     _check_ssrf_protection,
 )
 from app.json_safe import json_default
-from app.models import CrawlResult, RenderOptions
+from app.models import Classification, CrawlResult, RenderOptions, ResultStatus
+from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
 from app.validation import get_env_float, get_env_int, registrable_domain
 
@@ -100,6 +110,15 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
     The SSRF check involves synchronous DNS resolution (socket.getaddrinfo).
     To avoid blocking the event loop, the check runs in a thread pool via
     ``asyncio.to_thread``.
+
+    Plain-HTTP requests keep the FRESH (uncached) pinned IP, which governs the
+    actual connection: a rebind inside the resolver cache TTL must not slip
+    onto the wire (TOCTOU, F7/F8). HTTPS requests are validated through the
+    same cached check the websocket handler uses: ``SafeUrl.connect`` keeps
+    the original hostname there (real certificates carry no IP address SAN,
+    so a pin would only break SNI/cert verification), making an uncached pin
+    resolve per subresource pure cost with no security gain. HTTPS stays
+    blocklist-checked before the browser connects.
     """
 
     async def _handler(route, request):
@@ -129,7 +148,22 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
             await route.abort()
             return
         try:
-            pinned_url, host_headers = await asyncio.to_thread(_build_pinned_request, request.url, {})
+            # Annotated once, ahead of both branches: the https branch assigns
+            # an empty literal, which mypy cannot widen to the dict type the
+            # http branch's _build_pinned_request returns.
+            host_headers: dict[str, str]
+            if request_scheme == "https":
+                # The pinned IP is discarded for https (SafeUrl.connect keeps
+                # the original hostname so TLS SNI and certificate validation
+                # work -- real certs carry no IP SAN), so the pin resolve is
+                # discarded work here. Validate through the cached, TTL'd
+                # check instead: one resolver round trip per host, not one
+                # uncached resolve per subresource. The check still fails
+                # closed on private/loopback/resolved-internal targets.
+                await asyncio.to_thread(SafeUrl.parse, request.url)
+                pinned_url, host_headers = request.url, {}
+            else:
+                pinned_url, host_headers = await asyncio.to_thread(_build_pinned_request, request.url, {})
         except Exception:
             # Fail closed: DNS timeout, resolver errors, anything unexpected ->
             # abort rather than let an unchecked connection proceed.
@@ -323,7 +357,12 @@ class _LockedDomainCookieStore(MutableMapping[str, str]):
         with self._lock:
             self._data.clear()
 
-    def update(self, other: Any = (), **kwargs: str) -> None:
+    def update(
+        self,
+        other: SupportsKeysAndGetItem[str, str] | Iterable[tuple[str, str]] = (),
+        /,
+        **kwargs: str,
+    ) -> None:
         merged = dict(other)
         if kwargs:
             merged.update(kwargs)
@@ -417,6 +456,17 @@ class BrowserRenderer:
             else get_env_int("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
         )
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
+
+    @property
+    def warmup_urls(self) -> list[str]:
+        """Resolved warmup URLs for this renderer's browser profile.
+
+        The headed-warmed strategy profile is the one carrying warmup URLs (see
+        ``app.constants.BROWSER_STRATEGIES``); exposing the resolved list lets
+        the browser pool label its renders with the real browser mode instead
+        of inventing a strategy name on a failure path.
+        """
+        return self._warmup_urls
 
     async def _async_sleep(self, seconds: float) -> None:
         """Non-blocking sleep for use inside coroutines.
@@ -1081,8 +1131,8 @@ class BrowserRenderer:
     def _failure_result(
         self,
         url: str,
-        status: str,
-        classification: str,
+        status: ResultStatus,
+        classification: Classification,
         attempts: int,
         started: float,
         error: str | None,

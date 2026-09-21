@@ -4,16 +4,30 @@ import asyncio
 import logging
 import socket
 import ssl
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import httpx
 
 from app.crawl.decompression import DecompressionTooLargeError
-from app.models import BrowserPoolExhaustedError, CrawlResult, CrawlStrategyAttempt, EngineCrawlResult
+from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
+from app.models import (
+    BrowserPoolExhaustedError,
+    Classification,
+    CrawlResult,
+    CrawlStrategyAttempt,
+    CrawlStrategyName,
+    EngineCrawlResult,
+    ResultStatus,
+)
+
+_JobT = TypeVar("_JobT")
+
 
 logger = logging.getLogger(__name__)
 
 
-def _classify_error_code(exc: BaseException) -> str:
+def _classify_error_code(exc: BaseException) -> Classification:
     """Map an internal exception to a stable, non-leaking error code.
 
     Raw exception text can leak DNS hostnames, internal filesystem paths, or
@@ -28,9 +42,16 @@ def _classify_error_code(exc: BaseException) -> str:
     ``browser_pool_exhausted`` is kept distinct from the transport errors: it
     means the URL was never attempted because renderer capacity was
     unavailable, so it is a retry candidate, not a page failure.
+
+    Every branch returns a :data:`Classification` taxonomy member; the return
+    type states that so the callers that feed this straight into an
+    ``EngineCrawlResult`` get a statically-enforced classification instead of
+    an unproven string.
     """
     if isinstance(exc, BrowserPoolExhaustedError):
         return "browser_pool_exhausted"
+    if isinstance(exc, _CircuitBreakerOpen):
+        return "circuit_breaker_open"
     if isinstance(exc, DecompressionTooLargeError):
         return "payload_too_large"
     if isinstance(exc, httpx.TooManyRedirects):
@@ -72,10 +93,10 @@ def _engine_result_from_exception(
     error: BaseException,
     original_url: str,
     normalized_url: str,
-    strategy: str,
+    strategy: CrawlStrategyName | None,
     elapsed_ms: int | None = None,
     extra_diagnostics: dict | None = None,
-    known_classification: str | None = None,
+    known_classification: Classification | None = None,
 ) -> EngineCrawlResult:
     """Convert ANY strategy exception into a classified terminal result.
 
@@ -88,6 +109,11 @@ def _engine_result_from_exception(
     Raw exception text is logged server-side only and never reaches the wire
     (it can leak DNS names, paths, or stack detail); the caller sees the stable
     code.
+
+    ``strategy`` is the strategy this failure belongs to, or None when the
+    failure preceded any attempt (the scheduler's worker envelope, the
+    per-URL budget overrunning the whole chain): "no strategy was attempted"
+    is not a strategy, and None is the value the strict wire enum accepts.
 
     ``known_classification`` is for the one case where the failure mode is not
     derived from the exception type at all -- the per-URL wall-clock budget,
@@ -108,7 +134,12 @@ def _engine_result_from_exception(
     # never attempted. Flag it so the frontier layer can re-queue rather than
     # record a permanent failure.
     retryable = classification == "browser_pool_exhausted"
-    diagnostics = {"retryable": retryable, "error_code": classification}
+    diagnostics: dict = {"retryable": retryable, "error_code": classification}
+    # A domain circuit opening is a scheduler capacity decision, not a page
+    # failure: callers and dashboards key off this marker to tell "the site is
+    # unreachable" from "we chose not to try".
+    if classification == "circuit_breaker_open":
+        diagnostics["circuit_breaker"] = True
     # Callers may merge strategy-specific diagnostics that are ALREADY
     # redacted (e.g. the HTTP path's request_profile). The primitive owns
     # classification and raw-text redaction; it must not silently drop
@@ -128,15 +159,44 @@ def _engine_result_from_exception(
     )
 
 
+def _failed_result_for(
+    job: _JobT,
+    error: BaseException,
+    *,
+    url_of: Callable[[_JobT], str],
+) -> EngineCrawlResult:
+    """Build the terminal ``EngineCrawlResult`` for a job the scheduler skipped.
+
+    The domain scheduler used to construct this envelope inline, which silently
+    assumed every pipeline it serves returns an ``EngineCrawlResult``. The
+    render pipeline does not, so the envelope now comes from the pipeline:
+    crawl pipelines route here, the render pipeline supplies its own builder.
+
+    ``_CircuitBreakerOpen`` is the one exception the scheduler raises itself; it
+    reaches the same ``_engine_result_from_exception`` chokepoint so the
+    ``network_error`` / ``circuit_breaker_open`` classification and the redaction
+    contract stay in one place.
+    """
+    original_url = url_of(job)
+    normalized = getattr(job, "normalized_url", None) or original_url
+    return _engine_result_from_exception(
+        error=error,
+        original_url=original_url,
+        normalized_url=normalized,
+        strategy=None,
+    )
+
+
 def _terminal_crawl_result(
     *,
     url: str,
-    status: str,
-    classification: str,
+    status: ResultStatus,
+    classification: Classification,
     attempts: int,
     elapsed_ms: int,
     domain: str,
     error: str | None,
+    metadata: dict[str, Any] | None = None,
 ) -> CrawlResult:
     """Construct a terminal (no-payload) CrawlResult -- the /v1/render wire shape.
 
@@ -152,8 +212,8 @@ def _terminal_crawl_result(
     """
     return CrawlResult(
         url=url,
-        status=status,  # type: ignore[arg-type]
-        classification=classification,  # type: ignore[arg-type]
+        status=status,
+        classification=classification,
         final_url=None,
         html=None,
         text=None,
@@ -161,6 +221,90 @@ def _terminal_crawl_result(
         elapsed_ms=elapsed_ms,
         domain=domain,
         error=error,
+        metadata=metadata or {},
+    )
+
+
+def _crawl_result_from_engine_result(engine: EngineCrawlResult, *, url: str) -> CrawlResult:
+    """Adapt an ``EngineCrawlResult`` into the render pipeline's ``CrawlResult``.
+
+    :meth:`DomainScheduler.run` builds its worker-exception envelope as an
+    ``EngineCrawlResult`` -- the right shape for ``/v1/crawl``, whose pipeline
+    reads ``original_url``/``normalized_url``, and the wrong shape for
+    ``/v1/render``, whose pipeline reads ``url``
+    (:func:`render_result_to_unified`). The scheduler cannot know which pipeline
+    it is serving, so the render pipeline normalizes at its single receive
+    point (``_collect``) rather than making the scheduler polymorphic.
+
+    Classification, error and diagnostics survive the adaptation (the
+    classification was already derived through the shared classifier, so it is
+    a taxonomy member and redaction-safe); the caller supplies the URL its slot
+    was submitted with, since the engine shape carries it under a different
+    name. "no payload" fields mirror the other terminal ``CrawlResult``
+    primitives: this result represents a page that was never rendered.
+    """
+    elapsed_ms = int(engine.attempted_strategies[0].elapsed_ms) if engine.attempted_strategies else 0
+    return CrawlResult(
+        url=url,
+        status=engine.status,
+        classification=engine.classification,
+        final_url=engine.final_url,
+        html=engine.html,
+        text=engine.text,
+        attempts=len(engine.attempted_strategies),
+        elapsed_ms=elapsed_ms,
+        domain="",
+        error=engine.error,
+        metadata=engine.diagnostics or {},
+    )
+
+
+def _crawl_result_from_exception(
+    *,
+    error: BaseException,
+    url: str,
+    domain: str,
+    strategy: CrawlStrategyName | None,
+    elapsed_ms: int,
+) -> CrawlResult:
+    """Convert a render-path exception into a classified terminal CrawlResult.
+
+    The render worker contract (``CrawlWorker -> CrawlResult``) has no catch
+    site above it that can handle the failure: the scheduler's envelope builds
+    an ``EngineCrawlResult``, which is the wrong shape for the render pipeline
+    (``to_dict`` then ``render_result_to_unified`` reads ``item["url"]``, which
+    ``EngineCrawlResult`` does not have), and the engine's browser consumer
+    reads ``result.metadata`` / ``result.elapsed_ms``, which
+    ``EngineCrawlResult`` equally lacks. A render worker that fails must
+    therefore return the contracted ``CrawlResult`` shape itself, classified
+    through the same chokepoint as the engine path: ``_classify_error_code``
+    owns the taxonomy, this primitive owns the redaction (raw exception text is
+    logged server-side only).
+
+    ``strategy`` is the browser mode the worker was configured for, or None
+    when no strategy was attempted; it rides the server-side log and the
+    result metadata, never an invented enum member. ``retryable`` survives into
+    ``metadata`` so the render layer can answer 503 for capacity exhaustion and
+    the at-least-once frontier layer can re-queue the URL.
+    """
+    classification = _classify_error_code(error)
+    logger.warning(
+        "render_result_error",
+        extra={"strategy": strategy, "error_code": classification, "error_detail": str(error)},
+    )
+    # Pool exhaustion is a capacity condition, not a dead page: the URL was
+    # never attempted. Flag it so the render layer answers 503 and the
+    # frontier layer re-queues rather than records a permanent failure.
+    retryable = classification == "browser_pool_exhausted"
+    return _terminal_crawl_result(
+        url=url,
+        status="failed",
+        classification=classification,
+        attempts=1,
+        elapsed_ms=elapsed_ms,
+        domain=domain,
+        error=classification,
+        metadata={"retryable": retryable, "error_code": classification},
     )
 
 
@@ -169,8 +313,8 @@ def _make_engine_result(
     original_url: str,
     normalized_url: str,
     final_url: str | None,
-    status: str,
-    classification: str,
+    status: ResultStatus,
+    classification: Classification,
     attempt: CrawlStrategyAttempt,
     http_status: int | None,
     error: str | None,
@@ -233,9 +377,9 @@ def _terminal_engine_result(
     *,
     original_url: str,
     normalized_url: str,
-    strategy: str,
-    status: str,
-    classification: str,
+    strategy: CrawlStrategyName | None,
+    status: ResultStatus,
+    classification: Classification,
     error: str | None = None,
     diagnostics: dict | None = None,
     http_status: int | None = None,
@@ -253,7 +397,7 @@ def _terminal_engine_result(
     if error is None:
         error = classification
     attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
+        strategy=strategy,
         status=status,
         classification=classification,
         http_status=http_status,
@@ -278,8 +422,8 @@ def _failed_engine_result(
     *,
     original_url: str,
     normalized_url: str,
-    strategy: str,
-    classification: str,
+    strategy: CrawlStrategyName | None,
+    classification: Classification,
     error: str,
     diagnostics: dict | None = None,
     http_status: int | None = None,
@@ -303,8 +447,8 @@ def _skipped_engine_result(
     *,
     original_url: str,
     normalized_url: str,
-    strategy: str,
-    classification: str,
+    strategy: CrawlStrategyName | None,
+    classification: Classification,
     error: str,
     diagnostics: dict | None = None,
 ) -> EngineCrawlResult:
@@ -325,7 +469,7 @@ def _binary_no_text_result(
     original_url: str,
     normalized_url: str,
     final_url: str | None,
-    strategy: str,
+    strategy: CrawlStrategyName | None,
     http_status: int | None,
     headers: dict[str, str],
     content_type: str | None,
@@ -333,7 +477,7 @@ def _binary_no_text_result(
 ) -> EngineCrawlResult:
     """Construct a binary/no-text EngineCrawlResult."""
     attempt = CrawlStrategyAttempt(
-        strategy=strategy,  # type: ignore[arg-type]
+        strategy=strategy,
         status="failed",
         classification="binary_no_text",
         http_status=http_status,
