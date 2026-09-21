@@ -37,7 +37,7 @@ async def execute_crawl(
     payload_dict: dict[str, Any],
     *,
     settings,
-    shutdown_event: asyncio.Event,
+    shutdown_event: asyncio.Event | None,
     urls: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run a crawl shared by ``/v1/crawl`` and ``/v1/map``.

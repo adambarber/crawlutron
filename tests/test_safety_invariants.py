@@ -2460,14 +2460,14 @@ def test_doc_pool_reap_detector_bites():
 
 # --- 4e (optional): the attempt dataclass is pinned at its construction site ---
 #
-# mypy cannot enforce this today: ``CrawlStrategyName`` is a ``Literal`` built
-# from module constants that are typed ``str`` (not ``Final`` with a literal
-# type), so mypy degrades the alias and reports no arg-type error -- which is
-# why the six ``# type: ignore[arg-type]`` comments the producers carried were
-# all dead (``warn_unused_ignores`` had already flagged the two in engine.py).
-# Honest annotations on the producers help a human reader; this detector is
-# what actually pins the class, at the point that matters: every construction
-# site, regardless of which builder feeds it.
+# ``CrawlStrategyName`` is now a true Literal (the strategy constants in
+# ``app/constants.py`` are ``Final``, so ``Literal["HTTP_DECLARED_CRAWLER", ...]``
+# resolves and mypy enforces the ``strategy=`` arg-type at every
+# ``CrawlStrategyAttempt`` construction site statically. That replaced the six
+# ``# type: ignore[arg-type]`` comments the producers used to carry. This
+# detector is now belt-and-suspenders with mypy: it stays because it runs at
+# pytest time and flags a literal that slips past the checker, but the static
+# gate is the real chokepoint now.
 
 _ATTEMPT_CLASS = "CrawlStrategyAttempt"
 _ATTEMPT_STRATEGY_KWARG = "strategy"
@@ -2548,3 +2548,23 @@ def test_crawl_strategy_attempt_detector_bites():
     assert not _non_member_attempt_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py", members=members)
     good_var = ast.parse("def f(s):\n    return CrawlStrategyAttempt(strategy=s)\n")
     assert not _non_member_attempt_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+def test_crawl_strategy_name_members_match_constants():
+    """The ``CrawlStrategyName`` Literal must not drift from ``app.constants``.
+
+    ``CrawlStrategyName`` cannot reference the ``Final`` constants directly inside
+    ``Literal[...]`` (mypy rejects that), so its members are spelled as string
+    literals. constants.py remains the single source of truth; this pins the two
+    together so a rename there cannot orphan the alias.
+    """
+    from typing import get_args
+
+    from app import constants
+    from app.models import CrawlStrategyName
+
+    declared = {
+        constants.HTTP_DECLARED_CRAWLER,
+        constants.HTTP_CFFI_IMPERSONATE,
+        constants.BROWSER_HEADLESS,
+        constants.BROWSER_HEADED_WARMED,
+    }
+    assert set(get_args(CrawlStrategyName)) == declared

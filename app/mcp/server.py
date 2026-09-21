@@ -25,6 +25,7 @@ from app.mcp.constants import (
     HEADER_MISMATCH,
     INTERNAL_ERROR,
     INVALID_PARAMS,
+    INVALID_REQUEST,
     META_PROTOCOL_VERSION,
     METHOD_NOT_FOUND,
     SUPPORTED_PROTOCOL_VERSIONS,
@@ -184,6 +185,8 @@ async def _call_tool(
     from app.mcp.tools import TOOLS_BY_NAME
 
     name = params.get("name")
+    if not isinstance(name, str):
+        return error_response(request_id, INVALID_PARAMS, f"Unknown tool: {name}")
     spec = TOOLS_BY_NAME.get(name)
     if spec is None:
         return error_response(request_id, INVALID_PARAMS, f"Unknown tool: {name}")
@@ -219,9 +222,16 @@ async def handle_mcp_request(
         # HTTP that the server must act on; accept and drain.
         return 202, None
 
+    # JSON-RPC requires a request id to be an integer or string (never null);
+    # reject any other shape before it reaches the response builders, which echo
+    # the id verbatim.
     request_id = body.get("id")
+    if not isinstance(request_id, (int, str)):
+        return 400, error_response(None, INVALID_REQUEST, "Request id must be an integer or string")
     method = body.get("method")
-    params = body.get("params") if isinstance(body.get("params"), dict) else {}
+    params = body.get("params")
+    if not isinstance(params, dict):
+        params = {}
 
     try:
         _validate_transport(

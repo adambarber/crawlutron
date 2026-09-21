@@ -2193,8 +2193,8 @@ async def _http_strategy_result(
         discovered_links_truncated = post_fetch["discovered_links_truncated"]
         attempt = CrawlStrategyAttempt(
             strategy=strategy,
-            status=status,  # type: ignore[arg-type]
-            classification=classification,  # type: ignore[arg-type]
+            status=status,
+            classification=classification,
             http_status=response.status_code,
             content_type=content_type,
             elapsed_ms=response.elapsed_ms,

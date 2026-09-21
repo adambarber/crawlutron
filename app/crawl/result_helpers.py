@@ -318,7 +318,7 @@ def _make_engine_result(
     attempt: CrawlStrategyAttempt,
     http_status: int | None,
     error: str | None,
-    selected_strategy: str | None = None,
+    selected_strategy: CrawlStrategyName | None = None,
     headers: dict[str, str] | None = None,
     content_type: str | None = None,
     html: str | None = None,

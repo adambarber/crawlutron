@@ -4,13 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any, Literal, get_args
 
-from app.constants import (
-    BROWSER_HEADED_WARMED,
-    BROWSER_HEADLESS,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_DECLARED_CRAWLER,
-    ResultStatus,
-)
+from app.constants import ResultStatus
 
 Classification = Literal[
     "rendered",
@@ -100,10 +94,10 @@ def as_classification(value: str, *, default: Classification = "unknown_error") 
 
 
 CrawlStrategyName = Literal[
-    HTTP_DECLARED_CRAWLER,
-    HTTP_CFFI_IMPERSONATE,
-    BROWSER_HEADLESS,
-    BROWSER_HEADED_WARMED,
+    "HTTP_DECLARED_CRAWLER",
+    "HTTP_CFFI_IMPERSONATE",
+    "BROWSER_HEADLESS",
+    "BROWSER_HEADED_WARMED",
 ]
 
 

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
@@ -37,7 +37,7 @@ from app.search.endpoint import search as search_endpoint_handler
 
 logger = logging.getLogger(__name__)
 
-Handler = Callable[[dict[str, Any], Any, Any], Awaitable["ToolResult"]]
+Handler = Callable[..., Awaitable["ToolResult"]]
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,7 @@ async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> Tool
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
-def _schema(model: type) -> dict[str, Any]:
+def _schema(model: type[BaseModel]) -> dict[str, Any]:
     return model.model_json_schema()
 
 

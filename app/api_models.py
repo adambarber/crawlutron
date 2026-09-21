@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -263,7 +263,14 @@ class CrawlPolicy(BaseModel):
         return profile
 
 
-def _require_exactly_one_url_source(model: BaseModel) -> BaseModel:
+class _UrlSource(Protocol):
+    """Contract shared by every request model that accepts exactly one of ``url``/``urls``."""
+
+    url: str | None
+    urls: list[str] | None
+
+
+def _require_exactly_one_url_source(model: _UrlSource) -> _UrlSource:
     """Shared url/urls contract for crawl and render requests (L5, N4).
 
     Both set silently ignored ``url``; neither failed late in

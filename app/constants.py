@@ -9,14 +9,14 @@ import the constant instead of typing the string literal.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Final, Literal
 from urllib.parse import urlparse as _urlparse
 
 # Fetch strategies (how bytes are retrieved). Orthogonal to extraction.
 # ---------------------------------------------------------------------------
-HTTP_DECLARED_CRAWLER: str = "HTTP_DECLARED_CRAWLER"
-HTTP_CFFI_IMPERSONATE: str = "HTTP_CFFI_IMPERSONATE"
-BROWSER_HEADLESS: str = "BROWSER_HEADLESS"
+HTTP_DECLARED_CRAWLER: Final = "HTTP_DECLARED_CRAWLER"
+HTTP_CFFI_IMPERSONATE: Final = "HTTP_CFFI_IMPERSONATE"
+BROWSER_HEADLESS: Final = "BROWSER_HEADLESS"
 
 # Service version: single source of truth (L2), imported directly by callers.
 SERVICE_VERSION: str = "0.3.0"
@@ -33,7 +33,7 @@ USER_AGENT_TOKEN: str = "browser-crawler"
 # TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
 # fetcher and the agent-hints copy both reference this, so they cannot drift.
 CFFI_IMPERSONATE_TARGET: str = "firefox135"
-BROWSER_HEADED_WARMED: str = "BROWSER_HEADED_WARMED"
+BROWSER_HEADED_WARMED: Final = "BROWSER_HEADED_WARMED"
 
 # Strategy ordering / registries (imported by service.py)
 HTTP_STRATEGIES: set[str] = {HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE}
@@ -79,7 +79,7 @@ EXTRACTION_METHOD_HTTP_BODY: str = "http_body"
 EXTRACTION_METHOD_DOCUMENT: str = "document_extract"
 EXTRACTION_METHOD_TRAFILATURA: str = "trafilatura_extract"
 EXTRACTION_METHOD_DOM_TEXT: str = "dom_text"
-EXTRACTION_METHOD_BINARY_NO_TEXT: str = "binary_no_text"
+EXTRACTION_METHOD_BINARY_NO_TEXT: Final = "binary_no_text"
 
 
 # ---------------------------------------------------------------------------
