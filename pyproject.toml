@@ -65,6 +65,10 @@ dev = [
     "pytest-xdist>=3.0",
     "pytest-randomly>=4.0",
     "ruff>=0.5",
+    # Static type-checking (``make typecheck``). Advisory only: the app tree is
+    # not yet mypy-clean (P2-A wired the target against config that already
+    # existed but had never been run), so this is informational, not a gate.
+    "mypy>=1.11",
 ]
 
 [project.urls]
@@ -133,6 +137,11 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 "app/crawl/strategies/document.py" = ["S310"]
 "app/crawl/strategies/http.py" = ["E402", "S110", "S112"]
 "app/crawl/strategies/browser.py" = ["S108", "S110", "S112", "E402"]
+# browser_pool re-exports BrowserPoolExhaustedError for its existing importers
+# (the classifier in result_helpers isinstance-checks it without importing a
+# strategy module -- defining it there would cycle); the name is import
+# surface, not an unused local.
+"app/crawl/strategies/browser_pool.py" = ["F401"]
 # The job store wires the sqlite connection factory above the model imports.
 "app/crawl/job_store.py" = ["E402"]
 # Best-effort snapshot persistence: a failed cache write is never fatal.

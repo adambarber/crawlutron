@@ -5,7 +5,7 @@
 PYTHON ?= python3
 SUITE_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: help install test test-fast test-all lint clean
+.PHONY: help install test test-fast test-all lint typecheck clean
 
 help:
 	@echo "browser-crawler development tasks:"
@@ -14,6 +14,7 @@ help:
 	@echo "  make test-fast - alias for 'make test'"
 	@echo "  make test-all  - run the full suite including browser-marked tests"
 	@echo "  make lint      - run ruff on the app/ and tests/ trees"
+	@echo "  make typecheck - run mypy on the app tree (advisory; not yet clean)"
 	@echo "  make clean     - remove caches and build artifacts"
 
 install:
@@ -27,6 +28,14 @@ test-all:
 
 lint:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests
+
+# Advisory (P2-A): type-check the app tree with mypy. The config lives in
+# mypy.ini (files = app). This target is wired so the tooling that already
+# existed is actually run, but the codebase is NOT yet mypy-clean -- it was
+# never typechecked before -- so this is informational, not a gate. Do NOT
+# add it to CI as a hard gate until the findings backlog is cleared.
+typecheck:
+	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
 
 clean:
 	# Remove top-level caches and patterns first; ignore-missing tolerates
