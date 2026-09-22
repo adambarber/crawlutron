@@ -1874,7 +1874,12 @@ async def _http_strategy_result(
                     response = _rebuild_response(cached)
                     retry_diagnostics = {**retry_diagnostics, "content_cache": "hit_revalidated"}
                     revalidated_304 = True
-                # otherwise the response is fresh and falls through to be stored below.
+                else:
+                    # The origin answered 200 (content changed): this response
+                    # is the fresh one and must be stored below. Mark it so the
+                    # unconditional fetch later in the function sees a response
+                    # is already in hand and does not fetch a second time.
+                    content_hit = True
 
     try:
         if not content_hit and not revalidated_304:

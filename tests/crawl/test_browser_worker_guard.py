@@ -136,3 +136,4 @@ class TestPoolExhaustionRequeue:
         # One initial attempt plus the cap of frontier re-queues: the URL was
         # retried at least once rather than recorded as a permanent failure.
         assert len(invocations) == 1 + MAX_POOL_EXHAUSTION_REQUEUES, invocations
+

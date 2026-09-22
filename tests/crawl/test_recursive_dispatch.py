@@ -249,3 +249,71 @@ async def test_failed_job_does_not_shift_other_results():
             f"expected {jobs[index].normalized_url!r}"
         )
     assert spill.writes[1].status == "failed"
+
+
+async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
+    """A re-queued pool-exhausted URL was never crawled, so it must not cost a
+    page against ``max_pages``. Before the fix each re-queue incremented
+    ``page_count`` and a burst of exhaustion events could terminate the crawl
+    before its real page budget was spent.
+
+    The seed URL exhausts the pool on every attempt and is re-queued up to the
+    cap; it also discovers one real page, which renders successfully. The
+    budget admits exactly that real page after all the retries, so it is
+    reached only when the retries themselves cost nothing.
+    """
+    from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES
+    from app.models import EngineCrawlResult
+
+    total_attempts = 1 + MAX_POOL_EXHAUSTION_REQUEUES
+
+    async def worker(job):
+        if job.normalized_url == "http://a/seed":
+            return EngineCrawlResult(
+                original_url=job.original_url,
+                normalized_url=job.normalized_url,
+                final_url=None,
+                status="failed",
+                classification="browser_pool_exhausted",
+                selected_strategy=None,
+                attempted_strategies=[],
+                http_status=None,
+                headers={},
+                content_type=None,
+                html=None,
+                text=None,
+                extraction_method=None,
+                quality_score=0.0,
+                # Links from an eternally-exhausted URL are expanded only when
+                # its result is recorded, so the real page rides on the seed's
+                # final permanent failure, not on any re-queue.
+                discovered_links=[_link("http://a/real")],
+                error="browser_pool_exhausted",
+            )
+        return make_engine_result(job.normalized_url)
+
+    jobs = [
+        CrawlTask(
+            index=0,
+            original_url="http://a/seed",
+            normalized_url="http://a/seed",
+            domain="a",
+        )
+    ]
+
+    spill, _scheduler, _gate = await _run(
+        jobs,
+        worker,
+        max_depth=2,
+        # Budget admits the seed's final permanent failure plus exactly one real
+        # page and nothing spare: each phantom re-queue increment consumes a
+        # slot, so under the bug the loop exits before /real is ever popped.
+        max_pages=total_attempts,
+    )
+
+    statuses = {r.normalized_url: r.status for r in spill.writes.values()}
+    # The real page must have been crawled despite the retry budget: it is
+    # discovered only when the seed's permanent failure is finally recorded,
+    # which happens at the tail of the loop.
+    assert statuses.get("http://a/real") == "success", statuses
+    assert statuses.get("http://a/seed") == "failed", statuses

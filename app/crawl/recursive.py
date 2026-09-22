@@ -407,7 +407,10 @@ async def run_recursive_crawl(
                 job, depth=depth, frontier=frontier, attempts=pool_exhaustion_attempts
             ):
                 visited.discard(job.normalized_url)
-                page_count += 1
+                # No page was crawled: the URL goes back on the frontier for a
+                # retry, so this must NOT consume a max_pages slot. Counting it
+                # here let a burst of pool-exhaustion events terminate the crawl
+                # before its real page budget was spent.
                 continue
             # Strip heavy payloads inside the loop so they are not retained
             # for the whole crawl when the caller did not ask for them (#1).
