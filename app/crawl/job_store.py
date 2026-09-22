@@ -199,7 +199,14 @@ class JobStore:
         return job
 
     def save(self, job: CrawlJobState) -> None:
-        """Persist job state to SQLite (thread-safe)."""
+        """Persist job DATA to SQLite (thread-safe).
+
+        ``status`` is written only on first INSERT (a new row's initial
+        state); the UPDATE path deliberately never touches it. Control state
+        moves exclusively through :meth:`set_status` (H3): a whole-row save
+        from a stale snapshot must not resurrect the writer's status view
+        and clobber a concurrent pause/cancel.
+        """
         with self._lock:
             self._persist(job)
 
@@ -232,7 +239,6 @@ class JobStore:
                 kind=excluded.kind,
                 root_url=excluded.root_url,
                 policy=excluded.policy,
-                status=excluded.status,
                 frontier=excluded.frontier,
                 visited=excluded.visited,
                 results=excluded.results,
@@ -260,6 +266,32 @@ class JobStore:
             ),
         )
         self._conn.commit()
+
+    def set_status(
+        self,
+        job_id: str,
+        new: JobStatus,
+        *,
+        expected: JobStatus | frozenset[JobStatus],
+    ) -> bool:
+        """Atomic compare-and-set on the row's status (the control plane).
+
+        Returns True iff the row existed in one of the ``expected`` states
+        and now holds ``new``. False means missing-or-conflict: the caller's
+        view of the job is stale, and the persisted control state stands --
+        never silently overwritten by whichever writer saved last.
+        """
+        wanted = {expected} if isinstance(expected, JobStatus) else set(expected)
+        with self._lock:
+            # json_each keeps the expected set a BOUND parameter -- no SQL is
+            # ever constructed from values (and no S608-shaped f-string).
+            cur = self._conn.execute(
+                "UPDATE crawl_jobs SET status = ?, updated_at = ? "
+                "WHERE job_id = ? AND status IN (SELECT value FROM json_each(?))",
+                (new.value, time.time(), job_id, json.dumps(sorted(s.value for s in wanted))),
+            )
+            self._conn.commit()
+        return cur.rowcount == 1
 
     def load(self, job_id: str) -> CrawlJobState | None:
         """Load job state from SQLite. Returns None if not found."""

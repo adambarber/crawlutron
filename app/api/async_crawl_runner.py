@@ -101,8 +101,14 @@ async def run_async_crawl(
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
         return
-    job.status = JobStatus.RUNNING
-    await job_store.asave(job)
+    # Claim RUNNING on the control plane (H3: status moves only via CAS;
+    # a lost claim means the row was deleted or already transitioned).
+    claimed = await asyncio.to_thread(
+        job_store.set_status, request_id, JobStatus.RUNNING, expected=JobStatus.PENDING
+    )
+    if not claimed:
+        logger.error("async_crawl_claim_lost", extra={"request_id": request_id})
+        return
 
     try:
         async with _get_async_crawl_semaphore():
@@ -124,7 +130,6 @@ async def run_async_crawl(
 
             # Store results in job_store (single source of truth for async jobs)
             job.results = [response_payload]
-            job.status = JobStatus.COMPLETED
 
             # unified_results are UnifiedCrawlResult models (dict-tolerant: the
             # runner must never crash stats computation for a shape variant).
@@ -140,6 +145,9 @@ async def run_async_crawl(
                 "total_failed": failed,
             }
             await job_store.asave(job)
+            await asyncio.to_thread(
+                job_store.set_status, request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
+            )
 
             # Also store in result_store for backward compat (sync path reads from here)
             try:
@@ -157,9 +165,11 @@ async def run_async_crawl(
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
         job = job_store.load(request_id)
         if job is not None:
-            job.status = JobStatus.FAILED
             job.error = str(exc)
             await job_store.asave(job)
+            await asyncio.to_thread(
+                job_store.set_status, request_id, JobStatus.FAILED, expected=JobStatus.RUNNING
+            )
         if webhook_url:
             try:
                 error_payload = (

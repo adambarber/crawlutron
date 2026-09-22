@@ -331,7 +331,11 @@ class TestJobRunnerSavesOffTheEventLoop:
         assert progress >= liveness.needed, (
             f"the event loop made {progress} heartbeat ticks while a job-store save ran"
         )
-        assert JobStatus.PAUSED in saved
+        # H3 two-plane contract: the data save ran (recorded below) off the
+        # loop, and the shutdown pause is a pure CONTROL write -- a CAS,
+        # observed on the row, never carried by save() anymore.
+        assert saved, "the runner's write-ahead data save never ran"
+        assert store.load(job.job_id).status is JobStatus.PAUSED
 
 
 class TestAsyncCrawlRunnerSavesOffTheEventLoop:

@@ -225,8 +225,8 @@ class TestCrashRecovery:
         job = job_store.create("http://example.test/a", {})
         job.frontier = []
         job.in_flight = ["http://example.test/a"]
-        job.status = JobStatus.RUNNING
         job_store.save(job)
+        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
         job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")]))
         await job_runner.recover_and_start_pending_jobs(
@@ -574,8 +574,7 @@ class TestRunnerLifecycle:
 
     async def test_crash_orphan_recovered_to_pending(self, job_store):
         job = job_store.create("http://example.test/a", {})
-        job.status = JobStatus.RUNNING
-        job_store.save(job)
+        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
         recovered = job_runner.recover_orphaned_running_jobs(job_store)
         assert recovered == 1
@@ -590,8 +589,7 @@ class TestRunnerLifecycle:
         job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")], hang=hang))
         # Orphan RUNNING row rewinds to PENDING...
         job = job_store.create("http://example.test/a", {})
-        job.status = JobStatus.RUNNING
-        job_store.save(job)
+        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
         # ...and a second row is already PENDING.
         job_store.create("http://example.test/b", {})
 
@@ -673,9 +671,9 @@ class TestJobControlTransitions:
         from app.main import app, job_store
 
         job = job_store.create("http://example.com/", {})
-        # Set to completed
-        job.status = JobStatus.COMPLETED
-        job_store.save(job)
+        # Set to completed via the control plane (save no longer writes status).
+        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
         await run_job_control_test(app, job_store, job.job_id, "cancel", 409)
         job_store.delete(job.job_id)
 

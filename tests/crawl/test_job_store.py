@@ -30,7 +30,6 @@ def test_jobstore_create_and_load(job_store):
 
 def test_jobstore_save_updates_state(job_store):
     job = job_store.create("http://example.com/", {})
-    job.status = JobStatus.RUNNING
     job.frontier = ["http://example.com/page2"]
     job.visited = {"http://example.com/"}
     job.results = [{"url": "http://example.com/", "status": "success"}]
@@ -38,17 +37,21 @@ def test_jobstore_save_updates_state(job_store):
     job_store.save(job)
 
     loaded = job_store.load(job.job_id)
-    assert loaded.status == JobStatus.RUNNING
+    # DATA plane flows through save...
     assert loaded.frontier == ["http://example.com/page2"]
     assert loaded.visited == {"http://example.com/"}
     assert len(loaded.results) == 1
     assert loaded.stats["total_crawled"] == 1
+    # ...but the STATUS plane moves only via set_status (H3 separation).
+    assert loaded.status == JobStatus.PENDING
+    assert job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+    assert job_store.load(job.job_id).status == JobStatus.RUNNING
 
 
 def test_jobstore_list_jobs(job_store):
     job1 = job_store.create("http://site1.com/", {})
     job2 = job_store.create("http://site2.com/", {})
-    job2.status = JobStatus.RUNNING
+    job_store.set_status(job2.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     job_store.save(job2)
 
     jobs = job_store.list_jobs()
@@ -187,7 +190,6 @@ def test_jobstore_concurrent_writes_do_not_raise_locked():
     def worker(i):
         try:
             job = store.create(f"http://example.com/{i}", {})
-            job.status = JobStatus.RUNNING
             store.save(job)
             store.load(job.job_id)
             store.delete(job.job_id)

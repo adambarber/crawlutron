@@ -318,8 +318,8 @@ class TestAsyncCrawlJobStoreIntegration:
             ).model_dump()
 
             job.results = [response_payload]
-            job.status = JobStatus.COMPLETED
             store.save(job)
+            store.set_status("test-id", JobStatus.COMPLETED, expected=JobStatus.PENDING)
 
             # Load and verify
             loaded = store.load("test-id")

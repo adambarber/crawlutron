@@ -91,10 +91,11 @@ def recover_orphaned_running_jobs(job_store: JobStore) -> int:
     recovered = 0
     for summary in job_store.list_jobs():
         if summary.get("status") == JobStatus.RUNNING.value:
-            job = job_store.load(summary["job_id"])
-            if job is not None:
-                job.status = JobStatus.PENDING
-                job_store.save(job)
+            # Control-plane CAS: rewind RUNNING -> PENDING without rewriting
+            # the row's data (H3: save() no longer carries status anyway).
+            if job_store.set_status(
+                summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING
+            ):
                 recovered += 1
     return recovered
 
@@ -177,9 +178,18 @@ async def _run_job(
             if url not in job.visited and url not in _frontier_set(job):
                 _frontier_add(job, url)
         job.in_flight = []
-    job.status = JobStatus.RUNNING
+    # Claim RUNNING on the control plane (fresh PENDING start). A resumed job
+    # is already RUNNING -- resume_job claimed the transition atomically, so
+    # CAS failure with a RUNNING row means we own it; anything else
+    # (PAUSED/CANCELLED/terminal) means a control write beat us to it.
+    claimed = await asyncio.to_thread(
+        job_store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING
+    )
+    if not claimed and job.status is not JobStatus.RUNNING:
+        return
     # JobStore.save json-dumps the whole row (frontier/visited/results/stats)
     # and commits SQLite -- blocking work that must never run on the loop.
+    # It carries the DATA plane only; status lives behind set_status (H3).
     await asyncio.to_thread(job_store.save, job)
 
     try:
@@ -190,15 +200,23 @@ async def _run_job(
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
                 return  # control transition already persisted by handler
             if shutdown_event.is_set():
-                job.status = JobStatus.PAUSED
-                await asyncio.to_thread(job_store.save, job)
+                # Pure control transition: the data plane is already persisted
+                # (write-ahead save precedes the engine call).
+                await asyncio.to_thread(
+                    job_store.set_status, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
+                )
                 return
 
             batch = _pop_frontier(job)
             if not batch:
                 job.in_flight = []  # clean terminal state even if a crash left it set
-                job.status = JobStatus.COMPLETED
                 await asyncio.to_thread(job_store.save, job)
+                # Terminal claim: a concurrent cancel/pause during the final
+                # batch stands (CAS False) -- the user's control state wins,
+                # and the committed data survives either way.
+                await asyncio.to_thread(
+                    job_store.set_status, job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
+                )
                 return
             # Write-ahead the pop: the post-engine reload must see the
             # shrunk frontier or the loop refetches the same batch forever.
@@ -315,11 +333,9 @@ async def _run_job(
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
             job.in_flight = []  # batch committed; a later resume must not re-crawl it
             await asyncio.to_thread(job_store.save, job)
-
-            if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
-                # Transition landed mid-batch: state is already persisted
-                # with everything the engine produced; stop the loop here.
-                return
+            # (No post-save status check here: it could only read this task's
+            # own stale copy. The loop-top reload detects pause/cancel with a
+            # fresh row -- the only honest observation point.)
     except asyncio.CancelledError:
         # delete()/shutdown cancellation: leave any pre-cancel state intact.
         raise
@@ -327,9 +343,11 @@ async def _run_job(
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
         job = job_store.load(job_id)
         if job is not None and job.status == JobStatus.RUNNING:
-            job.status = JobStatus.FAILED
             job.error = str(exc)
             await asyncio.to_thread(job_store.save, job)
+            await asyncio.to_thread(
+                job_store.set_status, job_id, JobStatus.FAILED, expected=JobStatus.RUNNING
+            )
 
 
 def start_job(
@@ -357,25 +375,21 @@ def cancel_job_task(job_id: str) -> None:
 
 async def pause_job(job_id: str, job_store: JobStore) -> str:
     """Pause: flip the row; the task exits at the next batch boundary."""
-    job = job_store.load(job_id)
-    if job is None:
-        return "missing"
-    if job.status != JobStatus.RUNNING:
-        return "conflict"
-    job.status = JobStatus.PAUSED
-    await asyncio.to_thread(job_store.save, job)
-    return "ok"
+    ok = await asyncio.to_thread(
+        job_store.set_status, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
+    )
+    if ok:
+        return "ok"
+    return "missing" if job_store.load(job_id) is None else "conflict"
 
 
 async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_event: asyncio.Event) -> str:
     """Resume a paused job by respawning its runner task."""
-    job = job_store.load(job_id)
-    if job is None:
-        return "missing"
-    if job.status != JobStatus.PAUSED:
-        return "conflict"
-    job.status = JobStatus.RUNNING
-    await asyncio.to_thread(job_store.save, job)
+    ok = await asyncio.to_thread(
+        job_store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED
+    )
+    if not ok:
+        return "missing" if job_store.load(job_id) is None else "conflict"
     start_job(job_id, job_store, settings, shutdown_event)
     return "ok"
 
@@ -383,14 +397,15 @@ async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_e
 async def cancel_job(job_id: str, job_store: JobStore) -> str:
     """Cancel: flip the row; the task exits at the next batch boundary (the
     in-flight batch is still recorded — the engine already did the work)."""
-    job = job_store.load(job_id)
-    if job is None:
-        return "missing"
-    if job.status not in {JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.PENDING}:
-        return "conflict"
-    job.status = JobStatus.CANCELLED
-    await asyncio.to_thread(job_store.save, job)
-    return "ok"
+    ok = await asyncio.to_thread(
+        job_store.set_status,
+        job_id,
+        JobStatus.CANCELLED,
+        expected=frozenset({JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.PENDING}),
+    )
+    if ok:
+        return "ok"
+    return "missing" if job_store.load(job_id) is None else "conflict"
 
 
 __all__ = [
