@@ -11,24 +11,12 @@ from app.constants import BROWSER_HEADLESS
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.scheduler import DomainScheduler
-from tests._testkit import Spill, make_engine_result
+from tests._testkit import FakeScheduler, Spill, make_engine_result
 
 
-class _Scheduler:
-    def __init__(self):
-        self.runs = 0
+class _Scheduler(FakeScheduler):
+    """Local subclass kept only to preserve the tests' existing symbol name."""
 
-    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
-        self.runs += 1
-        out = {}
-        for job in jobs:
-            try:
-                out[job.index] = await worker(job)
-            except Exception as error:
-                if failed_result is None:
-                    raise
-                out[job.index] = failed_result(job, error)
-        return out
 
 
 class _Gate:

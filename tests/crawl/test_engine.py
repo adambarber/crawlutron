@@ -406,17 +406,26 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        # _robots_disallowed_result is nested inside crawl_request; test via _failed_engine_result
-        from app.crawl.engine import _failed_engine_result
+        # _robots_disallowed_result is nested inside crawl_request; exercise it
+        # through _skipped_engine_result, the primitive the production path uses
+        # (a disallow is a deliberate non-attempt, never a failure).
+        from app.constants import status_for_classification
+        from app.crawl.engine import _skipped_engine_result
 
-        result = _failed_engine_result(
+        result = _skipped_engine_result(
             original_url="http://example.com/page",
             normalized_url="http://example.com/page",
-            strategy="HTTP_DECLARED_CRAWLER",
+            # A disallow precedes any strategy attempt, so the recorded strategy
+            # is None, never a label that implies an HTTP fetch happened.
+            strategy=None,
             classification="robots_disallowed",
             error="robots_txt_disallowed",
         )
         assert result.classification == "robots_disallowed"
+        assert result.status == "skipped"
+        assert result.attempted_strategies[0].strategy is None
+        # The builder and the taxonomy table must agree for this label.
+        assert result.status == status_for_classification("robots_disallowed")
 
     async def test_crawl_chain_continue_on_skip(self):
         from app.crawl.engine import _execute_crawl_chain

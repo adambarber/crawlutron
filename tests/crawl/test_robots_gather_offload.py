@@ -10,7 +10,7 @@ import asyncio
 
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
-from tests._testkit import Spill, make_engine_result
+from tests._testkit import FakeScheduler, Spill, make_engine_result
 
 
 def _make_job(index: int, host: str) -> CrawlTask:
@@ -18,22 +18,11 @@ def _make_job(index: int, host: str) -> CrawlTask:
     return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
 
 
-class _Scheduler:
-    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
-        out = {}
-        for job in jobs:
-            try:
-                out[job.index] = await worker(job)
-            except Exception as error:
-                if failed_result is None:
-                    raise
-                out[job.index] = failed_result(job, error)
-        return out
+class _Scheduler(FakeScheduler):
+    """Local subclass kept only to preserve the tests' existing symbol name."""
 
     def get_pinned_strategy(self, domain):
         return None
-
-    def set_domain_min_delay(self, domain, delay):
         return None
 
 

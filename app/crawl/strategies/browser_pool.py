@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from app.constants import BROWSER_HEADED_WARMED, BROWSER_HEADLESS
@@ -172,10 +173,19 @@ class PooledBrowserWorker:
 
     async def __call__(self, job: Any) -> CrawlResult:
         started = time.monotonic()
+        # The browser mode this pool actually renders with, resolved before any
+        # attempt so the success and failure paths label the result identically.
+        strategy = self._configured_strategy()
         try:
             renderer = await self._pool.acquire()
             try:
-                return await renderer.render(job.url, job.options)
+                result = await renderer.render(job.url, job.options)
+                # The renderer does not know the pool's configured mode, so it
+                # leaves the slot empty; fill it here, at the one boundary that
+                # does, rather than letting the shaper guess a member.
+                if result.selected_strategy is None:
+                    result = replace(result, selected_strategy=strategy)
+                return result
             finally:
                 self._pool.release(renderer)
         except Exception as error:
@@ -192,7 +202,7 @@ class PooledBrowserWorker:
                 error=error,
                 url=job.url,
                 domain=job.domain,
-                strategy=self._configured_strategy(),
+                strategy=strategy,
                 elapsed_ms=int((time.monotonic() - started) * 1000),
             )
 

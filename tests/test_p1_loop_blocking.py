@@ -319,6 +319,84 @@ class TestJobRunnerSavesOffTheEventLoop:
         assert JobStatus.PAUSED in saved
 
 
+class TestAsyncCrawlRunnerSavesOffTheEventLoop:
+    """``run_async_crawl`` must not serialize+commit the job row on the loop.
+
+    ``_run_job`` (the whole-site runner above) already offloads its saves via
+    ``asyncio.to_thread(job_store.save, ...)``. The async single-shot runner
+    called ``job_store.save`` directly at its RUNNING / COMPLETED / FAILED
+    transitions -- same store, contradictory discipline, and the full response
+    body was serialized and written while the loop stalled. The blind spot
+    survived because the guard above drives only ``_run_job``; this one drives
+    ``run_async_crawl`` itself, so the async path cannot regress unnoticed
+    again.
+    """
+
+    async def test_run_async_crawl_save_does_not_block_the_event_loop(
+        self, real_sleeps, monkeypatch, tmp_path
+    ) -> None:
+        from _testkit import make_job_store
+
+        from app.api.async_crawl_runner import run_async_crawl
+        from app.crawl.result_store import CrawlResultStore
+        from app.settings import CrawlerSettings
+
+        store = make_job_store(str(tmp_path))
+        job = store.create_single_shot(
+            "crawl_loop_test", "http://example.com/", {"url": "http://example.com/"}
+        )
+
+        liveness = _LoopLiveness()
+        observed: list[int] = [-1]  # loop progress seen by the blocking save
+        real_save = store.save
+
+        def slow_save(j):
+            # The blocking work JobStore.save does: json.dumps of every row
+            # field plus the SQLite commit. Only the event loop can advance
+            # liveness, so a save run ON the loop sees zero progress.
+            observed[0] = max(observed[0], liveness.wait_for_progress())
+            real_save(j)
+
+        # ``asave`` delegates to ``save`` off-thread, so patching the sync
+        # method covers every save the runner makes.
+        monkeypatch.setattr(store, "save", slow_save)
+
+        async def _fake_execute(*args, **kwargs):
+            # A completed crawl drives the COMPLETED save too, not just the
+            # RUNNING one, and avoids any real network work.
+            return {"results": [], "submitted_count": 0}
+
+        monkeypatch.setattr("app.api.async_crawl_runner.execute_crawl", _fake_execute)
+
+        async def scenario() -> int:
+            hb = asyncio.ensure_future(liveness.heartbeat())
+            try:
+                await asyncio.wait_for(
+                    run_async_crawl(
+                        job.job_id,
+                        {"url": "http://example.com/"},
+                        None,
+                        CrawlerSettings.from_mapping(),
+                        store,
+                        CrawlResultStore(tmp_path / "results.db"),
+                        asyncio.Event(),
+                    ),
+                    timeout=20,
+                )
+            finally:
+                hb.cancel()
+            return observed[0]
+
+        progress = await asyncio.wait_for(scenario(), timeout=30)
+        assert progress >= liveness.needed, (
+            "the event loop made "
+            f"{progress} heartbeat ticks while the async crawl runner saved a job row"
+        )
+        # The job reached COMPLETED through the offloaded save, so the store is
+        # not just skipping the work.
+        assert store.load(job.job_id).status == JobStatus.COMPLETED
+
+
 class TestSpillAssemblyOffTheEventLoop:
     """``_crawl_request_impl`` reassembles the spilled results with
     ``load_ordered``: a full file scan plus a ``json.loads`` per line. That is

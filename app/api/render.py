@@ -199,7 +199,7 @@ async def render_request(
                 # The wire-visible error must be a stable classification, never
                 # raw exception text: to_dict is pure serialization, so str(exc)
                 # would leak DNS names / paths / secrets straight into the body.
-                error=_classify_error_code(worker_error) if worker_error is not None else "worker_failed",
+                error=_classify_error_code(worker_error) if worker_error is not None else "unknown_error",
             )
 
     ordered_results = [by_index[index] for index in range(len(urls))]

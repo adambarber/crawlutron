@@ -288,35 +288,144 @@ def test_every_grouping_member_is_an_enum_member():
             )
 
 
-def test_groupings_and_the_status_table_cover_the_documented_taxonomy():
-    """Members the status table deliberately leaves to their documented default
-    are exactly the older fetch-level failure codes; everything else the enum
-    advertises must be claimed by a grouping or by the table."""
-    documented_default = {
-        "robots_disallowed",
-        "navigation_timeout",
-        "browser_crash",
-        "network_error",
-        "connection_error",
-        "http_status_error",
-        "value_error",
-        "tls_error",
-        "dns_error",
-        "invalid_url",
-        "unsupported_scheme",
-        "private_network_target",
-        "unknown_error",
-    }
-    covered = set(CLASSIFICATION_STATUS_BY_LABEL)
-    for grouping in _GROUPINGS:
-        covered |= set(grouping)
-    accounted = covered | documented_default
+def test_the_status_table_covers_every_taxonomy_member():
+    """Completeness: every ``CrawlClassification`` member is an explicit key in
+    the status table, so no label can fall through to
+    ``UNKNOWN_CLASSIFICATION_STATUS``.
+
+    The module docstring claims this and nothing used to enforce it: 13 members
+    (the transport/strategy exception codes, the robots and policy-refusal
+    labels and the browser retry codes) took the "blocked" default while the
+    terminal builders asserted "failed"/"skipped"/"disallowed"/"retry_exhausted"
+    for those same labels -- so a consumer re-deriving status from
+    classification saw a different value than the wire. The set difference is
+    derived from the enum, not hand-copied, so a member added to the taxonomy
+    without a status entry fails here by name.
+    """
     entire = {member.value for member in CrawlClassification}
-    assert accounted == entire, (
-        f"taxonomy/accounting drift: "
-        f"unaccounted={sorted(entire - accounted)} "
-        f"secretly-defaulted={sorted(accounted - entire - documented_default)}"
+    covered = set(CLASSIFICATION_STATUS_BY_LABEL)
+    assert covered <= entire, (
+        f"status table names labels the taxonomy does not know: {sorted(covered - entire)}"
     )
+    assert entire - covered == set(), (
+        f"classifications with no explicit status entry: {sorted(entire - covered)}"
+    )
+
+
+def test_every_table_status_is_a_declared_result_status():
+    """No table entry may name a status the ``ResultStatus`` literal does not
+    declare -- the wire enum ``CrawlStatus`` mirrors that literal, so an
+    invented status would be silently coerced to ``failed`` at shaping."""
+    import typing
+
+    from app.constants import ResultStatus
+
+    declared = set(typing.get_args(ResultStatus))
+    bad = {label: status for label, status in CLASSIFICATION_STATUS_BY_LABEL.items() if status not in declared}
+    assert not bad, f"table entries with an undeclared status: {bad}"
+
+
+class TestStatusAgreesWithClassification:
+    """The (classification, status) agreement the taxonomy guards at the
+    terminal builders. These are the labels that used to disagree: the builders
+    asserted one status and ``status_for_classification`` re-derived the
+    "blocked" default for the same label."""
+
+    # The exception chokepoint's labels: it builds a terminal failure, and the
+    # table used to hand back "blocked" for every one of them.
+    @pytest.mark.parametrize(
+        "classification",
+        [
+            "network_error",
+            "connection_error",
+            "tls_error",
+            "dns_error",
+            "http_status_error",
+            "value_error",
+            "browser_crash",
+            "unknown_error",
+        ],
+    )
+    def test_exception_chokepoint_status_matches_the_table(self, classification):
+        from app.constants import status_for_classification
+        from app.crawl.result_helpers import _engine_result_from_exception
+
+        result = _engine_result_from_exception(
+            error=ConnectionError("boom"),
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            strategy=None,
+            known_classification=classification,
+        )
+        assert result.status == status_for_classification(classification) == "failed"
+
+    def test_robots_disallowed_builder_status_matches_the_table(self):
+        from app.constants import status_for_classification
+        from app.crawl.engine import _skipped_engine_result
+
+        result = _skipped_engine_result(
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            strategy="HTTP_DECLARED_CRAWLER",
+            classification="robots_disallowed",
+            error="robots_txt_disallowed",
+        )
+        assert result.status == status_for_classification("robots_disallowed") == "skipped"
+
+    @pytest.mark.parametrize(
+        "classification", ["invalid_url", "unsupported_scheme", "private_network_target"]
+    )
+    def test_policy_refusal_builder_status_matches_the_table(self, classification):
+        from app.api.render import _disallowed_result
+        from app.constants import status_for_classification
+
+        result = _disallowed_result((0, "http://example.com/"), classification)
+        assert result.status == status_for_classification(classification) == "disallowed"
+
+    def test_browser_retry_exhausted_status_matches_the_table(self):
+        """The browser retry loop's terminal verdict for a navigation timeout."""
+        from app.constants import status_for_classification
+        from app.crawl.result_helpers import _terminal_crawl_result
+
+        result = _terminal_crawl_result(
+            url="http://example.com/",
+            status="retry_exhausted",
+            classification="navigation_timeout",
+            attempts=2,
+            elapsed_ms=10,
+            domain="example.com",
+            error="navigation_timeout",
+        )
+        assert result.status == status_for_classification("navigation_timeout") == "retry_exhausted"
+
+    def test_taxonomy_allows_the_documented_context_varying_status(self):
+        """``unknown_error`` legitimately also pairs with ``retry_exhausted``:
+        the browser retry loop's verdict describes the attempt, not the page."""
+        from app.constants import status_agrees_with_classification, status_for_classification
+
+        assert status_for_classification("unknown_error") == "failed"
+        assert status_agrees_with_classification("unknown_error", "failed")
+        assert status_agrees_with_classification("unknown_error", "retry_exhausted")
+
+    def test_taxonomy_rejects_a_disagreeing_pair(self):
+        """A pair neither the table default nor the documented context set allows
+        must not be constructible at the terminal builder."""
+        from app.crawl.result_helpers import _failed_engine_result
+
+        with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
+            _failed_engine_result(
+                original_url="http://example.com/",
+                normalized_url="http://example.com/",
+                strategy=None,
+                # robots_disallowed's taxonomy status is "skipped", so a builder
+                # asserting "failed" for it is exactly the disagreement the guard
+                # exists to reject.
+                classification="robots_disallowed",
+                # A real taxonomy member (the construction gate rejects a
+                # non-member before the agreement guard is reached); the
+                # disagreement under test is status-vs-classification.
+                error="robots_disallowed",
+            )
 
 
 def test_capabilities_advertises_exactly_the_taxonomy():

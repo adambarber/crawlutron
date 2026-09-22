@@ -259,6 +259,38 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     # Capacity, not a dead page: the domain's breaker was open, so the URL was
     # never attempted. Same retry contract as browser_pool_exhausted above.
     "circuit_breaker_open": "failed",
+    # Transport / strategy exception codes emitted by the shared classifier
+    # (``_classify_error_code``) and by the engine's unsupported-strategy
+    # guard. Every one reaches the wire through the exception chokepoint
+    # (``_engine_result_from_exception`` / ``_crawl_result_from_exception``),
+    # which builds a terminal *failure*, so their status is "failed" -- not
+    # the "blocked" default an unlisted label takes. "blocked" is the
+    # non-assertive "we were kept out" verdict; these mean the fetch itself
+    # died, and leaving them unlisted made a consumer re-deriving status from
+    # classification disagree with the wire.
+    "network_error": "failed",
+    "connection_error": "failed",
+    "tls_error": "failed",
+    "dns_error": "failed",
+    "http_status_error": "failed",
+    "value_error": "failed",
+    "browser_crash": "failed",
+    "unknown_error": "failed",
+    # A robots.txt disallow is a deliberate non-attempt, not a page failure and
+    # not a block: the crawl path reports "skipped" (``_skipped_engine_result``),
+    # which says "we chose not to fetch" rather than "we could not", and keeps
+    # the URL out of the failed-bookkeeping a "failed" status would feed.
+    "robots_disallowed": "skipped",
+    # Policy refusals from ``normalize_public_http_url`` (unsupported scheme,
+    # non-public target, malformed URL), surfaced by the render endpoint as a
+    # caller-visible refusal. Never a page verdict of any kind.
+    "invalid_url": "disallowed",
+    "unsupported_scheme": "disallowed",
+    "private_network_target": "disallowed",
+    # The browser retry loop exhausted its attempts. Distinct from a transport
+    # failure: the page may be perfectly renderable on a later pass, so the
+    # verdict describes the attempt, not the page.
+    "navigation_timeout": "retry_exhausted",
 }
 
 # Unknown-classification default: "blocked".
@@ -290,6 +322,40 @@ def status_for_classification(classification: str) -> ResultStatus:
     :data:`UNKNOWN_CLASSIFICATION_STATUS`.
     """
     return CLASSIFICATION_STATUS_BY_LABEL.get(classification, UNKNOWN_CLASSIFICATION_STATUS)
+
+
+# The exhaustive set of classifications whose result status is NOT determined
+# by the label alone, each mapped to the statuses a builder may legitimately
+# pair it with beyond the table default.
+#
+# ``unknown_error`` is the one such label: the engine's unsupported-strategy
+# guard and the exception chokepoint report it as the table default "failed",
+# but the browser retry loop reports "retry_exhausted" once it has spent every
+# attempt -- a verdict about the attempt that the classification cannot carry.
+# Every entry here is a load-bearing, context-dependent status, not a drift
+# source: the terminal-result builders call
+# :func:`status_agrees_with_classification` on every construction, so a pairing
+# that is neither the table default nor listed here raises instead of reaching
+# the wire, and a new context-dependent pairing must be added here in the open.
+CONTEXT_VARYING_STATUS: dict[str, frozenset[ResultStatus]] = {
+    "unknown_error": frozenset({"retry_exhausted"}),
+}
+
+
+def status_agrees_with_classification(classification: str, status: str) -> bool:
+    """Whether a ``(classification, status)`` pair is one the taxonomy allows.
+
+    This is the guard that makes a disagreeing pair unrepresentable at the
+    terminal-result chokepoint: ``status`` must either be the table default for
+    this classification (:func:`status_for_classification`) or one of the
+    documented context-dependent statuses in :data:`CONTEXT_VARYING_STATUS`.
+    A caller re-deriving status from classification can therefore rely on the
+    value the builder set, which is the load-bearing invariant in this
+    module's docstring.
+    """
+    if status == status_for_classification(classification):
+        return True
+    return status in CONTEXT_VARYING_STATUS.get(classification, frozenset())
 
 
 # ---------------------------------------------------------------------------

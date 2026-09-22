@@ -9,11 +9,13 @@ from typing import Any, TypeVar
 
 import httpx
 
+from app.constants import status_agrees_with_classification
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models import (
     BrowserPoolExhaustedError,
     Classification,
+    CrawlError,
     CrawlResult,
     CrawlStrategyAttempt,
     CrawlStrategyName,
@@ -25,6 +27,25 @@ _JobT = TypeVar("_JobT")
 
 
 logger = logging.getLogger(__name__)
+
+
+def _enforce_status_classification(classification: Classification, status: ResultStatus) -> None:
+    """Reject a ``(classification, status)`` pair the taxonomy does not allow.
+
+    The terminal-result primitives take both axes as free parameters, which is
+    exactly the shape that lets the wire assert one status while
+    ``status_for_classification`` re-derives another for the same label. This
+    check at the construction chokepoint makes the disagreeing pair
+    unrepresentable instead of merely undesirable: it passes when the status is
+    the table default for the classification or one of the documented
+    context-dependent statuses, and raises otherwise, so the two axes can never
+    silently drift apart again.
+    """
+    if not status_agrees_with_classification(classification, status):
+        raise ValueError(
+            f"status {status!r} disagrees with the taxonomy status for "
+            f"classification {classification!r}"
+        )
 
 
 def _classify_error_code(exc: BaseException) -> Classification:
@@ -195,8 +216,9 @@ def _terminal_crawl_result(
     attempts: int,
     elapsed_ms: int,
     domain: str,
-    error: str | None,
+    error: CrawlError | None,
     metadata: dict[str, Any] | None = None,
+    selected_strategy: CrawlStrategyName | None = None,
 ) -> CrawlResult:
     """Construct a terminal (no-payload) CrawlResult -- the /v1/render wire shape.
 
@@ -209,7 +231,13 @@ def _terminal_crawl_result(
     the single construction site; ``error`` must be a stable classification
     (``_classify_error_code``), never raw exception text -- which is what the
     browser path already passed correctly.
+
+    ``selected_strategy`` is the browser mode that was in play, or None when no
+    browser produced the result (a policy refusal, a pool that never handed out
+    a renderer): the render shaper carries it to the wire instead of inventing
+    a member.
     """
+    _enforce_status_classification(classification, status)
     return CrawlResult(
         url=url,
         status=status,
@@ -222,6 +250,7 @@ def _terminal_crawl_result(
         domain=domain,
         error=error,
         metadata=metadata or {},
+        selected_strategy=selected_strategy,
     )
 
 
@@ -305,6 +334,7 @@ def _crawl_result_from_exception(
         domain=domain,
         error=classification,
         metadata={"retryable": retryable, "error_code": classification},
+        selected_strategy=strategy,
     )
 
 
@@ -317,7 +347,7 @@ def _make_engine_result(
     classification: Classification,
     attempt: CrawlStrategyAttempt,
     http_status: int | None,
-    error: str | None,
+    error: CrawlError | None,
     selected_strategy: CrawlStrategyName | None = None,
     headers: dict[str, str] | None = None,
     content_type: str | None = None,
@@ -346,6 +376,7 @@ def _make_engine_result(
         diagnostics = {}
     if discovered_links is None:
         discovered_links = []
+    _enforce_status_classification(classification, status)
     return EngineCrawlResult(
         original_url=original_url,
         normalized_url=normalized_url,
@@ -380,7 +411,7 @@ def _terminal_engine_result(
     strategy: CrawlStrategyName | None,
     status: ResultStatus,
     classification: Classification,
-    error: str | None = None,
+    error: CrawlError | None = None,
     diagnostics: dict | None = None,
     http_status: int | None = None,
     final_url: str | None = None,
@@ -424,7 +455,7 @@ def _failed_engine_result(
     normalized_url: str,
     strategy: CrawlStrategyName | None,
     classification: Classification,
-    error: str,
+    error: CrawlError,
     diagnostics: dict | None = None,
     http_status: int | None = None,
     final_url: str | None = None,
@@ -449,7 +480,7 @@ def _skipped_engine_result(
     normalized_url: str,
     strategy: CrawlStrategyName | None,
     classification: Classification,
-    error: str,
+    error: CrawlError,
     diagnostics: dict | None = None,
 ) -> EngineCrawlResult:
     """Construct a skipped EngineCrawlResult (e.g., robots_disallowed)."""

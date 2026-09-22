@@ -47,7 +47,7 @@ from app.crawl.strategies.http import (
     _check_ssrf_protection,
 )
 from app.json_safe import json_default
-from app.models import Classification, CrawlResult, RenderOptions, ResultStatus
+from app.models import Classification, CrawlError, CrawlResult, RenderOptions, ResultStatus
 from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
 from app.validation import get_env_float, get_env_int, registrable_domain
@@ -723,7 +723,7 @@ class BrowserRenderer:
             return CrawlResult(
                 url=url,
                 status=status,
-                classification=classification,  # type: ignore[arg-type]
+                classification=classification,
                 final_url=final_url,
                 html=html,
                 text=text,
@@ -953,7 +953,7 @@ class BrowserRenderer:
 
     async def _extract_with_challenge_wait(
         self, page: Any, options: RenderOptions
-    ) -> tuple[str | None, str | None, str, bool]:
+    ) -> tuple[str | None, str | None, Classification, bool]:
         html = await self._extract_html(page) if options.include_html else None
         text = await self._extract_text(page) if options.include_text else None
         title = await page.evaluate("() => document.title")
@@ -1135,7 +1135,7 @@ class BrowserRenderer:
         classification: Classification,
         attempts: int,
         started: float,
-        error: str | None,
+        error: CrawlError | None,
     ) -> CrawlResult:
         return _terminal_crawl_result(
             url=url,

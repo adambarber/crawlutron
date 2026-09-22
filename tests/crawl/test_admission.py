@@ -3,7 +3,7 @@
 import asyncio
 
 import pytest
-from _testkit import site_fetcher
+from _testkit import FakeScheduler, site_fetcher
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -478,30 +478,13 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
 # ---------------------------------------------------------------------------
 # Pure helper: does the upcoming batch look HTTP-heavy?
 # ---------------------------------------------------------------------------
-class _HSScheduler:
+class _HSScheduler(FakeScheduler):
     """Fake scheduler exposing per-domain pinned strategies."""
 
     def __init__(self, pins=None):
+        super().__init__()
         self.pins = dict(pins or {})
-        self.runs = 0
 
-    def get_pinned_strategy(self, domain):
-        return self.pins.get(domain)
-
-    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):
-        self.runs += 1
-        # Route a raising worker through the real envelope chokepoint when the
-        # caller supplies one, so the double honours the same contract the real
-        # scheduler does instead of silently dropping the failed job.
-        out = {}
-        for job in jobs:
-            try:
-                out[job.index] = await worker(job)
-            except Exception as error:
-                if failed_result is None:
-                    raise
-                out[job.index] = failed_result(job, error)
-        return out
 
 
 def _task(domain):

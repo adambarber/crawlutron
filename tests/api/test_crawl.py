@@ -9,6 +9,7 @@ from _testkit import browser_available, make_crawl_payload
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER
+from app.crawl.strategies.browser_pool import set_browser_pool
 from app.main import app
 
 
@@ -348,6 +349,94 @@ class TestDiscoveryAndRenderApi:
             set_browser_pool(old)
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
+
+    def _warmed_pool_endpoint(self, monkeypatch, warmup_urls):
+        """A real ``/v1/render`` whose pool serves renders in a chosen mode.
+
+        Only the browser is faked (no binary in CI): the pool, its
+        ``browser_strategy`` property, the pooled worker, the scheduler, the
+        ``to_dict`` serialization, the ``render_result_to_unified`` adapter and
+        the strict ``UnifiedCrawlResponse`` model all run as in production, so a
+        key the adapter emits but the wire model does not declare is dropped
+        before it reaches the assertion.
+        """
+        from app.crawl.strategies.browser_pool import BrowserPool
+        from app.models import CrawlResult
+
+        class _FakeRenderer:
+            async def render(self, url, options):
+                # The real renderer does not know the pool's configured mode, so
+                # it returns a result without one -- the worker fills the slot.
+                return CrawlResult(
+                    url=url,
+                    status="success",
+                    classification="rendered",
+                    final_url=url,
+                    html="<html></html>",
+                    text="t",
+                    attempts=1,
+                    elapsed_ms=1,
+                    domain="127.0.0.1",
+                    metadata={"extraction_method": "browser"},
+                )
+
+        pool = BrowserPool(pool_size=1, warmup_urls=warmup_urls)
+        renderer = _FakeRenderer()
+
+        async def _acquire(*args, **kwargs):
+            return renderer
+
+        monkeypatch.setattr(pool, "acquire", _acquire)
+        monkeypatch.setattr(pool, "release", lambda _renderer: None)
+        return set_browser_pool(pool)
+
+    async def test_v1_render_reports_the_pools_real_strategy_when_warmed(self, monkeypatch):
+        """The render wire must carry the browser mode that actually served the
+        render. The adapter used to hard-code ``BROWSER_HEADLESS`` for every
+        result while a warmed pool serves ``BROWSER_HEADED_WARMED`` -- the two
+        endpoints then disagreed about the provenance of the same render."""
+        from app.constants import BROWSER_HEADED_WARMED
+
+        old = self._warmed_pool_endpoint(monkeypatch, ["https://warmup.example/"])
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 200, resp.text
+        item = resp.json()["results"][0]
+        assert item["selected_strategy"] == BROWSER_HEADED_WARMED, item
+        assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADED_WARMED, item
+
+    async def test_v1_render_reports_headless_without_warmup(self, monkeypatch):
+        """Inverse case: a plain headless pool still labels its own mode, not the
+        warmed member."""
+        from app.constants import BROWSER_HEADLESS
+
+        old = self._warmed_pool_endpoint(monkeypatch, [])
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 200, resp.text
+        item = resp.json()["results"][0]
+        assert item["selected_strategy"] == BROWSER_HEADLESS, item
+        assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADLESS, item
+
+    async def test_v1_render_strategy_is_null_when_no_browser_served(self, monkeypatch):
+        """A result no browser produced (here a policy refusal on a malformed
+        URL) must fall back to null, never an invented member: the pool never
+        ran, so claiming it ran headless would be the same invention the
+        hard-coded label was."""
+        old = self._warmed_pool_endpoint(monkeypatch, ["https://warmup.example/"])
+        try:
+            resp = await self.client.post("/v1/render", json={"url": "not a url"})
+        finally:
+            set_browser_pool(old)
+        assert resp.status_code == 200, resp.text
+        item = resp.json()["results"][0]
+        assert item["status"] == "disallowed", item
+        assert item["selected_strategy"] is None, item
+        assert item["attempted_strategies"][0]["strategy"] is None, item
 
     async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request

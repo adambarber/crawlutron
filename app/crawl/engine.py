@@ -1178,10 +1178,14 @@ async def _crawl_request_impl(
         return None
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
+        # strategy=None: the URL was screened out by robots.txt before any
+        # strategy ran, and "no strategy was attempted" is not a strategy. The
+        # neighbouring failure envelopes pass None for the same reason; a label
+        # here would claim an HTTP attempt that never happened.
         return _skipped_engine_result(
             original_url=job.original_url,
             normalized_url=job.normalized_url,
-            strategy="HTTP_DECLARED_CRAWLER",
+            strategy=None,
             classification="robots_disallowed",
             error="robots_txt_disallowed",
             diagnostics={"robots": {"allowed": False}},

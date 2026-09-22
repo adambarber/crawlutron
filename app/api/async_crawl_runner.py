@@ -102,7 +102,7 @@ async def run_async_crawl(
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
         return
     job.status = JobStatus.RUNNING
-    job_store.save(job)
+    await job_store.asave(job)
 
     try:
         async with _get_async_crawl_semaphore():
@@ -139,7 +139,7 @@ async def run_async_crawl(
                 "total_crawled": len(unified_results),
                 "total_failed": failed,
             }
-            job_store.save(job)
+            await job_store.asave(job)
 
             # Also store in result_store for backward compat (sync path reads from here)
             try:
@@ -159,7 +159,7 @@ async def run_async_crawl(
         if job is not None:
             job.status = JobStatus.FAILED
             job.error = str(exc)
-            job_store.save(job)
+            await job_store.asave(job)
         if webhook_url:
             try:
                 error_payload = (

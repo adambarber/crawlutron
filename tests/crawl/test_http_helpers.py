@@ -335,7 +335,11 @@ class TestExecuteCrawlChain:
         assert (await self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
 
     async def test_unsupported_strategy(self) -> None:
-        assert (await self._run_chain("NOT_A_STRATEGY")).classification == "unknown_error"
+        # A strategy outside CrawlStrategyName is rejected at construction of the
+        # attempt: the strategy axis is a Literal, so an invalid value cannot
+        # reach a result and callers see a ValueError naming the field.
+        with pytest.raises(ValueError, match=r"\.strategy="):
+            await self._run_chain("NOT_A_STRATEGY")
 
 
 class TestCrawlRequest:

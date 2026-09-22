@@ -93,12 +93,108 @@ def as_classification(value: str, *, default: Classification = "unknown_error") 
     return _CLASSIFICATION_TABLE.get(value, default)
 
 
+# The stable machine-readable failure code carried alongside ``classification``.
+# Documented at app/api/render.py:202 as a stable code callers can key on, so it
+# is a declared taxonomy rather than a free-form str: a code that is not listed
+# here cannot reach a result, and the membership sweep enforces it for free.
+# - page-outcome codes that are also Classification members: the builders route
+#   ``error=classification`` for these (result_helpers), so the two fields agree
+#   and the code is a stable key for callers.
+# - pipeline conditions with no page-classification analogue
+#   (``browser_worker_unavailable`` is a capacity decision, ``unsupported_strategy``
+#   a config one): they are not page outcomes and forcing them into Classification
+#   would distort that taxonomy.
+CrawlError = Literal[
+    # Every Classification member: the builders route ``error=classification``
+    # (result_helpers), so the two fields agree and the code is a stable key for
+    # callers. Listed explicitly because mypy cannot evaluate ``*get_args()`` in
+    # a Literal alias; test_crawl_error_members_derive_from_classification pins
+    # this list to Classification's args so it cannot drift from the source.
+    "rendered",
+    "captcha_detected",
+    "bot_challenge_detected",
+    "access_denied",
+    "login_required",
+    "paywall_detected",
+    "rate_limited",
+    "cookie_consent_required",
+    "javascript_required",
+    "unsupported_browser",
+    "geolocation_blocked",
+    "waf_challenge_detected",
+    "not_found",
+    "site_error",
+    "gone",
+    "binary_no_text",
+    "robots_disallowed",
+    "navigation_timeout",
+    "browser_crash",
+    "network_error",
+    "connection_error",
+    "http_status_error",
+    "url_budget_exceeded",
+    "payload_too_large",
+    "too_many_redirects",
+    "http_error",
+    "value_error",
+    "tls_error",
+    "dns_error",
+    "invalid_url",
+    "unsupported_scheme",
+    "private_network_target",
+    "unknown_error",
+    "not_modified",
+    "browser_pool_exhausted",
+    "circuit_breaker_open",
+    # Pipeline conditions with no page-classification analogue: a capacity
+    # decision and a config one. They are not page outcomes, so forcing them into
+    # Classification would distort that taxonomy.
+    "robots_txt_disallowed",
+    "browser_worker_unavailable",
+    "unsupported_strategy",
+    "retries_exhausted",
+]
+
 CrawlStrategyName = Literal[
     "HTTP_DECLARED_CRAWLER",
     "HTTP_CFFI_IMPERSONATE",
     "BROWSER_HEADLESS",
     "BROWSER_HEADED_WARMED",
 ]
+
+
+# Fields whose declared type is a Literal: a value that is not a member is a
+# shape lie, so the dataclasses validate them at construction. Kept here next to
+# the Literal definitions because the check and the types must move together.
+_LITERAL_FIELDS = {
+    "status": set(get_args(ResultStatus)),
+    "classification": set(get_args(Classification)),
+    "selected_strategy": set(get_args(CrawlStrategyName)),
+    "strategy": set(get_args(CrawlStrategyName)),
+    "error": set(get_args(CrawlError)),
+}
+
+
+def _check_literal_fields(obj: Any) -> None:
+    """Reject a non-member value on any Literal field of a result dataclass.
+
+    This is the construction-time chokepoint: ``result_helpers`` builds most
+    results, but a dataclass built anywhere else (engine.py, strategies, tests)
+    previously escaped the only runtime guard. Checking in ``__post_init__``
+    closes the class by construction -- no future direct build can carry an
+    out-of-taxonomy value -- for the cost of one set lookup per field.
+    Namespace/provenance (a member *value* arriving from the wrong constant) is
+    not covered here and stays with the AST detector.
+    """
+    for name, allowed in _LITERAL_FIELDS.items():
+        if name not in obj.__dict__:
+            continue
+        value = obj.__dict__[name]
+        if value is not None and value not in allowed:
+            raise ValueError(
+                f"{type(obj).__name__}.{name}={value!r} is not a member of its "
+                f"declared Literal ({len(allowed)} allowed)"
+            )
 
 
 @dataclass(frozen=True)
@@ -131,7 +227,18 @@ class CrawlResult:
     elapsed_ms: int
     domain: str
     metadata: dict[str, Any] = field(default_factory=dict)
-    error: str | None = None
+    error: CrawlError | None = None
+    # The browser mode that actually served this render (BROWSER_HEADLESS or
+    # BROWSER_HEADED_WARMED), or None when no browser strategy produced it. The
+    # render endpoint surfaces this on the wire as ``selected_strategy`` so the
+    # caller can tell a warmed render from a plain headless one; None rather
+    # than a hard-coded member keeps "we did not render this" distinguishable
+    # from "we rendered it headless".
+    selected_strategy: CrawlStrategyName | None = None
+
+    def __post_init__(self) -> None:
+        _check_literal_fields(self)
+
 
 
 @dataclass(frozen=True)
@@ -160,7 +267,10 @@ class CrawlStrategyAttempt:
     http_status: int | None
     content_type: str | None
     elapsed_ms: int
-    error: str | None = None
+    error: CrawlError | None = None
+
+    def __post_init__(self) -> None:
+        _check_literal_fields(self)
 
 
 @dataclass(frozen=True)
@@ -210,13 +320,17 @@ class EngineCrawlResult:
     discovered_link_count: int = 0
     discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLink] = field(default_factory=list)
-    error: str | None = None
+    error: CrawlError | None = None
     markdown: str | None = None
     next_page_url: str | None = None
     # Origin validators for the delivered representation ("etag"/"last_modified").
     # Empty when the origin supplied none; surfaced so callers can revalidate
     # conditionally on later requests (freshness monitoring).
     validators: dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _check_literal_fields(self)
+
 
 
 # ---------------------------------------------------------------------------

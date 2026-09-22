@@ -7,6 +7,7 @@ so they can survive process restarts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -203,6 +204,23 @@ class JobStore:
         """Persist job state to SQLite (thread-safe)."""
         with self._lock:
             self._persist(job)
+
+    async def asave(self, job: CrawlJobState) -> None:
+        """Async :meth:`save`: offload the whole row -- the ``json.dumps`` of
+        results, visited and frontier plus the SQLite commit -- to a worker
+        thread so the event loop is never stalled.
+
+        Synchronous callers must keep using :meth:`save`: startup recovery
+        (``recover_orphaned_running_jobs``) is sync by design and runs before a
+        loop exists. This is the same sibling shape ``ContentCache`` uses for
+        ``set``/``aset``, and it keeps the offload discipline inside the store
+        rather than at each call site, so a new async caller cannot forget it
+        the way ``run_async_crawl`` did.
+
+        ``self._lock`` serializes every connection use, so a save run here is
+        safe against a concurrent sync ``save`` from the startup/recovery path.
+        """
+        await asyncio.to_thread(self.save, job)
 
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``."""

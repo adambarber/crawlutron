@@ -310,7 +310,7 @@ def build_pinned_renderer(monkeypatch, page):
     monkeypatch.setattr(
         BrowserRenderer,
         "_extract_with_challenge_wait",
-        lambda self, page, options: _async_return(("<html>hi</html>", "hi", "ok", False)),
+        lambda self, page, options: _async_return(("<html>hi</html>", "hi", "rendered", False)),
     )
     monkeypatch.setattr(BrowserRenderer, "_looks_like_pdf", lambda self, url: False)
     # Force the shared constants resolver (imported into the browser module's
@@ -533,6 +533,37 @@ class Spill:
 
     def load_ordered(self) -> list[Any]:
         return [self.writes[i] for i in sorted(self.writes)]
+
+
+class FakeScheduler:
+    """Shared domain-scheduler double for recursive-dispatch tests.
+
+    Runs jobs in submission order and routes a raising worker through the
+    caller's ``failed_result`` envelope when supplied, matching the real
+    scheduler's contract. Parameters are named explicitly (no ``**kwargs``) so
+    a required production kwarg added later cannot be silently accepted and
+    dropped -- the shape that hid the ``failed_result`` refactor's breakage
+    across 24 tests.
+    """
+
+    def __init__(self):
+        self.runs = 0
+        self.pins: dict[str, str] = {}
+
+    def get_pinned_strategy(self, domain: str):
+        return self.pins.get(domain)
+
+    async def run(self, jobs, worker, on_result=None, *, failed_result=None):
+        self.runs += 1
+        out = {}
+        for job in jobs:
+            try:
+                out[job.index] = await worker(job)
+            except Exception as error:
+                if failed_result is None:
+                    raise
+                out[job.index] = failed_result(job, error)
+        return out
 
 
 def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = None) -> dict:
@@ -924,8 +955,10 @@ __all__ = [
     "EXTRACTION_TRAFILATURA",
     "HTTP_CFFI_IMPERSONATE",
     "HTTP_DECLARED_CRAWLER",
+    "FakeScheduler",
     "HttpCache",
     "HttpFetchResult",
+    "FakeScheduler",
     "JobStore",
     "LLM_FORMAT_TEST_HTML",
     "MockClient",

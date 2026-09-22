@@ -62,7 +62,6 @@ from app.constants import (
     DEFAULT_USER_AGENT,
     DISCOVERY_BODY_MAX_BYTES,
     EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_BINARY_NO_TEXT,
     EXTRACTION_METHOD_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,
     EXTRACTION_METHOD_HTTP_HTML,
@@ -114,7 +113,6 @@ def _rebuild_response(data: dict[str, Any]) -> HttpFetchResult:
 
 from urllib.parse import urljoin
 
-from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.extraction import (
@@ -1013,11 +1011,10 @@ async def _default_http_fetcher(
     request_headers = dict(headers)
     while True:
         pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
-        try:
-            # follow_redirects=False: we follow manually so each hop is SSRF-checked.
-            async with client.stream(
-                "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
-            ) as response:
+        # follow_redirects=False: we follow manually so each hop is SSRF-checked.
+        async with client.stream(
+            "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
+        ) as response:
                 content_length = response.headers.get("content-length")
                 if _declared_length_exceeds(content_length, max_content_length):
                     return _http_413(url, current_url, started)
@@ -1034,6 +1031,11 @@ async def _default_http_fetcher(
                 # Terminal response: stream RAW bytes, capping total read (#5).
                 # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
                 # bytes re-allocates and copies the whole buffer per chunk.
+                # A non-2xx streams through this same capped loop, so an error
+                # body is bounded by max_content_length exactly like a success
+                # body -- there is no separate status-error branch, and none
+                # could fire: raise_for_status is never called, so httpx cannot
+                # raise HTTPStatusError out of stream().
                 raw = bytearray()
                 async for chunk in response.aiter_raw():
                     raw.extend(chunk)
@@ -1048,17 +1050,6 @@ async def _default_http_fetcher(
                 # Already decompressed above; drop header to avoid a second pass.
                 resp_headers.pop("content-encoding", None)
                 final_url = current_url
-        except httpx.HTTPStatusError as error:
-            response = error.response
-            # Error bodies are attacker-influenced too: cap them like success
-            # bodies (a hostile 5xx must not buffer into memory via .content).
-            try:
-                body = await read_capped_async(response.aiter_raw(), max_content_length)
-            except BodyTooLarge:
-                return _http_413(url, current_url, started)
-            status_code = response.status_code
-            resp_headers = {key.lower(): value for key, value in response.headers.items()}
-            final_url = current_url
         elapsed_ms = int((time.monotonic() - started) * 1000)
         _store_set_cookies(final_url or url, resp_headers)
         return HttpFetchResult(
@@ -2080,10 +2071,15 @@ async def _http_strategy_result(
                 }
             ]
         if extraction == EXTRACTION_TRAFILATURA and not is_html and classification == "rendered":
-            classification = EXTRACTION_METHOD_BINARY_NO_TEXT
+            # De-aliased from EXTRACTION_METHOD_BINARY_NO_TEXT: that is an
+            # extraction-method constant whose value happens to equal this
+            # classification member today, but the two namespaces are
+            # unrelated, so writing one into a ``classification`` slot is the
+            # shape that silently crosses a declared type boundary.
+            classification = "binary_no_text"
             classification_evidence = [
                 {
-                    "classification": EXTRACTION_METHOD_BINARY_NO_TEXT,
+                    "classification": "binary_no_text",
                     "signature": "non_html_body",
                     "source": "content_type",
                     "context": content_type or "",

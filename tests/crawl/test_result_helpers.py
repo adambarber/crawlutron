@@ -53,14 +53,14 @@ class TestTerminalResultContract:
             normalized_url="http://a/",
             strategy="HTTP_DECLARED_CRAWLER",
             classification="network_error",
-            error="boom",
+            error="connection_error",
             http_status=502,
             final_url="http://a/final",
             diagnostics={"k": "v"},
         )
         assert result.status == "failed"
         assert result.classification == "network_error"
-        assert result.error == "boom"
+        assert result.error == "connection_error"
         assert result.http_status == 502
         assert result.final_url == "http://a/final"
         assert result.diagnostics == {"k": "v"}
@@ -70,7 +70,7 @@ class TestTerminalResultContract:
             "status": "failed",
             "classification": "network_error",
             "http_status": 502,
-            "error": "boom",
+            "error": "connection_error",
             "content_type": None,
             "elapsed_ms": 0,
         }
@@ -83,7 +83,7 @@ class TestTerminalResultContract:
             normalized_url="http://c/",
             strategy="HTTP_DECLARED_CRAWLER",
             classification="robots_disallowed",
-            error="robots",
+            error="robots_txt_disallowed",
         )
         assert result.status == "skipped"
         assert result.final_url is None

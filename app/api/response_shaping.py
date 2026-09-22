@@ -169,16 +169,20 @@ def render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
         if key not in {"title", "content_length", "browser_reused", "challenge_resolved", "extraction_method"}
     }
     diagnostics.setdefault("browser_profile", {})
+    # The browser mode that actually served this render, threaded from the pool
+    # by the worker. Falls back to None -- never an invented member -- when no
+    # browser produced the item (a policy refusal, a worker that never ran).
+    selected_strategy = item.get("selected_strategy")
     return {
         "original_url": item["url"],
         "normalized_url": item["url"],
         "final_url": item.get("final_url"),
         "status": item["status"],
         "classification": item["classification"],
-        "selected_strategy": None,
+        "selected_strategy": selected_strategy,
         "attempted_strategies": [
             {
-                "strategy": "BROWSER_HEADLESS",
+                "strategy": selected_strategy,
                 "status": item["status"],
                 "classification": item["classification"],
                 "http_status": None,
