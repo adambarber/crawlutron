@@ -29,7 +29,7 @@ from app.constants import (
 from app.crawl.result_helpers import _failed_result_for
 from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
-from app.models import CrawlTask, EngineCrawlResult
+from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.scheduler import DomainScheduler
 from app.validation import registrable_domain
@@ -224,7 +224,7 @@ async def run_recursive_crawl(
     robots_allows: Callable[[str], Awaitable[bool]],
     robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult],
-    sitemap_seeds: Callable[[], Awaitable[list[str]]],
+    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]],
     spill: Any,
     shutdown_event: asyncio.Event,
     max_depth: int,

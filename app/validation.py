@@ -10,6 +10,8 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+from app.models import NormalizedUrl
+
 if TYPE_CHECKING:
     from publicsuffixlist import PublicSuffixList
 
@@ -114,7 +116,7 @@ def _resolver_numeric_ipv4(host: str) -> int | None:
     return result | values[-1]
 
 
-def normalize_public_http_url(url: str) -> str:
+def normalize_public_http_url(url: str) -> NormalizedUrl:
     """Canonicalize a public HTTP(S) URL into a single normalized form.
 
     This is the single source of truth for what a normalized URL is across the
@@ -158,7 +160,9 @@ def normalize_public_http_url(url: str) -> str:
         pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
         pairs.sort()
         query = urlencode(pairs, doseq=True)
-    return urlunparse((parsed.scheme, netloc, path, parsed.params, query, ""))
+    # The construction point of the type: everything upstream is raw
+    # input; everything downstream that names this shape is typed.
+    return NormalizedUrl(urlunparse((parsed.scheme, netloc, path, parsed.params, query, "")))
 
 
 def _strip_trailing_colon(value: str) -> str:
@@ -502,7 +506,7 @@ def filter_js_endpoints(
     ]
 
 
-def safe_public_url_or_none(raw: str | None) -> str | None:
+def safe_public_url_or_none(raw: str | None) -> NormalizedUrl | None:
     """The single normalize-or-None chokepoint for URL egress doors.
 
     ``normalize_public_http_url`` raises ``ValueError`` on anything it rejects

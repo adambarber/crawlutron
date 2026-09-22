@@ -121,6 +121,7 @@ from app.crawl.extraction import (
     extract_content,
     extract_post_fetch_discovery,
 )
+from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     _binary_no_text_result,
     _classify_error_code,
@@ -1816,7 +1817,7 @@ async def _http_strategy_result(
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
     # Drop the raw HTML as early as possible when the caller did not ask for it
     # so the decoded string + lxml tree are not retained in the result (T3/#2.1).
-    include_html = bool((policy.get("browser_profile") or {}).get("include_html", True))
+    include_html = policy_wants_html(policy)
 
     # Disk content cache (#5): serve an unchanged URL from local disk instead of
     # re-downloading. The key is derived from the *base* request headers (excluding
@@ -2124,6 +2125,7 @@ async def _http_strategy_result(
             include_diagnostics=bool(discovery),
             include_links=status == "success" and _want_discovery_links,
             include_js_endpoints=bool(discovery),
+            include_metadata=True,
         )
         if discovery:
             diagnostics.update(post_fetch["diagnostics"])
@@ -2223,6 +2225,7 @@ async def _http_strategy_result(
             content_type=content_type,
             html=html,
             text=text,
+            llm_metadata=post_fetch["llm_metadata"] or None,
             markdown=markdown,
             extraction_method=extraction_method,
             quality_score=quality,

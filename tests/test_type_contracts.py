@@ -53,3 +53,46 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     (url, headers, timeout_seconds, max_content_length) tuple the concrete
     fetchers accept -- not the three-parameter shape it drifted to."""
     assert get_args(HttpFetcher)[0] == [str, dict[str, str], int, int]
+
+
+class TestNormalizedUrlSeedType:
+    """M6: seeds and crawl tasks flow as a typed value, not a bare str.
+
+    The request URL enters as a bare string, but once it passes through
+    ``normalize_public_http_url`` -- the single source of truth for what a
+    normalized URL is -- the value carries the ``NormalizedUrl`` type
+    through ``CrawlTask.normalized_url`` and the sitemap-seed pipeline.
+    The type is a ``NewType`` over ``str``: erased at runtime (spills,
+    cache keys, and the wire stay plain JSON strings), but mypy refuses
+    to let an unnormalized string take a normalized-URL position without
+    crossing the normalizer first.
+    """
+
+    def test_normalized_url_is_a_newtype_over_str(self):
+        from app.models import NormalizedUrl
+
+        assert NormalizedUrl.__supertype__ is str
+
+    def test_crawl_task_normalized_url_field_is_typed(self):
+        from typing import get_type_hints
+
+        from app.models import CrawlTask, NormalizedUrl
+
+        assert get_type_hints(CrawlTask)["normalized_url"] is NormalizedUrl
+
+    def test_normalizer_returns_the_typed_value(self):
+        import typing
+
+        from app.models import NormalizedUrl
+        from app.validation import normalize_public_http_url
+
+        hints = typing.get_type_hints(normalize_public_http_url)
+        assert hints["return"] is NormalizedUrl
+
+    def test_typed_value_is_runtime_plain_str(self):
+        """Typing must not change runtime shape (JSON/spill compatibility)."""
+        from app.validation import normalize_public_http_url
+
+        normalized = normalize_public_http_url("HTTP://Example.COM:80/a/#frag")
+        assert type(normalized) is str
+        assert normalized == "http://example.com/a"

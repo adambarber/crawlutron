@@ -623,6 +623,57 @@ def test_crawl_response_chokepoint_detector_bites():
 
 
 # ---------------------------------------------------------------------------
+# Render-options construction chokepoint (C2/M11)
+# ---------------------------------------------------------------------------
+
+
+def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag ``RenderOptions(...)`` construction outside the resolver (C2/M11).
+
+    The effective render options were once hand-assembled at every entry
+    point and the copies drifted -- the browser strategy hardcoded the
+    capture knobs while policy reads respected the caller elsewhere, and
+    the /v1/render builder silently dropped browser_profile. Only
+    app/crawl/render_options.py may decide the shape; callers map their own
+    source into the resolver's mappings."""
+    if path.name == "render_options.py":
+        return []
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "RenderOptions"
+        ):
+            offenders.append(
+                offender(path, node.lineno, "RenderOptions(...) built outside resolve_render_options")
+            )
+    return offenders
+
+
+def test_render_options_built_only_by_resolver():
+    """Every effective RenderOptions flows through resolve_render_options."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_render_options_construction_offenders(tree, path))
+    assert not offenders, (
+        "Use app.crawl.render_options.resolve_render_options so request-side "
+        "options and server defaults merge in exactly one place: " + ", ".join(offenders)
+    )
+
+
+def test_render_options_chokepoint_detector_bites():
+    """Synthetic bypass fires; the resolver's own construction stays clean."""
+    bypass = ast.parse("def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n")
+    offenders = _render_options_construction_offenders(bypass, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "resolve_render_options" in offenders[0], offenders
+    resolver = ast.parse("def f(request, defaults):\n    return RenderOptions(**kwargs)\n")
+    assert not _render_options_construction_offenders(
+        resolver, REPO_ROOT / "app" / "crawl" / "render_options.py"
+    )
+
+
+# ---------------------------------------------------------------------------
 # ContentCache mirror twins (jscpd #2 class)
 # ---------------------------------------------------------------------------
 

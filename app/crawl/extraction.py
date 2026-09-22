@@ -29,7 +29,7 @@ from html import unescape
 from typing import Any, Literal, NamedTuple
 from urllib.parse import urljoin, urlparse
 
-from app.crawl.llm_format import _text_from_html
+from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
 from app.validation import get_env_float, get_env_int, public_url_or_none, safe_public_url_or_none
@@ -962,6 +962,7 @@ def extract_post_fetch_discovery(
     include_diagnostics: bool = False,
     include_links: bool = False,
     include_js_endpoints: bool = False,
+    include_metadata: bool = False,
 ) -> dict[str, Any]:
     """Sync post-fetch discovery block for the strategy result builders (perf #9).
 
@@ -989,6 +990,14 @@ def extract_post_fetch_discovery(
         if include_js_endpoints
         else []
     )
+    # H2: the page metadata rides the tree that was parsed for THIS call's
+    # diagnostics/links -- never a parse of its own. An empty dict means
+    # "no tree existed", and shaping falls back to its own single parse;
+    # a non-empty dict is authoritative and crosses the persistence
+    # boundary as plain JSON (the tree itself never leaves this function).
+    llm_metadata: dict[str, Any] = {}
+    if include_metadata and tree is not None and final_url:
+        llm_metadata = _llm_metadata_from_tree(tree, final_url)
     return {
         "diagnostics": diagnostics,
         "discovered_links": discovered_links,
@@ -996,6 +1005,7 @@ def extract_post_fetch_discovery(
         "discovered_links_truncated": discovered_links_truncated,
         "js_endpoints": js_endpoints,
         "next_page_url": _detect_pagination(html, final_url),
+        "llm_metadata": llm_metadata,
     }
 
 

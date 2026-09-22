@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Literal, get_args
+from typing import Any, Literal, NewType, get_args
 
 from app.constants import ResultStatus
 
@@ -276,12 +276,23 @@ class CrawlStrategyAttempt:
 @dataclass(frozen=True)
 class DiscoveredLink:
     url: str
-    normalized_url: str
+    # M6: the frontier/visited-eligible form; producers build it from
+    # ``normalize_public_http_url`` output (``frontier_link_url`` is the only
+    # read allowed for queueing -- the raw ``url`` href stays unqueue-able).
+    normalized_url: NormalizedUrl
     text: str
     rel: list[str]
     source_url: str
     host: str
     is_same_host: bool
+
+
+# M6: the canonical form produced by ``app.validation.normalize_public_http_url``
+# (the single source of truth for "what a normalized URL is"). A NewType over
+# str: erased at runtime -- spill JSON, cache keys, and the wire keep plain
+# strings -- but mypy rejects putting a raw request/sitemap/crawl string into
+# a normalized-URL position unless it has crossed the normalizer.
+NormalizedUrl = NewType("NormalizedUrl", str)
 
 
 @dataclass
@@ -295,7 +306,7 @@ class CrawlTask:
 
     index: int
     original_url: str
-    normalized_url: str
+    normalized_url: NormalizedUrl
     domain: str
 
 
@@ -327,6 +338,12 @@ class EngineCrawlResult:
     # Empty when the origin supplied none; surfaced so callers can revalidate
     # conditionally on later requests (freshness monitoring).
     validators: dict[str, str] = field(default_factory=dict)
+    # Page metadata (title/og/twitter/JSON-LD) computed once from the engine's
+    # shared discovery tree (H2). None = never computed here (no tree existed);
+    # shaping then reparses once. A dict is plain JSON data -- persisted in the
+    # spill, read by response shaping, and NEVER part of the wire response
+    # (build_unified_result maps it into the existing PageMetadata fields).
+    llm_metadata: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         _check_literal_fields(self)

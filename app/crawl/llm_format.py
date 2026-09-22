@@ -36,16 +36,36 @@ def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     Inputs above ``_MAX_LLM_FORMAT_HTML_INPUT_BYTES`` are truncated before
     lxml parses them so a malicious oversized payload cannot exhaust RAM
     building the DOM tree (adversarial F-llm-format-size-guard).
+
+    This is the fallback computation site: engine-produced items carry
+    metadata computed once from the discovery tree
+    (``app.crawl.extraction.extract_post_fetch_discovery``) and shaping
+    reads that dict instead of reaching this function (H2). Keep the two
+    paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
+    reader of a parsed tree.
     """
     metadata: dict[str, Any] = {"source_url": url}
     if len(html) > _MAX_LLM_FORMAT_HTML_INPUT_BYTES:
         html = html[:_MAX_LLM_FORMAT_HTML_INPUT_BYTES]
-    # Lazy import avoids a circular import: extraction.py imports this module.
+    # Lazy import avoids a circular import: extraction.py imports this module
+    # at module level, so this direction must stay lazy (H2 constraint).
     from app.crawl.extraction import _parse_html_tree
 
     tree = _parse_html_tree(html)
     if tree is None:
         return metadata
+    return _llm_metadata_from_tree(tree, url)
+
+
+def _llm_metadata_from_tree(tree: Any, url: str) -> dict[str, Any]:
+    """Read the page-metadata fields from an ALREADY-parsed lxml tree.
+
+    Shared by the fallback parse above and the engine's discovery stage, so
+    the carried ``llm_metadata`` and a shaping-time reparse cannot drift
+    into two different metadata dialects. Returns plain JSON data only --
+    the tree itself never escapes the caller.
+    """
+    metadata: dict[str, Any] = {"source_url": url}
 
     # title
     title = tree.findtext(".//title")

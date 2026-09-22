@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, TypeAlias, TypeGuard, overload
@@ -71,6 +72,7 @@ from app.crawl.recursive import (
     gather_robots_decisions,
     run_recursive_crawl,
 )
+from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.crawl.result_helpers import (
     _engine_result_from_exception,
     _failed_engine_result,
@@ -93,7 +95,7 @@ from app.models import (
     CrawlWorker,
     EngineCrawlResult,
     HttpFetcher,
-    RenderOptions,
+    NormalizedUrl,
     SyncCrawlWorker,
     to_dict,
 )
@@ -226,13 +228,21 @@ async def _browser_strategy_result(
     policy: dict[str, Any],
     browser_worker: CrawlWorker,
 ) -> EngineCrawlResult:
-    options = RenderOptions(
-        timeout_seconds=policy["limits"]["timeout_seconds"],
-        max_retries=policy["limits"]["max_retries"],
-        respect_robots=True,
-        include_html=True,
-        include_text=True,
-        browser_profile=policy.get("browser_profile") or {},
+    # The crawl pipeline owns the capture knobs: the captured HTML feeds
+    # markdown extraction, classification, and discovery below BEFORE the
+    # caller's payload knob (policy_wants_html) is applied at spill time,
+    # so a caller asking to drop HTML from the payload must not silently
+    # turn capture off here. Everything else is the policy's effective value.
+    options = resolve_render_options(
+        None,
+        {
+            "timeout_seconds": policy["limits"]["timeout_seconds"],
+            "max_retries": policy["limits"]["max_retries"],
+            "respect_robots": True,
+            "include_html": True,
+            "include_text": True,
+            "browser_profile": policy.get("browser_profile") or {},
+        },
     )
     job = CrawlJob(index=0, url=normalized_url, domain=registrable_domain(normalized_url), options=options)
     result = await _call_worker(browser_worker, job)
@@ -289,6 +299,7 @@ async def _browser_strategy_result(
         include_diagnostics=True,
         include_links=result.status == "success",
         include_js_endpoints=True,
+        include_metadata=True,
     )
     # Surface browser-captured dynamic discovery (XHR/fetch) into diagnostics.
     diagnostics: dict[str, Any] = {
@@ -354,6 +365,7 @@ async def _browser_strategy_result(
         # rather than inherited from the builder's default so the empty value
         # stays a statement, not an omission.
         validators={},
+        llm_metadata=post_fetch["llm_metadata"] or None,
     )
 
 
@@ -794,7 +806,7 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
 
 
 def _stale_seeds(
-    candidates: list[tuple[str, str | None]],
+    candidates: Iterable[tuple[str, str | None]],
     content_cache: Any,
     policy: dict[str, Any],
 ) -> set[str]:
@@ -1210,18 +1222,18 @@ async def _crawl_request_impl(
             diagnostics={"robots": {"allowed": False}},
         )
 
-    async def _sitemap_seed_urls() -> list[str]:
+    async def _sitemap_seed_urls() -> list[NormalizedUrl]:
         # Fetch each seed origin's /sitemap.xml concurrently: slow/unreachable
         # origins must not serialize the others' seeding. Seeds are hostile
         # input: normalize every <loc> and apply the scope filter before it can
         # reach the frontier (adversarial review M-5).
-        async def seeds_for(job: CrawlTask) -> list[str]:
+        async def seeds_for(job: CrawlTask) -> list[NormalizedUrl]:
             parsed = urlparse(job.normalized_url)
             origin = f"{parsed.scheme}://{parsed.netloc}"
             sitemap_url = urljoin(origin, "/sitemap.xml")
             # Recursive: follows sitemap indexes down to page URLs.
             found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
-            candidates: list[tuple[str, str | None]] = []
+            candidates: list[tuple[NormalizedUrl, str | None]] = []
             for loc, lastmod in found:
                 try:
                     normalized_seed = normalize_public_http_url(loc)
@@ -1251,7 +1263,7 @@ async def _crawl_request_impl(
     # loops forever.
     max_pages = int(limits.get("max_pages") or 0)
     respect_robots = bool(limits.get("respect_robots"))
-    include_html = bool((policy.get("browser_profile") or {}).get("include_html", True))
+    include_html = policy_wants_html(policy)
     discovery = policy.get("discovery") or {}
     scope_regex = policy.get("scope_regex")
     # Compile the user-supplied scope regex ONCE with the safe guard so the

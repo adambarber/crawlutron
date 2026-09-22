@@ -13,6 +13,7 @@ from typing import Any
 from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
+from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import (
     _classify_error_code,
     _crawl_result_from_engine_result,
@@ -38,12 +39,16 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
     options = payload.get("options") or {}
     if not isinstance(options, dict):
         raise ValueError("invalid_options")
-    return RenderOptions(
-        timeout_seconds=int(options.get("timeout_seconds", settings.default_timeout_seconds)),
-        max_retries=int(options.get("max_retries", settings.default_max_retries)),
-        respect_robots=bool(options.get("respect_robots", settings.respect_robots)),
-        include_html=bool(options.get("include_html", True)),
-        include_text=bool(options.get("include_text", True)),
+    # The /v1/render caller legitimately owns every capture knob, including
+    # browser_profile (forwarded since M11 -- it used to be dropped, which
+    # made every worker knob unreachable from this path).
+    return resolve_render_options(
+        options,
+        {
+            "timeout_seconds": settings.default_timeout_seconds,
+            "max_retries": settings.default_max_retries,
+            "respect_robots": settings.respect_robots,
+        },
     )
 
 

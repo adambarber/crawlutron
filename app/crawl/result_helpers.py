@@ -363,6 +363,7 @@ def _make_engine_result(
     discovered_links: list | None = None,
     next_page_url: str | None = None,
     validators: dict[str, str] | None = None,
+    llm_metadata: dict[str, Any] | None = None,
 ) -> EngineCrawlResult:
     """Construct an EngineCrawlResult from a pre-built attempt.
 
@@ -401,6 +402,7 @@ def _make_engine_result(
         error=error,
         next_page_url=next_page_url,
         validators=validators or {},
+        llm_metadata=llm_metadata,
     )
 
 

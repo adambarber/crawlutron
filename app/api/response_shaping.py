@@ -16,11 +16,14 @@ Public surface:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from app.api_models import CrawlStatus, PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
 from app.constants import CrawlClassification
+
+logger = logging.getLogger(__name__)
 
 
 def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
@@ -33,26 +36,29 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
     without HTML fall back to the strategy's extracted ``text`` so the consumer always
     receives a consistent Markdown payload regardless of how the content was acquired.
 
-    PERF TODO (P2, deferred): this is the third HTML scan for an HTTP page -- the
-    strategy already parsed the body once for trafilatura (``_extract_html``) and
-    once more for link/frame/form discovery (``extract_post_fetch_discovery``, one
-    shared lxml tree). ``_extract_llm_metadata`` reparses here to read title/meta/
-    JSON-LD. The natural fix is to read the metadata from the discovery tree and
-    thread it to shaping; that is deferred because the engine result this shapes is
-    persisted (job store, recursive-crawl spill) and reaches the API response and
-    webhook payloads, so a carried-along field needs an explicit, audited exclusion
-    from every serialization site, and consuming the discovery tree would invert the
-    llm_format -> extraction lazy-import discipline (circular-import risk). The parse
-    is already off the event loop (aformat_crawl_item / the batched offload), so this
-    is CPU saved, not latency.
+    H2 (solved): engine-produced items carry ``llm_metadata`` -- page
+    metadata computed ONCE from the discovery tree in the strategy stage --
+    and this formatter reads that plain-data dict instead of rebuilding an
+    lxml tree from the stored HTML. The reparse (``_extract_llm_metadata``)
+    stays as the honest fallback for items without a carried dict: a
+    single-shot engine page (no discovery tree existed to read from) and
+    any caller-built item that predates the field. Serialization audit for
+    the carried field: it persists only in the engine spill (internal
+    JSONL) and the job-runner's stored result is the already-shaped
+    UnifiedCrawlResponse, so API responses, webhook payloads, and the MCP
+    frontier carry ZERO new keys -- the metadata replaced its computation
+    site, never the wire shape.
     """
-    from app.crawl.llm_format import _extract_llm_metadata
-
+    carried = item.get("llm_metadata")
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
     html = item.get("html")
     markdown = item.get("markdown")
     if markdown:
+        if isinstance(carried, dict) and carried:
+            return markdown, dict(carried)
         if html and url:
+            from app.crawl.llm_format import _extract_llm_metadata
+
             return markdown, _extract_llm_metadata(html, url)
         return markdown, {}
     text = item.get("text")
@@ -64,12 +70,12 @@ def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]
 async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
     """Async :func:`format_crawl_item`: the whole formatter leaves the loop.
 
-    ``_extract_llm_metadata`` builds a second lxml tree per item; on a batch
-    of N results the sync path parks the event loop N times. The async path
-    runs the identical sync formatter in a worker thread (perf throughput
-    #2). Results without HTML take the same early returns (no thread hop
-    cost beyond the wrapper). Byte-identical to :func:`format_crawl_item`
-    for every item shape.
+    The fallback ``_extract_llm_metadata`` path (items without a carried
+    ``llm_metadata`` dict) still builds an lxml tree per item; on a batch of
+    N such results the sync path parks the event loop N times. The async
+    path runs the identical sync formatter in a worker thread (perf
+    throughput #2); engine-produced items skip the tree entirely. Byte-
+    identical to :func:`format_crawl_item` for every item shape.
     """
     return await asyncio.to_thread(format_crawl_item, item)
 
@@ -114,9 +120,9 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     """Map an internal engine result into the unified API response model.
 
     The unified response carries both the LLM-friendly ``markdown`` and the
-    full ``diagnostics`` payload. Page metadata is produced by the
-    shared page-metadata extractor (``_extract_llm_metadata``) from the
-    raw HTML when available.
+    full ``diagnostics`` payload. Page metadata comes from the result's
+    carried ``llm_metadata`` (H2) or, when absent, the shared
+    page-metadata extractor (``_extract_llm_metadata``) over the raw HTML.
     """
     markdown, metadata_dict = format_crawl_item(item)
     url = item.get("final_url") or item.get("normalized_url") or item.get("original_url")
@@ -244,7 +250,7 @@ def build_unified_crawl_response(
         submitted_count=submitted_count if submitted_count is not None else len(results),
         policy_schema_version=policy_schema_version,
         success=success,
-        results=[build_unified_result(item) for item in results],
+        results=_shape_all(results),
     )
 
 
@@ -271,22 +277,44 @@ def _shape_all(results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]
             adapted = adapt(item) if adapt is not None else item
             shaped.append(build_unified_result(adapted))
         except Exception:
+            # Log loudly: the original bug was a bare except that swallowed
+            # the exception, degraded the item to site_error, and left no
+            # trace of which shape failed or why.
+            logger.warning(
+                "response shaping failed for one item; degrading it to a terminal failure",
+                exc_info=True,
+            )
             shaped.append(_failed_unified_result(item))
     return shaped
 
 
-def _failed_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
+def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
     """A shape failure becomes a terminal failure for that item, not the batch.
 
     Mirrors the job runner's semantics (``failed += 1`` on a dropped item).
     Fields that require no interpretation are carried through so the caller
     still sees which URL failed.
+
+    This is the batch's last line of defense, so ``item`` is not trusted to
+    be a dict: the guard already proved the per-item path raises, and a
+    non-mapping item (``None``, a scalar, a mapping whose ``get`` itself
+    explodes) must not turn the fallback into a second exception that
+    escapes the guard and 500s the whole batch. Item reads are best-effort:
+    whatever the item cannot answer degrades to the honest empty value.
     """
-    url = item.get("normalized_url") or item.get("original_url") or item.get("url") or ""
+    peeked: dict[str, Any] = {}
+    try:
+        peeked = {
+            key: item.get(key)
+            for key in ("normalized_url", "original_url", "url", "final_url", "error")
+        }
+    except Exception:
+        logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
+    url = peeked.get("normalized_url") or peeked.get("original_url") or peeked.get("url") or ""
     return UnifiedCrawlResult(
-        original_url=item.get("original_url") or item.get("url") or url,
+        original_url=peeked.get("original_url") or peeked.get("url") or url,
         normalized_url=url,
-        final_url=item.get("final_url"),
+        final_url=peeked.get("final_url"),
         status=CrawlStatus.failed,
         # site_error is a FAILED_CLASSIFICATIONS member, so its status-table
         # entry is "failed" -- this keeps (status, classification) consistent
@@ -294,7 +322,7 @@ def _failed_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
         # unknown_error maps to "blocked", which would disagree with the
         # hardcoded status above.
         classification=CrawlClassification.site_error,
-        error=item.get("error") or "result_shaping_failed",
+        error=peeked.get("error") or "result_shaping_failed",
         # The remaining fields are declared without defaults in the pydantic
         # model even though the runtime treats them as optional (a bare
         # ``Field()`` accepts None), so state them explicitly: the item is
