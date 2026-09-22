@@ -537,17 +537,29 @@ class _RobotsPathMatcher:
             return False
         pos = len(first)
         if self._anchored_end:
-            # Every remaining literal must fit and end exactly at len(path).
             rest = literals[1:]
             if not rest:
                 return pos == len(path)
+            # The LAST literal is pinned to the end of the path; the middle
+            # literals must fit strictly before it. Greedy leftmost is sound
+            # only when the end is also constrained: scanning every literal
+            # leftmost and then demanding the scan land on len(path)
+            # UNDERMATCHED -- ``/*a$`` against ``/aba`` anchored the scan at
+            # the first ``a`` and returned False although the dialect (regex
+            # ``^/.*a$``) matches. Any occurrence later than the leftmost one
+            # starts further right, so a leftmost middle hit that overlaps the
+            # end segment proves no placement fits: False stays correct.
+            last = rest[-1]
+            end_start = len(path) - len(last)
+            if end_start < pos:
+                return False
             scan = pos
-            for literal in rest:
+            for literal in rest[:-1]:
                 found = path.find(literal, scan)
-                if found == -1:
+                if found == -1 or found + len(literal) > end_start:
                     return False
                 scan = found + len(literal)
-            return scan == len(path)
+            return path.endswith(last)
         # Prefix semantics: any placement of the remaining literals works —
         # greedy left-to-right scan never blocks a prefix match.
         for literal in literals[1:]:
