@@ -370,6 +370,11 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
         # _safe_aclose>" at GC). Declining to schedule is the honest no-op: the
         # queued reference is what guarantees the eventual close.
         return
+    if loop.is_closed():
+        # The swap raced a loop that is shutting down: ``create_task`` would
+        # raise "Event loop is closed" into the synchronous swap path. The
+        # client is dropped instead -- process teardown reclaims its sockets.
+        return
     task = loop.create_task(_safe_aclose(client))
     # asyncio keeps only a weak reference to a running task, so a teardown
     # scheduled from a synchronous rebuild could be garbage collected before it
