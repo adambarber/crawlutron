@@ -64,6 +64,14 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     safe = await _parse_pinned_off_loop(webhook_url)
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
+    # A fresh client per delivery is deliberate (M4 audit): the security
+    # posture REQUIRES a per-delivery parse+resolve+pin (line above; the
+    # F-webhook-toctou consolidation), and pooling connections across
+    # deliveries would either re-resolve by hostname (defeating the pin) or
+    # cache the IP across deliveries (reopening the rebinding window). The
+    # handshake cost is one-per-job-completion, and a pooled client would
+    # also inherit the aclose lifecycle discipline the crawl side had to
+    # build for close races. Not a duplication finding.
     async with httpx.AsyncClient(timeout=Timeouts.defaults().as_httpx()) as client:
         async with client.stream(
             "POST", connect_url, content=payload_bytes, headers=request_headers
