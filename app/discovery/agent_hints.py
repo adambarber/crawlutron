@@ -14,6 +14,7 @@ from app.constants import (
     CFFI_IMPERSONATE_TARGET,
     EXTRACTION_TRAFILATURA,
     HTTP_DECLARED_CRAWLER,
+    LARGE_CRAWL_GUIDANCE,
 )
 
 STRATEGY_DESCRIPTIONS = {
@@ -42,7 +43,7 @@ GUIDANCE = [
     "Use attempt history to generate reviewable policy suggestions.",
     "Treat discovered_links as bounded extraction output only; the service dedupes within a request by canonical page identity but callers still own cross-request frontier queueing and persistence.",
     "Never the same page twice: /v1/crawl collapses URLs that normalize to one page (host case, default port, fragment, trailing slash, UTM/tracking params, and query-param order are all canonicalized), and successful fetches are reused across requests within the content-cache TTL. Callers own cross-run dedupe and frontier persistence.",
-    "Synchronous POST /v1/crawl has no server-side time ceiling — duration scales with max_depth, max_pages, per-domain politeness delays, and the per-URL budget. For large or recursive crawls send async_mode=true (or webhook_url) to get an immediate 202 with a status_url, then poll GET /v1/crawl/{request_id}; for durable whole-site crawls use POST /v1/jobs, which persists progress and supports pause/cancel/resume across restarts.",
+    LARGE_CRAWL_GUIDANCE,
     "Inspect diagnostics.frames for legacy frameset and iframe URLs; the service reports frames but does not recursively crawl them.",
     "Inspect diagnostics.forms for form actions, methods, targets, and controls; the service reports forms but does not automatically submit them.",
     "Treat discovered pagination links as URL evidence only; callers must preserve form/search state before enqueueing paginated result URLs.",

@@ -72,6 +72,24 @@ class TestCapabilitiesWireContract:
         assert "/v1/jobs" in timing["large_crawl_guidance"]
         assert body["features"]["async_mode"] is True
 
+    async def test_timing_guidance_is_one_string_shared_by_every_surface(self, async_client):
+        """M14 follow-up: the no-time-ceiling guidance shipped as three
+        hand-maintained copies (capabilities, agent-hints, the OpenAPI
+        endpoint description). One constant now feeds all three, so the
+        surfaces cannot drift; this pins the identity on the WIRE (#1939),
+        not in the source text.
+        """
+        caps = (await async_client.get("/v1/capabilities")).json()
+        guidance = caps["crawl_timing"]["large_crawl_guidance"]
+        hints = (await async_client.get("/v1/agent-hints")).json()
+        assert guidance in hints["guidance"], "agent-hints drifted from the shared guidance constant"
+        openapi = (await async_client.get("/openapi.json")).json()
+        description = openapi["paths"]["/v1/crawl"]["post"]["description"]
+        assert guidance in description, "OpenAPI description drifted from the shared guidance constant"
+        # Routing content survives the unification (behavior, not wording).
+        assert "no server-side time ceiling" in guidance
+        assert "async_mode" in guidance and "/v1/jobs" in guidance
+
 
 class TestAgentHintsPayload:
     def test_agent_hints_payload_structure(self):

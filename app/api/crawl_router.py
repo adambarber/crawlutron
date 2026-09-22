@@ -17,6 +17,7 @@ from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler
 from app.api.dependencies import get_job_store, get_result_store, get_settings, get_shutdown_event
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.api_models import CrawlerError, CrawlRequest, UnifiedCrawlResponse
+from app.constants import LARGE_CRAWL_GUIDANCE
 
 router = APIRouter(tags=["Crawler"])
 
@@ -37,11 +38,9 @@ router = APIRouter(tags=["Crawler"])
         "Returns LLM-friendly condensed Markdown output with metadata for LLM-friendly consumption. "
         "Use policy.limits for timeout_seconds, max_retries, challenge_wait_seconds, "
         "max_discovered_links, and the recursion bounds max_depth and max_pages; omit limits to use defaults from "
-        "/v1/capabilities. A synchronous request has no server-side time ceiling - duration scales with max_depth, "
-        "max_pages, per-domain politeness delays, and the per-URL total_url_budget_seconds (which fails one tarpit URL, "
-        "not the crawl). For large or recursive crawls set async_mode=true (or webhook_url) for an immediate 202 with a "
-        "status_url to poll at GET /v1/crawl/{request_id}, or use POST /v1/jobs for durable resumable whole-site jobs. "
-        "Within a request the service never crawls the same page twice: submitted URLs are deduped by canonical page "
+        "/v1/capabilities. "
+        + LARGE_CRAWL_GUIDANCE
+        + " Within a request the service never crawls the same page twice: submitted URLs are deduped by canonical page "
         "identity, and fetches are reused within the content-cache TTL. Use request_profile for "
         "direct HTTP compatibility options such as user_agent_family, accept_language, fetch metadata, and benign "
         "per-host cookies. Use browser_profile for browser state, viewport, and resource_mode. Use discovery for "

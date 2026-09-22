@@ -16,6 +16,7 @@ from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    LARGE_CRAWL_GUIDANCE,
     SERVICE_VERSION,
 )
 from app.search import active_search_provider_name, configured_search_providers
@@ -111,15 +112,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
         "crawl_timing": {
             "per_url_budget_seconds": DEFAULT_TOTAL_URL_BUDGET_SECONDS,
             "sync_has_server_time_ceiling": False,
-            "large_crawl_guidance": (
-                "Synchronous POST /v1/crawl has no server-side time ceiling; its "
-                "duration scales with max_depth, max_pages, per-domain politeness "
-                "delays, and the per-URL budget above. For large or recursive crawls, "
-                "set async_mode=true (or webhook_url) to receive an immediate 202 with "
-                "a status_url, then poll GET /v1/crawl/{request_id} for the result; for "
-                "durable whole-site crawls use POST /v1/jobs, which persists progress "
-                "and supports pause/cancel/resume across restarts."
-            ),
+            "large_crawl_guidance": LARGE_CRAWL_GUIDANCE,
         },
         "openapi_url": "/openapi.json",
         "swagger_ui_url": "/docs",
