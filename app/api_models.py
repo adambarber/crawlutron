@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -182,6 +182,21 @@ class CrawlPolicyLimits(BaseModel):
 
 
 class CrawlPolicy(BaseModel):
+    # Rejected policy.headers names -> why (M12). Conditional pairs keep the
+    # M14 reason (they must arrive via ``validators``); the rest bypass an
+    # engine chokepoint or spoof origin-side identity. The map is the single
+    # ban list -- adding an entry here is the whole change surface.
+    _BANNED_HEADERS: ClassVar[dict[str, str]] = {
+        "if-none-match": "conditional headers belong to the validators map",
+        "if-modified-since": "conditional headers belong to the validators map",
+        "cookie": "the cookie jar owns Cookie; a raw header bypasses the cookie-namespace chokepoint",
+        "host": "Host is owned by the pinned-request chokepoint and is never forwarded verbatim",
+        "proxy-authorization": "proxy credentials are not a crawl input",
+        "x-forwarded-for": "origin-side identity headers must not be caller-controlled",
+        "x-forwarded-host": "origin-side identity headers must not be caller-controlled",
+        "x-real-ip": "origin-side identity headers must not be caller-controlled",
+    }
+
     schema_version: str = Field(
         POLICY_SCHEMA_VERSION,
         description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.",
@@ -262,6 +277,28 @@ class CrawlPolicy(BaseModel):
                 raise ValueError("execute_js actions are not permitted in browser_profile")
         return profile
 
+    @model_validator(mode="after")
+    def _reject_banned_headers(self) -> CrawlPolicy:
+        """Reject chokepoint-bypassing header names in ``policy.headers`` (M12).
+
+        Anchored on ``CrawlPolicy`` (not a request model) so every endpoint
+        that embeds a policy -- crawl, map, render alike -- inherits the ban
+        from one site; a per-request validator is a per-call-site guard the
+        engine's chokepoints would still have to re-trust. Rejection, never a
+        silent strip, so the caller learns the contract (#1912).
+
+        ``authorization`` is deliberately absent: credentialed crawling of
+        one's own site is a real use case, and the typed replacement
+        (``policy.credentials``) does not exist yet. Banning the header
+        before the replacement would only push callers into baking
+        credentials into URLs (worse). It lands here when Tier 2b does.
+        """
+        for key in self.headers:
+            reason = self._BANNED_HEADERS.get(key.strip().lower())
+            if reason is not None:
+                raise ValueError(f"header '{key}' is not permitted in policy.headers: {reason}")
+        return self
+
 
 class _UrlSource(Protocol):
     """Contract shared by every request model that accepts exactly one of ``url``/``urls``."""
@@ -313,24 +350,6 @@ class CrawlRequest(BaseModel):
         None,
         description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
     )
-
-    @model_validator(mode="after")
-    def _reject_duplicate_conditional_headers(self):
-        """Conditional headers must come from ``validators``, not raw policy headers.
-
-        The engine translates ``validators`` into If-None-Match /
-        If-Modified-Since itself; raw conditionals in policy.headers would
-        bypass that flow and let an origin 304 suppress content with no
-        body (M14). Rejected with or without a validators map; fail fast.
-        """
-        banned = {"if-none-match", "if-modified-since"}
-        for key in self.policy.headers:
-            if key.strip().lower() in banned:
-                raise ValueError(
-                    f"header '{key}' conflicts with the validators map; "
-                    "supply conditional validators only via 'validators'"
-                )
-        return self
 
     @model_validator(mode="after")
     def _require_url_source(self):
