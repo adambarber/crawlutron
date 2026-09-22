@@ -6,14 +6,15 @@ implementation lived inline in ``app/main.py``; splitting it out makes the
 endpoint handlers easier to read and lets integration tests target the
 helpers directly.
 
-Module-level ``set_webhook_dependencies`` wires the app context
-(``webhook_semaphore``, ``shutdown_event``, ``crawl_request``,
-``pool_getter``, ``get_metrics``) once at startup so the delivery helpers
-can stay stateless and the tests can mock individual hooks instead of
-constructing full FastAPI dependency trees. The response payload itself is
-always built by :func:`app.api.response_shaping.build_unified_crawl_response`
-— the one shaping chokepoint, called directly (never a swappable hook, so a
-test cannot reinstate a drift-prone construction path).
+The one delivery funnel is :func:`post_webhook`: it validates, size-caps,
+and delegates to :func:`deliver_pinned_webhook`, which re-parses through
+``SafeUrl`` to close the TOCTOU between validation and delivery. Nothing else
+in ``app/`` may POST to a webhook URL or compose a crawl with a delivery --
+the crawl-plus-deliver story lives solely in
+:mod:`app.api.async_crawl_runner`, and the response payload is always built by
+:func:`app.api.response_shaping.build_unified_crawl_response` — the one shaping
+chokepoint, called directly (never a swappable hook, so a test cannot
+reinstiate a drift-prone construction path).
 """
 
 from __future__ import annotations
@@ -25,9 +26,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
-from app.api.response_shaping import abuild_unified_crawl_response
 from app.bounded_io import BodyTooLarge, read_capped_async
-from app.settings import CrawlerSettings
 from app.timeouts import Timeouts
 from app.validation import get_mapping_int
 
@@ -35,45 +34,6 @@ if TYPE_CHECKING:
     from app.safe_url import SafeUrl
 
 logger = logging.getLogger(__name__)
-
-
-# Module-level app context. Wired once at FastAPI lifespan startup via
-# :func:`set_webhook_dependencies`. Cleared on teardown so unit tests start
-# from a known state.
-_webhook_semaphore: asyncio.Semaphore | None = None
-_shutdown_event: asyncio.Event | None = None
-_crawl_request_fn = None
-_pool_getter = None
-_get_metrics_fn = None
-
-
-def set_webhook_dependencies(
-    *,
-    webhook_semaphore: asyncio.Semaphore,
-    shutdown_event: asyncio.Event,
-    crawl_request_fn,
-    pool_getter,
-    get_metrics,
-) -> None:
-    """Install app context for the webhook helpers (called from lifespan)."""
-    global _webhook_semaphore, _shutdown_event, _crawl_request_fn, _pool_getter
-    global _get_metrics_fn
-    _webhook_semaphore = webhook_semaphore
-    _shutdown_event = shutdown_event
-    _crawl_request_fn = crawl_request_fn
-    _pool_getter = pool_getter
-    _get_metrics_fn = get_metrics
-
-
-def clear_webhook_dependencies() -> None:
-    """Reset module-level state (used by lifespan teardown and tests)."""
-    global _webhook_semaphore, _shutdown_event, _crawl_request_fn, _pool_getter
-    global _get_metrics_fn
-    _webhook_semaphore = None
-    _shutdown_event = None
-    _crawl_request_fn = None
-    _pool_getter = None
-    _get_metrics_fn = None
 
 
 async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None:
@@ -149,8 +109,8 @@ def _max_webhook_size() -> int:
 async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
     """POST payload to webhook URL with size limit and SSRF+IP-pinning.
 
-    Routes through the same validated + IP-pinned delivery path used by
-    :func:`deliver_webhook` so a malicious or rebinding webhook URL cannot
+    Routes through the same validated + IP-pinned delivery path
+    (:func:`deliver_pinned_webhook`) so a malicious or rebinding webhook URL cannot
     escape the SSRF guard between endpoint validation and delivery
     (TOCTOU window). The size cap and best-effort failure handling live
     here so the crawl worker is never crashed by a dead callback.
@@ -230,102 +190,9 @@ async def _parse_pinned_off_loop(webhook_url: str) -> SafeUrl:
     )
 
 
-async def run_and_deliver_webhook(
-    webhook_url: str,
-    request_id: str,
-    payload_dict: dict[str, Any],
-    crawl_settings: CrawlerSettings,
-) -> None:
-    """Run a crawl in the background and POST the result to ``webhook_url``.
-
-    Concurrency is capped by the module-level ``_webhook_semaphore`` (set
-    by ``set_webhook_dependencies``); excess deliveries wait on the
-    semaphore instead of multiplying resource usage. Delivery failures
-    are swallowed so a dead callback never crashes the crawler worker.
-    """
-    from app.crawl.strategies.browser_pool import PooledBrowserWorker
-
-    if any(
-        x is None
-        for x in (
-            _webhook_semaphore,
-            _shutdown_event,
-            _crawl_request_fn,
-            _pool_getter,
-            _get_metrics_fn,
-        )
-    ):
-        raise RuntimeError(
-            "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
-        )
-    # The ``any(...)`` guard above is the runtime check; these per-dependency
-    # asserts state the same fact for the type checker so the None branch is
-    # statically unreachable on every use below. Without them mypy keeps the
-    # module-level optional type and the delivery call sites read as
-    # "None not callable".
-    assert _webhook_semaphore is not None
-    assert _shutdown_event is not None
-    assert _crawl_request_fn is not None
-    assert _pool_getter is not None
-    assert _get_metrics_fn is not None
-    await validate_webhook_url_async(webhook_url)
-    pooled_worker = PooledBrowserWorker(_pool_getter())
-    result = await _crawl_request_fn(
-        payload_dict,
-        settings=crawl_settings,
-        browser_worker=pooled_worker,
-        shutdown_event=_shutdown_event,
-    )
-    result["request_id"] = request_id
-    _get_metrics_fn().observe_crawl(results=result.get("results", []))
-    response_payload = (
-        await abuild_unified_crawl_response(
-            result.get("results", []),
-            request_id=request_id,
-            submitted_count=result.get("submitted_count"),
-            policy_schema_version=result.get("policy_schema_version", ""),
-        )
-    ).model_dump()
-    try:
-        payload_bytes = json.dumps(response_payload, separators=(",", ":")).encode("utf-8")
-        if len(payload_bytes) > _max_webhook_size():
-            logger.warning(
-                "webhook_payload_too_large",
-                extra={"size": len(payload_bytes), "limit": _max_webhook_size()},
-            )
-            return
-        await deliver_pinned_webhook(webhook_url, payload_bytes)
-    except Exception as error:
-        logger.warning("webhook_delivery_failed: %s", error, extra={"webhook_url": webhook_url})
-
-
-async def deliver_webhook(
-    webhook_url: str,
-    request_id: str,
-    payload_dict: dict[str, Any],
-    crawl_settings: CrawlerSettings,
-) -> None:
-    """Throttled webhook entry point: caps concurrent crawls, then runs + delivers.
-
-    Best-effort: failures are swallowed so a dead callback never crashes
-    the crawler worker. This is the public entry point used by the
-    ``/v1/crawl`` background-task path.
-    """
-    if _webhook_semaphore is None:
-        raise RuntimeError(
-            "Webhook dependencies not initialized. Call set_webhook_dependencies() from the FastAPI lifespan."
-        )
-    async with _webhook_semaphore:
-        await run_and_deliver_webhook(webhook_url, request_id, payload_dict, crawl_settings)
-
-
 __all__ = [
-    "set_webhook_dependencies",
-    "clear_webhook_dependencies",
     "deliver_pinned_webhook",
     "post_webhook",
     "validate_webhook_url",
     "validate_webhook_url_async",
-    "run_and_deliver_webhook",
-    "deliver_webhook",
 ]

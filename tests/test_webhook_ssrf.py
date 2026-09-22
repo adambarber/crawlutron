@@ -7,18 +7,14 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 
 import socket
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
 from _testkit import block_private_targets
 
 from app.api.webhooks import (
-    clear_webhook_dependencies,
-    set_webhook_dependencies,
-)
-from app.api.webhooks import (
-    deliver_webhook as _deliver_webhook,
+    post_webhook as _post_webhook,
 )
 from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
@@ -30,7 +26,7 @@ def _fake_httpx_client(capture=None, body=b""):
 
     Records ``stream()`` args into ``capture`` and yields ``body`` as the
     response; the delivery path aliases httpx at import time, so the same
-    double works whether delivery goes through ``_deliver_webhook`` or
+    double observes the call ``post_webhook`` makes into
     ``deliver_pinned_webhook``.
     """
 
@@ -118,26 +114,15 @@ class TestWebhookUrlValidation:
 class TestWebhookDeliveryPinning:
     async def test_delivery_posts_to_pinned_ip(self, monkeypatch):
         """The outbound POST must target the resolved/pinned IP, not the raw
-        hostname, and preserve the original Host header (DNS-rebinding safe)."""
+        hostname, and preserve the original Host header (DNS-rebinding safe).
+
+        Driven through the production funnel ``post_webhook`` -- not a deleted
+        island entry point -- so the guard protects the path real crawls take.
+        """
         block_private_targets(monkeypatch)
         captured = {}
         with _pinned_webhook_client(capture=captured):
-            # Initialize webhook module-level state with a fake crawl_request.
-            import asyncio
-
-            set_webhook_dependencies(
-                webhook_semaphore=asyncio.Semaphore(1),
-                shutdown_event=asyncio.Event(),
-                crawl_request_fn=AsyncMock(return_value={"results": []}),
-                pool_getter=lambda: MagicMock(),
-                get_metrics=lambda: MagicMock(observe_crawl=lambda **kw: None),
-            )
-            try:
-                await _deliver_webhook(
-                    "http://webhook.example.com/cb", "crawl_test", {"results": []}, MagicMock()
-                )
-            finally:
-                clear_webhook_dependencies()
+            await _post_webhook("http://webhook.example.com/cb", {"results": []})
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured

@@ -6,8 +6,6 @@ import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from app.crawl.engine import crawl_request
-
 # Standalone JSON-line logging configuration. The previous version of this
 # module imported ``local_service_logging`` from the parent monorepo's
 # ``shared/python`` tree. The standalone equivalent now lives at
@@ -22,10 +20,8 @@ from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (
     close_browser_pool,
-    get_browser_pool,
     initialize_browser_pool,
 )
-from .metrics import get_metrics
 from .settings import CrawlerSettings
 
 if TYPE_CHECKING:
@@ -100,9 +96,7 @@ if FastAPI is not None:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        # Startup: wire webhook helpers, initialize browser pool, load cookie jar.
-        from .api.async_crawl_runner import _get_async_crawl_semaphore
-        from .api.webhooks import set_webhook_dependencies
+        # Startup: initialize browser pool, load cookie jar.
         from .crawl.engine import _resource_gate
         from .health.readiness import READINESS_STATE
 
@@ -115,13 +109,6 @@ if FastAPI is not None:
         # loop, so its lag probe must start here (M16).
         _resource_gate.start_lag_probe()
 
-        set_webhook_dependencies(
-            webhook_semaphore=_get_async_crawl_semaphore(),
-            shutdown_event=shutdown_event,
-            crawl_request_fn=crawl_request,
-            pool_getter=get_browser_pool,
-            get_metrics=get_metrics,
-        )
         await initialize_browser_pool(settings)
         # Cookies first: recovered jobs can receive cookies in their first
         # batch, and a clear-then-populate load would drop those (final #5).
@@ -148,13 +135,11 @@ if FastAPI is not None:
         from .api.job_runner import shutdown_job_runner
 
         await shutdown_job_runner()
-        from .api.webhooks import clear_webhook_dependencies
 
         if settings.cookie_persistence_enabled:
             from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
 
             _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
-        clear_webhook_dependencies()
 
         from app.crawl.strategies.http import close_async_http_client, close_cffi_session
 

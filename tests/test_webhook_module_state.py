@@ -1,74 +1,74 @@
-"""Tests for ``app.api.webhooks`` module-level dependency wiring.
+"""Guards for ``app.api.webhooks`` after the dead-delivery-island deletion (H3).
 
-Verifies the P0 reviewer finding: the ``global`` statement in
-``set_webhook_dependencies`` must cover all 5 module-level globals, and
-``clear_webhook_dependencies`` must reset all of them. If either function
-forgets a name, the corresponding module global stays at its previous
-value, silently breaking webhook delivery at runtime.
+The crawl-plus-deliver story lives solely in ``app.api.async_crawl_runner``;
+``app.api.webhooks`` is the delivery funnel (``post_webhook`` ->
+``deliver_pinned_webhook``) plus the URL validator. A second module-level
+dependency-wiring apparatus in the webhook module would recreate the island
+that shipped a duplicate crawl path with zero production callers, so its
+absence is pinned here.
 """
 
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import MagicMock
-
-import pytest
+import ast
+import pathlib
 
 from app.api import webhooks as wm
 
-
-def test_set_webhook_dependencies_sets_all_globals():
-    """Every module-level global is set; no local-variable shadowing."""
-    # Reset to a known state first.
-    wm.clear_webhook_dependencies()
-    assert wm._webhook_semaphore is None
-    assert wm._shutdown_event is None
-    assert wm._crawl_request_fn is None
-    assert wm._pool_getter is None
-    assert wm._get_metrics_fn is None
-
-    wm.set_webhook_dependencies(
-        webhook_semaphore=asyncio.Semaphore(1),
-        shutdown_event=asyncio.Event(),
-        crawl_request_fn=lambda: None,
-        pool_getter=lambda: None,
-        get_metrics=lambda: None,
-    )
-    assert wm._webhook_semaphore is not None
-    assert wm._shutdown_event is not None
-    assert wm._crawl_request_fn is not None
-    assert wm._pool_getter is not None
-    assert wm._get_metrics_fn is not None
+ISLAND_NAMES = (
+    "run_and_deliver_webhook",
+    "deliver_webhook",
+    "set_webhook_dependencies",
+    "clear_webhook_dependencies",
+    "_webhook_semaphore",
+    "_shutdown_event",
+    "_crawl_request_fn",
+    "_pool_getter",
+    "_get_metrics_fn",
+)
 
 
-def test_clear_webhook_dependencies_resets_all_globals():
-    """Teardown path resets all 5 globals; no leftover state across tests."""
-    wm.set_webhook_dependencies(
-        webhook_semaphore=asyncio.Semaphore(1),
-        shutdown_event=asyncio.Event(),
-        crawl_request_fn=MagicMock(),
-        pool_getter=MagicMock(),
-        get_metrics=MagicMock(),
-    )
-    wm.clear_webhook_dependencies()
-    assert wm._webhook_semaphore is None
-    assert wm._shutdown_event is None
-    assert wm._crawl_request_fn is None
-    assert wm._pool_getter is None
-    assert wm._get_metrics_fn is None
+def test_webhook_module_has_no_dependency_wiring_state():
+    """The deleted island must not come back.
 
-
-def test_deliver_webhook_without_dependencies_raises():
-    """Calling deliver_webhook before set_webhook_dependencies is a hard error.
-
-    Guards against the silent-None-failure mode the P0 reviewer flagged:
-    if ``global`` were incomplete, delivery would proceed with ``None``
-    callbacks and crash somewhere downstream with an obscure error.
+    Every name the island needed is gone from the module: no globals to wire,
+    no setters, no second crawl-composing entry point. The live surface is
+    exactly the funnel plus the validator.
     """
-    wm.clear_webhook_dependencies()
-    with pytest.raises(RuntimeError, match="not initialized"):
-        # asyncio.run to drive the coroutine
-        asyncio.run(wm.deliver_webhook("http://example.com/cb", "rid", {}, MagicMock()))
+    for name in ISLAND_NAMES:
+        assert not hasattr(wm, name), f"dead-island name reappeared: {name}"
+    assert set(wm.__all__) == {
+        "deliver_pinned_webhook",
+        "post_webhook",
+        "validate_webhook_url",
+        "validate_webhook_url_async",
+    }
+
+
+def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
+    """One POST funnel: only ``post_webhook`` may invoke the pinned delivery.
+
+    This is the shape the deleted island violated -- a second crawler reached
+    the same delivery helper by composing its own crawl. If a caller other
+    than ``post_webhook`` appears inside the module (or any other module
+    calls the helper), the funnel is no longer the only path and the
+    size-cap/validation story can drift from it.
+    """
+    repo_root = pathlib.Path(__file__).resolve().parents[1]
+    callers: set[str] = set()
+    for path in sorted((repo_root / "app").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and getattr(inner.func, "id", "")
+                    in {"deliver_pinned_webhook"}
+                ):
+                    callers.add(f"{path.name}::{node.name}")
+    assert callers == {"webhooks.py::post_webhook"}, callers
 
 
 def test_build_job_status_handles_single_shot_jobs():
