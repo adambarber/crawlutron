@@ -72,6 +72,7 @@ from app.constants import (
 )
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
+from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.document_text import (
     _format_extracted_document_text,
 )
@@ -1427,6 +1428,10 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     if cookie_header:
         headers["Cookie"] = cookie_header
     headers.update(policy["headers"])
+    # Origin-scoped credentials last: the value is attached only when this
+    # exact URL's origin holds one, and the redirect loop's Fix-3 scrub
+    # strips it on any cross-host hop (same chokepoint as cookies).
+    _apply_credentials(headers, url, policy.get("credentials") or {})
     return headers
 
 

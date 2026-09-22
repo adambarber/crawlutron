@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -181,6 +181,31 @@ class CrawlPolicyLimits(BaseModel):
     )
 
 
+class Credential(BaseModel):
+    """A scoped HTTP credential (Tier 2b).
+
+    Keyed in ``CrawlPolicy.credentials`` by canonical origin
+    (``scheme://host[:port]``), so a credential is addressable only for the
+    origin it was written for -- the per-hop redirect scrub for
+    ``authorization`` (Fix 3) then enforces "credentials never cross host
+    boundaries" for free. Values are secrets: never logged, never echoed in
+    diagnostics (policy echoes strip them, same discipline as cookies).
+    """
+
+    kind: Literal["bearer", "basic"]
+    token: str | None = Field(None, min_length=1, max_length=512, description="Bearer token (kind=bearer).")
+    username: str | None = Field(None, min_length=1, max_length=256, description="Basic username (kind=basic).")
+    password: str | None = Field(None, min_length=1, max_length=512, description="Basic password (kind=basic).")
+
+    @model_validator(mode="after")
+    def _match_kind(self) -> Credential:
+        if self.kind == "bearer" and not self.token:
+            raise ValueError("bearer credential requires a token")
+        if self.kind == "basic" and not (self.username and self.password):
+            raise ValueError("basic credential requires username and password")
+        return self
+
+
 class CrawlPolicy(BaseModel):
     # Rejected policy.headers names -> why (M12). Conditional pairs keep the
     # M14 reason (they must arrive via ``validators``); the rest bypass an
@@ -221,7 +246,12 @@ class CrawlPolicy(BaseModel):
     )
     headers: dict[str, str] = Field(
         default_factory=dict,
-        description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls.",
+        description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls. Authorization belongs in policy.credentials, which scopes it to one origin.",
+    )
+    credentials: dict[str, Credential] = Field(
+        default_factory=dict,
+        max_length=32,
+        description="Optional per-origin credentials for credentialed crawling of the caller's own sites, keyed by canonical origin (scheme://host[:port], no path). Applied as the Authorization header only for requests to that exact origin, and stripped by the redirect chokepoint on any cross-host hop.",
     )
     request_profile: dict[str, Any] = Field(
         default_factory=dict,
@@ -277,6 +307,30 @@ class CrawlPolicy(BaseModel):
                 raise ValueError("execute_js actions are not permitted in browser_profile")
         return profile
 
+    @field_validator("credentials")
+    @classmethod
+    def _validate_credential_keys(cls, value: dict[str, Credential]) -> dict[str, Credential]:
+        """Keys must already be canonical origins -- rejection, never silent
+        normalization (#1912): a path-, query- or userinfo-bearing key can
+        never match the per-hop origin lookup, so accepting it would let a
+        caller believe a credential was scoped narrower than it applies.
+        The canonicality rule itself lives in ``origin_of``, the same
+        function every lookup uses (one rule, one site).
+        """
+        from app.crawl.credentials import origin_of
+
+        for key in value:
+            try:
+                canonical = origin_of(key)
+            except ValueError as exc:
+                raise ValueError(f"credentials key '{key}' is not a valid origin: {exc}") from exc
+            if canonical != key:
+                raise ValueError(
+                    f"credentials key '{key}' must be the canonical origin '{canonical}' "
+                    "(scheme://host[:port], no path/query/userinfo)"
+                )
+        return value
+
     @model_validator(mode="after")
     def _reject_banned_headers(self) -> CrawlPolicy:
         """Reject chokepoint-bypassing header names in ``policy.headers`` (M12).
@@ -289,9 +343,10 @@ class CrawlPolicy(BaseModel):
 
         ``authorization`` is deliberately absent: credentialed crawling of
         one's own site is a real use case, and the typed replacement
-        (``policy.credentials``) does not exist yet. Banning the header
-        before the replacement would only push callers into baking
-        credentials into URLs (worse). It lands here when Tier 2b does.
+        (``policy.credentials``, Tier 2b) scopes it per origin. Callers may
+        still set a raw ``Authorization`` header for one-off needs, but the
+        credentials field is the supported path: origin-scoped, scrubbed on
+        cross-host hops by the same Fix-3 chokepoint as cookies.
         """
         for key in self.headers:
             reason = self._BANNED_HEADERS.get(key.strip().lower())

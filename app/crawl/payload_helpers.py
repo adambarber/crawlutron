@@ -20,6 +20,8 @@ from app.constants import (
     SUPPORTED_EXTRACTIONS,
     SUPPORTED_STRATEGIES,
 )
+from app.crawl.credentials import authorization_value as _authorization_value
+from app.crawl.credentials import origin_of
 from app.settings import CrawlerSettings
 from app.validation import safe_public_url_or_none
 
@@ -114,10 +116,12 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     request_profile = policy.get("request_profile") or {}
     browser_profile = policy.get("browser_profile") or {}
     discovery = policy.get("discovery") or {}
+    credentials = policy.get("credentials") or {}
     if (
         not isinstance(request_profile, dict)
         or not isinstance(browser_profile, dict)
         or not isinstance(discovery, dict)
+        or not isinstance(credentials, dict)
     ):
         raise ValueError("invalid_policy_profile")
     try:
@@ -138,6 +142,19 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             raise ValueError("invalid_policy_limits")
     except (TypeError, ValueError):
         raise ValueError("invalid_policy_limits") from None
+    normalized_credentials: dict[str, dict[str, Any]] = {}
+    for key, credential in credentials.items():
+        # Job-replay boundary: keys arrive as stored text, so canonicalize
+        # here (the wire layer rejected non-canonical keys; this is
+        # idempotent on those). Shape errors are rejected, never dropped.
+        if not isinstance(credential, dict):
+            raise ValueError("invalid_policy_credentials")
+        try:
+            origin = origin_of(str(key))
+            _authorization_value(credential)  # shape validation, value unused
+        except ValueError:
+            raise ValueError("invalid_policy_credentials") from None
+        normalized_credentials[origin] = dict(credential)
     return {
         "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
         "strategies": strategies,
@@ -162,6 +179,7 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
             ),
         },
         "headers": {str(key): str(value) for key, value in headers.items()},
+        "credentials": normalized_credentials,
         "request_profile": dict(request_profile),
         "browser_profile": dict(browser_profile),
         "discovery": {str(key): bool(value) for key, value in discovery.items()},

@@ -190,7 +190,8 @@ TOOL_SPECS: list[ToolSpec] = [
             "HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS, BROWSER_HEADED_WARMED), "
             "extraction (full, trafilatura, document, dom), limits (timeout_seconds, max_retries, "
             "challenge_wait_seconds, max_discovered_links, respect_robots), discovery, scope_regex, "
-            "css_selector, xpath, request_profile, browser_profile. Webhook/async delivery is not "
+            "css_selector, xpath, request_profile, browser_profile, headers, credentials "
+            "(origin-scoped authorization). Webhook/async delivery is not "
             "available over MCP."
         ),
         input_schema={
@@ -204,7 +205,7 @@ TOOL_SPECS: list[ToolSpec] = [
                 },
                 "policy": {
                     "type": "object",
-                    "description": "CrawlPolicy per POST /v1/crawl (strategies, extraction, limits, discovery, scope_regex, css_selector, xpath, request_profile, browser_profile, headers). Omit to use service defaults.",
+                    "description": "CrawlPolicy per POST /v1/crawl (strategies, extraction, limits, discovery, scope_regex, css_selector, xpath, request_profile, browser_profile, headers, credentials). Omit to use service defaults.",
                 },
             },
             "additionalProperties": False,
