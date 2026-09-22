@@ -9,6 +9,7 @@ import inspect
 from dataclasses import asdict
 
 import httpx
+import pytest
 from _testkit import *
 
 from app.constants import BROWSER_HEADLESS
@@ -96,6 +97,27 @@ def test_primitive_marks_pool_exhaustion_as_not_attempted():
     assert result.classification == "browser_pool_exhausted"
     diagnostics = result.diagnostics or {}
     assert diagnostics.get("retryable") is True
+
+
+@pytest.mark.parametrize(
+    "error",
+    [BrowserPoolExhaustedError("none free"), httpx.ConnectTimeout("boom"), ValueError("boom")],
+)
+def test_exception_envelopes_never_carry_discovered_links(error):
+    """Failure envelopes carry no links -- the invariant that makes the
+    re-queue ``continue`` in ``run_recursive_crawl`` (which precedes link
+    expansion) safe: a re-queued pool-exhausted URL cannot "lose" links
+    because an un-attempted crawl discovers none. If a future envelope
+    builder ever fills ``discovered_links`` from partial results, that link
+    source must reach the frontier BEFORE the re-queue decision; this pin
+    fails the day that becomes possible so the ordering gets revisited."""
+    result = _engine_result_from_exception(
+        error=error,
+        original_url="https://a.example/x",
+        normalized_url="https://a.example/x",
+        strategy="HTTP_DECLARED_CRAWLER",
+    )
+    assert result.discovered_links == []
 
 
 def test_primitive_default_classification_is_network_error():

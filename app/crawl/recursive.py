@@ -402,7 +402,9 @@ async def run_recursive_crawl(
             result = scheduled_results[job.index]
             # A pool-exhausted URL was never attempted: re-queue it to the
             # frontier tail under the per-job cap (at-least-once for capacity
-            # failures) instead of recording a permanent page failure.
+            # failures) instead of recording a permanent page failure. Safe to
+            # skip link expansion below: exception-path envelopes carry no
+            # discovered_links (pinned in tests/crawl/test_error_handling.py).
             if result.classification == "browser_pool_exhausted" and requeue_pool_exhausted(
                 job, depth=depth, frontier=frontier, attempts=pool_exhaustion_attempts
             ):
