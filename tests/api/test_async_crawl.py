@@ -64,6 +64,34 @@ class TestAsyncCrawlApi:
             message="Timed out waiting for async crawl to complete",
         )
 
+    async def test_single_shot_stats_do_not_fabricate_discovered(self):
+        """Single-shot jobs never enqueue a frontier, so "discovered" is
+        undefined for them -- stats must report what actually happened
+        (submitted pages crawled/failed), never invent a discovered count
+        that happens to equal crawled. Whole-site jobs keep the frontier-
+        derived total_discovered; a conflated value makes the two job kinds
+        mean different things under one field name.
+        """
+        from app.main import job_store
+
+        resp = await self.client.post(
+            "/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True)
+        )
+        assert resp.status_code == 202
+        request_id = resp.json()["request_id"]
+
+        async def _done() -> bool:
+            status_resp = await self.client.get(f"/v1/crawl/{request_id}")
+            return status_resp.status_code == 200
+
+        await poll_until(_done, timeout=10.0, interval=0.1, message="async crawl never completed")
+
+        row = job_store.load(request_id)
+        assert row is not None
+        assert "total_discovered" not in row.stats
+        assert row.stats["total_crawled"] == 1
+        assert row.stats["total_failed"] == 0
+
     async def test_v1_crawl_async_mode_with_webhook_delivers(self):
         """async_mode with webhook_url delivers result to webhook on completion."""
         payload = make_crawl_payload(

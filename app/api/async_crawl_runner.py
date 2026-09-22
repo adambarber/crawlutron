@@ -139,8 +139,12 @@ async def run_async_crawl(
 
             unified_results = response_model.results
             failed = sum(1 for item in unified_results if _failed(item))
+            # Single-shot jobs never enqueue a frontier, so "discovered" is
+            # undefined for them: report only what actually happened. The
+            # whole-site runner owns total_discovered (frontier-derived);
+            # fabricating it here would overload one field name with two
+            # different meanings.
             job.stats = {
-                "total_discovered": len(unified_results),
                 "total_crawled": len(unified_results),
                 "total_failed": failed,
             }
