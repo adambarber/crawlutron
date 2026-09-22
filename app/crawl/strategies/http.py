@@ -1829,8 +1829,16 @@ async def _http_strategy_result(
     # a key that dropped it could serve tenant A's private page to tenant B from A's
     # cache slot. Differing credentials must never share an entry.
     ckey: str | None = None
+    # ``content_hit`` means exactly ONE thing: the served body was assembled
+    # from the content cache, so the store below must not rewrite it. Whether
+    # a response object is in hand is DATAFLOW (``response is None``), not a
+    # second meaning of this flag -- reusing it for both (double-fetch fix,
+    # 2026-09-22) silently skipped storing origin-fresh revalidations: every
+    # later crawl re-downloaded the body forever. Pinned in
+    # tests/test_revalidation_fetch.py.
     content_hit = False
     revalidated_304 = False
+    response: Any = None
     if content_cache is not None:
         ckey = _content_cache_key(
             normalized_url,
@@ -1873,13 +1881,17 @@ async def _http_strategy_result(
                     revalidated_304 = True
                 else:
                     # The origin answered 200 (content changed): this response
-                    # is the fresh one and must be stored below. Mark it so the
-                    # unconditional fetch later in the function sees a response
-                    # is already in hand and does not fetch a second time.
-                    content_hit = True
+                    # is the fresh one. It is already in hand (no second fetch
+                    # -- response is not None below), it is NOT served from the
+                    # cache (content_hit stays False), and the store gate
+                    # therefore writes it back so later crawls skip the origin.
+                    retry_diagnostics = {
+                        **retry_diagnostics,
+                        "content_cache": "revalidated_fresh",
+                    }
 
     try:
-        if not content_hit and not revalidated_304:
+        if response is None:
             response, retry_diagnostics = await _fetch_with_retries(
                 http_fetcher,
                 normalized_url,
