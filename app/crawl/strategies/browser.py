@@ -695,7 +695,10 @@ class BrowserRenderer:
 
             # PDF extraction fallback
             if self._looks_like_pdf(final_url) and not (text or "").strip():
-                text = self._pdf_text_extractor(final_url)
+                # Blocking file read + parse: keep it off the event loop like
+                # every other document-extraction path (the extractor may be a
+                # sync downloader/parser; C3, adversarial perf family).
+                text = await asyncio.to_thread(self._pdf_text_extractor, final_url)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
                 classification = classify_page(html, text, title=title)
