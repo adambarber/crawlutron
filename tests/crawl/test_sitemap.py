@@ -1,6 +1,7 @@
 """Sitemap discovery: seed batches, last-modified freshness, conditional fetch and fanout bounds."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 
 from _testkit import install_to_thread_spy, make_fetch
 
@@ -454,3 +455,53 @@ def test_build_site_map_resolves_relative_paths():
     m = build_site_map(crawl_response)
     assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]
     assert all(not u.startswith("/") for u in m["all_urls"])
+
+
+# ---------------------------------------------------------------------------
+# H7: future-skew bound on sitemap <lastmod> (reject garbage at the parse
+# chokepoint; degradation direction is re-fetch, never "fresher than now").
+# ---------------------------------------------------------------------------
+
+
+def _iso_offset(seconds: float) -> str:
+    return (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat()
+
+
+def test_parse_lastmod_accepts_past_and_plausible_future():
+    assert _parse_lastmod(_iso_offset(-3600)) is not None
+    # Clock skew is a fact of life: a future stamp within the bound is trusted.
+    assert _parse_lastmod(_iso_offset(600)) is not None
+
+
+def test_parse_lastmod_rejects_far_future(monkeypatch):
+    """A >1-day-future stamp is a garbage claim, not freshness information."""
+    assert _parse_lastmod(_iso_offset(86400 * 2)) is None
+
+
+def test_future_skew_bound_is_configurable(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "0")
+    assert _parse_lastmod(_iso_offset(300)) is None
+    assert _parse_lastmod(_iso_offset(-300)) is not None
+
+
+def test_negative_bound_config_falls_back_to_floor(monkeypatch):
+    """A negative skew would reject stamps from the last N seconds (the
+    site's clock runs ahead); the lo=0 floor keeps 'trust the past' intact."""
+    monkeypatch.setenv("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "-3600")
+    assert _parse_lastmod(_iso_offset(-1800)) is not None
+
+
+def test_far_future_lastmod_never_skips_a_cached_seed():
+    """Contract pin: garbage lastmod fails open to re-fetch, and cheaply.
+
+    With the bound the parse returns None, so the freshness check declines
+    before composing cache keys -- the seed enters the frontier without the
+    per-strategy disk reads a far-future timestamp used to pay for a verdict
+    it could never return.
+    """
+
+    class _Cache:
+        def cached_at_of(self, key):
+            raise AssertionError("far-future lastmod must short-circuit before any disk read")
+
+    assert _seed_is_fresh("http://x.test/p", _iso_offset(86400 * 30), _Cache(), {}) is False

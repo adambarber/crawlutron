@@ -102,6 +102,7 @@ from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import (
     filter_js_endpoints,
+    get_env_int,
     normalize_public_http_url,
     registrable_domain,
     safe_public_url_or_none,
@@ -716,10 +717,21 @@ def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
 
 
 def _parse_lastmod(lastmod: str | None) -> float | None:
-    """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds."""
+    """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
+
+    A stamp further in the future than ``BROWSER_CRAWLER_SITEMAP_LASTMOD_
+    FUTURE_SKEW_SECONDS`` (default 1 day; ``lo=0`` so a negative config can
+    never reject the recent past) is an untrustworthy claim, not freshness
+    information -- broken generators stamp the whole sitemap "now-plus" on
+    every regeneration. It parses to ``None``, the same verdict as an absent
+    stamp: the seed fails open to re-fetch, and the freshness check declines
+    before composing cache keys, so the garbage costs nothing. The
+    degradation direction is deliberate (H7): never "fresher than now".
+    """
     if not lastmod:
         return None
     s = lastmod.strip()
+    ts: float | None = None
     try:
         from email.utils import parsedate_to_datetime
 
@@ -727,17 +739,24 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
         if dt is not None:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=UTC)
-            return dt.timestamp()
+            ts = dt.timestamp()
     except (TypeError, ValueError):
         pass
-    iso = s.replace("Z", "+00:00")
-    try:
-        dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.timestamp()
-    except ValueError:
+    if ts is None:
+        iso = s.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(iso)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=UTC)
+            ts = dt.timestamp()
+        except ValueError:
+            return None
+    if ts is None:
         return None
+    skew = get_env_int("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", 86400, lo=0)
+    if ts > time.time() + skew:
+        return None
+    return ts
 
 
 def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: dict[str, Any]) -> bool:
