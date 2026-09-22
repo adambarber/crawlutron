@@ -648,10 +648,15 @@ class TestJobApi:
         assert resp_cancel.status_code == 200, resp_cancel.text
         assert resp_cancel.json()["status"] == "cancelled"
 
-        # Unknown actions stay 422 (shape validation precedes dispatch)
+        # Unknown actions stay 422 (shape validation precedes dispatch).
+        # The contract is the EXACT envelope code (a substring check would
+        # keep passing through any code drift that keeps the prefix) and the
+        # persisted row being untouched by the rejected request.
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
-        assert "invalid_action" in resp_bad.json()["code"]
+        assert resp_bad.json()["code"] == "invalid_action"
+        resp_after = await self.client.get(f"/v1/jobs/{job_id}")
+        assert resp_after.json()["status"] == "cancelled"
 
     async def test_v1_jobs_delete_of_persisted_row(self):
         job_id = await self._seed_job(f"{self.base}/")
@@ -669,4 +674,9 @@ class TestJobApi:
 
         resp_bad = await self.client.post(f"/v1/jobs/{job_id}/control", json={"action": "invalid"})
         assert resp_bad.status_code == 422
-        assert "invalid_action" in resp_bad.json()["code"]
+        # Exact code is the wire contract (jobs_router declares
+        # "invalid_action"); the rejection must also leave the persisted
+        # row exactly as it was -- a side-effect-free refusal.
+        assert resp_bad.json()["code"] == "invalid_action"
+        resp_after = await self.client.get(f"/v1/jobs/{job_id}")
+        assert resp_after.json()["status"] == "pending"
