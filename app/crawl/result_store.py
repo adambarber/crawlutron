@@ -9,10 +9,11 @@ keyed by ``request_id`` with TTL + entry-count retention guardrails.
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import time
 from pathlib import Path
+
+from app.crawl.sqlite_store import connect_store
 
 
 class CrawlResultStore:
@@ -31,7 +32,9 @@ class CrawlResultStore:
         self._clock = clock or time.time
         self._lock = threading.Lock()
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # Shared store configuration (busy_timeout + WAL; M1) -- previously a
+        # plain connect while JobStore ran WAL, so the two stores drifted.
+        self._conn = connect_store(db_path)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS results (

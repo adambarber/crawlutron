@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from app.crawl.ids import new_job_id
+from app.crawl.sqlite_store import connect_store
 
 
 def _json_default(obj):
@@ -100,12 +101,9 @@ class JobStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        # Wait for the write lock instead of raising "database is locked" under
-        # concurrent access from FastAPI's worker threads.
-        self._conn.execute("PRAGMA busy_timeout=5000")
-        # Enable WAL mode for better concurrent read/write performance
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # Durability/concurrency settings come from the shared store
+        # chokepoint (busy_timeout + WAL; M1 confinement invariant).
+        self._conn = connect_store(self.db_path)
         # Serialize all connection use across threads (sqlite3 connections are
         # not safe for concurrent use even with check_same_thread=False).
         self._lock = threading.Lock()
