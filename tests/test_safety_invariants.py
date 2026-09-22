@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
+import pytest
 from chokepoint_walks import (
     REPO_ROOT,
     SANCTIONED,
@@ -1642,20 +1643,33 @@ def test_classifier_lives_in_the_neutral_home():
 
 _CLASSIFICATION_VALUE_SOURCES = ("classification", "known_classification")
 _RESULT_PRIMITIVES = (
-    # engine-layer builders
+    # Derived, not transcribed: the per-field detectors that used to live here
+    # matched on a six-name hand-kept list and silently omitted three live
+    # primitives plus every direct dataclass construction. The generic sweep
+    # in tests/membership_gate.py reads the registry from the models, so a
+    # primitive added tomorrow is covered the day it lands. These tuples stay
+    # only as the per-field detectors' public surface; the registry is the
+    # source of truth and this is its shadow, kept in sync by the
+    # subsumption assert below.
     "_failed_engine_result",
     "_make_engine_result",
     "_engine_result_from_exception",
     "_skipped_engine_result",
-    # render-layer exception -> CrawlResult chokepoint: the browser pool worker
-    # returns this shape on failure, so a non-member strategy literal here is
-    # the same class of bug the engine list guards against
     "_crawl_result_from_exception",
-    # strategy/render-layer terminal CrawlResult chokepoint: the render path
-    # reaches the wire through the same lenient dataclass, so a non-member
-    # literal here is the same class of bug the engine list guards against
     "_terminal_crawl_result",
 )
+
+
+def _result_primitive_names() -> frozenset[str]:
+    """The registry the per-field detectors actually sweep.
+
+    Routed through the derived registry rather than the transcribed tuple
+       above so the three per-field detectors cannot re-acquire the coverage gap
+    the generic sweep was written to close.
+    """
+    from membership_gate import RESULT_PRIMITIVES
+
+    return RESULT_PRIMITIVES
 def _non_member_classification_offenders(tree, path, *, members):
     """A literal classification passed to a result primitive must be a member.
 
@@ -1666,8 +1680,9 @@ def _non_member_classification_offenders(tree, path, *, members):
     attribute access, e.g. CrawlClassification.x) is what callers should
     write, and passes without comment.
     """
+    primitives = _result_primitive_names()
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _RESULT_PRIMITIVES):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in primitives):
             continue
         for kw in node.keywords:
             if kw.arg not in _CLASSIFICATION_VALUE_SOURCES:
@@ -1744,11 +1759,12 @@ def _non_member_strategy_offenders(tree, path, *, members):
     lockstep with the enum. A non-literal (variable, attribute, or module
     constant) is what callers should write and passes without comment.
     """
+    primitives = _result_primitive_names()
     for node in ast.walk(tree):
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id in _RESULT_PRIMITIVES
+            and node.func.id in primitives
         ):
             continue
         for kw in node.keywords:
@@ -2241,11 +2257,12 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) 
     exemption list is precisely how an invented status would ship.
     """
     offenders: list[str] = []
+    primitives = _result_primitive_names()
     for node in ast.walk(tree):
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id in _RESULT_PRIMITIVES
+            and node.func.id in primitives
         ):
             continue
         for kw in node.keywords:
@@ -2568,3 +2585,542 @@ def test_crawl_strategy_name_members_match_constants():
         constants.BROWSER_HEADED_WARMED,
     }
     assert set(get_args(CrawlStrategyName)) == declared
+
+
+def test_crawl_error_members_derive_from_classification():
+    """Every Classification member is a ``CrawlError`` member, and vice versa
+    only for the documented pipeline additions.
+
+    ``CrawlError`` cannot build itself from ``Classification`` with
+    ``*get_args()`` inside ``Literal[...]`` (mypy cannot evaluate that), so its
+    members are spelled as string literals. models.py remains the single source
+    of truth for the page-outcome half; this pins the two together so a
+    Classification member added upstream cannot be forgotten here -- the exact
+    drift the derivation was written to prevent.
+    """
+    from typing import get_args
+
+    from app.models import Classification, CrawlError
+
+    error_members = set(get_args(CrawlError))
+    classification_members = set(get_args(Classification))
+    assert classification_members <= error_members, (
+        "every Classification member must be a CrawlError member (the builders"
+        f" route error=classification): missing {sorted(classification_members - error_members)}"
+    )
+    # The only codes beyond Classification are the documented pipeline
+    # conditions with no page-classification analogue. A stray addition here is
+    # a code callers cannot rely on, and a removal silently narrows the field.
+    extras = error_members - classification_members
+    assert extras == {
+        "robots_txt_disallowed",
+        "browser_worker_unavailable",
+        "unsupported_strategy",
+        "retries_exhausted",
+    }, sorted(extras)
+
+
+# ===========================================================================
+# GENERIC value-membership chokepoint (program 1)
+#
+# The detectors above were written one per escaped field: classification after
+# url_budget_exceeded, strategy after BROWSER_DECLARED_CRAWLER, status after
+# the terminal-result widening. Each is a list nobody extends, so the class
+# re-emerged at every field not on the list. The replacement is one generic
+# sweep: the (dataclass, field, Literal) triples are read from app.models at
+# test time, so a field added to a result dataclass tomorrow is covered the day
+# it lands rather than the day someone remembers to name it.
+#
+# The old per-field detectors are kept below as *proof* the generic one is
+# strictly stronger -- each is subsumed by the generic sweep, which is what
+# makes deleting the per-field list safe. They are asserts on the generic
+# detector's coverage, not on a hand-kept field list.
+# ===========================================================================
+
+
+def test_result_primitives_emit_only_declared_literal_members():
+    """Every literal value handed to a result primitive is a member of its
+    field's declared ``Literal`` -- the generic, field-axis-closed form of the
+    per-field detectors. Tree-wide: a primitive in a new module is covered."""
+    from membership_gate import generic_literal_field_offenders, literal_typed_field_members
+
+    field_members = literal_typed_field_members()
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(generic_literal_field_offenders(tree, path, field_members=field_members))
+    assert not offenders, (
+        "a literal passed to a result primitive must be a member of its field's"
+        " declared Literal, or the strict enum at response shaping rejects the whole"
+        f" batch: {'; '.join(offenders)}"
+    )
+
+
+def test_generic_membership_detector_bites():
+    """The generic detector fires on the historical regression shape, and only
+    on it -- the proof that replacing the per-field list with a derived one did
+    not silently turn the sweep into a no-op."""
+    from membership_gate import generic_literal_field_offenders, literal_typed_field_members
+
+    members = literal_typed_field_members()
+    assert members, "no Literal fields were enumerated; the generic sweep is a no-op"
+    bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
+    hits = generic_literal_field_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    assert len(hits) == 1 and "totally_made_up" in hits[0], hits
+    # A real member literal passes.
+    good = ast.parse('def f():\n    return _failed_engine_result(classification="network_error")\n')
+    assert not generic_literal_field_offenders(good, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    # A non-literal (the shape a correct caller writes) passes without comment.
+    var = ast.parse("def f(c):\n    return _failed_engine_result(classification=c)\n")
+    assert not generic_literal_field_offenders(var, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+
+
+def test_generic_membership_subsumes_the_per_field_detectors():
+    """The generic sweep covers every field the three per-field detectors
+    guarded, and every primitive the hard-coded list forgot.
+
+    The historical detectors matched on a *transcribed* primitive list of six
+    names (``_RESULT_PRIMITIVES`` below). Three live primitives that set
+    classification/status/strategy were never on it -- ``_binary_no_text_result``
+    (which sets all three), ``_crawl_result_from_engine_result``, and
+    ``_terminal_engine_result`` -- and neither were the direct dataclass
+    constructions at five sites that bypass the primitives entirely. The
+    derived registry has twelve entries and is closed by construction.
+
+    This assert is the property that licenses deleting the per-field list: the
+    coverage gap is not a matter of opinion, it is the set difference below.
+    """
+    from membership_gate import RESULT_DATACLASS_NAMES, RESULT_PRIMITIVES, literal_typed_field_members
+
+    members = literal_typed_field_members()
+    # The three escaped axes the per-field detectors were written for.
+    assert "classification" in members and "site_error" in members["classification"]
+    assert "status" in members and "failed" in members["status"]
+    # The six-name list the per-field detectors transcribed.
+    transcribed = {
+        "_failed_engine_result",
+        "_make_engine_result",
+        "_engine_result_from_exception",
+        "_skipped_engine_result",
+        "_crawl_result_from_exception",
+        "_terminal_crawl_result",
+    }
+    missed = RESULT_PRIMITIVES - transcribed
+    assert missed == {
+        "_binary_no_text_result",
+        "_crawl_result_from_engine_result",
+        "_terminal_engine_result",
+    } | RESULT_DATACLASS_NAMES, (
+        "the derived registry must cover the primitives and dataclasses the"
+        f" transcribed list omitted: {sorted(missed)}"
+    )
+
+
+def test_result_construction_enforces_membership_at_the_dataclass():
+    """A result dataclass built ANYWHERE rejects a non-member value.
+
+    The historical escapes went through direct constructions outside
+    result_helpers, so routing was policed geographically. That is no longer the
+    load-bearing guarantee: every result dataclass validates its Literal fields
+    in ``__post_init__``, so a build site cannot escape membership checking
+    regardless of who calls it. This is the falsifiable version of that claim --
+    a bad value at a direct construction site must raise, and a member must not.
+    """
+    from app.models import (
+        CrawlResult,
+        CrawlStrategyAttempt,
+        EngineCrawlResult,
+    )
+
+    good_domain = "example.com"
+    # A direct construction with all-member values is accepted: the gate must
+    # not reject legitimate direct builds (tests and the primitives both do it).
+    CrawlResult(
+        url="http://a/",
+        status="success",
+        classification="rendered",
+        final_url=None,
+        html=None,
+        text=None,
+        attempts=1,
+        elapsed_ms=0,
+        domain=good_domain,
+    )
+    CrawlStrategyAttempt(
+        strategy="BROWSER_HEADLESS",
+        status="success",
+        classification="rendered",
+        http_status=200,
+        content_type=None,
+        elapsed_ms=0,
+    )
+    # A non-member on each Literal axis raises at construction.
+    for kwargs, field in (
+        ({"status": "Bogus"}, "status"),
+        ({"classification": "Bogus"}, "classification"),
+        ({"selected_strategy": "BROWSER_INVENTED"}, "selected_strategy"),
+    ):
+        with pytest.raises(ValueError, match=f".{field}="):
+            EngineCrawlResult(
+                original_url="http://a/",
+                normalized_url="http://a/",
+                final_url=None,
+                status=kwargs.get("status", "success"),
+                classification=kwargs.get("classification", "rendered"),
+                selected_strategy=kwargs.get("selected_strategy"),
+                attempted_strategies=[],
+                http_status=None,
+                headers={},
+                content_type=None,
+                html=None,
+                text=None,
+                extraction_method=None,
+                quality_score=0.0,
+            )
+    # CrawlError axis: a stable code outside the declared taxonomy is rejected.
+    with pytest.raises(ValueError, match=r"\.error="):
+        CrawlResult(
+            url="http://a/",
+            status="failed",
+            classification="network_error",
+            final_url=None,
+            html=None,
+            text=None,
+            attempts=1,
+            elapsed_ms=0,
+            domain=good_domain,
+            error="worker_failed",
+        )
+
+
+# ===========================================================================
+# NAMED-CONSTANT provenance (program 2)
+#
+# A literal detector is blind to a Name. The historical defect was exactly
+# that shape: EXTRACTION_METHOD_BINARY_NO_TEXT -- a constant from the
+# extraction-method namespace -- was assigned into a classification field. Its
+# *value* ("binary_no_text") collides with a real classification member, so
+# even resolving the name to its value cannot detect it: the collision is the
+# defect. The signal that is actually wrong is the constant's NAMESPACE, so
+# that is what the detector keys on.
+# ===========================================================================
+
+
+def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
+    """A constant from one taxonomy must not be consumed as a member of
+    another. Value membership cannot see this -- the colliding value is what
+    made the historical defect invisible."""
+    from membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+
+    field_members = literal_typed_field_members()
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(wrong_namespace_constant_offenders(tree, path, field_members=field_members))
+    assert not offenders, (
+        "a constant from a foreign namespace was consumed as a taxonomy member; the"
+        " value collides with a real member which is exactly why a value check misses"
+        f" it: {'; '.join(offenders)}"
+    )
+
+
+def test_wrong_namespace_detector_bites():
+    """The provenance detector fires on the historical shape and admits the
+    correct one."""
+    from membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+
+    members = literal_typed_field_members()
+    bad = ast.parse(
+        'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
+        "def f():\n"
+        "    return _failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
+    )
+    hits = wrong_namespace_constant_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    assert len(hits) == 1 and "EXTRACTION_METHOD_" in hits[0], hits
+    # The same constant used as its own field is the intended use.
+    ok = ast.parse(
+        'EXTRACTION_METHOD_BINARY_NO_TEXT = "binary_no_text"\n'
+        "def f(m):\n"
+        "    return _make_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
+    )
+    assert not wrong_namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    # A parameter (what a correct caller writes) is not a constant: passes.
+    param = ast.parse("def f(cls):\n    return _failed_engine_result(classification=cls.site_error)\n")
+    assert not wrong_namespace_constant_offenders(
+        param, REPO_ROOT / "app" / "_synthetic.py", field_members=members
+    )
+
+
+# ---------------------------------------------------------------------------
+# The runtime gate (program 1+2 closure): the class dies at the boundary
+# ---------------------------------------------------------------------------
+
+
+def test_the_membership_gate_rejects_a_non_member_value():
+    """The AST detectors see source text; the historical escape reached the
+    primitive through a local variable, which no textual detector can see.
+    The gate is the structural closure: whatever indirection a value took, it
+    must pass the primitive to become a result."""
+    from membership_gate import NonMemberValue, assert_member, assert_optional_member
+
+    members = frozenset({"rendered", "site_error"})
+    assert_member("rendered", field="classification", members=members, where="_test")
+    with pytest.raises(NonMemberValue):
+        assert_member("binary_no_text", field="classification", members=members, where="_test")
+    # None is admitted for the optional Literal fields.
+    assert_optional_member(None, field="strategy", members=frozenset({"BROWSER_HEADLESS"}), where="_test")
+    with pytest.raises(NonMemberValue):
+        assert_optional_member("BROWSER_DECLARED_CRAWLER", field="strategy", members=frozenset({}), where="_test")
+
+
+def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot():
+    """The exact historical shape, end to end: a local variable assigned a
+    wrong-namespace constant, then handed to the primitive as a bare Name. No
+    kwarg-level AST detector fires on this; the gate does, because it inspects
+    the value at the boundary instead of the text at the call."""
+    import asyncio
+
+    from membership_gate import NonMemberValue, field_member_sets
+
+    members = field_member_sets()
+    classification_members = members["classification"]
+
+    async def scenario() -> None:
+        # `classification` is a local whose provenance no AST walk can resolve
+        # from the call site alone.
+        classification = "totally_made_up"
+        from membership_gate import assert_result_fields
+
+        assert_result_fields(
+            {"classification": classification},
+            where="http._http_strategy_result",
+            members=members,
+        )
+
+    with pytest.raises(NonMemberValue):
+        asyncio.run(scenario())
+    # A real member through the same indirection passes.
+    assert "binary_no_text" in classification_members
+
+
+def test_the_gate_would_have_caught_the_shipped_defect():
+    """``EXTRACTION_METHOD_BINARY_NO_TEXT`` has a value that IS a legal
+    classification member -- so this is the shape a value check admits. The
+    gate inspects the value, and the value here is legal, which is precisely
+    the point: the *provenance* AST detector above is what names the defect,
+    while the gate is what guarantees no wrong value of ANY provenance crosses.
+    Both are needed and neither subsumes the other."""
+    from membership_gate import NonMemberValue, assert_result_fields, field_member_sets
+
+    members = field_member_sets()
+    # A genuinely non-member value through the same local-variable shape.
+    with pytest.raises(NonMemberValue):
+        assert_result_fields(
+            {"classification": "not_a_real_member"},
+            where="http._http_strategy_result",
+            members=members,
+        )
+
+
+# ===========================================================================
+# ALIAS-BLINDNESS (program 3): detectors must resolve import bindings, not
+# match on a literal module name
+# ===========================================================================
+
+
+def test_dynamic_pattern_re_calls_under_any_alias():
+    """``import re as _re`` then ``_re.compile(<dynamic>)`` is invisible to a
+    detector anchored on the name ``re``. The binding is resolved first, so an
+    alias cannot rename a dynamic pattern past the chokepoint. This subsumes
+    ``test_no_dynamic_pattern_re_calls`` and the call shape of
+    ``test_no_bare_re_compile_on_nonliteral``."""
+    from membership_gate import aliased_dynamic_pattern_re_offenders
+
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(aliased_dynamic_pattern_re_offenders(tree, path))
+    assert not offenders, (
+        "re.<method> with a dynamic pattern must go through app.safe_regex, under any"
+        f" import alias: {'; '.join(offenders)}"
+    )
+
+
+def test_alias_detector_bites():
+    from membership_gate import aliased_dynamic_pattern_re_offenders
+
+    aliased = ast.parse("import re as _re\n\n\ndef f(p):\n    return _re.compile(p)\n")
+    hits = aliased_dynamic_pattern_re_offenders(aliased, REPO_ROOT / "app" / "_synthetic.py")
+    assert len(hits) == 1 and "_re.compile" in hits[0], hits
+    # A literal pattern under the same alias is safe and stays unflagged.
+    literal = ast.parse('import re as _re\n\n\ndef f():\n    return _re.compile(r"<loc>")\n')
+    assert not aliased_dynamic_pattern_re_offenders(literal, REPO_ROOT / "app" / "_synthetic.py")
+    # The plain ``re`` name is still covered (subsumption of the old detector).
+    plain = ast.parse("import re\n\n\ndef f(p):\n    return re.search(p, t)\n")
+    assert aliased_dynamic_pattern_re_offenders(plain, REPO_ROOT / "app" / "_synthetic.py")
+    # No re import at all: nothing to check.
+    none_ = ast.parse("def f(p):\n    return compile(p)\n")
+    assert not aliased_dynamic_pattern_re_offenders(none_, REPO_ROOT / "app" / "_synthetic.py")
+
+
+def test_sanctioned_func_calls_under_any_alias():
+    """A sanctioned chokepoint function is covered under any import alias.
+
+    The name-matching detectors each carry a frozenset of spellings and were
+    extended one alias at a time. This sweep resolves the import binding, so a
+    new alias of ``decompress_body`` cannot name its way out of the cap
+    requirement the way ``_re`` names its way out of the pattern check."""
+    from membership_gate import aliased_sanctioned_func_offenders
+
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(aliased_sanctioned_func_offenders(tree, path))
+    assert not offenders, (
+        "a sanctioned chokepoint function is called through an alias the"
+        " name-matching detectors do not recognize; a missing cap or filter would"
+        f" be invisible to them: {'; '.join(offenders)}"
+    )
+
+
+def test_sanctioned_func_alias_detector_bites():
+    """The alias audit fires on a spelling the hand-kept list does not contain,
+    and stays silent on the two spellings the existing list already covers."""
+    from membership_gate import aliased_sanctioned_func_offenders
+
+    unknown = ast.parse(
+        "from app.crawl.decompression import decompress_body as dec\n\n"
+        "def f(raw, enc):\n    return dec(raw, enc)\n"
+    )
+    hits = aliased_sanctioned_func_offenders(unknown, REPO_ROOT / "app" / "_synthetic.py")
+    assert len(hits) == 1 and "decompress_body" in hits[0], hits
+    # The two spellings _DECOMPRESS_FUNCS already lists are known and silent.
+    known = ast.parse(
+        "from app.crawl.decompression import decompress_body as _decompress_body\n\n"
+        "def f(raw, enc):\n    return _decompress_body(raw, enc)\n"
+    )
+    assert not aliased_sanctioned_func_offenders(known, REPO_ROOT / "app" / "_synthetic.py")
+    # An import that is not a sanctioned function is not this sweep's business.
+    unrelated = ast.parse("from os import path as p\n\n\ndef f():\n    return p.join('a')\n")
+    assert not aliased_sanctioned_func_offenders(unrelated, REPO_ROOT / "app" / "_synthetic.py")
+
+
+# ===========================================================================
+# TEST DOUBLES THAT SWALLOW SIGNATURE DRIFT (program 4)
+# ===========================================================================
+
+
+def test_doubles_do_not_accept_and_drop_kwargs():
+    """A Protocol-shaped double that accepts ``**kwargs`` and never routes it
+    is blind to a signature change on the production callable: the
+    ``failed_result`` refactor broke 24 tests silently through exactly this
+    shape, because the doubles accepted the new kwarg and dropped it."""
+    from membership_gate import swallowing_test_double_offenders
+
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        offenders.extend(swallowing_test_double_offenders(tree, path))
+    assert not offenders, (
+        "bind the production kwarg by name or forward **kwargs to the real callable; a"
+        " double that drops it implements a contract that no longer exists: "
+        + "; ".join(offenders)
+    )
+
+
+def test_swallowing_double_detector_bites():
+    from membership_gate import swallowing_test_double_offenders
+
+    drops = ast.parse(
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return {}\n"
+    )
+    hits = swallowing_test_double_offenders(drops, REPO_ROOT / "tests" / "_synthetic.py")
+    assert len(hits) == 1 and "run(**kwargs)" in hits[0], hits
+    # Forwarding is the sanctioned shape: the double passes the contract through.
+    forwards = ast.parse(
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return real.run(jobs, worker, on_result=on_result, **kwargs)\n"
+    )
+    assert not swallowing_test_double_offenders(forwards, REPO_ROOT / "tests" / "_synthetic.py")
+    # Consulting kwargs by name (kwargs.get) also counts as routing it.
+    consults = ast.parse(
+        "class _S:\n"
+        "    async def run(self, jobs, worker, on_result=None, *, failed_result=None, **kwargs):\n"
+        "        return kwargs.get('x', 1)\n"
+    )
+    assert not swallowing_test_double_offenders(consults, REPO_ROOT / "tests" / "_synthetic.py")
+    # A non-Protocol method is not a double and stays unflagged.
+    unrelated = ast.parse("def run(a, **kwargs):\n    return 1\n")
+    assert not swallowing_test_double_offenders(unrelated, REPO_ROOT / "tests" / "_synthetic.py")
+
+
+def test_no_existing_double_swallows_failed_result():
+    """Derived from the production signature, not a hand-kept list: every
+    scheduler double in tests/ binds ``failed_result`` by name today, which is
+    the property the ``failed_result`` refactor needed. A double that regressed
+    to ``**kwargs``-only would be caught by both this and the sweep above."""
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        for node in ast.walk(tree):
+            if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run"):
+                continue
+            positional = [a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}]
+            if len(positional) < 2:
+                continue
+            names = {a.arg for a in node.args.args + node.args.kwonlyargs}
+            names |= {a.arg for a in node.args.posonlyargs}
+            if "failed_result" not in names:
+                offenders.append(offender(path, node.lineno, "run() does not bind failed_result by name"))
+    assert not offenders, (
+        "the DomainScheduler.run contract requires failed_result; a double that omits it"
+        " silently drops the envelope the pipeline supplies: " + "; ".join(offenders)
+    )
+
+
+# ===========================================================================
+# Program 5 (hunt): the error= field's undeclared taxonomy
+# ===========================================================================
+
+
+def test_error_field_values_are_classification_members():
+    """A literal ``error=`` on a result primitive is in the declared taxonomy.
+
+    ``error`` is a declared ``CrawlError`` Literal: page-outcome codes that are
+    also Classification members, plus pipeline conditions with no page analogue
+    (capacity, config). The field is documented as carrying a stable code
+    (render.py) that callers key on, so a literal outside the declared taxonomy
+    is a contract leak; this reports it so the missing chokepoint is visible
+    rather than latent.
+    """
+    import typing
+
+    from membership_gate import error_field_taxonomy_offenders
+
+    from app.models import CrawlError
+
+    members = frozenset(typing.get_args(CrawlError))
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(error_field_taxonomy_offenders(tree, path, members=members))
+    assert not offenders, (
+        "error= must be a member of the declared CrawlError taxonomy (the field is"
+        f" documented as a stable code callers key on): {'; '.join(offenders)}"
+    )
+
+
+def test_error_field_taxonomy_detector_bites():
+    """The hunt detector fires on the shipped shape and admits the classified one."""
+    import typing
+
+    from membership_gate import error_field_taxonomy_offenders
+
+    from app.models import CrawlError
+
+    members = frozenset(typing.get_args(CrawlError))
+    bad = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="worker_failed")\n')
+    hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert len(hits) == 1 and "worker_failed" in hits[0], hits
+    # A member literal passes.
+    good = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="site_error")\n')
+    assert not error_field_taxonomy_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    # A classified variable is the sanctioned shape and passes.
+    var = ast.parse("def f(c):\n    return _terminal_crawl_result(url='u', error=c)\n")
+    assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
