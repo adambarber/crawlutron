@@ -6,6 +6,7 @@ validation and pinned delivery resolve DNS off the event loop.
 
 import asyncio
 import socket
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +14,24 @@ from _testkit import block_private_targets
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore
+
+
+def _spy_resolver_threads(monkeypatch) -> list[threading.Thread]:
+    """Record the thread every ``socket.getaddrinfo`` call runs on.
+
+    Shared by the validation and delivery offload tests: both stage the same
+    spy (a public-IP answer plus the thread capture) and then assert against
+    the recorded threads themselves, so the staging exists in one place and
+    the two tests can only differ in what they drive.
+    """
+    resolver_threads: list[threading.Thread] = []
+
+    def spy_getaddrinfo(host, *args, **kwargs):
+        resolver_threads.append(threading.current_thread())
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", spy_getaddrinfo)
+    return resolver_threads
 
 
 class TestAsyncCrawlFailureWebhookDelivery:
@@ -75,18 +94,10 @@ class TestWebhookValidationRunsOffLoop:
     """
 
     async def test_post_webhook_validates_off_the_event_loop(self, monkeypatch):
-        import threading
-
         from app.api.webhooks import post_webhook
 
         block_private_targets(monkeypatch)
-        resolver_threads: list[threading.Thread] = []
-
-        def spy_getaddrinfo(host, *args, **kwargs):
-            resolver_threads.append(threading.current_thread())
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", spy_getaddrinfo)
+        resolver_threads = _spy_resolver_threads(monkeypatch)
         # Neutralize delivery so the ONLY resolution is the validation parse.
         monkeypatch.setattr("app.api.webhooks.deliver_pinned_webhook", AsyncMock())
 
@@ -111,18 +122,10 @@ class TestWebhookValidationRunsOffLoop:
         ``SafeUrl.parse(pin=True)``. Only the network POST is stubbed, so a
         parse left inline resolves on the loop thread and this fails.
         """
-        import threading
-
         from app.api.webhooks import deliver_pinned_webhook
 
         block_private_targets(monkeypatch)
-        resolver_threads: list[threading.Thread] = []
-
-        def spy_getaddrinfo(host, *args, **kwargs):
-            resolver_threads.append(threading.current_thread())
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
-
-        monkeypatch.setattr(socket, "getaddrinfo", spy_getaddrinfo)
+        resolver_threads = _spy_resolver_threads(monkeypatch)
 
         # Stub only the HTTP client: SafeUrl.parse + connect() must still run,
         # and connect() is pure (no I/O), so no network call is attempted.

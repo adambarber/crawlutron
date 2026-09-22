@@ -58,6 +58,20 @@ class _LoopLiveness:
             time.sleep(0.01)
         return self.ticks - baseline
 
+    async def run_with_heartbeat(self, work, *, timeout: float):
+        """Await ``work()`` with the heartbeat ticking; cancel the tick task.
+
+        The shared scenario scaffolding — spawn the heartbeat task, bound
+        the run, and cancel the heartbeat no matter how the work exits —
+        exists here and nowhere else, so a test cannot forget the ``finally``
+        and leak the heartbeat into the next test's tick count.
+        """
+        hb = asyncio.ensure_future(self.heartbeat())
+        try:
+            return await asyncio.wait_for(work(), timeout=timeout)
+        finally:
+            hb.cancel()
+
 
 async def _wait_for(flag: threading.Event, *, timeout: float = 5.0, reason: str) -> None:
     for _ in range(int(timeout / 0.02)):
@@ -65,6 +79,27 @@ async def _wait_for(flag: threading.Event, *, timeout: float = 5.0, reason: str)
             return
         await asyncio.sleep(0.02)
     pytest.fail(f"{reason} (waited {timeout}s)")
+
+
+def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> list[bool]:
+    """Serve ``stale`` bytes for key "k"'s envelope file until the toggle clears.
+
+    The envelope read runs off the lock and can race a concurrent refresh, so
+    these tests must control exactly what the file read returns while the
+    assertion runs; the returned toggle re-enables the real bytes once the
+    racy window is done. The staging (capture the real ``read_bytes``, patch
+    the conditional stub) exists here and nowhere else.
+    """
+    serve = [True]
+    real_read_bytes = Path.read_bytes
+
+    def fake_read(path, *args, **kwargs):
+        if serve[0] and path == cache._path_for("k"):
+            return stale
+        return real_read_bytes(path, *args, **kwargs)
+
+    monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+    return serve
 
 
 class TestContentCacheDiskIOOffTheLock:
@@ -201,19 +236,11 @@ class TestContentCacheDiskIOOffTheLock:
             {"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}
         ).encode()
         assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
-        real_read_bytes = Path.read_bytes
-        serve_stale = True
-
-        def fake_read(self, *args, **kwargs):
-            if serve_stale and self == cache._path_for("k"):
-                return stale
-            return real_read_bytes(self, *args, **kwargs)
-
-        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.prune() == 0, "a live entry refreshed during the scan was unlinked"
         assert "k" in cache._index, "the live entry was expunged from the index"
         # The live entry must still be servable from the bytes actually on disk.
-        serve_stale = False
+        serve_stale[0] = False
         cache._memory_cache.clear()  # force the on-disk envelope read
         assert cache.get("k") == {"body": "b" * 200}
 
@@ -243,15 +270,7 @@ class TestContentCacheDiskIOOffTheLock:
         # expire and to have been cached at 1.0.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
         assert len(stale) != cache._index_sizes["k"]
-        real_read_bytes = Path.read_bytes
-        serve_stale = True
-
-        def fake_read(self, *args, **kwargs):
-            if serve_stale and self == cache._path_for("k"):
-                return stale
-            return real_read_bytes(self, *args, **kwargs)
-
-        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.cached_at_of("k") == 1.0  # served the bytes that were read
         # but the superseded read must not enter the freshness mirror: a
         # fabricated cached_at=1.0 and a stale expires=None (which makes a live
@@ -262,7 +281,7 @@ class TestContentCacheDiskIOOffTheLock:
             f"a superseded read poisoned the freshness mirror: {cache._index_cached_at.get('k')!r}"
         )
         # The real bytes still populate the mirror with the real metadata.
-        serve_stale = False
+        serve_stale[0] = False
         assert cache.cached_at_of("k") == 1000.0
         assert cache._index_cached_at["k"] == real
 
@@ -304,15 +323,11 @@ class TestJobRunnerSavesOffTheEventLoop:
         shutdown.set()  # exit at the first batch boundary, before any crawl
 
         async def scenario() -> int:
-            hb = asyncio.ensure_future(liveness.heartbeat())
-            try:
-                runner = asyncio.ensure_future(_run_job(job.job_id, store, None, shutdown))
-                await asyncio.wait_for(runner, timeout=15)
-            finally:
-                hb.cancel()
+            runner = asyncio.ensure_future(_run_job(job.job_id, store, None, shutdown))
+            await asyncio.wait_for(runner, timeout=15)
             return observed[0]
 
-        progress = await asyncio.wait_for(scenario(), timeout=20)
+        progress = await liveness.run_with_heartbeat(scenario, timeout=20)
         assert progress >= liveness.needed, (
             f"the event loop made {progress} heartbeat ticks while a job-store save ran"
         )
@@ -369,25 +384,21 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         monkeypatch.setattr("app.api.async_crawl_runner.execute_crawl", _fake_execute)
 
         async def scenario() -> int:
-            hb = asyncio.ensure_future(liveness.heartbeat())
-            try:
-                await asyncio.wait_for(
-                    run_async_crawl(
-                        job.job_id,
-                        {"url": "http://example.com/"},
-                        None,
-                        CrawlerSettings.from_mapping(),
-                        store,
-                        CrawlResultStore(tmp_path / "results.db"),
-                        asyncio.Event(),
-                    ),
-                    timeout=20,
-                )
-            finally:
-                hb.cancel()
+            await asyncio.wait_for(
+                run_async_crawl(
+                    job.job_id,
+                    {"url": "http://example.com/"},
+                    None,
+                    CrawlerSettings.from_mapping(),
+                    store,
+                    CrawlResultStore(tmp_path / "results.db"),
+                    asyncio.Event(),
+                ),
+                timeout=20,
+            )
             return observed[0]
 
-        progress = await asyncio.wait_for(scenario(), timeout=30)
+        progress = await liveness.run_with_heartbeat(scenario, timeout=30)
         assert progress >= liveness.needed, (
             "the event loop made "
             f"{progress} heartbeat ticks while the async crawl runner saved a job row"
@@ -419,17 +430,12 @@ class TestSpillAssemblyOffTheEventLoop:
         payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 5}}}
 
         async def scenario() -> dict:
-            hb = asyncio.ensure_future(liveness.heartbeat())
-            try:
-                crawl = asyncio.ensure_future(
-                    crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-                )
-                out = await asyncio.wait_for(crawl, timeout=15)
-            finally:
-                hb.cancel()
-            return out
+            crawl = asyncio.ensure_future(
+                crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+            )
+            return await asyncio.wait_for(crawl, timeout=15)
 
-        out = await asyncio.wait_for(scenario(), timeout=20)
+        out = await liveness.run_with_heartbeat(scenario, timeout=20)
         assert observed[0] >= liveness.needed, (
             f"the event loop made {observed[0]} heartbeat ticks "
             "while the spilled results were read back"
@@ -449,13 +455,6 @@ class TestSpillAssemblyOffTheEventLoop:
         # the read and the index commit.
         stale = json.dumps({"expires": None, "value": {"v": "stale"}, "cached_at": 1.0}).encode()
         assert len(stale) != cache._index_sizes["k"]
-        real_read_bytes = Path.read_bytes
-
-        def fake_read(self, *args, **kwargs):
-            if self == cache._path_for("k"):
-                return stale
-            return real_read_bytes(self, *args, **kwargs)
-
-        monkeypatch.setattr(cc.Path, "read_bytes", fake_read)
+        _serve_stale_envelope(monkeypatch, cache, stale)  # toggle stays on: whole read is stale
         assert cache.get("k") == {"v": "stale"}  # served the bytes that were read
         assert "k" not in cache._memory_cache  # but the stale read is not mirrored

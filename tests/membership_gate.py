@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Collection
 
 from chokepoint_walks import offender
 
@@ -128,6 +129,33 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
     return values
 
 
+def primitive_keyword_calls(
+    tree: ast.AST, *, arg_names: Collection[str] | None = None
+) -> list[tuple[ast.Call, ast.keyword]]:
+    """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
+
+    The keyword-level detectors all walk the same shape -- a call whose
+    ``func`` is a bare name in ``RESULT_PRIMITIVES`` -- and disagree only
+    about what the keyword VALUE means (literal membership, constant
+    namespace, error-code provenance). This is the one walk; if the set of
+    calls that count as primitive calls drifts, it drifts for every
+    detector at once instead of only the one someone edited.
+    """
+    hits: list[tuple[ast.Call, ast.keyword]] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id not in RESULT_PRIMITIVES:
+            continue
+        for kw in node.keywords:
+            if kw.arg is None:
+                continue
+            if arg_names is not None and kw.arg not in arg_names:
+                continue
+            hits.append((node, kw))
+    return hits
+
+
 def generic_literal_field_offenders(
     tree: ast.AST, path: pathlib.Path, *, field_members: dict[str, set[str]]
 ) -> list[str]:
@@ -140,26 +168,19 @@ def generic_literal_field_offenders(
     is not checked here -- ``error`` has its own provenance story below.
     """
     out: list[str] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+    for node, kw in primitive_keyword_calls(tree, arg_names=field_members):
+        value = kw.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
             continue
-        if node.func.id not in RESULT_PRIMITIVES:
-            continue
-        for kw in node.keywords:
-            if kw.arg is None or kw.arg not in field_members:
-                continue
-            value = kw.value
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-                continue
-            if value.value not in field_members[kw.arg]:
-                out.append(
-                    offender(
-                        path,
-                        node.lineno,
-                        f"{node.func.id}({kw.arg}={value.value!r}) is not a member of the"
-                        f" {kw.arg} Literal; add it to the taxonomy or pass a member",
-                    )
+        if value.value not in field_members[kw.arg]:
+            out.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"{node.func.id}({kw.arg}={value.value!r}) is not a member of the"
+                    f" {kw.arg} Literal; add it to the taxonomy or pass a member",
                 )
+            )
     return out
 
 
@@ -219,33 +240,26 @@ def wrong_namespace_constant_offenders(
     """
     constants = _module_constants(tree)
     out: list[str] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+    for node, kw in primitive_keyword_calls(tree, arg_names=field_members):
+        value = kw.value
+        if not isinstance(value, ast.Name):
             continue
-        if node.func.id not in RESULT_PRIMITIVES:
+        if value.id not in constants:
             continue
-        for kw in node.keywords:
-            if kw.arg is None or kw.arg not in field_members:
-                continue
-            value = kw.value
-            if not isinstance(value, ast.Name):
-                continue
-            if value.id not in constants:
-                continue
-            hit = _namespace_violation(value.id, kw.arg)
-            if hit is None:
-                continue
-            out.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"{node.func.id}({kw.arg}={value.id}) is a constant from the"
-                    f" {'/'.join(hit)} namespace, not a {kw.arg}; the value"
-                    f" {constants[value.id]!r} collides with a real member, which is"
-                    " exactly what makes this invisible to a value check -- pass the"
-                    " taxonomy member or the enum attribute instead",
-                )
+        hit = _namespace_violation(value.id, kw.arg)
+        if hit is None:
+            continue
+        out.append(
+            offender(
+                path,
+                node.lineno,
+                f"{node.func.id}({kw.arg}={value.id}) is a constant from the"
+                f" {'/'.join(hit)} namespace, not a {kw.arg}; the value"
+                f" {constants[value.id]!r} collides with a real member, which is"
+                " exactly what makes this invisible to a value check -- pass the"
+                " taxonomy member or the enum attribute instead",
             )
+        )
     return out
 
 
@@ -649,27 +663,20 @@ def error_field_taxonomy_offenders(
     comment; ``None`` is the honest "no error" label and is admitted.
     """
     out: list[str] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+    for node, kw in primitive_keyword_calls(tree, arg_names={"error"}):
+        value = kw.value
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
             continue
-        if node.func.id not in RESULT_PRIMITIVES:
+        if value.value in members:
             continue
-        for kw in node.keywords:
-            if kw.arg != "error":
-                continue
-            value = kw.value
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-                continue
-            if value.value in members:
-                continue
-            out.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"error={value.value!r} is not a Classification member, but the"
-                    " field is documented as carrying a stable classification code"
-                    " (render.py) and _classify_error_code only returns members --"
-                    " declare it in the taxonomy or route it through the classifier",
-                )
+        out.append(
+            offender(
+                path,
+                node.lineno,
+                f"error={value.value!r} is not a Classification member, but the"
+                " field is documented as carrying a stable classification code"
+                " (render.py) and _classify_error_code only returns members --"
+                " declare it in the taxonomy or route it through the classifier",
             )
+        )
     return out
