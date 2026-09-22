@@ -764,20 +764,28 @@ def _dict_keys(node: ast.Dict) -> set[str]:
 def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag hand-rolled error envelopes; the factory is the only definition.
 
-    Two shapes: a ``HTTPException(detail={...code, message...})`` literal (the
-    pre-factory form, with or without ``details``) and any dict carrying all
-    three envelope keys anywhere (catches JSONResponse/return-value variants).
+    Three shapes: ANY ``HTTPException(...)`` construction (M8: the wire shape
+    may only be built by :func:`http_error`/``browser_pool_unavailable`` -- a
+    bare ``HTTPException(detail="str")`` reaches the handler's fallback and
+    used to be laundered into a fabricated ``http_<status>`` code); a
+    ``HTTPException(detail={...code, message...})`` literal (the pre-factory
+    form); and any dict carrying all three envelope keys anywhere (catches
+    JSONResponse/return-value variants).
     """
     offenders: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "HTTPException":
-            for kw in node.keywords:
-                if (
+        if isinstance(node, ast.Call):
+            func_name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if func_name == "HTTPException":
+                if node.keywords and any(
                     kw.arg == "detail"
                     and isinstance(kw.value, ast.Dict)
                     and {"code", "message"} <= _dict_keys(kw.value)
+                    for kw in node.keywords
                 ):
                     offenders.append(offender(path, node.lineno, "HTTPException detail= envelope literal"))
+                else:
+                    offenders.append(offender(path, node.lineno, "bare HTTPException construction"))
         elif isinstance(node, ast.Dict) and {"code", "message", "details"} <= _dict_keys(node):
             offenders.append(offender(path, node.lineno, "error envelope dict literal"))
     return offenders
@@ -794,13 +802,15 @@ def test_no_hand_rolled_error_envelopes():
 
 
 def test_envelope_detector_bites():
-    """Both drift shapes fire; factory-shaped code stays clean."""
+    """All three drift shapes fire; factory-shaped code stays clean."""
     bad = ast.parse(
         "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
         "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
+        "raise HTTPException(status_code=404, detail='plain string')\n"
+        "raise fastapi.HTTPException(status_code=500)\n"
     )
     offenders = _envelope_dict_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 2, offenders
+    assert len(offenders) == 4, offenders
     good = ast.parse(
         "from app.api.exceptions import http_error\n"
         "raise http_error(404, 'not_found', 'gone')\n"

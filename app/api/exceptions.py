@@ -5,9 +5,14 @@ Extracted from ``app/main.py`` so the FastAPI app factory stays thin.
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 
 def error_envelope(code: str, message: str, details: dict | None = None) -> dict:
@@ -17,6 +22,33 @@ def error_envelope(code: str, message: str, details: dict | None = None) -> dict
     exactly the drift this factory exists to prevent.
     """
     return {"code": code, "message": message, "details": details or {}}
+
+
+#: Synthetic code for an HTTPException whose detail is not envelope-shaped.
+#: Deliberately a *declared* code (not ``http_<status>``) so a non-conforming
+#: raise is greppable in the wire contract instead of masquerading as a
+#: status-derived one; the numeric status is carried in ``details``.
+MALFORMED_DETAIL_CODE = "malformed_error_detail"
+
+
+def error_envelope_from_detail(detail: Any, status_code: int) -> dict:
+    """The only way an ``HTTPException`` detail becomes an error envelope (M8).
+
+    Conforming detail (built by :func:`http_error`) unwraps 1:1. Anything else
+    means someone raised ``HTTPException`` outside the helpers -- a string
+    like Starlette's own 404/405, or a dict missing ``code``/``message`` --
+    so it is logged loudly (the drift must be visible in the server log, not
+    laundered into a fabricated ``http_<status>`` code whose message is a
+    ``str()`` of arbitrary content) and answered with the declared synthetic
+    code plus the numeric status in ``details``.
+    """
+    if isinstance(detail, dict) and "code" in detail and "message" in detail:
+        return error_envelope(str(detail["code"]), str(detail["message"]), detail.get("details"))
+    logger.warning(
+        "non_envelope_http_exception",
+        extra={"status_code": status_code, "detail_type": type(detail).__name__},
+    )
+    return error_envelope(MALFORMED_DETAIL_CODE, "Request failed", {"status_code": status_code})
 
 
 def http_error(status_code: int, code: str, message: str, details: dict | None = None) -> HTTPException:
@@ -70,19 +102,16 @@ async def http_exception_handler(request: Request, exc: Exception) -> JSONRespon
         )
     detail = getattr(exc, "detail", None)
     headers = getattr(exc, "headers", None)
-    if isinstance(detail, dict) and "code" in detail and "message" in detail:
-        content = error_envelope(str(detail.get("code")), str(detail.get("message")), detail.get("details"))
-    else:
-        content = error_envelope(
-            f"http_{exc.status_code}", str(detail) if detail is not None else "Request failed"
-        )
+    content = error_envelope_from_detail(detail, exc.status_code)
     return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
 
 
 __all__ = [
     "BROWSER_POOL_MESSAGE",
+    "MALFORMED_DETAIL_CODE",
     "browser_pool_unavailable",
     "error_envelope",
+    "error_envelope_from_detail",
     "http_error",
     "http_exception_handler",
     "validation_exception_handler",
