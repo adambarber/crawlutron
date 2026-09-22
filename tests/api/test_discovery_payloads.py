@@ -39,6 +39,18 @@ class TestCapabilitiesPayload:
         assert timing["per_url_budget_seconds"] == payload["default_limits"]["total_url_budget_seconds"]
         assert "async_mode" in timing["large_crawl_guidance"]
 
+    def test_large_crawl_guidance_routes_to_durable_jobs(self):
+        """M14 ruling: the no-ceiling note must name BOTH escape hatches.
+
+        async_mode de-risks the HTTP request; only POST /v1/jobs is durable
+        (pause/cancel/resume, crash recovery). An agent that reads only
+        async_mode picks a continuation of a single request when it should
+        book a job -- the guidance is the only place this choice is written.
+        """
+        settings = CrawlerSettings.from_mapping()
+        timing = capabilities_payload(settings)["crawl_timing"]
+        assert "/v1/jobs" in timing["large_crawl_guidance"]
+
 
 class TestCapabilitiesWireContract:
     """Serialize through the real endpoint, not the raw dict.
@@ -57,6 +69,7 @@ class TestCapabilitiesWireContract:
         assert timing["per_url_budget_seconds"] == body["default_limits"]["total_url_budget_seconds"]
         assert timing["sync_has_server_time_ceiling"] is False
         assert "async_mode" in timing["large_crawl_guidance"]
+        assert "/v1/jobs" in timing["large_crawl_guidance"]
         assert body["features"]["async_mode"] is True
 
 
@@ -67,6 +80,20 @@ class TestAgentHintsPayload:
         assert "strategies" in payload
         assert "guidance" in payload
         assert "example_policies" in payload
+
+    def test_agent_hints_time_guidance_names_both_escape_hatches(self):
+        """M14 ruling: the no-ceiling hint must point at async_mode AND jobs.
+
+        Same rationale as the capabilities guidance test: the hints are what
+        agents actually read before constructing a first request, so the
+        durable option must be named where the sync ceiling is documented.
+        """
+        payload = agent_hints_payload()
+        timing_hints = [g for g in payload["guidance"] if "time ceiling" in g]
+        assert timing_hints, "no time-ceiling guidance in agent hints"
+        hint = timing_hints[0]
+        assert "async_mode" in hint
+        assert "/v1/jobs" in hint
 
     def test_agent_hints_strategies_match(self):
         payload = agent_hints_payload()
