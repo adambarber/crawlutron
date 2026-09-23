@@ -3913,35 +3913,75 @@ def test_public_target_registry_is_not_empty():
     assert _property("public-target").fingerprints
 
 
+def _synthetic_app_tree(source: str) -> ast.AST:
+    """Parse a synthetic module as if it lived at the app-tree root.
+
+    Proof sources are written inline as one string per shape, so a detector
+    proof reads as the shape it forbids rather than as harness plumbing.
+    """
+    return ast.parse(source)
+
+
+def assert_property_detector_bites(
+    prop: Property,
+    detector,
+    *,
+    caught: dict[str, tuple[str, int]],
+    quiet: str,
+) -> None:
+    """Prove a property detector has teeth, in-process, without a break/restore cycle.
+
+    ``caught`` maps a label to (source, exact offender count): every shape must
+    be reported with exactly that many offenders, so a detector cannot pass by
+    over-reporting. ``quiet`` is a module that delegates to the owner and must
+    produce none. This is the entire proof of a detector's teeth -- a detector
+    that cannot recognise its own property fails here rather than in production.
+    """
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    for label, (source, expected) in caught.items():
+        offenders = detector(_synthetic_app_tree(source), path, prop)
+        assert len(offenders) == expected, (
+            f"{prop.name} detector: {label} shape produced {len(offenders)} offenders, "
+            f"expected {expected}: {offenders}"
+        )
+    quiet_offenders = detector(_synthetic_app_tree(quiet), path, prop)
+    assert not quiet_offenders, f"{prop.name} detector flagged an owner delegation: {quiet_offenders}"
+
+
 def test_public_target_detector_bites():
-    prop = _property("public-target")
-    bad = ast.parse(
-        "import ipaddress\n"
-        "import ipaddress as ip\n"
-        "from ipaddress import ip_address as parse\n"
-        "IP = ipaddress\n"
-        "def alias_import(value):\n"
-        "    address = ip.ip_address(value)\n"
-        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
-        "def from_import(value):\n"
-        "    address = parse(value)\n"
-        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
-        "def assignment(value):\n"
-        "    address = IP.ip_address(value)\n"
-        "    return address.is_private or IP.ip_network('100.64.0.0/10')\n"
-        "def getattr_call(value):\n"
-        "    address = getattr(ipaddress, 'ip_address')(value)\n"
-        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
+    assert_property_detector_bites(
+        _property("public-target"),
+        _public_target_offenders,
+        caught={
+            # All four alias forms live in ONE module on purpose: a detector
+            # that only inspected a module's first function would pass if each
+            # shape were proven in its own module.
+            "all alias forms in one module": (
+                "import ipaddress\n"
+                "import ipaddress as ip\n"
+                "from ipaddress import ip_address as parse\n"
+                "IP = ipaddress\n"
+                "def alias_import(value):\n"
+                "    address = ip.ip_address(value)\n"
+                "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
+                "def from_import(value):\n"
+                "    address = parse(value)\n"
+                "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
+                "def assignment(value):\n"
+                "    address = IP.ip_address(value)\n"
+                "    return address.is_private or IP.ip_network('100.64.0.0/10')\n"
+                "def getattr_call(value):\n"
+                "    address = getattr(ipaddress, 'ip_address')(value)\n"
+                "    return address.is_private or ipaddress.ip_network('100.64.0.0/10')\n",
+                4,
+            ),
+        },
+        quiet=(
+            "from app.validation import _is_public_ip as verdict\n"
+            "def check(value):\n"
+            "    return verdict(value)\n"
+        ),
     )
-    offenders = _public_target_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert len(offenders) == 4, offenders
-    assert all("public-address" in offender for offender in offenders), offenders
-    good = ast.parse(
-        "from app.validation import _is_public_ip as verdict\n"
-        "def check(value):\n"
-        "    return verdict(value)\n"
-    )
-    assert not _public_target_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
 
 
 def test_bool_env_has_one_implementation():
@@ -3958,32 +3998,33 @@ def test_bool_env_registry_is_not_empty():
 
 
 def test_bool_env_detector_bites():
-    prop = _property("bool-env")
-    truthy = ast.parse(
-        "def parse(value):\n"
-        "    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n"
+    assert_property_detector_bites(
+        _property("bool-env"),
+        _bool_env_offenders,
+        caught={
+            "truthy set": (
+                "def parse(value):\n"
+                "    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n",
+                1,
+            ),
+            "inverted set": (
+                "def parse(value):\n"
+                "    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n",
+                1,
+            ),
+            "module-level set": (
+                "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
+                "def parse(value):\n"
+                "    return value.strip().lower() not in FALSE_WORDS\n",
+                1,
+            ),
+        },
+        quiet=(
+            "from app.validation import parse_bool_value as parse\n"
+            "def parse_env(value, default):\n"
+            "    return parse(value, default, env_name='X')\n"
+        ),
     )
-    inverted = ast.parse(
-        "def parse(value):\n"
-        "    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n"
-    )
-    variable_set = ast.parse(
-        "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
-        "def parse(value):\n"
-        "    return value.strip().lower() not in FALSE_WORDS\n"
-    )
-    truthy_offenders = _bool_env_offenders(truthy, REPO_ROOT / "app" / "_synthetic.py", prop)
-    inverted_offenders = _bool_env_offenders(inverted, REPO_ROOT / "app" / "_synthetic.py", prop)
-    variable_offenders = _bool_env_offenders(variable_set, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert len(truthy_offenders) == 1 and "boolean" in truthy_offenders[0], truthy_offenders
-    assert len(inverted_offenders) == 1 and "boolean" in inverted_offenders[0], inverted_offenders
-    assert len(variable_offenders) == 1 and "boolean" in variable_offenders[0], variable_offenders
-    good = ast.parse(
-        "from app.validation import parse_bool_value as parse\n"
-        "def parse_env(value, default):\n"
-        "    return parse(value, default, env_name='X')\n"
-    )
-    assert not _bool_env_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
 
 
 def test_robots_policy_has_one_implementation():
@@ -4000,42 +4041,41 @@ def test_robots_policy_registry_is_not_empty():
 
 
 def test_robots_policy_detector_bites():
-    prop = _property("robots-policy")
-    bad = ast.parse(
-        "from app.bounded_ttl import BoundedTTLCache as Cache\n"
-        "from app.crawl.robots_parse import parse_robots_rules as parse\n"
-        "def robots_loader(origin):\n"
-        "    cache = Cache(max_entries=1, ttl=1)\n"
-        "    return parse('User-agent: *')\n"
+    assert_property_detector_bites(
+        _property("robots-policy"),
+        _robots_policy_offenders,
+        caught={
+            "parser call and cache": (
+                "from app.bounded_ttl import BoundedTTLCache as Cache\n"
+                "from app.crawl.robots_parse import parse_robots_rules as parse\n"
+                "def robots_loader(origin):\n"
+                "    cache = Cache(max_entries=1, ttl=1)\n"
+                "    return parse('User-agent: *')\n",
+                2,
+            ),
+            "parser definition": (
+                "def parse_robots_rules(text):\n    return [(True, text)]\n",
+                1,
+            ),
+            "split url literal": (
+                "def renamed_loader(origin):\n"
+                "    path = '/r' + 'obots.txt'\n"
+                "    return http_fetcher(urljoin(origin, path))\n",
+                1,
+            ),
+            "renamed parser definition": (
+                "def decode_directives(text):\n"
+                "    rows = text.splitlines()\n"
+                "    return [(True, row) for row in rows if 'disallow' in row.lower()]\n",
+                1,
+            ),
+        },
+        quiet=(
+            "from app.crawl.robots import load_robots_rules as load\n"
+            "def check(origin):\n"
+            "    return load(origin, fetcher, 5)\n"
+        ),
     )
-    offenders = _robots_policy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert len(offenders) == 2 and any("parse_robots_rules_call" in item for item in offenders), offenders
-    assert any("robots_bounded_ttl_cache" in item for item in offenders), offenders
-    definition = ast.parse("def parse_robots_rules(text):\n    return [(True, text)]\n")
-    definition_offenders = _robots_policy_offenders(
-        definition, REPO_ROOT / "app" / "_synthetic.py", prop
-    )
-    assert any("parse_robots_rules_definition" in item for item in definition_offenders), definition_offenders
-    split_url = ast.parse(
-        "def renamed_loader(origin):\n"
-        "    path = '/r' + 'obots.txt'\n"
-        "    return http_fetcher(urljoin(origin, path))\n"
-    )
-    split_offenders = _robots_policy_offenders(split_url, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert any("robots_url" in item for item in split_offenders), split_offenders
-    renamed_parser = ast.parse(
-        "def decode_directives(text):\n"
-        "    rows = text.splitlines()\n"
-        "    return [(True, row) for row in rows if 'disallow' in row.lower()]\n"
-    )
-    renamed_parser_offenders = _robots_policy_offenders(renamed_parser, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert any("parse_robots_rules_definition" in item for item in renamed_parser_offenders), renamed_parser_offenders
-    good = ast.parse(
-        "from app.crawl.robots import load_robots_rules as load\n"
-        "def check(origin):\n"
-        "    return load(origin, fetcher, 5)\n"
-    )
-    assert not _robots_policy_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
 
 
 _KNOB_PATTERN = re.compile(r"\bBROWSER_CRAWLER_[A-Z0-9_]+\b")
