@@ -14,6 +14,7 @@ from _testkit import block_private_targets
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore
+from app.validation import HostPolicy
 
 
 def _spy_resolver_threads(monkeypatch) -> list[threading.Thread]:
@@ -101,7 +102,11 @@ class TestWebhookValidationRunsOffLoop:
         # Neutralize delivery so the ONLY resolution is the validation parse.
         monkeypatch.setattr("app.api.webhooks.deliver_pinned_webhook", AsyncMock())
 
-        await post_webhook("http://public.example.com/cb", {"results": []})
+        await post_webhook(
+            "http://public.example.com/cb",
+            {"results": []},
+            host_policy=HostPolicy.unrestricted(),
+        )
 
         assert resolver_threads, "socket.getaddrinfo was never called during validation"
         loop_thread = threading.current_thread()
@@ -160,7 +165,11 @@ class TestWebhookValidationRunsOffLoop:
 
         monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
 
-        await deliver_pinned_webhook("http://public.example.com/cb", b"{}")
+        await deliver_pinned_webhook(
+            "http://public.example.com/cb",
+            b"{}",
+            host_policy=HostPolicy.unrestricted(),
+        )
 
         assert delivered, "delivery never ran; the test is not exercising the delivery path"
         assert resolver_threads, "socket.getaddrinfo was never called during delivery"
@@ -183,4 +192,7 @@ class TestWebhookValidationRunsOffLoop:
             return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
         ):
             with pytest.raises(ValueError):
-                await validate_webhook_url_async("http://evil.example.com/callback")
+                await validate_webhook_url_async(
+                    "http://evil.example.com/callback",
+                    host_policy=HostPolicy.unrestricted(),
+                )

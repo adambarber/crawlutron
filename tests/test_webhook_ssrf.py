@@ -19,6 +19,7 @@ from app.api.webhooks import (
 from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
+from app.validation import HostPolicy
 
 
 def _fake_httpx_client(capture=None, body=b""):
@@ -91,7 +92,10 @@ class TestWebhookUrlValidation:
             return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
         ):
             with pytest.raises(ValueError):
-                _validate_webhook_url("http://evil.example.com/callback")
+                _validate_webhook_url(
+                    "http://evil.example.com/callback",
+                    host_policy=HostPolicy.unrestricted(),
+                )
 
     def test_allows_public_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a public IP is accepted."""
@@ -99,16 +103,25 @@ class TestWebhookUrlValidation:
         with patch(
             "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
         ):
-            _validate_webhook_url("http://public.example.com/callback")
+            _validate_webhook_url(
+                "http://public.example.com/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )
 
     def test_rejects_non_http_scheme(self):
         with pytest.raises(ValueError):
-            _validate_webhook_url("ftp://example.com/callback")
+            _validate_webhook_url(
+                "ftp://example.com/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )
 
     def test_rejects_localhost(self, monkeypatch):
         block_private_targets(monkeypatch)
         with pytest.raises(ValueError):
-            _validate_webhook_url("http://localhost:8080/callback")
+            _validate_webhook_url(
+                "http://localhost:8080/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )
 
 
 class TestWebhookDeliveryPinning:
@@ -122,7 +135,11 @@ class TestWebhookDeliveryPinning:
         block_private_targets(monkeypatch)
         captured = {}
         with _pinned_webhook_client(capture=captured):
-            await _post_webhook("http://webhook.example.com/cb", {"results": []})
+            await _post_webhook(
+                "http://webhook.example.com/cb",
+                {"results": []},
+                host_policy=HostPolicy.unrestricted(),
+            )
 
         assert "8.8.8.8" in captured["url"], captured
         assert captured["headers"].get("Host") == "webhook.example.com", captured
@@ -136,7 +153,11 @@ class TestWebhookDeliveryPinning:
         block_private_targets(monkeypatch)
         captured = {}
         with _pinned_webhook_client(capture=captured):
-            await deliver_pinned_webhook("https://webhook.example.com/cb", b"{}")
+            await deliver_pinned_webhook(
+                "https://webhook.example.com/cb",
+                b"{}",
+                host_policy=HostPolicy.unrestricted(),
+            )
 
         assert captured["url"] == "https://webhook.example.com/cb", captured
         assert "8.8.8.8" not in captured["url"], captured
@@ -153,7 +174,11 @@ class TestWebhookDeliveryPinning:
         big_body = b"x" * (_max_webhook_size() + 1)
         with _pinned_webhook_client(body=big_body):
             with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
-                await deliver_pinned_webhook("http://webhook.example.com/cb", b"{}")
+                await deliver_pinned_webhook(
+                    "http://webhook.example.com/cb",
+                    b"{}",
+                    host_policy=HostPolicy.unrestricted(),
+                )
 
         assert any("webhook_response_too_large" in r.message for r in caplog.records), caplog.text
 

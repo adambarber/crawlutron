@@ -146,7 +146,7 @@ def _pop_frontier(job: Any) -> list[FrontierEntry]:
     max_pages = job_max_pages(job.policy)
     if job.in_flight:
         fixed = {
-            canonical_page_identity(url) or url
+            canonical_page_identity(url, host_policy=job.host_policy) or url
             for url in set(job.visited) | {entry.url for entry in job.in_flight}
         }
         if max_pages > 0 and len(fixed) > max_pages:
@@ -196,7 +196,7 @@ async def _pace_delayed_batch(
     tasks: list[CrawlTask] = []
     for index, entry in enumerate(batch):
         host = (urlparse(entry.url).hostname or "").lower()
-        identity = canonical_page_identity(entry.url)
+        identity = canonical_page_identity(entry.url, host_policy=context.host_policy)
         if host in context.delayed_hosts and identity is not None:
             tasks.append(
                 CrawlTask(
@@ -307,22 +307,28 @@ async def _run_job(
             for item in items:
                 original = item.get("original_url")
                 if isinstance(original, str) and original:
-                    resolved.setdefault(canonical_page_identity(original) or original, item)
+                    resolved.setdefault(
+                        canonical_page_identity(original, host_policy=context.host_policy) or original,
+                        item,
+                    )
             for item in items:
                 for key in (item.get("final_url"), item.get("normalized_url")):
                     if not isinstance(key, str) or not key:
                         continue
-                    identity = canonical_page_identity(key) or key
+                    identity = canonical_page_identity(key, host_policy=context.host_policy) or key
                     resolved.setdefault(identity, item)
 
             failed = 0
             for entry in batch:
                 url = entry.url
-                identity = canonical_page_identity(url) or url
+                identity = canonical_page_identity(url, host_policy=context.host_policy) or url
                 job.in_flight = [
                     pending
                     for pending in job.in_flight
-                    if (canonical_page_identity(pending.url) or pending.url) != identity
+                    if (
+                        canonical_page_identity(pending.url, host_policy=context.host_policy)
+                        or pending.url
+                    ) != identity
                 ]
                 item = resolved.get(identity)
                 if item is None:
@@ -339,7 +345,11 @@ async def _run_job(
                     and job.transient_retries.get(identity, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS
                 ):
                     job.transient_retries[identity] = job.transient_retries.get(identity, 0) + 1
-                    requeue_admitted_pages(job, (FrontierEntry(url=identity, depth=entry.depth),))
+                    requeue_admitted_pages(
+                        job,
+                        (FrontierEntry(url=identity, depth=entry.depth),),
+                        context,
+                    )
                     continue
 
                 job.transient_retries.pop(identity, None)

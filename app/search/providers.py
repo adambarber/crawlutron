@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http import get_async_http_client
 from app.timeouts import Timeouts
-from app.validation import safe_public_url_or_none
+from app.validation import HostPolicy, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -113,18 +113,24 @@ def _clip(text: str) -> str:
     return text if len(text) <= _MAX_TEXT_LENGTH else text[:_MAX_TEXT_LENGTH].rstrip() + "…"
 
 
-def _normalize_url(raw: str) -> str | None:
+def _normalize_url(raw: str, *, policy: HostPolicy) -> str | None:
     """Return ``raw`` when it is a crawlable public HTTP(S) URL, else ``None``.
 
     Dropping (rather than rewriting) invalid targets keeps the response honest:
     a result that points at loopback or a private network is not a public URL
     a caller can legally crawl, so it is not advertised.
     """
-    return safe_public_url_or_none(raw)
+    normalized = safe_public_url_or_none(raw, policy=policy)
+    return str(normalized) if normalized is not None else None
 
 
 def _collect_results(
-    items: object, *, url_key: str, title_key: str, description_key: str
+    items: object,
+    *,
+    url_key: str,
+    title_key: str,
+    description_key: str,
+    policy: HostPolicy,
 ) -> list[SearchResult]:
     """Normalize a keyed provider's raw result list into ``SearchResult``s.
 
@@ -138,7 +144,7 @@ def _collect_results(
     for item in items if isinstance(items, list) else []:
         if not isinstance(item, dict):
             continue
-        url = _normalize_url(str(item.get(url_key) or ""))
+        url = _normalize_url(str(item.get(url_key) or ""), policy=policy)
         if not url or url in seen:
             continue
         seen.add(url)
@@ -178,8 +184,9 @@ class _ApiKeyProvider:
 
     name: str
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, host_policy: HostPolicy) -> None:
         self._api_key = api_key
+        self._host_policy = host_policy
 
 
 class TavilyProvider(_ApiKeyProvider):
@@ -206,7 +213,11 @@ class TavilyProvider(_ApiKeyProvider):
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
         return _collect_results(
-            payload.get("results"), url_key="url", title_key="title", description_key="content"
+            payload.get("results"),
+            url_key="url",
+            title_key="title",
+            description_key="content",
+            policy=self._host_policy,
         )
 
 
@@ -231,6 +242,7 @@ class BraveProvider(_ApiKeyProvider):
             url_key="url",
             title_key="title",
             description_key="description",
+            policy=self._host_policy,
         )
 
 
@@ -251,7 +263,11 @@ class SerperProvider(_ApiKeyProvider):
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
         return _collect_results(
-            payload.get("organic"), url_key="link", title_key="title", description_key="snippet"
+            payload.get("organic"),
+            url_key="link",
+            title_key="title",
+            description_key="snippet",
+            policy=self._host_policy,
         )
 
 
@@ -259,6 +275,9 @@ class DuckDuckGoProvider:
     """Keyless DuckDuckGo HTML endpoint (best-effort; captcha-prone from datacenters)."""
 
     name = "duckduckgo"
+
+    def __init__(self, host_policy: HostPolicy) -> None:
+        self._host_policy = host_policy
 
     async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
         status, body = await _provider_http(
@@ -291,10 +310,13 @@ class DuckDuckGoProvider:
             link = node.xpath(".//a[contains(@class, 'result__a')]")
             if not link:
                 continue
-            url = _duckduckgo_target(str(link[0].get("href") or ""))
+            url = _duckduckgo_target(
+                str(link[0].get("href") or ""),
+                policy=self._host_policy,
+            )
             if not url:
                 continue
-            normalized = _normalize_url(url)
+            normalized = _normalize_url(url, policy=self._host_policy)
             if not normalized or normalized in seen:
                 continue
             snippet_node = node.xpath(".//a[contains(@class, 'result__snippet')]") or node.xpath(
@@ -315,7 +337,7 @@ class DuckDuckGoProvider:
         return results
 
 
-def _duckduckgo_target(href: str) -> str | None:
+def _duckduckgo_target(href: str, *, policy: HostPolicy) -> str | None:
     """Resolve a DuckDuckGo result link to its real URL.
 
     DuckDuckGo wraps results as ``//duckduckgo.com/l/?uddg=<encoded>&rut=...``;
@@ -325,9 +347,9 @@ def _duckduckgo_target(href: str) -> str | None:
         parsed = urlsplit(href)
         uddg = parse_qs(parsed.query).get("uddg")
         if uddg:
-            return unquote(uddg[0])
+            return _normalize_url(unquote(uddg[0]), policy=policy)
         return None
-    return href
+    return _normalize_url(href, policy=policy)
 
 
 def configured_search_providers(settings: Any) -> list[str]:
@@ -360,19 +382,20 @@ def get_search_provider(settings: Any) -> SearchProvider:
     actionable message instead of a generic 500.
     """
     requested = (settings.search_provider or "auto").strip().lower()
+    host_policy = HostPolicy.from_settings(settings)
     available: dict[str, SearchProvider] = {
         provider.name: provider
         for provider in (
-            TavilyProvider(settings.tavily_api_key) if settings.tavily_api_key else None,
-            BraveProvider(settings.brave_api_key) if settings.brave_api_key else None,
-            SerperProvider(settings.serper_api_key) if settings.serper_api_key else None,
+            TavilyProvider(settings.tavily_api_key, host_policy) if settings.tavily_api_key else None,
+            BraveProvider(settings.brave_api_key, host_policy) if settings.brave_api_key else None,
+            SerperProvider(settings.serper_api_key, host_policy) if settings.serper_api_key else None,
         )
         if provider is not None
     }
     if requested == "auto":
-        return next(iter(available.values())) if available else DuckDuckGoProvider()
+        return next(iter(available.values())) if available else DuckDuckGoProvider(host_policy)
     if requested == "duckduckgo":
-        return DuckDuckGoProvider()
+        return DuckDuckGoProvider(host_policy)
     provider = available.get(requested)
     if provider is not None:
         return provider

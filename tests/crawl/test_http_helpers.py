@@ -37,7 +37,6 @@ from app.crawl.engine import (
     crawl_request,
 )
 from app.crawl.extraction import (
-    _extract_discovered_links,
     _extract_forms,
     _extract_frames,
     _FrameCollector,
@@ -54,6 +53,7 @@ from app.crawl.strategies.http import (
     _select_fingerprint,
 )
 from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
@@ -65,14 +65,23 @@ def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024
 class TestValidationHelpers:
     def test_payload_urls_errors(self) -> None:
         with pytest.raises(ValueError, match=r"^invalid_urls$"):
-            _payload_urls({"urls": "notalist"})
+            _payload_urls(
+                {"urls": "notalist"},
+                host_policy=HostPolicy.unrestricted(),
+            )
         with pytest.raises(ValueError, match=r"^missing_url$"):
-            _payload_urls({})
-        assert _payload_urls({"url": "http://x/"}) == ["http://x/"]
-        assert _payload_urls({"urls": ["http://x/", "http://y/"]}) == ["http://x/", "http://y/"]
+            _payload_urls({}, host_policy=HostPolicy.unrestricted())
+        assert _payload_urls({"url": "http://x/"}, host_policy=HostPolicy.unrestricted()) == ["http://x/"]
+        assert _payload_urls(
+            {"urls": ["http://x/", "http://y/"]},
+            host_policy=HostPolicy.unrestricted(),
+        ) == ["http://x/", "http://y/"]
 
     def test_payload_urls_dedupes_exact_duplicates(self) -> None:
-        assert _payload_urls({"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]}) == [
+        assert _payload_urls(
+                {"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]},
+                host_policy=HostPolicy.unrestricted(),
+            ) == [
             "http://x/",
             "http://y/",
         ]
@@ -91,7 +100,10 @@ class TestValidationHelpers:
             "https://a.gov/y?b=2&a=1",  # param order only -> same page
             "https://a.gov/z",
         ]
-        assert _payload_urls({"urls": urls}) == [
+        assert _payload_urls(
+            {"urls": urls},
+            host_policy=HostPolicy.unrestricted(),
+        ) == [
             "https://a.gov/x",
             "https://a.gov/y?a=1&b=2",
             "https://a.gov/z",
@@ -259,6 +271,7 @@ class TestHttpStrategyResult:
             strategy=strategy,
             policy=pol,
             http_fetcher=fetcher,
+            host_policy=HostPolicy.unrestricted(),
         )
 
     async def test_success_html(self) -> None:
@@ -330,6 +343,7 @@ class TestExecuteCrawlChain:
             http_fetcher=ok_fetcher,
             cffi_fetcher=ok_fetcher,
             browser_worker=None,
+            host_policy=HostPolicy.unrestricted(),
             **kwargs,
         )
 
@@ -364,10 +378,18 @@ class TestCrawlRequest:
         from app.crawl.payload_helpers import checked_payload_urls
 
         within = {"urls": ["http://example.com/a", "http://example.com/a", "http://example.com/b"]}
-        assert checked_payload_urls(within, 10) == ["http://example.com/a", "http://example.com/b"]
+        assert checked_payload_urls(
+            within,
+            10,
+            host_policy=HostPolicy.unrestricted(),
+        ) == ["http://example.com/a", "http://example.com/b"]
         oversized = {"urls": [f"http://example.com/{i}" for i in range(11)]}
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
-            checked_payload_urls(oversized, 10)
+            checked_payload_urls(
+                oversized,
+                10,
+                host_policy=HostPolicy.unrestricted(),
+            )
 
     def test_checked_payload_urls_accepts_a_forwarded_batch_without_rederiving(self) -> None:
         """Tier-2 T3: the endpoint gate's result may be handed to the engine so
@@ -377,7 +399,12 @@ class TestCrawlRequest:
 
         forwarded = ["http://example.com/a", "http://example.com/b"]
         oversized_payload = {"urls": [f"http://example.com/{i}" for i in range(11)]}
-        assert checked_payload_urls(oversized_payload, 10, urls=forwarded) == forwarded
+        assert checked_payload_urls(
+            oversized_payload,
+            10,
+            urls=forwarded,
+            host_policy=HostPolicy.unrestricted(),
+        ) == forwarded
 
     def test_forwarded_batch_still_faces_the_cap(self) -> None:
         """...but the cap still applies to a forwarded batch (invariant: the
@@ -386,7 +413,12 @@ class TestCrawlRequest:
 
         forwarded = [f"http://example.com/{i}" for i in range(11)]
         with pytest.raises(ValueError, match=r"^batch_size_exceeded$"):
-            checked_payload_urls({"url": "http://example.com/x"}, 10, urls=forwarded)
+            checked_payload_urls(
+                {"url": "http://example.com/x"},
+                10,
+                urls=forwarded,
+                host_policy=HostPolicy.unrestricted(),
+            )
 
     async def test_crawl_request_consumes_the_forwarded_batch(self) -> None:
         """Engine handoff: with urls supplied, those URLs become the job set --

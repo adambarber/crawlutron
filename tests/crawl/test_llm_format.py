@@ -3,7 +3,6 @@
 from _testkit import *
 from _testkit import LLM_FORMAT_TEST_HTML
 
-from app.crawl.extraction import extract_content
 from app.crawl.llm_format import _extract_llm_metadata, _text_from_html
 
 

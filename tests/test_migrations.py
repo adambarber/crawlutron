@@ -19,13 +19,14 @@ from app.crawl.migrations import (
     stamp_store,
 )
 from app.crawl.result_store import CrawlResultStore
+from app.validation import HostPolicy
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
 
 
 def _open_store(schema: StoreSchema, db_path: Path) -> JobStore | CrawlResultStore:
     if schema is StoreSchema.CRAWL_JOBS:
-        return JobStore(db_path)
+        return JobStore(db_path, policy=HostPolicy.unrestricted())
     return CrawlResultStore(db_path)
 
 
@@ -99,7 +100,7 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     assert "_yoyo_migration" not in _table_names(before)
     before.close()
 
-    store = JobStore(db_path)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
     loaded = store.load("legacy-job")
 
     assert loaded is not None
@@ -127,7 +128,7 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
     before.commit()
     before.close()
 
-    store = JobStore(db_path)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
     loaded = store.load("legacy-job")
     after = sqlite3.connect(db_path)
     columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
@@ -180,7 +181,7 @@ def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_pa
 
 def test_missing_migration_column_is_detected_as_drift(tmp_path):
     db_path = tmp_path / "missing-column.db"
-    store = JobStore(db_path)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
     conn = sqlite3.connect(db_path)
     conn.execute("ALTER TABLE crawl_jobs DROP COLUMN transient_retries")
@@ -194,7 +195,7 @@ def test_missing_migration_column_is_detected_as_drift(tmp_path):
 
 def test_out_of_band_extra_column_is_detected_as_drift(tmp_path):
     db_path = tmp_path / "extra-column.db"
-    store = JobStore(db_path)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
     conn = sqlite3.connect(db_path)
     conn.execute("ALTER TABLE crawl_jobs ADD COLUMN unexpected TEXT")
@@ -208,7 +209,7 @@ def test_out_of_band_extra_column_is_detected_as_drift(tmp_path):
 
 def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):
     db_path = tmp_path / "changed-default.db"
-    store = JobStore(db_path)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
     conn = sqlite3.connect(db_path)
     changed_schema = create_table_sql(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]).replace(
@@ -226,7 +227,7 @@ def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):
 
 
 def test_migration_bookkeeping_never_leaks_into_store_payloads(tmp_path):
-    job_store = JobStore(tmp_path / "jobs.db")
+    job_store = JobStore(tmp_path / "jobs.db", policy=HostPolicy.unrestricted())
     result_store = CrawlResultStore(tmp_path / "results.db")
     job = job_store.create("https://example.test", {})
     job.results = [{"url": "https://example.test", "status": "success"}]

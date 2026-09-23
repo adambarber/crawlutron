@@ -9,6 +9,7 @@ from _testkit import make_fetch
 
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _http_strategy_result
+from app.validation import HostPolicy
 
 
 def _html(body: str) -> str:
@@ -24,6 +25,7 @@ async def _run_http(fetcher, validators=None):
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
         http_fetcher=fetcher,
         caller_validators=validators,
+        host_policy=HostPolicy.unrestricted(),
     )
 
 
@@ -256,5 +258,6 @@ class TestNotModifiedResponse:
             },
             http_fetcher=not_mod_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "not_modified"

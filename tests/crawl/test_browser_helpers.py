@@ -13,6 +13,8 @@ os.environ.setdefault(
     "BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl")
 )
 
+from _testkit import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
@@ -28,14 +30,22 @@ def _raise_generic(**kwargs: object):
 class TestBrowserRenderRetry:
     async def test_render_exhausts_retries_on_timeout_error(self):
         renderer = BrowserRenderer(browser_factory=_raise_timeout, sleep=lambda _s: None)
-        result = await renderer.render("http://example.com/", RenderOptions(max_retries=1))
+        result = await renderer.render(
+            "http://example.com/",
+            RenderOptions(max_retries=1),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert result.status == "retry_exhausted"
         assert result.classification == "navigation_timeout"
         assert result.attempts == 2
 
     async def test_render_exhausts_retries_on_generic_error(self):
         renderer = BrowserRenderer(browser_factory=_raise_generic, sleep=lambda _s: None)
-        result = await renderer.render("http://example.com/", RenderOptions(max_retries=1))
+        result = await renderer.render(
+            "http://example.com/",
+            RenderOptions(max_retries=1),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert result.status == "retry_exhausted"
         assert result.classification == "unknown_error"
         assert result.attempts == 2

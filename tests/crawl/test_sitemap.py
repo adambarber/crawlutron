@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from _testkit import install_to_thread_spy, make_fetch
+from _testkit import UNRESTRICTED_HOST_POLICY, install_to_thread_spy, make_fetch
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
@@ -31,7 +31,11 @@ async def test_304_reuses_cached_urls_without_reparsing():
     url = "http://x.test/sitemap.xml"
     # Seed an EXPIRED cache entry (forces a re-fetch attempt).
     # Seed an EXPIRED entry (negative ttl) through the chokepoint seam.
-    _SITEMAP_CACHE.put(url, ([("http://x.test/p1", None)], "v1", None), ttl=-1.0)
+    _SITEMAP_CACHE.put(
+        (url, UNRESTRICTED_HOST_POLICY),
+        ([("http://x.test/p1", None)], "v1", None),
+        ttl=-1.0,
+    )
     calls = []
 
     async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
@@ -40,17 +44,23 @@ async def test_304_reuses_cached_urls_without_reparsing():
             return _resp(304, etag="v1")  # not modified
         return _resp(200, "<x></x>", etag="v1")
 
-    out = await fetch_sitemap_urls(fetcher, url, 10, conditional={"If-None-Match": "v1"})
+    out = await fetch_sitemap_urls(
+            fetcher,
+            url,
+            10,
+            conditional={"If-None-Match": "v1"},
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
     assert out == {("http://x.test/p1", None)}
     # Conditional header was sent.
     assert any(c.get("If-None-Match") == "v1" for c in calls)
     # Cache TTL was refreshed (entry still present, not re-parsed).
-    assert _SITEMAP_CACHE.peek(url) is not None  # TTL refreshed, entry fresh again
+    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY)) is not None  # TTL refreshed, entry fresh again
 
 
 async def test_etag_captured_and_stored_on_200():
     url = "http://x.test/sitemap.xml"
-    _SITEMAP_CACHE.discard(url)
+    _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
     xml = """<?xml version="1.0"?>
     <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
       <url><loc>http://x.test/p1</loc><lastmod>2024-01-01</lastmod></url>
@@ -59,11 +69,11 @@ async def test_etag_captured_and_stored_on_200():
     async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
         return _resp(200, xml, etag="v2", last_modified="Wed, 01 Jan 2024 00:00:00 GMT")
 
-    out = await fetch_sitemap_urls(fetcher, url, 10)
+    out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
     assert ("http://x.test/p1", "2024-01-01") in out
     # The new etag/last-modified are stored so the next crawl can send a 304 check.
-    assert _SITEMAP_CACHE.peek(url)[1] == "v2"
-    assert _SITEMAP_CACHE.peek(url)[2] == "Wed, 01 Jan 2024 00:00:00 GMT"
+    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY))[1] == "v2"
+    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY))[2] == "Wed, 01 Jan 2024 00:00:00 GMT"
 
 
 def _resp_test_sitemap_fanout(body: str):
@@ -96,7 +106,7 @@ def _child_xml(i: int) -> str:
 class TestSitemapFanoutBound:
     async def test_child_scheduling_capped_by_remaining_need(self, real_sleeps, monkeypatch):
         url = "http://fanout.test/sitemap.xml"
-        _SITEMAP_CACHE.discard(url)
+        _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
         index_body = _index_xml(200)
         in_flight = 0
         max_in_flight = 0
@@ -126,9 +136,15 @@ class TestSitemapFanoutBound:
             return _resp_test_sitemap_fanout(index_body)
 
         try:
-            out = await fetch_sitemap_urls(fetcher, url, 10, max_urls=20)
+            out = await fetch_sitemap_urls(
+            fetcher,
+            url,
+            10,
+            max_urls=20,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
         finally:
-            _SITEMAP_CACHE.discard(url)
+            _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
         assert len(out) == 20
         # Enqueue-time cap: never schedule more children than still needed.
         assert child_fetches <= 20
@@ -159,7 +175,12 @@ async def test_extracts_lastmod_per_loc():
       <url><loc>http://x.test/b</loc></url>
       <url><loc>http://x.test/c</loc><lastmod>2023-06-01T00:00:00Z</lastmod></url>
     </urlset>"""
-    urls = await fetch_sitemap_urls(_sitemap_fetcher(xml), "http://x.test/sitemap.xml", 10)
+    urls = await fetch_sitemap_urls(
+            _sitemap_fetcher(xml),
+            "http://x.test/sitemap.xml",
+            10,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
     # returns (loc, lastmod) tuples
     by_loc = {loc: lastmod for loc, lastmod in urls}
     assert by_loc["http://x.test/a"] == "2024-01-15"
@@ -183,7 +204,12 @@ async def test_index_children_recurse_without_lastmod():
             url=url, final_url=url, status=200, ctype="application/xml", body=xml.encode("utf-8")
         )
 
-    urls = await fetch_sitemap_urls(fetcher, "http://x.test/sitemap.xml", 10)
+    urls = await fetch_sitemap_urls(
+            fetcher,
+            "http://x.test/sitemap.xml",
+            10,
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
     assert ("http://x.test/p", "2024-03-03") in urls
 
 
@@ -396,7 +422,7 @@ def test_build_site_map_aggregates_and_dedupes():
             }
         ]
     }
-    m = build_site_map(crawl_response)
+    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["url"] == "http://x.example/"
     assert m["links"] == ["http://x.example/a", "http://x.example/b"]
     assert "http://x.example/sitemap.xml" in m["sitemaps"]
@@ -424,13 +450,13 @@ def test_build_site_map_handles_dataclass_links():
         is_same_host=True,
     )
     crawl_response = {"results": [{"final_url": "http://r/", "discovered_links": [link], "diagnostics": {}}]}
-    m = build_site_map(crawl_response)
+    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["links"] == ["https://r/page"]
     assert m["all_urls"] == ["https://r/page"]
 
 
 def test_build_site_map_empty():
-    m = build_site_map({"results": []})
+    m = build_site_map({"results": []}, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["url"] is None
     assert m["all_urls"] == []
 
@@ -452,7 +478,7 @@ def test_build_site_map_resolves_relative_paths():
             }
         ]
     }
-    m = build_site_map(crawl_response)
+    m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]
     assert all(not u.startswith("/") for u in m["all_urls"])
 

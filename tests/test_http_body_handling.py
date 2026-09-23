@@ -2,6 +2,8 @@
 
 from _testkit import *
 
+from app.validation import HostPolicy
+
 
 class TestHttpBodyHandling:
     def _policy(self, extra=None):
@@ -25,6 +27,7 @@ class TestHttpBodyHandling:
             policy=_policy(),
             http_fetcher=_default_http_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert out.status == "success"
         etag, last_modified = cache.get(base_url + "/with_lastmod")
@@ -41,6 +44,7 @@ class TestHttpBodyHandling:
             policy=_policy(),
             http_fetcher=_default_http_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert out.http_status == 429
         assert "cooldown" in out.diagnostics

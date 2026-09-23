@@ -17,6 +17,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
+from app.validation import HostPolicy
 
 
 def _make_etag_test_setup(tmp_path, etag_server):
@@ -26,7 +27,13 @@ def _make_etag_test_setup(tmp_path, etag_server):
     policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
 
     def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return _default_http_fetcher(u, headers, timeout, max_content_length)
+        return _default_http_fetcher(
+            u,
+            headers,
+            timeout,
+            max_content_length,
+            policy=HostPolicy.unrestricted(),
+        )
 
     cache = HttpCache()
     content_cache = ContentCache(tmp_path)
@@ -139,7 +146,13 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
 
     async def counting_fetcher(u, headers, timeout, max_content):
         calls["n"] += 1
-        return await _default_http_fetcher(u, headers, timeout, max_content)
+        return await _default_http_fetcher(
+            u,
+            headers,
+            timeout,
+            max_content,
+            policy=HostPolicy.unrestricted(),
+        )
 
     r1 = await _http_strategy_result(
         original_url=url,
@@ -148,6 +161,7 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
         policy=policy,
         http_fetcher=counting_fetcher,
         content_cache=cache,
+        host_policy=HostPolicy.unrestricted(),
     )
     r2 = await _http_strategy_result(
         original_url=url,
@@ -156,6 +170,7 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
         policy=policy,
         http_fetcher=counting_fetcher,
         content_cache=cache,
+        host_policy=HostPolicy.unrestricted(),
     )
     assert r1.status == "success" and r2.status == "success"
     assert calls["n"] == 1  # cache prevented the second real fetch
@@ -175,6 +190,7 @@ async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
         http_fetcher=fetcher,
         cache=cache,
         content_cache=content_cache,
+        host_policy=HostPolicy.unrestricted(),
     )
     assert r1.status == "success"
     assert etag_server.hits == 1
@@ -187,6 +203,7 @@ async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
         http_fetcher=fetcher,
         cache=cache,
         content_cache=content_cache,
+        host_policy=HostPolicy.unrestricted(),
     )
     assert r2.status == "success"
     # Server was re-hit once for the conditional GET (304, no body re-download).
@@ -205,6 +222,7 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
         http_fetcher=fetcher,
         cache=cache,
         content_cache=content_cache,
+        host_policy=HostPolicy.unrestricted(),
     )
     # Simulate the upstream page changing its etag + body.
     try:
@@ -218,6 +236,7 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
             http_fetcher=fetcher,
             cache=cache,
             content_cache=content_cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert r2.status == "success"
         assert "changed content" in (r2.markdown or "")

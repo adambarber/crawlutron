@@ -2,6 +2,8 @@
 
 from _testkit import *
 
+from app.validation import HostPolicy
+
 
 class TestPolicyValidation:
     def test_unsupported_scheme(self):
@@ -24,48 +26,55 @@ class TestPolicyValidation:
         assert normalize_public_http_url("https://example.com/seg:") == "https://example.com/seg"
 
     def test_host_allow_list_restricts_targets(self):
-        assert normalize_public_http_url("https://Example.com:8443/page", allowed_hosts="example.com")
+        policy = HostPolicy.from_strings("example.com", "")
+        assert normalize_public_http_url("https://Example.com:8443/page", policy=policy)
         with pytest.raises(ValueError, match="host_not_allowed"):
-            normalize_public_http_url("https://other.test/page", allowed_hosts="example.com")
+            normalize_public_http_url("https://other.test/page", policy=policy)
         with pytest.raises(ValueError, match="host_not_allowed"):
-            normalize_public_http_url("https://notexample.com/page", allowed_hosts="example.com")
+            normalize_public_http_url("https://notexample.com/page", policy=policy)
 
     def test_host_deny_list_refuses_targets(self):
-        assert normalize_public_http_url("https://allowed.test/page", denied_hosts="blocked.test")
+        policy = HostPolicy.from_strings("", "blocked.test")
+        assert normalize_public_http_url("https://allowed.test/page", policy=policy)
         with pytest.raises(ValueError, match="host_denied"):
-            normalize_public_http_url("https://Blocked.test:443/page", denied_hosts="blocked.test")
+            normalize_public_http_url("https://Blocked.test:443/page", policy=policy)
 
     def test_host_deny_precedes_allow(self):
+        policy = HostPolicy.from_strings("blocked.test", "blocked.test")
         with pytest.raises(ValueError, match="host_denied"):
-            normalize_public_http_url(
-                "https://blocked.test/page",
-                allowed_hosts="blocked.test",
-                denied_hosts="blocked.test",
-            )
+            normalize_public_http_url("https://blocked.test/page", policy=policy)
 
     def test_host_policy_normalizes_case_port_and_idna(self):
+        policy = HostPolicy.from_strings("BÜCHER.Example:9443", "")
         assert normalize_public_http_url(
             "https://XN--BCHER-KVA.example:8443/page",
-            allowed_hosts="BÜCHER.Example:9443",
+            policy=policy,
         )
         with pytest.raises(ValueError, match="host_not_allowed"):
-            normalize_public_http_url("https://other.test/page", allowed_hosts="bücher.example")
+            normalize_public_http_url("https://other.test/page", policy=policy)
 
-    def test_host_policy_reads_configured_environment(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOWED_HOSTS", "allowed.test")
-        monkeypatch.setenv("BROWSER_CRAWLER_DENIED_HOSTS", "blocked.test")
-        assert normalize_public_http_url("https://allowed.test/page")
+    def test_host_policy_constructed_from_settings(self):
+        from app.settings import CrawlerSettings
+
+        settings = CrawlerSettings.from_mapping(
+            {
+                "BROWSER_CRAWLER_ALLOWED_HOSTS": "allowed.test",
+                "BROWSER_CRAWLER_DENIED_HOSTS": "blocked.test",
+            }
+        )
+        policy = HostPolicy.from_settings(settings)
+        assert normalize_public_http_url("https://allowed.test/page", policy=policy)
         with pytest.raises(ValueError, match="host_not_allowed"):
-            normalize_public_http_url("https://other.test/page")
+            normalize_public_http_url("https://other.test/page", policy=policy)
         with pytest.raises(ValueError, match="host_denied"):
-            normalize_public_http_url("https://blocked.test/page")
+            normalize_public_http_url("https://blocked.test/page", policy=policy)
 
     def test_host_policy_keeps_ssrf_guard_active(self, monkeypatch):
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError, match="private_network_target"):
             normalize_public_http_url(
                 "http://127.0.0.1/page",
-                allowed_hosts="127.0.0.1",
+                policy=HostPolicy.from_strings("127.0.0.1", ""),
             )
 
     def test_registrable_domain(self):

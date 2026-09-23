@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from _testkit import (
+    UNRESTRICTED_HOST_POLICY,
     _canned_result,
     _create_api_job,
     _execution_policy,
@@ -49,7 +50,7 @@ def _fresh_runner():
 
 @pytest.fixture
 def job_store(tmp_path):
-    return JobStore(tmp_path / "jobs.db")
+    return JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
 
 
 @pytest.fixture

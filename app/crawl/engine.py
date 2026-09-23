@@ -19,6 +19,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
+from functools import partial
 from typing import Any, TypeGuard, overload
 from urllib.parse import urljoin, urlparse
 
@@ -113,6 +114,7 @@ from app.resource_pressure import derive_browser_pool_size
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import (
+    HostPolicy,
     filter_js_endpoints,
     get_env_int,
     normalize_public_http_url,
@@ -239,6 +241,7 @@ async def _browser_strategy_result(
     strategy: CrawlStrategyName,
     policy: dict[str, Any],
     browser_worker: CrawlWorker,
+    host_policy: HostPolicy,
 ) -> EngineCrawlResult:
     # The crawl pipeline owns the capture knobs: the captured HTML feeds
     # markdown extraction, classification, and discovery below BEFORE the
@@ -256,7 +259,13 @@ async def _browser_strategy_result(
             "browser_profile": policy.get("browser_profile") or {},
         },
     )
-    job = CrawlJob(index=0, url=normalized_url, domain=registrable_domain(normalized_url), options=options)
+    job = CrawlJob(
+        index=0,
+        url=normalized_url,
+        domain=registrable_domain(normalized_url),
+        options=options,
+        host_policy=host_policy,
+    )
     result = await _call_worker(browser_worker, job)
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
     content = result.html if result.html else result.text
@@ -312,6 +321,7 @@ async def _browser_strategy_result(
         include_links=result.status == "success",
         include_js_endpoints=True,
         include_metadata=True,
+        host_policy=host_policy,
     )
     # Surface browser-captured dynamic discovery (XHR/fetch) into diagnostics.
     diagnostics: dict[str, Any] = {
@@ -338,7 +348,9 @@ async def _browser_strategy_result(
     if next_page_url:
         diagnostics["next_page_url"] = next_page_url
     diagnostics["js_endpoints"] = filter_js_endpoints(
-        post_fetch["js_endpoints"], resolve_against=result.final_url
+        post_fetch["js_endpoints"],
+        resolve_against=result.final_url,
+        policy=host_policy,
     )
     attempt = CrawlStrategyAttempt(
         strategy=strategy,
@@ -399,6 +411,7 @@ async def _execute_crawl_chain(
     domain: str = "",
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    host_policy: HostPolicy,
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
@@ -429,6 +442,7 @@ async def _execute_crawl_chain(
                 content_cache=content_cache,
                 caller_validators=caller_validators,
                 robots_sitemaps=robots_sitemaps,
+                host_policy=host_policy,
                 global_concurrency=global_concurrency,
             )
         elif strategy in BROWSER_STRATEGIES:
@@ -451,6 +465,7 @@ async def _execute_crawl_chain(
                     strategy=strategy,
                     policy=policy,
                     browser_worker=browser_worker,
+                    host_policy=host_policy,
                 )
         else:
             result = _failed_engine_result(
@@ -505,6 +520,7 @@ async def _execute_crawl_chain(
                     content_cache=content_cache,
                     caller_validators=caller_validators,
                     robots_sitemaps=robots_sitemaps,
+                    host_policy=host_policy,
                     global_concurrency=global_concurrency,
                 )
                 attempts.extend(retry_result.attempted_strategies)
@@ -784,13 +800,19 @@ async def crawl_request(
     spill_path: str | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
+    host_policy = HostPolicy.from_settings(active_settings)
     # L4: the batch cap is enforced by the same gate the async endpoint uses
     # before accepting, so sync and async cannot drift on oversized batches.
     # A forwarded batch (tier-2 T3) skips re-derivation but not the cap.
-    urls = checked_payload_urls(payload, active_settings.max_batch_size, urls=urls)
+    urls = checked_payload_urls(
+        payload,
+        active_settings.max_batch_size,
+        urls=urls,
+        host_policy=host_policy,
+    )
     policy = _payload_policy(payload, active_settings)
-    fetcher = http_fetcher or _default_http_fetcher
-    cffi = cffi_fetcher or _default_cffi_fetcher
+    fetcher = http_fetcher or partial(_default_http_fetcher, policy=host_policy)
+    cffi = cffi_fetcher or partial(_default_cffi_fetcher, policy=host_policy)
     shutdown_event = shutdown_event or asyncio.Event()
     # Bind the cookie namespace for the lifetime of this crawl so concurrent
     # multi-tenant calls cannot leak cookies through the shared
@@ -811,6 +833,7 @@ async def crawl_request(
             policy,
             fetcher,
             cffi,
+            host_policy,
             shutdown_event,
             browser_worker=browser_worker,
             cache=cache,
@@ -829,6 +852,7 @@ async def _crawl_request_impl(
     policy: dict[str, Any],
     fetcher: Any,
     cffi: Any,
+    host_policy: HostPolicy,
     shutdown_event: asyncio.Event,
     *,
     browser_worker: CrawlWorker | None,
@@ -841,11 +865,7 @@ async def _crawl_request_impl(
     jobs: list[CrawlTask] = []
     for index, original_url in enumerate(urls):
         try:
-            normalized_url = normalize_public_http_url(
-                original_url,
-                allowed_hosts=active_settings.allowed_hosts,
-                denied_hosts=active_settings.denied_hosts,
-            )
+            normalized_url = normalize_public_http_url(original_url, policy=host_policy)
             domain = registrable_domain(normalized_url)
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
@@ -882,11 +902,7 @@ async def _crawl_request_impl(
             continue
         validators_by_url[v_url] = entry
         validators_by_url.setdefault(
-            safe_public_url_or_none(
-                v_url,
-                allowed_hosts=active_settings.allowed_hosts,
-                denied_hosts=active_settings.denied_hosts,
-            )
+            safe_public_url_or_none(v_url, policy=host_policy)
             or v_url,
             entry,
         )
@@ -899,7 +915,8 @@ async def _crawl_request_impl(
         original_url = job.original_url
         normalized_url = job.normalized_url
         robots_sitemaps = [] if not respect_robots else cached_sitemaps(
-            f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}"
+            f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}",
+            policy=host_policy,
         )
         # Hard per-URL deadline over the WHOLE strategy chain (#adversarial 2.2):
         # a poisoned/tarpit URL must not hold its global concurrency slot for
@@ -928,6 +945,7 @@ async def _crawl_request_impl(
                     scheduler=scheduler,
                     domain=job.domain,
                     robots_sitemaps=robots_sitemaps,
+                    host_policy=host_policy,
                     caller_validators=_validators_for(job),
                 ),
                 timeout=budget,
@@ -950,28 +968,30 @@ async def _crawl_request_impl(
 
     async def _robots_allows_target(target_url: str) -> bool:
         rules, _sitemaps, _crawl_delay = await load_robots_rules(
-            _robots_policy.robots_origin(target_url),
+            _robots_policy.robots_origin(target_url, policy=host_policy),
             fetcher,
             policy["limits"]["timeout_seconds"],
             fetch_and_decode=(
                 _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
             ),
+            policy=host_policy,
         )
         return _robots_allows(target_url, rules)
 
     async def _robots_crawl_delay_for(target_url: str) -> float | None:
         _rules, _sitemaps, crawl_delay = await load_robots_rules(
-            _robots_policy.robots_origin(target_url),
+            _robots_policy.robots_origin(target_url, policy=host_policy),
             fetcher,
             policy["limits"]["timeout_seconds"],
             fetch_and_decode=(
                 _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
             ),
+            policy=host_policy,
         )
         return crawl_delay
 
     def _robots_sitemaps_for(origin: str) -> list[str] | None:
-        return cached_sitemaps(origin)
+        return cached_sitemaps(origin, policy=host_policy)
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
         # strategy=None: the URL was screened out by robots.txt before any
@@ -997,8 +1017,17 @@ async def _crawl_request_impl(
             origin = f"{parsed.scheme}://{parsed.netloc}"
             sitemap_url = urljoin(origin, "/sitemap.xml")
             # Recursive: follows sitemap indexes down to page URLs.
-            found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
-            candidates = normalize_sitemap_candidates(found, scope_pattern=scope_pattern)
+            found = await fetch_sitemap_urls(
+                fetcher,
+                sitemap_url,
+                policy["limits"]["timeout_seconds"],
+                host_policy=host_policy,
+            )
+            candidates = normalize_sitemap_candidates(
+                ((urljoin(sitemap_url, loc), lastmod) for loc, lastmod in found),
+                scope_pattern=scope_pattern,
+                host_policy=host_policy,
+            )
             # #3: skip URLs whose content we already cache and that the
             # sitemap says have not changed since we cached them. Each check
             # reads+parses the envelope from disk, so the whole batch runs off
@@ -1120,6 +1149,7 @@ async def _crawl_request_impl(
             seed_sitemaps=bool(discovery.get("sitemaps")),
             resource_gate=_resource_gate,
             admission=_admission,
+            host_policy=host_policy,
         )
     response = {
         "request_id": new_request_id(),

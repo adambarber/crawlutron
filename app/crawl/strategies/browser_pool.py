@@ -179,7 +179,7 @@ class PooledBrowserWorker:
         try:
             renderer = await self._pool.acquire()
             try:
-                result = await renderer.render(job.url, job.options)
+                result = await renderer.render(job.url, job.options, policy=job.host_policy)
                 # The renderer does not know the pool's configured mode, so it
                 # leaves the slot empty; fill it here, at the one boundary that
                 # does, rather than letting the shaper guess a member.

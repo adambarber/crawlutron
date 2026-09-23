@@ -11,6 +11,8 @@ unittest.mock) so the orchestration logic is exercised deterministically.
 
 import base64
 
+from _testkit import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
@@ -177,9 +179,17 @@ class TestBrowserReuse:
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
         opts = RenderOptions(browser_profile={})
-        await renderer.render("http://example.com/", opts)
+        await renderer.render(
+            "http://example.com/",
+            opts,
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert not renderer._browser_reused
-        await renderer.render("http://example.com/page", opts)
+        await renderer.render(
+            "http://example.com/page",
+            opts,
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert renderer._browser_reused
         assert cm.enters == 1
         assert browser.pages == 2
@@ -188,7 +198,11 @@ class TestBrowserReuse:
         browser = FakeBrowser()
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        await renderer.render("http://example.com/", RenderOptions(browser_profile={}))
+        await renderer.render(
+            "http://example.com/",
+            RenderOptions(browser_profile={}),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         await renderer.close()
         assert renderer._browser is None
         assert renderer._browser_cm is None
@@ -197,6 +211,10 @@ class TestBrowserReuse:
         browser = FakeBrowser()
         cm = FakeBrowserCM(browser)
         renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        result = await renderer.render("http://example.com/", RenderOptions(browser_profile={}))
+        result = await renderer.render(
+            "http://example.com/",
+            RenderOptions(browser_profile={}),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert result.status == "success"
         assert "Visible body text" in (result.text or "")

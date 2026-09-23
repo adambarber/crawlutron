@@ -15,7 +15,7 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
-from _testkit import block_private_targets
+from _testkit import UNRESTRICTED_HOST_POLICY, block_private_targets
 
 from app.safe_url import SafeUrl
 
@@ -27,11 +27,15 @@ def _resolve_as(addrs):
     return patch("socket.getaddrinfo", return_value=addrs)
 
 
+def _parse(url, **kwargs):
+    return SafeUrl.parse(url, policy=UNRESTRICTED_HOST_POLICY, **kwargs)
+
+
 class TestSafeUrlParse:
     def test_parse_public_url_validates(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com/page")
+            safe = _parse("http://example.com/page")
         assert safe.hostname == "example.com"
         assert safe.pinned_ip is None
         assert safe.raw.startswith("http://example.com")
@@ -39,13 +43,13 @@ class TestSafeUrlParse:
     def test_parse_private_url_raises(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PRIVATE), pytest.raises(ValueError):
-            SafeUrl.parse("http://127.0.0.1:8080/admin")
+            _parse("http://127.0.0.1:8080/admin")
 
     def test_parse_with_pin_returns_first_public_ip(self, monkeypatch):
         block_private_targets(monkeypatch)
         two_public = _PUBLIC + [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
         with _resolve_as(two_public):
-            safe = SafeUrl.parse("http://example.com/", pin=True)
+            safe = _parse("http://example.com/", pin=True)
         assert safe.hostname == "example.com"
         assert safe.pinned_ip == "93.184.216.34"
 
@@ -54,7 +58,7 @@ class TestSafeUrlRedirectHop:
     def test_public_to_public_hop_revalidates(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com/a")
+            safe = _parse("http://example.com/a")
             hopped = safe.redirect_hop("/b")
         assert hopped.hostname == "example.com"
         assert hopped.raw == "http://example.com/b"
@@ -62,14 +66,14 @@ class TestSafeUrlRedirectHop:
     def test_public_to_private_hop_raises(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com/a")
+            safe = _parse("http://example.com/a")
         with _resolve_as(_PRIVATE), pytest.raises(ValueError):
             safe.redirect_hop("http://127.0.0.1:8080/evil")
 
     def test_hop_preserves_pin_preference(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com/a", pin=True)
+            safe = _parse("http://example.com/a", pin=True)
             hopped = safe.redirect_hop("/b")
         assert hopped.pinned_ip == "93.184.216.34"
 
@@ -83,7 +87,7 @@ class TestSafeUrlConnect:
     def test_http_connect_uses_pinned_ip_and_host_header(self, monkeypatch):
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com:8080/a/b?x=1", pin=True)
+            safe = _parse("http://example.com:8080/a/b?x=1", pin=True)
         connect_url, headers = safe.connect()
         parsed = urlparse(connect_url)
         assert parsed.hostname == "93.184.216.34"
@@ -98,7 +102,7 @@ class TestSafeUrlConnect:
         # chokepoint refuses rather than degrading to the unsafe path.
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
-            safe = SafeUrl.parse("http://example.com/a")  # pin defaults False
+            safe = _parse("http://example.com/a")  # pin defaults False
         with pytest.raises(ValueError):
             safe.connect()
 
@@ -106,7 +110,7 @@ class TestSafeUrlConnect:
         block_private_targets(monkeypatch)
         https_addrs = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
         with _resolve_as(https_addrs):
-            safe = SafeUrl.parse("https://example.com/secure.pdf", pin=True)
+            safe = _parse("https://example.com/secure.pdf", pin=True)
         connect_url, headers = safe.connect()
         parsed = urlparse(connect_url)
         assert parsed.hostname == "example.com"  # never the IP (breaks SNI)
@@ -119,7 +123,7 @@ class TestSafeUrlConnect:
         block_private_targets(monkeypatch)
         v6_addrs = [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700:4700::1111", 80, 0, 0))]
         with _resolve_as(v6_addrs):
-            safe = SafeUrl.parse("http://v6.example/docs.pdf?x=1", pin=True)
+            safe = _parse("http://v6.example/docs.pdf?x=1", pin=True)
         connect_url, headers = safe.connect()
         parsed = urlparse(connect_url)
         assert connect_url.startswith("http://[2606:4700:4700::1111]/")

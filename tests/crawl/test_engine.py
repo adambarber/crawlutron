@@ -104,7 +104,11 @@ class TestEngineCrawlRequest:
         renderer = BrowserRenderer()
 
         async def browser_worker(job):
-            return await renderer.render(job.url, job.options)
+            return await renderer.render(
+                job.url,
+                job.options,
+                policy=job.host_policy,
+            )
 
         payload = {
             "url": f"{base_url}/",
@@ -317,6 +321,7 @@ class TestEngineChainEdges:
             browser_worker=None,
             scheduler=scheduler,
             domain="example.com",
+            host_policy=UNRESTRICTED_HOST_POLICY,
         )
         assert result.classification == "rate_limited"
         assert "example.com" in scheduler._domain_cooldowns
@@ -459,5 +464,6 @@ class TestEngineScopeEdges:
             browser_worker=None,
             scheduler=scheduler,
             domain="example.com",
+            host_policy=UNRESTRICTED_HOST_POLICY,
         )
         assert result.classification == "browser_crash"

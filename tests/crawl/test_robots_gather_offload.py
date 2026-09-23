@@ -12,7 +12,7 @@ from app.crawl.admission import RobotsGate
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.settings import CrawlerSettings
-from tests._testkit import FakeScheduler, Spill, make_engine_result
+from tests._testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, Spill, make_engine_result
 
 
 def _make_job(index: int, host: str) -> CrawlTask:
@@ -85,6 +85,7 @@ async def _drive(jobs, worker, allows, crawl_delay, **kwargs):
         seed_sitemaps=False,
         resource_gate=_Gate(),
         admission=None,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
     return spill
 
@@ -227,6 +228,7 @@ async def test_recursive_screen_no_robots_calls_when_disrespected():
         seed_sitemaps=False,
         resource_gate=_Gate(),
         admission=None,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
     assert calls == []
     assert len(spill.writes) == 3
@@ -257,7 +259,11 @@ async def test_cold_robots_gate_coalesces_same_origin_fetches(monkeypatch):
         return "User-agent: *\nDisallow:\n", 200
 
     monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
-    gate = RobotsGate({}, CrawlerSettings.from_mapping({}))
+    gate = RobotsGate(
+        {},
+        CrawlerSettings.from_mapping({}),
+        UNRESTRICTED_HOST_POLICY,
+    )
     decisions = await asyncio.gather(
         *(gate.allows(f"https://example.test/page-{index}") for index in range(5))
     )

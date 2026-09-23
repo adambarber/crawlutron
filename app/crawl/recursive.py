@@ -35,7 +35,7 @@ from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
 from app.scheduler import DomainScheduler
-from app.validation import registrable_domain
+from app.validation import HostPolicy, registrable_domain
 
 # A pool-exhausted URL was never attempted: the page is fine, capacity was the
 # problem. The recursive loop re-queues it onto the frontier tail so the
@@ -215,6 +215,7 @@ async def run_recursive_crawl(
     seed_sitemaps: bool,
     resource_gate: ResourceGate,
     admission: WeightedAdmission | None = None,
+    host_policy: HostPolicy,
 ) -> None:
     """Bounded recursive BFS with self-tuning resource admission control.
 
@@ -232,7 +233,8 @@ async def run_recursive_crawl(
     pool_exhaustion_attempts: dict[str, int] = {}
     frontier: deque[tuple[int, CrawlTask]] = deque([(0, job) for job in jobs])
     seed_identities = {
-        canonical_page_identity(job.normalized_url) or job.normalized_url for job in jobs
+        canonical_page_identity(job.normalized_url, host_policy=host_policy) or job.normalized_url
+        for job in jobs
     }
     next_index = len(jobs)
 
@@ -251,7 +253,7 @@ async def run_recursive_crawl(
     # bounded recursive BFS (#11) seeded by sitemaps (#13)
     if seed_sitemaps:
         for seed in await sitemap_seeds():
-            identity = canonical_page_identity(seed) or seed
+            identity = canonical_page_identity(seed, host_policy=host_policy) or seed
             if identity in seed_identities:
                 continue
             seed_identities.add(identity)
@@ -431,5 +433,6 @@ async def run_recursive_crawl(
                 robots_allows=robots_allows,
                 robots_crawl_delay=robots_crawl_delay,
                 commit_crawl_delay=lambda domain, delay: scheduler.set_domain_min_delay(domain, delay),
+                host_policy=host_policy,
                 occupied=page_count + len(frontier),
             )

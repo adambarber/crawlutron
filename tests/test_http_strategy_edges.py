@@ -7,6 +7,8 @@ from _testkit import *
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
 
+from app.validation import HostPolicy
+
 
 class _SimpleHandler(_BaseHandler):
     """Minimal 200/text-html handler for the subprocess cffi smoke test."""
@@ -27,9 +29,18 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
 
     from app.crawl.strategies.http import _default_cffi_fetcher
+    from app.validation import HostPolicy
 
     try:
-        result = asyncio.run(_default_cffi_fetcher(url, {}, 10, 50 * 1024 * 1024))
+        result = asyncio.run(
+            _default_cffi_fetcher(
+                url,
+                {},
+                10,
+                50 * 1024 * 1024,
+                policy=HostPolicy.unrestricted(),
+            )
+        )
         out_queue.put(("ok", result.status_code))
     except Exception as error:
         out_queue.put(("err", type(error).__name__, str(error)[:160]))
@@ -113,6 +124,7 @@ class TestHttpStrategyEdges:
             },
             http_fetcher=failing_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         # A bare httpx.RequestError is the generic httpx-level tail of the
         # classifier (more specific branches map to connection_error/tls_error
@@ -150,6 +162,7 @@ class TestHttpStrategyEdges:
             },
             http_fetcher=error_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "http_status_error"
 
@@ -189,5 +202,6 @@ class TestHttpStrategyEdges:
             },
             http_fetcher=binary_fetcher,
             cache=cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == EXTRACTION_METHOD_BINARY_NO_TEXT

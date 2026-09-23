@@ -50,37 +50,46 @@ from app.json_safe import json_default
 from app.models import Classification, CrawlError, CrawlResult, RenderOptions, ResultStatus
 from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
-from app.validation import get_env_float, get_env_int, parse_bool_value, registrable_domain
+from app.validation import (
+    HostPolicy,
+    get_env_float,
+    get_env_int,
+    normalize_public_http_url,
+    parse_bool_value,
+    registrable_domain,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_browser_target(url: str) -> tuple[str, dict[str, str]]:
+def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
     """SSRF-check + IP-pin ``url`` for browser navigation (F2).
 
     Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
     to the single resolved IP (preventing DNS-rebinding) while preserving the
     original ``Host`` header. Raises ``ValueError`` if the target is unsafe.
     """
-    pinned_url, request_headers = _build_pinned_request(url, {})
+    pinned_url, request_headers = _build_pinned_request(url, {}, policy=policy)
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 
 
-def _assert_safe_final_url(final_url: str) -> None:
+def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
     """Re-validate the post-navigation URL (F2/F8).
 
     The rendered site may have redirected the browser to an internal host. Fail
     closed (raise ``ValueError``) rather than returning potentially-internal
     content.
     """
-    _check_ssrf_protection(final_url)
+    normalized = normalize_public_http_url(final_url, policy=policy)
+    _check_ssrf_protection(normalized)
 
 
-def _is_ssrf_blocked(url: str) -> bool:
+def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
     """Return ``True`` if ``url`` resolves to an SSRF-unsafe target (F8)."""
     try:
-        _check_ssrf_protection(url)
+        normalized = normalize_public_http_url(url, policy=policy)
+        _check_ssrf_protection(normalized)
     except ValueError:
         return True
     return False
@@ -99,7 +108,12 @@ _REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 from app.constants import is_analytics_host as _is_analytics_url
 
 
-def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screenshot: bool = False):
+def _make_ssrf_route_handler(
+    resource_mode: str | None = None,
+    *,
+    include_screenshot: bool = False,
+    policy: HostPolicy,
+):
     """Playwright route handler that aborts requests to SSRF-unsafe hosts (F8).
 
     Registered via ``page.route`` so the main navigation, server-side
@@ -160,10 +174,19 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
                 # check instead: one resolver round trip per host, not one
                 # uncached resolve per subresource. The check still fails
                 # closed on private/loopback/resolved-internal targets.
-                await asyncio.to_thread(SafeUrl.parse, request.url)
+                await asyncio.to_thread(
+                    SafeUrl.parse,
+                    request.url,
+                    policy=policy,
+                )
                 pinned_url, host_headers = request.url, {}
             else:
-                pinned_url, host_headers = await asyncio.to_thread(_build_pinned_request, request.url, {})
+                pinned_url, host_headers = await asyncio.to_thread(
+                    _build_pinned_request,
+                    request.url,
+                    {},
+                    policy=policy,
+                )
         except Exception:
             # Fail closed: DNS timeout, resolver errors, anything unexpected ->
             # abort rather than let an unchecked connection proceed.
@@ -183,7 +206,7 @@ def _make_ssrf_route_handler(resource_mode: str | None = None, *, include_screen
     return _handler
 
 
-def _make_ssrf_websocket_handler():
+def _make_ssrf_websocket_handler(*, policy: HostPolicy):
     """Playwright websocket-route handler blocking SSRF-unsafe WS targets.
 
     page.route does not intercept WebSocket upgrades; without this a hostile
@@ -198,7 +221,12 @@ def _make_ssrf_websocket_handler():
             return  # not a websocket target
         http_equivalent = ("https" if scheme == "wss" else "http") + url[len(scheme) :]
         try:
-            await asyncio.to_thread(_check_ssrf_protection, http_equivalent)
+            normalized = await asyncio.to_thread(
+                normalize_public_http_url,
+                http_equivalent,
+                policy=policy,
+            )
+            await asyncio.to_thread(_check_ssrf_protection, normalized)
         except Exception:
             close = getattr(ws, "close", None)
             if close is not None:
@@ -394,7 +422,7 @@ class BrowserRenderer:
         browser_factory: Callable[[], Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         challenge_wait_seconds: float | None = None,
-        pdf_text_extractor: Callable[[str], str] | None = None,
+        pdf_text_extractor: Callable[[str, HostPolicy], str] | None = None,
         warmup_urls: list[str] | None = None,
         settings: CrawlerSettings | None = None,
     ) -> None:
@@ -519,7 +547,13 @@ class BrowserRenderer:
             except Exception:  # best-effort teardown
                 pass
 
-    async def render(self, url: str, options: RenderOptions) -> CrawlResult:
+    async def render(
+        self,
+        url: str,
+        options: RenderOptions,
+        *,
+        policy: HostPolicy,
+    ) -> CrawlResult:
         started = time.monotonic()
         attempts = 0
         last_error = None
@@ -528,7 +562,7 @@ class BrowserRenderer:
         while attempts < max_attempts:
             attempts += 1
             try:
-                result = await self._render_with_browser(url, options)
+                result = await self._render_with_browser(url, options, policy=policy)
                 return result
             except TimeoutError as error:
                 last_error = _classify_error_code(error)
@@ -595,22 +629,34 @@ class BrowserRenderer:
             except Exception:  # best-effort teardown
                 pass
 
-    async def _render_with_browser(self, url: str, options: RenderOptions) -> CrawlResult:
+    async def _render_with_browser(
+        self,
+        url: str,
+        options: RenderOptions,
+        *,
+        policy: HostPolicy,
+    ) -> CrawlResult:
         # Cap concurrent page renders: each render opens a browser tab, and an
         # unbounded burst of tabs crashes/OOMs the shared Camoufox process.
         async with self._page_semaphore:
-            return await self._render_with_page_unlocked(url, options)
+            return await self._render_with_page_unlocked(url, options, policy=policy)
 
     async def _navigate_and_settle(self, page: Any, pinned_url: str) -> None:
         """Goto the pinned URL and wait for a settled ready state."""
         await page.goto(pinned_url, wait_until="domcontentloaded")
         await self._wait_for_ready_state(page)
 
-    async def _render_with_page_unlocked(self, url: str, options: RenderOptions) -> CrawlResult:
+    async def _render_with_page_unlocked(
+        self,
+        url: str,
+        options: RenderOptions,
+        *,
+        policy: HostPolicy,
+    ) -> CrawlResult:
         # SSRF protection (F2): validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = _resolve_browser_target(url)
+        pinned_url, goto_headers = _resolve_browser_target(url, policy=policy)
 
         started = time.monotonic()
 
@@ -623,9 +669,10 @@ class BrowserRenderer:
             _make_ssrf_route_handler(
                 (options.browser_profile or {}).get("resource_mode"),
                 include_screenshot=bool((options.browser_profile or {}).get("include_screenshot")),
+                policy=policy,
             ),
         )
-        ws_guard = _make_ssrf_websocket_handler()
+        ws_guard = _make_ssrf_websocket_handler(policy=policy)
         ws_router = getattr(page, "route_websocket", None)
         if ws_router is None:
             logger.warning("websocket_interception_unsupported")
@@ -642,7 +689,8 @@ class BrowserRenderer:
 
             # Warmup URLs (no Host header needed)
             for warmup_url in self._warmup_urls:
-                await page.goto(warmup_url, wait_until="domcontentloaded")
+                normalized_warmup = normalize_public_http_url(warmup_url, policy=policy)
+                await page.goto(normalized_warmup, wait_until="domcontentloaded")
                 await self._wait_for_ready_state(page)
 
             # Navigate to target URL: set Host header for pinned IP navigation.
@@ -691,14 +739,14 @@ class BrowserRenderer:
             final_url = page.url
             # Re-validate the post-navigation URL (F2/F8): the site may have
             # redirected the browser to an internal host. Fail closed.
-            _assert_safe_final_url(final_url)
+            _assert_safe_final_url(final_url, policy=policy)
 
             # PDF extraction fallback
             if self._looks_like_pdf(final_url) and not (text or "").strip():
                 # Blocking file read + parse: keep it off the event loop like
                 # every other document-extraction path (the extractor may be a
                 # sync downloader/parser; C3, adversarial perf family).
-                text = await asyncio.to_thread(self._pdf_text_extractor, final_url)
+                text = await asyncio.to_thread(self._pdf_text_extractor, final_url, policy)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
                 classification = classify_page(html, text, title=title)

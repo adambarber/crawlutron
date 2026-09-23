@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Literal, NewType, get_args
+from typing import TYPE_CHECKING, Any, Literal, NewType, get_args
 
 from app.constants import ResultStatus
+
+if TYPE_CHECKING:
+    from app.validation import HostPolicy
 
 Classification = Literal[
     "rendered",
@@ -213,6 +216,7 @@ class CrawlJob:
     url: str
     domain: str
     options: RenderOptions
+    host_policy: HostPolicy
 
 
 @dataclass(frozen=True)

@@ -7,6 +7,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, TypeVar, cast
 from urllib.parse import urljoin, urlparse
 
@@ -26,7 +27,7 @@ from app.crawl.strategies.http import _default_http_fetcher
 from app.models import NormalizedUrl
 from app.safe_regex import UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
-from app.validation import registrable_domain, safe_public_url_or_none
+from app.validation import HostPolicy, registrable_domain, safe_public_url_or_none
 
 _DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
@@ -41,8 +42,8 @@ _MAX_SCOPE_PATTERN_LEN = 256
 _ROBOTS_ADMISSION_CHUNK_SIZE = 16
 
 
-def canonical_page_identity(url: str) -> NormalizedUrl | None:
-    return safe_public_url_or_none(url)
+def canonical_page_identity(url: str, *, host_policy: HostPolicy) -> NormalizedUrl | None:
+    return safe_public_url_or_none(url, policy=host_policy)
 
 
 def _bounded_int(value: Any, *, default: int = 0) -> int:
@@ -96,7 +97,7 @@ async def _gather_robots_allowed(urls: list[str], robots_allows: RobotsAllows) -
     return list(await asyncio.gather(*(robots_allows(url) for url in urls)))
 
 
-def _frontier_identity(value: Any) -> str | None:
+def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> str | None:
     raw_url: Any
     if isinstance(value, FrontierEntry):
         raw_url = value.url
@@ -112,7 +113,7 @@ def _frontier_identity(value: Any) -> str | None:
         raw_url = getattr(value, "normalized_url", None)
     if not isinstance(raw_url, str) or not raw_url:
         return None
-    identity = canonical_page_identity(raw_url)
+    identity = canonical_page_identity(raw_url, host_policy=host_policy)
     return str(identity or raw_url)
 
 
@@ -123,13 +124,14 @@ def _candidate_stream(
     known: set[str],
     scope_pattern: re.Pattern[str] | None,
     want_document_bodies: bool,
+    host_policy: HostPolicy,
 ) -> Iterable[AdmittedLink]:
     for link in links:
         values = _link_values(link)
         if values is None:
             continue
         normalized_raw, original, delay_host = values
-        normalized = canonical_page_identity(normalized_raw)
+        normalized = canonical_page_identity(normalized_raw, host_policy=host_policy)
         if normalized is None or normalized in known:
             continue
         if is_analytics_host(normalized):
@@ -199,6 +201,7 @@ async def admit_discovered_links(
     robots_allows: RobotsAllows,
     robots_crawl_delay: RobotsCrawlDelay | None,
     commit_crawl_delay: CommitCrawlDelay,
+    host_policy: HostPolicy,
     reserve_admitted: bool = False,
     occupied: int | None = None,
 ) -> AdmissionOutcome:
@@ -206,7 +209,7 @@ async def admit_discovered_links(
         return AdmissionOutcome()
     next_depth = source_depth + 1
     normalized_known = {
-        str(canonical_page_identity(url) or url)
+        str(canonical_page_identity(url, host_policy=host_policy) or url)
         for url in known
         if isinstance(url, str) and url
     }
@@ -214,7 +217,7 @@ async def admit_discovered_links(
     known.update(normalized_known)
     reserved = set(known)
     for value in frontier:
-        identity = _frontier_identity(value)
+        identity = _frontier_identity(value, host_policy=host_policy)
         if identity is not None:
             reserved.add(identity)
     current_occupied = occupied if occupied is not None else len(reserved)
@@ -230,6 +233,7 @@ async def admit_discovered_links(
             known=known,
             scope_pattern=scope_pattern,
             want_document_bodies=want_document_bodies,
+            host_policy=host_policy,
         )
     )
     while not stopped:
@@ -300,7 +304,8 @@ async def admit_discovered_links(
 
 
 class RobotsGate:
-    def __init__(self, policy: Any, settings: Any) -> None:
+    def __init__(self, policy: Any, settings: Any, host_policy: HostPolicy) -> None:
+        self._host_policy = host_policy
         self._timeout_seconds = max(
             1,
             _bounded_int(
@@ -312,12 +317,13 @@ class RobotsGate:
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
-            robots_origin(url),
-            _default_http_fetcher,
+            robots_origin(url, policy=self._host_policy),
+            partial(_default_http_fetcher, policy=self._host_policy),
             self._timeout_seconds,
             fetch_and_decode=(
                 _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
             ),
+            policy=self._host_policy,
         )
         return rules, delay
 
@@ -333,6 +339,7 @@ class RobotsGate:
 @dataclass
 class JobAdmissionContext:
     policy: dict[str, Any]
+    host_policy: HostPolicy
     max_depth: int
     max_pages: int
     scope_pattern: re.Pattern[str] | None
@@ -352,7 +359,8 @@ class JobAdmissionContext:
     def create(cls, policy: Any, settings: Any) -> JobAdmissionContext:
         normalized = normalized_policy(policy)
         limits = policy_limits(normalized)
-        robots = RobotsGate(normalized, settings)
+        host_policy = HostPolicy.from_settings(settings)
+        robots = RobotsGate(normalized, settings, host_policy)
         scheduler = DomainScheduler(
             global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
             per_domain_limit=max(1, int(getattr(settings, "per_domain_concurrency", 2))),
@@ -367,6 +375,7 @@ class JobAdmissionContext:
         discovery_map = discovery if isinstance(discovery, dict) else {}
         return cls(
             policy=normalized,
+            host_policy=host_policy,
             max_depth=max(0, _bounded_int(limits.get("max_depth"))),
             max_pages=max(0, _bounded_int(limits.get("max_pages"))),
             scope_pattern=compile_scope_pattern(normalized.get("scope_regex")),
@@ -385,7 +394,7 @@ class JobAdmissionContext:
         )
 
 
-def admitted_page_identities(job: Any) -> set[str]:
+def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
     """Union of canonical identities already admitted across the job's state.
 
     No normalization pass: entries are canonical by construction (ingress and
@@ -399,7 +408,7 @@ def admitted_page_identities(job: Any) -> set[str]:
     }
     for value in values:
         if isinstance(value, str) and value:
-            identities.add(str(canonical_page_identity(value) or value))
+            identities.add(str(canonical_page_identity(value, host_policy=host_policy) or value))
     return identities
 
 
@@ -407,11 +416,12 @@ def normalize_sitemap_candidates(
     found: Iterable[tuple[str, str | None]],
     *,
     scope_pattern: re.Pattern[str] | None,
+    host_policy: HostPolicy,
 ) -> list[tuple[NormalizedUrl, str | None]]:
     candidates: list[tuple[NormalizedUrl, str | None]] = []
     seen: set[str] = set()
     for loc, lastmod in found:
-        normalized = canonical_page_identity(loc)
+        normalized = canonical_page_identity(loc, host_policy=host_policy)
         if normalized is None or normalized in seen:
             continue
         if scope_pattern is not None and not scope_allows(scope_pattern, normalized):
@@ -446,7 +456,7 @@ async def admit_job_links(
     source_depth: int,
     context: JobAdmissionContext,
 ) -> AdmissionOutcome:
-    known = admitted_page_identities(job)
+    known = admitted_page_identities(job, host_policy=context.host_policy)
     outcome = await admit_discovered_links(
         links,
         source_depth=source_depth,
@@ -461,6 +471,7 @@ async def admit_job_links(
         robots_allows=context.robots.allows,
         robots_crawl_delay=context.robots.crawl_delay,
         commit_crawl_delay=context.commit_crawl_delay,
+        host_policy=context.host_policy,
         reserve_admitted=True,
     )
     if outcome.cap_blocked:
@@ -468,12 +479,16 @@ async def admit_job_links(
     return outcome
 
 
-def requeue_admitted_pages(job: Any, entries: Iterable[FrontierEntry]) -> AdmissionOutcome:
-    known = admitted_page_identities(job)
+def requeue_admitted_pages(
+    job: Any,
+    entries: Iterable[FrontierEntry],
+    context: JobAdmissionContext,
+) -> AdmissionOutcome:
+    known = admitted_page_identities(job, host_policy=context.host_policy)
     accepted_entries: list[FrontierEntry] = []
     cap_blocked = 0
     for entry in entries:
-        identity = canonical_page_identity(entry.url) or entry.url
+        identity = canonical_page_identity(entry.url, host_policy=context.host_policy) or entry.url
         if identity in known:
             continue
         capacity = remaining_page_capacity(len(known), job_max_pages(job.policy))
@@ -493,11 +508,14 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
         return []
     sitemap_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", "/sitemap.xml")
     found = await fetch_sitemap_urls(
-        _default_http_fetcher,
+        partial(_default_http_fetcher, policy=context.host_policy),
         sitemap_url,
         context.timeout_seconds,
+        host_policy=context.host_policy,
     )
-    return sorted({url for url, _lastmod in found if isinstance(url, str)})
+    return sorted(
+        {urljoin(sitemap_url, url) for url, _lastmod in found if isinstance(url, str)}
+    )
 
 
 __all__ = [

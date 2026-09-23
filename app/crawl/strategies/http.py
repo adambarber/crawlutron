@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextvars
+import functools
 import hashlib
 import inspect
 import json
@@ -77,7 +78,13 @@ from app.crawl.document_text import (
     _format_extracted_document_text,
 )
 from app.timeouts import Timeouts
-from app.validation import _is_public_ip_value, filter_js_endpoints, get_env_int
+from app.validation import (
+    HostPolicy,
+    _is_public_ip_value,
+    filter_js_endpoints,
+    get_env_int,
+    normalize_public_http_url,
+)
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -897,7 +904,12 @@ def _http_413(url: str, final_url: str, started: float) -> HttpFetchResult:
     )
 
 
-def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+def _build_pinned_request(
+    url: str,
+    headers: dict[str, str],
+    *,
+    policy: HostPolicy,
+) -> tuple[str, dict[str, str]]:
     """Resolve ``url`` once and build the pinned request for it.
 
     Delegates entirely to the SafeUrl chokepoint: ``parse(pin=True)`` runs
@@ -909,7 +921,7 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
     """
     from app.safe_url import SafeUrl
 
-    safe = SafeUrl.parse(url, pin=True)
+    safe = SafeUrl.parse(url, policy=policy, pin=True)
     connect_url, connect_headers = safe.connect()
     return connect_url, {**headers, **connect_headers}
 
@@ -922,14 +934,22 @@ def _build_pinned_request(url: str, headers: dict[str, str]) -> tuple[str, dict[
 _DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
 
-async def _build_pinned_request_async(url: str, headers: dict[str, str]) -> tuple[str, dict[str, str]]:
+async def _build_pinned_request_async(
+    url: str,
+    headers: dict[str, str],
+    *,
+    policy: HostPolicy,
+) -> tuple[str, dict[str, str]]:
     """Offload SSRF-safe request building (incl. the blocking ``socket.getaddrinfo``
     call) to a worker thread so the event loop is never stalled by a resolver
     lookup (adversarial perf #1.1). Mirrors the browser route handler, which
     already runs ``_build_pinned_request`` via ``asyncio.to_thread``.
     """
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_DNS_EXECUTOR, _build_pinned_request, url, headers)
+    return await loop.run_in_executor(
+        _DNS_EXECUTOR,
+        functools.partial(_build_pinned_request, url, headers, policy=policy),
+    )
 
 
 _MAX_REDIRECT_HOPS = 5
@@ -947,6 +967,8 @@ def _redirect_target(
     status_code: int,
     location: str | None,
     hops: int,
+    *,
+    policy: HostPolicy,
 ) -> tuple[str, dict[str, str]] | None:
     """Decide the next hop of a manual redirect loop (shared by both fetchers).
 
@@ -958,7 +980,7 @@ def _redirect_target(
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
         return None
-    new_url = urljoin(current_url, location)
+    new_url = str(normalize_public_http_url(urljoin(current_url, location), policy=policy))
     new_host = urlparse(new_url).hostname
     current_host = urlparse(current_url).hostname
     if new_host != current_host:
@@ -971,6 +993,8 @@ async def _default_http_fetcher(
     headers: dict[str, str],
     timeout_seconds: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    *,
+    policy: HostPolicy,
 ) -> HttpFetchResult:
     """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
@@ -991,7 +1015,11 @@ async def _default_http_fetcher(
     # Work with a copy of headers so we can mutate per-hop
     request_headers = dict(headers)
     while True:
-        pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
+        pinned_url, hop_headers = await _build_pinned_request_async(
+            current_url,
+            request_headers,
+            policy=policy,
+        )
         # follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -1004,7 +1032,14 @@ async def _default_http_fetcher(
                 # SSRF-safe redirect: only follow within the hop budget. The next
                 # loop iteration re-runs _build_pinned_request, which re-validates
                 # (and re-pins) the redirect target against the SSRF blocklist.
-                redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
+                redirect = _redirect_target(
+                    current_url,
+                    request_headers,
+                    status_code,
+                    location,
+                    hops,
+                    policy=policy,
+                )
                 if redirect is not None:
                     current_url, request_headers = redirect
                     hops += 1
@@ -1065,6 +1100,8 @@ async def _default_cffi_fetcher(
     headers: dict[str, str],
     timeout_seconds: int,
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    *,
+    policy: HostPolicy,
 ) -> HttpFetchResult:
     """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
 
@@ -1079,7 +1116,13 @@ async def _default_cffi_fetcher(
         from curl_cffi.requests.exceptions import RequestException
         from curl_cffi.requests.models import STREAM_END
     except ImportError:
-        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+        return await _default_http_fetcher(
+            url,
+            headers,
+            timeout_seconds,
+            max_content_length,
+            policy=policy,
+        )
     # Shared session (perf throughput #4): built once per event loop instead of
     # per request. Unavailable (ImportError at build) -> plain httpx fallback.
     # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
@@ -1087,7 +1130,13 @@ async def _default_cffi_fetcher(
     # and would silently degrade every impersonated fetch to plain httpx.
     client = get_cffi_session()
     if client is None:
-        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+        return await _default_http_fetcher(
+            url,
+            headers,
+            timeout_seconds,
+            max_content_length,
+            policy=policy,
+        )
     try:
         current_url = url
         hops = 0
@@ -1095,7 +1144,11 @@ async def _default_cffi_fetcher(
         # Work with a copy of headers so we can mutate per-hop
         request_headers = dict(headers)
         while True:
-            pinned_url, hop_headers = await _build_pinned_request_async(current_url, request_headers)
+            pinned_url, hop_headers = await _build_pinned_request_async(
+            current_url,
+            request_headers,
+            policy=policy,
+        )
             try:
                 response = await client.get(
                     pinned_url,
@@ -1106,7 +1159,13 @@ async def _default_cffi_fetcher(
                 )
             except Exception:
                 # Fall back to plain httpx for this request on transport errors.
-                return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+                return await _default_http_fetcher(
+            url,
+            headers,
+            timeout_seconds,
+            max_content_length,
+            policy=policy,
+        )
             # Content-length check (#5)
             content_length = response.headers.get("content-length")
             if _declared_length_exceeds(content_length, max_content_length):
@@ -1123,7 +1182,14 @@ async def _default_cffi_fetcher(
             location = response.headers.get("location")
             # SSRF-safe redirect: only follow within the hop budget; the next
             # iteration re-validates + re-pins the target via _build_pinned_request.
-            redirect = _redirect_target(current_url, request_headers, status_code, location, hops)
+            redirect = _redirect_target(
+                current_url,
+                request_headers,
+                status_code,
+                location,
+                hops,
+                policy=policy,
+            )
             if redirect is not None:
                 await response.aclose()  # N8: release the curl handle
                 current_url, request_headers = redirect
@@ -1232,7 +1298,13 @@ async def _default_cffi_fetcher(
                 decompression_failed=cffi_decompression_failed,
             )
     except Exception:  # any cffi failure falls back to plain httpx
-        return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length)
+        return await _default_http_fetcher(
+            url,
+            headers,
+            timeout_seconds,
+            max_content_length,
+            policy=policy,
+        )
 
 
 def cookie_namespace_for(profile: dict[str, Any]) -> str:
@@ -1598,6 +1670,7 @@ async def _discovery_diagnostics(
     normalized_url: str,
     html: str | None,
     policy: dict[str, Any],
+    host_policy: HostPolicy,
     headers: dict[str, str],
     http_fetcher: Any,
     engine_robots_sitemaps: list[str] | None,
@@ -1682,7 +1755,10 @@ async def _discovery_diagnostics(
             try:
                 # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
                 found_locs = await fetch_sitemap_urls(
-                    http_fetcher, sitemap_url, limits.get("timeout_seconds", 10)
+                    http_fetcher,
+                    sitemap_url,
+                    limits.get("timeout_seconds", 10),
+                    host_policy=host_policy,
                 )
                 for loc, lastmod in found_locs:
                     sitemap_urls.append(loc)
@@ -1783,6 +1859,7 @@ async def _http_strategy_result(
     normalized_url: str,
     strategy: CrawlStrategyName,
     policy: dict[str, Any],
+    host_policy: HostPolicy,
     http_fetcher: Any,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
@@ -2140,6 +2217,7 @@ async def _http_strategy_result(
             include_links=status == "success" and _want_discovery_links,
             include_js_endpoints=bool(discovery),
             include_metadata=True,
+            host_policy=host_policy,
         )
         if discovery:
             diagnostics.update(post_fetch["diagnostics"])
@@ -2157,6 +2235,7 @@ async def _http_strategy_result(
                     robots_evaluated=robots_evaluated,
                     html=html,
                     policy=policy,
+                    host_policy=host_policy,
                     # Base headers only: page-level If-None-Match /
                     # If-Modified-Since must never reach robots.txt or
                     # sitemap fetches (false 304s / missed sitemaps).
@@ -2177,7 +2256,11 @@ async def _http_strategy_result(
         # JS-endpoint extraction is discovery-oriented; skip it for
         # content-only crawls (B1).
         raw_endpoints = post_fetch["js_endpoints"]
-        diagnostics["js_endpoints"] = filter_js_endpoints(raw_endpoints, resolve_against=response.final_url)
+        diagnostics["js_endpoints"] = filter_js_endpoints(
+            raw_endpoints,
+            resolve_against=response.final_url,
+            policy=host_policy,
+        )
         # Pagination detection stays on for all crawls: next_page_url is a
         # standard result field (returned even without discovery mode), so it is
         # always computed. Only the heavier discovery-only extras below are

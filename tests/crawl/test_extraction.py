@@ -15,15 +15,12 @@ import app.crawl.extraction as extraction
 import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import (
     ExtractedContent,
-    _detect_pagination,
     _extract_document,
     _extract_html,
     _extract_selected,
     _is_html,
     _looks_like_document,
     _text_from_html,
-    extract_content,
-    extract_js_endpoints,
 )
 
 
@@ -308,7 +305,7 @@ class TestSelectedExtraction:
 
 class TestLinkExtraction:
     def test_engine_parse_robots_blank_line(self):
-        from app.crawl.extraction import _extract_discovered_links
+        from _testkit import _extract_discovered_links
 
         # Test link extraction with mixed quote styles (covers edge cases)
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
@@ -543,7 +540,11 @@ def _spy_parse(monkeypatch):
 def test_html_diagnostics_parses_once(monkeypatch):
     calls = _spy_parse(monkeypatch)
     html = "<html><body><a href='/x'>x</a><form action='/s'><input name='q'></form></body></html>"
-    extraction._html_diagnostics(html, "http://example.com/")
+    extraction._html_diagnostics(
+        html,
+        "http://example.com/",
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
     assert calls["n"] == 1
 
 
@@ -555,8 +556,18 @@ def test_shared_tree_parses_once_across_passes(monkeypatch):
     )
     tree = extraction._parse_html_tree(html)
     assert calls["n"] == 1
-    extraction._html_diagnostics(html, "http://example.com/", tree=tree)
-    links, _, _ = extraction._extract_discovered_links(html, "http://example.com/", tree=tree)
+    extraction._html_diagnostics(
+        html,
+        "http://example.com/",
+        host_policy=UNRESTRICTED_HOST_POLICY,
+        tree=tree,
+    )
+    links, _, _ = extraction._extract_discovered_links(
+        html,
+        "http://example.com/",
+        host_policy=UNRESTRICTED_HOST_POLICY,
+        tree=tree,
+    )
     # frames, forms, and links all reused the single pre-parsed tree.
     assert calls["n"] == 1
     assert links

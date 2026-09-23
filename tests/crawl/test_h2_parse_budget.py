@@ -27,6 +27,7 @@ from _testkit import make_fetch
 
 from app.crawl import extraction
 from app.crawl.strategies.http import _http_strategy_result
+from app.validation import HostPolicy
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -75,6 +76,7 @@ async def _run(policy_extra: dict, *, html: str = HTML):
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}, **policy_extra},
         http_fetcher=fetcher,
         caller_validators=None,
+        host_policy=HostPolicy.unrestricted(),
     )
 
 

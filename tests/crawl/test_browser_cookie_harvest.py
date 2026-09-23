@@ -8,6 +8,8 @@ retry that follows the render.
 
 import asyncio
 
+from _testkit import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from app.validation import registrable_domain
@@ -72,7 +74,11 @@ class TestHarvestWaitBounded:
             monkeypatch.setattr(BrowserRenderer, "_safe_close_page", fake_close)
 
             async def call_finally():
-                await renderer._render_with_page_unlocked(url, RenderOptions(browser_profile={}))
+                await renderer._render_with_page_unlocked(
+                    url,
+                    RenderOptions(browser_profile={}),
+                    policy=UNRESTRICTED_HOST_POLICY,
+                )
 
             loop = asyncio.get_running_loop()
             started = loop.time()

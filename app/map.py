@@ -13,9 +13,10 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.response_shaping import frontier_link_url
+from app.validation import HostPolicy, safe_public_url_or_none
 
 
-def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
+def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -> dict[str, Any]:
     """Aggregate discovered URLs from a crawl response into a site map.
 
     Returns a dict with:
@@ -45,14 +46,19 @@ def build_site_map(crawl_response: dict[str, Any]) -> dict[str, Any]:
             return None
         from urllib.parse import urljoin
 
-        from app.validation import safe_public_url_or_none
-
         candidate = urljoin(root_url, u) if u.startswith("/") else u
-        return safe_public_url_or_none(candidate)
+        normalized = safe_public_url_or_none(candidate, policy=host_policy)
+        return str(normalized) if normalized is not None else None
 
     links: list[str] = []
     for link in result.get("discovered_links", []) or []:
-        url = _normalize(frontier_link_url(link))
+        url = _normalize(
+            frontier_link_url(
+                link,
+                policy=host_policy,
+                resolve_against=root_url,
+            )
+        )
         if url:
             links.append(url)
 

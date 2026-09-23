@@ -11,7 +11,12 @@ from curl_cffi.requests.models import STREAM_END
 from helpers.server import spawn_threaded_server
 
 import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.http import _default_cffi_fetcher
+from app.crawl.strategies.http import _default_cffi_fetcher as _default_cffi_fetcher_with_policy
+from app.validation import HostPolicy
+
+
+async def _default_cffi_fetcher(*args, policy=HostPolicy.unrestricted(), **kwargs):
+    return await _default_cffi_fetcher_with_policy(*args, policy=policy, **kwargs)
 
 
 class TestCffiImpersonateStrategy:
@@ -41,6 +46,7 @@ class TestCffiImpersonateStrategy:
             },
             http_fetcher=cffi_fetcher,
             cache=HttpCache(),
+            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "rendered"
 
@@ -51,8 +57,6 @@ class TestCffiFetcherLiveFetch:
         # instant-asyncio.sleep patch starves curl_cffi's socket/timer loop
         # and wedges the transfer past all client timeouts.
         from helpers.server import spawn_server
-
-        from app.crawl.strategies.http import _default_cffi_fetcher
 
         server = spawn_server()
         try:
@@ -120,7 +124,14 @@ def _patch_session(monkeypatch, response: _Response) -> _Session:
     return session
 
 
-async def _fall_back_to_httpx(url, headers, timeout_seconds, max_content_length=0):
+async def _fall_back_to_httpx(
+    url,
+    headers,
+    timeout_seconds,
+    max_content_length=0,
+    *,
+    policy,
+):
     return "httpx-fallback"
 
 
@@ -245,9 +256,16 @@ def _fetch_worker(url: str, timeout: float, out_queue: multiprocessing.Queue) ->
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
 
     from app.crawl.strategies.http import _default_cffi_fetcher
+    from app.validation import HostPolicy
 
     async def _run():
-        return await _default_cffi_fetcher(url, {}, int(timeout), max_content_length=10 * 1024 * 1024)
+        return await _default_cffi_fetcher(
+            url,
+            {},
+            int(timeout),
+            max_content_length=10 * 1024 * 1024,
+            policy=HostPolicy.unrestricted(),
+        )
 
     try:
         result = asyncio.run(_run())
@@ -383,10 +401,9 @@ class TestCffiStreamingCap:
 
 
 async def _fetch_twice(base_url):
-    from app.crawl.strategies import http as http_mod
 
     async def one():
-        return await http_mod._default_cffi_fetcher(base_url + "/", {}, 10, 1024 * 1024)
+        return await _default_cffi_fetcher(base_url + "/", {}, 10, 1024 * 1024)
 
     r1 = await one()
     r2 = await one()
@@ -453,7 +470,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
     seen: list[str] = []
 
-    async def fake_http(url, headers, timeout_seconds, max_content_length=0):
+    async def fake_http(url, headers, timeout_seconds, max_content_length=0, *, policy):
         seen.append(url)
 
         class Resp:
@@ -467,7 +484,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
 
     monkeypatch.setattr(http_mod, "_default_http_fetcher", fake_http)
     try:
-        resp = await http_mod._default_cffi_fetcher("http://example.com/", {}, 5, 1024)
+        resp = await _default_cffi_fetcher("http://example.com/", {}, 5, 1024)
     finally:
         await http_mod.close_cffi_session()
     assert resp.status_code == 200

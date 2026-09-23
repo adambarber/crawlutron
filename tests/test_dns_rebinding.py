@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
 from app.crawl.strategies.http import _default_http_fetcher
+from app.validation import HostPolicy
 
 
 class TestDNSRebindingProtection:
@@ -68,7 +69,13 @@ class TestDNSRebindingProtection:
             patch("socket.getaddrinfo", side_effect=fake_getaddrinfo),
             patch("app.crawl.strategies.http.get_async_http_client", return_value=_Client()),
         ):
-            result = await _default_http_fetcher("http://example.com/page", {}, 10, 50 * 1024 * 1024)
+            result = await _default_http_fetcher(
+            "http://example.com/page",
+            {},
+            10,
+            50 * 1024 * 1024,
+            policy=HostPolicy.unrestricted(),
+        )
 
         parsed = urlparse(captured["url"])
         assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", captured

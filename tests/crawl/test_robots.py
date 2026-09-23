@@ -23,6 +23,7 @@ from app.crawl.robots_parse import (
 )
 from app.crawl.strategies.http import _discovery_diagnostics
 from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 class TestRobotsCacheLocking:
@@ -544,8 +545,9 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
         headers={},
         http_fetcher=lambda *a, **k: _fake_fetcher(calls, *a, **k),
         engine_robots_sitemaps=engine_robots_sitemaps,
-        robots_evaluated=True,
-    )
+            robots_evaluated=True,
+            host_policy=HostPolicy.unrestricted(),
+        )
 
 
 async def test_discovery_skips_robots_fetch_when_sitemaps_passed():

@@ -11,7 +11,7 @@ from app.constants import BROWSER_HEADLESS
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.scheduler import DomainScheduler
-from tests._testkit import FakeScheduler, Spill, make_engine_result
+from tests._testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, Spill, make_engine_result
 
 
 class _Scheduler(FakeScheduler):
@@ -91,6 +91,7 @@ async def _run(
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
         resource_gate=gate,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
     return spill, scheduler, gate
 

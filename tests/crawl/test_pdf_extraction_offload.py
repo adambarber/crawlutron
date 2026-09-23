@@ -58,12 +58,17 @@ async def _render_pdf(monkeypatch):
     page = _PdfPage()
     renderer = _build_pdf_renderer(monkeypatch, page)
 
-    def blocking_pdf_extractor(url: str) -> str:
+    def blocking_pdf_extractor(url: str, policy) -> str:
         assert url == _PDF_URL
+        assert policy == UNRESTRICTED_HOST_POLICY
         return "extracted pdf text"
 
     renderer._pdf_text_extractor = blocking_pdf_extractor
-    return await renderer._render_with_page_unlocked(_PDF_URL, RenderOptions(include_text=True))
+    return await renderer._render_with_page_unlocked(
+        _PDF_URL,
+        RenderOptions(include_text=True),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
 
 
 class TestPdfExtractorIsOffloaded:

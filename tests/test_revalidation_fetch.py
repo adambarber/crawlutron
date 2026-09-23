@@ -9,6 +9,8 @@ round-trips and doubled origin load for one crawl.
 
 from _testkit import *  # noqa: F403 (test wildcard seam)
 
+from app.validation import HostPolicy
+
 
 class _CountingFetcher:
     """A fetcher that counts calls and always returns a fresh 200.
@@ -59,6 +61,7 @@ class TestRevalidationFetchesOnce:
             http_fetcher=fetcher,
             cache=cache,
             content_cache=content_cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert first.status == "success"
         assert fetcher.calls == 1, fetcher.calls
@@ -74,6 +77,7 @@ class TestRevalidationFetchesOnce:
             http_fetcher=fetcher,
             cache=cache,
             content_cache=content_cache,
+            host_policy=HostPolicy.unrestricted(),
         )
         assert second.status == "success"
         assert fetcher.calls == 2, (
@@ -128,6 +132,7 @@ class TestRevalidationFetchesOnce:
                 http_fetcher=fetcher,
                 cache=cache,
                 content_cache=content_cache,
+                host_policy=HostPolicy.unrestricted(),
             )
             assert result.status == "success"
             return result

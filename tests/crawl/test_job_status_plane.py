@@ -11,12 +11,14 @@ atomic compare-and-set on the row itself.
 
 import ast
 
+from _testkit import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from tests.chokepoint_walks import app_trees, offender
 
 
 def _store(tmp_path) -> JobStore:
-    return JobStore(tmp_path / "jobs.db")
+    return JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
 
 
 def _running_job(store: JobStore, job_id: str = "j1") -> CrawlJobState:

@@ -10,6 +10,7 @@ fetch and turn one crafted response into that URL's failure.
 from _testkit import MockResponse, patch_http_fetcher_transport
 
 from app.crawl.strategies.http import _declared_length_exceeds, _default_http_fetcher
+from app.validation import HostPolicy
 
 
 class TestDeclaredLengthPredicate:
@@ -41,7 +42,13 @@ async def test_httpx_fetcher_serves_body_despite_garbage_content_length(monkeypa
         monkeypatch,
         [MockResponse(200, {"content-type": "text/html", "content-length": "abc"}, b"<html>ok</html>")],
     )
-    result = await _default_http_fetcher("http://example.com/", {}, 30, 1000)
+    result = await _default_http_fetcher(
+            "http://example.com/",
+            {},
+            30,
+            1000,
+            policy=HostPolicy.unrestricted(),
+        )
     assert result.status_code == 200
     assert result.body == b"<html>ok</html>"
 
@@ -52,5 +59,11 @@ async def test_httpx_fetcher_still_rejects_valid_oversized_declared_length(monke
         monkeypatch,
         [MockResponse(200, {"content-type": "text/html", "content-length": "5000"}, b"<html>ok</html>")],
     )
-    result = await _default_http_fetcher("http://example.com/", {}, 30, 1000)
+    result = await _default_http_fetcher(
+            "http://example.com/",
+            {},
+            30,
+            1000,
+            policy=HostPolicy.unrestricted(),
+        )
     assert result.status_code == 413

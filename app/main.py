@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
 from app.logging_config import configure_service_logging
-from app.validation import get_env_float, get_env_int
+from app.validation import HostPolicy, get_env_float, get_env_int
 
 from .constants import SERVICE_VERSION
 from .crawl.job_store import JobStore
@@ -54,7 +54,10 @@ from .health.readiness import create_health_router
 settings = CrawlerSettings.from_mapping()
 
 # Job store for resumable crawls (#3+#14)
-job_store = JobStore(settings.cache_dir + "/jobs.db")
+job_store = JobStore(
+    settings.cache_dir + "/jobs.db",
+    policy=HostPolicy.from_settings(settings),
+)
 
 # Completed single-request crawl results (fixes the dead status_url promise and
 # makes results recoverable if the HTTP connection drops mid-response).

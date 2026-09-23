@@ -14,6 +14,7 @@ from _testkit import http_strategy_policy, invoke_http_strategy
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.strategies.http import _classify_error_code, _http_strategy_result
+from app.validation import HostPolicy
 
 
 class _RaisingFetcher:
@@ -36,6 +37,7 @@ async def _run(exc):
         strategy="HTTP_DECLARED_CRAWLER",
         policy=policy,
         http_fetcher=fetcher,
+        host_policy=HostPolicy.unrestricted(),
     )
 
 

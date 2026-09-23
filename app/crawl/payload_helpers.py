@@ -23,7 +23,7 @@ from app.constants import (
 from app.crawl.credentials import authorization_value as _authorization_value
 from app.crawl.credentials import origin_of
 from app.settings import CrawlerSettings
-from app.validation import safe_public_url_or_none
+from app.validation import HostPolicy, safe_public_url_or_none
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
@@ -32,7 +32,7 @@ SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 DEFAULT_MAX_PAGES = 100
 
 
-def _payload_urls(payload: dict[str, Any]) -> list[str]:
+def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
     """Extract the request URL batch, collapsing duplicates by page identity.
 
     ``normalize_public_http_url`` is the single source of truth for what counts
@@ -57,7 +57,7 @@ def _payload_urls(payload: dict[str, Any]) -> list[str]:
             # private under SSRF) keeps its RAW key so request-target validation
             # stays with the caller -- safe_public_url_or_none cannot drop it
             # here the way it does on the egress doors.
-            key = safe_public_url_or_none(url) or url
+            key = safe_public_url_or_none(url, policy=host_policy) or url
             if key not in seen:
                 seen.add(key)
                 unique.append(url)
@@ -68,7 +68,11 @@ def _payload_urls(payload: dict[str, Any]) -> list[str]:
 
 
 def checked_payload_urls(
-    payload: dict[str, Any], max_batch_size: int, *, urls: list[str] | None = None
+    payload: dict[str, Any],
+    max_batch_size: int,
+    *,
+    host_policy: HostPolicy,
+    urls: list[str] | None = None,
 ) -> list[str]:
     """Deduplicated URL batch, rejected if it exceeds the batch cap (L4).
 
@@ -85,7 +89,7 @@ def checked_payload_urls(
     oversized batch past the ceiling.
     """
     if urls is None:
-        urls = _payload_urls(payload)
+        urls = _payload_urls(payload, host_policy=host_policy)
     if len(urls) > max_batch_size:
         raise ValueError("batch_size_exceeded")
     return urls

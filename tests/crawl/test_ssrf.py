@@ -8,7 +8,7 @@ from _testkit import assert_dns_pinning_uses_first_resolution, block_private_tar
 
 import app.crawl.strategies.http as http_mod
 from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
-from app.validation import normalize_public_http_url
+from app.validation import HostPolicy, normalize_public_http_url
 
 
 def _blocked(ip):
@@ -106,7 +106,11 @@ def test_build_pinned_request_never_targets_loopback_for_unresolvable(monkeypatc
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     # _build_pinned_request raises now (check fails closed), so assert it raises.
     with pytest.raises(ValueError):
-        http_mod._build_pinned_request("http://nonexistent.invalid/", {})
+        http_mod._build_pinned_request(
+            "http://nonexistent.invalid/",
+            {},
+            policy=HostPolicy.unrestricted(),
+        )
 
 
 class TestSSRFProtection:
@@ -137,7 +141,7 @@ class TestSSRFProtection:
         block_private_targets(monkeypatch)
         for target in ["http://localhost:8080/", "http://127.0.0.1:8080/", "http://10.0.0.1:8080/"]:
             with pytest.raises(ValueError, match="private"):
-                normalize_public_http_url(target)
+                normalize_public_http_url(target, policy=HostPolicy.unrestricted())
 
     def test_hostname_resolved_only_once(self, monkeypatch):
         """The SSRF check must resolve the hostname exactly once.

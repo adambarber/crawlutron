@@ -27,7 +27,7 @@ from app.api.response_shaping import abuild_unified_crawl_response
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
-from app.validation import get_env_int
+from app.validation import HostPolicy, get_env_int
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,11 @@ async def run_async_crawl(
             if webhook_url:
                 from app.api.webhooks import post_webhook
 
-                await post_webhook(webhook_url, response_payload)
+                await post_webhook(
+                    webhook_url,
+                    response_payload,
+                    host_policy=HostPolicy.from_settings(crawl_settings),
+                )
 
     except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
@@ -183,7 +187,11 @@ async def run_async_crawl(
                 ).model_dump()
                 from app.api.webhooks import post_webhook
 
-                await post_webhook(webhook_url, error_payload)
+                await post_webhook(
+                    webhook_url,
+                    error_payload,
+                    host_policy=HostPolicy.from_settings(crawl_settings),
+                )
             except Exception:
                 pass
 

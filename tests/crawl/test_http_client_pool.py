@@ -12,6 +12,7 @@ from curl_cffi.requests import AsyncSession
 import app.crawl.strategies.http as http_mod
 from app import settings as settings_mod
 from app.crawl.strategies.http import get_async_http_client
+from app.validation import HostPolicy
 
 
 class TestAsyncHttpClientLifecycle:
@@ -391,7 +392,14 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch, r
     monkeypatch.setattr(http_mod, "_build_cffi_session", lambda *a, **k: _build_cffi_fake())
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
 
-    async def _fake_http_fetcher(url, headers, timeout_seconds, max_content_length=0):
+    async def _fake_http_fetcher(
+        url,
+        headers,
+        timeout_seconds,
+        max_content_length=0,
+        *,
+        policy,
+    ):
         return "fell-back-to-httpx"
 
     monkeypatch.setattr(http_mod, "_default_http_fetcher", _fake_http_fetcher)
@@ -399,7 +407,13 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch, r
     async def _scenario():
         # A session whose transport call fails forces the documented fallback;
         # either way the fetch must have drained the queue first.
-        return await http_mod._default_cffi_fetcher("http://example.invalid/", {}, 1, 1024)
+        return await http_mod._default_cffi_fetcher(
+            "http://example.invalid/",
+            {},
+            1,
+            1024,
+            policy=HostPolicy.unrestricted(),
+        )
 
     try:
         result = asyncio.run(_scenario())

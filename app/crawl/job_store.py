@@ -24,7 +24,7 @@ from typing import Any
 from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
 from app.crawl.sqlite_store import connect_store
-from app.validation import safe_public_url_or_none
+from app.validation import HostPolicy, safe_public_url_or_none
 
 
 def _json_default(obj):
@@ -71,11 +71,11 @@ _CANONICAL_CACHE_MAX = 50_000
 
 
 @lru_cache(maxsize=_CANONICAL_CACHE_MAX)
-def _canonical_cached(url: str) -> str:
-    return str(safe_public_url_or_none(url) or url)
+def _canonical_cached(url: str, host_policy: HostPolicy) -> str:
+    return str(safe_public_url_or_none(url, policy=host_policy) or url)
 
 
-def _canonical_or_raw(url: str) -> str:
+def _canonical_or_raw(url: str, host_policy: HostPolicy) -> str:
     """Canonical page identity for ``url``, or the raw value when it has none.
 
     Memoized: the job store re-reads the same durable collections on every loop
@@ -87,7 +87,7 @@ def _canonical_or_raw(url: str) -> str:
     """
     if not url:
         return url
-    return _canonical_cached(url)
+    return _canonical_cached(url, host_policy)
 
 
 def normalized_policy(policy: Any) -> dict[str, Any]:
@@ -169,6 +169,7 @@ def normalize_frontier(
     *,
     root_url: str,
     policy: dict[str, Any],
+    host_policy: HostPolicy,
     canonicalize: bool = True,
 ) -> list[FrontierEntry]:
     """Coerce persisted/runner-supplied frontier values into ``FrontierEntry`` records.
@@ -182,7 +183,7 @@ def normalize_frontier(
     """
     if not isinstance(values, (list, tuple)):
         return []
-    canonical_root = _canonical_or_raw(root_url) if canonicalize else root_url
+    canonical_root = _canonical_or_raw(root_url, host_policy) if canonicalize else root_url
     legacy_depth = job_max_depth(policy)
     entries: dict[str, FrontierEntry] = {}
     order: list[str] = []
@@ -200,7 +201,7 @@ def normalize_frontier(
             depth = legacy_depth
         if not isinstance(raw_url, str) or not raw_url:
             continue
-        url = _canonical_or_raw(raw_url) if canonicalize else raw_url
+        url = _canonical_or_raw(raw_url, host_policy) if canonicalize else raw_url
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
         entry = FrontierEntry(url=url, depth=entry_depth)
         previous = entries.get(url)
@@ -219,8 +220,9 @@ def normalize_job_collections(
     visited: Any,
     frontier: Any,
     in_flight: Any,
+    host_policy: HostPolicy,
 ) -> tuple[set[str], list[FrontierEntry], list[FrontierEntry]]:
-    canonical_root = _canonical_or_raw(root_url)
+    canonical_root = _canonical_or_raw(root_url, host_policy)
     normalized_policy_value = normalized_policy(policy)
     if isinstance(visited, str):
         visited_values = [visited]
@@ -230,15 +232,21 @@ def normalize_job_collections(
         except TypeError:
             visited_values = []
     normalized_visited = {
-        _canonical_or_raw(url)
+        _canonical_or_raw(url, host_policy)
         for url in visited_values
         if isinstance(url, str) and url
     }
     normalized_frontier = normalize_frontier(
-        frontier, root_url=canonical_root, policy=normalized_policy_value
+        frontier,
+        root_url=canonical_root,
+        policy=normalized_policy_value,
+        host_policy=host_policy,
     )
     normalized_in_flight = normalize_frontier(
-        in_flight, root_url=canonical_root, policy=normalized_policy_value
+        in_flight,
+        root_url=canonical_root,
+        policy=normalized_policy_value,
+        host_policy=host_policy,
     )
     frontier_by_url = {entry.url: entry for entry in normalized_frontier}
     normalized_in_flight = [
@@ -314,6 +322,7 @@ class CrawlJobState:
     updated_at: float = field(default_factory=time.time)
     error: str | None = None
     stats: dict[str, int] = field(default_factory=_default_stats)
+    host_policy: HostPolicy = field(default_factory=HostPolicy.unrestricted, repr=False, compare=False)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize to JSON-serializable dict.
@@ -326,6 +335,7 @@ class CrawlJobState:
         """
         normalize_job_state(self)
         data = asdict(self)
+        data.pop("host_policy", None)
         data["frontier"] = [_entry_payload(entry) for entry in self.frontier]
         data["in_flight"] = [_entry_payload(entry) for entry in self.in_flight]
         data["visited"] = sorted(self.visited)
@@ -335,7 +345,7 @@ class CrawlJobState:
         return data
 
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> CrawlJobState:
+    def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy) -> CrawlJobState:
         """Deserialize from JSON dict.
 
         The read boundary always normalizes: canonical identity, cross-list
@@ -351,11 +361,11 @@ class CrawlJobState:
         policy = normalized_policy(data.get("policy"))
         root_url = str(data.get("root_url") or "")
         if not canonicalized:
-            root_url = _canonical_or_raw(root_url)
+            root_url = _canonical_or_raw(root_url, host_policy)
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-                (url if canonicalized else _canonical_or_raw(url))
+                (url if canonicalized else _canonical_or_raw(url, host_policy))
                 for url in visited_raw
                 if isinstance(url, str) and url
             }
@@ -368,7 +378,7 @@ class CrawlJobState:
                 if not isinstance(url, str):
                     continue
                 try:
-                    key = url if canonicalized else _canonical_or_raw(url)
+                    key = url if canonicalized else _canonical_or_raw(url, host_policy)
                     transient_retries[key] = max(0, int(attempts))
                 except (TypeError, ValueError):
                     continue
@@ -382,6 +392,7 @@ class CrawlJobState:
                 data.get("frontier", []),
                 root_url=root_url,
                 policy=policy,
+                host_policy=host_policy,
                 canonicalize=not canonicalized,
             ),
             visited=visited,
@@ -389,6 +400,7 @@ class CrawlJobState:
                 data.get("in_flight", []),
                 root_url=root_url,
                 policy=policy,
+                host_policy=host_policy,
                 canonicalize=not canonicalized,
             ),
             transient_retries=transient_retries,
@@ -397,6 +409,7 @@ class CrawlJobState:
             updated_at=float(data.get("updated_at", 0.0)),
             error=data.get("error") if isinstance(data.get("error"), str) else None,
             stats=_normalized_stats(data.get("stats", {})),
+            host_policy=host_policy,
         )
         if not canonicalized:
             # Legacy row: the one place full normalization is owed. The marker is
@@ -406,7 +419,7 @@ class CrawlJobState:
 
 
 def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
-    root_url = _canonical_or_raw(job.root_url)
+    root_url = _canonical_or_raw(job.root_url, job.host_policy)
     policy = normalized_policy(job.policy)
     visited, frontier, in_flight = normalize_job_collections(
         root_url=root_url,
@@ -414,6 +427,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
         visited=job.visited,
         frontier=job.frontier,
         in_flight=job.in_flight,
+        host_policy=job.host_policy,
     )
     transient_retries: dict[str, int] = {}
     for url, attempts in job.transient_retries.items():
@@ -423,7 +437,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
             value = max(0, int(attempts))
         except (TypeError, ValueError):
             continue
-        identity = _canonical_or_raw(url)
+        identity = _canonical_or_raw(url, job.host_policy)
         transient_retries[identity] = max(transient_retries.get(identity, 0), value)
     job.root_url = root_url
     job.policy = policy
@@ -438,8 +452,9 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
 class JobStore:
     """SQLite-backed store for crawl job states."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, policy: HostPolicy):
         self.db_path = Path(db_path)
+        self._host_policy = policy
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Durability/concurrency settings come from the shared store
         # chokepoint (busy_timeout + WAL; M1 confinement invariant).
@@ -469,14 +484,15 @@ class JobStore:
                 "stats": json.loads(row[11]),
                 "in_flight": json.loads(row[12]),
                 "transient_retries": json.loads(row[13]),
-            }
+            },
+            host_policy=self._host_policy,
         )
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
         job_id = new_job_id()
-        canonical_root = _canonical_or_raw(root_url)
+        canonical_root = _canonical_or_raw(root_url, self._host_policy)
         normalized = normalized_policy(policy)
         job = CrawlJobState(
             job_id=job_id,
@@ -485,6 +501,7 @@ class JobStore:
             policy=normalized,
             status=JobStatus.PENDING,
             frontier=[FrontierEntry(url=canonical_root, depth=0)],
+            host_policy=self._host_policy,
         )
         with self._lock:
             self._persist(job)
@@ -495,9 +512,10 @@ class JobStore:
         job = CrawlJobState(
             job_id=job_id,
             kind=JobKind.SINGLE_SHOT,
-            root_url=_canonical_or_raw(root_url),
+            root_url=_canonical_or_raw(root_url, self._host_policy),
             policy=normalized_policy(policy),
             status=JobStatus.PENDING,
+            host_policy=self._host_policy,
         )
         with self._lock:
             self._persist(job)

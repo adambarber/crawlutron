@@ -10,6 +10,8 @@ connection-scoped, so "configure at connect time" is a one-call contract).
 
 import ast
 
+from _testkit import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.job_store import JobStore
 from app.crawl.result_store import CrawlResultStore
 from tests.chokepoint_walks import app_trees
@@ -37,7 +39,7 @@ def _pragma_exec_offenders() -> list[str]:
 
 def test_both_stores_share_the_pragma_configuration(tmp_path):
     for store in (
-        JobStore(tmp_path / "jobs.db"),
+        JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY),
         CrawlResultStore(tmp_path / "results.db"),
     ):
         conn = store._conn

@@ -179,4 +179,4 @@ def _resolved_expr(expr: ast.AST, bindings: dict[str, str]) -> str:
 
 def resolved_call_name(tree: ast.AST, call: ast.Call) -> str:
     """Return a call's import-resolved dotted name for AST detectors."""
-    return _resolved_expr(call.func, _import_bindings(tree))
+    return _resolved_expr(call, _import_bindings(tree))

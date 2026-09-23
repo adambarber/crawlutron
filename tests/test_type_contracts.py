@@ -91,8 +91,11 @@ class TestNormalizedUrlSeedType:
 
     def test_typed_value_is_runtime_plain_str(self):
         """Typing must not change runtime shape (JSON/spill compatibility)."""
-        from app.validation import normalize_public_http_url
+        from app.validation import HostPolicy, normalize_public_http_url
 
-        normalized = normalize_public_http_url("HTTP://Example.COM:80/a/#frag")
+        normalized = normalize_public_http_url(
+            "HTTP://Example.COM:80/a/#frag",
+            policy=HostPolicy.unrestricted(),
+        )
         assert type(normalized) is str
         assert normalized == "http://example.com/a"

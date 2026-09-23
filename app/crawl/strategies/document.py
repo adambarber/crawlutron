@@ -13,6 +13,7 @@ import urllib.request
 from typing import Any
 
 from app.timeouts import Timeouts
+from app.validation import HostPolicy
 
 
 def _format_table(rows: list[list[Any]]) -> str:
@@ -89,7 +90,7 @@ class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _default_document_text_extractor(url: str) -> str:
+def _default_document_text_extractor(url: str, policy: HostPolicy) -> str:
     """Default document text extractor: fetch the URL and extract Markdown.
 
     Used by the browser strategy for ``.pdf`` final URLs. Injectable via
@@ -109,7 +110,7 @@ def _default_document_text_extractor(url: str) -> str:
 
     # Parse BEFORE the fetch try: unsafe input raises loudly (the F2
     # contract); only fetch/extract failures below yield empty text.
-    current = SafeUrl.parse(url, pin=True)
+    current = SafeUrl.parse(url, policy=policy, pin=True)
 
     opener = urllib.request.build_opener(_NoAutoRedirect)
     from app.bounded_io import read_capped_sync

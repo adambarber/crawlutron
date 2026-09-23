@@ -6,6 +6,7 @@ import math
 import os
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -46,36 +47,48 @@ def _policy_hosts(raw: str) -> tuple[str, ...]:
     return tuple(entry for item in raw.split(",") if (entry := _policy_host_entry(item)))
 
 
-def _host_policy_reason(
-    host: str,
-    *,
-    allowed_hosts: str | None = None,
-    denied_hosts: str | None = None,
-) -> str | None:
-    if allowed_hosts is None and denied_hosts is None:
-        allowed_hosts = os.environ.get("BROWSER_CRAWLER_ALLOWED_HOSTS", "")
-        denied_hosts = os.environ.get("BROWSER_CRAWLER_DENIED_HOSTS", "")
+@dataclass(frozen=True)
+class HostPolicy:
+    allowed_hosts: tuple[str, ...]
+    denied_hosts: tuple[str, ...]
+
+    @classmethod
+    def unrestricted(cls) -> HostPolicy:
+        return cls((), ())
+
+    @classmethod
+    def from_strings(cls, allowed_hosts: str, denied_hosts: str) -> HostPolicy:
+        return cls(_policy_hosts(allowed_hosts), _policy_hosts(denied_hosts))
+
+    @classmethod
+    def from_settings(cls, settings: object) -> HostPolicy:
+        return cls.from_strings(
+            str(getattr(settings, "allowed_hosts", "") or ""),
+            str(getattr(settings, "denied_hosts", "") or ""),
+        )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "allowed_hosts",
+            tuple(_policy_host_entry(entry) for entry in self.allowed_hosts if _policy_host_entry(entry)),
+        )
+        object.__setattr__(
+            self,
+            "denied_hosts",
+            tuple(_policy_host_entry(entry) for entry in self.denied_hosts if _policy_host_entry(entry)),
+        )
+
+
+def _host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     normalized = _normalize_policy_host(host)
-    denied = _policy_hosts(denied_hosts or "")
-    if any(normalized == entry or normalized.endswith(f".{entry}") for entry in denied):
+    if any(normalized == entry or normalized.endswith(f".{entry}") for entry in policy.denied_hosts):
         return "host_denied"
-    allowed = _policy_hosts(allowed_hosts or "")
-    if allowed and not any(normalized == entry or normalized.endswith(f".{entry}") for entry in allowed):
+    if policy.allowed_hosts and not any(
+        normalized == entry or normalized.endswith(f".{entry}") for entry in policy.allowed_hosts
+    ):
         return "host_not_allowed"
     return None
-
-
-def _host_allowed(
-    host: str,
-    *,
-    allowed_hosts: str | None = None,
-    denied_hosts: str | None = None,
-) -> bool:
-    return _host_policy_reason(
-        host,
-        allowed_hosts=allowed_hosts,
-        denied_hosts=denied_hosts,
-    ) is None
 
 
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
@@ -179,12 +192,7 @@ def _resolver_numeric_ipv4(host: str) -> int | None:
     return result | values[-1]
 
 
-def normalize_public_http_url(
-    url: str,
-    *,
-    allowed_hosts: str | None = None,
-    denied_hosts: str | None = None,
-) -> NormalizedUrl:
+def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
     """Canonicalize a public HTTP(S) URL into a single normalized form.
 
     This is the single source of truth for what a normalized URL is across the
@@ -201,11 +209,7 @@ def normalize_public_http_url(
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
-    host_policy_reason = _host_policy_reason(
-        host,
-        allowed_hosts=allowed_hosts,
-        denied_hosts=denied_hosts,
-    )
+    host_policy_reason = _host_policy_reason(host, policy=policy)
     if host_policy_reason:
         raise ValueError(host_policy_reason)
     # Local dev/test escape hatch: the crawler is a localhost dev service and
@@ -602,8 +606,7 @@ def public_url_or_none(
     raw: str | None,
     *,
     resolve_against: str | None = None,
-    allowed_hosts: str | None = None,
-    denied_hosts: str | None = None,
+    policy: HostPolicy,
 ) -> str | None:
     """Egress filter: resolve relatives FIRST, then strictly accept http/https.
 
@@ -622,16 +625,15 @@ def public_url_or_none(
     candidate = raw.strip()
     if resolve_against:
         candidate = urljoin(resolve_against, candidate)
-    parsed = urlparse(candidate)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return None
-    if not _host_allowed(parsed.hostname, allowed_hosts=allowed_hosts, denied_hosts=denied_hosts):
-        return None
-    return candidate
+    normalized = safe_public_url_or_none(candidate, policy=policy)
+    return str(normalized) if normalized is not None else None
 
 
 def filter_js_endpoints(
-    endpoints: list[dict[str, str]], *, resolve_against: str | None = None
+    endpoints: list[dict[str, str]],
+    *,
+    resolve_against: str | None = None,
+    policy: HostPolicy,
 ) -> list[dict[str, str]]:
     """Egress filter for the JS-endpoint discovery door.
 
@@ -647,17 +649,18 @@ def filter_js_endpoints(
     return [
         {**endpoint, "url": clean}
         for endpoint in endpoints
-        if (clean := public_url_or_none(str(endpoint.get("url", "")), resolve_against=resolve_against))
+        if (
+            clean := public_url_or_none(
+                str(endpoint.get("url", "")),
+                resolve_against=resolve_against,
+                policy=policy,
+            )
+        )
         is not None
     ]
 
 
-def safe_public_url_or_none(
-    raw: str | None,
-    *,
-    allowed_hosts: str | None = None,
-    denied_hosts: str | None = None,
-) -> NormalizedUrl | None:
+def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> NormalizedUrl | None:
     """The single normalize-or-None chokepoint for URL egress doors.
 
     ``normalize_public_http_url`` raises ``ValueError`` on anything it rejects
@@ -677,10 +680,6 @@ def safe_public_url_or_none(
     try:
         if raw is None:
             return None
-        return normalize_public_http_url(
-            raw,
-            allowed_hosts=allowed_hosts,
-            denied_hosts=denied_hosts,
-        )
+        return normalize_public_http_url(raw, policy=policy)
     except ValueError:
         return None

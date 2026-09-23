@@ -1,5 +1,7 @@
 """HTTP fetch strategy behavior against a real local server (no mocks)."""
 
+from functools import partial
+
 from _testkit import make_fetch
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
@@ -9,9 +11,16 @@ from app.crawl.strategies.http import (
     _http_strategy_result,
     _looks_like_binary_body,
 )
+from app.validation import HostPolicy
+
+_default_http_fetcher_with_policy = partial(
+    _default_http_fetcher,
+    policy=HostPolicy.unrestricted(),
+)
 
 
 async def _run(**kwargs):
+    kwargs.setdefault("host_policy", HostPolicy.unrestricted())
     return await _http_strategy_result(**kwargs)
 
 
@@ -113,7 +122,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert result.status == "success"
         assert result.classification == "rendered"
@@ -130,7 +139,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/missing",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert result.status == "failed"
         assert result.classification == "not_found"
@@ -142,7 +151,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/blocked",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert result.classification == "access_denied"
         assert result.status == "blocked"
@@ -156,7 +165,7 @@ class TestHttpStrategy:
             normalized_url=url,
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
             cache=cache,
         )
         assert result.classification == "not_modified"
@@ -169,7 +178,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/sample.csv",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert "Alice" in (result.markdown or "")
         assert "|" in (result.markdown or "")
@@ -180,7 +189,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/sample.json",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert '"a":1' in (result.markdown or "")
 
@@ -190,7 +199,7 @@ class TestHttpStrategy:
             normalized_url=f"{base_url}/sample_table.pdf",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
-            http_fetcher=_default_http_fetcher,
+            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert "Name" in (result.markdown or "")
         assert "Department" in (result.markdown or "")
@@ -320,5 +329,6 @@ class TestHttpStrategyRetry:
             },
             http_fetcher=retry_fetcher,
             cache=HttpCache(),
+            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "rendered"

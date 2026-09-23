@@ -3,7 +3,7 @@
 import asyncio
 
 import pytest
-from _testkit import FakeScheduler, site_fetcher
+from _testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, site_fetcher
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -624,6 +624,7 @@ async def _run_with_gate(sched, gate, jobs):
         global_concurrency=4,
         seed_sitemaps=False,
         resource_gate=gate,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
     return spill
 
@@ -972,6 +973,7 @@ async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
         robots_allows=allows,
         robots_crawl_delay=crawl_delay,
         commit_crawl_delay=commit,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
     assert outcome.accepted == 1
@@ -1009,6 +1011,7 @@ async def test_duplicate_canonical_spellings_do_not_consume_capacity():
         robots_allows=lambda url: _true_async(),
         robots_crawl_delay=None,
         commit_crawl_delay=lambda domain, delay: None,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
     assert outcome.accepted == 2
@@ -1042,6 +1045,7 @@ async def test_admission_robots_work_stops_at_remaining_capacity():
         robots_crawl_delay=crawl_delay,
         commit_crawl_delay=lambda domain, delay: None,
         occupied=1,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
     assert calls == ["https://example.test/page-0"]

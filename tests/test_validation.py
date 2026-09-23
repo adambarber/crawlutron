@@ -1,8 +1,22 @@
 """Deep URL normalization: sort query params, strip default ports, drop fragments."""
 
+from functools import partial
+
 import pytest
 
-from app.validation import filter_js_endpoints, normalize_public_http_url
+from app.validation import (
+    HostPolicy,
+)
+from app.validation import (
+    filter_js_endpoints as _filter_js_endpoints,
+)
+from app.validation import (
+    normalize_public_http_url as _normalize_public_http_url,
+)
+
+_HOST_POLICY = HostPolicy.unrestricted()
+normalize_public_http_url = partial(_normalize_public_http_url, policy=_HOST_POLICY)
+filter_js_endpoints = partial(_filter_js_endpoints, policy=_HOST_POLICY)
 
 
 class TestDeepUrlNormalization:
@@ -68,10 +82,10 @@ class TestNormalizationGuardMemoization:
 
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
         counts = self._spy(monkeypatch)
-        first = validation.normalize_public_http_url(self.URL)
+        first = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
         env_after_first = counts["env"]
         ip_after_first = counts["ip"]
-        second = validation.normalize_public_http_url(self.URL)
+        second = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
         assert second == first == "https://memo-t2-9e16c.test/path?a=1&b=2"
         # The guard really ran on the first call, then nothing re-ran on the second.
         assert env_after_first >= 1
@@ -86,16 +100,19 @@ class TestNormalizationGuardMemoization:
 
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "false")
         with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://localhost/x")
+            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "true")
-        assert validation.normalize_public_http_url("http://localhost/x") == "http://localhost/x"
+        assert (
+            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
+            == "http://localhost/x"
+        )
 
     def test_unrecognized_env_value_keeps_guard_on(self, monkeypatch):
         import app.validation as validation
 
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "affirmative")
         with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://localhost/x")
+            validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
 
     def test_numeric_host_forms_still_classified(self, monkeypatch):
         import app.validation as validation
@@ -103,10 +120,10 @@ class TestNormalizationGuardMemoization:
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
         for host in ("2130706433", "0x7f000001"):
             with pytest.raises(ValueError, match="private_network_target"):
-                validation.normalize_public_http_url(f"http://{host}/x")
+                validation.normalize_public_http_url(f"http://{host}/x", policy=_HOST_POLICY)
         # Repeated forms hit the memo but must keep rejecting.
         with pytest.raises(ValueError, match="private_network_target"):
-            validation.normalize_public_http_url("http://2130706433/x")
+            validation.normalize_public_http_url("http://2130706433/x", policy=_HOST_POLICY)
 
 
 class TestFilterJsEndpoints:

@@ -17,6 +17,7 @@ from app.crawl.robots_parse import (
     parse_robots_rules,
     parse_robots_sitemaps,
 )
+from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
 
 ROBOTS_CACHE_MAX_ENTRIES = 2048
 ROBOTS_CACHE_TTL_SECONDS = 600.0
@@ -24,15 +25,16 @@ ROBOTS_FAILURE_TTL_SECONDS = 60.0
 RobotsRules: TypeAlias = tuple[list[tuple[bool, str]], list[str], float | None]
 FetchAndDecode = Callable[[Any, str, dict[str, str], int], Awaitable[tuple[str | None, int | None]]]
 
-robots_cache: BoundedTTLCache[str, RobotsRules] = BoundedTTLCache(
+robots_cache: BoundedTTLCache[tuple[str, HostPolicy], RobotsRules] = BoundedTTLCache(
     max_entries=ROBOTS_CACHE_MAX_ENTRIES,
     ttl=ROBOTS_CACHE_TTL_SECONDS,
 )
-_inflight: dict[str, asyncio.Task[RobotsRules]] = {}
+_inflight: dict[tuple[str, HostPolicy], asyncio.Task[RobotsRules]] = {}
 
 
-def robots_origin(url: str) -> str:
-    parsed = urlparse(url)
+def robots_origin(url: str, *, policy: HostPolicy) -> str:
+    normalized = normalize_public_http_url(url, policy=policy)
+    parsed = urlparse(normalized)
     return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
 
@@ -41,6 +43,7 @@ async def _load_uncached(
     fetcher: Any,
     timeout_seconds: int,
     fetch_and_decode: FetchAndDecode,
+    policy: HostPolicy,
 ) -> RobotsRules:
     body, status = await fetch_and_decode(
         fetcher,
@@ -51,7 +54,11 @@ async def _load_uncached(
     if status == 200 and body is not None:
         value: RobotsRules = (
             parse_robots_rules(body),
-            parse_robots_sitemaps(body),
+            [
+                loc
+                for loc in parse_robots_sitemaps(body)
+                if safe_public_url_or_none(urljoin(origin, loc), policy=policy) is not None
+            ],
             parse_robots_crawl_delay(body),
         )
         ttl = ROBOTS_CACHE_TTL_SECONDS
@@ -61,7 +68,7 @@ async def _load_uncached(
     else:
         value = ([(False, "/")], [], None)
         ttl = ROBOTS_FAILURE_TTL_SECONDS
-    robots_cache.put(origin, value, ttl=ttl)
+    robots_cache.put((origin, policy), value, ttl=ttl)
     return value
 
 
@@ -71,22 +78,25 @@ async def load_robots_rules(
     timeout_seconds: int,
     *,
     fetch_and_decode: FetchAndDecode | None = None,
+    policy: HostPolicy,
 ) -> RobotsRules:
     """Load one origin's robots policy through the process-wide cache."""
-    canonical_origin = robots_origin(origin)
-    cached = robots_cache.get(canonical_origin)
+    canonical_origin = robots_origin(origin, policy=policy)
+    cache_key = (canonical_origin, policy)
+    cached = robots_cache.get(cache_key)
     if cached is not None:
         return cached
     decode = _fetch_and_decode if fetch_and_decode is None else fetch_and_decode
     return await _single_flight(
         _inflight,
-        canonical_origin,
-        lambda: _load_uncached(canonical_origin, fetcher, timeout_seconds, decode),
+        cache_key,
+        lambda: _load_uncached(canonical_origin, fetcher, timeout_seconds, decode, policy),
     )
 
 
-def cached_sitemaps(origin: str) -> list[str] | None:
-    cached = robots_cache.get(robots_origin(origin))
+def cached_sitemaps(origin: str, *, policy: HostPolicy) -> list[str] | None:
+    canonical_origin = robots_origin(origin, policy=policy)
+    cached = robots_cache.get((canonical_origin, policy))
     return None if cached is None else list(cached[1])
 
 

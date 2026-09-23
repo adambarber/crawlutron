@@ -60,7 +60,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
 
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     route = MockRoute()
     request = MockRequest("http://example.com/")
@@ -89,7 +89,7 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
 
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     async def call_handler(i):
         route = MockRoute()
@@ -118,7 +118,7 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     """Safe subresource requests should be pinned to validated IP and continued
     with the pinned URL and original Host header."""
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     # Mock _build_pinned_request (sync - runs in thread pool via asyncio.to_thread)
     def mock_build_pinned_request(url, headers):
@@ -156,7 +156,7 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
 @pytest.mark.browser
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     # Mock _build_pinned_request (sync) to raise ValueError for unsafe target
     def mock_build_pinned_request(url, headers):
@@ -188,7 +188,7 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
 
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     route = MockRoute()
     request = MockRequest("http://example.com/")
@@ -209,7 +209,7 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
 
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     class MockRequest:
         def __init__(self, url):
@@ -257,7 +257,7 @@ class _Route:
 @pytest.mark.browser
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
     """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     def boom(url, headers):
         raise TimeoutError("dns lookup timed out")
@@ -272,7 +272,7 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 @pytest.mark.browser
 async def test_ssrf_route_handler_allows_non_network_schemes():
     """data:/blob:/about: requests never touch DNS; they must pass through."""
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     for scheme_url in ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"):
         route = _Route()
@@ -326,7 +326,11 @@ class _FakeRequest:
 
 
 def _handler_for(resource_mode=None, *, include_screenshot=False):
-    return _make_ssrf_route_handler(resource_mode, include_screenshot=include_screenshot)
+    return _make_ssrf_route_handler(
+        resource_mode,
+        include_screenshot=include_screenshot,
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
 
 
 @pytest.mark.browser

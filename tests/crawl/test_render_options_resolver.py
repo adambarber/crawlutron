@@ -28,6 +28,7 @@ from app.crawl.engine import _browser_strategy_result
 from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.models import CrawlResult
 from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 def _settings() -> CrawlerSettings:
@@ -149,6 +150,7 @@ class TestEngineConsumesResolver:
             strategy="BROWSER_HEADLESS",
             policy=policy,
             browser_worker=worker,
+            host_policy=HostPolicy.unrestricted(),
         )
         options = captured["options"]
         # The caller asked for no HTML in the payload...

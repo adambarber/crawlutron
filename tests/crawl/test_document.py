@@ -6,11 +6,11 @@ from _testkit import *
 from _testkit import make_fetch
 
 from app.crawl.strategies.document import (
-    _default_document_text_extractor,
     _extract_pdf_bytes_to_markdown,
     _format_table,
     _pdf_to_markdown,
 )
+from app.validation import HostPolicy
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
 
@@ -233,6 +233,7 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
             "extraction": "document",
         },
         http_fetcher=fetcher,
+        host_policy=HostPolicy.unrestricted(),
     )
     assert result.status == "success", (result.status, result.classification)
     assert "Alice" in (result.text or "")

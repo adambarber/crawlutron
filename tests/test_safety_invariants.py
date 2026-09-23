@@ -1885,6 +1885,280 @@ def test_non_member_strategy_detector_bites():
     )
 
 
+_REQUIRED_POLICY_FUNCTIONS = frozenset(
+    {
+        "canonical_page_identity",
+        "filter_js_endpoints",
+        "normalize_public_http_url",
+        "public_url_or_none",
+        "safe_public_url_or_none",
+    }
+)
+
+
+def _annotation_names_host_policy(annotation: ast.AST | None) -> bool:
+    if annotation is None:
+        return False
+    if isinstance(annotation, ast.Name):
+        return annotation.id == "HostPolicy"
+    if isinstance(annotation, ast.Attribute):
+        return annotation.attr == "HostPolicy"
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        return annotation.value.endswith("HostPolicy")
+    return False
+
+
+def _host_policy_argument(function: ast.AST) -> tuple[bool, bool]:
+    if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False, False
+    positional = (*function.args.posonlyargs, *function.args.args)
+    defaults = function.args.defaults
+    positional_defaults = {
+        id(argument): default
+        for argument, default in zip(positional[-len(defaults) :], defaults, strict=True)
+    } if defaults else {}
+    for argument in positional:
+        if _annotation_names_host_policy(argument.annotation):
+            return True, positional_defaults.get(id(argument)) is not None
+    for argument, default in zip(function.args.kwonlyargs, function.args.kw_defaults, strict=True):
+        if _annotation_names_host_policy(argument.annotation):
+            return True, default is not None
+    return False, False
+
+
+def _walk_non_none(root: ast.AST) -> list[ast.AST]:
+    pending = [root]
+    nodes: list[ast.AST] = []
+    while pending:
+        node = pending.pop()
+        nodes.append(node)
+        pending.extend(
+            child
+            for _, field in ast.iter_fields(node)
+            for child in (
+                (field,)
+                if isinstance(field, ast.AST)
+                else field
+                if isinstance(field, (list, tuple))
+                else ()
+            )
+            if isinstance(child, ast.AST)
+        )
+    return nodes
+
+
+def _url_parameter_name(name: str) -> bool:
+    lowered = name.lower()
+    return (
+        "url" in lowered
+        or lowered in {"href", "location", "origin", "endpoint", "endpoints"}
+        or lowered.endswith("_href")
+    )
+
+
+def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
+    if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    arguments = (*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs)
+    url_names = {argument.arg for argument in arguments if _url_parameter_name(argument.arg)}
+    url_calls = {
+        "canonical_page_identity",
+        "normalize_public_http_url",
+        "public_url_or_none",
+        "safe_public_url_or_none",
+        "urljoin",
+        "urlunsplit",
+    }
+    def derives_url(node: ast.AST) -> bool:
+        if isinstance(node, ast.Name):
+            return node.id in url_names
+        if isinstance(node, ast.Call):
+            name = resolved_call_name(tree, node)
+            return name in url_calls or name == "SafeUrl.parse" or name.endswith(
+                (".urlparse", ".urlsplit", ".geturl")
+            )
+        if isinstance(node, (ast.BinOp, ast.JoinedStr)):
+            return any(derives_url(child) for child in ast.iter_child_nodes(node))
+        return False
+
+    changed = True
+    while changed:
+        changed = False
+        for statement in _local_nodes(function):
+            if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = statement.value
+            if value is None:
+                continue
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            names = {target.id for target in targets if isinstance(target, ast.Name)}
+            if not names or names <= url_names:
+                continue
+            if derives_url(value):
+                url_names.update(names)
+                changed = True
+
+    def expression_returns_url(node: ast.AST | None) -> bool:
+        if node is None:
+            return False
+        if isinstance(node, ast.Name):
+            return node.id in url_names
+        if isinstance(node, ast.Constant):
+            return isinstance(node.value, str) and node.value.lower().startswith(("http://", "https://"))
+        if isinstance(node, ast.Attribute):
+            return node.attr in {"url", "raw", "href", "location", "normalized_url", "final_url"}
+        if isinstance(node, ast.Subscript):
+            key = node.slice
+            return isinstance(key, ast.Constant) and key.value == "url"
+        if isinstance(node, ast.Call):
+            name = resolved_call_name(tree, node)
+            return name in url_calls or name == "SafeUrl.parse" or name.endswith(
+                (".urlparse", ".urlsplit", ".geturl")
+            )
+        if isinstance(node, ast.Dict):
+            return bool(url_names) and any(
+                isinstance(key, ast.Constant) and key.value == "url" and expression_returns_url(value)
+                for key, value in zip(node.keys, node.values, strict=True)
+            )
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return any(expression_returns_url(element) for element in node.elts)
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+            return expression_returns_url(node.elt) or any(
+                _url_parameter_name(generator.iter.id)
+                for generator in node.generators
+                if isinstance(generator.iter, ast.Name)
+            )
+        if isinstance(node, ast.DictComp):
+            return expression_returns_url(node.key) or expression_returns_url(node.value)
+        if isinstance(node, (ast.BinOp, ast.JoinedStr)):
+            return any(expression_returns_url(child) for child in ast.iter_child_nodes(node))
+        return False
+
+    endpoint_parameters = {
+        argument.arg
+        for argument in arguments
+        if argument.arg.lower() in {"endpoint", "endpoints"}
+    }
+    return any(
+        isinstance(node, ast.Return)
+        and (
+            expression_returns_url(node.value)
+            or isinstance(node.value, ast.Name)
+            and node.value.id in endpoint_parameters
+        )
+        for node in _local_nodes(function)
+    )
+
+
+def _class_policies(tree: ast.AST) -> set[int]:
+    policy_classes: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if any(
+            isinstance(child, ast.AnnAssign)
+            and isinstance(child.target, ast.Name)
+            and child.target.id in {"policy", "host_policy"}
+            and _annotation_names_host_policy(child.annotation)
+            for child in node.body
+        ):
+            policy_classes.add(id(node))
+    return policy_classes
+
+
+def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    found: list[str] = []
+    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    policy_classes = _class_policies(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        has_policy, has_default = _host_policy_argument(node)
+        parent = parents.get(id(node))
+        required_name = node.name in _REQUIRED_POLICY_FUNCTIONS or (
+            isinstance(parent, ast.ClassDef)
+            and parent.name == "SafeUrl"
+            and node.name == "parse"
+        )
+        method_has_bound_policy = isinstance(parent, ast.ClassDef) and id(parent) in policy_classes
+        if (required_name or _url_return_shapes(node, tree)) and not (
+            has_policy and not has_default or method_has_bound_policy and not required_name
+        ):
+            found.append(offender(path, node.lineno, f"{node.name}() returns URLs without required HostPolicy"))
+    return found
+
+
+def test_required_host_policy_detector_bites():
+    bad = ast.parse(
+        "def normalize_public_http_url(url, *, policy=None):\n"
+        "    return url\n"
+    )
+    offenders = _required_host_policy_offenders(
+        bad,
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+    assert len(offenders) == 1 and "HostPolicy" in offenders[0], offenders
+
+    good = ast.parse(
+        "def normalize_public_http_url(url, *, policy: HostPolicy):\n"
+        "    return url\n"
+    )
+    assert not _required_host_policy_offenders(
+        good,
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+    safe_bad = ast.parse(
+        "class SafeUrl:\n"
+        "    def parse(self, url, *, policy=None):\n"
+        "        return url\n"
+    )
+    assert len(
+        _required_host_policy_offenders(
+            safe_bad,
+            REPO_ROOT / "app" / "_synthetic.py",
+        )
+    ) == 1
+
+
+def test_required_host_policy_detector_covers_new_url_helper_shapes():
+    source = ast.parse(
+        "def passthrough_url(url: str) -> str:\n"
+        "    return url\n"
+        "def filter_endpoints(endpoints: list[dict[str, str]]) -> list[dict[str, str]]:\n"
+        "    return [item for item in endpoints if item.get('url')]\n"
+    )
+    offenders = _required_host_policy_offenders(
+        source,
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+    assert len(offenders) == 2, offenders
+
+
+def test_url_returning_helpers_require_host_policy():
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_required_host_policy_offenders(tree, path))
+    assert not offenders, ", ".join(offenders)
+
+
+def test_resolved_call_name_handles_getattr_alias_and_static_name():
+    source = ast.parse(
+        "from builtins import getattr as ga\n"
+        "import ipaddress\n"
+        "def direct():\n"
+        "    return getattr(ipaddress, 'ip_address')\n"
+        "def aliased(value):\n"
+        "    return ga(ipaddress, 'ip_address')(value)\n"
+        "def constructed(value):\n"
+        "    name = 'ip_' + 'address'\n"
+        "    return getattr(ipaddress, name)(value)\n"
+    )
+    calls = [node for node in ast.walk(source) if isinstance(node, ast.Call)]
+    attribute_calls = [call for call in calls if isinstance(call.func, ast.Name)]
+    assert len(attribute_calls) == 3
+    assert all(resolved_call_name(source, call) == "ipaddress.ip_address" for call in attribute_calls)
+
+
 # ---------------------------------------------------------------------------
 # Normalize-or-None chokepoint (jscpd #5 family)
 #
@@ -3551,10 +3825,8 @@ def _public_range_accesses(tree: ast.AST, nodes: list[ast.AST]) -> int:
                 if name.endswith(".ip_network"):
                     count += 1
                 elif (
-                    name == "getattr"
+                    name.endswith(tuple(f".{attribute}" for attribute in _PUBLIC_RANGE_ATTRIBUTES))
                     and len(child.args) >= 2
-                    and isinstance(child.args[1], ast.Constant)
-                    and child.args[1].value in _PUBLIC_RANGE_ATTRIBUTES
                 ):
                     count += 1
     return count
@@ -3861,7 +4133,7 @@ def _robots_observations_for_node(tree: ast.AST, path: pathlib.Path, node: ast.A
     parser_definitions = int(_parser_definition(tree, path, node))
     cache_calls = _cache_call_count(tree, node)
     url_calls = int(_url_constructor(tree, node))
-    if url_calls and _robots_fetch_like(tree, node):
+    if url_calls and _robot_signal(node) and _robots_fetch_like(tree, node):
         observations["robots_url"] = url_calls
     if parser_calls:
         observations["parse_robots_rules_call"] = parser_calls

@@ -1,6 +1,7 @@
 from _testkit import MockResponse, patch_http_fetcher_transport
 
 from app.crawl.strategies.http import _default_http_fetcher
+from app.validation import HostPolicy
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
 
@@ -12,7 +13,12 @@ async def _fetch_with_redirect(monkeypatch, redirect_location):
         MockResponse(200, {"content-type": "text/html"}, b"<html>ok</html>"),
     ]
     mock_client = patch_http_fetcher_transport(monkeypatch, responses)
-    result = await _default_http_fetcher("http://example.com/", dict(SENSITIVE_HEADERS), 30)
+    result = await _default_http_fetcher(
+            "http://example.com/",
+            dict(SENSITIVE_HEADERS),
+            30,
+            policy=HostPolicy.unrestricted(),
+        )
     return mock_client, result
 
 

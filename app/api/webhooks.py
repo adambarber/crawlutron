@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.timeouts import Timeouts
-from app.validation import get_mapping_int
+from app.validation import HostPolicy, get_mapping_int
 
 if TYPE_CHECKING:
     from app.safe_url import SafeUrl
@@ -36,7 +36,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None:
+async def deliver_pinned_webhook(
+    webhook_url: str,
+    payload_bytes: bytes,
+    *,
+    host_policy: HostPolicy,
+) -> None:
     """POST ``payload_bytes`` to ``webhook_url`` with DNS-rebinding safety.
 
     The pin policy lives in ``SafeUrl.connect()`` (plain HTTP connects to the
@@ -61,7 +66,7 @@ async def deliver_pinned_webhook(webhook_url: str, payload_bytes: bytes) -> None
     # validate_webhook_url already ran at the edge; parsing again here closes
     # the TOCTOU between validation and delivery. The parse runs off the event
     # loop (D3): see _parse_pinned_off_loop.
-    safe = await _parse_pinned_off_loop(webhook_url)
+    safe = await _parse_pinned_off_loop(webhook_url, host_policy=host_policy)
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
     # A fresh client per delivery is deliberate (M4 audit): the security
@@ -114,7 +119,12 @@ def _max_webhook_size() -> int:
     return _parse_webhook_size(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE"))
 
 
-async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
+async def post_webhook(
+    webhook_url: str,
+    payload: dict[str, Any],
+    *,
+    host_policy: HostPolicy,
+) -> None:
     """POST payload to webhook URL with size limit and SSRF+IP-pinning.
 
     Routes through the same validated + IP-pinned delivery path
@@ -131,8 +141,12 @@ async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
         )
         return
     try:
-        await validate_webhook_url_async(webhook_url)
-        await deliver_pinned_webhook(webhook_url, payload_bytes)
+        await validate_webhook_url_async(webhook_url, host_policy=host_policy)
+        await deliver_pinned_webhook(
+            webhook_url,
+            payload_bytes,
+            host_policy=host_policy,
+        )
     except Exception as exc:
         logger.warning(
             "webhook_delivery_failed",
@@ -140,7 +154,7 @@ async def post_webhook(webhook_url: str, payload: dict[str, Any]) -> None:
         )
 
 
-def validate_webhook_url(webhook_url: str) -> None:
+def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
     """Validate webhook URL to prevent SSRF attacks.
 
     Similar to crawl target validation but for outbound webhook callbacks.
@@ -154,10 +168,10 @@ def validate_webhook_url(webhook_url: str) -> None:
     """
     from app.safe_url import SafeUrl
 
-    SafeUrl.parse(webhook_url, pin=True)
+    SafeUrl.parse(webhook_url, policy=host_policy, pin=True)
 
 
-async def validate_webhook_url_async(webhook_url: str) -> None:
+async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
     """Off-event-loop twin of :func:`validate_webhook_url` (M6).
 
     ``SafeUrl.parse(pin=True)`` calls the synchronous ``socket.getaddrinfo``,
@@ -172,10 +186,13 @@ async def validate_webhook_url_async(webhook_url: str) -> None:
     from app.crawl.strategies.http import _DNS_EXECUTOR
 
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(_DNS_EXECUTOR, validate_webhook_url, webhook_url)
+    await loop.run_in_executor(
+        _DNS_EXECUTOR,
+        functools.partial(validate_webhook_url, webhook_url, host_policy=host_policy),
+    )
 
 
-async def _parse_pinned_off_loop(webhook_url: str) -> SafeUrl:
+async def _parse_pinned_off_loop(webhook_url: str, *, host_policy: HostPolicy) -> SafeUrl:
     """Off-event-loop ``SafeUrl.parse(webhook_url, pin=True)`` (D3).
 
     The delivery path re-parses through the chokepoint to close the TOCTOU
@@ -194,7 +211,8 @@ async def _parse_pinned_off_loop(webhook_url: str) -> SafeUrl:
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        _DNS_EXECUTOR, functools.partial(SafeUrl.parse, webhook_url, pin=True)
+        _DNS_EXECUTOR,
+        functools.partial(SafeUrl.parse, webhook_url, policy=host_policy, pin=True),
     )
 
 

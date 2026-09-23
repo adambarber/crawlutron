@@ -1,6 +1,15 @@
 """Unit tests for the shared manual-redirect decision helper (both fetchers)."""
 
-from app.crawl.strategies.http import _MAX_REDIRECT_HOPS, _redirect_target
+from functools import partial
+
+from app.crawl.strategies.http import _MAX_REDIRECT_HOPS
+from app.crawl.strategies.http import _redirect_target as _redirect_target_with_policy
+from app.validation import HostPolicy
+
+_redirect_target = partial(
+    _redirect_target_with_policy,
+    policy=HostPolicy.unrestricted(),
+)
 
 
 def test_redirect_target_follows_in_budget_redirect():

@@ -33,6 +33,7 @@ from app.crawl.payload_helpers import checked_payload_urls
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 from app.output_formats import serialize_results
+from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,12 @@ async def crawl(
         # only fails it inside the detached background task, where the caller
         # can no longer see why. Same chokepoint the engine uses, so sync and
         # async cannot drift.
-        checked = checked_payload_urls(payload_dict, settings.max_batch_size)
+        host_policy = HostPolicy.from_settings(settings)
+        checked = checked_payload_urls(
+            payload_dict,
+            settings.max_batch_size,
+            host_policy=host_policy,
+        )
         webhook_url = payload.webhook_url
         async_mode = payload.async_mode
         if async_mode or webhook_url:
@@ -90,7 +96,7 @@ async def crawl(
             ):
                 raise http_error(422, "validation_error", "Invalid webhook_url")
             if webhook_url:
-                await validate_webhook_url_async(webhook_url)
+                await validate_webhook_url_async(webhook_url, host_policy=host_policy)
             request_id = new_request_id()
             job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
             from app.api.async_crawl_runner import run_async_crawl

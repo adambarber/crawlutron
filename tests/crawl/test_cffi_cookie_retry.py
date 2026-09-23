@@ -5,6 +5,7 @@ from _testkit import make_fetch
 
 from app.crawl.engine import _execute_crawl_chain
 from app.models import CrawlResult
+from app.validation import HostPolicy
 
 
 def _crawl_result(url):
@@ -88,6 +89,7 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
         http_fetcher=http_fetcher,
         cffi_fetcher=cffi_fetcher,
         browser_worker=browser_worker,
+        host_policy=HostPolicy.unrestricted(),
     )
     assert result.status == "success"
     assert result.diagnostics["robots"]["evaluation"] == "disabled"

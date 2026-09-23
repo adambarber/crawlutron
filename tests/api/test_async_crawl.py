@@ -1,7 +1,7 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
 import pytest
-from _testkit import make_crawl_payload, poll_until
+from _testkit import UNRESTRICTED_HOST_POLICY, make_crawl_payload, poll_until
 from helpers.server import WEBHOOK_RECEIVED
 
 
@@ -307,7 +307,7 @@ class TestAsyncCrawlJobStoreIntegration:
         from app.crawl.job_store import JobKind, JobStatus, JobStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = JobStore(f"{tmpdir}/test.db")
+            store = JobStore(f"{tmpdir}/test.db", policy=UNRESTRICTED_HOST_POLICY)
             job = store.create_single_shot("test-id", "http://example.com/", {"test": "policy"})
             assert job.job_id == "test-id"
             assert job.kind == JobKind.SINGLE_SHOT
@@ -330,7 +330,7 @@ class TestAsyncCrawlJobStoreIntegration:
         from app.crawl.job_store import JobKind, JobStatus, JobStore
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = JobStore(f"{tmpdir}/test.db")
+            store = JobStore(f"{tmpdir}/test.db", policy=UNRESTRICTED_HOST_POLICY)
             job = store.create_single_shot("test-id", "http://example.com/", {"test": "policy"})
 
             # Simulate completion

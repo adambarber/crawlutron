@@ -9,7 +9,7 @@
 
 import asyncio
 
-from _testkit import BrowserFakePage, build_pinned_renderer
+from _testkit import UNRESTRICTED_HOST_POLICY, BrowserFakePage, build_pinned_renderer
 
 import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _MAX_ACTION_WAIT_SECONDS, BrowserRenderer
@@ -60,8 +60,12 @@ class TestNavigationTimeout:
         monkeypatch.setattr(
             browser_mod,
             "_build_pinned_request",
-            lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
+            lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
         )
         options = RenderOptions(timeout_seconds=1, max_retries=0)
-        result = await renderer.render("http://example.com/", options)
+        result = await renderer.render(
+            "http://example.com/",
+            options,
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert result.classification == "navigation_timeout"

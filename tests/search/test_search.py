@@ -26,6 +26,7 @@ from app.search.providers import (
     get_search_provider,
 )
 from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 def _settings(**overrides) -> CrawlerSettings:
@@ -57,7 +58,7 @@ class TestProviderParsing:
                 }
             ),
         )
-        provider = TavilyProvider("test-key")
+        provider = TavilyProvider("test-key", HostPolicy.unrestricted())
         results = await provider.search("worcester agenda", 5, 10.0)
         assert [r.url for r in results] == ["https://example.gov/1"]
         assert results[0].title == "Good"
@@ -77,7 +78,7 @@ class TestProviderParsing:
                 }
             ),
         )
-        provider = BraveProvider("test-key")
+        provider = BraveProvider("test-key", HostPolicy.unrestricted())
         results = await provider.search("records", 5, 10.0)
         assert [r.url for r in results] == ["https://example.gov/b", "https://example.gov/b2"]
         assert results[0].description == "b desc"
@@ -93,7 +94,7 @@ class TestProviderParsing:
                 }
             ),
         )
-        provider = SerperProvider("test-key")
+        provider = SerperProvider("test-key", HostPolicy.unrestricted())
         results = await provider.search("minutes", 5, 10.0)
         assert results[0].url == "https://example.gov/s"
         assert results[0].title == "S"
@@ -103,9 +104,9 @@ class TestProviderParsing:
         """Each keyed provider sends the key it was constructed with."""
         capture: list = []
         fake_provider_http(200, json.dumps({"results": []}), capture=capture)
-        await TavilyProvider("tavily-key").search("x", 1, 5.0)
-        await BraveProvider("brave-key").search("x", 1, 5.0)
-        await SerperProvider("serper-key").search("x", 1, 5.0)
+        await TavilyProvider("tavily-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
+        await BraveProvider("brave-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
+        await SerperProvider("serper-key", HostPolicy.unrestricted()).search("x", 1, 5.0)
         assert capture[0]["json_body"]["api_key"] == "tavily-key"
         assert capture[1]["headers"]["X-Subscription-Token"] == "brave-key"
         assert capture[2]["headers"]["X-API-KEY"] == "serper-key"
@@ -126,7 +127,7 @@ class TestProviderParsing:
             </body></html>
             """,
         )
-        provider = DuckDuckGoProvider()
+        provider = DuckDuckGoProvider(HostPolicy.unrestricted())
         results = await provider.search("agenda", 5, 10.0)
         assert [r.url for r in results] == [target]
         assert results[0].title == "Agenda page"
@@ -134,19 +135,19 @@ class TestProviderParsing:
 
     async def test_duckduckgo_bot_challenge_raises(self, fake_provider_http):
         fake_provider_http(200, "<html>Anomaly detected. Please complete the following challenge.</html>")
-        provider = DuckDuckGoProvider()
+        provider = DuckDuckGoProvider(HostPolicy.unrestricted())
         with pytest.raises(SearchProviderError, match="bot challenge"):
             await provider.search("x", 5, 10.0)
 
     async def test_non_2xx_provider_status_raises_with_detail(self, fake_provider_http):
         fake_provider_http(401, json.dumps({"detail": "invalid api key"}))
-        provider = TavilyProvider("bad-key")
+        provider = TavilyProvider("bad-key", HostPolicy.unrestricted())
         with pytest.raises(SearchProviderError, match="HTTP 401.*invalid api key"):
             await provider.search("x", 5, 10.0)
 
     async def test_non_json_body_raises(self, fake_provider_http):
         fake_provider_http(200, "not json at all")
-        provider = TavilyProvider("key")
+        provider = TavilyProvider("key", HostPolicy.unrestricted())
         with pytest.raises(SearchProviderError, match="non-JSON"):
             await provider.search("x", 5, 10.0)
 
@@ -163,7 +164,7 @@ class TestProviderParsing:
                 }
             ),
         )
-        provider = TavilyProvider("key")
+        provider = TavilyProvider("key", HostPolicy.unrestricted())
         results = await provider.search("x", 5, 10.0)
         assert [r.url for r in results] == ["https://example.gov/a", "https://example.gov/b"]
 
@@ -180,7 +181,13 @@ class TestCollectResults:
             {"url": "https://example.gov/a/", "title": "A dup", "content": "dup"},
             {"url": "https://example.gov/b", "title": "B", "content": "second"},
         ]
-        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        results = _collect_results(
+            items,
+            url_key="url",
+            title_key="title",
+            description_key="content",
+            policy=HostPolicy.unrestricted(),
+        )
         assert [(r.url, r.title, r.description) for r in results] == [
             ("https://example.gov/a", "A", "first"),
             ("https://example.gov/b", "B", "second"),
@@ -200,7 +207,13 @@ class TestCollectResults:
             {"title": "no url key"},
             {"url": "https://example.gov/ok", "title": "kept"},
         ]
-        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        results = _collect_results(
+            items,
+            url_key="url",
+            title_key="title",
+            description_key="content",
+            policy=HostPolicy.unrestricted(),
+        )
         assert [r.url for r in results] == ["https://example.gov/ok"]
         assert results[0].description == ""
 
@@ -210,7 +223,13 @@ class TestCollectResults:
         items = [
             {"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}
         ]
-        results = _collect_results(items, url_key="url", title_key="title", description_key="content")
+        results = _collect_results(
+            items,
+            url_key="url",
+            title_key="title",
+            description_key="content",
+            policy=HostPolicy.unrestricted(),
+        )
         assert results[0].title == "a b"
         assert results[0].description.endswith("…")
         assert len(results[0].description) == _MAX_TEXT_LENGTH + 1  # ellipsis adds one
@@ -218,7 +237,13 @@ class TestCollectResults:
     def test_none_items_iterable_is_empty(self):
         from app.search.providers import _collect_results
 
-        assert _collect_results(None, url_key="url", title_key="title", description_key="content") == []
+        assert _collect_results(
+            None,
+            url_key="url",
+            title_key="title",
+            description_key="content",
+            policy=HostPolicy.unrestricted(),
+        ) == []
 
 
 # --- Provider selection -----------------------------------------------------

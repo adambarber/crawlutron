@@ -10,7 +10,11 @@ class TestFormatCrawlItemUnified:
         html = "<html><head><title>T</title></head><body><p>Body text here</p></body></html>"
         item = {
             "html": html,
-            "markdown": extract_content(html, "text/html", "http://example.com/").markdown,
+            "markdown": extract_content(
+                html,
+                "text/html",
+                "http://example.com/",
+            ).markdown,
             "final_url": "http://example.com/",
         }
         markdown, metadata = format_crawl_item(item)

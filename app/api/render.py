@@ -32,7 +32,7 @@ from app.models import (
 )
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import normalize_public_http_url, registrable_domain
+from app.validation import HostPolicy, normalize_public_http_url, registrable_domain
 
 
 def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> RenderOptions:
@@ -91,10 +91,15 @@ async def render_request(
 ) -> dict[str, Any]:
     """Run a /v1/render-shaped request through the per-domain scheduler."""
     active_settings = settings or CrawlerSettings.from_mapping()
+    host_policy = HostPolicy.from_settings(active_settings)
     # The single shared batch gate (app.crawl.payload_helpers.checked_payload_urls):
     # this route used to hand-roll the same cap against max_batch_size with a
     # different failure shape, so the two gates could drift.
-    urls = checked_payload_urls(payload, active_settings.max_batch_size)
+    urls = checked_payload_urls(
+        payload,
+        active_settings.max_batch_size,
+        host_policy=host_policy,
+    )
 
     options = _render_options(payload, active_settings)
     started = time.monotonic()
@@ -103,7 +108,7 @@ async def render_request(
 
     for index, url in enumerate(urls):
         try:
-            normalized = normalize_public_http_url(url)
+            normalized = normalize_public_http_url(url, policy=host_policy)
             domain = registrable_domain(normalized)
         except ValueError as error:
             # ``normalize_public_http_url`` raises with the taxonomy code itself
@@ -118,7 +123,15 @@ async def render_request(
                 (index, url), classification, int((time.monotonic() - started) * 1000)
             )
             continue
-        jobs.append(CrawlJob(index=index, url=normalized, domain=domain, options=options))
+        jobs.append(
+            CrawlJob(
+                index=index,
+                url=normalized,
+                domain=domain,
+                options=options,
+                host_policy=host_policy,
+            )
+        )
 
     scheduler = DomainScheduler(
         global_limit=active_settings.global_concurrency,

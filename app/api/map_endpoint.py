@@ -19,6 +19,8 @@ from app.constants import MAX_DISCOVERED_LINKS
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.map import build_site_map
 from app.metrics import get_metrics
+from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +45,10 @@ async def map_site(
         limits.setdefault("max_discovered_links", MAX_DISCOVERED_LINKS)
         policy["limits"] = limits
         _crawl_started = time.monotonic()
+        active_settings = settings or CrawlerSettings.from_mapping()
         result = await execute_crawl(
             payload_dict,
-            settings=settings,
+            settings=active_settings,
             shutdown_event=shutdown_event,
         )
         get_metrics().observe_crawl(
@@ -56,7 +59,7 @@ async def map_site(
             "map_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
-        return build_site_map(result)
+        return build_site_map(result, host_policy=HostPolicy.from_settings(active_settings))
     except ValueError as error:
         logger.warning("map_request_rejected", extra={"error": str(error)})
         raise http_error(

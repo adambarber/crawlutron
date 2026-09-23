@@ -14,6 +14,7 @@ from app.crawl.robots import (
     robots_cache,
 )
 from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 def _policy(*, respect_robots: bool = True) -> dict:
@@ -44,7 +45,11 @@ def _page_fetcher(calls: list[str]):
 
 async def test_job_fetch_populates_cache_seen_by_engine():
     robots_cache.clear()
-    gate = RobotsGate({}, CrawlerSettings.from_mapping({}))
+    gate = RobotsGate(
+            {},
+            CrawlerSettings.from_mapping({}),
+            HostPolicy.unrestricted(),
+        )
     fetch_calls = 0
 
     async def decode(fetcher, url, headers, timeout_seconds):
@@ -68,7 +73,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
     )
     assert result["results"][0]["status"] == "success"
     assert fetch_calls == 1
-    assert robots_cache.get("https://shared.test") == (
+    assert robots_cache.get(("https://shared.test", HostPolicy.unrestricted())) == (
         [(False, "/private")],
         ["https://shared.test/sitemap.xml"],
         2.0,
@@ -86,7 +91,11 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     assert result["results"][0]["status"] == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
 
-    gate = RobotsGate({}, CrawlerSettings.from_mapping({}))
+    gate = RobotsGate(
+            {},
+            CrawlerSettings.from_mapping({}),
+            HostPolicy.unrestricted(),
+        )
 
     async def unexpected_decode(*args):
         raise AssertionError("job path fetched a cached robots policy")
@@ -127,7 +136,11 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
 
     robots_cache.clear()
     calls = 0
-    gate = RobotsGate({}, CrawlerSettings.from_mapping({}))
+    gate = RobotsGate(
+            {},
+            CrawlerSettings.from_mapping({}),
+            HostPolicy.unrestricted(),
+        )
     import app.crawl.admission as admission
 
     monkeypatch.setattr(admission, "_fetch_and_decode", decode)
@@ -150,18 +163,29 @@ async def test_owner_preserves_404_and_5xx_ttl_semantics(monkeypatch):
         return None, next(statuses)
 
     monkeypatch.setattr(owner, "_fetch_and_decode", decode)
-    missing = await load_robots_rules("https://missing.test", object(), 5)
-    missing_again = await load_robots_rules("https://missing.test", object(), 5)
-    failure = await load_robots_rules("https://failure.test", object(), 5)
-    failure_again = await load_robots_rules("https://failure.test", object(), 5)
+    policy = HostPolicy.unrestricted()
+    missing = await load_robots_rules("https://missing.test", object(), 5, policy=policy)
+    missing_again = await load_robots_rules(
+        "https://missing.test",
+        object(),
+        5,
+        policy=policy,
+    )
+    failure = await load_robots_rules("https://failure.test", object(), 5, policy=policy)
+    failure_again = await load_robots_rules(
+        "https://failure.test",
+        object(),
+        5,
+        policy=policy,
+    )
     assert missing == ([], [], None)
     assert missing_again == ([], [], None)
     assert failure == ([(False, "/")], [], None)
     assert failure_again == ([(False, "/")], [], None)
     assert calls == 2
-    missing_expires_at, _missing_value = owner.robots_cache._entries["https://missing.test"]
+    missing_expires_at, _missing_value = owner.robots_cache._entries[("https://missing.test", policy)]
     assert missing_expires_at - time.monotonic() == pytest.approx(ROBOTS_CACHE_TTL_SECONDS, abs=5)
-    expires_at, _value = owner.robots_cache._entries["https://failure.test"]
+    expires_at, _value = owner.robots_cache._entries[("https://failure.test", policy)]
     assert expires_at - time.monotonic() == pytest.approx(ROBOTS_FAILURE_TTL_SECONDS, abs=5)
 
 

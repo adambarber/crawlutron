@@ -42,6 +42,7 @@ class TestBrowserWorkerGuard:
             url="https://a.example/x",
             domain="a.example",
             options=RenderOptions(timeout_seconds=1),
+            host_policy=UNRESTRICTED_HOST_POLICY,
         )
         result = await worker(job)
 

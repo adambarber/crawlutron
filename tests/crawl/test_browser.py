@@ -12,6 +12,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
+from app.validation import HostPolicy
 
 
 class TestBrowserRenderer:
@@ -25,7 +26,11 @@ class TestBrowserRenderer:
     async def _render(self, path: str, base_url: str, **options) -> object:
         url = f"{base_url}{path}"
         opts = RenderOptions(browser_profile=options.pop("browser_profile", {}), **options)
-        return await self.renderer.render(url, opts)
+        return await self.renderer.render(
+            url,
+            opts,
+            policy=HostPolicy.unrestricted(),
+        )
 
     async def test_browser_renders_html_content(self, base_url):
         result = await self._render("/", base_url)
@@ -70,7 +75,11 @@ class TestBrowserRenderer:
         }
         response = await crawl_request(
             payload,
-            browser_worker=lambda job: self.renderer.render(job.url, job.options),
+            browser_worker=lambda job: self.renderer.render(
+                job.url,
+                job.options,
+                policy=job.host_policy,
+            ),
             cache=HttpCache(),
         )
         assert response["submitted_count"] == 1

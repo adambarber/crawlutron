@@ -19,9 +19,11 @@ import asyncio
 import logging
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urljoin
 
 from app.api_models import CrawlStatus, PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
 from app.constants import CrawlClassification
+from app.validation import HostPolicy, safe_public_url_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +218,12 @@ def render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def frontier_link_url(link: Any) -> str | None:
+def frontier_link_url(
+    link: Any,
+    *,
+    policy: HostPolicy,
+    resolve_against: str | None = None,
+) -> str | None:
     """The only link field eligible for frontier/visited use: the validated URL.
 
     Extraction can legitimately emit a raw ``url`` href (``/rel``, ``#frag``,
@@ -231,9 +238,11 @@ def frontier_link_url(link: Any) -> str | None:
         normalized = link.get("normalized_url")
     else:
         normalized = getattr(link, "normalized_url", None)
-    if isinstance(normalized, str) and normalized:
-        return normalized
-    return None
+    if not isinstance(normalized, str) or not normalized:
+        return None
+    candidate = urljoin(resolve_against, normalized) if resolve_against else normalized
+    validated = safe_public_url_or_none(candidate, policy=policy)
+    return str(validated) if validated is not None else None
 
 
 def build_unified_crawl_response(

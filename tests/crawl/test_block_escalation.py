@@ -15,6 +15,7 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from app.crawl.engine import _execute_crawl_chain
+from app.validation import HostPolicy
 
 
 class TestBlockAutoEscalation:
@@ -26,6 +27,7 @@ class TestBlockAutoEscalation:
             http_fetcher=fetcher,
             cffi_fetcher=fetcher,
             browser_worker=None,
+            host_policy=HostPolicy.unrestricted(),
             **kwargs,
         )
 

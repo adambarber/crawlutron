@@ -170,7 +170,10 @@ class TestWorkerExtractorErrorDegrades:
         from app.crawl.strategies.browser import BrowserRenderer
 
         renderer = BrowserRenderer()
-        text = renderer._pdf_text_extractor("http://127.0.0.1:1/nonexistent.pdf")
+        text = renderer._pdf_text_extractor(
+            "http://127.0.0.1:1/nonexistent.pdf",
+            UNRESTRICTED_HOST_POLICY,
+        )
         assert text == ""
 
     async def test_browser_renderer_capture_element_screenshots_error(self):

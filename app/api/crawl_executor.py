@@ -15,6 +15,8 @@ from app.api.exceptions import browser_pool_unavailable
 from app.constants import BROWSER_STRATEGIES
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
+from app.settings import CrawlerSettings
+from app.validation import HostPolicy
 
 
 def _request_needs_browser(payload_dict: dict) -> bool:
@@ -51,16 +53,18 @@ async def execute_crawl(
     ``urls`` forwards the caller's already-gated batch (tier-2 T3) so the
     engine skips re-deriving it; the cap still applies there.
     """
+    active_settings = settings or CrawlerSettings.from_mapping()
+    host_policy = HostPolicy.from_settings(active_settings)
     target_url = payload_dict.get("url")
     if isinstance(target_url, str):
         from app.validation import normalize_public_http_url
 
         try:
-            normalize_public_http_url(target_url)
+            normalize_public_http_url(target_url, policy=host_policy)
         except ValueError:
             return await crawl_request(
                 payload_dict,
-                settings=settings,
+                settings=active_settings,
                 urls=urls,
                 browser_worker=None,
                 shutdown_event=shutdown_event,

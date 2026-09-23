@@ -17,6 +17,9 @@ import pytest
 
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.strategies.http import HttpFetchResult
+from app.validation import HostPolicy
+
+UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 BOOL_ENV_CASES = (
     (None, True),
@@ -83,7 +86,13 @@ def site_fetcher(pages: dict[str, Any]):
 def make_job(index: int, url: str):
     from app.models import CrawlJob
 
-    return CrawlJob(index=index, url=url, domain=url.split("/")[2], options=None)
+    return CrawlJob(
+        index=index,
+        url=url,
+        domain=url.split("/")[2],
+        options=None,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
 
 
 def make_result(url: str, domain: str):
@@ -355,7 +364,7 @@ def pinned_renderer(monkeypatch, *, pinned=("http://1.2.3.4:80/", {"Host": "exam
 
     page = BrowserFakePage()
     renderer = build_pinned_renderer(monkeypatch, page)
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", lambda url, headers: pinned)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", lambda url, headers, *, policy: pinned)
     return page, renderer
 
 
@@ -631,6 +640,7 @@ async def invoke_http_strategy(
         normalized_url="http://example.com/",
         strategy="HTTP_DECLARED_CRAWLER",
         policy=policy,
+        host_policy=UNRESTRICTED_HOST_POLICY,
         http_fetcher=fetcher,
         **kwargs,
     )
@@ -663,6 +673,7 @@ async def invoke_browser_strategy(
         strategy="BROWSER_HEADLESS",
         policy=policy,
         browser_worker=browser_worker,
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
 
@@ -768,7 +779,7 @@ def make_job_store(tmpdir: str) -> JobStore:
         Configured JobStore instance
     """
     db_path = pathlib.Path(tmpdir) / "jobs.db"
-    return JobStore(db_path)
+    return JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
 
 
 async def run_job_control_test(
@@ -889,29 +900,116 @@ from app.crawl.engine import (
     _payload_policy,
 )
 from app.crawl.extraction import (
-    _extract_discovered_links,
-    _html_diagnostics,
-    extract_js_endpoints,
+    _detect_pagination as _detect_pagination_with_policy,
+)
+from app.crawl.extraction import (
+    _extract_discovered_links as _extract_discovered_links_with_policy,
+)
+from app.crawl.extraction import (
+    _html_diagnostics as _html_diagnostics_with_policy,
+)
+from app.crawl.extraction import (
+    extract_content as _extract_content_with_policy,
+)
+from app.crawl.extraction import (
+    extract_js_endpoints as _extract_js_endpoints_with_policy,
 )
 from app.crawl.llm_format import _extract_llm_metadata
 from app.crawl.strategies.document import (
-    _default_document_text_extractor,
+    _default_document_text_extractor as _default_document_text_extractor_with_policy,
+)
+from app.crawl.strategies.document import (
     _format_table,
 )
 from app.crawl.strategies.http import (
     _cookie_header_for_url,
     _decode_body,
-    _default_http_fetcher,
     _headers_for_strategy,
     _quality_score,
+)
+from app.crawl.strategies.http import (
+    _default_http_fetcher as _default_http_fetcher_with_policy,
 )
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.validation import (
     get_env_int,
-    normalize_public_http_url,
-    public_url_or_none,
     registrable_domain,
 )
+from app.validation import (
+    normalize_public_http_url as _normalize_public_http_url,
+)
+from app.validation import (
+    public_url_or_none as _public_url_or_none,
+)
+
+
+def normalize_public_http_url(url, *, policy=UNRESTRICTED_HOST_POLICY):
+    return _normalize_public_http_url(url, policy=policy)
+
+
+def public_url_or_none(raw, *, resolve_against=None, policy=UNRESTRICTED_HOST_POLICY):
+    return _public_url_or_none(
+        raw,
+        resolve_against=resolve_against,
+        policy=policy,
+    )
+
+
+def _html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):
+    return _html_diagnostics_with_policy(html, source_url, host_policy=policy)
+
+
+def extract_content(
+    html,
+    content_type,
+    source_url,
+    css_selector=None,
+    xpath=None,
+):
+    return _extract_content_with_policy(
+        html,
+        content_type,
+        source_url,
+        css_selector,
+        xpath,
+    )
+
+
+def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):
+    return _extract_js_endpoints_with_policy(
+        endpoints,
+        source_url,
+        host_policy=policy,
+    )
+
+
+def _detect_pagination(html, final_url, *, policy=UNRESTRICTED_HOST_POLICY):
+    return _detect_pagination_with_policy(html, final_url, host_policy=policy)
+
+
+def _extract_discovered_links(
+    html,
+    source_url,
+    *,
+    host_policy=UNRESTRICTED_HOST_POLICY,
+    max_links=250,
+    tree=None,
+):
+    return _extract_discovered_links_with_policy(
+        html,
+        source_url,
+        host_policy=host_policy,
+        max_links=max_links,
+        tree=tree,
+    )
+
+
+def _default_document_text_extractor(url, policy=UNRESTRICTED_HOST_POLICY):
+    return _default_document_text_extractor_with_policy(url, policy)
+
+
+async def _default_http_fetcher(*args, policy=UNRESTRICTED_HOST_POLICY, **kwargs):
+    return await _default_http_fetcher_with_policy(*args, policy=policy, **kwargs)
 
 
 def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
@@ -993,6 +1091,7 @@ __all__ = [
     "_collect_document_item_lines",
     "_cookie_header_for_url",
     "_decode_body",
+    "_detect_pagination",
     "_default_document_text_extractor",
     "_default_http_fetcher",
     "_document_item_range",
@@ -1028,6 +1127,7 @@ __all__ = [
     "crawl_request",
     "decompress_body",
     "extract_function_body",
+    "extract_content",
     "extract_js_endpoints",
     "get_env_int",
     "gzip",
@@ -1045,6 +1145,7 @@ __all__ = [
     "make_job",
     "make_job_store",
     "make_result",
+    "UNRESTRICTED_HOST_POLICY",
     "normalize_public_http_url",
     "ok_fetcher",
     "os",

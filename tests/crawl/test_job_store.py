@@ -92,7 +92,7 @@ def test_crawljobstate_serialization():
     assert json_data["status"] == "running"
     assert set(json_data["visited"]) == {"http://example.com"}
 
-    loaded = CrawlJobState.from_json(json_data)
+    loaded = CrawlJobState.from_json(json_data, host_policy=UNRESTRICTED_HOST_POLICY)
     assert loaded.job_id == "test123"
     assert loaded.status == JobStatus.RUNNING
     assert loaded.frontier == [
@@ -105,7 +105,7 @@ def test_crawljobstate_serialization():
 
 def test_create_returns_full_uuid_hex():
     """HIGH #9: job IDs must not be short brute-forceable suffixes."""
-    store = JobStore(":memory:")
+    store = JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
     job = store.create("https://example.com/", {"limits": {}})
     assert len(job.job_id) == 32
     assert all(c in "0123456789abcdef" for c in job.job_id)
@@ -115,7 +115,7 @@ def test_create_returns_full_uuid_hex():
 
 
 def test_ids_are_unique():
-    store = JobStore(":memory:")
+    store = JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
     ids = {store.create("https://example.com/", {"limits": {}}).job_id for _ in range(50)}
     assert len(ids) == 50
 
@@ -129,7 +129,7 @@ class TestJobStoreLifecycle:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
+            store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
             job = store.create("http://example.com/", {})
             store.save(job)
             updated = store.load(job.job_id)
@@ -170,7 +170,7 @@ class TestJobStoreCorruptRow:
 
 def _store(tmp_path=None):
     # Use in-memory SQLite to avoid disk I/O and lock contention (speed).
-    return JobStore(":memory:")
+    return JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
 
 
 def test_jobstore_has_concurrency_guard():
@@ -209,7 +209,7 @@ def test_jobstore_concurrent_writes_do_not_raise_locked():
 
 
 def _store_test_job_store_serialization(tmp_path):
-    return JobStore(str(tmp_path / "jobs.db"))
+    return JobStore(str(tmp_path / "jobs.db"), policy=UNRESTRICTED_HOST_POLICY)
 
 
 def test_save_survives_non_serializable_results(tmp_path):
@@ -276,7 +276,7 @@ class TestJobStoreEdges:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
+            store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
             import sqlite3
 
             conn = sqlite3.connect(str(db_path))
@@ -294,7 +294,7 @@ class TestJobStoreEdges:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = pathlib.Path(tmpdir) / "jobs.db"
-            store = JobStore(db_path)
+            store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
             store._conn.close()
             store._conn.close()
 
@@ -302,7 +302,7 @@ class TestJobStoreEdges:
 def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):
     from app.crawl.job_store import FrontierEntry, JobStore
 
-    store = JobStore(tmp_path / "jobs.db")
+    store = JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
     root = "https://example.test/root"
     child = "https://example.test/child"
     job = store.create(root, {"limits": {"max_depth": 2}})
@@ -326,7 +326,7 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
 def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
     from app.crawl.job_store import FrontierEntry, JobStore
 
-    store = JobStore(tmp_path / "jobs.db")
+    store = JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
     job = store.create("HTTPS://Example.test:443/", {})
     loaded = store.load(job.job_id)
 
@@ -337,7 +337,7 @@ def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
 def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
     from app.crawl.job_store import JobStore
 
-    store = JobStore(tmp_path / "jobs.db")
+    store = JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
     for policy_json, expected in (
         ('["corrupt"]', {}),
         ('{"limits":"corrupt","scope_regex":null}', {"limits": {}, "scope_regex": None}),
@@ -359,7 +359,7 @@ def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
 def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
     from app.crawl.job_store import FrontierEntry, JobStore
 
-    store = JobStore(tmp_path / "jobs.db")
+    store = JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
     job = store.create("https://example.test/root", {"limits": {"max_depth": 4}})
     job.frontier = [
         FrontierEntry("https://example.test/child", 4),
@@ -367,7 +367,7 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
     ]
     job_store_data = job.to_json()
 
-    loaded = CrawlJobState.from_json(job_store_data)
+    loaded = CrawlJobState.from_json(job_store_data, host_policy=UNRESTRICTED_HOST_POLICY)
 
     assert loaded.frontier == [FrontierEntry("https://example.test/child", 1)]
 
@@ -382,7 +382,8 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
             "policy": {"limits": {"max_depth": 4}},
             "frontier": [{"url": "https://example.test/child", "depth": 1}],
             "in_flight": [{"url": "https://example.test/child", "depth": 3}],
-        }
+        },
+        host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
     assert loaded.frontier == []

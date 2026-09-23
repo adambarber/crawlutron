@@ -10,6 +10,7 @@ import asyncio
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
+from urllib.parse import urljoin
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
@@ -22,8 +23,10 @@ from app.constants import (
     SITEMAP_MAX_URLS,
 )
 from app.crawl.strategies.http import _decode_body, _decompress_body
+from app.validation import HostPolicy, safe_public_url_or_none
 
 _T = TypeVar("_T")
+_K = TypeVar("_K")
 
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
@@ -89,8 +92,8 @@ async def _fetch_and_decode(
 
 
 async def _single_flight(
-    inflight: dict[str, asyncio.Task[_T]],
-    key: str,
+    inflight: dict[_K, asyncio.Task[_T]],
+    key: _K,
     factory: Callable[[], Awaitable[_T]],
 ) -> _T:
     task = inflight.get(key)
@@ -140,7 +143,7 @@ async def _fetch_text(
 #
 # The lock lives inside the chokepoint, so call sites can never forget it
 # (the class of bug that produced the robots-cache and DNS-cache races).
-_SITEMAP_CACHE: BoundedTTLCache[str, tuple[list, str | None, str | None]] = BoundedTTLCache(
+_SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = BoundedTTLCache(
     max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS
 )
 
@@ -153,6 +156,7 @@ async def fetch_sitemap_urls(
     max_depth: int = SITEMAP_MAX_DEPTH,
     max_urls: int = SITEMAP_MAX_URLS,
     conditional: dict[str, str] | None = None,
+    host_policy: HostPolicy,
 ) -> set[tuple[str, str | None]]:
     """Recursively resolve a sitemap URL into ``(loc, lastmod)`` pairs.
 
@@ -177,6 +181,10 @@ async def fetch_sitemap_urls(
     page_urls: set[tuple[str, str | None]] = set()
 
     async def recurse(current_url: str, depth: int, cond_headers: dict[str, str] | None = None):
+        normalized_url = safe_public_url_or_none(current_url, policy=host_policy)
+        if normalized_url is None:
+            return None, None
+        current_url = str(normalized_url)
         etag: str | None = None
         last_modified: str | None = None
         if depth > max_depth or current_url in visited or len(page_urls) >= max_urls:
@@ -189,7 +197,7 @@ async def fetch_sitemap_urls(
             # 304: reuse the previously resolved URLs for this exact URL.
             # get_stale (not get): the entry must be PRESENT, not fresh --
             # the origin just confirmed the last-known set is still valid.
-            prev = _SITEMAP_CACHE.get_stale(current_url)
+            prev = _SITEMAP_CACHE.get_stale((current_url, host_policy))
             if prev:
                 for entry in prev[0]:
                     page_urls.add(entry)
@@ -225,10 +233,12 @@ async def fetch_sitemap_urls(
         for idx, (pos, loc) in enumerate(loc_items):
             next_pos = loc_items[idx + 1][0] if idx + 1 < len(loc_items) else len(text)
             lastmod = next((val for lpos, val in lastmod_items if pos < lpos < next_pos), None)
-            page_urls.add((loc, lastmod))
+            if safe_public_url_or_none(urljoin(current_url, loc), policy=host_policy) is not None:
+                page_urls.add((loc, lastmod))
         return etag, last_modified
 
-    cached = _SITEMAP_CACHE.get(sitemap_url)
+    cache_key = (sitemap_url, host_policy)
+    cached = _SITEMAP_CACHE.get(cache_key)
     if cached is not None:
         # Fresh: serve directly (get() already LRU-touched).
         return set(cached[0])
@@ -249,5 +259,5 @@ async def fetch_sitemap_urls(
         root_etag, root_lm = (cached[1] if cached else None), (cached[2] if cached else None)
     # Store through the chokepoint: LRU recency refresh and bounded eviction
     # happen inside put(), under its lock (no more manual popitem loop).
-    _SITEMAP_CACHE.put(sitemap_url, (list(page_urls), root_etag, root_lm))
+    _SITEMAP_CACHE.put(cache_key, (list(page_urls), root_etag, root_lm))
     return page_urls

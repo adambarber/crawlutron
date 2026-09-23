@@ -4,7 +4,12 @@ pytestmark = pytest.mark.browser
 
 import urllib.request
 
-from _testkit import BrowserFakePage, build_pinned_renderer, pinned_renderer
+from _testkit import (
+    UNRESTRICTED_HOST_POLICY,
+    BrowserFakePage,
+    build_pinned_renderer,
+    pinned_renderer,
+)
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
@@ -87,7 +92,11 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
 
 async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     page, renderer = pinned_renderer(monkeypatch)
-    result = await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
+    result = await renderer._render_with_browser(
+            "http://example.com/",
+            RenderOptions(browser_profile={}),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
     # Should use set_extra_http_headers, NOT extra_http_headers param;
@@ -107,7 +116,11 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
     )
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
+        await renderer._render_with_browser(
+            "http://example.com/",
+            RenderOptions(browser_profile={}),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -124,7 +137,7 @@ async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
-    handler = _make_ssrf_route_handler()
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     class _Route:
         def __init__(self):
@@ -158,6 +171,10 @@ async def test_render_registers_ssrf_route_guard(monkeypatch):
         "_build_pinned_request",
         lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
     )
-    await renderer._render_with_browser("http://example.com/", RenderOptions(browser_profile={}))
+    await renderer._render_with_browser(
+            "http://example.com/",
+            RenderOptions(browser_profile={}),
+            policy=UNRESTRICTED_HOST_POLICY,
+        )
     # The SSRF route guard must be registered on the page.
     assert any(pattern == "**/*" for pattern, _ in page.route_calls)

@@ -33,6 +33,8 @@ from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
 from app.validation import (
+    HostPolicy,
+    filter_js_endpoints,
     get_env_float,
     get_env_int,
     parse_bool_env,
@@ -889,7 +891,13 @@ def _extract_forms(
     return forms
 
 
-def _html_diagnostics(html: str | None, source_url: str | None, *, tree: Any | None = None) -> dict[str, Any]:
+def _html_diagnostics(
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    tree: Any | None = None,
+) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
     # #11: parse the HTML once and share the single lxml tree across the
     # frames/forms passes instead of reparsing per pass.
@@ -905,11 +913,16 @@ def _html_diagnostics(html: str | None, source_url: str | None, *, tree: Any | N
 
 
 def _extract_discovered_links(
-    html: str | None, source_url: str | None, *, max_links: int = 250, tree: Any | None = None
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    max_links: int = 250,
+    tree: Any | None = None,
 ) -> tuple[list[Any], int, bool]:
     if not html or not source_url:
         return [], 0, False
-    norm_source = safe_public_url_or_none(source_url) or source_url
+    norm_source = safe_public_url_or_none(source_url, policy=host_policy) or source_url
     source_host = (urlparse(norm_source).hostname or "").lower()
     if tree is None:
         tree = _parse_html_tree(html)
@@ -930,7 +943,7 @@ def _extract_discovered_links(
         if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
             continue
         try:
-            normalized_url = safe_public_url_or_none(urljoin(source_url, href))
+            normalized_url = safe_public_url_or_none(urljoin(source_url, href), policy=host_policy)
         except ValueError:
             continue
         if not normalized_url or normalized_url in seen:
@@ -970,6 +983,7 @@ def extract_post_fetch_discovery(
     include_links: bool = False,
     include_js_endpoints: bool = False,
     include_metadata: bool = False,
+    host_policy: HostPolicy,
 ) -> dict[str, Any]:
     """Sync post-fetch discovery block for the strategy result builders (perf #9).
 
@@ -985,15 +999,23 @@ def extract_post_fetch_discovery(
     producer covers every consumer.
     """
     tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
-    diagnostics = _html_diagnostics(html, final_url, tree=tree) if include_diagnostics else {}
+    diagnostics = (
+        _html_diagnostics(html, final_url, host_policy=host_policy, tree=tree)
+        if include_diagnostics
+        else {}
+    )
     if include_links:
         discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(
-            html, final_url, max_links=max_links, tree=tree
+            html, final_url, host_policy=host_policy, max_links=max_links, tree=tree
         )
     else:
         discovered_links, discovered_link_count, discovered_links_truncated = [], 0, False
     js_endpoints = (
-        extract_js_endpoints(html, js_base_url if js_base_url is not None else final_url)
+        extract_js_endpoints(
+            html,
+            js_base_url if js_base_url is not None else final_url,
+            host_policy=host_policy,
+        )
         if include_js_endpoints
         else []
     )
@@ -1011,7 +1033,7 @@ def extract_post_fetch_discovery(
         "discovered_link_count": discovered_link_count,
         "discovered_links_truncated": discovered_links_truncated,
         "js_endpoints": js_endpoints,
-        "next_page_url": _detect_pagination(html, final_url),
+        "next_page_url": _detect_pagination(html, final_url, host_policy=host_policy),
         "llm_metadata": llm_metadata,
     }
 
@@ -1031,7 +1053,12 @@ _XHR_OPEN_RE = re.compile(
 )
 
 
-def extract_js_endpoints(html: str | None, source_url: str | None = None) -> list[dict[str, str]]:
+def extract_js_endpoints(
+    html: str | None,
+    source_url: str | None = None,
+    *,
+    host_policy: HostPolicy,
+) -> list[dict[str, str]]:
     """Extract client-side API endpoints referenced from JavaScript.
 
     Katana-style discovery: find ``fetch(...)``, ``axios.*(...)``, jQuery
@@ -1057,7 +1084,14 @@ def extract_js_endpoints(html: str | None, source_url: str | None = None) -> lis
                 continue
             seen.add(resolved)
             endpoints.append({"url": resolved})
-    return endpoints
+    if source_url is None:
+        return [
+            endpoint
+            for endpoint in endpoints
+            if not endpoint["url"].lower().startswith(("http://", "https://"))
+            or public_url_or_none(endpoint["url"], policy=host_policy) is not None
+        ]
+    return filter_js_endpoints(endpoints, resolve_against=source_url, policy=host_policy)
 
 
 _NEXT_REL_ANCHOR_RE = re.compile(r"<a\b[^>]*\brel=[\"']([^\"']+)[\"'][^>]*>", re.IGNORECASE)
@@ -1065,7 +1099,12 @@ _NEXT_REL_LINK_RE = re.compile(r"<link\b[^>]*\brel=[\"']([^\"']+)[\"'][^>]*>", r
 _HREF_RE = re.compile(r"href=[\"']([^\"']+)[\"']", re.IGNORECASE)
 
 
-def _detect_pagination(html: str | None, final_url: str | None) -> str | None:
+def _detect_pagination(
+    html: str | None,
+    final_url: str | None,
+    *,
+    host_policy: HostPolicy,
+) -> str | None:
     """Auto-detect the next-page URL via ``rel="next"`` hints.
 
     Checks both ``<a rel="next" href="...">`` and
@@ -1086,5 +1125,9 @@ def _detect_pagination(html: str | None, final_url: str | None) -> str | None:
                 continue
             href_match = _HREF_RE.search(tag.group(0))
             if href_match:
-                return public_url_or_none(href_match.group(1).strip(), resolve_against=final_url)
+                return public_url_or_none(
+                    href_match.group(1).strip(),
+                    resolve_against=final_url,
+                    policy=host_policy,
+                )
     return None

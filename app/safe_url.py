@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-from app.validation import normalize_public_http_url
+from app.validation import HostPolicy, normalize_public_http_url
 
 
 @dataclass(frozen=True)
@@ -36,10 +36,11 @@ class SafeUrl:
 
     raw: str
     hostname: str
+    policy: HostPolicy
     pinned_ip: str | None = None
 
     @classmethod
-    def parse(cls, url: str, *, pin: bool = False) -> SafeUrl:
+    def parse(cls, url: str, *, policy: HostPolicy, pin: bool = False) -> SafeUrl:
         """Normalize + SSRF-check ``url`` in one place; raise ValueError if unsafe.
 
         With ``pin=True`` also resolve-and-pin the host (HTTPS delivery and
@@ -47,13 +48,13 @@ class SafeUrl:
         """
         from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
 
-        normalized = normalize_public_http_url(url)
+        normalized = normalize_public_http_url(url, policy=policy)
         _check_ssrf_protection(normalized)
         hostname = urlparse(normalized).hostname or ""
         pinned: str | None = None
         if pin:
             _, pinned = _resolve_and_pin_host(normalized)
-        return cls(raw=normalized, hostname=hostname, pinned_ip=pinned)
+        return cls(raw=normalized, hostname=hostname, policy=policy, pinned_ip=pinned)
 
     def redirect_hop(self, location: str) -> SafeUrl:
         """Follow one redirect: resolve against this URL, re-validate, return new SafeUrl.
@@ -62,7 +63,11 @@ class SafeUrl:
         a pinned URL re-pins the new host; an unpinned one stays unpinned.
         Raises ValueError when the hop target is unsafe.
         """
-        return SafeUrl.parse(urljoin(self.raw, location), pin=self.pinned_ip is not None)
+        return SafeUrl.parse(
+            urljoin(self.raw, location),
+            policy=self.policy,
+            pin=self.pinned_ip is not None,
+        )
 
     def connect(self) -> tuple[str, dict[str, str]]:
         """Return ``(connect_url, headers)`` applying the pin policy.

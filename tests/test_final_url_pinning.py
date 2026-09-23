@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 from app.crawl.strategies import http as http_mod
 from app.crawl.strategies.http import _default_http_fetcher
+from app.validation import HostPolicy
 
 
 class _FakeStream:
@@ -45,6 +46,12 @@ def test_final_url_uses_hostname_not_pinned_ip():
         patch.object(http_mod, "get_async_http_client") as gc,
     ):
         gc.return_value.stream.return_value = fake
-        result = asyncio.run(_default_http_fetcher("http://example.com/page", {}, 5.0, 1_000_000))
+        result = asyncio.run(_default_http_fetcher(
+            "http://example.com/page",
+            {},
+            5.0,
+            1_000_000,
+            policy=HostPolicy.unrestricted(),
+        ))
     assert result.final_url == "http://example.com/page"
     assert "93.184.216.34" not in result.final_url

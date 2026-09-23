@@ -8,6 +8,7 @@ strategy result builders. The post-fetch block must move to
 
 import asyncio
 
+from app.validation import HostPolicy
 from tests._testkit import (
     http_strategy_policy,
     install_to_thread_spy,
@@ -91,6 +92,7 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
         include_diagnostics=True,
         include_links=True,
         include_js_endpoints=True,
+        host_policy=HostPolicy.unrestricted(),
     )
 
     def _has_element(value):
