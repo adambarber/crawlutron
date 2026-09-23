@@ -25,7 +25,7 @@ from collections.abc import (
     Iterator,
     MutableMapping,
 )
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from _typeshed import SupportsKeysAndGetItem
@@ -564,20 +564,15 @@ class BrowserRenderer:
             try:
                 result = await self._render_with_browser(url, options, policy=policy)
                 return result
-            except TimeoutError as error:
-                last_error = _classify_error_code(error)
-                await self._reset_browser()
-                if attempts >= max_attempts:
-                    return self._failure_result(
-                        url, "retry_exhausted", "navigation_timeout", attempts, started, last_error
-                    )
-                await self._async_sleep(min(2 ** (attempts - 1), 5))
             except Exception as error:
+                classification: Literal["navigation_timeout", "unknown_error"] = (
+                    "navigation_timeout" if isinstance(error, TimeoutError) else "unknown_error"
+                )
                 last_error = _classify_error_code(error)
                 await self._reset_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(
-                        url, "retry_exhausted", "unknown_error", attempts, started, last_error
+                        url, "retry_exhausted", classification, attempts, started, last_error
                     )
                 await self._async_sleep(min(2 ** (attempts - 1), 5))
 

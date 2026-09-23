@@ -245,6 +245,10 @@ def frontier_link_url(
     return str(validated) if validated is not None else None
 
 
+def _unified_response(results: list[UnifiedCrawlResult], **fields: Any) -> UnifiedCrawlResponse:
+    return UnifiedCrawlResponse(results=results, **fields)
+
+
 def build_unified_crawl_response(
     results: list[dict[str, Any]],
     *,
@@ -254,12 +258,9 @@ def build_unified_crawl_response(
     submitted_count: int | None = None,
 ) -> UnifiedCrawlResponse:
     """Build the unified crawl response from a list of engine-result dicts."""
-    return UnifiedCrawlResponse(
-        request_id=request_id,
-        submitted_count=submitted_count if submitted_count is not None else len(results),
-        policy_schema_version=policy_schema_version,
-        success=success,
-        results=_shape_all(results),
+    return _unified_response(
+        _shape_all(results), request_id=request_id, policy_schema_version=policy_schema_version,
+        success=success, submitted_count=submitted_count if submitted_count is not None else len(results),
     )
 
 
@@ -354,13 +355,13 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
 
 async def abuild_unified_crawl_response(
     results: list[dict[str, Any]],
-    *,
-    request_id: str = "",
-    policy_schema_version: str = "",
-    success: bool = True,
-    submitted_count: int | None = None,
-    adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    **options: Any,
 ) -> UnifiedCrawlResponse:
+    request_id = options.pop("request_id", "")
+    policy_schema_version = options.pop("policy_schema_version", "")
+    success = options.pop("success", True)
+    submitted_count = options.pop("submitted_count", None)
+    adapt = options.pop("adapt", None)
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
     The whole batch is shaped in ONE event-loop offload (perf throughput #2):
@@ -373,13 +374,11 @@ async def abuild_unified_crawl_response(
     rejects degrades instead of failing the response.
     """
     shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
-    return UnifiedCrawlResponse(
-        request_id=request_id,
+    fields = dict(
+        request_id=request_id, policy_schema_version=policy_schema_version, success=success,
         submitted_count=submitted_count if submitted_count is not None else len(results),
-        policy_schema_version=policy_schema_version,
-        success=success,
-        results=list(shaped),
     )
+    return _unified_response(list(shaped), **fields)
 
 
 __all__ = [

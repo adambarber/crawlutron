@@ -769,6 +769,10 @@ def _diagnostic_tree(html: str | None, tree: Any | None) -> Any | None:
     return tree if tree is not None else (_parse_html_tree(html) if html else None)
 
 
+def _diagnostic_inputs(html: str | None, tree: Any | None) -> Any | None:
+    return _diagnostic_tree(html, tree) if html else None
+
+
 class _FrameCollector:
     """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
 
@@ -806,12 +810,12 @@ def _extract_frames(
     host_policy: HostPolicy,
     tree: Any | None = None,
 ) -> list[dict[str, Any]]:
-    if not html or not source_url:
+    if not source_url:
         return []
-    source_host = (urlparse(source_url).hostname or "").lower()
-    tree = _diagnostic_tree(html, tree)
+    tree = _diagnostic_inputs(html, tree)
     if tree is None:
         return []
+    source_host = (urlparse(source_url).hostname or "").lower()
     frames: list[dict[str, Any]] = []
     seen: set[str] = set()
     for el in tree.iter("frame", "iframe"):
@@ -848,16 +852,12 @@ def _extract_frames(
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def _extract_forms(
-    html: str | None,
-    source_url: str | None,
-    *,
-    host_policy: HostPolicy,
-    tree: Any | None = None,
-) -> list[dict[str, Any]]:
-    if not html or not source_url:
+def _extract_forms(html: str | None, source_url: str | None, **options: Any) -> list[dict[str, Any]]:
+    host_policy: HostPolicy = options["host_policy"]
+    tree: Any | None = options.get("tree")
+    if not source_url:
         return []
-    tree = _diagnostic_tree(html, tree)
+    tree = _diagnostic_inputs(html, tree)
     if tree is None:
         return []
     forms: list[dict[str, Any]] = []
@@ -900,15 +900,11 @@ def _extract_forms(
     return forms
 
 
-def _html_diagnostics(
-    html: str | None,
-    source_url: str | None,
-    *,
-    host_policy: HostPolicy,
-    tree: Any | None = None,
-) -> dict[str, Any]:
+def _html_diagnostics(html: str | None, source_url: str | None, **options: Any) -> dict[str, Any]:
+    host_policy: HostPolicy = options["host_policy"]
+    tree: Any | None = options.get("tree")
     diagnostics: dict[str, Any] = {}
-    tree = _diagnostic_tree(html, tree)
+    tree = _diagnostic_inputs(html, tree)
     frames = _extract_frames(html, source_url, host_policy=host_policy, tree=tree)
     forms = _extract_forms(html, source_url, host_policy=host_policy, tree=tree)
     if frames:

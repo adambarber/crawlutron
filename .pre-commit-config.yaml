@@ -50,8 +50,8 @@ repos:
       # rather than noise: repeated HttpFetchResult constructions, two MCP handler
       # tails, a rejection path restated across crawl_endpoint and map_endpoint,
       # two provider request builders. The HTTP subsystem split then collapsed six
-      # of those pairs, taking the baseline to 21 pairs / 176 lines (0.81%) at
-      # 72a27d1, and this threshold moved with it.
+      # of those pairs, taking the baseline to 16 pairs / 141 lines (0.65%) at
+      # 0de8e65, and this threshold moved with it.
       #
       # The threshold is a RATCHET, and it moves the moment the baseline moves --
       # not at the end of a phase. A review caught it still sitting at the old
@@ -60,7 +60,7 @@ repos:
       # the exact failure a ratchet exists to prevent, so lowering this number is
       # part of CLOSING a de-duplication, not a separate chore to remember.
       #
-      # It is 0.82 because that is the tightest value that passes the current
+      # It is 0.66 because that is the tightest value that passes the current
       # measurement. Earlier numbers here (0.9, then 1.03) came from jscpd's
       # ROUNDED summary line, and a threshold read off that display can be
       # stricter than the thing it measures -- 0.9 would have failed a tree at
@@ -82,7 +82,7 @@ repos:
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.82 --fail-on-empty app
+          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.66 --fail-on-empty app
         language: system
         files: ^(docker/browser-crawler/)?app/.*\.py$
         pass_filenames: false
