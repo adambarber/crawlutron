@@ -107,6 +107,22 @@ def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:
     return f"{label} {detail}".strip()
 
 
+def _static_string(expr: ast.AST, bindings: dict[str, str]) -> str | None:
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return expr.value
+    if isinstance(expr, ast.Name):
+        return bindings.get(expr.id)
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        left = _static_string(expr.left, bindings)
+        right = _static_string(expr.right, bindings)
+        return left + right if left is not None and right is not None else None
+    if isinstance(expr, ast.JoinedStr):
+        parts = [_static_string(value, bindings) for value in expr.values]
+        if all(part is not None for part in parts):
+            return "".join(parts)
+    return None
+
+
 @lru_cache(maxsize=256)
 def _import_bindings(tree: ast.AST) -> dict[str, str]:
     bindings: dict[str, str] = {}
@@ -127,7 +143,8 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
             value = node.value
             if value is None:
                 continue
-            canonical = _resolved_expr(value, bindings)
+            canonical = "" if isinstance(value, ast.Call) else _resolved_expr(value, bindings)
+            canonical = canonical or _static_string(value, bindings)
             if not canonical:
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -139,21 +156,24 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
 
 
 def _resolved_expr(expr: ast.AST, bindings: dict[str, str]) -> str:
+    """Resolve import aliases and constant-folded ``getattr`` names.
+
+    Only literals, concatenations, and constant f-strings are folded for an
+    attribute name. Runtime-computed values remain opaque by design.
+    """
     if isinstance(expr, ast.Name):
         return bindings.get(expr.id, expr.id)
     if isinstance(expr, ast.Attribute):
         base = _resolved_expr(expr.value, bindings)
         return f"{base}.{expr.attr}" if base else expr.attr
-    if (
-        isinstance(expr, ast.Call)
-        and isinstance(expr.func, ast.Name)
-        and expr.func.id == "getattr"
-        and len(expr.args) >= 2
-        and isinstance(expr.args[1], ast.Constant)
-        and isinstance(expr.args[1].value, str)
-    ):
-        base = _resolved_expr(expr.args[0], bindings)
-        return f"{base}.{expr.args[1].value}" if base else ""
+    if isinstance(expr, ast.Call):
+        callee = _resolved_expr(expr.func, bindings)
+        if callee.rsplit(".", 1)[-1] == "getattr" and len(expr.args) >= 2:
+            attribute = _static_string(expr.args[1], bindings)
+            base = _resolved_expr(expr.args[0], bindings)
+            if attribute is not None and base:
+                return f"{base}.{attribute}"
+        return callee
     return ""
 
 

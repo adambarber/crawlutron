@@ -3952,6 +3952,15 @@ def _property_registry_failures(registry: tuple[Property, ...] = PROPERTY_REGIST
         unobserved = set(prop.fingerprints) - set(observed[prop.name])
         if unobserved:
             failures.append(f"{prop.name} has unobserved fingerprints (dead configuration): {sorted(unobserved)}")
+        zero_observations = {
+            fingerprint
+            for fingerprint in prop.fingerprints
+            if fingerprint in observed[prop.name] and observed[prop.name][fingerprint] <= 0
+        }
+        if zero_observations:
+            failures.append(
+                f"{prop.name} has zero observations for fingerprints: {sorted(zero_observations)}"
+            )
     return failures
 
 
@@ -3964,6 +3973,23 @@ def _observed_property_count(prop: Property) -> int:
 
 def test_property_registry_is_not_empty():
     assert PROPERTY_REGISTRY
+
+
+def _property_owner_failures(
+    registry: tuple[Property, ...],
+    definitions: dict[str, list[tuple[str, ast.AST]]],
+) -> list[str]:
+    failures: list[str] = []
+    for prop in registry:
+        for symbol in prop.owner_symbols:
+            matches = definitions.get(symbol, [])
+            if len(matches) != 1:
+                failures.append(f"{symbol}={len(matches)}")
+                continue
+            relative, _node = matches[0]
+            if relative != prop.owner_module:
+                failures.append(f"{symbol}@{relative}")
+    return failures
 
 
 def test_property_registry_owners_exist():
@@ -3980,22 +4006,42 @@ def test_property_registry_owners_exist():
         for node in ast.walk(tree):
             if isinstance(node, _DEFINITION_TYPES):
                 definitions.setdefault(node.name, []).append((relative, node))
-    duplicates: list[str] = []
-    for prop in PROPERTY_REGISTRY:
-        for symbol in prop.owner_symbols:
-            matches = definitions.get(symbol, [])
-            if len(matches) != 1:
-                duplicates.append(f"{symbol}={len(matches)}")
-                continue
-            relative, node = matches[0]
-            if relative != prop.owner_module:
-                duplicates.append(f"{symbol}@{relative}")
-    assert not duplicates, "property registry owners are not unique: " + ", ".join(duplicates)
+    failures = _property_owner_failures(PROPERTY_REGISTRY, definitions)
+    assert not failures, "property registry owners are not unique: " + ", ".join(failures)
 
 
 def test_property_registry_fingerprints_are_observed():
     failures = _property_registry_failures()
     assert not failures, "; ".join(failures)
+
+
+def test_property_registry_detector_bites(monkeypatch):
+    prop = _property("robots-policy")
+
+    def zero_observations(tree, path, candidate):
+        return dict.fromkeys(candidate.fingerprints, 0)
+
+    monkeypatch.setitem(globals(), "_property_observations", zero_observations)
+    failures = _property_registry_failures((prop,))
+    assert any("zero observations" in failure and "robots_url" in failure for failure in failures), failures
+
+
+def test_property_registry_rejects_duplicate_owner_count():
+    prop = _property("bool-env")
+    tree = ast.parse(
+        "def parse_bool_value(raw, default, *, env_name):\n"
+        "    return default\n"
+        "def parse_bool_value(raw, default, *, env_name):\n"
+        "    return raw.strip().lower() in {'0', 'false', 'no', 'off'}\n"
+    )
+    definitions = {
+        "parse_bool_value": [
+            ("app/validation.py", node)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
+        ]
+    }
+    assert _property_owner_failures((prop,), definitions) == ["parse_bool_value=2"]
 
 
 def test_property_registry_rejects_deleted_fingerprint():
@@ -4114,12 +4160,39 @@ def test_public_target_detector_bites():
                 "    return not getattr(parse_address(value), 'is_private')\n",
                 1,
             ),
+            "aliased getattr": (
+                "from builtins import getattr as ga\n"
+                "import ipaddress\n"
+                "def verdict(value):\n"
+                "    return not ga(ipaddress, 'ip_address')(value).is_private\n",
+                1,
+            ),
+            "constant-folded getattr name": (
+                "import ipaddress\n"
+                "def verdict(value):\n"
+                "    name = 'ip_' + 'address'\n"
+                "    return not getattr(ipaddress, name)(value).is_private\n",
+                1,
+            ),
         },
         quiet=(
             "from app.validation import _is_public_ip as verdict\n"
             "def check(value):\n"
             "    return verdict(value)\n"
         ),
+    )
+    runtime_name = ast.parse(
+        "import ipaddress\n"
+        "def attribute_name():\n"
+        "    return 'ip_address'\n"
+        "def verdict(value):\n"
+        "    name = attribute_name()\n"
+        "    return not getattr(ipaddress, name)(value).is_private\n"
+    )
+    assert not _public_target_offenders(
+        runtime_name,
+        REPO_ROOT / "app" / "_synthetic.py",
+        _property("public-target"),
     )
 
 
@@ -4231,6 +4304,11 @@ def test_robots_policy_detector_bites():
             "inline f-string url": (
                 "def load(origin):\n"
                 "    return http_fetcher(f'{origin}/robots.txt')\n",
+                1,
+            ),
+            "inline absolute formatted url": (
+                "def load(origin):\n"
+                "    return http_fetcher('https://{}/robots.txt'.format(origin))\n",
                 1,
             ),
             "helper split with arbitrary dict parser": (
