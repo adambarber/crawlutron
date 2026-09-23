@@ -14,7 +14,7 @@ help:
 	@echo "  make test-fast - alias for 'make test'"
 	@echo "  make test-all  - run the full suite including browser-marked tests"
 	@echo "  make lint      - run ruff on the app/ and tests/ trees"
-	@echo "  make typecheck - run mypy on the app tree (advisory; not yet clean)"
+	@echo "  make typecheck - run mypy on the app tree (required CI gate)"
 	@echo "  make clean     - remove caches and build artifacts"
 
 install:
@@ -29,11 +29,10 @@ test-all:
 lint:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests
 
-# Advisory (P2-A): type-check the app tree with mypy. The config lives in
-# mypy.ini (files = app). This target is wired so the tooling that already
-# existed is actually run, but the codebase is NOT yet mypy-clean -- it was
-# never typechecked before -- so this is informational, not a gate. Do NOT
-# add it to CI as a hard gate until the findings backlog is cleared.
+# Type-check the app tree with mypy. The config lives in mypy.ini (files = app).
+# This started as an advisory target against a never-typechecked tree; the
+# backlog it warned about is cleared (0 errors across 85 files) and CI now runs
+# this as part of the required quality gate, so a type error fails a build.
 typecheck:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
 

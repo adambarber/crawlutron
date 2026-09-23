@@ -7,10 +7,11 @@ pytest>=8.2.0
 pytest-asyncio>=0.23.0
 pytest-httpx>=0.10.0
 httpx>=0.27.0
-ruff>=0.5.0
+ruff==0.16.8
 pytest-randomly>=4.0.0
 pytest-xdist>=3.0.0  # parallel suite runs: pytest -n auto (suite is xdist-safe)
-# Static type-checking (make typecheck). Advisory only: the codebase was never
-# typechecked before P2-A wired the target, so findings are expected; the target
-# is informational until that backlog is cleared.
-mypy>=1.11
+# Static type-checking. This is a real gate, not an advisory: the app tree is
+# mypy-clean (0 errors across 85 files) and CI runs `python3 -m mypy app` as
+# part of the required quality gate. Pinned so a new mypy release cannot turn
+# a build red with no repository change.
+mypy==2.3.1

@@ -5,60 +5,118 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The browser suite needs a Camoufox binary and a manual trigger. Without this
+  # event the test-browser job's `if` could never be true, so the job was
+  # structurally unreachable: declared, never run, silently green.
+  workflow_dispatch:
 
 jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: docker/browser-crawler/pyproject.toml
+      # Pinned, not ranged: a floating `ruff>=0.5` means a new rule can turn a
+      # merge red with no repository change. Same reasoning as the pinned
+      # pre-commit hooks.
       - name: Install ruff
-        run: pip install "ruff>=0.5"
-      - name: Run ruff (new code — app/api + app/main.py must be clean)
-        run: ruff check app/api app/main.py
-      - name: Run ruff format check (new code)
-        run: ruff format --check app/api app/main.py
-      # Legacy app/crawl + tests still carry style debt (E402, F821, S110, etc.)
-      # tracked in the 652-error backlog; gate only new code until the
-      # extraction backlog is cleared. Full-tree check is advisory:
-      - name: Advisory full-tree ruff (non-blocking)
-        run: ruff check app tests || true
-      - name: Advisory full-tree format (non-blocking)
+        run: pip install "ruff==0.16.8"
+      # Whole-tree and blocking. The tree is lint-clean, so the old
+      # app/api-only subset plus an advisory full tree (`|| true`) was a gate
+      # that could not fail on the code most likely to drift.
+      - name: Run ruff check
+        run: ruff check app tests
+      # Formatting is still advisory: the tree carries format debt (the
+      # previous blocking subset was red on it). It becomes blocking in the
+      # same commit that formats the tree — not before.
+      - name: Advisory ruff format check (non-blocking)
         run: ruff format --check app tests || true
+
+  typecheck:
+    name: Typecheck (mypy)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker/browser-crawler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: docker/browser-crawler/pyproject.toml
+      - name: Install package + dev dependencies
+        run: pip install -e ".[dev]"
+      # The gate existed (`make typecheck`, mypy config, pydantic plugin) and
+      # was clean at 0 errors — but no workflow ran it, so a type regression
+      # could not fail a build. This is the stringly-typed-identity class
+      # caught statically.
+      - name: Run mypy
+        run: python3 -m mypy app
 
   test-fast:
     name: Test suite (fast)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: docker/browser-crawler/pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
+      # Includes the project-specific safety predicates (tests/test_safety_invariants.py
+      # and friends): those detectors are the only exit path for the chokepoint
+      # rules, and they run inside the default marker set.
       - name: Run pytest (fast)
         run: python3 -m pytest
 
   test-browser:
-    name: Test suite (browser, opt-in)
+    name: Test suite (browser, manual)
     runs-on: ubuntu-latest
-    # Default to skip; set the workflow_dispatch / run workflow UI to
-    # trigger this job explicitly when the Camoufox binary is available.
+    # Manual only: needs the Camoufox binary. Not part of the required gate
+    # until it has actually run green against a known-good commit.
     if: ${{ github.event_name == 'workflow_dispatch' }}
+    defaults:
+      run:
+        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
+          cache-dependency-path: docker/browser-crawler/pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
       - name: Install Camoufox browser binary
         run: python3 -m camoufox fetch
       - name: Run pytest (full)
         run: python3 -m pytest -o addopts=
+
+  # One required check, not four. A repository ruleset should require exactly
+  # this job: GitHub treats a skipped job as success, so the individual jobs
+  # stay unconditional and this aggregate fails if any of them did not succeed.
+  required:
+    name: Required quality gate
+    if: ${{ always() }}
+    needs: [lint, typecheck, test-fast]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every gate to have succeeded
+        run: |
+          test "${{ needs.lint.result }}" = "success"
+          test "${{ needs.typecheck.result }}" = "success"
+          test "${{ needs.test-fast.result }}" = "success"
