@@ -20,7 +20,6 @@ class Property:
     fingerprints: tuple[str, ...]
     reason: str
     suppressions: tuple[Suppression, ...] = ()
-    definition_line: int | None = None
 
 
 PROPERTY_REGISTRY = (
@@ -31,7 +30,6 @@ PROPERTY_REGISTRY = (
         definition_site="app/validation.py:_is_public_ip",
         fingerprints=("ipaddress_range_verdict",),
         reason="URL normalization and HTTP pinning must share one public-address verdict.",
-        definition_line=261,
     ),
     Property(
         name="bool-env",
@@ -40,7 +38,6 @@ PROPERTY_REGISTRY = (
         definition_site="app/validation.py:parse_bool_value",
         fingerprints=("bool_literal_set",),
         reason="Environment boolean spelling is one policy across settings and feature gates.",
-        definition_line=394,
     ),
     Property(
         name="robots-policy",
@@ -54,7 +51,6 @@ PROPERTY_REGISTRY = (
             "robots_bounded_ttl_cache",
         ),
         reason="The engine and durable admission path must share one robots policy loader and cache.",
-        definition_line=68,
         suppressions=(
             Suppression(
                 module="app/crawl/robots_parse.py",

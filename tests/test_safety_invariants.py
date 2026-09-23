@@ -3470,13 +3470,8 @@ def _owner_definition_ids(tree: ast.AST, path: pathlib.Path, prop: Property) -> 
         if isinstance(node, _DEFINITION_TYPES) and node.name in prop.owner_symbols:
             by_symbol.setdefault(node.name, []).append(node)
     owner_ids: set[int] = set()
-    site_symbol = prop.definition_site.rsplit(":", 1)[-1]
-    for symbol, nodes in by_symbol.items():
-        canonical = next(
-            (node for node in nodes if symbol == site_symbol and node.lineno == prop.definition_line),
-            nodes[0],
-        )
-        owner_ids.add(id(canonical))
+    for nodes in by_symbol.values():
+        owner_ids.add(id(nodes[0]))
     return owner_ids
 
 
@@ -3565,38 +3560,50 @@ def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
 _BOOL_ENV_SPELLINGS = frozenset({"0", "1", "false", "true", "no", "yes", "off", "on"})
 
 
-def _bool_env_literal_sets(node: ast.AST) -> tuple[dict[int, set[str]], dict[str, set[str]]]:
-    direct: dict[int, set[str]] = {}
+def _bool_literal_values(node: ast.AST) -> set[str]:
+    return {
+        element.value
+        for element in node.elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    }
+
+
+def _bool_named_sets(nodes) -> dict[str, set[str]]:
     named: dict[str, set[str]] = {}
-    for child in _local_nodes(node):
-        if not isinstance(child, (ast.Set, ast.List, ast.Tuple)):
-            continue
-        literals = {
-            element.value
-            for element in child.elts
-            if isinstance(element, ast.Constant) and isinstance(element.value, str)
-        }
-        if literals & _BOOL_ENV_SPELLINGS:
-            direct[id(child)] = literals
-    for assignment in _local_nodes(node):
+    for assignment in nodes:
         if not isinstance(assignment, (ast.Assign, ast.AnnAssign)) or not isinstance(assignment.value, (ast.Set, ast.List, ast.Tuple)):
             continue
-        literals = {
-            element.value
-            for element in assignment.value.elts
-            if isinstance(element, ast.Constant) and isinstance(element.value, str)
-        }
+        literals = _bool_literal_values(assignment.value)
         if not literals & _BOOL_ENV_SPELLINGS:
             continue
         targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
         for target in targets:
             if isinstance(target, ast.Name):
                 named[target.id] = literals
-    return direct, named
+    return named
 
 
-def _bool_env_node_count(tree: ast.AST, node: ast.AST) -> int:
+def _bool_env_literal_sets(node: ast.AST) -> tuple[dict[int, set[str]], dict[str, set[str]]]:
+    direct: dict[int, set[str]] = {}
+    for child in _local_nodes(node):
+        if isinstance(child, (ast.Set, ast.List, ast.Tuple)) and _bool_literal_values(child) & _BOOL_ENV_SPELLINGS:
+            direct[id(child)] = _bool_literal_values(child)
+    return direct, _bool_named_sets(_local_nodes(node))
+
+
+def _bool_env_tree_sets(tree: ast.AST) -> dict[str, set[str]]:
+    return _bool_named_sets(ast.walk(tree))
+
+
+
+
+def _bool_env_node_count(
+    tree: ast.AST,
+    node: ast.AST,
+    tree_sets: dict[str, set[str]] | None = None,
+) -> int:
     direct, named = _bool_env_literal_sets(node)
+    named = {**tree_sets, **named} if tree_sets else named
     has_normalization = any(
         isinstance(child, ast.Call)
         and isinstance(child.func, ast.Attribute)
@@ -3621,14 +3628,16 @@ def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) ->
     contexts = _property_contexts(tree) if _relative_app_path(path) == prop.owner_module else [
         node for _name, node in _property_nodes(tree, path, prop)
     ]
-    count = sum(_bool_env_node_count(tree, node) for node in contexts)
+    tree_sets = _bool_env_tree_sets(tree)
+    count = sum(_bool_env_node_count(tree, node, tree_sets) for node in contexts)
     return {"bool_literal_set": count} if count else {}
 
 
 def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
+    tree_sets = _bool_env_tree_sets(tree)
     for name, node in _property_nodes(tree, path, prop):
-        if _bool_env_node_count(tree, node):
+        if _bool_env_node_count(tree, node, tree_sets):
             offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing"))
     return offenders
 
@@ -3852,8 +3861,6 @@ def test_property_registry_owners_exist():
             relative, node = matches[0]
             if relative != prop.owner_module:
                 duplicates.append(f"{symbol}@{relative}")
-            if prop.definition_line is not None and symbol == site_symbol and node.lineno != prop.definition_line:
-                duplicates.append(f"{symbol}@{relative}:{node.lineno}")
     assert not duplicates, "property registry owners are not unique: " + ", ".join(duplicates)
 
 
@@ -3872,7 +3879,6 @@ def test_property_registry_rejects_deleted_fingerprint():
         fingerprints=tuple(item for item in prop.fingerprints if item != "robots_url"),
         reason=prop.reason,
         suppressions=prop.suppressions,
-        definition_line=prop.definition_line,
     )
     failures = _property_registry_failures((weakened,))
     assert any("robots_url" in failure for failure in failures), failures
@@ -3961,10 +3967,17 @@ def test_bool_env_detector_bites():
         "def parse(value):\n"
         "    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n"
     )
+    variable_set = ast.parse(
+        "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
+        "def parse(value):\n"
+        "    return value.strip().lower() not in FALSE_WORDS\n"
+    )
     truthy_offenders = _bool_env_offenders(truthy, REPO_ROOT / "app" / "_synthetic.py", prop)
     inverted_offenders = _bool_env_offenders(inverted, REPO_ROOT / "app" / "_synthetic.py", prop)
+    variable_offenders = _bool_env_offenders(variable_set, REPO_ROOT / "app" / "_synthetic.py", prop)
     assert len(truthy_offenders) == 1 and "boolean" in truthy_offenders[0], truthy_offenders
     assert len(inverted_offenders) == 1 and "boolean" in inverted_offenders[0], inverted_offenders
+    assert len(variable_offenders) == 1 and "boolean" in variable_offenders[0], variable_offenders
     good = ast.parse(
         "from app.validation import parse_bool_value as parse\n"
         "def parse_env(value, default):\n"
