@@ -1,0 +1,58 @@
+# Local quality gates for browser-crawler.
+#
+# These are ergonomics, not enforcement: CI (and its required status check) is
+# the authority. The point of running them here is that every gate below is
+# whole-tree and cheap enough to run in seconds, so a violation is caught while
+# the change is still in the editor's context rather than at review time.
+#
+# Hooks use `language: system` deliberately: no hook environment is downloaded,
+# no package index is contacted, and the exact tool versions already pinned for
+# this project are the ones that run.
+#
+# `ruff format --check` is intentionally absent: the tree carries formatting
+# debt (the CI-blocking subset is red on it today), and a hook that fails every
+# commit trains people to bypass the gate. It belongs here only once the tree
+# is format-clean.
+repos:
+  - repo: local
+    hooks:
+      # Whole-tree style/safety lint, seconds to run, zero tolerance (the ruff
+      # config in pyproject.toml is the single style source of truth; inline
+      # noqa is banned by project rule).
+      - id: ruff
+        name: ruff check (app + tests)
+        entry: .venv/bin/python -m ruff check app tests
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Copy/paste detection at zero tolerance. A clone is evidence of a missing
+      # funnel, so this is a design gate, not a style one.
+      - id: jscpd
+        name: jscpd (zero tolerance)
+        entry: jscpd -f python --threshold 0 app tests
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Type gate: catches the stringly-typed-identity class statically. Kept on
+      # pre-push because it is slower than the two above and a type error is
+      # worth catching slightly later than a lint error.
+      - id: mypy
+        name: mypy (app)
+        entry: .venv/bin/python -m mypy app
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+
+      # The project-specific safety predicates (chokepoint detectors). They are
+      # the real architecture gate and the only exit path for those rules, so
+      # they run on pre-push rather than being left to CI alone.
+      - id: safety-invariants
+        name: chokepoint safety invariants
+        entry: .venv/bin/python -m pytest -q -p no:randomly tests/test_safety_invariants.py tests/test_env_regression.py tests/test_store_pragma_chokepoint.py tests/membership_gate.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
