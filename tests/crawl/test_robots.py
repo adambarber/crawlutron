@@ -544,6 +544,7 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
         headers={},
         http_fetcher=lambda *a, **k: _fake_fetcher(calls, *a, **k),
         engine_robots_sitemaps=engine_robots_sitemaps,
+        robots_evaluated=True,
     )
 
 

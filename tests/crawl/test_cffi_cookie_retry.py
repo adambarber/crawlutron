@@ -72,8 +72,14 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
 
     policy = {
         "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_CFFI_IMPERSONATE", "BROWSER_HEADLESS"],
-        "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
+        "limits": {
+            "timeout_seconds": 10,
+            "max_retries": 0,
+            "max_discovered_links": 10,
+            "respect_robots": False,
+        },
         "headers": {},
+        "discovery": {"robots": True},
     }
     result = await _execute_crawl_chain(
         original_url="http://example.com/",
@@ -84,6 +90,7 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
         browser_worker=browser_worker,
     )
     assert result.status == "success"
+    assert result.diagnostics["robots"]["evaluation"] == "disabled"
     # final cffi attempt must carry the browser cookies
     cffi_calls = [h for kind, h in calls if kind == "cffi"]
     assert any("incap_ses=abc" in h.get("Cookie", "") for h in cffi_calls), calls

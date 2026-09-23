@@ -1600,8 +1600,8 @@ async def _discovery_diagnostics(
     policy: dict[str, Any],
     headers: dict[str, str],
     http_fetcher: Any,
-    engine_robots_sitemaps: list[str] | None = None,
-    robots_evaluated: bool = True,
+    engine_robots_sitemaps: list[str] | None,
+    robots_evaluated: bool,
 ) -> dict[str, Any]:
     discovery = policy.get("discovery") or {}
     limits = policy.get("limits", {})
@@ -1788,7 +1788,6 @@ async def _http_strategy_result(
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
-    robots_evaluated: bool = True,
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
@@ -1804,6 +1803,7 @@ async def _http_strategy_result(
     # Apply policy limits; fall back to strategy defaults when the caller
     # omitted them (engine-provided policies always carry explicit limits).
     limits = policy.get("limits", {})
+    robots_evaluated = bool(limits.get("respect_robots", True))
     timeout_seconds = limits.get("timeout_seconds", 10)
     max_retries = limits.get("max_retries", 0)
     # The engine threads its live concurrency here (perf throughput #5) so the
