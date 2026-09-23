@@ -8,6 +8,7 @@ import time
 import bs4
 import pytest
 from _testkit import *
+from _testkit import BOOL_ENV_CASES, set_optional_env
 
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
@@ -217,13 +218,55 @@ async def test_extract_document_skips_oversized_input(monkeypatch):
     assert not spawned
 
 
+@pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
+def test_document_worker_decision_uses_shared_bool_parser(monkeypatch, caplog, raw, expected):
+    import app.crawl.extraction as ex
+
+    set_optional_env(monkeypatch, "BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", raw)
+
+    class _Process:
+        pid = 1
+
+        def is_alive(self):
+            return True
+
+        def terminate(self):
+            return None
+
+        def join(self, timeout=None):
+            return None
+
+        def kill(self):
+            return None
+
+    class _Connection:
+        def close(self):
+            return None
+
+    spawned = []
+
+    def spawn():
+        spawned.append(True)
+        return ex._DocWorker(_Process(), _Connection())
+
+    monkeypatch.setattr(ex, "_spawn_doc_worker", spawn)
+    monkeypatch.setattr(ex, "_doc_extraction_worker_count", lambda: 1)
+    ex._reset_doc_pool()
+    worker = ex._acquire_doc_worker()
+    assert (worker is not None) is expected
+    assert bool(spawned) is expected
+    if raw == "garbage":
+        assert any("EXTRACTION_DOC_ENABLED" in record.getMessage() for record in caplog.records)
+    ex._reset_doc_pool()
+
+
 async def test_extract_document_kill_switch(monkeypatch):
     """Env kill-switch lets deployments disable subprocess doc extraction."""
     import app.crawl.extraction as ex
 
     _FakeProcess, spawned = _non_spawning_process()
     monkeypatch.setattr(ex.multiprocessing, "Process", _FakeProcess)
-    monkeypatch.setattr(ex, "_EXTRACTION_DOC_ENABLED", False)
+    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "0")
 
     out = await asyncio.to_thread(ex._extract_document, b"tiny", None)
     assert out.text is None and out.markdown is None

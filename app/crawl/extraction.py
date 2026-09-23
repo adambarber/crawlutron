@@ -32,7 +32,13 @@ from urllib.parse import urljoin, urlparse
 from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
-from app.validation import get_env_float, get_env_int, public_url_or_none, safe_public_url_or_none
+from app.validation import (
+    get_env_float,
+    get_env_int,
+    parse_bool_env,
+    public_url_or_none,
+    safe_public_url_or_none,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +260,10 @@ def _teardown_doc_pool_locked() -> None:
         _retire_doc_worker(worker)
 
 
+def _document_extraction_enabled() -> bool:
+    return parse_bool_env("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", default=True)
+
+
 def _acquire_doc_worker() -> _DocWorker | None:
     """Take an idle pool worker, spawning on demand up to the configured size.
 
@@ -273,6 +283,8 @@ def _acquire_doc_worker() -> _DocWorker | None:
     document extraction in the process.
     """
     global _DOC_POOL
+    if not _document_extraction_enabled():
+        return None
     # Dead slots discovered here are replaced under the lock but TERMINATED
     # after it: the slot swap is instant, while the kill-escalation a
     # retirement runs can take ~10s (SIGTERM -> join(5) -> SIGKILL -> join(5)).
@@ -405,11 +417,6 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 # size and allow deployments to disable subprocess extraction entirely.
 _EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int(
     "BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1
-)
-_EXTRACTION_DOC_ENABLED = os.environ.get("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "true").lower() not in (
-    "0",
-    "false",
-    "no",
 )
 
 # Maximum extracted markdown size (chars) to prevent unbounded output (F5).
@@ -672,7 +679,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     indefinitely; the worker is forcefully killed and its slot respawned.
     Output is also capped to prevent unbounded memory growth.
     """
-    if not _EXTRACTION_DOC_ENABLED:
+    if not _document_extraction_enabled():
         return ExtractedContent(None, None)
     if len(body) > _EXTRACTION_DOC_MAX_INPUT_BYTES:
         logger.warning(

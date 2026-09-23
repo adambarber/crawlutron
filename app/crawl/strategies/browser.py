@@ -50,7 +50,7 @@ from app.json_safe import json_default
 from app.models import Classification, CrawlError, CrawlResult, RenderOptions, ResultStatus
 from app.safe_url import SafeUrl
 from app.settings import CrawlerSettings
-from app.validation import get_env_float, get_env_int, registrable_domain
+from app.validation import get_env_float, get_env_int, parse_bool_value, registrable_domain
 
 logger = logging.getLogger(__name__)
 
@@ -1161,12 +1161,11 @@ class BrowserRenderer:
         return [url.strip() for url in value.split(",") if url.strip()]
 
     def _headless_enabled(self) -> bool:
-        return os.environ.get("BROWSER_CRAWLER_HEADLESS", "true").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
-        }
+        return parse_bool_value(
+            os.environ.get("BROWSER_CRAWLER_HEADLESS"),
+            default=True,
+            env_name="BROWSER_CRAWLER_HEADLESS",
+        )
 
     def _looks_like_pdf(self, url: str) -> bool:
         return url.split("?", 1)[0].lower().endswith(".pdf")

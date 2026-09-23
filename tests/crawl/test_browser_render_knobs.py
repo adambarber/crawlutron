@@ -6,6 +6,7 @@ defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 """
 
 import pytest
+from _testkit import BOOL_ENV_CASES, set_optional_env
 
 from app.crawl.strategies.browser import BrowserRenderer
 
@@ -90,6 +91,12 @@ def test_browser_knob_defaults_unchanged():
     assert plain.browser_cookie_harvest_timeout_seconds == 5.0
     assert BrowserRenderer(settings=plain)._harvest_timeout_for({}) == 5.0
     assert BrowserRenderer(settings=plain)._scroll_config_for({}) == (3, 1)
+
+
+@pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
+def test_headless_decision_uses_shared_bool_parser(monkeypatch, raw, expected):
+    set_optional_env(monkeypatch, "BROWSER_CRAWLER_HEADLESS", raw)
+    assert BrowserRenderer()._get_browser_kwargs({})["headless"] is expected
 
 
 def test_browser_knob_env_mapping():

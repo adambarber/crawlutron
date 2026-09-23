@@ -18,6 +18,28 @@ import pytest
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.strategies.http import HttpFetchResult
 
+BOOL_ENV_CASES = (
+    (None, True),
+    ("", True),
+    ("   ", True),
+    ("1", True),
+    (" TrUe ", True),
+    ("yes", True),
+    ("ON", True),
+    ("0", False),
+    (" FALSE ", False),
+    ("No", False),
+    ("off", False),
+    ("garbage", True),
+)
+
+
+def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
+    if value is None:
+        monkeypatch.delenv(name, raising=False)
+    else:
+        monkeypatch.setenv(name, value)
+
 
 def block_private_targets(monkeypatch) -> None:
     """Disable the local-dev private-target escape hatch for one test.
