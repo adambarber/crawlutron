@@ -66,6 +66,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
 | C1 | Every result's `classification`, `strategy`, `error` and `status` is a member of its declared type at the moment of construction | `app/models.py:_check_literal_fields` | **runtime construction** | `__post_init__` on all three result dataclasses + membership-gate AST detector + taxonomy drift tests | `GATED` — the strongest gate in the repo |
+| C1b | A validated input is resolved exactly once and the resolved value is what everything downstream sees | `app/crawl/strategies/request_profile.py` | runtime construction | none — a stateful Mapping is iterated twice (snapshot for diagnostics, re-validated for headers), so headers and diagnostics can disagree | `UNGATED` |
 | C2 | Terminal and failure result shapes are built by the shared builders, never restated per path | `app/crawl/result_helpers.py` | runtime construction | construction-site AST detectors (primitive set is hand-maintained) | `GATED`, registry of primitives is hand-maintained |
 | C3 | A terminal result's status agrees with the status its classification maps to | `app/crawl/result_helpers.py:_enforce_status_classification` | runtime construction | completeness test pinning every enum member | `GATED` |
 | C4 | `None` strategy means "no strategy was attempted" — no path invents a strategy label | `app/crawl/result_helpers.py` | runtime construction | strategy-value detector + construction gate | `GATED` |
@@ -93,7 +94,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | E2 | No lock is held across blocking disk I/O | `app/crawl/content_cache.py` | runtime construction | AST detector + race tests | `GATED` |
 | E3 | Loop-bound primitives are rebound when the loop changes | `app/crawl/strategies/http_client_pool.py:_LoopBoundPooledClient`, async runner semaphore | runtime construction | loop-bound detector | `GATED` |
 | E4 | Remote politeness directives cannot install an unbounded sleep | `app/scheduler.py` | runtime construction | clamp tests | `GATED` |
-| E5 | Work submitted to a closing loop cannot raise into a completed task | `app/crawl/strategies/http.py` close helpers | runtime construction | deterministic close-race tests | `GATED` |
+| E5 | Work submitted to a closing loop cannot raise into a completed task | `app/crawl/strategies/http_client_pool.py` close helpers | runtime construction | deterministic close-race tests | `GATED` |
 
 ## F. Configuration ownership
 
