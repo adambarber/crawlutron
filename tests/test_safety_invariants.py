@@ -18,8 +18,11 @@ from chokepoint_walks import (
     SANCTIONED,
     STRATEGIES_DIR,
     TESTS_DIR,
+    app_offenders,
     app_python_files,
     app_trees,
+    call_keyword_values,
+    calls_named,
     file_tree,
     offender,
     trees_under,
@@ -31,6 +34,9 @@ __all__ = [
     "STRATEGIES_DIR",
     "app_python_files",
     "app_trees",
+    "app_offenders",
+    "call_keyword_values",
+    "calls_named",
     "file_tree",
     "offender",
     "trees_under",
@@ -594,22 +600,18 @@ def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
     if path.name == "response_shaping.py":
         return []
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "UnifiedCrawlResponse"
-            and any(kw.arg == "results" for kw in node.keywords)
-        ):
-            offenders.append(offender(path, node.lineno, "explicit UnifiedCrawlResponse(results=...) build"))
+    for node, _ in call_keyword_values(
+        tree,
+        function_names="UnifiedCrawlResponse",
+        keyword_names="results",
+    ):
+        offenders.append(offender(path, node.lineno, "explicit UnifiedCrawlResponse(results=...) build"))
     return offenders
 
 
 def test_crawl_response_built_only_by_shaping_chokepoint():
     """Every UnifiedCrawlResponse-with-results flows through the shaper."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_crawl_response_construction_offenders(tree, path))
+    offenders = app_offenders(_crawl_response_construction_offenders)
     assert not offenders, "Use app.api.response_shaping.build_unified_crawl_response: " + ", ".join(offenders)
 
 
@@ -639,23 +641,16 @@ def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
     if path.name == "render_options.py":
         return []
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "RenderOptions"
-        ):
-            offenders.append(
-                offender(path, node.lineno, "RenderOptions(...) built outside resolve_render_options")
-            )
+    for node in calls_named(tree, "RenderOptions"):
+        offenders.append(
+            offender(path, node.lineno, "RenderOptions(...) built outside resolve_render_options")
+        )
     return offenders
 
 
 def test_render_options_built_only_by_resolver():
     """Every effective RenderOptions flows through resolve_render_options."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_render_options_construction_offenders(tree, path))
+    offenders = app_offenders(_render_options_construction_offenders)
     assert not offenders, (
         "Use app.crawl.render_options.resolve_render_options so request-side "
         "options and server defaults merge in exactly one place: " + ", ".join(offenders)
@@ -1741,22 +1736,19 @@ def _non_member_classification_offenders(tree, path, *, members):
     attribute access, e.g. CrawlClassification.x) is what callers should
     write, and passes without comment.
     """
-    primitives = _result_primitive_names()
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in primitives):
+    for node, value in call_keyword_values(
+        tree,
+        function_names=_result_primitive_names(),
+        keyword_names=_CLASSIFICATION_VALUE_SOURCES,
+    ):
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
             continue
-        for kw in node.keywords:
-            if kw.arg not in _CLASSIFICATION_VALUE_SOURCES:
-                continue
-            value = kw.value
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-                continue
-            if value.value not in members:
-                yield offender(
-                    path, node.lineno,
-                    f"classification={value.value!r} is not a CrawlClassification member; "
-                    f"add it to the enum (app/constants.py) or route through the classifier",
-                )
+        if value.value not in members:
+            yield offender(
+                path, node.lineno,
+                f"classification={value.value!r} is not a CrawlClassification member; "
+                f"add it to the enum (app/constants.py) or route through the classifier",
+            )
 
 
 def test_engine_emitted_classifications_are_enum_members():
@@ -1820,29 +1812,22 @@ def _non_member_strategy_offenders(tree, path, *, members):
     lockstep with the enum. A non-literal (variable, attribute, or module
     constant) is what callers should write and passes without comment.
     """
-    primitives = _result_primitive_names()
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in primitives
-        ):
+    for node, value in call_keyword_values(
+        tree,
+        function_names=_result_primitive_names(),
+        keyword_names=_STRATEGY_VALUE_SOURCES,
+    ):
+        if isinstance(value, ast.Constant) and value.value is None:
             continue
-        for kw in node.keywords:
-            if kw.arg not in _STRATEGY_VALUE_SOURCES:
-                continue
-            value = kw.value
-            if isinstance(value, ast.Constant) and value.value is None:
-                continue
-            if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
-                continue
-            if value.value not in members:
-                yield offender(
-                    path,
-                    node.lineno,
-                    f"strategy={value.value!r} is not a CrawlStrategy member; "
-                    f"pass a real member, or None when no strategy was attempted",
-                )
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        if value.value not in members:
+            yield offender(
+                path,
+                node.lineno,
+                f"strategy={value.value!r} is not a CrawlStrategy member; "
+                f"pass a real member, or None when no strategy was attempted",
+            )
 
 
 def test_engine_emitted_strategies_are_enum_members():
@@ -2244,13 +2229,7 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     (``_robots_pattern_to_regex``) goes through it too.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == _ROBOTS_COMPILE
-        ):
-            continue
+    for node in calls_named(tree, _ROBOTS_COMPILE):
         scopes = _enclosing_defs(node, tree)
         if _ROBOTS_COMPILE_HOME in scopes and "get" in scopes[: scopes.index(_ROBOTS_COMPILE_HOME) + 1]:
             continue
@@ -2318,29 +2297,22 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) 
     exemption list is precisely how an invented status would ship.
     """
     offenders: list[str] = []
-    primitives = _result_primitive_names()
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in primitives
-        ):
+    for node, value in call_keyword_values(
+        tree,
+        function_names=_result_primitive_names(),
+        keyword_names=_STATUS_VALUE_SOURCES,
+    ):
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
             continue
-        for kw in node.keywords:
-            if kw.arg not in _STATUS_VALUE_SOURCES:
-                continue
-            value = kw.value
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-                continue
-            if value.value not in members:
-                offenders.append(
-                    offender(
-                        path,
-                        node.lineno,
-                        f"status={value.value!r} is not a ResultStatus member; add it to the"
-                        " Literal (app/models.py) or derive it from an existing member",
-                    )
+        if value.value not in members:
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"status={value.value!r} is not a ResultStatus member; add it to the"
+                    " Literal (app/models.py) or derive it from an existing member",
                 )
+            )
     return offenders
 
 
@@ -2561,30 +2533,24 @@ def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *,
     argument set, read at test time.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == _ATTEMPT_CLASS
-        ):
+    for node, value in call_keyword_values(
+        tree,
+        function_names=_ATTEMPT_CLASS,
+        keyword_names=_ATTEMPT_STRATEGY_KWARG,
+    ):
+        if isinstance(value, ast.Constant) and value.value is None:
             continue
-        for kw in node.keywords:
-            if kw.arg != _ATTEMPT_STRATEGY_KWARG:
-                continue
-            value = kw.value
-            if isinstance(value, ast.Constant) and value.value is None:
-                continue
-            if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-                continue
-            if value.value not in members:
-                offenders.append(
-                    offender(
-                        path,
-                        node.lineno,
-                        f"strategy={value.value!r} is not a CrawlStrategyName member; pass a real"
-                        " member, or None when no strategy was attempted",
-                    )
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        if value.value not in members:
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"strategy={value.value!r} is not a CrawlStrategyName member; pass a real"
+                    " member, or None when no strategy was attempted",
                 )
+            )
     return offenders
 
 

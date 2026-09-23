@@ -20,6 +20,12 @@ BROWSER_HEADLESS: Final = "BROWSER_HEADLESS"
 
 # Service version: single source of truth (L2), imported directly by callers.
 SERVICE_VERSION: str = "0.3.0"
+ROUTER_MODULE_DOC: Final = (
+    "Pure router: imports :func:`{handler}` and binds it\n"
+    "to the ``{path}`` POST path. The handler implementation lives in the\n"
+    "endpoint module so the router stays trivial and the handler is testable\n"
+    "without FastAPI machinery."
+)
 # Public-facing identity strings. Kept here so the same UA appears in both the
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
 # to outbound requests, and so the package version is sourced from a single

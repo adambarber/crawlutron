@@ -53,21 +53,24 @@ def _build_pdf_renderer(monkeypatch, page):
     return renderer
 
 
+async def _render_pdf(monkeypatch):
+    """Drive the real PDF fallback with a blocking extractor at the shared URL."""
+    page = _PdfPage()
+    renderer = _build_pdf_renderer(monkeypatch, page)
+
+    def blocking_pdf_extractor(url: str) -> str:
+        assert url == _PDF_URL
+        return "extracted pdf text"
+
+    renderer._pdf_text_extractor = blocking_pdf_extractor
+    return await renderer._render_with_page_unlocked(_PDF_URL, RenderOptions(include_text=True))
+
+
 class TestPdfExtractorIsOffloaded:
     async def test_pdf_fallback_runs_in_worker_thread(self, real_sleeps, monkeypatch):
         seen = install_to_thread_spy(monkeypatch)
 
-        def blocking_pdf_extractor(url: str) -> str:
-            assert url == _PDF_URL
-            return "extracted pdf text"
-
-        page = _PdfPage()
-        renderer = _build_pdf_renderer(monkeypatch, page)
-        renderer._pdf_text_extractor = blocking_pdf_extractor
-
-        result = await renderer._render_with_page_unlocked(
-            _PDF_URL, RenderOptions(include_text=True)
-        )
+        result = await _render_pdf(monkeypatch)
 
         assert (result.metadata or {}).get("extraction_method") == "pdf_text", (
             "the PDF fallback branch never ran -- the test would pass vacuously"
@@ -77,15 +80,6 @@ class TestPdfExtractorIsOffloaded:
         )
 
     async def test_result_text_comes_from_the_extractor(self, real_sleeps, monkeypatch):
-        def blocking_pdf_extractor(url: str) -> str:
-            return "extracted pdf text"
-
-        page = _PdfPage()
-        renderer = _build_pdf_renderer(monkeypatch, page)
-        renderer._pdf_text_extractor = blocking_pdf_extractor
-
-        result = await renderer._render_with_page_unlocked(
-            _PDF_URL, RenderOptions(include_text=True)
-        )
+        result = await _render_pdf(monkeypatch)
         assert (result.metadata or {}).get("extraction_method") == "pdf_text"
         assert result.text == "extracted pdf text"

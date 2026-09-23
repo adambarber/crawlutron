@@ -42,6 +42,52 @@ def app_trees(*, exclude: frozenset[str] = SANCTIONED) -> Iterator[tuple[pathlib
         yield path, ast.parse(path.read_text(encoding="utf-8"))
 
 
+def app_offenders(detector, *, exclude: frozenset[str] = SANCTIONED) -> list[str]:
+    """Run one app-tree detector and collect its formatted offenders."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=exclude):
+        offenders.extend(detector(tree, path))
+    return offenders
+
+
+def calls_named(tree: ast.AST, function_name: str) -> Iterator[ast.Call]:
+    """Yield direct calls to one named function in an AST tree."""
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == function_name
+        ):
+            yield node
+
+
+def call_keyword_values(
+    tree: ast.AST,
+    *,
+    function_names: str | frozenset[str],
+    keyword_names: str | tuple[str, ...],
+) -> Iterator[tuple[ast.Call, ast.expr]]:
+    """Yield selected keyword values from direct calls to named functions."""
+    names = {function_names} if isinstance(function_names, str) else function_names
+    keywords = {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in names
+        ):
+            continue
+        # One pair per DISTINCT keyword name: Python itself rejects a repeated
+        # keyword, so a call carrying two is un-compilable source, and emitting
+        # an offender per occurrence would over-report against the one-per-call
+        # behavior these detectors had before they were unified.
+        seen_keywords: set[str | None] = set()
+        for keyword in node.keywords:
+            if keyword.arg in keywords and keyword.arg not in seen_keywords:
+                seen_keywords.add(keyword.arg)
+                yield node, keyword.value
+
+
 def trees_under(directory: pathlib.Path) -> Iterator[tuple[pathlib.Path, ast.Module]]:
     """Yield ``(path, tree)`` for every module under ``directory``."""
     for path in sorted(directory.rglob("*.py")):

@@ -655,7 +655,7 @@ import pathlib
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
-from app.crawl.job_store import JobStore
+from app.crawl.job_store import JobStatus, JobStore
 
 
 def build_payload(
@@ -1011,6 +1011,7 @@ __all__ = [
     "gzip",
     "http_strategy_policy",
     "install_to_thread_spy",
+    "install_to_thread_spy",
     "invoke_browser_strategy",
     "invoke_http_strategy",
     "make_base_policy",
@@ -1076,16 +1077,31 @@ def _canned_result(
     }
 
 
+async def _execution_urls(payload_dict, hang: asyncio.Event | None):
+    """Honor an execution barrier and return the payload's submitted URLs."""
+    if hang is not None and not hang.is_set():
+        await hang.wait()
+    return payload_dict.get("urls") or [payload_dict.get("url")]
+
+
+def _execution_payload(results: list[dict], submitted_count: int) -> dict:
+    """Wrap engine results in the common execute-crawl response contract."""
+    return {
+        "results": results,
+        "submitted_count": submitted_count,
+        "policy_schema_version": "test",
+    }
+
+
 def _fake_execute_scripted(
     scripts: dict[str, list[dict]],
     *,
     attempts: dict[str, int] | None = None,
     hang: asyncio.Event | None = None,
 ):
+    """Build a scripted execute-crawl double with per-URL attempt tracking."""
     async def _execute(payload_dict, *, settings, shutdown_event):
-        if hang is not None and not hang.is_set():
-            await hang.wait()
-        urls = payload_dict.get("urls") or [payload_dict.get("url")]
+        urls = await _execution_urls(payload_dict, hang)
         results = []
         for url in urls:
             sequence = scripts.get(url)
@@ -1098,28 +1114,30 @@ def _fake_execute_scripted(
             if attempts is not None:
                 attempts[url] = attempts.get(url, 0) + 1
             results.append(entry)
-        return {
-            "results": results,
-            "submitted_count": len(urls),
-            "policy_schema_version": "test",
-        }
+        return _execution_payload(results, len(urls))
 
     return _execute
 
 
 def _fake_execute(results: list[dict], *, hang: asyncio.Event | None = None):
+    """Build a URL-keyed execute-crawl double with optional execution blocking."""
     async def _execute(payload_dict, *, settings, shutdown_event):
-        if hang is not None and not hang.is_set():
-            await hang.wait()
-        urls = payload_dict.get("urls") or [payload_dict.get("url")]
+        urls = await _execution_urls(payload_dict, hang)
         by_url = {result["original_url"]: result for result in results}
-        return {
-            "results": [by_url.get(url, _canned_result(url, status="failed")) for url in urls],
-            "submitted_count": len(urls),
-            "policy_schema_version": "test",
-        }
+        selected = [by_url.get(url, _canned_result(url, status="failed")) for url in urls]
+        return _execution_payload(selected, len(urls))
 
     return _execute
+
+
+def _scripted_result_map(
+    urls,
+    *,
+    links: dict[str, list[str]] | None = None,
+) -> dict[str, list[dict]]:
+    """Build successful scripted responses for each URL, preserving discovered links."""
+    link_map = links or {}
+    return {url: [_canned_result(url, links=link_map.get(url, []))] for url in urls}
 
 
 def _small_link_graph_results() -> list[dict]:
@@ -1190,7 +1208,8 @@ def _execution_policy(policy: dict | None) -> dict:
     return effective
 
 
-async def _run_job_to_completed(client, job_store, root_url: str, execute, policy: dict | None = None):
+async def _create_api_job(client, root_url: str, execute, policy: dict | None = None):
+    """Install an engine double, submit a job, and return its persisted ID."""
     from app.api import job_runner
 
     job_runner.install_execute_crawl(execute)
@@ -1198,7 +1217,64 @@ async def _run_job_to_completed(client, job_store, root_url: str, execute, polic
         "/v1/jobs",
         json={"root_url": root_url, "policy": _execution_policy(policy)},
     )
-    job_id = response.json()["job_id"]
+    assert response.status_code == 200, response.text
+    return response.json()["job_id"]
+
+
+def _seed_job(
+    job_store,
+    root_url: str,
+    policy: dict | None = None,
+    *,
+    frontier: list[str] | None = None,
+    in_flight: list[str] | None = None,
+    running: bool = False,
+):
+    """Persist a job with explicit frontier and in-flight recovery state."""
+    job = job_store.create(root_url, policy if policy is not None else {})
+    if frontier is not None:
+        job.frontier = list(frontier)
+    if in_flight is not None:
+        job.in_flight = list(in_flight)
+    job_store.save(job)
+    if running:
+        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+    return job
+
+
+async def _run_persisted_job(job, job_store, execute):
+    """Run a pre-seeded job to a terminal state and reload its persisted record."""
+    from app.api import job_runner
+    from app.settings import CrawlerSettings
+
+    job_runner.install_execute_crawl(execute)
+    await job_runner._run_job(
+        job.job_id,
+        job_store,
+        CrawlerSettings.from_mapping({}),
+        asyncio.Event(),
+    )
+    status = await _wait_status(job_store, job.job_id, {"completed", "failed"})
+    assert status in {"completed", "failed"}
+    finished = job_store.load(job.job_id)
+    assert finished is not None
+    return finished
+
+
+async def _run_scripted_persisted_job(job, job_store, result_map):
+    """Run a persisted job with scripted responses and return its attempt counts."""
+    attempts: dict[str, int] = {}
+    finished = await _run_persisted_job(
+        job,
+        job_store,
+        _fake_execute_scripted(result_map, attempts=attempts),
+    )
+    return finished, attempts
+
+
+async def _run_job_to_completed(client, job_store, root_url: str, execute, policy: dict | None = None):
+    """Run an API job to successful completion and return its persisted record."""
+    job_id = await _create_api_job(client, root_url, execute, policy)
     status = await _wait_status(job_store, job_id, {"completed", "failed"})
     assert status == "completed"
     return job_store.load(job_id)

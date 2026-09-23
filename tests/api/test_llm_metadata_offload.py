@@ -7,6 +7,8 @@ parse with ``asyncio.to_thread`` via the additive async shaping API.
 
 import asyncio
 
+from _testkit import install_to_thread_spy
+
 from app.api.response_shaping import (
     abuild_unified_crawl_response,
     abuild_unified_result,
@@ -113,29 +115,15 @@ async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatc
     test above pins that).
     """
     items = [_html_item(i) for i in range(4)]
-    calls = {"n": 0}
-    orig_to_thread = asyncio.to_thread
-
-    def spy(fn, *args, **kwargs):
-        calls["n"] += 1
-        return orig_to_thread(fn, *args, **kwargs)
-
-    monkeypatch.setattr(asyncio, "to_thread", spy)
+    offloaded = install_to_thread_spy(monkeypatch)
     resp = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
     assert len(resp.results) == len(items)
-    assert calls["n"] == 1, f"expected one batched offload, got {calls['n']}"
+    assert len(offloaded) == 1, f"expected one batched offload, got {len(offloaded)}"
 
 
 async def test_abuild_batches_offload_for_empty_results(monkeypatch):
     """An empty batch offloads nothing and still answers the empty response."""
-    calls = {"n": 0}
-    orig_to_thread = asyncio.to_thread
-
-    def spy(fn, *args, **kwargs):
-        calls["n"] += 1
-        return orig_to_thread(fn, *args, **kwargs)
-
-    monkeypatch.setattr(asyncio, "to_thread", spy)
+    offloaded = install_to_thread_spy(monkeypatch)
     resp = await abuild_unified_crawl_response([], request_id="r")
     assert resp.results == []
-    assert calls["n"] <= 1, f"empty batch must not fan out: {calls['n']}"
+    assert len(offloaded) <= 1, f"empty batch must not fan out: {len(offloaded)}"

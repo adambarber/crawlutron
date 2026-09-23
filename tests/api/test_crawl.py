@@ -390,6 +390,16 @@ class TestDiscoveryAndRenderApi:
         monkeypatch.setattr(pool, "release", lambda _renderer: None)
         return set_browser_pool(pool)
 
+    async def _render_result(self, monkeypatch, warmup_urls):
+        """Post through a selected browser-pool mode and return the wire result."""
+        old = self._warmed_pool_endpoint(monkeypatch, warmup_urls)
+        try:
+            response = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
+        finally:
+            set_browser_pool(old)
+        assert response.status_code == 200, response.text
+        return response.json()["results"][0]
+
     async def test_v1_render_reports_the_pools_real_strategy_when_warmed(self, monkeypatch):
         """The render wire must carry the browser mode that actually served the
         render. The adapter used to hard-code ``BROWSER_HEADLESS`` for every
@@ -397,13 +407,7 @@ class TestDiscoveryAndRenderApi:
         endpoints then disagreed about the provenance of the same render."""
         from app.constants import BROWSER_HEADED_WARMED
 
-        old = self._warmed_pool_endpoint(monkeypatch, ["https://warmup.example/"])
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
-        assert resp.status_code == 200, resp.text
-        item = resp.json()["results"][0]
+        item = await self._render_result(monkeypatch, ["https://warmup.example/"])
         assert item["selected_strategy"] == BROWSER_HEADED_WARMED, item
         assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADED_WARMED, item
 
@@ -412,13 +416,7 @@ class TestDiscoveryAndRenderApi:
         warmed member."""
         from app.constants import BROWSER_HEADLESS
 
-        old = self._warmed_pool_endpoint(monkeypatch, [])
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
-        assert resp.status_code == 200, resp.text
-        item = resp.json()["results"][0]
+        item = await self._render_result(monkeypatch, [])
         assert item["selected_strategy"] == BROWSER_HEADLESS, item
         assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADLESS, item
 

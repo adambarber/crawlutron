@@ -15,13 +15,18 @@ from unittest.mock import MagicMock
 import pytest
 from _testkit import (
     _canned_result,
+    _create_api_job,
     _execution_policy,
     _fake_execute,
     _fake_execute_scripted,
     _link,
     _make_app,
     _run_job_to_completed,
+    _run_persisted_job,
     _run_scripted_job,
+    _run_scripted_persisted_job,
+    _scripted_result_map,
+    _seed_job,
     _small_link_graph_results,
     _wait_status,
     _wait_until,
@@ -87,27 +92,23 @@ class TestCrashRecovery:
     async def test_in_flight_requeue_survives_job_wide_page_cap(self, job_store):
         root = "http://example.test/a"
         discovered = "http://example.test/b"
-        job = job_store.create(root, {"limits": {"max_depth": 2, "max_pages": 1}})
-        job.frontier = []
-        job.in_flight = [root]
-        job_store.save(job)
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+        job = _seed_job(
+            job_store,
+            root,
+            {"limits": {"max_depth": 2, "max_pages": 1}},
+            frontier=[],
+            in_flight=[root],
+            running=True,
+        )
         attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
+        finished = await _run_persisted_job(
+            job,
+            job_store,
             _fake_execute_scripted(
                 {root: [_canned_result(root, links=[discovered])]},
                 attempts=attempts,
-            )
+            ),
         )
-
-        await job_runner._run_job(
-            job.job_id,
-            job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
-        )
-
-        finished = job_store.load(job.job_id)
         assert finished.status == JobStatus.COMPLETED
         assert finished.visited == {root}
         assert attempts == {root: 1}
@@ -248,23 +249,16 @@ class TestWholeSiteJobExecution:
         assert all(payload["policy"]["limits"]["max_depth"] == 0 for payload in captured)
 
     async def test_create_runs_to_completed(self, client, job_store, real_sleeps):
-        job_runner.install_execute_crawl(
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
             _fake_execute(
                 [
                     _canned_result("http://example.test/a", links=["http://example.test/b"]),
                     _canned_result("http://example.test/b"),
                 ]
-            )
+            ),
         )
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
-        assert resp.status_code == 200
-        job_id = resp.json()["job_id"]
 
         status = await _wait_status(job_store, job_id, {"completed", "failed"})
         assert status == "completed"
@@ -455,15 +449,11 @@ class TestTransientFailureRequeue:
             crawled.append(list(urls))
             return await install(payload_dict, settings=settings, shutdown_event=shutdown_event)
 
-        job_runner.install_execute_crawl(recording_execute)
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
+            recording_execute,
         )
-        job_id = resp.json()["job_id"]
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
 
         job = job_store.load(job_id)
@@ -475,17 +465,11 @@ class TestTransientFailureRequeue:
         """A link without a validated normalized_url is never queue-eligible."""
         empty = {"url": "http://evil.test/x", "normalized_url": ""}
         bare = "http://legacy.test/string-link"
-        job_runner.install_execute_crawl(
-            _fake_execute([_canned_result("http://example.test/a", raw_links=[empty], links=[])])
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
+            _fake_execute([_canned_result("http://example.test/a", raw_links=[empty], links=[])]),
         )
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
-        job_id = resp.json()["job_id"]
         # The string link rides in a second result so a regression that queues
         # raw values is observable before completion too.
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
@@ -496,7 +480,9 @@ class TestTransientFailureRequeue:
 
     async def test_pause_retains_frontier_and_resume_finishes(self, client, job_store, real_sleeps):
         hang = asyncio.Event()
-        job_runner.install_execute_crawl(
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
             _fake_execute(
                 [
                     _canned_result(
@@ -506,16 +492,8 @@ class TestTransientFailureRequeue:
                     _canned_result("http://example.test/c"),
                 ],
                 hang=hang,
-            )
+            ),
         )
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
-        job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"running"})
 
         pause_resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
@@ -537,19 +515,13 @@ class TestTransientFailureRequeue:
 
     async def test_cancel_persists_terminal_state(self, client, job_store, real_sleeps):
         hang = asyncio.Event()
-        job_runner.install_execute_crawl(
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
             _fake_execute(
                 [_canned_result("http://example.test/a", links=["http://example.test/b"])], hang=hang
-            )
+            ),
         )
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
-        job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"running"})
 
         cancel_resp = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
@@ -588,15 +560,11 @@ class TestTransientFailureRequeue:
 
     async def test_delete_running_job_cancels(self, client, job_store, real_sleeps):
         hang = asyncio.Event()
-        job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")], hang=hang))
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
+            _fake_execute([_canned_result("http://example.test/a")], hang=hang),
         )
-        job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"running"})
 
         del_resp = await client.delete(f"/v1/jobs/{job_id}")
@@ -608,7 +576,9 @@ class TestTransientFailureRequeue:
 
     async def test_discovered_links_dedupe(self, client, job_store, real_sleeps):
         # a discovers b and c; b discovers a again — visited dedupe wins.
-        job_runner.install_execute_crawl(
+        job_id = await _create_api_job(
+            client,
+            "http://example.test/a",
             _fake_execute(
                 [
                     _canned_result(
@@ -617,16 +587,8 @@ class TestTransientFailureRequeue:
                     _canned_result("http://example.test/b", links=["http://example.test/a"]),
                     _canned_result("http://example.test/c"),
                 ]
-            )
+            ),
         )
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
-        job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"completed", "failed"})
         job = job_store.load(job_id)
         assert job.stats["total_crawled"] == 3
@@ -873,25 +835,16 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         second = "https://example.test/second"
         third = "https://example.test/third"
-        job = job_store.create(root, self._policy(1, 2))
-        job.frontier = [root, second, third]
-        job_store.save(job)
+        job = _seed_job(job_store, root, self._policy(1, 2), frontier=[root, second, third])
         attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {url: [_canned_result(url)] for url in (root, second, third)},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        finished = await _run_persisted_job(
+            job,
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            _fake_execute_scripted(
+                _scripted_result_map((root, second, third)),
+                attempts=attempts,
+            ),
         )
-
-        finished = job_store.load(job.job_id)
         assert attempts == {root: 1, second: 1}
         assert finished.visited == {"https://example.test/root", "https://example.test/second"}
         assert finished.frontier == []
@@ -900,27 +853,23 @@ class TestWholeSiteAdmissionContract:
     async def test_in_flight_recovery_keeps_every_admitted_url(self, job_store, real_sleeps):
         first = "https://example.test/first"
         second = "https://example.test/second"
-        job = job_store.create(first, self._policy(1, 1))
-        job.frontier = []
-        job.in_flight = [first, second]
-        job_store.save(job)
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {url: [_canned_result(url)] for url in (first, second)},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        job = _seed_job(
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            first,
+            self._policy(1, 1),
+            frontier=[],
+            in_flight=[first, second],
+            running=True,
         )
-
-        finished = job_store.load(job.job_id)
+        attempts: dict[str, int] = {}
+        finished = await _run_persisted_job(
+            job,
+            job_store,
+            _fake_execute_scripted(
+                _scripted_result_map((first, second)),
+                attempts=attempts,
+            ),
+        )
         assert attempts == {first: 1, second: 1}
         assert finished.visited == {"https://example.test/first", "https://example.test/second"}
         assert finished.stats["cap_overcommitted"] == 1
@@ -950,14 +899,12 @@ class TestWholeSiteAdmissionContract:
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        job_runner.install_execute_crawl(
-            _fake_execute([_canned_result(root, links=[child])])
+        job_id = await _create_api_job(
+            client,
+            root,
+            _fake_execute([_canned_result(root, links=[child])]),
+            self._policy(1, 1),
         )
-        response = await client.post(
-            "/v1/jobs",
-            json={"root_url": root, "policy": self._policy(1, 1)},
-        )
-        job_id = response.json()["job_id"]
         assert await _wait_status(job_store, job_id, {"completed", "failed"}) == "completed"
 
         response = await client.get(f"/v1/jobs/{job_id}")
@@ -972,7 +919,7 @@ class TestWholeSiteAdmissionContract:
         import sqlite3
 
         root = "https://example.test/root"
-        job = job_store.create(root, {})
+        job = _seed_job(job_store, root)
         connection = sqlite3.connect(job_store.db_path)
         connection.execute(
             "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
@@ -980,16 +927,11 @@ class TestWholeSiteAdmissionContract:
         )
         connection.commit()
         connection.close()
-        job_runner.install_execute_crawl(_fake_execute([_canned_result(root)]))
-
-        await job_runner._run_job(
-            job.job_id,
+        finished = await _run_persisted_job(
+            job,
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            _fake_execute([_canned_result(root)]),
         )
-
-        finished = job_store.load(job.job_id)
         assert finished.status == JobStatus.COMPLETED
         assert finished.visited == {"https://example.test/root"}
 
@@ -1087,25 +1029,12 @@ class TestWholeSiteAdmissionContract:
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        job = job_store.create(root, self._policy(1, 2))
-        job.frontier = [root, child]
-        job_store.save(job)
-        attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {root: [_canned_result(root, links=[child])], child: [_canned_result(child)]},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        job = _seed_job(job_store, root, self._policy(1, 2), frontier=[root, child])
+        finished, attempts = await _run_scripted_persisted_job(
+            job,
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            _scripted_result_map((root, child), links={root: [child]}),
         )
-
-        finished = job_store.load(job.job_id)
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}
         assert len(finished.results) == 2
@@ -1118,25 +1047,12 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=test"
         child = "https://example.test/child"
-        job = job_store.create(root, self._policy(1, 2))
-        job.frontier = [root, root_alias, child]
-        job_store.save(job)
-        attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {url: [_canned_result(url)] for url in (root, child)},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        job = _seed_job(job_store, root, self._policy(1, 2), frontier=[root, root_alias, child])
+        finished, attempts = await _run_scripted_persisted_job(
+            job,
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            _scripted_result_map((root, child)),
         )
-
-        finished = job_store.load(job.job_id)
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}
         assert finished.stats["cap_truncated"] == 0
@@ -1146,27 +1062,19 @@ class TestWholeSiteAdmissionContract:
         self, job_store, real_sleeps
     ):
         urls = [f"https://example.test/page-{index}" for index in range(10)]
-        job = job_store.create(urls[0], self._policy(1, 2))
-        job.frontier = []
-        job.in_flight = urls
-        job_store.save(job)
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {url: [_canned_result(url)] for url in urls},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        job = _seed_job(
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            urls[0],
+            self._policy(1, 2),
+            frontier=[],
+            in_flight=urls,
+            running=True,
         )
-
-        finished = job_store.load(job.job_id)
+        finished, attempts = await _run_scripted_persisted_job(
+            job,
+            job_store,
+            _scripted_result_map(urls),
+        )
         assert attempts == {url: 1 for url in urls}
         assert finished.visited == set(urls)
         assert finished.in_flight == []
@@ -1177,27 +1085,19 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=legacy"
         child = "https://example.test/child"
-        job = job_store.create(root, self._policy(1, 2))
-        job.frontier = [child, root_alias]
-        job.in_flight = [root]
-        job_store.save(job)
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        attempts: dict[str, int] = {}
-        job_runner.install_execute_crawl(
-            _fake_execute_scripted(
-                {root: [_canned_result(root)], child: [_canned_result(child)]},
-                attempts=attempts,
-            )
-        )
-
-        await job_runner._run_job(
-            job.job_id,
+        job = _seed_job(
             job_store,
-            CrawlerSettings.from_mapping({}),
-            asyncio.Event(),
+            root,
+            self._policy(1, 2),
+            frontier=[child, root_alias],
+            in_flight=[root],
+            running=True,
         )
-
-        finished = job_store.load(job.job_id)
+        finished, attempts = await _run_scripted_persisted_job(
+            job,
+            job_store,
+            _scripted_result_map((root, child)),
+        )
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}
         assert len(finished.results) == 2

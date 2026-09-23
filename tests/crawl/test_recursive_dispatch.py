@@ -183,6 +183,16 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
     return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
 
 
+def _tiered_worker(fail_index: int | None = None):
+    """Build an aligned result worker with an optional single failure index."""
+    async def worker(job):
+        if fail_index is not None and job.index == fail_index:
+            raise RuntimeError("transient failure")
+        return make_engine_result(job.normalized_url)
+
+    return worker
+
+
 async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
     """A batch that interleaves HTTP and browser-pinned tasks must still write
     each result to its own job index.
@@ -203,10 +213,7 @@ async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
         _tiered_job(3, "h2"),
     ]
 
-    async def worker(job):
-        # Result identity reflects the job that actually produced it.
-        return make_engine_result(job.normalized_url)
-
+    worker = _tiered_worker()
     spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
 
     assert set(spill.writes) == {0, 1, 2, 3}
@@ -223,11 +230,7 @@ async def test_failed_job_does_not_shift_other_results():
     scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
     jobs = [_tiered_job(i, f"h{i}") for i in range(4)]
 
-    async def worker(job):
-        if job.index == 1:
-            raise RuntimeError("transient failure")
-        return make_engine_result(job.normalized_url)
-
+    worker = _tiered_worker(fail_index=1)
     spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
 
     assert set(spill.writes) == {0, 1, 2, 3}

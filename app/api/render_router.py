@@ -1,10 +1,4 @@
-"""``/v1/render`` URL→handler mapping.
-
-Pure router: imports :func:`app.api.render_endpoint.render` and binds it
-to the ``/v1/render`` POST path. The handler implementation lives in the
-endpoint module so the router stays trivial and the handler is testable
-without FastAPI machinery.
-"""
+"""``/v1/render`` URL→handler mapping."""
 
 from __future__ import annotations
 
@@ -13,6 +7,12 @@ from fastapi import APIRouter, Depends
 from app.api.dependencies import get_settings
 from app.api.render_endpoint import render as render_handler
 from app.api_models import CrawlerError, RenderRequest, UnifiedCrawlResponse
+from app.constants import ROUTER_MODULE_DOC
+
+__doc__ = f"""``/v1/render`` URL→handler mapping.
+
+{ROUTER_MODULE_DOC.format(handler="app.api.render_endpoint.render", path="/v1/render")}
+"""
 
 router = APIRouter(tags=["Crawler"])
 

@@ -1,10 +1,4 @@
-"""``/v1/search`` URL→handler mapping.
-
-Pure router: imports :func:`app.search.endpoint.search` and binds it to the
-``/v1/search`` POST path. The handler implementation lives in the endpoint
-module so the router stays trivial and the handler is testable without
-FastAPI machinery.
-"""
+"""``/v1/search`` URL→handler mapping."""
 
 from __future__ import annotations
 
@@ -12,7 +6,13 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.api_models import CrawlerError, SearchRequest, SearchResponse
+from app.constants import ROUTER_MODULE_DOC
 from app.search.endpoint import search as search_handler
+
+__doc__ = f"""``/v1/search`` URL→handler mapping.
+
+{ROUTER_MODULE_DOC.format(handler="app.search.endpoint.search", path="/v1/search")}
+"""
 
 router = APIRouter(tags=["Search"])
 
