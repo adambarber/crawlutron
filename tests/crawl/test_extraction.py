@@ -24,6 +24,17 @@ from app.crawl.extraction import (
 )
 
 
+def test_document_test_hooks_accept_shared_bool_spellings(monkeypatch):
+    for value in (" true ", "yes", "1"):
+        monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", value)
+        monkeypatch.setenv("TEST_MARKITDOWN_DIE", value)
+        monkeypatch.setenv("TEST_MARKITDOWN_HANG", value)
+        hooks = extraction._doc_task_hooks()
+        assert hooks is not None
+        assert hooks["die"] is True
+        assert hooks["hang"] is True
+
+
 class TestExtractContent:
     def test_html_uses_trafilatura_markdown(self):
         html = "<html><body><main>Main content here</main></body></html>"

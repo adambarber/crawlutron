@@ -17,6 +17,17 @@ def test_probe_does_not_start_without_running_loop():
     assert probe.get() == 0.0
 
 
+def test_loop_lag_probe_flag_accepts_shared_bool_spellings(monkeypatch):
+    import importlib
+
+    for value in (" true ", "yes", "1"):
+        monkeypatch.setenv("BROWSER_CRAWLER_LOOP_LAG_PROBE", value)
+        module = importlib.reload(rp)
+        assert module._LOOP_LAG_PROBE_ENABLED is True
+    monkeypatch.delenv("BROWSER_CRAWLER_LOOP_LAG_PROBE")
+    importlib.reload(rp)
+
+
 def test_gate_construction_never_starts_probe(monkeypatch):
     monkeypatch.setattr(rp, "_LOOP_LAG_PROBE_ENABLED", True)
     gate = ResourceGate()

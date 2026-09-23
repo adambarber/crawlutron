@@ -25,6 +25,7 @@ import os
 import re
 import threading
 import time
+from contextlib import suppress
 from html import unescape
 from typing import Any, Literal, NamedTuple
 from urllib.parse import urljoin, urlparse
@@ -102,7 +103,7 @@ def _test_hooks_enabled() -> bool:
     they only fire when the operator explicitly exports
     BROWSER_CRAWLER_TEST_HOOKS=1 alongside the per-hook flag.
     """
-    return os.environ.get("BROWSER_CRAWLER_TEST_HOOKS") == "1"
+    return parse_bool_env("BROWSER_CRAWLER_TEST_HOOKS", default=False)
 
 
 def _doc_task_hooks() -> dict | None:
@@ -118,8 +119,8 @@ def _doc_task_hooks() -> dict | None:
     if not _test_hooks_enabled():
         return None
     return {
-        "die": os.environ.get("TEST_MARKITDOWN_DIE") == "1",
-        "hang": os.environ.get("TEST_MARKITDOWN_HANG") == "1",
+        "die": parse_bool_env("TEST_MARKITDOWN_DIE", default=False),
+        "hang": parse_bool_env("TEST_MARKITDOWN_HANG", default=False),
         "output": os.environ.get("TEST_MARKITDOWN_OUTPUT"),
     }
 
@@ -152,32 +153,24 @@ def _doc_worker_main(conn) -> None:
                 return
             if hooks is not None:
                 if hooks.get("die"):
-                    try:
+                    with suppress(Exception):
                         conn.close()
-                    except Exception:
-                        pass
                     os._exit(1)
                 if hooks.get("hang"):
                     time.sleep(10)  # Longer than any test timeout
                 if hooks.get("output") is not None:
-                    try:
+                    with suppress(Exception):
                         conn.send(("ok", hooks["output"]))
-                    except Exception:
-                        return
                     continue
             try:
                 md = _markitdown_extract(body)
                 conn.send(("ok", md))
             except Exception:
-                try:
+                with suppress(Exception):
                     conn.send(("err", None))
-                except Exception:
-                    return
     finally:
-        try:
+        with suppress(Exception):
             conn.close()
-        except Exception:
-            pass
 
 
 # Grace period for a document worker to honor SIGTERM before we escalate.
@@ -193,20 +186,14 @@ def _terminate_doc_process(proc) -> None:
     pool slot for the life of the service. Escalate to SIGKILL, and join after
     the kill so the reaped child cannot linger as a zombie.
     """
-    try:
+    with suppress(Exception):
         proc.terminate()
-    except Exception:
-        pass
-    try:
+    with suppress(Exception):
         proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
-    except Exception:
-        pass
-    try:
+    with suppress(Exception):
         if proc.is_alive():
             proc.kill()
             proc.join(timeout=_DOC_TERMINATE_GRACE_SECONDS)
-    except Exception:
-        pass
 
 
 def _markitdown_extract(body: bytes) -> str | None:
@@ -248,10 +235,8 @@ def _retire_doc_worker(worker: _DocWorker) -> None:
     """
     worker.retired = True
     _terminate_doc_process(worker.proc)
-    try:
+    with suppress(Exception):
         worker.conn.close()
-    except Exception:
-        pass
 
 
 def _teardown_doc_pool_locked() -> None:
@@ -780,27 +765,34 @@ def _parse_html_tree(html: str | None):
         return None
 
 
+def _diagnostic_tree(html: str | None, tree: Any | None) -> Any | None:
+    return tree if tree is not None else (_parse_html_tree(html) if html else None)
+
+
 class _FrameCollector:
-    """Back-compat collector: parse once with lxml and collect frame/iframe srcs.
+    """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
 
-    Kept because the test-suite builds it directly via
-    ``feed()``; internally it now shares the single lxml parse.
-    """
-
-    def __init__(self) -> None:
+    def __init__(self, source_url: str, *, host_policy: HostPolicy) -> None:
+        self.source_url = source_url
+        self.host_policy = host_policy
         self.frames: list[dict[str, str]] = []
 
     def feed(self, html: str) -> None:
-        tree = _parse_html_tree(html)
+        tree = _diagnostic_tree(html, None)
         if tree is None:
             return
         for el in tree.iter("frame", "iframe"):
             src = (el.get("src") or "").strip()
-            if not src:
+            normalized = public_url_or_none(
+                src,
+                resolve_against=self.source_url,
+                policy=self.host_policy,
+            )
+            if normalized is None:
                 continue
             self.frames.append(
                 {
-                    "url": src,
+                    "url": normalized,
                     "name": el.get("name") or "",
                     "title": el.get("title") or "",
                 }
@@ -808,13 +800,16 @@ class _FrameCollector:
 
 
 def _extract_frames(
-    html: str | None, source_url: str | None, *, tree: Any | None = None
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    tree: Any | None = None,
 ) -> list[dict[str, Any]]:
     if not html or not source_url:
         return []
     source_host = (urlparse(source_url).hostname or "").lower()
-    if tree is None:
-        tree = _parse_html_tree(html)
+    tree = _diagnostic_tree(html, tree)
     if tree is None:
         return []
     frames: list[dict[str, Any]] = []
@@ -823,22 +818,28 @@ def _extract_frames(
         src = (el.get("src") or "").strip()
         if not src:
             continue
-        normalized_url = urljoin(source_url, src)
-        parsed = urlparse(normalized_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        normalized_url = public_url_or_none(
+            urljoin(source_url, src),
+            policy=host_policy,
+        )
+        if normalized_url is None:
             continue
+        parsed = urlparse(normalized_url)
         if normalized_url in seen:
             continue
         seen.add(normalized_url)
+        # Resolved once: hostname is Optional, and asking twice is how one field
+        # ends up disagreeing with the other.
+        frame_host = (parsed.hostname or "").lower()
         frames.append(
             {
-                "url": src,
+                "url": normalized_url,
                 "normalized_url": normalized_url,
                 "name": el.get("name") or "",
                 "title": el.get("title") or "",
                 "source_url": source_url,
-                "host": parsed.hostname.lower(),
-                "is_same_host": parsed.hostname.lower() == source_host,
+                "host": frame_host,
+                "is_same_host": bool(frame_host) and frame_host == source_host,
             }
         )
     return frames
@@ -848,19 +849,27 @@ _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
 def _extract_forms(
-    html: str | None, source_url: str | None, *, tree: Any | None = None
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    tree: Any | None = None,
 ) -> list[dict[str, Any]]:
     if not html or not source_url:
         return []
-    if tree is None:
-        tree = _parse_html_tree(html)
+    tree = _diagnostic_tree(html, tree)
     if tree is None:
         return []
     forms: list[dict[str, Any]] = []
     for form_el in tree.iter("form"):
         attrs = {key.lower(): value for key, value in form_el.attrib.items()}
         action = unescape(str(attrs.get("action", "")).strip())
-        normalized_action = urljoin(source_url, action) if action else source_url
+        normalized_action = public_url_or_none(
+            urljoin(source_url, action) if action else source_url,
+            policy=host_policy,
+        )
+        if normalized_action is None:
+            continue
         controls: list[dict[str, str]] = []
         for control in form_el.iter(*_CONTROL_TAGS):
             cattrs = {key.lower(): value for key, value in control.attrib.items()}
@@ -880,7 +889,7 @@ def _extract_forms(
         forms.append(
             {
                 "method": (attrs.get("method") or "GET").upper(),
-                "action": action,
+                "action": normalized_action,
                 "normalized_action": normalized_action,
                 "target": attrs.get("target", ""),
                 "name": attrs.get("name", ""),
@@ -899,12 +908,9 @@ def _html_diagnostics(
     tree: Any | None = None,
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
-    # #11: parse the HTML once and share the single lxml tree across the
-    # frames/forms passes instead of reparsing per pass.
-    if tree is None:
-        tree = _parse_html_tree(html)
-    frames = _extract_frames(html, source_url, tree=tree)
-    forms = _extract_forms(html, source_url, tree=tree)
+    tree = _diagnostic_tree(html, tree)
+    frames = _extract_frames(html, source_url, host_policy=host_policy, tree=tree)
+    forms = _extract_forms(html, source_url, host_policy=host_policy, tree=tree)
     if frames:
         diagnostics["frames"] = frames
     if forms:

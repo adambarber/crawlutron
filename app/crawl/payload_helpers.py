@@ -23,16 +23,29 @@ from app.constants import (
 from app.crawl.credentials import authorization_value as _authorization_value
 from app.crawl.credentials import origin_of
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
 
 SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
+
+
+def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
+    try:
+        return str(normalize_public_http_url(url, policy=host_policy))
+    except ValueError as error:
+        reason = str(error)
+        if reason in {"unsupported_scheme", "invalid_url"}:
+            reason = "invalid_url"
+        raise ValueError(reason) from error
+
 
 # Bounded default for max_pages. A missing or zero value must NOT mean
 # "unlimited" (F4) - it falls back to this sane cap instead.
 DEFAULT_MAX_PAGES = 100
 
 
-def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
+def _payload_urls(
+    payload: dict[str, Any], *, host_policy: HostPolicy, validate_targets: bool = True
+) -> list[str]:
     """Extract the request URL batch, collapsing duplicates by page identity.
 
     ``normalize_public_http_url`` is the single source of truth for what counts
@@ -41,9 +54,8 @@ def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[s
     canonical form -- not the raw string. Identical pages crawl once; the first
     occurrence is kept, order-preserving. Both the engine and the render paths
     inherit the dedup here, and the batch-size check downstream counts unique
-    pages. A value the canonicalizer rejects (non-http, or a private target under
-    the SSRF guard) is not silently dropped: it keeps its raw key so it stays a
-    distinct entry, and request-target validation remains the caller's job.
+    pages. Validation happens before the key is built, so a refused target is
+    never a distinct entry that can cross an acceptance boundary.
     """
     if "urls" in payload:
         urls = payload["urls"]
@@ -52,17 +64,18 @@ def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[s
         seen: set[str] = set()
         unique: list[str] = []
         for url in urls:
-            # Per the page-identity contract (#1926): batch dedupe collapses on
-            # the canonical key, but a value the normalizer rejects (non-http,
-            # private under SSRF) keeps its RAW key so request-target validation
-            # stays with the caller -- safe_public_url_or_none cannot drop it
-            # here the way it does on the egress doors.
-            key = safe_public_url_or_none(url, policy=host_policy) or url
+            key = (
+                _validated_url(url, host_policy=host_policy)
+                if validate_targets
+                else safe_public_url_or_none(url, policy=host_policy) or url
+            )
             if key not in seen:
                 seen.add(key)
                 unique.append(url)
         return unique
     if "url" in payload and isinstance(payload["url"], str):
+        if validate_targets:
+            _validated_url(payload["url"], host_policy=host_policy)
         return [payload["url"]]
     raise ValueError("missing_url")
 
@@ -73,6 +86,7 @@ def checked_payload_urls(
     *,
     host_policy: HostPolicy,
     urls: list[str] | None = None,
+    validate_targets: bool = True,
 ) -> list[str]:
     """Deduplicated URL batch, rejected if it exceeds the batch cap (L4).
 
@@ -89,7 +103,17 @@ def checked_payload_urls(
     oversized batch past the ceiling.
     """
     if urls is None:
-        urls = _payload_urls(payload, host_policy=host_policy)
+        urls = _payload_urls(
+            payload,
+            host_policy=host_policy,
+            validate_targets=validate_targets,
+        )
+    else:
+        for url in urls:
+            if not isinstance(url, str):
+                raise ValueError("invalid_url")
+            if validate_targets:
+                _validated_url(url, host_policy=host_policy)
     if len(urls) > max_batch_size:
         raise ValueError("batch_size_exceeded")
     return urls

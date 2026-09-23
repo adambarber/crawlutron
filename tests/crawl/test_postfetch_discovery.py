@@ -8,6 +8,7 @@ strategy result builders. The post-fetch block must move to
 
 import asyncio
 
+from app.crawl.extraction import extract_post_fetch_discovery
 from app.validation import HostPolicy
 from tests._testkit import (
     http_strategy_policy,
@@ -107,6 +108,42 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     assert not _has_element(out)
     assert out["discovered_link_count"] == 3
     assert out["next_page_url"] == "http://example.com/next"
+
+
+def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    html = (
+        '<iframe src="https://blocked.test/frame"></iframe>'
+        '<form action="http://127.0.0.1/admin"></form>'
+    )
+    result = extract_post_fetch_discovery(
+        html,
+        "https://allowed.test/page",
+        include_diagnostics=True,
+        host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
+    )
+    assert result["diagnostics"] == {}
+
+
+async def test_discovery_feeds_are_policy_filtered():
+    from app.crawl.strategies.fetch_policy import _discovery_diagnostics
+
+    html = (
+        '<link rel="alternate" type="application/rss+xml" href="https://blocked.test/feed">'
+        '<link rel="alternate" type="application/atom+xml" href="http://127.0.0.1/feed">'
+        '<link rel="alternate" type="application/rss+xml" href="https://allowed.test/feed">'
+    )
+    result = await _discovery_diagnostics(
+        normalized_url="https://allowed.test/page",
+        html=html,
+        policy={"discovery": {"feeds": True}},
+        host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
+        headers={},
+        http_fetcher=lambda *args: None,
+        engine_robots_sitemaps=[],
+        robots_evaluated=True,
+    )
+    assert result["discovery"]["feeds"] == ["https://allowed.test/feed"]
 
 
 async def test_browser_path_filters_malicious_next_page_url(monkeypatch):

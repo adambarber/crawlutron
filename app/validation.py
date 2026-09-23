@@ -6,6 +6,7 @@ import math
 import os
 import sys
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import TYPE_CHECKING, TypeVar
@@ -592,13 +593,10 @@ def registrable_domain(url: str) -> str:
         ascii_host = host
     psl = _public_suffix_list()
     if psl is not None:
-        try:
+        with suppress(Exception):
             registrable = psl.privatesuffix(ascii_host)
             if registrable:
                 return registrable
-        except Exception:
-            # A poisoned/unparseable host falls through to the heuristic.
-            pass
     return _heuristic_registrable_domain(host)
 
 

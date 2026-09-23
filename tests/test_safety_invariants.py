@@ -47,6 +47,17 @@ __all__ = [
     "trees_under",
 ]
 
+# Per-file no-growth budget for app/. A new file starts at 0; a file may not grow.
+# The budget is a ratchet that moves ONLY in the commit that legitimately shrinks
+# or justifies a file, so a gate is never a reason to stop removing code. Seven
+# entries moved in the policy-enforcement commit and the reason is the same for
+# all of them: entry points that accept work now validate it against the host
+# policy before the work is accepted, and that validation is ONE shared helper
+# (`_validated_url` in app/crawl/payload_helpers.py) rather than a repeated check,
+# so the growth is the chokepoint plus its wiring. The migration entries moved for
+# the same kind of reason: startup now verifies schema conformance on the no-op
+# path, and the column comparison is consolidated into one by-name function rather
+# than duplicated per policy.
 _APP_FILE_LINE_BUDGETS = {
     "app/__init__.py": 1,
     "app/api/async_crawl_runner.py": 199,
@@ -56,14 +67,14 @@ _APP_FILE_LINE_BUDGETS = {
     "app/api/dependencies.py": 37,
     "app/api/exceptions.py": 118,
     "app/api/job_runner.py": 469,
-    "app/api/jobs_router.py": 162,
+    "app/api/jobs_router.py": 173,
     "app/api/main_helpers.py": 27,
     "app/api/map_endpoint.py": 75,
     "app/api/map_router.py": 35,
     "app/api/metrics_router.py": 21,
     "app/api/middleware.py": 83,
     "app/api/policy_defaults.py": 34,
-    "app/api/render.py": 231,
+    "app/api/render.py": 232,
     "app/api/render_endpoint.py": 85,
     "app/api/render_router.py": 34,
     "app/api/response_shaping.py": 393,
@@ -83,7 +94,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/decompression.py": 162,
     "app/crawl/document_text.py": 180,
     "app/crawl/engine.py": 1166,
-    "app/crawl/extraction.py": 1133,
+    "app/crawl/extraction.py": 1139,
     "app/crawl/fetch_helpers.py": 264,
     "app/crawl/ids.py": 23,
     "app/crawl/job_store.py": 697,
@@ -93,9 +104,9 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/0002_crawl_jobs_drop_canonicalized.py": 24,
     "app/crawl/migrations/__init__.py": 35,
     "app/crawl/migrations/__main__.py": 6,
-    "app/crawl/migrations/manifest.py": 197,
-    "app/crawl/migrations/runner.py": 162,
-    "app/crawl/payload_helpers.py": 193,
+    "app/crawl/migrations/manifest.py": 216,
+    "app/crawl/migrations/runner.py": 179,
+    "app/crawl/payload_helpers.py": 217,
     "app/crawl/recursive.py": 438,
     "app/crawl/render_options.py": 93,
     "app/crawl/result_helpers.py": 534,
@@ -112,7 +123,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/strategies/content_cache_key.py": 85,
     "app/crawl/strategies/cookie_jar.py": 168,
     "app/crawl/strategies/document.py": 145,
-    "app/crawl/strategies/fetch_policy.py": 217,
+    "app/crawl/strategies/fetch_policy.py": 245,
     "app/crawl/strategies/fetchers.py": 328,
     "app/crawl/strategies/http.py": 659,
     "app/crawl/strategies/http_client_pool.py": 482,

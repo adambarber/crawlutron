@@ -120,7 +120,7 @@ ignore = [
 # by design; calls listed here are recognized as immutable by bugbear.
 # S311: random.uniform jitter in the scheduler is throughput shaping, not crypto.
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
+extend-immutable-calls = ["Depends", "fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 37
@@ -151,10 +151,8 @@ max-statements = 147
 "app/crawl/engine.py" = ["E402", "S110", "S112", "ARG002"]
 # Robustness boundaries: best-effort probes/cleanup where silence is the
 # contract (worker reaps, optional-binding probes, webhook best-effort).
-"app/crawl/extraction.py" = ["S110"]
 "app/api/async_crawl_runner.py" = ["S110", "E402"]
 "app/api/webhooks.py" = ["S110"]
-"app/validation.py" = ["S110"]
 # robots single-token matcher constant (not a credential; S105 name heuristic).
 "app/constants.py" = ["S105"]
 # S310: document.py hands opener.open a urllib Request whose URL comes from
@@ -172,7 +170,6 @@ max-statements = 147
 # surface, not an unused local.
 "app/crawl/strategies/browser_pool.py" = ["F401"]
 # The job store wires the sqlite connection factory above the model imports.
-"app/crawl/job_store.py" = ["E402"]
 # Best-effort snapshot persistence: a failed cache write is never fatal.
 "app/crawl/llm_format.py" = ["S110", "S112"]
 "app/crawl/fetch_helpers.py" = ["S110", "S112"]
@@ -181,9 +178,6 @@ max-statements = 147
 "app/**" = ["UP042"]
 # The scheduler's jitter is throughput shaping, not crypto (see flake8-bandit note).
 "app/scheduler.py" = ["S311"]
-# Existing broad per-surface grants (kept from the original config):
-"app/api/**" = ["B008"]
-"app/main.py" = ["B008"]
 "**/__pycache__/**" = ["ALL"]
 
 [tool.pytest.ini_options]

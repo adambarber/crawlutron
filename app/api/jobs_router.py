@@ -23,6 +23,8 @@ from app.api_models import (
     JobStatusResponse,
 )
 from app.crawl.job_store import CrawlJobState
+from app.crawl.payload_helpers import checked_payload_urls
+from app.validation import HostPolicy
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
@@ -63,7 +65,16 @@ async def create_job(
 ) -> JobCreateResponse:
     from app.crawl.job_store import JobStatus
 
-    job = job_store.create(str(payload.root_url), payload.policy.model_dump())
+    try:
+        host_policy = HostPolicy.from_settings(settings)
+        checked = checked_payload_urls(
+            {"url": str(payload.root_url)},
+            settings.max_batch_size,
+            host_policy=host_policy,
+        )
+        job = job_store.create(checked[0], payload.policy.model_dump())
+    except ValueError as error:
+        raise http_error(422, "validation_error", "Request validation failed", {"errors": [{"msg": str(error)}]}) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
     job = job_store.load(job.job_id)
     return JobCreateResponse(

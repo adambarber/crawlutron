@@ -13,8 +13,6 @@ import logging
 import sqlite3
 import threading
 import time
-
-logger = logging.getLogger(__name__)
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import lru_cache
@@ -24,7 +22,9 @@ from typing import Any
 from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
 from app.crawl.sqlite_store import connect_store
-from app.validation import HostPolicy, safe_public_url_or_none
+from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
+
+logger = logging.getLogger(__name__)
 
 
 def _json_default(obj):
@@ -104,24 +104,22 @@ def policy_limits(policy: Any) -> dict[str, Any]:
     return dict(limits) if isinstance(limits, dict) else {}
 
 
-def job_max_depth(policy: Any) -> int:
-    value = policy_limits(policy).get("max_depth")
+def _policy_int(policy: Any, name: str) -> int:
+    value = policy_limits(policy).get(name)
     if isinstance(value, bool):
         return 0
     try:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def job_max_depth(policy: Any) -> int:
+    return _policy_int(policy, "max_depth")
 
 
 def job_max_pages(policy: Any) -> int:
-    value = policy_limits(policy).get("max_pages")
-    if isinstance(value, bool):
-        return 0
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
+    return _policy_int(policy, "max_pages")
 
 
 def _entry_depth(value: Any, fallback: int) -> int:
@@ -492,7 +490,7 @@ class JobStore:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
         job_id = new_job_id()
-        canonical_root = _canonical_or_raw(root_url, self._host_policy)
+        canonical_root = str(normalize_public_http_url(root_url, policy=self._host_policy))
         normalized = normalized_policy(policy)
         job = CrawlJobState(
             job_id=job_id,
@@ -512,7 +510,7 @@ class JobStore:
         job = CrawlJobState(
             job_id=job_id,
             kind=JobKind.SINGLE_SHOT,
-            root_url=_canonical_or_raw(root_url, self._host_policy),
+            root_url=str(normalize_public_http_url(root_url, policy=self._host_policy)),
             policy=normalized_policy(policy),
             status=JobStatus.PENDING,
             host_policy=self._host_policy,

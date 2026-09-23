@@ -234,7 +234,11 @@ class TestPureParsing:
             '<iframe src="javascript:alert(1)"></iframe>'
             '<iframe src="http://same.example/f"></iframe>'
         )
-        frames = _extract_frames(html, "http://same.example/")
+        frames = _extract_frames(
+            html,
+            "http://same.example/",
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
         assert len(frames) == 1
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
@@ -243,7 +247,10 @@ class TestPureParsing:
         assert len(links) == 1
 
     def test_frame_collector_ignores_frames_without_src(self) -> None:
-        collector = _FrameCollector()
+        collector = _FrameCollector(
+            "http://x/",
+            host_policy=UNRESTRICTED_HOST_POLICY,
+        )
         collector.feed('<frame></frame><iframe src="http://x/f"></iframe>')
         assert len(collector.frames) == 1
 
@@ -465,6 +472,7 @@ class TestFetchHelperUtilities:
             "<button name='b' value='go'>Go</button>"
             "</form>",
             "http://x/",
+            host_policy=UNRESTRICTED_HOST_POLICY,
         )
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}

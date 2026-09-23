@@ -19,6 +19,7 @@ from app.crawl.migrations.manifest import (
     MIGRATION_SEQUENCES,
     StoreSchema,
     legacy_stamp_drift,
+    schema_drift,
 )
 from app.crawl.sqlite_store import table_has_column
 
@@ -89,6 +90,15 @@ def _require_stampable_schema(conn: sqlite3.Connection, schema: StoreSchema) -> 
         )
 
 
+def _require_current_schema(conn: sqlite3.Connection, schema: StoreSchema) -> None:
+    table = CURRENT_SCHEMAS[schema]
+    drift = schema_drift(conn, table)
+    if drift:
+        raise LegacySchemaMismatch(
+            f"{table.name} does not match the declared schema: {'; '.join(drift)}"
+        )
+
+
 def migrate_store(
     db_path: str | Path,
     schema: StoreSchema | str,
@@ -101,22 +111,22 @@ def migrate_store(
     with _locked_backend(db_path, memory_name) as backend:
         applied_hashes = set(backend.get_applied_migration_hashes())
         pending = backend.to_apply(migrations)
-        if not pending:
-            return
-        target_was_applied = any(migration.hash in applied_hashes for migration in migrations)
-        if not target_was_applied and _table_exists(backend.connection, selected):
-            _require_stampable_schema(backend.connection, selected)
-            initial = next(
-                migration
-                for migration in migrations
-                if migration.id == MIGRATION_SEQUENCES[selected][0]
-            )
-            backend.mark_migrations([initial])
-            remaining = backend.to_apply(migrations)
-            if remaining:
-                backend.apply_migrations(remaining)
-        else:
-            backend.apply_migrations(pending)
+        if pending:
+            target_was_applied = any(migration.hash in applied_hashes for migration in migrations)
+            if not target_was_applied and _table_exists(backend.connection, selected):
+                _require_stampable_schema(backend.connection, selected)
+                initial = next(
+                    migration
+                    for migration in migrations
+                    if migration.id == MIGRATION_SEQUENCES[selected][0]
+                )
+                backend.mark_migrations([initial])
+                remaining = backend.to_apply(migrations)
+                if remaining:
+                    backend.apply_migrations(remaining)
+            else:
+                backend.apply_migrations(pending)
+        _require_current_schema(backend.connection, selected)
 
 
 def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> None:
@@ -129,7 +139,14 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> None:
                 f"cannot stamp missing table {CURRENT_SCHEMAS[selected].name}"
             )
         _require_stampable_schema(backend.connection, selected)
-        backend.mark_migrations(backend.to_apply(migrations))
+        pending = backend.to_apply(migrations)
+        if not schema_drift(backend.connection, CURRENT_SCHEMAS[selected]):
+            to_mark = pending
+        else:
+            initial_id = MIGRATION_SEQUENCES[selected][0]
+            to_mark = [migration for migration in pending if migration.id == initial_id]
+        if to_mark:
+            backend.mark_migrations(to_mark)
 
 
 def rollback_store(db_path: str | Path, schema: StoreSchema | str) -> None:

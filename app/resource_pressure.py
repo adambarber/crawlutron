@@ -28,7 +28,7 @@ from app.memory_pressure import (
     ResourceGauge,
     read_memory_stats,
 )
-from app.validation import get_env_float, get_env_int
+from app.validation import get_env_float, get_env_int, parse_bool_env
 
 # Self-managed CPU admission targets (no operator knob): the gate rides at
 # TARGET and pauses at HARD against the cgroup CPU quota it discovers itself.
@@ -42,7 +42,7 @@ _DEFAULT_CPU_BUDGET = None
 # admission). Disabled by default so test suites and minimal deployments pay no
 # background-task cost; enable with BROWSER_CRAWLER_LOOP_LAG_PROBE=1 in the
 # container. When disabled the probe reports zero lag and the gate is unaffected.
-_LOOP_LAG_PROBE_ENABLED = os.environ.get("BROWSER_CRAWLER_LOOP_LAG_PROBE", "0") == "1"
+_LOOP_LAG_PROBE_ENABLED = parse_bool_env("BROWSER_CRAWLER_LOOP_LAG_PROBE", default=False)
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05
 _LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
 _LOOP_LAG_HARD_THRESHOLD = 0.30  # at/above this lag (s) -> full throttle

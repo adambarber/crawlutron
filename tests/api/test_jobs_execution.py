@@ -134,6 +134,45 @@ class TestCrashRecovery:
         assert job.in_flight == []
 
 
+    @pytest.mark.parametrize(
+        ("url", "settings_values"),
+        [
+            ("https://blocked.test/secret", {"denied_hosts": "blocked.test"}),
+            ("https://other.test/secret", {"allowed_hosts": "allowed.test"}),
+            ("http://127.0.0.1/secret", {"allowed_hosts": "127.0.0.1"}),
+        ],
+    )
+    async def test_rejected_job_is_not_persisted_or_started(self, job_store, monkeypatch, url, settings_values):
+        from httpx import ASGITransport, AsyncClient
+
+        from app.api.dependencies import get_settings
+        from app.settings import CrawlerSettings
+
+        app = _make_app(job_store)
+        app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(
+            {f"BROWSER_CRAWLER_{key.upper()}": value for key, value in settings_values.items()}
+        )
+        started: list[str] = []
+        monkeypatch.setattr(job_runner, "start_job", lambda job_id, *args: started.append(job_id))
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post("/v1/jobs", json={"root_url": url})
+
+        assert response.status_code == 422
+        body = response.json()
+        envelope = body if "code" in body else body["detail"]
+        assert envelope["code"] == "validation_error"
+        assert envelope["details"]["errors"][0]["msg"] in {
+            "host_denied",
+            "host_not_allowed",
+            "private_network_target",
+        }
+        assert job_store.list_jobs() == []
+        assert started == []
+
+
 class TestWholeSiteJobExecution:
     def test_engine_payload_builder_disables_recursion_and_preserves_limits(self, job_store):
         root = "http://example.test/a"

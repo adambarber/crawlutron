@@ -17,7 +17,7 @@ from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.result_helpers import _classify_error_code
 from app.crawl.strategies.body_decode import _decode_body
 from app.models import HttpFetcher
-from app.validation import HostPolicy
+from app.validation import HostPolicy, public_url_or_none
 
 _RETRY_BACKOFF_BASE_SECONDS = 0.25
 _RETRY_BACKOFF_CAP_SECONDS = 2.0
@@ -114,7 +114,10 @@ async def _discovery_diagnostics(
     discovery = policy.get("discovery") or {}
     limits = policy.get("limits", {})
     diagnostics: dict[str, Any] = {}
-    parsed = urlparse(normalized_url)
+    safe_source = public_url_or_none(normalized_url, policy=host_policy)
+    if safe_source is None:
+        return diagnostics
+    parsed = urlparse(safe_source)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     robots_sitemaps: list[str] = []
     if not robots_evaluated:
@@ -131,7 +134,11 @@ async def _discovery_diagnostics(
         # extracted its Sitemap directives; reuse them instead of hitting the
         # network a second time (#4). An empty list is a valid signal (robots
         # fetched, no Sitemap lines) and still means "do not re-fetch".
-        robots_sitemaps = list(engine_robots_sitemaps)
+        robots_sitemaps = [
+            safe_url
+            for entry in engine_robots_sitemaps
+            if (safe_url := public_url_or_none(entry, resolve_against=safe_source, policy=host_policy))
+        ]
         diagnostics["robots"] = {
             "url": None,
             "allowed": True,
@@ -141,7 +148,9 @@ async def _discovery_diagnostics(
             "evaluation": "cached",
         }
     elif discovery.get("robots"):
-        robots_url = urljoin(origin, "/robots.txt")
+        robots_url = public_url_or_none(urljoin(origin, "/robots.txt"), policy=host_policy)
+        if robots_url is None:
+            return diagnostics
         try:
             robots_response = http_fetcher(robots_url, headers, limits.get("timeout_seconds", 10))
             if inspect.iscoroutine(robots_response):
@@ -164,7 +173,13 @@ async def _discovery_diagnostics(
                     except ValueError:
                         crawl_delay = None
                 elif key.strip().lower() == "sitemap":
-                    robots_sitemaps.append(value.strip())
+                    safe_sitemap = public_url_or_none(
+                        value.strip(),
+                        resolve_against=safe_source,
+                        policy=host_policy,
+                    )
+                    if safe_sitemap is not None:
+                        robots_sitemaps.append(safe_sitemap)
             diagnostics["robots"] = {
                 "url": robots_url,
                 "allowed": True,
@@ -196,9 +211,16 @@ async def _discovery_diagnostics(
                     host_policy=host_policy,
                 )
                 for loc, lastmod in found_locs:
-                    sitemap_urls.append(loc)
+                    safe_loc = public_url_or_none(
+                        loc,
+                        resolve_against=sitemap_url,
+                        policy=host_policy,
+                    )
+                    if safe_loc is None:
+                        continue
+                    sitemap_urls.append(safe_loc)
                     if lastmod:
-                        diagnostics.setdefault("sitemap_lastmod", {})[loc] = lastmod
+                        diagnostics.setdefault("sitemap_lastmod", {})[safe_loc] = lastmod
             except Exception:
                 continue
     feeds: list[str] = []
@@ -211,7 +233,13 @@ async def _discovery_diagnostics(
                 continue
             href_match = re.search(r"href=['\"]([^'\"]+)['\"]", tag, flags=re.IGNORECASE)
             if href_match:
-                feeds.append(urljoin(normalized_url, href_match.group(1)))
+                feed = public_url_or_none(
+                    href_match.group(1),
+                    resolve_against=safe_source,
+                    policy=host_policy,
+                )
+                if feed is not None:
+                    feeds.append(feed)
     if sitemap_urls or feeds:
         diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
     return diagnostics

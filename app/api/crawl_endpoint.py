@@ -98,7 +98,7 @@ async def crawl(
             if webhook_url:
                 await validate_webhook_url_async(webhook_url, host_policy=host_policy)
             request_id = new_request_id()
-            job_store.create_single_shot(request_id, payload_dict.get("url", ""), payload_dict)
+            job_store.create_single_shot(request_id, checked[0], payload_dict)
             from app.api.async_crawl_runner import run_async_crawl
 
             background_tasks.add_task(

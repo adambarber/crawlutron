@@ -164,24 +164,27 @@ def _index_drift(conn: sqlite3.Connection, schema: TableSchema) -> tuple[str, ..
     return (f"indexes: expected={expected!r} actual={actual!r}",)
 
 
-def schema_drift(conn: sqlite3.Connection, schema: TableSchema) -> tuple[str, ...]:
-    actual_columns = _actual_columns(conn, schema.name)
-    if actual_columns == schema.columns:
-        return _index_drift(conn, schema)
-    return (
-        f"columns: expected={schema.columns!r} actual={actual_columns!r}",
-        *_index_drift(conn, schema),
-    )
-
-
-def legacy_stamp_drift(
+def _column_drift(
     conn: sqlite3.Connection,
     schema: TableSchema,
-    store_schema: StoreSchema,
+    *,
+    allowed: dict[str, ColumnSchema],
 ) -> tuple[str, ...]:
+    """Compare a live table against the declared manifest BY COLUMN NAME.
+
+    SQLite appends a column added by ALTER TABLE to the end of the table, so a
+    database created by the previous migration path has exactly the declared
+    columns in a different ORDER. Order is a physical accident of how the table
+    was built, not part of the contract -- SQL addresses columns by name. A
+    positional comparison therefore rejects every database this service has
+    ever created, which is how a startup conformance check becomes an outage.
+
+    `allowed` carries columns that are permitted to exist beyond the manifest
+    (a legacy column on the stamping path); they are still checked against their
+    own declared shape, never ignored.
+    """
     actual = {column.name: column for column in _actual_columns(conn, schema.name)}
     expected = {column.name: column for column in schema.columns}
-    allowed = {column.name: column for column in LEGACY_COLUMNS[store_schema]}
     drift: list[str] = []
     for name in sorted(expected.keys() - actual.keys()):
         drift.append(f"missing column: {name}")
@@ -195,3 +198,19 @@ def legacy_stamp_drift(
             drift.append(f"legacy column {name}: expected={allowed[name]!r} actual={actual[name]!r}")
     drift.extend(_index_drift(conn, schema))
     return tuple(drift)
+
+
+def schema_drift(conn: sqlite3.Connection, schema: TableSchema) -> tuple[str, ...]:
+    return _column_drift(conn, schema, allowed={})
+
+
+def legacy_stamp_drift(
+    conn: sqlite3.Connection,
+    schema: TableSchema,
+    store_schema: StoreSchema,
+) -> tuple[str, ...]:
+    return _column_drift(
+        conn,
+        schema,
+        allowed={column.name: column for column in LEGACY_COLUMNS[store_schema]},
+    )

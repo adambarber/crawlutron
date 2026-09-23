@@ -71,10 +71,10 @@ class TestCrawlApi:
         diagnostics = result["diagnostics"]
         assert "robots" in diagnostics
         assert diagnostics["robots"]["allowed"] is True
-        assert "/sitemap.xml" in diagnostics["robots"]["sitemaps"]
+        assert f"{self.base}/sitemap.xml" in diagnostics["robots"]["sitemaps"]
         assert "discovery" in diagnostics
-        assert "/page1" in diagnostics["discovery"]["sitemap_urls"]
-        assert "/page2" in diagnostics["discovery"]["sitemap_urls"]
+        assert f"{self.base}/page1" in diagnostics["discovery"]["sitemap_urls"]
+        assert f"{self.base}/page2" in diagnostics["discovery"]["sitemap_urls"]
 
     async def test_v1_crawl_404_is_classified_not_found(self):
         resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/missing"))

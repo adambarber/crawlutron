@@ -35,6 +35,21 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 422, resp.text
         assert "batch_size_exceeded" in resp.text
 
+    async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(self, override_settings):
+        from app.main import job_store
+
+        override_settings(denied_hosts="blocked.test")
+        before = len(job_store.list_jobs())
+        response = await self.client.post(
+            "/v1/crawl",
+            json=make_crawl_payload("https://blocked.test/secret", async_mode=True),
+        )
+
+        assert response.status_code == 422
+        assert response.json()["code"] == "validation_error"
+        assert response.json()["details"]["errors"][0]["msg"] == "host_denied"
+        assert len(job_store.list_jobs()) == before
+
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
         resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))

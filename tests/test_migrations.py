@@ -141,7 +141,7 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
     store.close()
 
 
-def test_explicit_legacy_stamp_allows_historical_column_but_drift_remains_strict(tmp_path):
+def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
     db_path = tmp_path / "stamped-historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
     before = sqlite3.connect(db_path)
@@ -153,9 +153,11 @@ def test_explicit_legacy_stamp_allows_historical_column_but_drift_remains_strict
 
     after = sqlite3.connect(db_path)
     columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
+    applied = {str(row[0]) for row in after.execute("SELECT migration_id FROM _yoyo_migration")}
     assert "canonicalized" in columns
+    assert "0001_crawl_jobs_initial" in applied
+    assert "0002_crawl_jobs_drop_canonicalized" not in applied
     assert schema_drift(after, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS])
-    _assert_migration_recorded(after, StoreSchema.CRAWL_JOBS)
     after.close()
 
 
@@ -179,7 +181,7 @@ def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_pa
     store.close()
 
 
-def test_missing_migration_column_is_detected_as_drift(tmp_path):
+def test_missing_migration_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "missing-column.db"
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
@@ -188,12 +190,11 @@ def test_missing_migration_column_is_detected_as_drift(tmp_path):
     conn.commit()
     conn.close()
 
-    drifted = sqlite3.connect(db_path)
-    assert schema_drift(drifted, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS])
-    drifted.close()
+    with pytest.raises(Exception, match="transient_retries"):
+        JobStore(db_path, policy=HostPolicy.unrestricted())
 
 
-def test_out_of_band_extra_column_is_detected_as_drift(tmp_path):
+def test_out_of_band_extra_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "extra-column.db"
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
@@ -202,9 +203,8 @@ def test_out_of_band_extra_column_is_detected_as_drift(tmp_path):
     conn.commit()
     conn.close()
 
-    drifted = sqlite3.connect(db_path)
-    assert schema_drift(drifted, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS])
-    drifted.close()
+    with pytest.raises(Exception, match="unexpected"):
+        JobStore(db_path, policy=HostPolicy.unrestricted())
 
 
 def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):

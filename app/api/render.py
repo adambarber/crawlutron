@@ -99,6 +99,7 @@ async def render_request(
         payload,
         active_settings.max_batch_size,
         host_policy=host_policy,
+        validate_targets=False,
     )
 
     options = _render_options(payload, active_settings)
