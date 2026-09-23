@@ -1,0 +1,81 @@
+# Quality gates for browser-crawler.
+#
+# This file lives INSIDE the service on purpose: the service is destined to
+# become its own repository, and its tooling should travel with it. While it is
+# still a subdirectory of the dev-stack parent repo, the parent repo's
+# .git/hooks/pre-commit invokes this config explicitly (`pre-commit run
+# --config docker/browser-crawler/.pre-commit-config.yaml`), so nothing here
+# governs the rest of dev-stack, and nothing in dev-stack governs this service.
+#
+# Entries resolve the service root themselves, so the same config works in both
+# layouts: as `docker/browser-crawler/` inside the parent repo, and as the
+# repository root once the service stands alone. `files:` matches both shapes
+# for the same reason — a hook must not fire on the parent repo's other files.
+#
+# These gates are ergonomics, not enforcement: CI's required status check is the
+# authority. Their value is that each one is whole-tree and fast, so a violation
+# surfaces while the change is still in context. `language: system` means no
+# hook environment is downloaded, no package index is contacted, and the
+# project's own pinned tools (installed in the service venv) are what runs.
+#
+# ruff format is intentionally absent: the tree carries formatting debt (CI runs
+# it as advisory for the same reason) and a hook that fails every commit trains
+# people to bypass the gate. It belongs here once the tree is format-clean.
+repos:
+  - repo: local
+    hooks:
+      # Whole-tree style/safety lint. The ruff config in the service's
+      # pyproject.toml is the single style source of truth; inline noqa is
+      # banned by project rule.
+      - id: ruff
+        name: ruff check
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          .venv/bin/python -m ruff check app tests
+        language: system
+        files: ^(docker/browser-crawler/)?.*\.py$
+        pass_filenames: false
+
+      # Copy/paste detection at zero tolerance, with --fail-on-empty so a future
+      # path or cwd mistake cannot silently analyze nothing and pass. A clone is
+      # evidence of a missing funnel, so this is a design gate, not a style one.
+      - id: jscpd
+        name: jscpd (zero tolerance)
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          jscpd -f python --threshold 0 --fail-on-empty app tests
+        language: system
+        files: ^(docker/browser-crawler/)?.*\.py$
+        pass_filenames: false
+
+      # Type gate: catches the stringly-typed-identity class statically, and is
+      # the same command CI runs. On pre-push because it is slower than the two
+      # above and a type error is worth catching slightly later than lint.
+      - id: mypy
+        name: mypy
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          .venv/bin/python -m mypy app
+        language: system
+        files: ^(docker/browser-crawler/)?.*\.py$
+        pass_filenames: false
+        stages: [pre-push]
+
+      # The project-specific safety predicates (chokepoint detectors). They are
+      # the real architecture gate and the only exit path for those rules, so
+      # they run on pre-push rather than living only in CI.
+      - id: safety-invariants
+        name: chokepoint safety invariants
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          .venv/bin/python -m pytest -q -p no:randomly
+          tests/test_safety_invariants.py tests/test_env_regression.py
+          tests/test_store_pragma_chokepoint.py tests/membership_gate.py
+        language: system
+        files: ^(docker/browser-crawler/)?.*\.py$
+        pass_filenames: false
+        stages: [pre-push]
