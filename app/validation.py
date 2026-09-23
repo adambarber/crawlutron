@@ -46,21 +46,38 @@ def _policy_hosts(raw: str) -> tuple[str, ...]:
     return tuple(entry for item in raw.split(",") if (entry := _policy_host_entry(item)))
 
 
-def _host_allowed(
+def _host_policy_reason(
     host: str,
     *,
     allowed_hosts: str | None = None,
     denied_hosts: str | None = None,
-) -> bool:
+) -> str | None:
     if allowed_hosts is None and denied_hosts is None:
         allowed_hosts = os.environ.get("BROWSER_CRAWLER_ALLOWED_HOSTS", "")
         denied_hosts = os.environ.get("BROWSER_CRAWLER_DENIED_HOSTS", "")
     normalized = _normalize_policy_host(host)
     denied = _policy_hosts(denied_hosts or "")
     if any(normalized == entry or normalized.endswith(f".{entry}") for entry in denied):
-        return False
+        return "host_denied"
     allowed = _policy_hosts(allowed_hosts or "")
-    return not allowed or any(normalized == entry or normalized.endswith(f".{entry}") for entry in allowed)
+    if allowed and not any(normalized == entry or normalized.endswith(f".{entry}") for entry in allowed):
+        return "host_not_allowed"
+    return None
+
+
+def _host_allowed(
+    host: str,
+    *,
+    allowed_hosts: str | None = None,
+    denied_hosts: str | None = None,
+) -> bool:
+    return _host_policy_reason(
+        host,
+        allowed_hosts=allowed_hosts,
+        denied_hosts=denied_hosts,
+    ) is None
+
+
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 _IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
 _NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
@@ -184,12 +201,13 @@ def normalize_public_http_url(
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
-    if not _host_allowed(host, allowed_hosts=allowed_hosts, denied_hosts=denied_hosts):
-        denied = _policy_hosts(denied_hosts or os.environ.get("BROWSER_CRAWLER_DENIED_HOSTS", ""))
-        normalized_host = _normalize_policy_host(host)
-        if any(normalized_host == entry or normalized_host.endswith(f".{entry}") for entry in denied):
-            raise ValueError("host_denied")
-        raise ValueError("host_not_allowed")
+    host_policy_reason = _host_policy_reason(
+        host,
+        allowed_hosts=allowed_hosts,
+        denied_hosts=denied_hosts,
+    )
+    if host_policy_reason:
+        raise ValueError(host_policy_reason)
     # Local dev/test escape hatch: the crawler is a localhost dev service and
     # tests run a real in-process server on loopback. Allow opting out of the
     # private-network guard via env var rather than relaxing it by default.
