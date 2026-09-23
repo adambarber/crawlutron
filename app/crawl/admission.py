@@ -10,9 +10,8 @@ from dataclasses import dataclass, field
 from typing import Any, TypeVar, cast
 from urllib.parse import urljoin, urlparse
 
-from app.bounded_ttl import BoundedTTLCache
 from app.constants import is_analytics_host, is_document_url
-from app.crawl.fetch_helpers import _fetch_and_decode, _single_flight, fetch_sitemap_urls
+from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.job_store import (
     FrontierEntry,
     job_max_depth,
@@ -21,13 +20,15 @@ from app.crawl.job_store import (
     normalized_policy,
     policy_limits,
 )
-from app.crawl.robots_parse import parse_robots_crawl_delay, parse_robots_rules
+from app.crawl.robots import load_robots_rules, robots_allows, robots_cache, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.http import _default_http_fetcher
 from app.models import NormalizedUrl
 from app.safe_regex import UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
 from app.validation import registrable_domain, safe_public_url_or_none
+
+_DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +38,6 @@ CommitCrawlDelay = Callable[[str, float], None]
 T = TypeVar("T")
 
 _MAX_SCOPE_PATTERN_LEN = 256
-_ROBOTS_CACHE_TTL_SECONDS = 600.0
-_ROBOTS_FAILURE_TTL_SECONDS = 60.0
-_ROBOTS_CACHE_MAX_ENTRIES = 2048
 _ROBOTS_ADMISSION_CHUNK_SIZE = 16
 
 
@@ -310,44 +308,22 @@ class RobotsGate:
                 default=int(getattr(settings, "default_timeout_seconds", 30)),
             ),
         )
-        self._cache: BoundedTTLCache[str, tuple[list[tuple[bool, str]], float | None]] = BoundedTTLCache(
-            max_entries=_ROBOTS_CACHE_MAX_ENTRIES,
-            ttl=_ROBOTS_CACHE_TTL_SECONDS,
-        )
-        self._inflight: dict[str, asyncio.Task[tuple[list[tuple[bool, str]], float | None]]] = {}
-
-    async def _load_rules(self, origin: str) -> tuple[list[tuple[bool, str]], float | None]:
-        body, status = await _fetch_and_decode(
-            _default_http_fetcher,
-            f"{origin}/robots.txt",
-            {},
-            self._timeout_seconds,
-        )
-        ttl = _ROBOTS_CACHE_TTL_SECONDS
-        if status == 200 and body is not None:
-            value = (parse_robots_rules(body), parse_robots_crawl_delay(body))
-        elif status == 404:
-            value = ([], None)
-        else:
-            value = ([(False, "/")], None)
-            ttl = _ROBOTS_FAILURE_TTL_SECONDS
-        self._cache.put(origin, value, ttl=ttl)
-        return value
+        self._cache = robots_cache
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
-        identity = canonical_page_identity(url)
-        parsed = urlparse(identity or url)
-        origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
-        cached = self._cache.get(origin)
-        if cached is not None:
-            return cached
-        return await _single_flight(self._inflight, origin, lambda: self._load_rules(origin))
+        rules, _sitemaps, delay = await load_robots_rules(
+            robots_origin(url),
+            _default_http_fetcher,
+            self._timeout_seconds,
+            fetch_and_decode=(
+                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
+            ),
+        )
+        return rules, delay
 
     async def allows(self, url: str) -> bool:
-        from app.crawl.engine import _robots_allows
-
         rules, _delay = await self._rules(url)
-        return _robots_allows(url, rules)
+        return robots_allows(url, rules)
 
     async def crawl_delay(self, url: str) -> float | None:
         _rules, delay = await self._rules(url)

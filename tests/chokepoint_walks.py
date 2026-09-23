@@ -18,6 +18,7 @@ from __future__ import annotations
 import ast
 import pathlib
 from collections.abc import Iterator
+from functools import lru_cache
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
@@ -104,3 +105,48 @@ def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:
     """Format an offender as ``app/pkg/mod.py:lineno detail`` for messages."""
     label = f"{path.relative_to(REPO_ROOT)}:{lineno}"
     return f"{label} {detail}".strip()
+
+
+@lru_cache(maxsize=256)
+def _import_bindings(tree: ast.AST) -> dict[str, str]:
+    bindings: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                local = alias.asname or alias.name
+                bindings[local] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or alias.name.split(".", 1)[0]
+                bindings[local] = alias.name if alias.asname else local
+    assignments = [node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    changed = True
+    while changed:
+        changed = False
+        for node in assignments:
+            value = node.value
+            if value is None:
+                continue
+            canonical = _resolved_expr(value, bindings)
+            if not canonical:
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id not in bindings:
+                    bindings[target.id] = canonical
+                    changed = True
+    return bindings
+
+
+def _resolved_expr(expr: ast.AST, bindings: dict[str, str]) -> str:
+    if isinstance(expr, ast.Name):
+        return bindings.get(expr.id, expr.id)
+    if isinstance(expr, ast.Attribute):
+        base = _resolved_expr(expr.value, bindings)
+        return f"{base}.{expr.attr}" if base else expr.attr
+    return ""
+
+
+def resolved_call_name(tree: ast.AST, call: ast.Call) -> str:
+    """Return a call's import-resolved dotted name for AST detectors."""
+    return _resolved_expr(call.func, _import_bindings(tree))

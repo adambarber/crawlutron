@@ -15,17 +15,14 @@ import logging
 import os
 import re
 import tempfile
-import threading
 import time
-from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any, TypeAlias, TypeGuard, overload
+from typing import Any, TypeGuard, overload
 from urllib.parse import urljoin, urlparse
 
 from app.api_models import POLICY_SCHEMA_VERSION
-from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     BROWSER_STRATEGIES,
@@ -42,17 +39,30 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
 )
+from app.crawl import robots as _robots_policy
 from app.crawl.ids import new_request_id
-from app.crawl.robots_parse import (
-    parse_robots_crawl_delay,
-    parse_robots_rules,
-    parse_robots_sitemaps,
-)
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy, doc_worker_count
 from app.safe_regex import UnsafePattern, compile_untrusted
 
 logger = logging.getLogger(__name__)
+
+ROBOTS_CACHE_MAX_ENTRIES = _robots_policy.ROBOTS_CACHE_MAX_ENTRIES
+ROBOTS_CACHE_TTL_SECONDS = _robots_policy.ROBOTS_CACHE_TTL_SECONDS
+ROBOTS_FAILURE_TTL_SECONDS = _robots_policy.ROBOTS_FAILURE_TTL_SECONDS
+_ROBOTS_PATTERN_CACHE_PER_HOST = _robots_policy.ROBOTS_PATTERN_CACHE_PER_HOST
+_ROBOTS_PATTERN_CACHE_MAX_HOSTS = _robots_policy.ROBOTS_PATTERN_CACHE_MAX_HOSTS
+robots_cache = _robots_policy.robots_cache
+_RobotsPathMatcher = _robots_policy._RobotsPathMatcher
+_MatchAll = _robots_policy._MatchAll
+_PrefixMatcher = _robots_policy._PrefixMatcher
+_RobotsPatternCache = _robots_policy._RobotsPatternCache
+RobotsMatcher = _robots_policy.RobotsMatcher
+_compile_robots_pattern = _robots_policy._compile_robots_pattern
+_robots_pattern_to_regex = _robots_policy._robots_pattern_to_regex
+_robots_allows = _robots_policy.robots_allows
+load_robots_rules = _robots_policy.load_robots_rules
+cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
 from app.crawl.admission import normalize_sitemap_candidates
@@ -109,6 +119,8 @@ from app.validation import (
     registrable_domain,
     safe_public_url_or_none,
 )
+
+_DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
@@ -512,232 +524,8 @@ async def _execute_crawl_chain(
     return replace(last_result, attempted_strategies=attempts)
 
 
-class _RobotsPathMatcher:
-    """Linear-time matcher for robots.txt path patterns.
-
-    Translating patterns to ``re`` (``*`` -> ``.*``) admits catastrophic
-    backtracking: a rule like ``/*a*`` repeated against a long non-matching
-    path measured 8.5s for 30 wildcards x 2000 chars, and doubles per added
-    wildcard. This matcher implements the same semantics (``*`` wildcard,
-    ``$`` end anchor, left-anchored prefix match) with pure ``str.find``
-    scanning: O(pattern + path) per match, no backtracking.
-    """
-
-    __slots__ = ("_literals", "_anchored_end")
-
-    def __init__(self, pattern: str) -> None:
-        self._anchored_end = pattern.endswith("$") and len(pattern) > 1
-        body = pattern[:-1] if self._anchored_end else pattern
-        self._literals = body.split("*")
-
-    def match(self, path: str) -> bool:
-        literals = self._literals
-        first = literals[0]
-        if not path.startswith(first):
-            return False
-        pos = len(first)
-        if self._anchored_end:
-            rest = literals[1:]
-            if not rest:
-                return pos == len(path)
-            # The LAST literal is pinned to the end of the path; the middle
-            # literals must fit strictly before it. Greedy leftmost is sound
-            # only when the end is also constrained: scanning every literal
-            # leftmost and then demanding the scan land on len(path)
-            # UNDERMATCHED -- ``/*a$`` against ``/aba`` anchored the scan at
-            # the first ``a`` and returned False although the dialect (regex
-            # ``^/.*a$``) matches. Any occurrence later than the leftmost one
-            # starts further right, so a leftmost middle hit that overlaps the
-            # end segment proves no placement fits: False stays correct.
-            last = rest[-1]
-            end_start = len(path) - len(last)
-            if end_start < pos:
-                return False
-            scan = pos
-            for literal in rest[:-1]:
-                found = path.find(literal, scan)
-                if found == -1 or found + len(literal) > end_start:
-                    return False
-                scan = found + len(literal)
-            return path.endswith(last)
-        # Prefix semantics: any placement of the remaining literals works —
-        # greedy left-to-right scan never blocks a prefix match.
-        for literal in literals[1:]:
-            found = path.find(literal, pos)
-            if found == -1:
-                return False
-            pos = found + len(literal)
-        return True
-
-
-class _MatchAll:
-    """Degenerate robots pattern ("" matches everything)."""
-
-    __slots__ = ()
-
-    def match(self, path: str) -> bool:
-        # `path` is accepted for surface parity with the other matcher classes,
-        # which dispatch on it; the empty pattern matches every path regardless.
-        return True
-
-
-class _PrefixMatcher:
-    """Wildcard-free robots pattern: left-anchored prefix match."""
-
-    __slots__ = ("_prefix",)
-
-    def __init__(self, prefix: str) -> None:
-        self._prefix = prefix
-
-    def match(self, path: str) -> bool:
-        return path.startswith(self._prefix)
-
-
-# P2-E: matcher compilation is cached PER HOST. The cache this replaced was a
-# process-global LRU keyed only on the pattern string, and patterns come from
-# remotely-fetched robots.txt rules, so a hostile site spraying distinct
-# patterns pushed every other site's matchers out of the shared 1024-entry cap
-# and forced recompilation (plus a cache it fully controlled). Binding the key
-# to the host confines eviction to the offending site: it can only evict its
-# own entries. Each host gets its own bounded LRU, and the host table is itself
-# bounded and LRU-evicted so unbounded host cardinality cannot grow the
-# structure without bound.
-_ROBOTS_PATTERN_CACHE_PER_HOST = 1024
-_ROBOTS_PATTERN_CACHE_MAX_HOSTS = 1024
-
-
-class _RobotsPatternCache:
-    """Bounded per-host LRU of compiled robots path matchers."""
-
-    __slots__ = ("_hosts", "_lock")
-
-    def __init__(self) -> None:
-        self._hosts: OrderedDict[str, OrderedDict[str, RobotsMatcher]] = OrderedDict()
-        self._lock = threading.Lock()
-
-    def get(self, host: str, pattern: str) -> RobotsMatcher:
-        """Return the matcher for ``pattern``, cached under ``host``.
-
-        ``host`` is part of the key, never an optimization: the whole point is
-        that one host's entries are evictable only by that host.
-        """
-        with self._lock:
-            table = self._hosts.get(host)
-            if table is None:
-                table = OrderedDict()
-                self._hosts[host] = table
-                while len(self._hosts) > _ROBOTS_PATTERN_CACHE_MAX_HOSTS:
-                    self._hosts.popitem(last=False)
-            else:
-                self._hosts.move_to_end(host)
-            cached = table.get(pattern)
-            if cached is not None:
-                table.move_to_end(pattern)
-                return cached
-            matcher = _compile_robots_pattern(pattern)
-            table[pattern] = matcher
-            while len(table) > _ROBOTS_PATTERN_CACHE_PER_HOST:
-                table.popitem(last=False)
-            return matcher
-
-
-_robots_pattern_cache = _RobotsPatternCache()
-
-
-def _robots_pattern_to_regex(host: str, pattern: str) -> RobotsMatcher:
-    """Translate a robots.txt path pattern to a linear-time matcher.
-
-    Per RFC 9309 / Google's interpretation: ``*`` matches any sequence of
-    characters and ``$`` anchors the end of the path. Patterns are matched as
-    path prefixes (left-anchored). An empty pattern matches everything.
-
-    Returns a :class:`_RobotsPathMatcher` — same ``.match()`` surface as a
-    compiled regex (returns a bool), but with guaranteed linear time; the
-    historical ``re`` translation backtracked exponentially on overlapping
-    wildcards (adversarial review M-robots-redos).
-
-    ``host`` scopes the cache so a hostile robots.txt cannot evict another
-    site's matchers (P2-E); it is part of the identity of a cached entry, not
-    a hint.
-    """
-    return _robots_pattern_cache.get(host, pattern)
-
-
-# The set of objects a robots path pattern can compile to. All three expose
-# the same ``.match(path) -> bool`` surface, which is the only thing a caller
-# ever does with the result; the union is the honest return type of both
-# ``_compile_robots_pattern`` and the per-host cache. Declaring only
-# ``re.Pattern | _RobotsPathMatcher`` omitted the degenerate empty-pattern and
-# wildcard-free fast paths, which are real returns, not unreachable ones.
-RobotsMatcher: TypeAlias = re.Pattern[str] | _RobotsPathMatcher | _MatchAll | _PrefixMatcher
-
-
-def _compile_robots_pattern(pattern: str) -> RobotsMatcher:
-    """The pure pattern translation, uncached (the per-host cache wraps it)."""
-    if pattern == "":
-        return _MatchAll()
-    if "*" not in pattern and not (pattern.endswith("$") and len(pattern) > 1):
-        return _PrefixMatcher(pattern)
-    return _RobotsPathMatcher(pattern)
-
-
-ROBOTS_CACHE_MAX_ENTRIES = 1000
-
-# Module-level robots cache shared across all crawl_request calls in the
-# process (#9). Previously each crawl_request built its own cache, so two
-# separate API calls to the same domain each re-fetched /robots.txt.
-# BoundedTTLCache chokepoint: the lock lives INSIDE (get/put/purge are all
-# atomic), LRU eviction is built in -- the two historical bug classes here
-# (cap called outside the lock; forgetting the lock entirely) are no longer
-# expressible. Per-entry TTLs ride put(ttl=...) because the failure entry's
-# TTL is shorter than the success TTL.
-robots_cache = BoundedTTLCache[str, tuple[list[tuple[bool, str]], list[str], float | None]](
-    max_entries=ROBOTS_CACHE_MAX_ENTRIES, ttl=600.0
-)
-
-
 def _purge_robots_cache(now: float | None = None) -> int:
-    """Remove expired entries from the module robots cache; return count removed.
-
-    Kept as a named seam (tests + the size-check call site) delegating to the
-    BoundedTTLCache chokepoint; ``now`` is accepted for test determinism.
-    """
     return robots_cache.purge_expired(now=now)
-
-
-def _robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
-    """Return True if ``target_url`` is allowed by the robots ``rules``.
-
-    Implements RFC 9309 path matching: ``*`` wildcards, ``$`` end anchors, and
-    the longest-matching-rule-wins precedence. An empty ``Disallow:`` value
-    means "allow everything" (no restriction) and overrides other rules.
-    """
-    parsed = urlparse(target_url)
-    path = parsed.path or "/"
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-    # The host scopes the matcher cache so a hostile robots.txt cannot evict
-    # another site's entries (P2-E).
-    host = parsed.hostname or ""
-
-    # RFC 9309: an empty Disallow value permits all URLs for the group.
-    if any((not is_allow) and pattern == "" for is_allow, pattern in rules):
-        return True
-
-    allowed = True
-    best_len = -1
-    for is_allow, pattern in rules:
-        if not pattern:
-            continue
-        if _robots_pattern_to_regex(host, pattern).match(path):
-            plen = len(pattern)
-            if plen > best_len:
-                best_len = plen
-                allowed = is_allow
-            elif plen == best_len and is_allow:
-                # On a tie, allow wins (Google's robots.txt guidance).
-                allowed = True
-    return allowed
 
 
 def _parse_lastmod(lastmod: str | None) -> float | None:
@@ -1098,7 +886,7 @@ async def _crawl_request_impl(
         index = job.index
         original_url = job.original_url
         normalized_url = job.normalized_url
-        robots_sitemaps = _robots_sitemaps_for(
+        robots_sitemaps = [] if not respect_robots else cached_sitemaps(
             f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}"
         )
         # Hard per-URL deadline over the WHOLE strategy chain (#adversarial 2.2):
@@ -1148,77 +936,30 @@ async def _crawl_request_impl(
             )
         return index, result
 
-    # --- robots.txt parsing + filtering helpers (#12) ---
-    # robots_cache is module-level (shared across requests, #9); we reference it
-    # directly from the nested helpers below.
-    robots_ttl = 600.0
-    # Negative-result TTL for robots fetch failures (M7): a blip must not
-    # allow-list an origin for the full robots_ttl, nor block it for an hour.
-    ROBOTS_FAILURE_TTL_SECONDS = 60.0
-
-    async def _fetch_robots_rules(
-        origin: str,
-    ) -> tuple[list[tuple[bool, str]], list[str], float | None]:
-        # Periodically purge expired entries to prevent unbounded growth.
-        # The chokepoint's put() evicts LRU-first under its own lock, so a
-        # crawl discovering thousands of unique origins can no longer grow
-        # the cache without bound (adversarial review F-robots-cache-race;
-        # the manual pre-purge + explicit cap are gone with the bare dict).
-        cached = robots_cache.get(origin)
-        if cached is not None:
-            return cached
-        rules: list[tuple[bool, str]] = []
-        sitemaps: list[str] = []
-        crawl_delay: float | None = None
-        robots_url = urljoin(origin, "/robots.txt")
-        # Lock released before the blocking network call so concurrent
-        # crawls for different origins do not serialize on the lock.
-        body, status = await _fetch_and_decode(fetcher, robots_url, {}, policy["limits"]["timeout_seconds"])
-        ttl = robots_ttl
-        if status == 200 and body is not None:
-            rules = parse_robots_rules(body)
-            sitemaps = parse_robots_sitemaps(body)
-            crawl_delay = parse_robots_crawl_delay(body)
-        elif status == 404:
-            # No robots.txt: nothing to enforce.
-            pass
-        else:
-            # 5xx, other statuses, or transport failure: fail closed by
-            # disallowing everything (M7). Cached on a short TTL so a blip
-            # cannot allow-list an origin, while a recovery is picked up
-            # quickly and a prolonged outage stays blocked.
-            rules = [(False, "/")]
-            ttl = min(robots_ttl, ROBOTS_FAILURE_TTL_SECONDS)
-        robots_cache.put(origin, (rules, sitemaps, crawl_delay), ttl=ttl)
-        return rules, sitemaps, crawl_delay
-
     async def _robots_allows_target(target_url: str) -> bool:
-        parsed = urlparse(target_url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        rules, _sitemaps, _crawl_delay = await _fetch_robots_rules(origin)
+        rules, _sitemaps, _crawl_delay = await load_robots_rules(
+            _robots_policy.robots_origin(target_url),
+            fetcher,
+            policy["limits"]["timeout_seconds"],
+            fetch_and_decode=(
+                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
+            ),
+        )
         return _robots_allows(target_url, rules)
 
     async def _robots_crawl_delay_for(target_url: str) -> float | None:
-        """Return the Crawl-delay (seconds) declared by the target's origin, or
-        None. Uses the shared robots cache so the value is fetched at most once
-        per origin per TTL window (adversarial perf #2.6)."""
-        parsed = urlparse(target_url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        _rules, _sitemaps, crawl_delay = await _fetch_robots_rules(origin)
+        _rules, _sitemaps, crawl_delay = await load_robots_rules(
+            _robots_policy.robots_origin(target_url),
+            fetcher,
+            policy["limits"]["timeout_seconds"],
+            fetch_and_decode=(
+                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
+            ),
+        )
         return crawl_delay
 
     def _robots_sitemaps_for(origin: str) -> list[str] | None:
-        """Return cached robots Sitemap URLs for an origin, or ``None`` if the
-        engine never fetched robots.txt for it (e.g. respect_robots=False).
-
-        Returning ``None`` (not ``[]``) matters: an empty list would tell
-        discovery "robots was fetched, no sitemaps", preventing its own fetch,
-        while ``None`` lets discovery fetch robots itself when needed (#4).
-        """
-        cached = robots_cache.get(origin)
-        if cached is not None:
-            return list(cached[1])
-        return None
+        return cached_sitemaps(origin)
 
     def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
         # strategy=None: the URL was screened out by robots.txt before any

@@ -5,9 +5,9 @@ import logging
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.models import NormalizedUrl
@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+_IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
+_NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
 
 # Lazily-initialised public-suffix list. ``publicsuffixlist`` is an optional
 # dependency, and importing it (and building the table) is only worth paying
@@ -137,8 +140,8 @@ def normalize_public_http_url(url: str) -> NormalizedUrl:
     # tests run a real in-process server on loopback. Allow opting out of the
     # private-network guard via env var rather than relaxing it by default.
     # Inverted-by-default: any value not explicitly recognized as truthy keeps
-    # the SSRF guard ON, mirroring ``settings._parse_bool_env_value`` so the
-    # two paths agree on what counts as "on". Both layers below are memoized
+    # the SSRF guard ON, using the shared ``parse_bool_value`` policy so every
+    # path agrees on what counts as "on". Both layers below are memoized
     # (perf tier-2 T2) because this function runs per anchor: the env decision
     # is keyed on its raw value (so any change is visible on the very next
     # call) and the host verdict is a pure function of the canonical host.
@@ -222,15 +225,8 @@ def _host_is_public(host: str) -> bool:
         numeric = _resolver_numeric_ipv4(host)
         if numeric is not None:
             address = ipaddress.ip_address(numeric)
-    if address is not None:
-        address = _classified_ip_address(address)
-        if (
-            address.is_private
-            or address.is_loopback
-            or address.is_link_local
-            or address.is_reserved
-        ):
-            return False
+    if address is not None and not _is_public_ip(address):
+        return False
     return True
 
 
@@ -262,6 +258,35 @@ def _classified_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
     return _embedded_ipv4(addr) or addr
 
 
+def _is_public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return whether one parsed address is safe for public egress."""
+    classified = _classified_ip_address(address)
+    if (
+        classified.is_private
+        or classified.is_loopback
+        or classified.is_link_local
+        or classified.is_reserved
+        or classified.is_multicast
+        or classified.is_unspecified
+    ):
+        return False
+    if isinstance(classified, ipaddress.IPv4Address) and classified in _CGNAT_NETWORK:
+        return False
+    if isinstance(classified, ipaddress.IPv6Address) and classified in _IPV6_UNIQUE_LOCAL_NETWORK:
+        return False
+    if isinstance(classified, ipaddress.IPv6Address) and classified in _NAT64_NETWORK:
+        return False
+    return True
+
+
+def _is_public_ip_value(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return _is_public_ip(address)
+
+
 def parse_bool_env(name: str, default: bool = False) -> bool:
     """Read an env var and return a boolean, warning on unrecognized values.
 
@@ -282,6 +307,54 @@ def _clamp(value, lo, hi):
     return value
 
 
+T = TypeVar("T", int, float)
+
+
+def _finite_or_none(value: float) -> float | None:
+    """A finite float, or None when the parsed value cannot be honored."""
+    return value if math.isfinite(value) else None
+
+
+def _mapping_number(
+    mapping: Mapping[str, str],
+    name: str,
+    fallback: T,
+    *,
+    parse: Callable[[str], T],
+    invalid_event: str,
+    validate: Callable[[T], T | None] | None = None,
+    validate_event: str | None = None,
+    lo: T | None = None,
+    hi: T | None = None,
+) -> T:
+    """The one never-raise numeric env read shared by the int and float faces.
+
+    Both public readers differed only in the parse callable, the warning event
+    and the float-only finiteness check. Restating that body per type is how
+    the two faces drifted, so the shape lives here once and each face supplies
+    only what genuinely differs.
+    """
+    raw = mapping.get(name)
+    if raw is None:
+        return fallback
+    try:
+        value = parse(str(raw).strip())
+    except (TypeError, ValueError, OverflowError):
+        logging.getLogger(__name__).warning(
+            invalid_event, extra={"env_name": name, "env_value": raw, "fallback": fallback}
+        )
+        return fallback
+    if validate is not None and validate_event is not None:
+        checked = validate(value)
+        if checked is None:
+            logging.getLogger(__name__).warning(
+                validate_event, extra={"env_name": name, "env_value": raw, "fallback": fallback}
+            )
+            return fallback
+        value = checked
+    return _clamp(value, lo, hi)
+
+
 def get_mapping_int(
     mapping: Mapping[str, str], name: str, default: int, *, lo: int | None = None, hi: int | None = None
 ) -> int:
@@ -290,41 +363,32 @@ def get_mapping_int(
     ``CrawlerSettings.from_mapping`` reads a mapping (os.environ in prod, a
     dict in tests), so the chokepoint must serve both faces from one core.
     """
-    fallback = _clamp(_as_int_default(default, name=name), lo, hi)
-    raw = mapping.get(name)
-    if raw is None:
-        return fallback
-    try:
-        value = int(str(raw).strip())
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning(
-            "invalid_int_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    return _clamp(value, lo, hi)
+    return _mapping_number(
+        mapping,
+        name,
+        _clamp(_as_int_default(default, name=name), lo, hi),
+        parse=int,
+        invalid_event="invalid_int_env",
+        lo=lo,
+        hi=hi,
+    )
 
 
 def get_mapping_float(
     mapping: Mapping[str, str], name: str, default: float, *, lo: float | None = None, hi: float | None = None
 ) -> float:
     """Mapping face of :func:`get_env_float`; identical never-raise contract."""
-    fallback = _clamp(_as_float_default(default, name=name), lo, hi)
-    raw = mapping.get(name)
-    if raw is None:
-        return fallback
-    try:
-        value = float(str(raw).strip())
-    except (TypeError, ValueError, OverflowError):
-        logging.getLogger(__name__).warning(
-            "invalid_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    if not math.isfinite(value):
-        logging.getLogger(__name__).warning(
-            "non_finite_float_env", extra={"env_name": name, "env_value": raw, "fallback": fallback}
-        )
-        return fallback
-    return _clamp(value, lo, hi)
+    return _mapping_number(
+        mapping,
+        name,
+        _clamp(_as_float_default(default, name=name), lo, hi),
+        parse=float,
+        invalid_event="invalid_float_env",
+        validate=_finite_or_none,
+        validate_event="non_finite_float_env",
+        lo=lo,
+        hi=hi,
+    )
 
 
 def parse_bool_value(raw: str | None, default: bool, *, env_name: str) -> bool:

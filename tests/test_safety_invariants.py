@@ -25,8 +25,10 @@ from chokepoint_walks import (
     calls_named,
     file_tree,
     offender,
+    resolved_call_name,
     trees_under,
 )
+from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
 __all__ = [
     "REPO_ROOT",
@@ -3418,3 +3420,278 @@ def test_job_frontier_detector_sanction_is_narrow():
     assert _direct_frontier_growth_offenders(bad, path, allowed_functions=allowed)
     sanctioned = ast.parse("def normalize_job_state(job):\n    frontier = []\n    job.frontier = frontier\n")
     assert not _direct_frontier_growth_offenders(sanctioned, path, allowed_functions=allowed)
+
+
+def _property(name: str) -> Property:
+    return PROPERTY_BY_NAME[name]
+
+
+def _property_contexts(tree: ast.AST) -> list[ast.AST]:
+    symbol_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
+    contexts: list[ast.AST] = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for scope in (tree, *(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef))):
+        contexts.extend(node for node in getattr(scope, "body", []) if not isinstance(node, symbol_types))
+    return contexts
+
+
+def _property_owner(path: pathlib.Path, prop: Property, symbol: str | None = None) -> bool:
+    try:
+        relative = path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        relative = path.as_posix()
+    return relative == prop.owner_module and (symbol is None or symbol == "<module>" or symbol in prop.owner_symbols)
+
+
+def _property_suppressed(prop: Property, path: pathlib.Path, symbol: str, fingerprint: str) -> bool:
+    try:
+        relative = path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        relative = path.as_posix()
+    return any(
+        entry.module == relative and entry.symbol == symbol and entry.fingerprint == fingerprint
+        for entry in prop.suppressions
+    )
+
+
+def _property_nodes(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[tuple[str, ast.AST]]:
+    nodes: list[tuple[str, ast.AST]] = []
+    for node in _property_contexts(tree):
+        name = getattr(node, "name", "<module>")
+        if not _property_owner(path, prop, name):
+            nodes.append((name, node))
+    return nodes
+
+
+def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+    range_attributes = {"is_private", "is_loopback", "is_link_local", "is_reserved", "is_multicast", "is_unspecified"}
+    offenders: list[str] = []
+    for name, node in _property_nodes(tree, path, prop):
+        calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
+        has_parse = any(resolved_call_name(tree, call) == "ipaddress.ip_address" for call in calls)
+        has_range = any(
+            (isinstance(child, ast.Attribute) and child.attr in range_attributes)
+            or (isinstance(child, ast.Call) and resolved_call_name(tree, child).endswith(".ip_network"))
+            for child in ast.walk(node)
+        )
+        if "ipaddress_range_verdict" in prop.fingerprints and has_parse and has_range:
+            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements public-address policy"))
+    return offenders
+
+
+def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+    truthy = {"1", "true", "yes", "on"}
+    offenders: list[str] = []
+    for name, node in _property_nodes(tree, path, prop):
+        values = {
+            element.value
+            for child in ast.walk(node)
+            if isinstance(child, (ast.Set, ast.List, ast.Tuple))
+            for element in child.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        }
+        has_bool_set = truthy <= values
+        has_normalization = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr in {"strip", "lower", "casefold"}
+            for child in ast.walk(node)
+        )
+        if "bool_literal_set" in prop.fingerprints and has_bool_set and has_normalization:
+            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing"))
+    return offenders
+
+
+def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+    offenders: list[str] = []
+    for name, node in _property_nodes(tree, path, prop):
+        calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
+        capabilities: set[str] = set()
+        parents = {id(child): parent for parent in ast.walk(node) for child in ast.iter_child_nodes(parent)}
+        has_robots_url = False
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                call_name = resolved_call_name(tree, child).lower()
+                if call_name.endswith("urljoin") and any(
+                    isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and "robots.txt" in arg.value.lower()
+                    for arg in child.args
+                ):
+                    has_robots_url = True
+                if call_name.endswith("format") and any(
+                    isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)
+                    and "robots.txt" in arg.value.lower()
+                    for arg in child.args
+                ):
+                    has_robots_url = True
+            elif isinstance(child, ast.JoinedStr) and any(
+                isinstance(part, ast.Constant)
+                and isinstance(part.value, str)
+                and "robots.txt" in part.value.lower()
+                for part in child.values
+            ):
+                has_robots_url = True
+            elif isinstance(child, ast.BinOp) and isinstance(child.op, ast.Add):
+                if any(
+                    isinstance(part, ast.Constant)
+                    and isinstance(part.value, str)
+                    and "robots.txt" in part.value.lower()
+                    for part in ast.walk(child)
+                ):
+                    has_robots_url = True
+            elif isinstance(child, ast.Constant) and isinstance(child.value, str) and "robots.txt" in child.value.lower():
+                parent = parents.get(id(child))
+                if isinstance(parent, ast.Call) or isinstance(parent, (ast.Assign, ast.AnnAssign)):
+                    has_robots_url = True
+        if "robots_url" in prop.fingerprints and has_robots_url:
+            capabilities.add("robots_url")
+        if "parse_robots_rules_call" in prop.fingerprints and any(
+            resolved_call_name(tree, call).rsplit(".", 1)[-1].startswith("parse_robots_") for call in calls
+        ):
+            capabilities.add("parse_robots_rules_call")
+        if "parse_robots_rules_definition" in prop.fingerprints and name.startswith("parse_robots_"):
+            capabilities.add("parse_robots_rules_definition")
+        source = ast.unparse(node).lower()
+        scopes = _enclosing_defs(node, tree)
+        has_robot_scope = "robot" in source or any("robot" in scope.lower() for scope in scopes)
+        if "robots_bounded_ttl_cache" in prop.fingerprints and any(
+            resolved_call_name(tree, call).lower().endswith("boundedttlcache") for call in calls
+        ) and has_robot_scope:
+            capabilities.add("robots_bounded_ttl_cache")
+        for capability in sorted(capabilities):
+            if _property_suppressed(prop, path, name, capability):
+                continue
+            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} has robots capability {capability}"))
+    return offenders
+
+
+def test_property_registry_is_not_empty():
+    assert PROPERTY_REGISTRY
+
+
+def test_property_registry_owners_exist():
+    assert PROPERTY_REGISTRY
+    assert all(prop.reason.strip() for prop in PROPERTY_REGISTRY)
+    assert all(
+        entry.reason.strip() for prop in PROPERTY_REGISTRY for entry in prop.suppressions
+    )
+    for prop in PROPERTY_REGISTRY:
+        site_module, site_symbol = prop.definition_site.split(":", 1)
+        assert site_module == prop.owner_module
+        assert site_symbol in prop.owner_symbols
+    missing: list[str] = []
+    for prop in PROPERTY_REGISTRY:
+        path = REPO_ROOT / prop.owner_module
+        if not path.exists():
+            missing.append(prop.owner_module)
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        names = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        missing.extend(f"{prop.owner_module}:{symbol}" for symbol in prop.owner_symbols if symbol not in names)
+    assert not missing, "property registry owners are missing: " + ", ".join(missing)
+
+
+def test_public_target_has_one_implementation():
+    prop = _property("public-target")
+    offenders: list[str] = []
+    scanned = 0
+    for path, tree in app_trees(exclude=frozenset()):
+        scanned += sum(1 for _ in _property_contexts(tree))
+        offenders.extend(_public_target_offenders(tree, path, prop))
+    assert scanned, "public-target detector traversed no symbols"
+    assert not offenders, "public-address policy has a second implementation: " + ", ".join(offenders)
+
+
+def test_public_target_registry_is_not_empty():
+    assert _property("public-target").fingerprints
+
+
+def test_public_target_detector_bites():
+    prop = _property("public-target")
+    bad = ast.parse(
+        "import ipaddress as ip\n"
+        "parse = ip.ip_address\n"
+        "def twin(value):\n"
+        "    address = parse(value)\n"
+        "    return address.is_private or address.is_loopback or ip.ip_network('100.64.0.0/10')\n"
+    )
+    offenders = _public_target_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
+    assert len(offenders) == 1 and "public-address" in offenders[0], offenders
+    good = ast.parse(
+        "from app.validation import _is_public_ip as verdict\n"
+        "def check(value):\n"
+        "    return verdict(value)\n"
+    )
+    assert not _public_target_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
+
+
+def test_bool_env_has_one_implementation():
+    prop = _property("bool-env")
+    offenders: list[str] = []
+    scanned = 0
+    for path, tree in app_trees(exclude=frozenset()):
+        scanned += sum(1 for _ in _property_contexts(tree))
+        offenders.extend(_bool_env_offenders(tree, path, prop))
+    assert scanned, "bool-env detector traversed no symbols"
+    assert not offenders, "boolean environment policy has a second implementation: " + ", ".join(offenders)
+
+
+def test_bool_env_registry_is_not_empty():
+    assert _property("bool-env").fingerprints
+
+
+def test_bool_env_detector_bites():
+    prop = _property("bool-env")
+    bad = ast.parse(
+        "def parse(value):\n"
+        "    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n"
+    )
+    offenders = _bool_env_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
+    assert len(offenders) == 1 and "boolean" in offenders[0], offenders
+    good = ast.parse(
+        "from app.validation import parse_bool_value as parse\n"
+        "def parse_env(value, default):\n"
+        "    return parse(value, default, env_name='X')\n"
+    )
+    assert not _bool_env_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
+
+
+def test_robots_policy_has_one_implementation():
+    prop = _property("robots-policy")
+    offenders: list[str] = []
+    scanned = 0
+    for path, tree in app_trees(exclude=frozenset()):
+        scanned += sum(1 for _ in _property_contexts(tree))
+        offenders.extend(_robots_policy_offenders(tree, path, prop))
+    assert scanned, "robots-policy detector traversed no symbols"
+    assert not offenders, "robots policy has a second implementation: " + ", ".join(offenders)
+
+
+def test_robots_policy_registry_is_not_empty():
+    assert _property("robots-policy").fingerprints
+
+
+def test_robots_policy_detector_bites():
+    prop = _property("robots-policy")
+    bad = ast.parse(
+        "from app.bounded_ttl import BoundedTTLCache as Cache\n"
+        "from app.crawl.robots_parse import parse_robots_rules as parse\n"
+        "def robots_loader(origin):\n"
+        "    cache = Cache(max_entries=1, ttl=1)\n"
+        "    return parse('User-agent: *')\n"
+    )
+    offenders = _robots_policy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
+    assert len(offenders) == 2 and any("parse_robots_rules_call" in item for item in offenders), offenders
+    assert any("robots_bounded_ttl_cache" in item for item in offenders), offenders
+    definition = ast.parse("def parse_robots_rules(text):\n    return [(True, text)]\n")
+    definition_offenders = _robots_policy_offenders(
+        definition, REPO_ROOT / "app" / "_synthetic.py", prop
+    )
+    assert any("parse_robots_rules_definition" in item for item in definition_offenders), definition_offenders
+    good = ast.parse(
+        "from app.crawl.robots import load_robots_rules as load\n"
+        "def check(origin):\n"
+        "    return load(origin, fetcher, 5)\n"
+    )
+    assert not _robots_policy_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)

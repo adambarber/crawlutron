@@ -41,10 +41,6 @@ def _default_http_keepalive() -> int:
     return max(20, min(128, _default_http_max_connections() // 2))
 
 
-def _parse_bool_env_value(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
 @dataclass(frozen=True)
 class CrawlerSettings:
     # Bind interface (M15): loopback by default since the service has no

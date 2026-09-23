@@ -243,3 +243,36 @@ def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
     assert hostname == "hooks.svc.local"
     assert pinned == "hooks.svc.local"
     assert pinned != "127.0.0.1"
+
+
+def test_shared_public_target_verdict_matches_reserved_range_corpus():
+    from app.validation import _host_is_public, _is_public_ip_value
+
+    blocked = {
+        "10.0.0.1": True,
+        "172.16.0.1": True,
+        "192.168.1.1": True,
+        "127.0.0.1": True,
+        "169.254.1.1": True,
+        "100.64.0.1": True,
+        "64:ff9b::1": True,
+        "fc00::1": True,
+        "fd12:3456::1": True,
+        "224.0.0.1": True,
+        "ff02::1": True,
+        "240.0.0.1": True,
+        "0.0.0.0": True,
+        "::1": True,
+        "fe80::1": True,
+        "2001:db8::1": True,
+        "::ffff:100.64.0.1": True,
+    }
+    public = {"8.8.8.8", "93.184.216.34", "2606:4700:4700::1111", "::ffff:8.8.8.8"}
+    for address, expected_blocked in blocked.items():
+        assert _is_public_ip_value(address) is (not expected_blocked), address
+        assert _host_is_public(address) is (not expected_blocked), address
+        assert _blocked(address) is expected_blocked, address
+    for address in public:
+        assert _is_public_ip_value(address) is True, address
+        assert _host_is_public(address) is True, address
+        assert _blocked(address) is False, address

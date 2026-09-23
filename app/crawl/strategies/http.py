@@ -77,7 +77,7 @@ from app.crawl.document_text import (
     _format_extracted_document_text,
 )
 from app.timeouts import Timeouts
-from app.validation import filter_js_endpoints, get_env_int
+from app.validation import _is_public_ip_value, filter_js_endpoints, get_env_int
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -744,36 +744,10 @@ _GLOBAL_COOKIE_JAR = CookieJar()
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:
-    """Return True if ``ip`` is NOT a safe public address (SSRF protection).
+    """Return whether an address is outside the shared public-target policy."""
+    from app.validation import _is_public_ip_value
 
-    Rejects private, loopback, link-local, reserved, multicast and unspecified
-    ranges, plus carrier-grade NAT (100.64.0.0/10), IPv6 unique-local
-    (fc00::/7) and NAT64 (64:ff9b::/96) which older stdlib ``is_private`` does
-    not always cover (F7). IPv6 wrappers around an IPv4 target are unwrapped
-    first (B3) so a wrapper cannot hide an IPv4 range this check rejects.
-    """
-    import ipaddress
-
-    from app.validation import _classified_ip_address
-
-    try:
-        addr = _classified_ip_address(ipaddress.ip_address(ip))
-    except ValueError:
-        return True
-    if addr.is_private or addr.is_loopback or addr.is_link_local:
-        return True
-    if addr.is_reserved or addr.is_multicast or addr.is_unspecified:
-        return True
-    # Carrier-grade NAT (RFC 6598) - shared ISP space, not a public target.
-    if isinstance(addr, ipaddress.IPv4Address) and addr in ipaddress.ip_network("100.64.0.0/10"):
-        return True
-    # IPv6 unique-local (RFC 4193) is functionally private.
-    if isinstance(addr, ipaddress.IPv6Address) and addr in ipaddress.ip_network("fc00::/7"):
-        return True
-    # NAT64 (RFC 6147) well-known prefix.
-    if isinstance(addr, ipaddress.IPv6Address) and addr in ipaddress.ip_network("64:ff9b::/96"):
-        return True
-    return False
+    return not _is_public_ip_value(ip)
 
 
 # Per-host DNS resolution cache (#3). Crawling a single host thousands of times
@@ -846,7 +820,7 @@ def _check_ssrf_protection(url: str) -> None:
         # fallback in _resolve_and_pin_host.
         raise ValueError(f"SSRF protection: cannot resolve hostname {hostname}") from None
     for ip in ips:
-        if _is_private_or_loopback_ip(ip):
+        if not _is_public_ip_value(ip):
             raise ValueError(
                 f"SSRF protection: hostname {hostname} resolves to private/loopback IP {ip}"
             ) from None
@@ -883,7 +857,7 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
         # error instead of silently connecting to 127.0.0.1 (SSRF bypass, F9).
         return hostname, hostname
     for ip in ips:
-        if not _is_private_or_loopback_ip(ip):
+        if _is_public_ip_value(ip):
             return hostname, ip
     # No public IP found (should have been caught above) -> fail safe
     raise ValueError(f"SSRF protection: hostname {hostname} has no public IP")
