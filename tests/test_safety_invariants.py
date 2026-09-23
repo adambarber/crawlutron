@@ -3422,6 +3422,16 @@ def test_job_frontier_detector_sanction_is_narrow():
     assert not _direct_frontier_growth_offenders(sanctioned, path, allowed_functions=allowed)
 
 
+_DEFINITION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_REQUIRED_PROPERTY_FINGERPRINTS = {
+    "public-target": frozenset({"ipaddress_range_verdict"}),
+    "bool-env": frozenset({"bool_literal_set"}),
+    "robots-policy": frozenset(
+        {"robots_url", "parse_robots_rules_call", "parse_robots_rules_definition", "robots_bounded_ttl_cache"}
+    ),
+}
+
+
 def _property(name: str) -> Property:
     return PROPERTY_BY_NAME[name]
 
@@ -3434,19 +3444,54 @@ def _property_contexts(tree: ast.AST) -> list[ast.AST]:
     return contexts
 
 
-def _property_owner(path: pathlib.Path, prop: Property, symbol: str | None = None) -> bool:
+def _local_nodes(node: ast.AST):
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield from _local_nodes(child)
+
+
+def _relative_app_path(path: pathlib.Path) -> str:
     try:
-        relative = path.relative_to(REPO_ROOT).as_posix()
+        return path.relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        relative = path.as_posix()
-    return relative == prop.owner_module and (symbol is None or symbol == "<module>" or symbol in prop.owner_symbols)
+        return path.as_posix()
+
+
+def _owner_definition_ids(tree: ast.AST, path: pathlib.Path, prop: Property) -> set[int]:
+    if _relative_app_path(path) != prop.owner_module:
+        return set()
+    by_symbol: dict[str, list[ast.AST]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, _DEFINITION_TYPES) and node.name in prop.owner_symbols:
+            by_symbol.setdefault(node.name, []).append(node)
+    owner_ids: set[int] = set()
+    site_symbol = prop.definition_site.rsplit(":", 1)[-1]
+    for symbol, nodes in by_symbol.items():
+        canonical = next(
+            (node for node in nodes if symbol == site_symbol and node.lineno == prop.definition_line),
+            nodes[0],
+        )
+        owner_ids.add(id(canonical))
+    return owner_ids
+
+
+def _property_owner(
+    path: pathlib.Path,
+    prop: Property,
+    symbol: str | None = None,
+    *,
+    tree: ast.AST | None = None,
+    node: ast.AST | None = None,
+) -> bool:
+    if node is not None and tree is not None:
+        return id(node) in _owner_definition_ids(tree, path, prop)
+    return False
 
 
 def _property_suppressed(prop: Property, path: pathlib.Path, symbol: str, fingerprint: str) -> bool:
-    try:
-        relative = path.relative_to(REPO_ROOT).as_posix()
-    except ValueError:
-        relative = path.as_posix()
+    relative = _relative_app_path(path)
     return any(
         entry.module == relative and entry.symbol == symbol and entry.fingerprint == fingerprint
         for entry in prop.suppressions
@@ -3454,26 +3499,62 @@ def _property_suppressed(prop: Property, path: pathlib.Path, symbol: str, finger
 
 
 def _property_nodes(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[tuple[str, ast.AST]]:
-    nodes: list[tuple[str, ast.AST]] = []
-    for node in _property_contexts(tree):
-        name = getattr(node, "name", "<module>")
-        if not _property_owner(path, prop, name):
-            nodes.append((name, node))
-    return nodes
+    owner_ids = _owner_definition_ids(tree, path, prop)
+    return [
+        (getattr(node, "name", "<module>"), node)
+        for node in _property_contexts(tree)
+        if id(node) not in owner_ids
+    ]
+
+
+def _public_target_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
+    range_attributes = {"is_private", "is_loopback", "is_link_local", "is_reserved", "is_multicast", "is_unspecified"}
+    observations: dict[str, int] = {}
+
+    def count_node(node: ast.AST) -> int:
+        nodes = list(_local_nodes(node))
+        calls = [child for child in nodes if isinstance(child, ast.Call)]
+        parses = sum(resolved_call_name(tree, call) == "ipaddress.ip_address" for call in calls)
+        ranges = sum(
+            (isinstance(child, ast.Attribute) and child.attr in range_attributes)
+            or (isinstance(child, ast.Call) and resolved_call_name(tree, child).endswith(".ip_network"))
+            for child in nodes
+        )
+        return min(parses, ranges) if parses and ranges else 0
+
+    if _relative_app_path(path) == prop.owner_module:
+        owner_nodes = [child for node in _property_contexts(tree) for child in _local_nodes(node)]
+        owner_calls = [child for child in owner_nodes if isinstance(child, ast.Call)]
+        owner_parses = sum(resolved_call_name(tree, call) == "ipaddress.ip_address" for call in owner_calls)
+        owner_ranges = sum(
+            (isinstance(child, ast.Attribute) and child.attr in range_attributes)
+            or (isinstance(child, ast.Call) and resolved_call_name(tree, child).endswith(".ip_network"))
+            for child in owner_nodes
+        )
+        if owner_parses and owner_ranges:
+            observations["ipaddress_range_verdict"] = min(owner_parses, owner_ranges)
+        return observations
+    for _name, node in _property_nodes(tree, path, prop):
+        count = count_node(node)
+        if count:
+            observations["ipaddress_range_verdict"] = observations.get("ipaddress_range_verdict", 0) + count
+    return observations
 
 
 def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
-    range_attributes = {"is_private", "is_loopback", "is_link_local", "is_reserved", "is_multicast", "is_unspecified"}
     offenders: list[str] = []
     for name, node in _property_nodes(tree, path, prop):
-        calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
-        has_parse = any(resolved_call_name(tree, call) == "ipaddress.ip_address" for call in calls)
-        has_range = any(
-            (isinstance(child, ast.Attribute) and child.attr in range_attributes)
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        nodes = list(_local_nodes(node))
+        calls = [child for child in nodes if isinstance(child, ast.Call)]
+        parses = sum(resolved_call_name(tree, call) == "ipaddress.ip_address" for call in calls)
+        ranges = sum(
+            (isinstance(child, ast.Attribute) and child.attr in {"is_private", "is_loopback", "is_link_local", "is_reserved", "is_multicast", "is_unspecified"})
             or (isinstance(child, ast.Call) and resolved_call_name(tree, child).endswith(".ip_network"))
-            for child in ast.walk(node)
+            for child in nodes
         )
-        if "ipaddress_range_verdict" in prop.fingerprints and has_parse and has_range:
+        if parses and ranges:
             offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements public-address policy"))
     return offenders
 
@@ -3481,9 +3562,10 @@ def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
 _BOOL_ENV_SPELLINGS = frozenset({"0", "1", "false", "true", "no", "yes", "off", "on"})
 
 
-def _bool_env_literal_sets(node: ast.AST) -> dict[int, set[str]]:
-    values: dict[int, set[str]] = {}
-    for child in ast.walk(node):
+def _bool_env_literal_sets(node: ast.AST) -> tuple[dict[int, set[str]], dict[str, set[str]]]:
+    direct: dict[int, set[str]] = {}
+    named: dict[str, set[str]] = {}
+    for child in _local_nodes(node):
         if not isinstance(child, (ast.Set, ast.List, ast.Tuple)):
             continue
         literals = {
@@ -3492,18 +3574,13 @@ def _bool_env_literal_sets(node: ast.AST) -> dict[int, set[str]]:
             if isinstance(element, ast.Constant) and isinstance(element.value, str)
         }
         if literals & _BOOL_ENV_SPELLINGS:
-            values[id(child)] = literals
-            if isinstance(getattr(node, "name", None), str):
-                values[id(node)] = literals
-    for assignment in ast.walk(node):
-        if not isinstance(assignment, (ast.Assign, ast.AnnAssign)):
-            continue
-        value = assignment.value
-        if not isinstance(value, (ast.Set, ast.List, ast.Tuple)):
+            direct[id(child)] = literals
+    for assignment in _local_nodes(node):
+        if not isinstance(assignment, (ast.Assign, ast.AnnAssign)) or not isinstance(assignment.value, (ast.Set, ast.List, ast.Tuple)):
             continue
         literals = {
             element.value
-            for element in value.elts
+            for element in assignment.value.elts
             if isinstance(element, ast.Constant) and isinstance(element.value, str)
         }
         if not literals & _BOOL_ENV_SPELLINGS:
@@ -3511,98 +3588,237 @@ def _bool_env_literal_sets(node: ast.AST) -> dict[int, set[str]]:
         targets = assignment.targets if isinstance(assignment, ast.Assign) else [assignment.target]
         for target in targets:
             if isinstance(target, ast.Name):
-                values[id(target)] = literals
-    return values
+                named[target.id] = literals
+    return direct, named
+
+
+def _bool_env_node_count(tree: ast.AST, node: ast.AST) -> int:
+    direct, named = _bool_env_literal_sets(node)
+    has_normalization = any(
+        isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr in {"strip", "lower", "casefold"}
+        for child in _local_nodes(node)
+    )
+    if not has_normalization:
+        return 0
+    count = 0
+    for child in _local_nodes(node):
+        if not isinstance(child, ast.Compare) or not any(isinstance(op, (ast.In, ast.NotIn)) for op in child.ops):
+            continue
+        if any(
+            id(part) in direct or (isinstance(part, ast.Name) and part.id in named)
+            for part in _local_nodes(child)
+        ):
+            count += 1
+    return count
+
+
+def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
+    contexts = _property_contexts(tree) if _relative_app_path(path) == prop.owner_module else [
+        node for _name, node in _property_nodes(tree, path, prop)
+    ]
+    count = sum(_bool_env_node_count(tree, node) for node in contexts)
+    return {"bool_literal_set": count} if count else {}
 
 
 def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
     for name, node in _property_nodes(tree, path, prop):
-        literal_sets = _bool_env_literal_sets(node)
-        has_membership = False
-        has_normalization = False
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Compare):
-                continue
-            if not any(isinstance(op, (ast.In, ast.NotIn)) for op in child.ops):
-                continue
-            if not any(id(part) in literal_sets for part in ast.walk(child)):
-                continue
-            has_membership = True
-        has_normalization = any(
-            isinstance(child, ast.Call)
-            and isinstance(child.func, ast.Attribute)
-            and child.func.attr in {"strip", "lower", "casefold"}
-            for child in ast.walk(node)
-        )
-        if "bool_literal_set" in prop.fingerprints and has_membership and has_normalization:
+        if _bool_env_node_count(tree, node):
             offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing"))
     return offenders
+
+
+
+
+def _source_and_literals(node: ast.AST) -> tuple[str, str]:
+    nodes = list(_local_nodes(node))
+    source = " ".join(ast.unparse(child) for child in nodes[1:]).lower() if isinstance(
+        node, (ast.FunctionDef, ast.AsyncFunctionDef)
+    ) else ast.unparse(node).lower()
+    literals = "".join(
+        child.value
+        for child in nodes
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    ).lower()
+    return source, literals
+
+
+def _robot_signal(node: ast.AST) -> bool:
+    source, literals = _source_and_literals(node)
+    return any(token in source or token in literals for token in ("robot", "crawl-delay", "disallow", "user-agent"))
+
+
+def _call_leaf_names(tree: ast.AST, node: ast.AST):
+    for child in _local_nodes(node):
+        if isinstance(child, ast.Call):
+            yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
+
+
+def _fetch_like(tree: ast.AST, node: ast.AST) -> bool:
+    return any(
+        any(token in name for token in ("fetch", "request", "download", "retrieve", "http"))
+        for name in _call_leaf_names(tree, node)
+    )
+
+
+def _url_literal_capability(node: ast.AST) -> bool:
+    if not isinstance(node, (ast.BinOp, ast.JoinedStr)):
+        return False
+    parts = [
+        child.value
+        for child in _local_nodes(node)
+        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+    ]
+    return any("robot" in part or ".txt" in part for part in parts) and any(
+        part.startswith("/") or "http" in part for part in parts
+    )
+
+
+def _url_constructor(tree: ast.AST, node: ast.AST) -> bool:
+    nodes = list(_local_nodes(node))
+    return any(
+        isinstance(child, ast.Call)
+        and resolved_call_name(tree, child).rsplit(".", 1)[-1].lower() in {"urljoin", "urlunsplit"}
+        for child in nodes
+    ) or any(_url_literal_capability(child) for child in nodes)
+
+
+def _robots_fetch_like(tree: ast.AST, node: ast.AST) -> bool:
+    return any(
+        "http" in name
+        or name.startswith(("load_", "retrieve", "request"))
+        or name == "fetch_and_decode"
+        or (name in {"get", "open", "read", "send", "urlopen"} and _robot_signal(node))
+        for name in _call_leaf_names(tree, node)
+    )
+
+
+def _parser_call_count(tree: ast.AST, node: ast.AST) -> int:
+    count = 0
+    for child in _local_nodes(node):
+        if not isinstance(child, ast.Call):
+            continue
+        name = resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
+        if (
+            ("parse" in name and any(token in name for token in ("robot", "rule", "directive", "crawl")))
+            or ("decode" in name and "rule" in name)
+            or ("read" in name and "robot" in name)
+        ):
+            count += 1
+    return count
+
+
+def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool:
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    _source, _literals = _source_and_literals(node)
+    name = node.name.lower()
+    if _relative_app_path(path) == "app/crawl/robots_parse.py" and ("robot" in name or "parse" in name):
+        return True
+    if "robot" in name and any(token in name for token in ("parse", "rule", "directive")):
+        return True
+    nodes = list(_local_nodes(node))
+    line_scan = any(
+        isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr in {"splitlines", "partition"}
+        for child in nodes
+    )
+    collection_return = any(
+        isinstance(child, ast.Return)
+        and isinstance(child.value, (ast.ListComp, ast.List, ast.Tuple))
+        for child in nodes
+    )
+    return line_scan and collection_return
+
+
+def _cache_call_count(tree: ast.AST, node: ast.AST) -> int:
+    return sum(
+        isinstance(child, ast.Call)
+        and resolved_call_name(tree, child).rsplit(".", 1)[-1].lower().endswith("boundedttlcache")
+        for child in _local_nodes(node)
+    )
+
+
+def _robots_observations_for_node(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> dict[str, int]:
+    observations: dict[str, int] = {}
+    parser_calls = _parser_call_count(tree, node)
+    parser_definitions = int(_parser_definition(tree, path, node))
+    cache_calls = _cache_call_count(tree, node)
+    url_calls = int(_url_constructor(tree, node))
+    if url_calls and _robots_fetch_like(tree, node):
+        observations["robots_url"] = url_calls
+    if parser_calls:
+        observations["parse_robots_rules_call"] = parser_calls
+    if parser_definitions:
+        observations["parse_robots_rules_definition"] = parser_definitions
+    if cache_calls and (_robot_signal(node) or parser_calls or _fetch_like(tree, node)):
+        observations["robots_bounded_ttl_cache"] = cache_calls
+    return observations
+
+
+def _robots_policy_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
+    observations: dict[str, int] = {}
+    for node in _property_contexts(tree):
+        for fingerprint, count in _robots_observations_for_node(tree, path, node).items():
+            observations[fingerprint] = observations.get(fingerprint, 0) + count
+    return observations
 
 
 def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
     for name, node in _property_nodes(tree, path, prop):
-        calls = [child for child in ast.walk(node) if isinstance(child, ast.Call)]
-        capabilities: set[str] = set()
-        parents = {id(child): parent for parent in ast.walk(node) for child in ast.iter_child_nodes(parent)}
-        has_robots_url = False
-        for child in ast.walk(node):
-            if isinstance(child, ast.Call):
-                call_name = resolved_call_name(tree, child).lower()
-                if call_name.endswith("urljoin") and any(
-                    isinstance(arg, ast.Constant)
-                    and isinstance(arg.value, str)
-                    and "robots.txt" in arg.value.lower()
-                    for arg in child.args
-                ):
-                    has_robots_url = True
-                if call_name.endswith("format") and any(
-                    isinstance(arg, ast.Constant)
-                    and isinstance(arg.value, str)
-                    and "robots.txt" in arg.value.lower()
-                    for arg in child.args
-                ):
-                    has_robots_url = True
-            elif isinstance(child, ast.JoinedStr) and any(
-                isinstance(part, ast.Constant)
-                and isinstance(part.value, str)
-                and "robots.txt" in part.value.lower()
-                for part in child.values
-            ):
-                has_robots_url = True
-            elif isinstance(child, ast.BinOp) and isinstance(child.op, ast.Add):
-                if any(
-                    isinstance(part, ast.Constant)
-                    and isinstance(part.value, str)
-                    and "robots.txt" in part.value.lower()
-                    for part in ast.walk(child)
-                ):
-                    has_robots_url = True
-            elif isinstance(child, ast.Constant) and isinstance(child.value, str) and "robots.txt" in child.value.lower():
-                parent = parents.get(id(child))
-                if isinstance(parent, ast.Call) or isinstance(parent, (ast.Assign, ast.AnnAssign)):
-                    has_robots_url = True
-        if "robots_url" in prop.fingerprints and has_robots_url:
-            capabilities.add("robots_url")
-        if "parse_robots_rules_call" in prop.fingerprints and any(
-            resolved_call_name(tree, call).rsplit(".", 1)[-1].startswith("parse_robots_") for call in calls
-        ):
-            capabilities.add("parse_robots_rules_call")
-        if "parse_robots_rules_definition" in prop.fingerprints and name.startswith("parse_robots_"):
-            capabilities.add("parse_robots_rules_definition")
-        source = ast.unparse(node).lower()
-        scopes = _enclosing_defs(node, tree)
-        has_robot_scope = "robot" in source or any("robot" in scope.lower() for scope in scopes)
-        if "robots_bounded_ttl_cache" in prop.fingerprints and any(
-            resolved_call_name(tree, call).lower().endswith("boundedttlcache") for call in calls
-        ) and has_robot_scope:
-            capabilities.add("robots_bounded_ttl_cache")
+        capabilities = _robots_observations_for_node(tree, path, node)
         for capability in sorted(capabilities):
             if _property_suppressed(prop, path, name, capability):
                 continue
             offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} has robots capability {capability}"))
     return offenders
+
+
+def _property_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
+    if prop.name == "public-target":
+        return _public_target_observations(tree, path, prop)
+    if prop.name == "bool-env":
+        return _bool_env_observations(tree, path, prop)
+    if prop.name == "robots-policy":
+        return _robots_policy_observations(tree, path, prop)
+    return {}
+
+
+def _property_registry_failures(registry: tuple[Property, ...] = PROPERTY_REGISTRY) -> list[str]:
+    failures: list[str] = []
+    names = [prop.name for prop in registry]
+    if len(names) != len(set(names)):
+        failures.append("property registry names are not unique")
+    observed: dict[str, dict[str, int]] = {prop.name: {} for prop in registry}
+    for path, tree in app_trees(exclude=frozenset()):
+        for prop in registry:
+            for fingerprint, count in _property_observations(tree, path, prop).items():
+                observed[prop.name][fingerprint] = observed[prop.name].get(fingerprint, 0) + count
+    for prop in registry:
+        if not prop.fingerprints:
+            failures.append(f"{prop.name} has no fingerprints")
+        required = _REQUIRED_PROPERTY_FINGERPRINTS.get(prop.name)
+        if required is None:
+            failures.append(f"{prop.name} has no detector")
+        else:
+            missing = required - set(prop.fingerprints)
+            if missing:
+                failures.append(f"{prop.name} is missing required fingerprints: {sorted(missing)}")
+        unobserved = set(prop.fingerprints) - set(observed[prop.name])
+        if unobserved:
+            failures.append(f"{prop.name} has unobserved fingerprints (dead configuration): {sorted(unobserved)}")
+    return failures
+
+
+def _observed_property_count(prop: Property) -> int:
+    count = 0
+    for path, tree in app_trees(exclude=frozenset()):
+        count += sum(_property_observations(tree, path, prop).values())
+    return count
 
 
 def test_property_registry_is_not_empty():
@@ -3612,33 +3828,75 @@ def test_property_registry_is_not_empty():
 def test_property_registry_owners_exist():
     assert PROPERTY_REGISTRY
     assert all(prop.reason.strip() for prop in PROPERTY_REGISTRY)
-    assert all(
-        entry.reason.strip() for prop in PROPERTY_REGISTRY for entry in prop.suppressions
-    )
+    assert all(entry.reason.strip() for prop in PROPERTY_REGISTRY for entry in prop.suppressions)
     for prop in PROPERTY_REGISTRY:
         site_module, site_symbol = prop.definition_site.split(":", 1)
         assert site_module == prop.owner_module
         assert site_symbol in prop.owner_symbols
-    missing: list[str] = []
+    definitions: dict[str, list[tuple[str, ast.AST]]] = {}
+    for path, tree in app_trees(exclude=frozenset()):
+        relative = _relative_app_path(path)
+        for node in ast.walk(tree):
+            if isinstance(node, _DEFINITION_TYPES):
+                definitions.setdefault(node.name, []).append((relative, node))
+    duplicates: list[str] = []
     for prop in PROPERTY_REGISTRY:
-        path = REPO_ROOT / prop.owner_module
-        if not path.exists():
-            missing.append(prop.owner_module)
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        names = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-        missing.extend(f"{prop.owner_module}:{symbol}" for symbol in prop.owner_symbols if symbol not in names)
-    assert not missing, "property registry owners are missing: " + ", ".join(missing)
+        for symbol in prop.owner_symbols:
+            matches = definitions.get(symbol, [])
+            if len(matches) != 1:
+                duplicates.append(f"{symbol}={len(matches)}")
+                continue
+            relative, node = matches[0]
+            if relative != prop.owner_module:
+                duplicates.append(f"{symbol}@{relative}")
+            if prop.definition_line is not None and symbol == site_symbol and node.lineno != prop.definition_line:
+                duplicates.append(f"{symbol}@{relative}:{node.lineno}")
+    assert not duplicates, "property registry owners are not unique: " + ", ".join(duplicates)
+
+
+def test_property_registry_fingerprints_are_observed():
+    failures = _property_registry_failures()
+    assert not failures, "; ".join(failures)
+
+
+def test_property_registry_rejects_deleted_fingerprint():
+    prop = _property("robots-policy")
+    weakened = Property(
+        name=prop.name,
+        owner_module=prop.owner_module,
+        owner_symbols=prop.owner_symbols,
+        definition_site=prop.definition_site,
+        fingerprints=tuple(item for item in prop.fingerprints if item != "robots_url"),
+        reason=prop.reason,
+        suppressions=prop.suppressions,
+        definition_line=prop.definition_line,
+    )
+    failures = _property_registry_failures((weakened,))
+    assert any("robots_url" in failure for failure in failures), failures
+
+
+def test_property_owner_duplicate_is_not_sanctioned():
+    prop = _property("bool-env")
+    tree = ast.parse(
+        "def parse_bool_value(raw, default, *, env_name):\n"
+        "    return default\n"
+        "def parse_bool_value(raw, default, *, env_name):\n"
+        "    return raw.strip().lower() in {'0', 'false', 'no', 'off'}\n"
+    )
+    path = REPO_ROOT / "app" / "validation.py"
+    owner_ids = _owner_definition_ids(tree, path, prop)
+    duplicate = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"][1]
+    assert len(owner_ids) == 1
+    assert not _property_owner(path, prop, tree=tree, node=duplicate)
+    assert _bool_env_offenders(tree, path, prop)
 
 
 def test_public_target_has_one_implementation():
     prop = _property("public-target")
     offenders: list[str] = []
-    scanned = 0
     for path, tree in app_trees(exclude=frozenset()):
-        scanned += sum(1 for _ in _property_contexts(tree))
         offenders.extend(_public_target_offenders(tree, path, prop))
-    assert scanned, "public-target detector traversed no symbols"
+    assert _observed_property_count(prop), "public-target detector observed no fingerprint occurrences"
     assert not offenders, "public-address policy has a second implementation: " + ", ".join(offenders)
 
 
@@ -3680,11 +3938,9 @@ def test_public_target_detector_bites():
 def test_bool_env_has_one_implementation():
     prop = _property("bool-env")
     offenders: list[str] = []
-    scanned = 0
     for path, tree in app_trees(exclude=frozenset()):
-        scanned += sum(1 for _ in _property_contexts(tree))
         offenders.extend(_bool_env_offenders(tree, path, prop))
-    assert scanned, "bool-env detector traversed no symbols"
+    assert _observed_property_count(prop), "bool-env detector observed no fingerprint occurrences"
     assert not offenders, "boolean environment policy has a second implementation: " + ", ".join(offenders)
 
 
@@ -3717,11 +3973,9 @@ def test_bool_env_detector_bites():
 def test_robots_policy_has_one_implementation():
     prop = _property("robots-policy")
     offenders: list[str] = []
-    scanned = 0
     for path, tree in app_trees(exclude=frozenset()):
-        scanned += sum(1 for _ in _property_contexts(tree))
         offenders.extend(_robots_policy_offenders(tree, path, prop))
-    assert scanned, "robots-policy detector traversed no symbols"
+    assert _observed_property_count(prop), "robots-policy detector observed no fingerprint occurrences"
     assert not offenders, "robots policy has a second implementation: " + ", ".join(offenders)
 
 
@@ -3746,6 +4000,20 @@ def test_robots_policy_detector_bites():
         definition, REPO_ROOT / "app" / "_synthetic.py", prop
     )
     assert any("parse_robots_rules_definition" in item for item in definition_offenders), definition_offenders
+    split_url = ast.parse(
+        "def renamed_loader(origin):\n"
+        "    path = '/r' + 'obots.txt'\n"
+        "    return http_fetcher(urljoin(origin, path))\n"
+    )
+    split_offenders = _robots_policy_offenders(split_url, REPO_ROOT / "app" / "_synthetic.py", prop)
+    assert any("robots_url" in item for item in split_offenders), split_offenders
+    renamed_parser = ast.parse(
+        "def decode_directives(text):\n"
+        "    rows = text.splitlines()\n"
+        "    return [(True, row) for row in rows if 'disallow' in row.lower()]\n"
+    )
+    renamed_parser_offenders = _robots_policy_offenders(renamed_parser, REPO_ROOT / "app" / "_synthetic.py", prop)
+    assert any("parse_robots_rules_definition" in item for item in renamed_parser_offenders), renamed_parser_offenders
     good = ast.parse(
         "from app.crawl.robots import load_robots_rules as load\n"
         "def check(origin):\n"
