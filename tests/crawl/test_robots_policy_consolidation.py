@@ -7,7 +7,12 @@ from _testkit import make_fetch
 
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request
-from app.crawl.robots import ROBOTS_FAILURE_TTL_SECONDS, load_robots_rules, robots_cache
+from app.crawl.robots import (
+    ROBOTS_CACHE_TTL_SECONDS,
+    ROBOTS_FAILURE_TTL_SECONDS,
+    load_robots_rules,
+    robots_cache,
+)
 from app.settings import CrawlerSettings
 
 
@@ -154,6 +159,8 @@ async def test_owner_preserves_404_and_5xx_ttl_semantics(monkeypatch):
     assert failure == ([(False, "/")], [], None)
     assert failure_again == ([(False, "/")], [], None)
     assert calls == 2
+    missing_expires_at, _missing_value = owner.robots_cache._entries["https://missing.test"]
+    assert missing_expires_at - time.monotonic() == pytest.approx(ROBOTS_CACHE_TTL_SECONDS, abs=5)
     expires_at, _value = owner.robots_cache._entries["https://failure.test"]
     assert expires_at - time.monotonic() == pytest.approx(ROBOTS_FAILURE_TTL_SECONDS, abs=5)
 
@@ -172,4 +179,8 @@ async def test_respect_false_does_not_fetch_robots_even_when_discovery_requests_
         http_fetcher=_page_fetcher(calls),
     )
     assert result["results"][0]["status"] == "success"
+    robots_diagnostics = result["results"][0]["diagnostics"]["robots"]
+    assert robots_diagnostics["evaluation"] == "disabled"
+    assert robots_diagnostics["reused_from_engine"] is False
+    assert robots_diagnostics["sitemaps"] == []
     assert not any(url.endswith("/robots.txt") for url in calls)

@@ -1598,6 +1598,7 @@ async def _discovery_diagnostics(
     headers: dict[str, str],
     http_fetcher: Any,
     engine_robots_sitemaps: list[str] | None = None,
+    robots_evaluated: bool = True,
 ) -> dict[str, Any]:
     discovery = policy.get("discovery") or {}
     limits = policy.get("limits", {})
@@ -1605,7 +1606,16 @@ async def _discovery_diagnostics(
     parsed = urlparse(normalized_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     robots_sitemaps: list[str] = []
-    if engine_robots_sitemaps is not None:
+    if not robots_evaluated:
+        diagnostics["robots"] = {
+            "url": None,
+            "allowed": True,
+            "crawl_delay_seconds": None,
+            "sitemaps": [],
+            "reused_from_engine": False,
+            "evaluation": "disabled",
+        }
+    elif engine_robots_sitemaps is not None:
         # The engine already fetched /robots.txt (for allow/deny checks) and
         # extracted its Sitemap directives; reuse them instead of hitting the
         # network a second time (#4). An empty list is a valid signal (robots
@@ -1617,6 +1627,7 @@ async def _discovery_diagnostics(
             "crawl_delay_seconds": None,
             "sitemaps": robots_sitemaps,
             "reused_from_engine": True,
+            "evaluation": "cached",
         }
     elif discovery.get("robots"):
         robots_url = urljoin(origin, "/robots.txt")
@@ -1648,9 +1659,17 @@ async def _discovery_diagnostics(
                 "allowed": True,
                 "crawl_delay_seconds": crawl_delay,
                 "sitemaps": robots_sitemaps,
+                "reused_from_engine": False,
+                "evaluation": "evaluated",
             }
         except Exception as error:
-            diagnostics["robots"] = {"url": robots_url, "error": _classify_error_code(error), "sitemaps": []}
+            diagnostics["robots"] = {
+                "url": robots_url,
+                "error": _classify_error_code(error),
+                "sitemaps": [],
+                "reused_from_engine": False,
+                "evaluation": "evaluated",
+            }
     sitemap_urls: list[str] = []
     if discovery.get("sitemaps"):
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
@@ -1766,6 +1785,7 @@ async def _http_strategy_result(
     content_cache: ContentCache | None = None,
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    robots_evaluated: bool = True,
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     started = time.monotonic()
@@ -2131,6 +2151,7 @@ async def _http_strategy_result(
                 await _discovery_diagnostics(
                     normalized_url=normalized_url,
                     engine_robots_sitemaps=robots_sitemaps,
+                    robots_evaluated=robots_evaluated,
                     html=html,
                     policy=policy,
                     # Base headers only: page-level If-None-Match /

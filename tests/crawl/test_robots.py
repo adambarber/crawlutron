@@ -555,6 +555,8 @@ async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
     # sitemap still fetched + parsed
     assert "https://x.test/sitemap.xml" in calls
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
+    assert diag["robots"]["evaluation"] == "cached"
+    assert diag["robots"]["reused_from_engine"] is True
     # lastmod is surfaced for downstream skip-if-unchanged logic (#1)
     assert diag.get("sitemap_lastmod") == {"https://x.test/p1": "2024-05-05"}
 
@@ -564,4 +566,6 @@ async def test_discovery_fetches_robots_when_no_sitemaps_passed():
     diag = await _run_diag(calls, engine_robots_sitemaps=None)
     # Without engine-provided sitemaps, robots.txt is fetched as before.
     assert "https://x.test/robots.txt" in calls
+    assert diag["robots"]["evaluation"] == "evaluated"
+    assert diag["robots"]["reused_from_engine"] is False
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]

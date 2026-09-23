@@ -399,6 +399,7 @@ async def _execute_crawl_chain(
     domain: str = "",
     caller_validators: dict[str, str] | None = None,
     robots_sitemaps: list[str] | None = None,
+    robots_evaluated: bool = True,
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
     attempts: list[CrawlStrategyAttempt] = []
@@ -429,6 +430,7 @@ async def _execute_crawl_chain(
                 content_cache=content_cache,
                 caller_validators=caller_validators,
                 robots_sitemaps=robots_sitemaps,
+                robots_evaluated=robots_evaluated,
                 global_concurrency=global_concurrency,
             )
         elif strategy in BROWSER_STRATEGIES:
@@ -916,6 +918,7 @@ async def _crawl_request_impl(
                     scheduler=scheduler,
                     domain=job.domain,
                     robots_sitemaps=robots_sitemaps,
+                    robots_evaluated=respect_robots,
                     caller_validators=_validators_for(job),
                 ),
                 timeout=budget,
