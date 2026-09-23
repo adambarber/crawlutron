@@ -84,7 +84,7 @@ LEGACY_COLUMNS = {
 }
 
 MIGRATION_SEQUENCES = {
-    StoreSchema.CRAWL_JOBS: ("0001_crawl_jobs_initial",),
+    StoreSchema.CRAWL_JOBS: ("0001_crawl_jobs_initial", "0002_crawl_jobs_drop_canonicalized"),
     StoreSchema.RESULTS: ("0001_results_initial",),
 }
 

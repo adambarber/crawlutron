@@ -16,6 +16,7 @@ from app.crawl.migrations import (
     create_table_sql,
     rollback_store,
     schema_drift,
+    stamp_store,
 )
 from app.crawl.result_store import CrawlResultStore
 
@@ -116,7 +117,7 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     store.close()
 
 
-def test_historical_canonicalized_column_survives_legacy_stamping(tmp_path):
+def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_path):
     db_path = tmp_path / "historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
     before = sqlite3.connect(db_path)
@@ -132,11 +133,29 @@ def test_historical_canonicalized_column_survives_legacy_stamping(tmp_path):
     columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
 
     assert loaded is not None
+    assert "canonicalized" not in columns
+    assert schema_drift(after, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]) == ()
+    _assert_migration_recorded(after, StoreSchema.CRAWL_JOBS)
+    after.close()
+    store.close()
+
+
+def test_explicit_legacy_stamp_allows_historical_column_but_drift_remains_strict(tmp_path):
+    db_path = tmp_path / "stamped-historical-jobs.db"
+    _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
+    before = sqlite3.connect(db_path)
+    before.execute("ALTER TABLE crawl_jobs ADD COLUMN canonicalized INTEGER NOT NULL DEFAULT 0")
+    before.commit()
+    before.close()
+
+    stamp_store(db_path, StoreSchema.CRAWL_JOBS)
+
+    after = sqlite3.connect(db_path)
+    columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
     assert "canonicalized" in columns
     assert schema_drift(after, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS])
     _assert_migration_recorded(after, StoreSchema.CRAWL_JOBS)
     after.close()
-    store.close()
 
 
 def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_path):

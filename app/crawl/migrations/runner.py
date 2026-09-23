@@ -106,7 +106,15 @@ def migrate_store(
         target_was_applied = any(migration.hash in applied_hashes for migration in migrations)
         if not target_was_applied and _table_exists(backend.connection, selected):
             _require_stampable_schema(backend.connection, selected)
-            backend.mark_migrations(pending)
+            initial = next(
+                migration
+                for migration in migrations
+                if migration.id == MIGRATION_SEQUENCES[selected][0]
+            )
+            backend.mark_migrations([initial])
+            remaining = backend.to_apply(migrations)
+            if remaining:
+                backend.apply_migrations(remaining)
         else:
             backend.apply_migrations(pending)
 
