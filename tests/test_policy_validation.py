@@ -23,6 +23,51 @@ class TestPolicyValidation:
     def test_trailing_colon_path(self):
         assert normalize_public_http_url("https://example.com/seg:") == "https://example.com/seg"
 
+    def test_host_allow_list_restricts_targets(self):
+        assert normalize_public_http_url("https://Example.com:8443/page", allowed_hosts="example.com")
+        with pytest.raises(ValueError, match="host_not_allowed"):
+            normalize_public_http_url("https://other.test/page", allowed_hosts="example.com")
+        with pytest.raises(ValueError, match="host_not_allowed"):
+            normalize_public_http_url("https://notexample.com/page", allowed_hosts="example.com")
+
+    def test_host_deny_list_refuses_targets(self):
+        assert normalize_public_http_url("https://allowed.test/page", denied_hosts="blocked.test")
+        with pytest.raises(ValueError, match="host_denied"):
+            normalize_public_http_url("https://Blocked.test:443/page", denied_hosts="blocked.test")
+
+    def test_host_deny_precedes_allow(self):
+        with pytest.raises(ValueError, match="host_denied"):
+            normalize_public_http_url(
+                "https://blocked.test/page",
+                allowed_hosts="blocked.test",
+                denied_hosts="blocked.test",
+            )
+
+    def test_host_policy_normalizes_case_port_and_idna(self):
+        assert normalize_public_http_url(
+            "https://XN--BCHER-KVA.example:8443/page",
+            allowed_hosts="BÜCHER.Example:9443",
+        )
+        with pytest.raises(ValueError, match="host_not_allowed"):
+            normalize_public_http_url("https://other.test/page", allowed_hosts="bücher.example")
+
+    def test_host_policy_reads_configured_environment(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOWED_HOSTS", "allowed.test")
+        monkeypatch.setenv("BROWSER_CRAWLER_DENIED_HOSTS", "blocked.test")
+        assert normalize_public_http_url("https://allowed.test/page")
+        with pytest.raises(ValueError, match="host_not_allowed"):
+            normalize_public_http_url("https://other.test/page")
+        with pytest.raises(ValueError, match="host_denied"):
+            normalize_public_http_url("https://blocked.test/page")
+
+    def test_host_policy_keeps_ssrf_guard_active(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError, match="private_network_target"):
+            normalize_public_http_url(
+                "http://127.0.0.1/page",
+                allowed_hosts="127.0.0.1",
+            )
+
     def test_registrable_domain(self):
         assert registrable_domain("https://a.b.c.example.com/x") == "example.com"
         assert registrable_domain("https://example.com/x") == "example.com"
@@ -144,3 +189,18 @@ class TestPublicUrlOrNone:
     def test_empty_is_none(self):
         assert public_url_or_none("") is None
         assert public_url_or_none("   ") is None
+
+
+async def test_crawl_request_applies_settings_host_policy():
+    from app.crawl.engine import crawl_request
+    from app.settings import CrawlerSettings
+
+    settings = CrawlerSettings(allowed_hosts="allowed.test")
+    with pytest.raises(ValueError, match="host_not_allowed"):
+        await crawl_request(
+            {
+                "url": "https://blocked.test/page",
+                "policy": {"strategies": ["HTTP_DECLARED_CRAWLER"]},
+            },
+            settings=settings,
+        )

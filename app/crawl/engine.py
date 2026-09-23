@@ -843,7 +843,11 @@ async def _crawl_request_impl(
     jobs: list[CrawlTask] = []
     for index, original_url in enumerate(urls):
         try:
-            normalized_url = normalize_public_http_url(original_url)
+            normalized_url = normalize_public_http_url(
+                original_url,
+                allowed_hosts=active_settings.allowed_hosts,
+                denied_hosts=active_settings.denied_hosts,
+            )
             domain = registrable_domain(normalized_url)
         except ValueError as error:
             raise ValueError(f"invalid_url: {error}") from error
@@ -879,7 +883,15 @@ async def _crawl_request_impl(
         if not entry:
             continue
         validators_by_url[v_url] = entry
-        validators_by_url.setdefault(safe_public_url_or_none(v_url) or v_url, entry)
+        validators_by_url.setdefault(
+            safe_public_url_or_none(
+                v_url,
+                allowed_hosts=active_settings.allowed_hosts,
+                denied_hosts=active_settings.denied_hosts,
+            )
+            or v_url,
+            entry,
+        )
 
     def _validators_for(job: CrawlTask) -> dict[str, str] | None:
         return validators_by_url.get(job.normalized_url) or validators_by_url.get(job.original_url)

@@ -1398,6 +1398,9 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         )
     if "accept_language" in fp:
         headers["Accept-Language"] = fp["accept_language"]
+    configured_user_agent = os.environ.get("BROWSER_CRAWLER_USER_AGENT", "").strip()
+    if configured_user_agent:
+        headers["User-Agent"] = configured_user_agent
     cookie_header = _cookie_header_for_url(profile, url)
     if cookie_header:
         headers["Cookie"] = cookie_header

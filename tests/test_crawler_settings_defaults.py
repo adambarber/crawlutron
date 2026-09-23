@@ -22,12 +22,11 @@ class TestFromMappingHardening:
     def test_garbage_numeric_values_fall_back_to_defaults(self, caplog):
         settings = CrawlerSettings.from_mapping(
             {
-                "BROWSER_CRAWLER_HOST_PORT": "8765x",
                 "BROWSER_CRAWLER_GLOBAL_CONCURRENCY": "four",
                 "BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY": "not-a-float",
             }
         )
-        assert settings.host_port == 8765
+        assert not hasattr(settings, "host_port")
         assert settings.global_concurrency == 4
         assert settings.adaptive_min_delay == 0.5
 

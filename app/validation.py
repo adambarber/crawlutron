@@ -18,6 +18,49 @@ if TYPE_CHECKING:
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
 TWO_PART_PUBLIC_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "com.au", "net.au", "org.au"}
+
+
+def _normalize_policy_host(host: str) -> str:
+    value = host.strip().lower().rstrip(".")
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+    try:
+        return value.encode("idna").decode("ascii").lower().rstrip(".")
+    except UnicodeError:
+        return value
+
+
+def _policy_host_entry(entry: str) -> str:
+    value = entry.strip()
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = parsed.hostname or value.split("/", 1)[0].split(":", 1)[0]
+    if host.startswith("*."):
+        host = host[2:]
+    return _normalize_policy_host(host)
+
+
+@lru_cache(maxsize=256)
+def _policy_hosts(raw: str) -> tuple[str, ...]:
+    return tuple(entry for item in raw.split(",") if (entry := _policy_host_entry(item)))
+
+
+def _host_allowed(
+    host: str,
+    *,
+    allowed_hosts: str | None = None,
+    denied_hosts: str | None = None,
+) -> bool:
+    if allowed_hosts is None and denied_hosts is None:
+        allowed_hosts = os.environ.get("BROWSER_CRAWLER_ALLOWED_HOSTS", "")
+        denied_hosts = os.environ.get("BROWSER_CRAWLER_DENIED_HOSTS", "")
+    normalized = _normalize_policy_host(host)
+    denied = _policy_hosts(denied_hosts or "")
+    if any(normalized == entry or normalized.endswith(f".{entry}") for entry in denied):
+        return False
+    allowed = _policy_hosts(allowed_hosts or "")
+    return not allowed or any(normalized == entry or normalized.endswith(f".{entry}") for entry in allowed)
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 _IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
 _NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
@@ -119,7 +162,12 @@ def _resolver_numeric_ipv4(host: str) -> int | None:
     return result | values[-1]
 
 
-def normalize_public_http_url(url: str) -> NormalizedUrl:
+def normalize_public_http_url(
+    url: str,
+    *,
+    allowed_hosts: str | None = None,
+    denied_hosts: str | None = None,
+) -> NormalizedUrl:
     """Canonicalize a public HTTP(S) URL into a single normalized form.
 
     This is the single source of truth for what a normalized URL is across the
@@ -136,6 +184,12 @@ def normalize_public_http_url(url: str) -> NormalizedUrl:
         raise ValueError("invalid_url")
 
     host = parsed.hostname.lower().rstrip(".")
+    if not _host_allowed(host, allowed_hosts=allowed_hosts, denied_hosts=denied_hosts):
+        denied = _policy_hosts(denied_hosts or os.environ.get("BROWSER_CRAWLER_DENIED_HOSTS", ""))
+        normalized_host = _normalize_policy_host(host)
+        if any(normalized_host == entry or normalized_host.endswith(f".{entry}") for entry in denied):
+            raise ValueError("host_denied")
+        raise ValueError("host_not_allowed")
     # Local dev/test escape hatch: the crawler is a localhost dev service and
     # tests run a real in-process server on loopback. Allow opting out of the
     # private-network guard via env var rather than relaxing it by default.
@@ -524,7 +578,13 @@ def registrable_domain(url: str) -> str:
     return _heuristic_registrable_domain(host)
 
 
-def public_url_or_none(raw: str | None, *, resolve_against: str | None = None) -> str | None:
+def public_url_or_none(
+    raw: str | None,
+    *,
+    resolve_against: str | None = None,
+    allowed_hosts: str | None = None,
+    denied_hosts: str | None = None,
+) -> str | None:
     """Egress filter: resolve relatives FIRST, then strictly accept http/https.
 
     Attacker-influenced URLs leave the service through several doors
@@ -544,6 +604,8 @@ def public_url_or_none(raw: str | None, *, resolve_against: str | None = None) -
         candidate = urljoin(resolve_against, candidate)
     parsed = urlparse(candidate)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if not _host_allowed(parsed.hostname, allowed_hosts=allowed_hosts, denied_hosts=denied_hosts):
         return None
     return candidate
 
@@ -570,7 +632,12 @@ def filter_js_endpoints(
     ]
 
 
-def safe_public_url_or_none(raw: str | None) -> NormalizedUrl | None:
+def safe_public_url_or_none(
+    raw: str | None,
+    *,
+    allowed_hosts: str | None = None,
+    denied_hosts: str | None = None,
+) -> NormalizedUrl | None:
     """The single normalize-or-None chokepoint for URL egress doors.
 
     ``normalize_public_http_url`` raises ``ValueError`` on anything it rejects
@@ -590,6 +657,10 @@ def safe_public_url_or_none(raw: str | None) -> NormalizedUrl | None:
     try:
         if raw is None:
             return None
-        return normalize_public_http_url(raw)
+        return normalize_public_http_url(
+            raw,
+            allowed_hosts=allowed_hosts,
+            denied_hosts=denied_hosts,
+        )
     except ValueError:
         return None

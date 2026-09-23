@@ -298,7 +298,6 @@ defaults shown):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port. |
 | `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | `4` (env-overridable floor) | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
 | `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `2` | Max concurrent tasks per host. |
 | `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `500` | Delay between requests to the same host. |
@@ -316,12 +315,14 @@ defaults shown):
 | `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
 | `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
 | `BROWSER_CRAWLER_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
-| `BROWSER_CRAWLER_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated). |
-| `BROWSER_CRAWLER_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated). |
+| `BROWSER_CRAWLER_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated suffix match; case, IDNA, and port normalized). |
+| `BROWSER_CRAWLER_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated suffix match; deny wins over allow). |
 | `BROWSER_CRAWLER_LOG_LEVEL` | `info` | Log verbosity. |
 | `BROWSER_CRAWLER_LOG_FILE` | `/app/logs/browser-crawler.jsonl` | Structured JSONL log path. |
 | `BROWSER_CRAWLER_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
 | `BROWSER_CRAWLER_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
+
+Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames and may include a port; a denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
 > The container's production command also reads `BROWSER_CRAWLER_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 

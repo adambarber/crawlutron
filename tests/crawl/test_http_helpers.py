@@ -127,6 +127,11 @@ class TestHeaderHelpers:
         headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, policy, "http://x/")
         assert "iPhone" in headers["User-Agent"]
 
+    def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
+        monkeypatch.setenv("BROWSER_CRAWLER_USER_AGENT", "crawler-test/1")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://x/")
+        assert headers["User-Agent"] == "crawler-test/1"
+
     def test_cookie_header_invalid_structures(self) -> None:
         assert _cookie_header_for_url({"cookie_jar": "per_host", "cookies": "notdict"}, "http://host/") == ""
         assert (

@@ -41,6 +41,16 @@ def _default_http_keepalive() -> int:
     return max(20, min(128, _default_http_max_connections() // 2))
 
 
+ENVIRONMENT_FIELD_ALIASES: dict[str, str] = {
+    "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS": "browser_cookie_harvest_timeout_seconds",
+    "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS": "browser_lazy_scroll_delay_seconds",
+    "BROWSER_CRAWLER_LAZY_SCROLL_STEPS": "browser_lazy_scroll_steps",
+    "BROWSER_CRAWLER_LOG_BACKUP_COUNT": "log_file_backup_count",
+    "BROWSER_CRAWLER_LOG_FILE": "log_file_path",
+    "BROWSER_CRAWLER_LOG_MAX_BYTES": "log_file_max_bytes",
+}
+
+
 @dataclass(frozen=True)
 class CrawlerSettings:
     # Bind interface (M15): loopback by default since the service has no
@@ -48,7 +58,6 @@ class CrawlerSettings:
     # must set 0.0.0.0 explicitly (the compose file does, gated by its
     # loopback-only ports mapping).
     host: str = "127.0.0.1"
-    host_port: int = 8765
     global_concurrency: int = 4
     per_domain_concurrency: int = 2
     per_domain_delay_ms: int = 500
@@ -120,7 +129,6 @@ class CrawlerSettings:
         source = os.environ if values is None else values
         return cls(
             host=source.get("BROWSER_CRAWLER_HOST", cls.host),
-            host_port=get_mapping_int(source, "BROWSER_CRAWLER_HOST_PORT", cls.host_port),
             global_concurrency=get_mapping_int(
                 source, "BROWSER_CRAWLER_GLOBAL_CONCURRENCY", cls.global_concurrency
             ),
