@@ -363,8 +363,9 @@ def parse_bool_env(name: str, default: bool = False) -> bool:
     """Read an env var and return a boolean, warning on unrecognized values.
 
     Truthy values: ``1``, ``true``, ``yes``, ``on``; falsy: ``0``/``false``/
-    ``no``/``off`` (case-insensitive). Garbage logs a warning naming the
-    variable and returns ``default``. Centralized so every SSRF /
+    ``no``/``off`` (case-insensitive). Surrounding whitespace is ignored.
+    Garbage logs a warning naming the variable and returns ``default``.
+    Centralized so every SSRF /
     feature-flag check agrees on what "on" means.
     """
     return parse_bool_value(os.environ.get(name), default, env_name=name)
@@ -467,8 +468,9 @@ def parse_bool_value(raw: str | None, default: bool, *, env_name: str) -> bool:
     """Parse a boolean env value; warn (never silently flip) on garbage.
 
     Unset/empty -> ``default``. Recognized truthy: 1/true/yes/on; falsy:
-    0/false/no/off (case-insensitive). Anything else logs a warning naming
-    the variable and returns ``default`` -- so a typo can no longer silently
+    0/false/no/off (case-insensitive). Surrounding whitespace is ignored.
+    Anything else logs a warning naming the variable and returns ``default``
+    -- so a typo can no longer silently
     fail a policy open (``RESPECT_ROBOTS=ture`` keeps robots respected).
     """
     if raw is None or not raw.strip():

@@ -3,6 +3,7 @@
 import logging
 
 from app.settings import CrawlerSettings
+from app.validation import parse_bool_value
 
 
 def test_parallelism_defaults():
@@ -44,6 +45,17 @@ class TestFromMappingHardening:
             {
                 "BROWSER_CRAWLER_RESPECT_ROBOTS": "no",
                 "BROWSER_CRAWLER_ADAPTIVE_THROTTLING": "1",
+            }
+        )
+        assert settings.respect_robots is False
+        assert settings.adaptive_throttling is True
+
+    def test_padded_boolean_is_intentionally_accepted_and_declared(self):
+        assert "surrounding whitespace" in (parse_bool_value.__doc__ or "").lower()
+        settings = CrawlerSettings.from_mapping(
+            {
+                "BROWSER_CRAWLER_RESPECT_ROBOTS": " FALSE ",
+                "BROWSER_CRAWLER_ADAPTIVE_THROTTLING": " true ",
             }
         )
         assert settings.respect_robots is False

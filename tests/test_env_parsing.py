@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from app.validation import get_env_float, get_env_int
+from app.validation import get_env_float, get_env_int, parse_bool_env
 
 
 class TestGetEnvInt:
@@ -20,6 +20,14 @@ class TestGetEnvInt:
     def test_valid_value_parses(self, monkeypatch):
         monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "7")
         assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 7
+
+    def test_env_readers_accept_surrounding_whitespace_consistently(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_TEST_BOOL", " FALSE ")
+        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", " 7 ")
+        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", " 0.25 ")
+        assert parse_bool_env("BROWSER_CRAWLER_TEST_BOOL", True) is False
+        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 7
+        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", 0.5) == 0.25
 
     def test_typo_falls_back_to_default(self, monkeypatch, caplog):
         monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "four")
