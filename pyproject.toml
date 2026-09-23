@@ -124,14 +124,6 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # _testkit is the single home for shared test factories and re-exports the
 # coverage-suite surface (app internals) for star-import suites by design.
 "tests/_testkit.py" = ["F401"]
-# The duplication counter shells out to jscpd because that is the only way to
-# read its exact duplicated-line count (the console summary rounds to one
-# decimal, which is too coarse to hold a wave to "less than when it started").
-# The argv is a literal built here, never user or environment input, and the
-# executable comes from the service venv on PATH. S607 fires on any bare name
-# because a partial path is a PATH-hijack surface; this script only ever runs
-# from a developer shell or an agent measuring its own wave, never a request.
-"scripts/duplication-count.py" = ["S603", "S607"]
 # Engine/strategy modules perform deferred heavy imports (optional browser
 # bindings) after module-level constants are computed; E402 is deliberate.
 # ARG002: _MatchAll.match(path) accepts `path` for surface parity with the other
