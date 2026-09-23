@@ -45,18 +45,20 @@ repos:
       #
       # app/ runs at the tighter 30-token bound, where duplication is a second
       # implementation of a property -- the defect class that survives review
-      # (two robots caches, two public-IP verdicts). It sits at 27 pairs today,
-      # and reading them shows real missing funnels rather than noise: three
-      # repeated HttpFetchResult constructions, two MCP handler tails, a
-      # rejection path restated across crawl_endpoint and map_endpoint, two
-      # provider request builders. The threshold is therefore a RATCHET at the
-      # current level (0.9%), not zero: the tail gets worked down deliberately
-      # and the threshold tightens with it, while any NEW duplication fails
-      # immediately. At least one pair is sanctioned and documented rather than
-      # exempt (Classification and CrawlError share a prefix by design, pinned
-      # by test_crawl_error_members_derive_from_classification) -- jscpd has no
-      # per-clone expectation mechanism, so such pairs live in the baseline
-      # instead of an ignore list that could swallow a future offender.
+      # (two robots caches, two public-IP verdicts). It sits at 27 pairs /
+      # 211 duplicated lines of 20,648 today, and reading them shows real
+      # missing funnels rather than noise: repeated HttpFetchResult
+      # constructions, two MCP handler tails, a rejection path restated across
+      # crawl_endpoint and map_endpoint, two provider request builders. The
+      # threshold is a RATCHET at the measured baseline, not zero: the tail gets
+      # worked down deliberately and the threshold tightens with it, while any
+      # NEW duplication fails immediately.
+      #
+      # The number is 1.03, not the 0.9 first written here. 0.9 came from jscpd's
+      # ROUNDED summary line; the exact duplicated-lines percentage was already
+      # 1.02, so the tighter number never enforced anything and the gate would
+      # have failed unrelated work. A ratchet is only real if it sits just above
+      # the true measurement. Wave 5 drives this to 0.9 and lower as the tail goes.
       #
       # tests/ keeps the 50-token bound at zero tolerance. At 30 it reports 157
       # pairs, and reading them shows per-test setup that legitimately looks
@@ -68,7 +70,7 @@ repos:
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.9 --fail-on-empty app
+          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 1.03 --fail-on-empty app
         language: system
         files: ^(docker/browser-crawler/)?app/.*\.py$
         pass_filenames: false
