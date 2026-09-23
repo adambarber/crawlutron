@@ -56,48 +56,48 @@ async def _default_http_fetcher(
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
         ) as response:
-                content_length = response.headers.get("content-length")
-                if pinned_transport._declared_length_exceeds(content_length, max_content_length):
+            content_length = response.headers.get("content-length")
+            if pinned_transport._declared_length_exceeds(content_length, max_content_length):
+                return pinned_transport._http_413(url, current_url, started)
+            status_code = response.status_code
+            location = response.headers.get("location")
+            # SSRF-safe redirect: only follow within the hop budget. The next
+            # loop iteration re-runs _build_pinned_request, which re-validates
+            # (and re-pins) the redirect target against the SSRF blocklist.
+            redirect = pinned_transport._redirect_target(
+                current_url,
+                request_headers,
+                status_code,
+                location,
+                hops,
+                policy=policy,
+            )
+            if redirect is not None:
+                current_url, request_headers = redirect
+                hops += 1
+                continue
+            # Terminal response: stream RAW bytes, capping total read (#5).
+            # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
+            # bytes re-allocates and copies the whole buffer per chunk.
+            # A non-2xx streams through this same capped loop, so an error
+            # body is bounded by max_content_length exactly like a success
+            # body -- there is no separate status-error branch, and none
+            # could fire: raise_for_status is never called, so httpx cannot
+            # raise HTTPStatusError out of stream().
+            raw = bytearray()
+            async for chunk in response.aiter_raw():
+                raw.extend(chunk)
+                if len(raw) > max_content_length:
                     return pinned_transport._http_413(url, current_url, started)
-                status_code = response.status_code
-                location = response.headers.get("location")
-                # SSRF-safe redirect: only follow within the hop budget. The next
-                # loop iteration re-runs _build_pinned_request, which re-validates
-                # (and re-pins) the redirect target against the SSRF blocklist.
-                redirect = pinned_transport._redirect_target(
-                    current_url,
-                    request_headers,
-                    status_code,
-                    location,
-                    hops,
-                    policy=policy,
-                )
-                if redirect is not None:
-                    current_url, request_headers = redirect
-                    hops += 1
-                    continue
-                # Terminal response: stream RAW bytes, capping total read (#5).
-                # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
-                # bytes re-allocates and copies the whole buffer per chunk.
-                # A non-2xx streams through this same capped loop, so an error
-                # body is bounded by max_content_length exactly like a success
-                # body -- there is no separate status-error branch, and none
-                # could fire: raise_for_status is never called, so httpx cannot
-                # raise HTTPStatusError out of stream().
-                raw = bytearray()
-                async for chunk in response.aiter_raw():
-                    raw.extend(chunk)
-                    if len(raw) > max_content_length:
-                        return pinned_transport._http_413(url, current_url, started)
-                encoding = response.headers.get("content-encoding", "")
-                try:
-                    body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
-                except DecompressionTooLargeError:
-                    return pinned_transport._http_413(url, current_url, started)
-                resp_headers = {key.lower(): value for key, value in response.headers.items()}
-                # Already decompressed above; drop header to avoid a second pass.
-                resp_headers.pop("content-encoding", None)
-                final_url = current_url
+            encoding = response.headers.get("content-encoding", "")
+            try:
+                body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
+            except DecompressionTooLargeError:
+                return pinned_transport._http_413(url, current_url, started)
+            resp_headers = {key.lower(): value for key, value in response.headers.items()}
+            # Already decompressed above; drop header to avoid a second pass.
+            resp_headers.pop("content-encoding", None)
+            final_url = current_url
         elapsed_ms = int((time.monotonic() - started) * 1000)
         _store_set_cookies(final_url or url, resp_headers)
         return HttpFetchResult(
@@ -108,6 +108,30 @@ async def _default_http_fetcher(
             body=body,
             elapsed_ms=elapsed_ms,
         )
+
+
+async def _fallback_to_httpx(
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    max_content_length: int,
+    *,
+    policy: HostPolicy,
+) -> HttpFetchResult:
+    return await _default_http_fetcher(
+        url, headers, timeout_seconds, max_content_length, policy=policy
+    )
+
+
+def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:
+    return HttpFetchResult(
+        url=url,
+        final_url=current_url,
+        status_code=413,
+        headers={key.lower(): value for key, value in response.headers.items()},
+        body=b"",
+        elapsed_ms=elapsed_ms,
+    )
 
 
 def _release_stream_noblock(response: Any) -> None:
@@ -148,12 +172,8 @@ async def _default_cffi_fetcher(
         from curl_cffi.requests.exceptions import RequestException
         from curl_cffi.requests.models import STREAM_END
     except ImportError:
-        return await _default_http_fetcher(
-            url,
-            headers,
-            timeout_seconds,
-            max_content_length,
-            policy=policy,
+        return await _fallback_to_httpx(
+            url, headers, timeout_seconds, max_content_length, policy=policy
         )
     # Shared session (perf throughput #4): built once per event loop instead of
     # per request. Unavailable (ImportError at build) -> plain httpx fallback.
@@ -162,12 +182,8 @@ async def _default_cffi_fetcher(
     # and would silently degrade every impersonated fetch to plain httpx.
     client = http_client_pool.get_cffi_session()
     if client is None:
-        return await _default_http_fetcher(
-            url,
-            headers,
-            timeout_seconds,
-            max_content_length,
-            policy=policy,
+        return await _fallback_to_httpx(
+            url, headers, timeout_seconds, max_content_length, policy=policy
         )
     try:
         current_url = url
@@ -191,24 +207,15 @@ async def _default_cffi_fetcher(
                 )
             except Exception:
                 # Fall back to plain httpx for this request on transport errors.
-                return await _default_http_fetcher(
-            url,
-            headers,
-            timeout_seconds,
-            max_content_length,
-            policy=policy,
-        )
+                return await _fallback_to_httpx(
+                    url, headers, timeout_seconds, max_content_length, policy=policy
+                )
             # Content-length check (#5)
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
                 await response.aclose()  # N8: release the curl handle
-                return HttpFetchResult(
-                    url=url,
-                    final_url=current_url,
-                    status_code=413,
-                    headers={key.lower(): value for key, value in response.headers.items()},
-                    body=b"",
-                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                return _cffi_too_large_result(
+                    url, current_url, response, int((time.monotonic() - started) * 1000)
                 )
             status_code = response.status_code
             location = response.headers.get("location")
@@ -286,14 +293,7 @@ async def _default_cffi_fetcher(
                         # Mid-stream abandon: a 413 out of the loop is still an
                         # abandon, and the producer may be a hostile drip --
                         # never wait on it. The finally releases the handle.
-                        return HttpFetchResult(
-                            url=url,
-                            final_url=current_url,
-                            status_code=413,
-                            headers={key.lower(): value for key, value in response.headers.items()},
-                            body=b"",
-                            elapsed_ms=elapsed_ms,
-                        )
+                        return _cffi_too_large_result(url, current_url, response, elapsed_ms)
             finally:
                 if not stream_completed:
                     _release_stream_noblock(response)
@@ -308,14 +308,7 @@ async def _default_cffi_fetcher(
             try:
                 body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
             except DecompressionTooLargeError:
-                return HttpFetchResult(
-                    url=url,
-                    final_url=current_url,
-                    status_code=413,
-                    headers={key.lower(): value for key, value in response.headers.items()},
-                    body=b"",
-                    elapsed_ms=elapsed_ms,
-                )
+                return _cffi_too_large_result(url, current_url, response, elapsed_ms)
             cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
             resp_headers.pop("content-encoding", None)
@@ -330,10 +323,6 @@ async def _default_cffi_fetcher(
                 decompression_failed=cffi_decompression_failed,
             )
     except Exception:  # any cffi failure falls back to plain httpx
-        return await _default_http_fetcher(
-            url,
-            headers,
-            timeout_seconds,
-            max_content_length,
-            policy=policy,
+        return await _fallback_to_httpx(
+            url, headers, timeout_seconds, max_content_length, policy=policy
         )

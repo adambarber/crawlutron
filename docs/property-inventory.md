@@ -70,7 +70,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | C4 | `None` strategy means "no strategy was attempted" — no path invents a strategy label | `app/crawl/result_helpers.py` | runtime construction | strategy-value detector + construction gate | `GATED` |
 | C5 | The unified crawl response is constructed only by the response shaper | `app/api/response_shaping.py` | runtime construction | AST construction detector | `GATED` |
 | C6 | Wire-visible payloads are model-derived: a field that is not on the response model cannot reach the wire, and MCP input schemas are derived from the same models the handlers use | `app/discovery/*`, `app/mcp/tools.py` | config | endpoint-level contract tests | `PARTIAL` — MCP **input** schemas are still hand-written dicts |
-| C7 | Diagnostics report what actually happened: a check that was skipped, served from cache, or never performed is distinguishable from one that was evaluated | `app/crawl/strategies/http.py:_discovery_diagnostics`, engine call sites | runtime construction | metadata tests | `PARTIAL` — a second call site defaulted the flag and claimed an evaluation (being fixed) |
+| C7 | Diagnostics report what actually happened: a check that was skipped, served from cache, or never performed is distinguishable from one that was evaluated | `app/crawl/strategies/fetch_policy.py:_discovery_diagnostics`, engine call sites | runtime construction | metadata tests | `PARTIAL` — a second call site defaulted the flag and claimed an evaluation (being fixed) |
 
 ## D. Durable state and the control plane
 
@@ -90,7 +90,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 |---|---|---|---|---|---|
 | E1 | Blocking I/O never runs on the event loop | call sites | AST route + spy | await-inside-lock detector; `asyncio.to_thread` spy in tests | `PARTIAL` — the spy records but does not enforce; coverage is per-call-site |
 | E2 | No lock is held across blocking disk I/O | `app/crawl/content_cache.py` | runtime construction | AST detector + race tests | `GATED` |
-| E3 | Loop-bound primitives are rebound when the loop changes | `app/crawl/strategies/http.py:_LoopBoundPooledClient`, async runner semaphore | runtime construction | loop-bound detector | `GATED` |
+| E3 | Loop-bound primitives are rebound when the loop changes | `app/crawl/strategies/http_client_pool.py:_LoopBoundPooledClient`, async runner semaphore | runtime construction | loop-bound detector | `GATED` |
 | E4 | Remote politeness directives cannot install an unbounded sleep | `app/scheduler.py` | runtime construction | clamp tests | `GATED` |
 | E5 | Work submitted to a closing loop cannot raise into a completed task | `app/crawl/strategies/http.py` close helpers | runtime construction | deterministic close-race tests | `GATED` |
 

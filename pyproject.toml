@@ -93,6 +93,7 @@ line-length = 110
 target-version = "py311"
 
 [tool.ruff.lint]
+preview = true
 select = [
     "E",   # pycodestyle errors
     "F",   # pyflakes
@@ -101,9 +102,18 @@ select = [
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
     "S",   # flake8-bandit (security)
+    "C901",
+    "PLR0912",
+    "PLR0915",
 ]
 ignore = [
     "E501",  # line length (handled by formatter)
+    "E302",
+    "E303",
+    "E306",
+    "E117",
+    "W391",
+    "B903",
     "S101",  # use of assert (acceptable in tests)
 ]
 # B008: FastAPI dependency injection passes Depends(...) as a default argument
@@ -111,6 +121,15 @@ ignore = [
 # S311: random.uniform jitter in the scheduler is throughput shaping, not crypto.
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 37
+
+[tool.ruff.lint.pylint]
+max-branches = 41
+max-statements = 147
+# PLR0911 and PLR0913 remain pending: extraction.py:530 and result_helpers.py:341
+# belong to the follow-up return/argument de-fanging wave.
 
 [tool.ruff.lint.flake8-bandit]
 # The scheduler's random.uniform crawl-delay jitter is throughput shaping, not
@@ -120,7 +139,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # Test suites import the shared helper namespace with star imports, set up
 # env/monkeypatch state before imports, and exercise security-sensitive shapes
 # (asserts, fake creds) that bandit/bugbear flag; strict hygiene does not apply.
-"tests/**" = ["E402", "F403", "F405", "S", "B"]
+"tests/**" = ["E402", "F403", "F405", "S", "B", "C901", "PLR0912", "PLR0915"]
 # _testkit is the single home for shared test factories and re-exports the
 # coverage-suite surface (app internals) for star-import suites by design.
 "tests/_testkit.py" = ["F401"]

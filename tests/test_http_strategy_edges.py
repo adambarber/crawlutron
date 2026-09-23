@@ -1,8 +1,7 @@
-"""HTTP strategy edge cases: fallback chains, streaming caps, timeout handling."""
-
 import multiprocessing
 import os
 
+import pytest
 from _testkit import *
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
@@ -205,3 +204,27 @@ class TestHttpStrategyEdges:
             host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == EXTRACTION_METHOD_BINARY_NO_TEXT
+
+
+async def test_http_strategy_rejects_non_mapping_request_profile():
+    from app.crawl.strategies.http import _http_strategy_result
+
+    async def fetcher(*args, **kwargs):
+        raise AssertionError("fetcher must not run for an invalid request profile")
+
+    for profile in ("hello", ["hello"]):
+        with pytest.raises(ValueError, match="^invalid_policy_profile$"):
+            await _http_strategy_result(
+                original_url="http://profile.example/",
+                normalized_url="http://profile.example/",
+                strategy="HTTP_DECLARED_CRAWLER",
+                policy={
+                    "strategies": ["HTTP_DECLARED_CRAWLER"],
+                    "extraction": "full",
+                    "headers": {},
+                    "request_profile": profile,
+                    "limits": {"timeout_seconds": 5, "max_retries": 0},
+                },
+                http_fetcher=fetcher,
+                host_policy=HostPolicy.unrestricted(),
+            )
