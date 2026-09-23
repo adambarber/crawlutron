@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from app.crawl.ids import new_job_id
-from app.crawl.sqlite_store import connect_store, table_has_column
+from app.crawl.migrations import StoreSchema
+from app.crawl.sqlite_store import connect_store
 from app.validation import safe_public_url_or_none
 
 
@@ -442,7 +443,7 @@ class JobStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Durability/concurrency settings come from the shared store
         # chokepoint (busy_timeout + WAL; M1 confinement invariant).
-        self._conn = connect_store(self.db_path)
+        self._conn = connect_store(self.db_path, schema=StoreSchema.CRAWL_JOBS)
         # Serialize all connection use across threads (sqlite3 connections are
         # not safe for concurrent use even with check_same_thread=False).
         self._lock = threading.Lock()
@@ -450,50 +451,6 @@ class JobStore:
         # indexing for columns added later (e.g. canonicalized) would couple the
         # read path to ALTER ordering. sqlite3.Row still supports row[n].
         self._conn.row_factory = sqlite3.Row
-        self._init_schema()
-
-    def _column_exists(self, column: str) -> bool:
-        return table_has_column(self._conn, "crawl_jobs", column)
-
-    def _init_schema(self) -> None:
-        self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS crawl_jobs (
-                job_id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL DEFAULT 'whole_site',  -- JobKind enum value
-                root_url TEXT NOT NULL DEFAULT '',
-                policy TEXT NOT NULL DEFAULT '{}',        -- JSON
-                status TEXT NOT NULL,           -- JobStatus enum value
-                frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of {url, depth} entries
-                visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of canonical URLs
-                in_flight TEXT NOT NULL DEFAULT '[]',      -- JSON array of {url, depth} entries
-                transient_retries TEXT NOT NULL DEFAULT '{}', -- JSON dict: url -> transient retry count
-                results TEXT NOT NULL DEFAULT '[]',       -- JSON array of result objects
-                created_at REAL NOT NULL,
-                updated_at REAL NOT NULL,
-                error TEXT,
-                stats TEXT NOT NULL DEFAULT '{}'           -- JSON dict
-            )
-        """)
-        # Migrations. Existence is decided by the schema itself (PRAGMA
-        # table_info), NOT by swallowing OperationalError: the old shape caught
-        # that exception around every ALTER, so a disk-full, permission or
-        # corruption failure looked identical to "column already exists" and the
-        # migration silently did not run. Only the absence of the column is
-        # tolerated now; every other error propagates.
-        if not self._column_exists("kind"):
-            self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'whole_site'")
-        # in_flight: mid-batch crash recovery (re-queue popped work).
-        if not self._column_exists("in_flight"):
-            self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN in_flight TEXT NOT NULL DEFAULT '[]'")
-        # transient_retries: bounded whole-site transient retries.
-        if not self._column_exists("transient_retries"):
-            self._conn.execute(
-                "ALTER TABLE crawl_jobs ADD COLUMN transient_retries TEXT NOT NULL DEFAULT '{}'"
-            )
-        # Canonical-form detection is structural (see _row_is_canonical), so no
-        # marker column is stored: a flag can disagree with the data it claims
-        # to describe, while the data itself cannot.
-        self._conn.commit()
 
     def _row_to_job(self, row) -> CrawlJobState:
         return CrawlJobState.from_json(

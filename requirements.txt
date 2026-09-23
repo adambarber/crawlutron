@@ -17,6 +17,8 @@ beautifulsoup4>=4.12
 markdownify>=0.13
 # Required by FastAPI request/response models.
 pydantic>=2.0
+# Local DBAPI schema migrations only; the package documents no network or telemetry behavior.
+yoyo-migrations==9.0.0
 # Bounded-execution regex engine (app/safe_regex.py): native C-loop timeout=
 # for attacker-influenced patterns; stdlib re cannot be interrupted (GIL wedge).
 regex>=2026.5.9

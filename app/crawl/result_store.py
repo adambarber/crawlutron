@@ -13,6 +13,7 @@ import threading
 import time
 from pathlib import Path
 
+from app.crawl.migrations import StoreSchema
 from app.crawl.sqlite_store import connect_store
 
 
@@ -34,17 +35,7 @@ class CrawlResultStore:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         # Shared store configuration (busy_timeout + WAL; M1) -- previously a
         # plain connect while JobStore ran WAL, so the two stores drifted.
-        self._conn = connect_store(db_path)
-        self._conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS results (
-                request_id TEXT PRIMARY KEY,
-                stored_at REAL NOT NULL,
-                payload TEXT NOT NULL
-            )
-            """
-        )
-        self._conn.commit()
+        self._conn = connect_store(db_path, schema=StoreSchema.RESULTS)
 
     def put(self, request_id: str, payload: dict) -> None:
         """Store a completed response; prune expired/oldest entries first."""

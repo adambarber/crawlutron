@@ -3928,6 +3928,7 @@ def assert_property_detector_bites(
     *,
     caught: dict[str, tuple[str, int]],
     quiet: str,
+    quiet_path: pathlib.Path | None = None,
 ) -> None:
     """Prove a property detector has teeth, in-process, without a break/restore cycle.
 
@@ -3944,7 +3945,8 @@ def assert_property_detector_bites(
             f"{prop.name} detector: {label} shape produced {len(offenders)} offenders, "
             f"expected {expected}: {offenders}"
         )
-    quiet_offenders = detector(_synthetic_app_tree(quiet), path, prop)
+    resolved_quiet_path = quiet_path or path
+    quiet_offenders = detector(_synthetic_app_tree(quiet), resolved_quiet_path, prop)
     assert not quiet_offenders, f"{prop.name} detector flagged an owner delegation: {quiet_offenders}"
 
 
@@ -4288,4 +4290,57 @@ def test_documented_knob_detector_bites():
             "def resolved(source):\n"
             "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['browser_lazy_scroll_steps'], 3)\n"
         ),
+    )
+
+
+_MIGRATION_DDL_PROPERTY = Property(
+    name="migration-ddl",
+    owner_module="app/crawl/migrations/",
+    owner_symbols=(),
+    definition_site="app/crawl/migrations/",
+    fingerprints=("ddl",),
+    reason="Schema changes must remain ordered and reversible in the migration package.",
+)
+
+
+def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+    if _relative_app_path(path).startswith("app/crawl/migrations/"):
+        return []
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        if re.match(
+            r"\s*(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b",
+            node.value,
+            re.IGNORECASE,
+        ):
+            found.append(offender(path, node.lineno, node.value.splitlines()[0]))
+    return found
+
+
+def test_ddl_is_confined_to_the_migrations_package():
+    offenders = [
+        found
+        for path, tree in app_trees(exclude=frozenset())
+        for found in _ddl_offenders(tree, path, _MIGRATION_DDL_PROPERTY)
+    ]
+    assert not offenders, "DDL outside app/crawl/migrations: " + ", ".join(offenders)
+
+
+def test_ddl_detector_bites():
+    assert_property_detector_bites(
+        _MIGRATION_DDL_PROPERTY,
+        _ddl_offenders,
+        caught={
+            "create alter drop": (
+                "def bypass(conn):\n"
+                "    conn.execute('CREATE TABLE x (id TEXT)')\n"
+                "    conn.execute('ALTER TABLE x ADD COLUMN y TEXT')\n"
+                "    conn.execute('DROP TABLE x')\n",
+                3,
+            )
+        },
+        quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
+        quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
     )

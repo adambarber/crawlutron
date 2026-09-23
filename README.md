@@ -112,6 +112,31 @@ container with Caddy or another reverse proxy that owns the `.local` zone.
 
 ---
 
+## SQLite schema migrations
+
+Migrations live in `app/crawl/migrations/`. Store startup applies pending migrations under yoyo's lock; an exact pre-ledger table is stamped instead of recreated.
+
+```bash
+# Apply pending migrations (normally automatic when a store opens).
+.venv/bin/python -m app.crawl.migrations apply /path/to/jobs.db crawl_jobs
+.venv/bin/python -m app.crawl.migrations apply /path/to/results.db results
+
+# Add a migration: add a versioned schema to manifest.py, point CURRENT_SCHEMAS at it,
+# then add a yoyo step with apply and rollback SQL under the migration directory.
+$EDITOR app/crawl/migrations/manifest.py
+$EDITOR app/crawl/migrations/0002_crawl_jobs_descriptive_name.py
+
+# Stamp an existing database after checking it against the declared schema.
+.venv/bin/python -m app.crawl.migrations stamp /path/to/jobs.db crawl_jobs
+.venv/bin/python -m app.crawl.migrations stamp /path/to/results.db results
+
+# Roll back this store's applied migrations in reverse order; do not open the store afterward.
+.venv/bin/python -m app.crawl.migrations rollback /path/to/jobs.db crawl_jobs
+.venv/bin/python -m app.crawl.migrations rollback /path/to/results.db results
+```
+
+---
+
 ## Endpoints
 
 | Method | Path | Purpose |
