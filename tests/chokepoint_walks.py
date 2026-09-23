@@ -144,6 +144,16 @@ def _resolved_expr(expr: ast.AST, bindings: dict[str, str]) -> str:
     if isinstance(expr, ast.Attribute):
         base = _resolved_expr(expr.value, bindings)
         return f"{base}.{expr.attr}" if base else expr.attr
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id == "getattr"
+        and len(expr.args) >= 2
+        and isinstance(expr.args[1], ast.Constant)
+        and isinstance(expr.args[1].value, str)
+    ):
+        base = _resolved_expr(expr.args[0], bindings)
+        return f"{base}.{expr.args[1].value}" if base else ""
     return ""
 
 

@@ -3649,14 +3649,26 @@ def test_public_target_registry_is_not_empty():
 def test_public_target_detector_bites():
     prop = _property("public-target")
     bad = ast.parse(
+        "import ipaddress\n"
         "import ipaddress as ip\n"
-        "parse = ip.ip_address\n"
-        "def twin(value):\n"
+        "from ipaddress import ip_address as parse\n"
+        "IP = ipaddress\n"
+        "def alias_import(value):\n"
+        "    address = ip.ip_address(value)\n"
+        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
+        "def from_import(value):\n"
         "    address = parse(value)\n"
-        "    return address.is_private or address.is_loopback or ip.ip_network('100.64.0.0/10')\n"
+        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
+        "def assignment(value):\n"
+        "    address = IP.ip_address(value)\n"
+        "    return address.is_private or IP.ip_network('100.64.0.0/10')\n"
+        "def getattr_call(value):\n"
+        "    address = getattr(ipaddress, 'ip_address')(value)\n"
+        "    return address.is_private or ip.ip_network('100.64.0.0/10')\n"
     )
     offenders = _public_target_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", prop)
-    assert len(offenders) == 1 and "public-address" in offenders[0], offenders
+    assert len(offenders) == 4, offenders
+    assert all("public-address" in offender for offender in offenders), offenders
     good = ast.parse(
         "from app.validation import _is_public_ip as verdict\n"
         "def check(value):\n"
