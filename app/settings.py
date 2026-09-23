@@ -153,12 +153,18 @@ class CrawlerSettings:
             allowed_hosts=source.get("BROWSER_CRAWLER_ALLOWED_HOSTS", cls.allowed_hosts),
             denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
             log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),
-            log_file_path=source.get("BROWSER_CRAWLER_LOG_FILE", cls.log_file_path),
+            log_file_path=source.get(
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_FILE"], cls.log_file_path
+            ),
             log_file_max_bytes=get_mapping_int(
-                source, "BROWSER_CRAWLER_LOG_MAX_BYTES", cls.log_file_max_bytes
+                source,
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_MAX_BYTES"],
+                cls.log_file_max_bytes,
             ),
             log_file_backup_count=get_mapping_int(
-                source, "BROWSER_CRAWLER_LOG_BACKUP_COUNT", cls.log_file_backup_count
+                source,
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_BACKUP_COUNT"],
+                cls.log_file_backup_count,
             ),
             cache_dir=source.get("BROWSER_CRAWLER_CACHE_DIR", cls.cache_dir),
             cache_ttl_seconds=get_mapping_int(
@@ -211,17 +217,20 @@ class CrawlerSettings:
                 source, "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
             ),
             browser_lazy_scroll_steps=get_mapping_int(
-                source, "BROWSER_CRAWLER_LAZY_SCROLL_STEPS", cls.browser_lazy_scroll_steps, lo=0
+                source,
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LAZY_SCROLL_STEPS"],
+                cls.browser_lazy_scroll_steps,
+                lo=0,
             ),
             browser_lazy_scroll_delay_seconds=get_mapping_float(
                 source,
-                "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS",
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS"],
                 cls.browser_lazy_scroll_delay_seconds,
                 lo=0.0,
             ),
             browser_cookie_harvest_timeout_seconds=get_mapping_float(
                 source,
-                "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS",
+                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS"],
                 cls.browser_cookie_harvest_timeout_seconds,
                 lo=0.0,
             ),
