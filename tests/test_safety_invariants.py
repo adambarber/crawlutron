@@ -4096,32 +4096,71 @@ def _documented_browser_knobs() -> set[str] | None:
     return {name for name in env_names | readme_names if not name.endswith("_")}
 
 
-def _settings_declaration_constant(path: pathlib.Path, tree: ast.AST, node: ast.Constant) -> bool:
+def _settings_alias_declaration_constant(
+    path: pathlib.Path,
+    tree: ast.AST,
+    node: ast.Constant,
+) -> bool:
     if _relative_app_path(path) != "app/settings.py":
         return False
     parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    ancestors: list[ast.AST] = []
     current: ast.AST = node
     while id(current) in parents:
         current = parents[id(current)]
-        ancestors.append(current)
-    if any(
-        isinstance(parent, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "ENVIRONMENT_FIELD_ALIASES" for target in parent.targets)
-        for parent in ancestors
-    ):
-        return True
-    if not any(
-        isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)) and parent.name == "from_mapping"
-        for parent in ancestors
-    ):
-        return False
-    return any(
-        isinstance(parent, ast.Call)
-        and resolved_call_name(tree, parent).rsplit(".", 1)[-1]
-        in {"get", "get_mapping_int", "get_mapping_float", "parse_bool_value"}
-        for parent in ancestors
-    )
+        if isinstance(current, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "ENVIRONMENT_FIELD_ALIASES"
+            for target in current.targets
+        ):
+            return True
+    return False
+
+
+_ENV_READER_NAMES = frozenset(
+    {
+        "get",
+        "getenv",
+        "get_env_float",
+        "get_env_int",
+        "get_mapping_float",
+        "get_mapping_int",
+        "parse_bool_env",
+        "parse_bool_value",
+    }
+)
+
+
+def _environment_reader_reference(
+    tree: ast.AST,
+    node: ast.Constant,
+    field_environments: dict[str, str],
+) -> str | None:
+    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    current: ast.AST = node
+    alias_value: str | None = None
+    is_alias_lookup = False
+    reaches_reader = False
+    while id(current) in parents:
+        current = parents[id(current)]
+        if (
+            isinstance(current, ast.Subscript)
+            and isinstance(current.value, ast.Name)
+            and current.value.id == "ENVIRONMENT_FIELD_ALIASES"
+        ):
+            is_alias_lookup = True
+            if isinstance(current.slice, ast.Constant) and isinstance(current.slice.value, str):
+                alias_value = field_environments.get(current.slice.value)
+        if (
+            isinstance(current, ast.Call)
+            and resolved_call_name(tree, current).rsplit(".", 1)[-1] in _ENV_READER_NAMES
+        ):
+            reaches_reader = True
+    if not reaches_reader:
+        return None
+    if is_alias_lookup:
+        return alias_value
+    if node.value.startswith("BROWSER_CRAWLER_"):
+        return node.value
+    return None
 
 
 def _settings_fields() -> set[str]:
@@ -4142,9 +4181,9 @@ def _settings_alias_failures(
 ) -> list[str]:
     known_fields = fields if fields is not None else _settings_fields()
     return [
-        f"{environment} maps to missing field {field}"
-        for environment, field in aliases.items()
-        if field not in known_fields
+        f"{field} maps to invalid environment name {environment}"
+        for field, environment in aliases.items()
+        if field not in known_fields or not environment.startswith("BROWSER_CRAWLER_")
     ]
 
 
@@ -4157,17 +4196,22 @@ def _production_browser_knob_references() -> set[str]:
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
-                and node.value.startswith("BROWSER_CRAWLER_")
-                and not _settings_declaration_constant(path, tree, node)
+                and not _settings_alias_declaration_constant(path, tree, node)
             ):
-                references.add(node.value)
-            if isinstance(node, ast.Attribute) and _relative_app_path(path) != "app/settings.py":
-                for environment, field in ENVIRONMENT_FIELD_ALIASES.items():
-                    if node.attr == field:
-                        references.add(environment)
-                environment = f"BROWSER_CRAWLER_{node.attr.upper()}"
-                if environment in field_knobs:
+                environment = _environment_reader_reference(
+                    tree,
+                    node,
+                    ENVIRONMENT_FIELD_ALIASES,
+                )
+                if environment is not None:
                     references.add(environment)
+            if isinstance(node, ast.Attribute) and _relative_app_path(path) != "app/settings.py":
+                environment = ENVIRONMENT_FIELD_ALIASES.get(node.attr)
+                if environment is not None:
+                    references.add(environment)
+                conventional = f"BROWSER_CRAWLER_{node.attr.upper()}"
+                if conventional in field_knobs:
+                    references.add(conventional)
     dockerfile = REPO_ROOT / "Dockerfile"
     if dockerfile.exists():
         for line in dockerfile.read_text(encoding="utf-8").splitlines():
@@ -4185,6 +4229,19 @@ def _documented_knob_offenders(
     if not documented:
         return ["no documented BROWSER_CRAWLER knobs were found"]
     return [f"{name} has no production consumer" for name in sorted(documented - references)]
+
+
+def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
+    references: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            environment = _environment_reader_reference(tree, node, ENVIRONMENT_FIELD_ALIASES)
+            if environment is not None:
+                references.add(environment)
+    return _documented_knob_offenders(
+        {"BROWSER_CRAWLER_LAZY_SCROLL_STEPS"},
+        references,
+    )
 
 
 def test_documented_browser_knobs_have_consumers():
@@ -4206,4 +4263,29 @@ def test_documented_knob_detector_bites():
     assert "BROWSER_CRAWLER_ALLOWED_HOSTS" in current
     assert not _documented_knob_offenders({"BROWSER_CRAWLER_ALLOWED_HOSTS"}, {"BROWSER_CRAWLER_ALLOWED_HOSTS"})
     assert _documented_knob_offenders({"BROWSER_CRAWLER_LOG_FILE"}, set())
-    assert _settings_alias_failures({"BROWSER_CRAWLER_FAKE": "missing_field"}, {"real_field"})
+    assert _settings_alias_failures({"missing_field": "BROWSER_CRAWLER_FAKE"}, {"real_field"})
+    prop = Property(
+        name="resolved-env-reader",
+        owner_module="app/settings.py",
+        owner_symbols=("from_mapping",),
+        definition_site="app/settings.py:from_mapping",
+        fingerprints=("environment_reader_reference",),
+        reason="A documented environment name must resolve through a value reader.",
+    )
+    assert_property_detector_bites(
+        prop,
+        _resolved_env_reader_offenders,
+        caught={
+            "mapping lookup passes field name to reader": (
+                "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
+                "def broken(source):\n"
+                "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['BROWSER_CRAWLER_LAZY_SCROLL_STEPS'], 3)\n",
+                1,
+            ),
+        },
+        quiet=(
+            "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
+            "def resolved(source):\n"
+            "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['browser_lazy_scroll_steps'], 3)\n"
+        ),
+    )

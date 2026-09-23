@@ -123,3 +123,19 @@ def test_browser_knob_env_mapping():
     assert junk.browser_lazy_scroll_steps == 3
     assert junk.browser_lazy_scroll_delay_seconds == 1
     assert junk.browser_cookie_harvest_timeout_seconds == 5.0
+
+
+def test_log_knob_env_mapping():
+    from app.settings import CrawlerSettings
+
+    mapped = CrawlerSettings.from_mapping(
+        {
+            "BROWSER_CRAWLER_LOG_FILE": "/tmp/crawler.jsonl",
+            "BROWSER_CRAWLER_LOG_MAX_BYTES": "4096",
+            "BROWSER_CRAWLER_LOG_BACKUP_COUNT": "7",
+        }
+    )
+
+    assert mapped.log_file_path == "/tmp/crawler.jsonl"
+    assert mapped.log_file_max_bytes == 4096
+    assert mapped.log_file_backup_count == 7

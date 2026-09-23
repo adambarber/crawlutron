@@ -42,12 +42,12 @@ def _default_http_keepalive() -> int:
 
 
 ENVIRONMENT_FIELD_ALIASES: dict[str, str] = {
-    "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS": "browser_cookie_harvest_timeout_seconds",
-    "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS": "browser_lazy_scroll_delay_seconds",
-    "BROWSER_CRAWLER_LAZY_SCROLL_STEPS": "browser_lazy_scroll_steps",
-    "BROWSER_CRAWLER_LOG_BACKUP_COUNT": "log_file_backup_count",
-    "BROWSER_CRAWLER_LOG_FILE": "log_file_path",
-    "BROWSER_CRAWLER_LOG_MAX_BYTES": "log_file_max_bytes",
+    "browser_cookie_harvest_timeout_seconds": "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS",
+    "browser_lazy_scroll_delay_seconds": "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS",
+    "browser_lazy_scroll_steps": "BROWSER_CRAWLER_LAZY_SCROLL_STEPS",
+    "log_file_backup_count": "BROWSER_CRAWLER_LOG_BACKUP_COUNT",
+    "log_file_path": "BROWSER_CRAWLER_LOG_FILE",
+    "log_file_max_bytes": "BROWSER_CRAWLER_LOG_MAX_BYTES",
 }
 
 
@@ -154,16 +154,16 @@ class CrawlerSettings:
             denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
             log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),
             log_file_path=source.get(
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_FILE"], cls.log_file_path
+                ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path
             ),
             log_file_max_bytes=get_mapping_int(
                 source,
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_MAX_BYTES"],
+                ENVIRONMENT_FIELD_ALIASES["log_file_max_bytes"],
                 cls.log_file_max_bytes,
             ),
             log_file_backup_count=get_mapping_int(
                 source,
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LOG_BACKUP_COUNT"],
+                ENVIRONMENT_FIELD_ALIASES["log_file_backup_count"],
                 cls.log_file_backup_count,
             ),
             cache_dir=source.get("BROWSER_CRAWLER_CACHE_DIR", cls.cache_dir),
@@ -218,19 +218,19 @@ class CrawlerSettings:
             ),
             browser_lazy_scroll_steps=get_mapping_int(
                 source,
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LAZY_SCROLL_STEPS"],
+                ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_steps"],
                 cls.browser_lazy_scroll_steps,
                 lo=0,
             ),
             browser_lazy_scroll_delay_seconds=get_mapping_float(
                 source,
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS"],
+                ENVIRONMENT_FIELD_ALIASES["browser_lazy_scroll_delay_seconds"],
                 cls.browser_lazy_scroll_delay_seconds,
                 lo=0.0,
             ),
             browser_cookie_harvest_timeout_seconds=get_mapping_float(
                 source,
-                ENVIRONMENT_FIELD_ALIASES["BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS"],
+                ENVIRONMENT_FIELD_ALIASES["browser_cookie_harvest_timeout_seconds"],
                 cls.browser_cookie_harvest_timeout_seconds,
                 lo=0.0,
             ),
