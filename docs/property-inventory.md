@@ -37,8 +37,9 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 |---|---|---|---|---|---|
 | A1 | Canonical page identity is computed by one function, and every frontier key, visited entry, cache key and fetch target derives from it — never from a raw submitted string | `app/validation.py:normalize_public_http_url`, `app/crawl/admission.py:canonical_page_identity` | runtime construction | `test_batch_dedup_keys_on_canonical_page_identity` (AST, tree-wide); job-store normalization tests | `GATED` |
 | A2 | The public-address verdict (private / loopback / link-local / reserved / CGNAT / NAT64 / ULA / multicast) has exactly one implementation | `app/validation.py:_is_public_ip` | runtime construction | property registry `public-target` + reserved-range corpus test + bite proof | `GATED`, weak seam (see W1) |
-| A3 | The host allow/deny policy cannot be omitted by any path that normalizes or admits a URL | `app/validation.py:_host_policy_reason` | **signature (required argument)** | being added this wave; a seed-list-only enforcement was found and is being removed | `PARTIAL` → in flight |
+| A3 | The host allow/deny policy cannot be omitted by any path that normalizes or admits a URL | `app/validation.py:_host_policy_reason` | **signature (required argument)** | a signature detector, which is too weak to hold the property (see P2 below) | `PARTIAL` — the argument is required everywhere, but the ADMISSION seam is still fail-open: a dedup helper keeps the raw URL when validation rejects it, so a denied target is persisted, scheduled and reported as accepted (202) before the engine ever validates |
 | A3b | **Every** URL entry point applies the private-target refusal, not only the fetch path | `app/validation.py` (`public_url_or_none`, `filter_js_endpoints`) | signature | none — confirmed to pass private URLs even with an allow-list configured | `UNGATED` — a second, pre-existing SSRF path |
+| A3c | A URL the service DISCLOSES has been through the same policy as a URL it FETCHES | frame / form-action / feed extraction | signature | none — these accept `host_policy` and never use it, and the values reach the wire | `UNGATED` — frames, form actions and feed URLs were emitted unvalidated, including private targets |
 | A4 | `SafeUrl.parse` either pins the resolved address or fails closed; it never delivers to an unpinned host on HTTPS | `app/safe_url.py:48` | runtime construction | `test_safe_url_parse_must_pin` (AST) | `GATED` |
 | A5 | Robots rules are fetched, parsed, cached and served by one owner, with one cache, one TTL policy, one failure semantic and per-origin single-flight | `app/crawl/robots.py:load_robots_rules` | runtime construction | property registry `robots-policy` + consolidation tests | `GATED`, weak seam (see W1) |
 | A6 | A domain's politeness floor may only be installed through the scheduler setter, which clamps it to the service ceiling | `app/scheduler.py:set_domain_min_delay` | runtime construction | `test_domain_politeness_floor_is_committed_only_via_the_setter` (AST) | `GATED` |
@@ -77,7 +78,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
 | D1 | Job status changes only through a compare-and-set transition; a data-plane save never writes status | `app/crawl/job_store.py:set_status` | runtime construction | control-plane mutation AST detector + store tests | `GATED` |
-| D2 | Schema changes only through the migration ledger, and a migrated database matches the declared schema | `app/crawl/migrations/` | AST route + runtime | DDL confinement detector + fresh/legacy/drift tests | `GATED` |
+| D2 | Schema changes only through the migration ledger, and a migrated database matches the declared schema | `app/crawl/migrations/` | AST route + runtime | DDL confinement detector + fresh/legacy/drift tests | `PARTIAL` — the drift helper has NO production caller: `migrate_store` returns early when nothing is pending and never verifies, so an out-of-band change is accepted at startup and fails later at query time. The tests proved the helper, not the seam |
 | D3 | SQLite durability configuration is set in one place | `app/crawl/sqlite_store.py:connect_store` | config | `test_store_pragma_chokepoint` | `GATED` |
 | D4 | Persisted collections hold canonical identity, and a legacy row is normalized once at the storage boundary | `app/crawl/job_store.py:from_json` | runtime construction | store tests incl. legacy row shape | `GATED` |
 | D5 | Job persistence does not block the event loop | `app/api/job_runner.py` (store `asave`) | runtime construction | off-loop save tests | `GATED` |
@@ -98,7 +99,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
-| F1 | An environment boolean has one spelling policy, in either polarity, wherever it is read | `app/validation.py:parse_bool_value` | runtime construction | property registry `bool-env` + decision-path tests | `GATED`, weak seam (see W1) |
+| F1 | An environment boolean has one spelling policy, in either polarity, wherever it is read | `app/validation.py:parse_bool_value` | runtime construction | property registry `bool-env` + decision-path tests | `PARTIAL` — `BROWSER_CRAWLER_LOOP_LAG_PROBE` is still parsed with `== "1"` in `app/resource_pressure.py:45`, so `" true "` and `"yes"` read false there and true in the shared reader; two test-only parsers in `app/crawl/extraction.py` do the same |
 | F2 | Every documented `BROWSER_CRAWLER_*` knob has a real production consumer, and env names resolve through declared aliases | `app/settings.py` | runtime construction | documented-knob detector | `PARTIAL` — a bare mention was accepted as a consumer (being fixed) |
 | F3 | Two documented knobs cannot silently collapse onto one settings field | `app/settings.py:ENVIRONMENT_FIELD_ALIASES` | runtime construction | alias integrity check | `PARTIAL` — duplicate targets were accepted (being fixed) |
 | F4 | Numeric settings are read through never-raise readers that warn and fall back; there is one int face and one float face | `app/validation.py:_mapping_number` | runtime construction | differential tests over bounds, garbage, non-finite | `GATED` |
@@ -138,6 +139,19 @@ is about **value or ownership**. Each of these was demonstrated, not suspected:
 - **W4 — reference counted as use.** The documented-knob detector accepted a
   docstring mention as a production consumer. A consumer must be a resolved
   read, not a reference.
+- **W5 — a required argument mistaken for enforcement.** A signature detector
+  proves the argument is *present*, not that the function *uses* it. A class
+  annotated with the policy type exempts every method, including ones that never
+  read it, and a resolved-name pattern misses a real dotted import
+  (`urllib.parse.urljoin`) while flagging nothing about the two functions that
+  actually ignore the policy. Key on the property — does this function return or
+  forward a URL without the policy in scope — and prove it with the producer and
+  the consumer in DIFFERENT modules, because a proof that puts both in one
+  synthetic module cannot see a cross-module split.
+- **W6 — resolution scoped to one file.** The property detectors resolve a helper
+  only within the same module, so splitting an implementation across two modules
+  evades all three. The proofs cannot see it because both halves live in one
+  synthetic module.
 
 **The family lesson.** Fixing the next instance individually is a treadmill.
 When a gate is evaded, the fix belongs in the shared matching machinery, and
