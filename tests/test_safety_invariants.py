@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
 from chokepoint_walks import (
@@ -29,6 +30,8 @@ from chokepoint_walks import (
     trees_under,
 )
 from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
+
+from app.settings import ENVIRONMENT_FIELD_ALIASES
 
 __all__ = [
     "REPO_ROOT",
@@ -4020,3 +4023,134 @@ def test_robots_policy_detector_bites():
         "    return load(origin, fetcher, 5)\n"
     )
     assert not _robots_policy_offenders(good, REPO_ROOT / "app" / "_synthetic.py", prop)
+
+
+_KNOB_PATTERN = re.compile(r"\bBROWSER_CRAWLER_[A-Z0-9_]+\b")
+
+
+def _documented_browser_knobs() -> set[str] | None:
+    env_path = REPO_ROOT / ".env.example"
+    readme_path = REPO_ROOT / "README.md"
+    if not env_path.exists() or not readme_path.exists():
+        return None
+    env_names = {
+        match.group(0)
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+        for match in _KNOB_PATTERN.finditer(line)
+    }
+    readme_names = set(_KNOB_PATTERN.findall(readme_path.read_text(encoding="utf-8")))
+    return {name for name in env_names | readme_names if not name.endswith("_")}
+
+
+def _settings_declaration_constant(path: pathlib.Path, tree: ast.AST, node: ast.Constant) -> bool:
+    if _relative_app_path(path) != "app/settings.py":
+        return False
+    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    ancestors: list[ast.AST] = []
+    current: ast.AST = node
+    while id(current) in parents:
+        current = parents[id(current)]
+        ancestors.append(current)
+    if any(
+        isinstance(parent, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ENVIRONMENT_FIELD_ALIASES" for target in parent.targets)
+        for parent in ancestors
+    ):
+        return True
+    if not any(
+        isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)) and parent.name == "from_mapping"
+        for parent in ancestors
+    ):
+        return False
+    return any(
+        isinstance(parent, ast.Call)
+        and resolved_call_name(tree, parent).rsplit(".", 1)[-1]
+        in {"get", "get_mapping_int", "get_mapping_float", "parse_bool_value"}
+        for parent in ancestors
+    )
+
+
+def _settings_fields() -> set[str]:
+    tree = file_tree("app/settings.py")[1]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "CrawlerSettings":
+            return {
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            }
+    return set()
+
+
+def _settings_alias_failures(
+    aliases: dict[str, str],
+    fields: set[str] | None = None,
+) -> list[str]:
+    known_fields = fields if fields is not None else _settings_fields()
+    return [
+        f"{environment} maps to missing field {field}"
+        for environment, field in aliases.items()
+        if field not in known_fields
+    ]
+
+
+def _production_browser_knob_references() -> set[str]:
+    references: set[str] = set()
+    fields = _settings_fields()
+    field_knobs = {f"BROWSER_CRAWLER_{field.upper()}": field for field in fields}
+    for path, tree in app_trees(exclude=frozenset()):
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value.startswith("BROWSER_CRAWLER_")
+                and not _settings_declaration_constant(path, tree, node)
+            ):
+                references.add(node.value)
+            if isinstance(node, ast.Attribute) and _relative_app_path(path) != "app/settings.py":
+                for environment, field in ENVIRONMENT_FIELD_ALIASES.items():
+                    if node.attr == field:
+                        references.add(environment)
+                environment = f"BROWSER_CRAWLER_{node.attr.upper()}"
+                if environment in field_knobs:
+                    references.add(environment)
+    dockerfile = REPO_ROOT / "Dockerfile"
+    if dockerfile.exists():
+        for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            if line.lstrip().startswith(("CMD", "ENTRYPOINT")):
+                references.update(_KNOB_PATTERN.findall(line))
+    return references
+
+
+def _documented_knob_offenders(
+    documented: set[str] | None,
+    references: set[str],
+) -> list[str]:
+    if documented is None:
+        return ["documented knob source could not be located"]
+    if not documented:
+        return ["no documented BROWSER_CRAWLER knobs were found"]
+    return [f"{name} has no production consumer" for name in sorted(documented - references)]
+
+
+def test_documented_browser_knobs_have_consumers():
+    assert not _settings_alias_failures(ENVIRONMENT_FIELD_ALIASES)
+    failures = _documented_knob_offenders(
+        _documented_browser_knobs(),
+        _production_browser_knob_references(),
+    )
+    assert not failures, "; ".join(failures)
+
+
+def test_documented_knob_detector_bites():
+    assert _documented_knob_offenders({"BROWSER_CRAWLER_FAKE"}, set()) == [
+        "BROWSER_CRAWLER_FAKE has no production consumer"
+    ]
+    assert _documented_knob_offenders(None, set()) == ["documented knob source could not be located"]
+    current = _documented_browser_knobs()
+    assert current is not None
+    assert "BROWSER_CRAWLER_ALLOWED_HOSTS" in current
+    assert not _documented_knob_offenders({"BROWSER_CRAWLER_ALLOWED_HOSTS"}, {"BROWSER_CRAWLER_ALLOWED_HOSTS"})
+    assert _documented_knob_offenders({"BROWSER_CRAWLER_LOG_FILE"}, set())
+    assert _settings_alias_failures({"BROWSER_CRAWLER_FAKE": "missing_field"}, {"real_field"})
