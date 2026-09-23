@@ -16,7 +16,7 @@ import socket
 
 from _testkit import UNRESTRICTED_HOST_POLICY, block_private_targets
 
-import app.crawl.strategies.http as http_mod
+import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
 
 

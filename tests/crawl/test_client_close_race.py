@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app.crawl.strategies import http as http_mod
+from app.crawl.strategies import http_client_pool as http_mod
 
 
 class _ClosingClient:

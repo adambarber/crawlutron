@@ -15,7 +15,7 @@ from typing import get_args
 
 import pytest
 
-from app.crawl.strategies.http import _default_cffi_fetcher, _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
 from app.models import HttpFetcher
 
 _CONCRETE_FETCHERS = [

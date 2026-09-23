@@ -10,8 +10,9 @@ from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 from helpers.server import spawn_threaded_server
 
-import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.http import _default_cffi_fetcher as _default_cffi_fetcher_with_policy
+import app.crawl.strategies.fetchers as fetchers_mod
+import app.crawl.strategies.http_client_pool as http_mod
+from app.crawl.strategies.fetchers import _default_cffi_fetcher as _default_cffi_fetcher_with_policy
 from app.validation import HostPolicy
 
 
@@ -137,7 +138,7 @@ async def _fall_back_to_httpx(
 
 @pytest.fixture(autouse=True)
 def _no_real_fallback(monkeypatch):
-    monkeypatch.setattr(http_mod, "_default_http_fetcher", _fall_back_to_httpx)
+    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", _fall_back_to_httpx)
     # Pooled-client bookkeeping is irrelevant here and other suites leave
     # entries behind; start clean so the drain cannot close our fake.
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
@@ -148,7 +149,7 @@ def _scheduled_closes(monkeypatch):
     """Capture ``_release_stream_noblock`` calls instead of the real scheduling."""
     released: list[object] = []
     monkeypatch.setattr(
-        http_mod, "_release_stream_noblock", lambda response: released.append(response)
+        fetchers_mod, "_release_stream_noblock", lambda response: released.append(response)
     )
     return released
 
@@ -255,7 +256,7 @@ def _fetch_worker(url: str, timeout: float, out_queue: multiprocessing.Queue) ->
 
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
 
-    from app.crawl.strategies.http import _default_cffi_fetcher
+    from app.crawl.strategies.fetchers import _default_cffi_fetcher
     from app.validation import HostPolicy
 
     async def _run():
@@ -419,7 +420,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch, real_s
     """
     import curl_cffi.requests as cffi_mod
 
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import http_client_pool as http_mod
 
     real_session = cffi_mod.AsyncSession
     constructions = 0
@@ -443,7 +444,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch, real_s
 
 def test_cffi_session_rebuilt_on_loop_change(monkeypatch):
     """A new event loop gets a fresh session (no sockets bound to a dead loop)."""
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import http_client_pool as http_mod
 
     async def _get():
         return http_mod.get_cffi_session()
@@ -464,7 +465,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
     """Without curl_cffi the fetcher still delegates to the plain httpx path."""
     import sys
 
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import http_client_pool as http_mod
 
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
@@ -482,7 +483,7 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
 
         return Resp()
 
-    monkeypatch.setattr(http_mod, "_default_http_fetcher", fake_http)
+    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", fake_http)
     try:
         resp = await _default_cffi_fetcher("http://example.com/", {}, 5, 1024)
     finally:

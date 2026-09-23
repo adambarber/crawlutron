@@ -7,7 +7,7 @@ import pytest
 from _testkit import *
 
 from app.crawl.decompression import DecompressionTooLargeError, decompress_body
-from app.crawl.strategies.http import _decode_body
+from app.crawl.strategies.body_decode import _decode_body
 
 _CAP = 10_000_000
 
@@ -96,7 +96,7 @@ class TestDecompressionFallback:
 
 class TestBodyCharsetDecoding:
     def test_http_charset_decode_error(self):
-        from app.crawl.strategies.http import _decode_body
+        from app.crawl.strategies.body_decode import _decode_body
 
         # Charset rides on the content-type only; a stray value can never
         # reach the decoder as a headers argument (the parameter is gone).

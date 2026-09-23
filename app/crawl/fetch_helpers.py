@@ -22,7 +22,8 @@ from app.constants import (
     SITEMAP_MAX_DEPTH,
     SITEMAP_MAX_URLS,
 )
-from app.crawl.strategies.http import _decode_body, _decompress_body
+from app.crawl.decompression import decompress_body as _decompress_body
+from app.crawl.strategies.body_decode import _decode_body
 from app.validation import HostPolicy, safe_public_url_or_none
 
 _T = TypeVar("_T")

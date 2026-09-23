@@ -6,11 +6,9 @@ from _testkit import make_fetch
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
-from app.crawl.strategies.http import (
-    _default_http_fetcher,
-    _http_strategy_result,
-    _looks_like_binary_body,
-)
+from app.crawl.strategies.fetch_policy import _looks_like_binary_body
+from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.http import _http_strategy_result
 from app.validation import HostPolicy
 
 _default_http_fetcher_with_policy = partial(
@@ -259,7 +257,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
     # #13-fix: during recursive crawls, site-wide sitemap/feed URL lists are
     # frontier seeds, not per-page payload -- returning them on every page's
     # diagnostics wastes memory across thousands of pages.
-    import app.crawl.strategies.http as http_mod
+    import app.crawl.strategies.fetch_policy as http_mod
 
     async def fake_diag(**kwargs):
         return {

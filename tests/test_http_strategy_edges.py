@@ -28,7 +28,7 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
 
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
 
-    from app.crawl.strategies.http import _default_cffi_fetcher
+    from app.crawl.strategies.fetchers import _default_cffi_fetcher
     from app.validation import HostPolicy
 
     try:
@@ -50,20 +50,20 @@ class TestHttpStrategyEdges:
     """Cover remaining branches in http.py"""
 
     def test_charset_from_bytes_import_error(self):
-        from app.crawl.strategies.http import _decode_body
+        from app.crawl.strategies.body_decode import _decode_body
 
         body = b"test content"
         result = _decode_body(body, "text/plain; charset=utf-8")
         assert result == "test content"
 
     async def test_close_async_http_client_error(self):
-        from app.crawl.strategies.http import close_async_http_client
+        from app.crawl.strategies.http_client_pool import close_async_http_client
 
         await close_async_http_client()
         await close_async_http_client()
 
     def test_is_private_or_loopback_ip_invalid(self):
-        from app.crawl.strategies.http import _is_private_or_loopback_ip
+        from app.crawl.strategies.pinned_transport import _is_private_or_loopback_ip
 
         assert _is_private_or_loopback_ip("127.0.0.1")
         assert _is_private_or_loopback_ip("192.168.1.1")
@@ -167,7 +167,7 @@ class TestHttpStrategyEdges:
         assert result.classification == "http_status_error"
 
     def test_decode_body_unicode_decode_error(self):
-        from app.crawl.strategies.http import _decode_body
+        from app.crawl.strategies.body_decode import _decode_body
 
         body = b"\xff\xfe"
         result = _decode_body(body, "text/html")

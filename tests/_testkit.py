@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import pytest
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.crawl.strategies.http import HttpFetchResult
+from app.models import HttpFetchResult
 from app.validation import HostPolicy
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
@@ -140,7 +140,7 @@ def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip=
     import socket
     from unittest.mock import patch
 
-    from app.crawl.strategies.http import _resolve_and_pin_host
+    from app.crawl.strategies.pinned_transport import _resolve_and_pin_host
 
     block_private_targets(monkeypatch)
     calls = []
@@ -497,13 +497,14 @@ def patch_http_fetcher_transport(monkeypatch, responses):
     Neutralizes SSRF/DNS so the fetcher can be driven against canned responses
     (per-hop headers land in ``MockClient.captured_headers``).
     """
-    import app.crawl.strategies.http as http_mod
+    from app.crawl.strategies import http_client_pool as pool_mod
+    from app.crawl.strategies import pinned_transport as pinned_mod
 
     mock_client = MockClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda: mock_client)
-    monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
+    monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: mock_client)
+    monkeypatch.setattr(pinned_mod, "_check_ssrf_protection", lambda url: None)
     monkeypatch.setattr(
-        http_mod,
+        pinned_mod,
         "_resolve_and_pin_host",
         lambda url: (urlparse(url).hostname, "1.2.3.4"),
     )
@@ -915,21 +916,15 @@ from app.crawl.extraction import (
     extract_js_endpoints as _extract_js_endpoints_with_policy,
 )
 from app.crawl.llm_format import _extract_llm_metadata
+from app.crawl.strategies.body_decode import _decode_body, _quality_score
 from app.crawl.strategies.document import (
     _default_document_text_extractor as _default_document_text_extractor_with_policy,
 )
 from app.crawl.strategies.document import (
     _format_table,
 )
-from app.crawl.strategies.http import (
-    _cookie_header_for_url,
-    _decode_body,
-    _headers_for_strategy,
-    _quality_score,
-)
-from app.crawl.strategies.http import (
-    _default_http_fetcher as _default_http_fetcher_with_policy,
-)
+from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http_fetcher_with_policy
+from app.crawl.strategies.request_profile import _cookie_header_for_url, _headers_for_strategy
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.validation import (
     get_env_int,

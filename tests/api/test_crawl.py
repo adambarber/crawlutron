@@ -538,7 +538,7 @@ class TestCookiePersistenceApi:
         self.base = base_url
         self.cookie_file = tmp_path / "cookie_jar.json"
         # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
-        from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+        from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
         _GLOBAL_COOKIE_JAR.load_from_file(str(self.cookie_file))
         WEBHOOK_RECEIVED.clear()

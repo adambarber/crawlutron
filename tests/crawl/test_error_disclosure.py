@@ -13,7 +13,8 @@ import httpx
 from _testkit import http_strategy_policy, invoke_http_strategy
 
 from app.crawl.decompression import DecompressionTooLargeError
-from app.crawl.strategies.http import _classify_error_code, _http_strategy_result
+from app.crawl.result_helpers import _classify_error_code
+from app.crawl.strategies.http import _http_strategy_result
 from app.validation import HostPolicy
 
 

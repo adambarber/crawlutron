@@ -90,12 +90,9 @@ from app.crawl.result_helpers import (
     _make_engine_result,
     _skipped_engine_result,
 )
-from app.crawl.strategies.http import (
-    _default_cffi_fetcher,
-    _default_http_fetcher,
-    _http_strategy_result,
-    _quality_score,
-)
+from app.crawl.strategies.body_decode import _quality_score
+from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
+from app.crawl.strategies.http import _http_strategy_result
 from app.models import (
     AsyncCrawlWorker,
     CrawlJob,
@@ -601,7 +598,8 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
     css = policy.get("css_selector")
     xp = policy.get("xpath")
     # Lazy import avoids a module cycle (engine <-> http).
-    from app.crawl.strategies.http import _content_cache_key, _headers_for_strategy
+    from app.crawl.strategies.content_cache_key import _content_cache_key
+    from app.crawl.strategies.request_profile import _headers_for_strategy
 
     # Default to the real strategy chain (L5): the old ["HTTP"] placeholder
     # is not a strategy, so its cache keys could never match stored entries
@@ -819,10 +817,8 @@ async def crawl_request(
     # ``_GLOBAL_COOKIE_JAR``. Defaults to "" (legacy shared behavior) so
     # single-tenant callers and tests see no change (adversarial review
     # F-cookie-cross-contamination).
-    from app.crawl.strategies.http import (
-        _COOKIE_NAMESPACE,
-        cookie_namespace_for,
-    )
+    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+    from app.crawl.strategies.request_profile import cookie_namespace_for
 
     _cookie_token = _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
     try:

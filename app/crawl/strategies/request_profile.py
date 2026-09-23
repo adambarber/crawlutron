@@ -1,0 +1,206 @@
+"""Owns request profile validation, cookie headers, fingerprints, and header assembly.
+
+This module owns the policy-to-request identity seam and origin-scoped credentials.
+It must not fetch, decode, extract, or construct crawl results.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+from collections.abc import Mapping
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+
+from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
+from app.crawl.credentials import apply_credentials as _apply_credentials
+from app.crawl.strategies import cookie_jar
+from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+
+
+def _validated_request_profile(policy: Mapping[str, Any]) -> dict[str, Any]:
+    value = policy.get("request_profile")
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("invalid_policy_profile")
+    return dict(value)
+
+
+def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
+    """Return a per-request cookie namespace, or ``""`` for the shared default.
+
+    Callers running multi-tenant crawls should set
+    ``request_profile.cookie_namespace`` to a tenant id so cookies from
+    different callers cannot leak into each other's sessions. Empty / unset
+    preserves the legacy shared behavior so single-tenant callers and the
+    test suite see no change.
+    """
+    value = profile.get("cookie_namespace")
+    return str(value).strip() if isinstance(value, str) else ""
+
+
+def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
+    """Build a Cookie header from policy cookies and the persistent jar (#2)."""
+    host = (urlparse(url).hostname or "").lower()
+    parts: list[str] = []
+
+    # Static policy cookies
+    if profile.get("cookie_jar") in {"per_host", "session"}:
+        cookies = profile.get("cookies") or {}
+        if isinstance(cookies, dict):
+            host_cookies = cookies.get(host) or {}
+            if isinstance(host_cookies, dict):
+                parts.extend(f"{key}={value}" for key, value in host_cookies.items())
+
+    # Persistent cookies from prior responses (optionally namespaced via the
+    # profile or the per-request cookie namespace contextvar).
+    namespace = cookie_namespace_for(profile) or _COOKIE_NAMESPACE.get()
+    jar_header = cookie_jar._GLOBAL_COOKIE_JAR.cookie_header_for(url, namespace=namespace)
+    if jar_header:
+        parts.append(jar_header)
+
+    return "; ".join(parts)
+
+
+def _store_set_cookies(
+    url: str,
+    response_headers: httpx.Headers | dict[str, str],
+    *,
+    namespace: str | None = None,
+) -> None:
+    """Extract Set-Cookie headers from a response into the persistent jar (#2).
+
+    Uses ``get_list`` to capture all ``Set-Cookie`` headers (httpx 0.28+
+    returns comma-joined values from ``.items()`` for duplicate keys).
+    ``namespace`` isolates cookies for multi-tenant callers; when not
+    provided, the per-request cookie namespace contextvar is used.
+    """
+    if namespace is None:
+        namespace = _COOKIE_NAMESPACE.get()
+    # Accept both httpx.Headers (for get_list) and plain dict (for tests)
+    if hasattr(response_headers, "get_list"):
+        set_cookies = response_headers.get_list("set-cookie")
+    else:
+        # Fallback for plain dict (test mocks) - iterate items
+        set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
+    for cookie in set_cookies:
+        cookie_jar._GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie, namespace=namespace)
+
+
+_BUILTIN_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+]
+_BUILTIN_ACCEPT_LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.8",
+    "fr-FR,fr;q=0.9",
+    "de-DE,de;q=0.9",
+    "es-ES,es;q=0.9",
+]
+
+
+def _domain_seed(url: str) -> str:
+    """Hostname used as the rotation seed (stable; avoids normalization side effects)."""
+    return urlparse(url).hostname or ""
+
+
+def _rotating_index(profile: dict[str, Any], domain: str, pool_size: int) -> int:
+    """Deterministic per-host pool index so repeated crawls of the same host keep a
+    stable fingerprint (the disk content-cache key stays consistent) while different
+    hosts rotate through the pool (#11)."""
+    seed = f"{profile.get('fingerprint_seed', '')}:{domain}".encode()
+    return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
+
+
+def _select_fingerprint(profile: dict[str, Any], domain: str) -> dict[str, str]:
+    """Select fingerprint signals for a host (#11). Rotation is deterministic per host.
+    Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
+    falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
+    and curl_cffi TLS impersonation rather than conflicting with them."""
+    out: dict[str, str] = {}
+    ua_pool = list(profile.get("user_agents") or [])
+    if not ua_pool and profile.get("fingerprint_rotation"):
+        ua_pool = _BUILTIN_USER_AGENTS
+    if ua_pool:
+        out["user_agent"] = ua_pool[_rotating_index(profile, domain, len(ua_pool))]
+    al_pool = list(profile.get("accept_languages") or [])
+    if not al_pool and profile.get("fingerprint_rotation"):
+        al_pool = _BUILTIN_ACCEPT_LANGUAGES
+    if al_pool:
+        out["accept_language"] = al_pool[_rotating_index(profile, domain, len(al_pool))]
+    return out
+
+
+def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
+    profile = _validated_request_profile(policy)
+    headers = {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+    }
+    user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
+    is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
+    # Fingerprint injection/rotation (#11): deterministic per-host selection so a single
+    # crawl rotates fingerprints across hosts while staying stable per host.
+    fp = _select_fingerprint(profile, _domain_seed(url))
+    if "user_agent" in fp:
+        headers["User-Agent"] = fp["user_agent"]
+        is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
+    elif is_browser_like:
+        # Firefox identity: must match CFFI_IMPERSONATE_TARGET AND the Camoufox
+        # browser strategy so cookie-bootstrap sessions carry a consistent
+        # User-Agent across strategies.
+        if strategy == HTTP_CFFI_IMPERSONATE:
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"
+            )
+            headers["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            headers["Referer"] = "https://www.google.com/"
+            headers["Upgrade-Insecure-Requests"] = "1"
+            headers["Sec-Fetch-Dest"] = "document"
+            headers["Sec-Fetch-Mode"] = "navigate"
+            headers["Sec-Fetch-Site"] = "cross-site"
+            headers["Sec-Fetch-User"] = "?1"
+        else:
+            headers["User-Agent"] = (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            headers["Referer"] = "https://www.google.com/"
+            headers["Sec-Fetch-Site"] = "cross-site"
+            headers["Sec-CH-UA"] = '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"'
+            headers["Sec-CH-UA-Mobile"] = "?0"
+            headers["Sec-CH-UA-Platform"] = '"Windows"'
+            headers["Sec-Fetch-User"] = "?1"
+    elif user_agent_family == "mobile_safari":
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        )
+    if "accept_language" in fp:
+        headers["Accept-Language"] = fp["accept_language"]
+    configured_user_agent = os.environ.get("BROWSER_CRAWLER_USER_AGENT", "").strip()
+    if configured_user_agent:
+        headers["User-Agent"] = configured_user_agent
+    cookie_header = _cookie_header_for_url(profile, url)
+    if cookie_header:
+        headers["Cookie"] = cookie_header
+    headers.update(policy["headers"])
+    # Origin-scoped credentials last: the value is attached only when this
+    # exact URL's origin holds one, and the redirect loop's Fix-3 scrub
+    # strips it on any cross-host hop (same chokepoint as cookies).
+    _apply_credentials(headers, url, policy.get("credentials") or {})
+    return headers

@@ -16,7 +16,8 @@ import app.crawl.content_cache as cc
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
-from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
+from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.crawl.strategies.http import _http_strategy_result
 from app.validation import HostPolicy
 
 
@@ -136,7 +137,8 @@ def test_cache_short_circuits_real_fetch(counting_server, tmp_path):
 
 
 async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
-    from app.crawl.strategies.http import _default_http_fetcher, _http_strategy_result
+    from app.crawl.strategies.fetchers import _default_http_fetcher
+    from app.crawl.strategies.http import _http_strategy_result
 
     cache = ContentCache(cache_dir=tmp_path / "hs", default_ttl=3600)
     url = base_url + "/"

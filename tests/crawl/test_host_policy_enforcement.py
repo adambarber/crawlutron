@@ -4,7 +4,9 @@ import httpx
 import pytest
 from _testkit import make_fetch
 
-import app.crawl.strategies.http as http_mod
+import app.crawl.strategies.fetchers as fetchers_mod
+import app.crawl.strategies.http_client_pool as pool_mod
+import app.crawl.strategies.pinned_transport as pinned_mod
 from app.crawl.engine import crawl_request
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.models import CrawlResult
@@ -145,12 +147,12 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
             "https://allowed.test/",
         )
     )
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda: client)
-    monkeypatch.setattr(http_mod, "_check_ssrf_protection", lambda url: None)
-    monkeypatch.setattr(http_mod, "_resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
+    monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
+    monkeypatch.setattr(pinned_mod, "_check_ssrf_protection", lambda url: None)
+    monkeypatch.setattr(pinned_mod, "_resolve_and_pin_host", lambda url: ("93.184.216.34", ""))
 
     with pytest.raises(ValueError, match="host_denied"):
-        await http_mod._default_http_fetcher(
+        await fetchers_mod._default_http_fetcher(
             "https://allowed.test/",
             {},
             30,

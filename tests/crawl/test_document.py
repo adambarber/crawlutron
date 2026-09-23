@@ -90,7 +90,7 @@ class TestDocumentRedirectSsrf:
         import urllib.request
         from urllib.parse import urlparse
 
-        import app.crawl.strategies.http as http_strategy
+        import app.crawl.strategies.pinned_transport as http_strategy
 
         def fake_resolve_ips(hostname, *, use_cache=True):
             if ":" in hostname:

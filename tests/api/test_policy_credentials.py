@@ -16,7 +16,7 @@ from _testkit import *  # noqa: F403 (test seam per project convention)
 
 from app.api_models import CrawlPolicy, Credential
 from app.crawl.payload_helpers import _payload_policy
-from app.crawl.strategies.http import _apply_credentials
+from app.crawl.strategies.request_profile import _apply_credentials
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
@@ -73,7 +73,7 @@ class TestApplyCredentials:
         """The invariant rides Fix 3: authorization is in _CREDENTIAL_HEADERS,
         so the manual redirect loop strips it when the hop changes host --
         credentials applied to the seed URL never reach the redirect target."""
-        from app.crawl.strategies.http import _CREDENTIAL_HEADERS, _redirect_target
+        from app.crawl.strategies.pinned_transport import _CREDENTIAL_HEADERS, _redirect_target
 
         assert "authorization" in _CREDENTIAL_HEADERS
         headers = {"Authorization": "Bearer tok"}
@@ -92,7 +92,7 @@ class TestApplyCredentials:
     def test_headers_for_strategy_attaches_only_the_matching_origin(self):
         """Integration through the real header assembly seam (the only
         consumer): seed URL gets the header, any other origin does not."""
-        from app.crawl.strategies.http import _headers_for_strategy
+        from app.crawl.strategies.request_profile import _headers_for_strategy
 
         policy = {
             "headers": {},

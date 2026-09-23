@@ -12,7 +12,7 @@ import tempfile
 import threading
 from unittest.mock import patch
 
-from app.crawl.strategies.http import CookieJar
+from app.crawl.strategies.cookie_jar import CookieJar
 
 
 def test_cookie_jar_is_locked():
@@ -91,7 +91,7 @@ def test_concurrent_cookie_writes_do_not_raise():
 def test_cookie_jar_evicts_oldest_host_past_cap():
     """The jar is module-global and long-lived: distinct (namespace, host)
     slots are LRU-bounded so every crawled host cannot accumulate forever."""
-    from app.crawl.strategies.http import _COOKIE_JAR_MAX_HOSTS
+    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
 
     jar = CookieJar()
     for i in range(_COOKIE_JAR_MAX_HOSTS + 5):
@@ -104,7 +104,7 @@ def test_cookie_jar_evicts_oldest_host_past_cap():
 def test_cookie_jar_read_refreshes_host_recency():
     """Reading a host's cookies marks it recently used: a read host survives
     the next eviction instead of the oldest-unread slot."""
-    from app.crawl.strategies.http import _COOKIE_JAR_MAX_HOSTS
+    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
 
     jar = CookieJar()
     for i in range(_COOKIE_JAR_MAX_HOSTS):
@@ -117,7 +117,7 @@ def test_cookie_jar_read_refreshes_host_recency():
 
 class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
-        from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+        from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
         # Call with invalid cookie header - should not raise
         _GLOBAL_COOKIE_JAR.add_cookie_header({}, "http://example.com/")
@@ -151,16 +151,17 @@ def test_no_store_cookie_jar_inherits_the_stdlib_jar_not_the_storing_one():
     """
     import http.cookiejar
 
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import http_client_pool as pool_mod
+    from app.crawl.strategies.cookie_jar import CookieJar
 
-    assert issubclass(http_mod._NoStoreCookieJar, http.cookiejar.CookieJar)
+    assert issubclass(pool_mod._NoStoreCookieJar, http.cookiejar.CookieJar)
     # The project's own jar STORES cookies; the inert jar must not be one.
-    assert not issubclass(http_mod._NoStoreCookieJar, http_mod.CookieJar)
+    assert not issubclass(pool_mod._NoStoreCookieJar, CookieJar)
 
 
 def test_no_store_cookie_jar_never_stores_a_set_cookie():
     """The inert jar must stay empty after a response carries a Set-Cookie."""
-    from app.crawl.strategies.http import _NoStoreCookieJar
+    from app.crawl.strategies.http_client_pool import _NoStoreCookieJar
 
     jar = _NoStoreCookieJar()
     assert jar.extract_cookies(_RecordingResponse(), _RecordingRequest()) is None

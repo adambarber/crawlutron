@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
-from app.crawl.strategies.http import _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
 
@@ -67,7 +67,7 @@ class TestDNSRebindingProtection:
 
         with (
             patch("socket.getaddrinfo", side_effect=fake_getaddrinfo),
-            patch("app.crawl.strategies.http.get_async_http_client", return_value=_Client()),
+            patch("app.crawl.strategies.http_client_pool.get_async_http_client", return_value=_Client()),
         ):
             result = await _default_http_fetcher(
             "http://example.com/page",

@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
 
-import app.crawl.strategies.http as http_mod
-from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
+import app.crawl.strategies.pinned_transport as http_mod
+from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
 from app.validation import HostPolicy, normalize_public_http_url
 
 
@@ -150,7 +150,7 @@ class TestSSRFProtection:
         persists across tests, so without isolation a prior test that resolved
         the same host would serve this call from cache (0 getaddrinfo calls).
         """
-        from app.crawl.strategies.http import _DNS_CACHE
+        from app.crawl.strategies.pinned_transport import _DNS_CACHE
 
         block_private_targets(monkeypatch)
         _DNS_CACHE.clear()

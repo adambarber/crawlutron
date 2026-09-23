@@ -183,7 +183,7 @@ async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolic
     Every caller of ``validate_webhook_url`` is already async, so they route
     here instead.
     """
-    from app.crawl.strategies.http import _DNS_EXECUTOR
+    from app.crawl.strategies.pinned_transport import _DNS_EXECUTOR
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
@@ -206,7 +206,7 @@ async def _parse_pinned_off_loop(webhook_url: str, *, host_policy: HostPolicy) -
     """
     import functools
 
-    from app.crawl.strategies.http import _DNS_EXECUTOR
+    from app.crawl.strategies.pinned_transport import _DNS_EXECUTOR
     from app.safe_url import SafeUrl
 
     loop = asyncio.get_running_loop()

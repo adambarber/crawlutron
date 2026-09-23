@@ -6,7 +6,7 @@ common in CJK). The correct magic bytes are PK\x03\x04 (zip local header),
 PK\x05\x06 (zip EOCD), and \x1f\x8b (gzip). These tests lock that in.
 """
 
-from app.crawl.strategies.http import _looks_like_binary_body
+from app.crawl.strategies.fetch_policy import _looks_like_binary_body
 
 
 def test_zip_local_header_detected():

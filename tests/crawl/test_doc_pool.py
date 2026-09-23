@@ -489,7 +489,7 @@ class TestLifespanDocPoolTeardown:
         """
         from app import main as main_mod
         from app.crawl import extraction as ext_mod
-        from app.crawl.strategies import http as http_mod
+        from app.crawl.strategies import http_client_pool as http_mod
         from app.health import readiness as readiness_mod
         from app.health.readiness import ReadinessState
 

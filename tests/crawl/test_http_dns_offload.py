@@ -5,8 +5,8 @@ import threading
 
 import pytest
 
-from app.crawl.strategies import http as http_mod
-from app.crawl.strategies.http import _default_http_fetcher
+from app.crawl.strategies import pinned_transport as http_mod
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
 

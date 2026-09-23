@@ -2,8 +2,8 @@
 
 from functools import partial
 
-from app.crawl.strategies.http import _MAX_REDIRECT_HOPS
-from app.crawl.strategies.http import _redirect_target as _redirect_target_with_policy
+from app.crawl.strategies.pinned_transport import _MAX_REDIRECT_HOPS
+from app.crawl.strategies.pinned_transport import _redirect_target as _redirect_target_with_policy
 from app.validation import HostPolicy
 
 _redirect_target = partial(

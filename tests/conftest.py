@@ -93,7 +93,7 @@ def ssrf_guard_required(monkeypatch):
             _check_ssrf_protection(...)
     """
     called: list[str] = []
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import pinned_transport as pinned_mod
 
     def _track(name: str, fn):
         def wrapper(*args, **kwargs):
@@ -115,10 +115,10 @@ def ssrf_guard_required(monkeypatch):
         return wrapper
 
     monkeypatch.setattr(
-        http_mod, "_check_ssrf_protection", _track("check_ssrf_protection", http_mod._check_ssrf_protection)
+        pinned_mod, "_check_ssrf_protection", _track("check_ssrf_protection", pinned_mod._check_ssrf_protection)
     )
     monkeypatch.setattr(
-        http_mod, "_resolve_and_pin_host", _track("resolve_and_pin_host", http_mod._resolve_and_pin_host)
+        pinned_mod, "_resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod._resolve_and_pin_host)
     )
     yield
     # Sanity check in setup phase (not teardown) so the failure surfaces as
@@ -386,38 +386,39 @@ def _reset_global_http_state():
     yield
     import asyncio
 
-    from app.crawl.strategies import http as http_mod
+    from app.crawl.strategies import cookie_jar as cookie_mod
+    from app.crawl.strategies import http_client_pool as pool_mod
 
     try:
-        http_mod._GLOBAL_COOKIE_JAR.clear()
+        cookie_mod._GLOBAL_COOKIE_JAR.clear()
     except Exception:
         pass
     try:
-        if http_mod._DEFAULT_HTTP_CLIENT is not None:
+        if pool_mod._DEFAULT_HTTP_CLIENT is not None:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
                     # Inside an async test's loop: drop the reference so GC
                     # reclaims the client instead of awaiting across loops.
-                    http_mod._DEFAULT_HTTP_CLIENT = None
+                    pool_mod._DEFAULT_HTTP_CLIENT = None
                 else:
-                    loop.run_until_complete(http_mod.close_async_http_client())
+                    loop.run_until_complete(pool_mod.close_async_http_client())
             except RuntimeError:
-                http_mod._DEFAULT_HTTP_CLIENT = None
+                pool_mod._DEFAULT_HTTP_CLIENT = None
     except Exception:
         pass
     # Shared curl_cffi session (perf throughput #4): same loop-hygiene as the
     # pooled httpx client so tests stay order-independent under asyncio.run.
     try:
-        if http_mod._DEFAULT_CFFI_SESSION is not None:
+        if pool_mod._DEFAULT_CFFI_SESSION is not None:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    http_mod._DEFAULT_CFFI_SESSION = None
+                    pool_mod._DEFAULT_CFFI_SESSION = None
                 else:
-                    loop.run_until_complete(http_mod.close_cffi_session())
+                    loop.run_until_complete(pool_mod.close_cffi_session())
             except RuntimeError:
-                http_mod._DEFAULT_CFFI_SESSION = None
+                pool_mod._DEFAULT_CFFI_SESSION = None
     except Exception:
         pass
     # The real app's shutdown event is module-global and shared by every
@@ -454,17 +455,21 @@ def _reset_global_http_state():
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
     # or schedules a client close would leak state into the next test
     # (adversarial review F-test-isolation).
+    from app.crawl.strategies import cookie_jar as cookie_mod
+    from app.crawl.strategies import http_client_pool as pool_mod
+    from app.crawl.strategies import pinned_transport as pinned_mod
+
     try:
-        http_mod._DNS_CACHE.clear()
+        pinned_mod._DNS_CACHE.clear()
         # Drop pending-client references: we cannot await aclose from sync
         # context, but dropping the references lets GC reclaim the sockets
         # once the loop that owns them exits. The capped queue means the
         # list stays small even under heavy loop churn.
-        with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-            http_mod._PENDING_CLIENT_CLOSE.clear()
+        with pool_mod._PENDING_CLIENT_CLOSE_LOCK:
+            pool_mod._PENDING_CLIENT_CLOSE.clear()
         # Reset the per-request cookie namespace so a test that sets one does
         # not leak into a subsequent test's request context.
-        http_mod._COOKIE_NAMESPACE.set("")
+        cookie_mod._COOKIE_NAMESPACE.set("")
     except Exception:
         pass
 

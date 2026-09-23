@@ -23,7 +23,7 @@ from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from app.bounded_io import BodyTooLarge, read_capped_async
-from app.crawl.strategies.http import get_async_http_client
+from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.timeouts import Timeouts
 from app.validation import HostPolicy, safe_public_url_or_none
 

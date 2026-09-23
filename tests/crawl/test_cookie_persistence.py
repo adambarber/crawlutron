@@ -3,7 +3,7 @@
 import os
 import tempfile
 
-from app.crawl.strategies.http import CookieJar
+from app.crawl.strategies.cookie_jar import CookieJar
 
 
 def test_cookie_jar_save_load_roundtrip():

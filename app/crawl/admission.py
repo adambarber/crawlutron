@@ -23,7 +23,7 @@ from app.crawl.job_store import (
 )
 from app.crawl.robots import load_robots_rules, robots_allows, robots_cache, robots_origin
 from app.crawl.scope_match import scope_allows
-from app.crawl.strategies.http import _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import NormalizedUrl
 from app.safe_regex import UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler

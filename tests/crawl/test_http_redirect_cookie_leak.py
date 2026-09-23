@@ -1,6 +1,6 @@
 from _testkit import MockResponse, patch_http_fetcher_transport
 
-from app.crawl.strategies.http import _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
@@ -53,14 +53,15 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
     keys. Using get_list("set-cookie") gives each header separately.
     """
-    from app.crawl.strategies.http import CookieJar, _store_set_cookies
+    from app.crawl.strategies.cookie_jar import CookieJar
+    from app.crawl.strategies.request_profile import _store_set_cookies
 
     # Use a fresh jar to avoid interference from other tests
     jar = CookieJar()
-    import app.crawl.strategies.http as http_mod
+    from app.crawl.strategies import cookie_jar as cookie_mod
 
-    old_jar = http_mod._GLOBAL_COOKIE_JAR
-    http_mod._GLOBAL_COOKIE_JAR = jar
+    old_jar = cookie_mod._GLOBAL_COOKIE_JAR
+    cookie_mod._GLOBAL_COOKIE_JAR = jar
     try:
 
         class MockHeaders:
@@ -78,7 +79,7 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
         assert "session=abc" in cookie_header
         assert "csrf=xyz" in cookie_header
     finally:
-        http_mod._GLOBAL_COOKIE_JAR = old_jar
+        cookie_mod._GLOBAL_COOKIE_JAR = old_jar
 
 
 def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
@@ -87,7 +88,7 @@ def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
     Passing a comma-joined string (what httpx.items() yields) to SimpleCookie
     corrupts cookie values (e.g., 'abc,' instead of 'abc').
     """
-    from app.crawl.strategies.http import CookieJar
+    from app.crawl.strategies.cookie_jar import CookieJar
 
     jar = CookieJar()
 

@@ -21,7 +21,7 @@ from app.crawl.robots_parse import (
     parse_robots_sitemaps,
     select_robots_values,
 )
-from app.crawl.strategies.http import _discovery_diagnostics
+from app.crawl.strategies.fetch_policy import _discovery_diagnostics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 

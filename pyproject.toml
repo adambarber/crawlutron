@@ -143,6 +143,9 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Body", "f
 # custom-scheme audit is a false positive there (H5 pinned connect).
 "app/crawl/strategies/document.py" = ["S310"]
 "app/crawl/strategies/http.py" = ["E402", "S110", "S112"]
+"app/crawl/strategies/http_client_pool.py" = ["S110"]
+"app/crawl/strategies/cookie_jar.py" = ["S110"]
+"app/crawl/strategies/fetch_policy.py" = ["S112"]
 "app/crawl/strategies/browser.py" = ["S108", "S110", "S112", "E402"]
 # browser_pool re-exports BrowserPoolExhaustedError for its existing importers
 # (the classifier in result_helpers isinstance-checks it without importing a

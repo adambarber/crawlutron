@@ -42,7 +42,7 @@ from app.constants import (
 )
 from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
 from app.crawl.strategies.document import _default_document_text_extractor
-from app.crawl.strategies.http import (
+from app.crawl.strategies.pinned_transport import (
     _build_pinned_request,
     _check_ssrf_protection,
 )

@@ -120,7 +120,7 @@ if FastAPI is not None:
             # from it; standalone checkouts default to ./cache which may not
             # exist on first run.
             os.makedirs(os.path.dirname(settings.cookie_jar_path) or ".", exist_ok=True)
-            from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+            from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
             _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
         # Jobs: rewind crash orphans and resume every PENDING whole-site job.
@@ -140,11 +140,11 @@ if FastAPI is not None:
         await shutdown_job_runner()
 
         if settings.cookie_persistence_enabled:
-            from app.crawl.strategies.http import _GLOBAL_COOKIE_JAR
+            from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
             _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
 
-        from app.crawl.strategies.http import close_async_http_client, close_cffi_session
+        from app.crawl.strategies.http_client_pool import close_async_http_client, close_cffi_session
 
         from .crawl.engine import _resource_gate
 

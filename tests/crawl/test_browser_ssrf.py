@@ -13,7 +13,7 @@ from _testkit import (
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
-import app.crawl.strategies.http as http_mod
+import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.browser import (
     _assert_safe_final_url,
     _is_ssrf_blocked,

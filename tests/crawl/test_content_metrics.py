@@ -1,6 +1,6 @@
 """_content_metrics must count tags in a single pass (#13) with stable keys."""
 
-from app.crawl.strategies.http import _content_metrics
+from app.crawl.strategies.body_decode import _content_metrics
 
 
 def test_content_metrics_counts_in_single_pass():

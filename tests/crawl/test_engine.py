@@ -132,7 +132,8 @@ def test_seed_freshness_uses_real_default_strategies():
     can never match anything actually stored."""
     from app.constants import DEFAULT_EXTRACTION, HTTP_DECLARED_CRAWLER
     from app.crawl.engine import _parse_lastmod, _seed_is_fresh
-    from app.crawl.strategies.http import _content_cache_key, _headers_for_strategy
+    from app.crawl.strategies.content_cache_key import _content_cache_key
+    from app.crawl.strategies.request_profile import _headers_for_strategy
 
     url = "http://seed-fresh.test/page"
     # Normalized shape but no strategies key: the default must apply.
@@ -369,7 +370,7 @@ class TestEngineChainEdges:
         """Adversarial perf #2.1: per-page cap shrinks as concurrency rises, floor
         respected, explicit policy value wins."""
         from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
-        from app.crawl.strategies.http import _effective_max_content_length
+        from app.crawl.strategies.content_cache_key import _effective_max_content_length
 
         # Explicit value always wins.
         assert _effective_max_content_length({"max_content_length_bytes": 123}) == 123

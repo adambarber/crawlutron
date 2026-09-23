@@ -11,7 +11,7 @@ import threading
 
 from _testkit import _spawn_fetch, asyncio
 
-from app.crawl.strategies.http import _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
 
@@ -116,7 +116,7 @@ async def test_chunked_response_without_content_length_is_capped():
 
 class TestFetchContentLengthLimit:
     def test_http_large_content(self):
-        from app.crawl.strategies.http import _default_http_fetcher
+        from app.crawl.strategies.fetchers import _default_http_fetcher
 
         result = _spawn_fetch(lambda s: asyncio.run(_default_http_fetcher(
             s.base_url + "/",

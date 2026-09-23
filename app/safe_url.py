@@ -46,7 +46,7 @@ class SafeUrl:
         With ``pin=True`` also resolve-and-pin the host (HTTPS delivery and
         other paths that must connect to a validated IP, not re-resolve).
         """
-        from app.crawl.strategies.http import _check_ssrf_protection, _resolve_and_pin_host
+        from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
 
         normalized = normalize_public_http_url(url, policy=policy)
         _check_ssrf_protection(normalized)

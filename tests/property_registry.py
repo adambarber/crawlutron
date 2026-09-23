@@ -98,7 +98,7 @@ PROPERTY_REGISTRY = (
                 ),
             ),
             Suppression(
-                module="app/crawl/strategies/http.py",
+                module="app/crawl/strategies/fetch_policy.py",
                 symbol="_discovery_diagnostics",
                 fingerprint="robots_url",
                 reason=(

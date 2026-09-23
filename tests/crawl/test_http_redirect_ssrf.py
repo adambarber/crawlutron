@@ -1,7 +1,9 @@
 import httpx
 import pytest
 
-import app.crawl.strategies.http as http_mod
+from app.crawl.strategies import fetchers as fetchers_mod
+from app.crawl.strategies import http_client_pool as pool_mod
+from app.crawl.strategies import pinned_transport as pinned_mod
 from app.validation import HostPolicy
 
 
@@ -59,7 +61,7 @@ async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
         _Resp(302, {"location": "http://127.0.0.1:9/secret"}, "http://public.example/"),
     ]
     fake = _FakeClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda *a, **k: fake)
+    monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
 
     # Simulate the SSRF check: block anything pointing at loopback.
     def fake_build(url, headers, *, policy):
@@ -67,10 +69,10 @@ async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
             raise ValueError(f"SSRF: blocked target {url}")
         return url, dict(headers)
 
-    monkeypatch.setattr(http_mod, "_build_pinned_request", fake_build)
+    monkeypatch.setattr(pinned_mod, "_build_pinned_request", fake_build)
 
     with pytest.raises(ValueError):
-        await http_mod._default_http_fetcher(
+        await fetchers_mod._default_http_fetcher(
             "http://public.example/",
             {},
             30,
@@ -91,11 +93,11 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
         _Resp(200, {"content-type": "text/html"}, "http://other.example/", chunks=[b"<html>ok</html>"]),
     ]
     fake = _FakeClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda *a, **k: fake)
+    monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
     # Treat every host as safe so the loop can follow.
-    monkeypatch.setattr(http_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
+    monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
 
-    result = await http_mod._default_http_fetcher(
+    result = await fetchers_mod._default_http_fetcher(
             "http://public.example/",
             {},
             30,
@@ -113,10 +115,10 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
     """The manual loop must terminate even on indefinite redirects (F1)."""
     responses = [_Resp(302, {"location": "http://a.example/"}, "http://public.example/") for _ in range(10)]
     fake = _FakeClient(responses)
-    monkeypatch.setattr(http_mod, "get_async_http_client", lambda *a, **k: fake)
-    monkeypatch.setattr(http_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
+    monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
+    monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
 
-    result = await http_mod._default_http_fetcher(
+    result = await fetchers_mod._default_http_fetcher(
             "http://public.example/",
             {},
             30,
@@ -125,4 +127,4 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
 
     # Terminates at the hop cap and returns the last 302 rather than looping.
     assert result.status_code == 302
-    assert len(fake.calls) == http_mod._MAX_REDIRECT_HOPS + 1
+    assert len(fake.calls) == pinned_mod._MAX_REDIRECT_HOPS + 1
