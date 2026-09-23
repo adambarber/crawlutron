@@ -40,14 +40,47 @@ repos:
       # Copy/paste detection at zero tolerance, with --fail-on-empty so a future
       # path or cwd mistake cannot silently analyze nothing and pass. A clone is
       # evidence of a missing funnel, so this is a design gate, not a style one.
-      - id: jscpd
-        name: jscpd (zero tolerance)
+      #
+      # Two tiers, because the two trees mean different things.
+      #
+      # app/ runs at the tighter 30-token bound, where duplication is a second
+      # implementation of a property -- the defect class that survives review
+      # (two robots caches, two public-IP verdicts). It sits at 27 pairs today,
+      # and reading them shows real missing funnels rather than noise: three
+      # repeated HttpFetchResult constructions, two MCP handler tails, a
+      # rejection path restated across crawl_endpoint and map_endpoint, two
+      # provider request builders. The threshold is therefore a RATCHET at the
+      # current level (0.9%), not zero: the tail gets worked down deliberately
+      # and the threshold tightens with it, while any NEW duplication fails
+      # immediately. At least one pair is sanctioned and documented rather than
+      # exempt (Classification and CrawlError share a prefix by design, pinned
+      # by test_crawl_error_members_derive_from_classification) -- jscpd has no
+      # per-clone expectation mechanism, so such pairs live in the baseline
+      # instead of an ignore list that could swallow a future offender.
+      #
+      # tests/ keeps the 50-token bound at zero tolerance. At 30 it reports 157
+      # pairs, and reading them shows per-test setup that legitimately looks
+      # alike (same endpoint, different URL and assertion), not missing funnels;
+      # abstracting those would hide what each test proves. The test-side
+      # funnels that were real were larger, and were found at 50.
+      - id: jscpd-app
+        name: jscpd app/ (ratchet, 30 tokens)
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          jscpd -f python --threshold 0 --fail-on-empty app tests
+          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.9 --fail-on-empty app
         language: system
-        files: ^(docker/browser-crawler/)?.*\.py$
+        files: ^(docker/browser-crawler/)?app/.*\.py$
+        pass_filenames: false
+
+      - id: jscpd-tests
+        name: jscpd tests/ (zero tolerance, 50 tokens)
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          jscpd -f python --threshold 0 --fail-on-empty tests
+        language: system
+        files: ^(docker/browser-crawler/)?tests/.*\.py$
         pass_filenames: false
 
       # Type gate: catches the stringly-typed-identity class statically, and is
