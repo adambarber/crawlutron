@@ -23,11 +23,14 @@ from app.constants import (
     BROWSER_STRATEGIES,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     HTTP_STRATEGIES,
-    is_analytics_host,
-    is_document_url,
+)
+from app.crawl.admission import (
+    AdmittedLink,
+    admit_discovered_links,
+    canonical_page_identity,
+    gather_robots_decisions,
 )
 from app.crawl.result_helpers import _failed_result_for
-from app.crawl.scope_match import scope_allows as _scope_allows
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
@@ -142,31 +145,6 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
         await res
 
 
-async def gather_robots_decisions(
-    urls: list[str],
-    robots_allows: Callable[[str], Awaitable[bool]],
-    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None = None,
-) -> list[tuple[bool, float | None]]:
-    """Screen a batch of URLs against robots concurrently (perf throughput #1).
-
-    Returns ``(allowed, crawl_delay)`` per URL in input order. The delay is
-    only fetched for allowed URLs, mirroring the old sequential flow. Callers
-    still route every check through the same ``robots_allows``/``robots_crawl_delay``
-    closures, so the ``robots_cache`` chokepoint and SSRF semantics are unchanged;
-    only the awaiting is concurrent. A same-origin concurrent miss may fetch
-    robots.txt twice (idempotent ``put``); per-origin results stay identical.
-    """
-
-    async def _check(url: str) -> tuple[bool, float | None]:
-        allowed = await robots_allows(url)
-        delay: float | None = None
-        if allowed and robots_crawl_delay is not None:
-            delay = await robots_crawl_delay(url)
-        return allowed, delay
-
-    return list(await asyncio.gather(*(_check(url) for url in urls)))
-
-
 def _count_strategy_tiers(scheduler, frontier, n):
     """Count HTTP vs browser tasks among the next ``n`` frontier entries.
 
@@ -253,21 +231,38 @@ async def run_recursive_crawl(
     # cap in requeue_pool_exhausted can bound a permanently oversubscribed crawl.
     pool_exhaustion_attempts: dict[str, int] = {}
     frontier: deque[tuple[int, CrawlTask]] = deque([(0, job) for job in jobs])
+    seed_identities = {
+        canonical_page_identity(job.normalized_url) or job.normalized_url for job in jobs
+    }
     next_index = len(jobs)
+
+    def make_admitted_task(link: AdmittedLink) -> tuple[int, CrawlTask]:
+        nonlocal next_index
+        task = CrawlTask(
+            index=next_index,
+            original_url=link.original_url,
+            normalized_url=link.normalized_url,
+            domain=link.delay_domain,
+        )
+        next_index += 1
+        return link.depth, task
+
     page_count = 0
     # bounded recursive BFS (#11) seeded by sitemaps (#13)
     if seed_sitemaps:
         for seed in await sitemap_seeds():
-            if seed in visited:
+            identity = canonical_page_identity(seed) or seed
+            if identity in seed_identities:
                 continue
+            seed_identities.add(identity)
             frontier.append(
                 (
                     0,
                     CrawlTask(
                         index=next_index,
                         original_url=seed,
-                        normalized_url=seed,
-                        domain=registrable_domain(seed),
+                        normalized_url=identity,
+                        domain=registrable_domain(identity),
                     ),
                 )
             )
@@ -422,44 +417,19 @@ async def run_recursive_crawl(
             page_count += 1
             if depth >= max_depth:
                 continue
-            # Sync pre-filter first (visited/analytics/document/scope need no
-            # I/O), then screen the survivors' robots checks concurrently.
-            # Survivors past the max_pages break still get screened: the old
-            # sequential loop set crawl-delays before the break check too, and
-            # the extra checks are robots-cache hits in the common case.
-            candidates = []
-            for link in result.discovered_links:
-                if link.normalized_url in visited:
-                    continue
-                if is_analytics_host(link.normalized_url):
-                    continue
-                if not want_document_bodies and is_document_url(link.normalized_url):
-                    continue
-                if scope_pattern is not None and not _scope_allows(scope_pattern, link.normalized_url):
-                    continue
-                candidates.append(link)
-            if respect_robots:
-                link_decisions = await gather_robots_decisions(
-                    [link.normalized_url for link in candidates], robots_allows, robots_crawl_delay
-                )
-            else:
-                link_decisions = [(True, None)] * len(candidates)
-            for link, (link_allowed, link_delay) in zip(candidates, link_decisions, strict=True):
-                if respect_robots and not link_allowed:
-                    continue
-                if respect_robots and link_delay and link_delay > 0:
-                    scheduler.set_domain_min_delay(link.host, link_delay)
-                if max_pages and page_count + len(frontier) >= max_pages:
-                    break
-                frontier.append(
-                    (
-                        depth + 1,
-                        CrawlTask(
-                            index=next_index,
-                            original_url=link.url,
-                            normalized_url=link.normalized_url,
-                            domain=link.host,
-                        ),
-                    )
-                )
-                next_index += 1
+            await admit_discovered_links(
+                result.discovered_links,
+                source_depth=depth,
+                max_depth=max_depth,
+                max_pages=max_pages,
+                known=visited,
+                frontier=frontier,
+                make_entry=make_admitted_task,
+                scope_pattern=scope_pattern,
+                want_document_bodies=want_document_bodies,
+                respect_robots=respect_robots,
+                robots_allows=robots_allows,
+                robots_crawl_delay=robots_crawl_delay,
+                commit_crawl_delay=lambda domain, delay: scheduler.set_domain_min_delay(domain, delay),
+                occupied=page_count + len(frontier),
+            )

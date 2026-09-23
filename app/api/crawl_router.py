@@ -47,8 +47,8 @@ router = APIRouter(tags=["Crawler"])
         "robots, sitemaps, and feeds diagnostics. The service records per-URL provenance, selected strategy, raw "
         "evidence, classification evidence, quality score, bounded discovered links, diagnostics.frames for "
         "legacy frameset/iframe URLs, diagnostics.forms for form metadata without submitting forms, and stable "
-        "error details. It reports discovered links but does not recursively enqueue them; callers must preserve "
-        "form/search state before enqueueing pagination URLs. It classifies denial/challenge outcomes without "
+        "error details. It reports discovered links and recursively follows eligible links within the configured "
+        "depth and page bounds; callers must preserve form/search state before enqueueing pagination URLs themselves. It classifies denial/challenge outcomes without "
         "CAPTCHA solving, proxy or identity rotation, credential injection, or bypass behavior."
     ),
     responses={

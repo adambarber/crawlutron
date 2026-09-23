@@ -1,6 +1,7 @@
 """Job store: serialization, concurrency, purge and lifecycle edges."""
 
 import datetime
+import json
 import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -8,16 +9,16 @@ from concurrent.futures import ThreadPoolExecutor
 from _testkit import *
 from _testkit import make_job_store
 
-from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
+from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 
 
 def test_jobstore_create_and_load(job_store):
     job = job_store.create("http://example.com/", {"strategies": ["HTTP_DECLARED_CRAWLER"]})
 
     assert job.job_id
-    assert job.root_url == "http://example.com/"
+    assert job.root_url == "http://example.com"
     assert job.status == JobStatus.PENDING
-    assert job.frontier == ["http://example.com/"]
+    assert job.frontier == [FrontierEntry(url="http://example.com", depth=0)]
     assert job.visited == set()
 
     loaded = job_store.load(job.job_id)
@@ -38,8 +39,8 @@ def test_jobstore_save_updates_state(job_store):
 
     loaded = job_store.load(job.job_id)
     # DATA plane flows through save...
-    assert loaded.frontier == ["http://example.com/page2"]
-    assert loaded.visited == {"http://example.com/"}
+    assert loaded.frontier == [FrontierEntry(url="http://example.com/page2", depth=0)]
+    assert loaded.visited == {"http://example.com"}
     assert len(loaded.results) == 1
     assert loaded.stats["total_crawled"] == 1
     # ...but the STATUS plane moves only via set_status (H3 separation).
@@ -89,13 +90,16 @@ def test_crawljobstate_serialization():
     json_data = job.to_json()
     assert json_data["job_id"] == "test123"
     assert json_data["status"] == "running"
-    assert set(json_data["visited"]) == {"http://example.com/"}
+    assert set(json_data["visited"]) == {"http://example.com"}
 
     loaded = CrawlJobState.from_json(json_data)
     assert loaded.job_id == "test123"
     assert loaded.status == JobStatus.RUNNING
-    assert loaded.frontier == ["http://example.com/a", "http://example.com/b"]
-    assert loaded.visited == {"http://example.com/"}
+    assert loaded.frontier == [
+        FrontierEntry(url="http://example.com/a", depth=0),
+        FrontierEntry(url="http://example.com/b", depth=0),
+    ]
+    assert loaded.visited == {"http://example.com"}
     assert len(loaded.results) == 1
 
 
@@ -293,3 +297,93 @@ class TestJobStoreEdges:
             store = JobStore(db_path)
             store._conn.close()
             store._conn.close()
+
+
+def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path):
+    from app.crawl.job_store import FrontierEntry, JobStore
+
+    store = JobStore(tmp_path / "jobs.db")
+    root = "https://example.test/root"
+    child = "https://example.test/child"
+    job = store.create(root, {"limits": {"max_depth": 2}})
+    connection = sqlite3.connect(store.db_path)
+    connection.execute(
+        "UPDATE crawl_jobs SET frontier = ?, in_flight = ? WHERE job_id = ?",
+        (json.dumps([root, child]), json.dumps([root, child]), job.job_id),
+    )
+    connection.commit()
+    connection.close()
+
+    loaded = store.load(job.job_id)
+
+    assert loaded.frontier == []
+    assert loaded.in_flight == [
+        FrontierEntry(url="https://example.test/root", depth=0),
+        FrontierEntry(url="https://example.test/child", depth=2),
+    ]
+
+
+def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
+    from app.crawl.job_store import FrontierEntry, JobStore
+
+    store = JobStore(tmp_path / "jobs.db")
+    job = store.create("HTTPS://Example.test:443/", {})
+    loaded = store.load(job.job_id)
+
+    assert loaded.root_url == "https://example.test"
+    assert loaded.frontier == [FrontierEntry(url="https://example.test", depth=0)]
+
+
+def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
+    from app.crawl.job_store import JobStore
+
+    store = JobStore(tmp_path / "jobs.db")
+    for policy_json, expected in (
+        ('["corrupt"]', {}),
+        ('{"limits":"corrupt","scope_regex":null}', {"limits": {}, "scope_regex": None}),
+    ):
+        job = store.create("https://example.test/root", {})
+        connection = sqlite3.connect(store.db_path)
+        connection.execute(
+            "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
+            (policy_json, job.job_id),
+        )
+        connection.commit()
+        connection.close()
+
+        loaded = store.load(job.job_id)
+
+        assert loaded.policy == expected
+
+
+def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
+    from app.crawl.job_store import FrontierEntry, JobStore
+
+    store = JobStore(tmp_path / "jobs.db")
+    job = store.create("https://example.test/root", {"limits": {"max_depth": 4}})
+    job.frontier = [
+        FrontierEntry("https://example.test/child", 4),
+        FrontierEntry("https://example.test/child?utm_source=test", 1),
+    ]
+    job_store_data = job.to_json()
+
+    loaded = CrawlJobState.from_json(job_store_data)
+
+    assert loaded.frontier == [FrontierEntry("https://example.test/child", 1)]
+
+
+def test_cross_list_duplicate_keeps_shallowest_depth():
+    from app.crawl.job_store import FrontierEntry
+
+    loaded = CrawlJobState.from_json(
+        {
+            "job_id": "cross-list",
+            "root_url": "https://example.test/root",
+            "policy": {"limits": {"max_depth": 4}},
+            "frontier": [{"url": "https://example.test/child", "depth": 1}],
+            "in_flight": [{"url": "https://example.test/child", "depth": 3}],
+        }
+    )
+
+    assert loaded.frontier == []
+    assert loaded.in_flight == [FrontierEntry("https://example.test/child", 1)]

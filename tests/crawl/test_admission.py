@@ -9,6 +9,7 @@ from app.constants import (
     BROWSER_HEADLESS,
     HTTP_DECLARED_CRAWLER,
 )
+from app.crawl.admission import admit_discovered_links
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.payload_helpers import _payload_policy
@@ -935,3 +936,118 @@ class TestHTTPTaskRamEstimate:
         # enough concurrent HTTP fetches for hundreds of pages per minute.
         p = _policy()
         assert p.max_http_concurrency >= 16
+
+
+async def test_discovered_link_delay_commits_in_order_and_breaks_at_cap():
+    events: list[tuple] = []
+    links = [
+        "https://example.test/first",
+        "https://example.test/over-cap",
+        "https://example.test/not-processed",
+    ]
+
+    async def allows(url: str) -> bool:
+        events.append(("robots", url))
+        return True
+
+    async def crawl_delay(url: str) -> float:
+        events.append(("delay", url))
+        return 1.5
+
+    def commit(domain: str, delay: float) -> None:
+        events.append(("commit", domain, delay))
+
+    frontier: list[str] = []
+    outcome = await admit_discovered_links(
+        links,
+        source_depth=0,
+        max_depth=1,
+        max_pages=1,
+        known=set(),
+        frontier=frontier,
+        make_entry=lambda link: link.normalized_url,
+        scope_pattern=None,
+        want_document_bodies=False,
+        respect_robots=True,
+        robots_allows=allows,
+        robots_crawl_delay=crawl_delay,
+        commit_crawl_delay=commit,
+    )
+
+    assert outcome.accepted == 1
+    assert outcome.cap_blocked == 1
+    assert frontier == ["https://example.test/first"]
+    assert [event for event in events if event[0] == "delay"] == [
+        ("delay", "https://example.test/first"),
+        ("delay", "https://example.test/over-cap"),
+    ]
+    assert [event for event in events if event[0] == "commit"] == [
+        ("commit", "example.test", 1.5),
+        ("commit", "example.test", 1.5),
+    ]
+    assert not any(event == ("robots", "https://example.test/not-processed") for event in events)
+
+
+async def test_duplicate_canonical_spellings_do_not_consume_capacity():
+    frontier: list[str] = []
+    outcome = await admit_discovered_links(
+        [
+            "https://example.test/child?utm_source=one",
+            "https://example.test/child/",
+            "https://example.test/other",
+            "https://example.test/third",
+        ],
+        source_depth=0,
+        max_depth=1,
+        max_pages=2,
+        known=set(),
+        frontier=frontier,
+        make_entry=lambda link: link.normalized_url,
+        scope_pattern=None,
+        want_document_bodies=False,
+        respect_robots=False,
+        robots_allows=lambda url: _true_async(),
+        robots_crawl_delay=None,
+        commit_crawl_delay=lambda domain, delay: None,
+    )
+
+    assert outcome.accepted == 2
+    assert frontier == ["https://example.test/child", "https://example.test/other"]
+    assert outcome.cap_blocked == 1
+
+
+async def test_admission_robots_work_stops_at_remaining_capacity():
+    calls: list[str] = []
+
+    async def allows(url: str) -> bool:
+        calls.append(url)
+        return True
+
+    async def crawl_delay(url: str) -> float | None:
+        return None
+
+    frontier: list[str] = []
+    outcome = await admit_discovered_links(
+        [f"https://example.test/page-{index}" for index in range(100)],
+        source_depth=0,
+        max_depth=1,
+        max_pages=1,
+        known={"https://example.test/root"},
+        frontier=frontier,
+        make_entry=lambda link: link.normalized_url,
+        scope_pattern=None,
+        want_document_bodies=False,
+        respect_robots=True,
+        robots_allows=allows,
+        robots_crawl_delay=crawl_delay,
+        commit_crawl_delay=lambda domain, delay: None,
+        occupied=1,
+    )
+
+    assert calls == ["https://example.test/page-0"]
+    assert outcome.accepted == 0
+    assert outcome.cap_blocked == 1
+
+
+async def _true_async() -> bool:
+    return True

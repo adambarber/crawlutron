@@ -236,14 +236,26 @@ Every crawl result carries a `classification` from a fixed enum of **30 values**
   Set `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` to disable it (local testing only).
 - **robots.txt** is respected by default (`respect_robots`). Disallowed targets
   return `robots_disallowed`.
-- **Recursion / frontier** is best-effort and caller-owned for *cross-run* work:
-  discovered links, sitemaps, and feeds are reported; the caller owns cross-request
-  frontier queueing, persistence, and host-policy decisions. `max_depth`, `max_pages`,
-  `max_discovered_links`, and `scope_regex` bound discovery. **Within a request the
-  service guarantees "never the same page twice":** submitted URLs are deduped by
-  canonical page identity (host case, default port, fragment, trailing slash,
-  UTM/tracking params, and query-param order are normalized), and successful fetches
-  are reused across requests within the content-cache TTL.
+- **Recursion / frontier:** `POST /v1/crawl` recursively expands one in-memory
+  frontier for the duration of a request and reports discovered links, sitemaps,
+  and feeds; cross-run queue ownership remains with the caller. `POST /v1/jobs`
+  instead owns a durable whole-site frontier. Each persisted `frontier` and
+  `in_flight` entry is `{"url": "...", "depth": N}`; `url` is the canonical page
+  identity and depth 0 is the stored canonical root. Legacy string entries load
+  at depth 0 when they are the root and at the effective `max_depth` otherwise,
+  preventing untracked additional recursion during upgrade.
+- **Whole-site admission:** the engine dispatcher and durable job runner share
+  canonical-identity, scope, analytics, document, robots, crawl-depth, and page-cap
+  admission. When `discovery.sitemaps` is enabled, root sitemap pages enter the
+  durable frontier at depth 0 through that same pipeline. `max_depth=0` is
+  single-page. A positive job `max_pages` counts unique canonical page identities
+  across the root, pending frontier, in-flight recovery,
+  visited pages, and retries. Missing or zero `max_pages` is unbounded for jobs;
+  `/v1/crawl` retains its bounded service default. A positive job cap sets
+  `cap_truncated=true` in status and `stats.cap_truncated=1` only when it refuses
+  or truncates eligible queued or discovered work; normal `BATCH_SIZE` chunking
+  does not set it. Already-admitted in-flight work is never dropped: recovery
+  preserves at-least-once delivery and records `stats.cap_overcommitted=1`.
 - **Crawl duration & async**: a synchronous `POST /v1/crawl` has **no server-side
   time ceiling** — it returns only when the whole bounded recursion finishes, so
   duration scales with `max_depth`, `max_pages`, per-domain politeness delays, and

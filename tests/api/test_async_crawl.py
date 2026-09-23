@@ -311,7 +311,12 @@ class TestAsyncCrawlJobStoreIntegration:
             job = store.create_single_shot("test-id", "http://example.com/", {"test": "policy"})
             assert job.job_id == "test-id"
             assert job.kind == JobKind.SINGLE_SHOT
-            assert job.root_url == "http://example.com/"
+            # Roots are stored in canonical page-identity form:
+            # normalize_public_http_url is the single source of truth for page
+            # identity, so the submitted trailing slash is normalized away.
+            # Storing the raw spelling is what let one page occupy two
+            # frontier/visited identities (cap underfill, duplicate crawl).
+            assert job.root_url == "http://example.com"
             assert job.status == JobStatus.PENDING
             assert job.frontier == []
             assert job.visited == set()

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import (
@@ -21,6 +22,9 @@ from app.constants import (
     SITEMAP_MAX_URLS,
 )
 from app.crawl.strategies.http import _decode_body, _decompress_body
+
+_T = TypeVar("_T")
+
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
@@ -82,6 +86,28 @@ async def _fetch_and_decode(
     """
     text, status, _ = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
     return text, status
+
+
+async def _single_flight(
+    inflight: dict[str, asyncio.Task[_T]],
+    key: str,
+    factory: Callable[[], Awaitable[_T]],
+) -> _T:
+    task = inflight.get(key)
+    if task is None:
+
+        async def run() -> _T:
+            return await factory()
+
+        task = asyncio.create_task(run())
+        inflight[key] = task
+
+        def discard(done: asyncio.Task[_T]) -> None:
+            if inflight.get(key) is done:
+                inflight.pop(key, None)
+
+        task.add_done_callback(discard)
+    return await asyncio.shield(task)
 
 
 async def _fetch_text(

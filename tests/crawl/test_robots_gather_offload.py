@@ -8,8 +8,10 @@ contract: overlapping checks must be observable via an in-flight counter.
 
 import asyncio
 
+from app.crawl.admission import RobotsGate
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
+from app.settings import CrawlerSettings
 from tests._testkit import FakeScheduler, Spill, make_engine_result
 
 
@@ -243,3 +245,22 @@ async def test_recursive_batch_duplicate_url_crawled_once():
     await _drive(jobs, worker, allows, crawl_delay)
     assert seen == ["http://dup.example/page0"]
     assert state["calls"] == 1
+
+
+async def test_cold_robots_gate_coalesces_same_origin_fetches(monkeypatch):
+    calls = 0
+
+    async def fetch_robots(fetcher, url, headers, timeout_seconds):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return "User-agent: *\nDisallow:\n", 200
+
+    monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
+    gate = RobotsGate({}, CrawlerSettings.from_mapping({}))
+    decisions = await asyncio.gather(
+        *(gate.allows(f"https://example.test/page-{index}") for index in range(5))
+    )
+
+    assert decisions == [True] * 5
+    assert calls == 1

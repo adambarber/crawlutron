@@ -22,6 +22,7 @@ from app.api_models import (
     JobListResponse,
     JobStatusResponse,
 )
+from app.crawl.job_store import CrawlJobState
 
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
@@ -34,13 +35,20 @@ def _raise_conflict(message: str) -> None:
     raise http_error(409, "invalid_state", message)
 
 
+def _job_status(job: CrawlJobState) -> JobStatusResponse:
+    return _build_job_status(job).model_copy(
+        update={"cap_truncated": bool(job.stats.get("cap_truncated", 0))}
+    )
+
+
 @router.post(
     "",
     summary="Create a whole-site crawl job and start executing it",
     description=(
         "Persist a resumable whole-site crawl job and immediately start a "
-        "background runner that consumes the frontier through the shared "
-        "crawl engine (same strategies and policy as POST /v1/crawl). "
+        "background runner. The durable runner owns depth-aware canonical "
+        "frontier admission (scope, documents, analytics, robots, and max_pages), "
+        "then uses the shared crawl engine for non-recursive page batches. "
         "Control the job via POST /v1/jobs/{job_id}/control."
     ),
     responses={
@@ -79,14 +87,18 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
 @router.get(
     "/{job_id}",
     summary="Get crawl job state and results",
-    description="Return the full job state including frontier, visited URLs, and results.",
+    description=(
+        "Return current status, frontier/visited/result counts, stats, and the "
+        "persisted cap_truncated signal. Durable URL/depth entries remain internal."
+    ),
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
     job = job_store.load(job_id)
     if job is None:
         _raise_not_found(job_id)
-    return _build_job_status(job)
+    assert job is not None
+    return _job_status(job)
 
 
 @router.post(
@@ -129,7 +141,8 @@ async def control_job(
     if outcome == "conflict":
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
     job = job_store.load(job_id)
-    return _build_job_status(job)
+    assert job is not None
+    return _job_status(job)
 
 
 @router.delete(

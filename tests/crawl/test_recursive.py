@@ -159,3 +159,39 @@ class TestRecursiveCrawlServer:
                 assert result["html"] is None
                 assert result["text"] is None
                 assert result["markdown"] is not None
+
+
+async def test_real_sitemap_parser_feeds_scope_filtered_recursive_crawl():
+    pages = {
+        "/": (200, "<html>home</html>", "text/html"),
+        "/sitemap.xml": (
+            200,
+            "<sitemapindex><sitemap><loc>https://example.com/child-sitemap.xml</loc></sitemap></sitemapindex>",
+            "application/xml",
+        ),
+        "/child-sitemap.xml": (
+            200,
+            "<urlset>"
+            "<url><loc>https://example.com/keep?utm_source=test</loc></url>"
+            "<url><loc>https://example.com/keep/</loc></url>"
+            "<url><loc>https://example.com/drop</loc></url>"
+            "</urlset>",
+            "application/xml",
+        ),
+        "/keep": (200, "<html>keep</html>", "text/html"),
+        "/drop": (200, "<html>drop</html>", "text/html"),
+    }
+    payload = {
+        "url": "https://example.com/",
+        "policy": {
+            "limits": {"max_depth": 1, "max_pages": 10},
+            "discovery": {"sitemaps": True},
+            "scope_regex": r"^https://example\.com/keep/?$",
+        },
+    }
+
+    output = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    normalized = [result["normalized_url"] for result in output["results"]]
+
+    assert normalized.count("https://example.com/keep") == 1
+    assert "https://example.com/drop" not in normalized

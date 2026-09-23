@@ -1044,3 +1044,174 @@ __all__ = [
     "to_dict",
     "urlparse",
 ]
+
+
+def _link(url: str, source_url: str, *, normalized: str | None = None) -> dict:
+    return {
+        "url": url,
+        "normalized_url": normalized if normalized is not None else url,
+        "text": "",
+        "rel": [],
+        "source_url": source_url,
+        "host": (normalized or url).split("//", 1)[-1].split("/", 1)[0],
+        "is_same_host": True,
+    }
+
+
+def _canned_result(
+    url: str,
+    *,
+    status: str = "success",
+    links: list[str] | None = None,
+    raw_links: list[dict] | None = None,
+    classification: str | None = None,
+) -> dict:
+    return {
+        "original_url": url,
+        "normalized_url": url,
+        "final_url": url,
+        "status": status,
+        "classification": classification or ("rendered" if status == "success" else "site_error"),
+        "discovered_links": [_link(link, url) for link in links or []] + (raw_links or []),
+    }
+
+
+def _fake_execute_scripted(
+    scripts: dict[str, list[dict]],
+    *,
+    attempts: dict[str, int] | None = None,
+    hang: asyncio.Event | None = None,
+):
+    async def _execute(payload_dict, *, settings, shutdown_event):
+        if hang is not None and not hang.is_set():
+            await hang.wait()
+        urls = payload_dict.get("urls") or [payload_dict.get("url")]
+        results = []
+        for url in urls:
+            sequence = scripts.get(url)
+            if sequence is None:
+                entry = _canned_result(url)
+            elif len(sequence) > 1:
+                entry = sequence.pop(0)
+            else:
+                entry = sequence[0]
+            if attempts is not None:
+                attempts[url] = attempts.get(url, 0) + 1
+            results.append(entry)
+        return {
+            "results": results,
+            "submitted_count": len(urls),
+            "policy_schema_version": "test",
+        }
+
+    return _execute
+
+
+def _fake_execute(results: list[dict], *, hang: asyncio.Event | None = None):
+    async def _execute(payload_dict, *, settings, shutdown_event):
+        if hang is not None and not hang.is_set():
+            await hang.wait()
+        urls = payload_dict.get("urls") or [payload_dict.get("url")]
+        by_url = {result["original_url"]: result for result in results}
+        return {
+            "results": [by_url.get(url, _canned_result(url, status="failed")) for url in urls],
+            "submitted_count": len(urls),
+            "policy_schema_version": "test",
+        }
+
+    return _execute
+
+
+def _small_link_graph_results() -> list[dict]:
+    root = "http://example.test/a"
+    return [
+        _canned_result(
+            root,
+            links=[
+                "http://example.test/b",
+                "http://example.test/c",
+                "http://example.test/d",
+            ],
+        ),
+        _canned_result("http://example.test/b", links=["http://example.test/d"]),
+        _canned_result("http://example.test/c"),
+        _canned_result("http://example.test/d"),
+    ]
+
+
+def _make_app(job_store):
+    from fastapi import FastAPI
+
+    from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
+    from app.api.jobs_router import router as jobs_router
+    from app.settings import CrawlerSettings
+
+    app = FastAPI()
+    app.include_router(jobs_router)
+    shutdown = asyncio.Event()
+    app.dependency_overrides[get_job_store] = lambda: job_store
+    app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping({})
+    app.dependency_overrides[get_shutdown_event] = lambda: shutdown
+    return app
+
+
+async def _wait_status(job_store, job_id: str, statuses: set[str], timeout: float = 5.0) -> str:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        job = job_store.load(job_id)
+        if job is not None and job.status.value in statuses:
+            return job.status.value
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"job never reached {statuses}; last={job_store.load(job_id)}")
+
+
+async def _wait_until(job_store, job_id: str, predicate, timeout: float = 5.0):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        job = job_store.load(job_id)
+        if job is not None and predicate(job):
+            return job
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"predicate never satisfied; last={job_store.load(job_id)}")
+
+
+def _execution_policy(policy: dict | None) -> dict:
+    effective = dict(policy or {})
+    limits = dict(effective.get("limits") or {})
+    limits.setdefault("max_depth", 1)
+    limits.setdefault("max_pages", 0)
+    limits.setdefault("respect_robots", False)
+    effective["limits"] = limits
+    discovery = dict(effective.get("discovery") or {})
+    discovery.setdefault("sitemaps", False)
+    effective["discovery"] = discovery
+    return effective
+
+
+async def _run_job_to_completed(client, job_store, root_url: str, execute, policy: dict | None = None):
+    from app.api import job_runner
+
+    job_runner.install_execute_crawl(execute)
+    response = await client.post(
+        "/v1/jobs",
+        json={"root_url": root_url, "policy": _execution_policy(policy)},
+    )
+    job_id = response.json()["job_id"]
+    status = await _wait_status(job_store, job_id, {"completed", "failed"})
+    assert status == "completed"
+    return job_store.load(job_id)
+
+
+async def _run_scripted_job(
+    client, job_store, root_url: str, sequence: list[dict]
+) -> tuple[Any, dict[str, int]]:
+    attempts: dict[str, int] = {}
+    job = await _run_job_to_completed(
+        client,
+        job_store,
+        root_url,
+        _fake_execute_scripted({root_url: sequence}, attempts=attempts),
+    )
+    return job, attempts

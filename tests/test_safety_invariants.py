@@ -3185,3 +3185,270 @@ def test_error_field_taxonomy_detector_bites():
     # A classified variable is the sanctioned shape and passes.
     var = ast.parse("def f(c):\n    return _terminal_crawl_result(url='u', error=c)\n")
     assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+
+
+def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    has_builder = any(
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name == "_job_engine_payload"
+        for node in ast.walk(tree)
+    )
+    if relative != "app/api/job_runner.py" and not has_builder:
+        return []
+    execute_names = {"_execute_crawl", "_real_execute_crawl"}
+    builder_names = {"_job_engine_payload"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        value = node.value
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if isinstance(value, ast.Name) and value.id in execute_names:
+            execute_names.update(target.id for target in targets if isinstance(target, ast.Name))
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id in builder_names
+        ):
+            builder_names.update(target.id for target in targets if isinstance(target, ast.Name))
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in execute_names):
+            continue
+        payload = node.args[0] if node.args else next(
+            (keyword.value for keyword in node.keywords if keyword.arg in {"payload", "data"}), None
+        )
+        if isinstance(payload, ast.Name) and payload.id in builder_names:
+            continue
+        if (
+            isinstance(payload, ast.Call)
+            and isinstance(payload.func, ast.Name)
+            and payload.func.id in builder_names
+        ):
+            continue
+        offenders.append(offender(path, node.lineno, "_execute_crawl payload bypasses _job_engine_payload"))
+    return offenders
+
+
+def test_job_engine_payload_uses_single_builder():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_job_engine_payload_chokepoint_offenders(tree, path))
+    assert not offenders, "Build whole-site engine payloads only with _job_engine_payload: " + ", ".join(offenders)
+
+
+def test_job_engine_payload_chokepoint_detector_bites():
+    pre_fix = ast.parse(
+        "async def run(job, batch):\n"
+        "    payload = {'urls': batch, 'policy': dict(job.policy)}\n"
+        "    await _execute_crawl(payload)\n"
+    )
+    alias = ast.parse(
+        "async def run(job, batch):\n"
+        "    execute = _execute_crawl\n"
+        "    await execute({'urls': batch, 'policy': {}})\n"
+    )
+    path = REPO_ROOT / "app" / "api" / "job_runner.py"
+    assert _job_engine_payload_chokepoint_offenders(pre_fix, path)
+    assert _job_engine_payload_chokepoint_offenders(alias, path)
+    good = ast.parse(
+        "async def run(job, batch):\n"
+        "    payload = _job_engine_payload(job, batch)\n"
+        "    await _execute_crawl(payload)\n"
+    )
+    assert not _job_engine_payload_chokepoint_offenders(good, path)
+
+
+def _frontier_expression(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "frontier"
+
+
+def _direct_frontier_growth_offenders(
+    tree: ast.AST,
+    path: pathlib.Path,
+    *,
+    allowed_functions: frozenset[str] = frozenset(),
+) -> list[str]:
+    growth_methods = {"append", "extend", "insert"}
+    offenders: list[str] = []
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+
+    def is_allowed(node: ast.AST) -> bool:
+        if not allowed_functions:
+            return False
+        owner = parents.get(node)
+        while owner is not None and not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
+            owner = parents.get(owner)
+        if not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef) or owner.name not in allowed_functions:
+            return False
+        if owner.name == "normalize_job_state":
+            return (
+                isinstance(node, ast.Assign)
+                and any(_frontier_expression(target) for target in node.targets)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "frontier"
+            )
+        return (
+            owner.name == "_persist"
+            and isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Attribute)
+            and _frontier_expression(node.value)
+        )
+
+    for node in ast.walk(tree):
+        if is_allowed(node):
+            continue
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in growth_methods and _frontier_expression(node.func.value):
+                offenders.append(
+                    offender(path, node.lineno, "direct frontier growth bypasses admit_job_links")
+                )
+        elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(_frontier_expression(target) for target in targets):
+                offenders.append(
+                    offender(path, node.lineno, "frontier replacement bypasses admit_job_links")
+                )
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute):
+                if _frontier_expression(node.value):
+                    offenders.append(
+                        offender(path, node.lineno, "frontier alias bypasses admit_job_links")
+                    )
+                if node.value.attr == "append" and _frontier_expression(node.value.value):
+                    offenders.append(
+                        offender(path, node.lineno, "frontier method alias bypasses admit_job_links")
+                    )
+        elif isinstance(node, ast.Subscript) and _frontier_expression(node.value):
+            parent = parents.get(node)
+            if isinstance(parent, ast.Assign | ast.AugAssign | ast.AnnAssign):
+                offenders.append(
+                    offender(path, node.lineno, "frontier slice mutation bypasses admit_job_links")
+                )
+    return offenders
+
+
+def test_job_frontier_growth_only_uses_funnel():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/admission.py":
+            continue
+        allowed = (
+            frozenset({"normalize_job_state", "_persist"})
+            if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/job_store.py"
+            else frozenset()
+        )
+        offenders.extend(_direct_frontier_growth_offenders(tree, path, allowed_functions=allowed))
+    assert not offenders, "Grow whole-site frontiers only through admit_job_links: " + ", ".join(offenders)
+
+
+def test_job_frontier_growth_detector_bites():
+    path = REPO_ROOT / "app" / "api" / "job_runner.py"
+    pre_fix_owners = (
+        "def run(job, url):\n    job.frontier.append(url)\n",
+        "def run(job, url):\n    append = job.frontier.append\n    append(url)\n",
+        "def run(job, url):\n    job.frontier += [url]\n",
+        "def run(job, urls):\n    job.frontier = urls\n",
+    )
+    for source in pre_fix_owners:
+        assert _direct_frontier_growth_offenders(ast.parse(source), path), source
+    alias = ast.parse(
+        "def run(job, url):\n"
+        "    frontier = job.frontier\n"
+        "    frontier.append(url)\n"
+    )
+    assert _direct_frontier_growth_offenders(alias, path)
+    good = ast.parse("async def run(job, links):\n    await admit_job_links(job, links)\n")
+    assert not _direct_frontier_growth_offenders(good, path)
+
+
+_FILTER_NAMES = {
+    "app.constants.is_analytics_host": "is_analytics_host",
+    "app.constants.is_document_url": "is_document_url",
+    "app.crawl.scope_match.scope_allows": "scope_allows",
+    "app.validation.normalize_public_http_url": "normalize_public_http_url",
+}
+
+
+def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in {
+            "app.constants",
+            "app.crawl.scope_match",
+            "app.validation",
+        }:
+            for imported in node.names:
+                canonical = f"{node.module}.{imported.name}"
+                if canonical in _FILTER_NAMES:
+                    aliases[imported.asname or imported.name] = _FILTER_NAMES[canonical]
+        elif isinstance(node, ast.Import):
+            for imported in node.names:
+                canonical = imported.name
+                if canonical in _FILTER_NAMES:
+                    aliases[imported.asname or imported.name] = _FILTER_NAMES[canonical]
+    return aliases
+
+
+def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    assert isinstance(tree, ast.Module)
+    aliases = _imported_filter_names(tree)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    function_calls: dict[ast.FunctionDef | ast.AsyncFunctionDef, set[str]] = {}
+    filter_names = set(_FILTER_NAMES.values())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        name = aliases.get(node.func.id, node.func.id)
+        if name not in filter_names:
+            continue
+        owner = parents.get(node)
+        while owner is not None and not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
+            owner = parents.get(owner)
+        if isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
+            function_calls.setdefault(owner, set()).add(name)
+    offenders: list[str] = []
+    for function, names in function_calls.items():
+        if len(names) >= 2:
+            offenders.append(
+                offender(path, function.lineno, "recursive admission filter list is re-inlined")
+            )
+    return offenders
+
+
+def test_shared_admission_filter_set_has_no_twin_list():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/admission.py":
+            continue
+        offenders.extend(_shared_admission_filter_offenders(tree, path))
+    assert not offenders, "Use the shared admission filter chokepoint: " + ", ".join(offenders)
+
+
+def test_shared_admission_filter_detector_bites():
+    pre_fix = ast.parse(
+        "def expand(links, visited, scope):\n"
+        "    candidates = []\n"
+        "    for link in links:\n"
+        "        if link.url in visited: continue\n"
+        "        if is_analytics_host(link.url): continue\n"
+        "        if is_document_url(link.url): continue\n"
+        "        if scope is not None and not scope_allows(scope, link.url): continue\n"
+        "        candidates.append(link)\n"
+        "    return candidates\n"
+    )
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    assert _shared_admission_filter_offenders(pre_fix, path)
+    good = ast.parse(
+        "async def expand(links):\n"
+        "    return await admit_discovered_links(links)\n"
+    )
+    assert not _shared_admission_filter_offenders(good, path)
+
+
+def test_job_frontier_detector_sanction_is_narrow():
+    path = REPO_ROOT / "app" / "crawl" / "job_store.py"
+    allowed = frozenset({"normalize_job_state", "_persist"})
+    bad = ast.parse("def grow_frontier(job):\n    job.frontier.append('x')\n")
+    assert _direct_frontier_growth_offenders(bad, path, allowed_functions=allowed)
+    sanctioned = ast.parse("def normalize_job_state(job):\n    frontier = []\n    job.frontier = frontier\n")
+    assert not _direct_frontier_growth_offenders(sanctioned, path, allowed_functions=allowed)

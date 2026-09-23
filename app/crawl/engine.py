@@ -48,7 +48,6 @@ from app.crawl.robots_parse import (
     parse_robots_rules,
     parse_robots_sitemaps,
 )
-from app.crawl.scope_match import scope_allows as _scope_allows
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy, doc_worker_count
 from app.safe_regex import UnsafePattern, compile_untrusted
@@ -56,6 +55,7 @@ from app.safe_regex import UnsafePattern, compile_untrusted
 logger = logging.getLogger(__name__)
 
 _resource_gate = ResourceGate()
+from app.crawl.admission import normalize_sitemap_candidates
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.extraction import (
@@ -1245,15 +1245,7 @@ async def _crawl_request_impl(
             sitemap_url = urljoin(origin, "/sitemap.xml")
             # Recursive: follows sitemap indexes down to page URLs.
             found = await fetch_sitemap_urls(fetcher, sitemap_url, policy["limits"]["timeout_seconds"])
-            candidates: list[tuple[NormalizedUrl, str | None]] = []
-            for loc, lastmod in found:
-                try:
-                    normalized_seed = normalize_public_http_url(loc)
-                except ValueError:
-                    continue
-                if scope_pattern is not None and not _scope_allows(scope_pattern, normalized_seed):
-                    continue
-                candidates.append((normalized_seed, lastmod))
+            candidates = normalize_sitemap_candidates(found, scope_pattern=scope_pattern)
             # #3: skip URLs whose content we already cache and that the
             # sitemap says have not changed since we cached them. Each check
             # reads+parses the envelope from disk, so the whole batch runs off

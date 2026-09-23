@@ -1,0 +1,549 @@
+"""Shared recursive URL admission for the engine and durable job runner."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from collections.abc import Awaitable, Callable, Iterable, MutableSequence
+from dataclasses import dataclass, field
+from typing import Any, TypeVar, cast
+from urllib.parse import urljoin, urlparse
+
+from app.bounded_ttl import BoundedTTLCache
+from app.constants import is_analytics_host, is_document_url
+from app.crawl.fetch_helpers import _fetch_and_decode, _single_flight, fetch_sitemap_urls
+from app.crawl.job_store import (
+    FrontierEntry,
+    job_max_depth,
+    job_max_pages,
+    normalize_job_state,
+    normalized_policy,
+    policy_limits,
+)
+from app.crawl.robots_parse import parse_robots_crawl_delay, parse_robots_rules
+from app.crawl.scope_match import scope_allows
+from app.crawl.strategies.http import _default_http_fetcher
+from app.models import NormalizedUrl
+from app.safe_regex import UnsafePattern, compile_untrusted
+from app.scheduler import DomainScheduler
+from app.validation import registrable_domain, safe_public_url_or_none
+
+logger = logging.getLogger(__name__)
+
+RobotsAllows = Callable[[str], Awaitable[bool]]
+RobotsCrawlDelay = Callable[[str], Awaitable[float | None]]
+CommitCrawlDelay = Callable[[str, float], None]
+T = TypeVar("T")
+
+_MAX_SCOPE_PATTERN_LEN = 256
+_ROBOTS_CACHE_TTL_SECONDS = 600.0
+_ROBOTS_FAILURE_TTL_SECONDS = 60.0
+_ROBOTS_CACHE_MAX_ENTRIES = 2048
+_ROBOTS_ADMISSION_CHUNK_SIZE = 16
+
+
+def canonical_page_identity(url: str) -> NormalizedUrl | None:
+    return safe_public_url_or_none(url)
+
+
+def _bounded_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
+    if max_pages <= 0:
+        return None
+    return max(0, max_pages - max(0, admitted_count))
+
+
+def compile_scope_pattern(scope_regex: Any) -> re.Pattern[str] | None:
+    if not isinstance(scope_regex, str) or not scope_regex:
+        return None
+    try:
+        return cast(
+            re.Pattern[str],
+            compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN),
+        )
+    except (UnsafePattern, re.error):
+        return None
+
+
+async def gather_robots_decisions(
+    urls: list[str],
+    robots_allows: RobotsAllows,
+    robots_crawl_delay: RobotsCrawlDelay | None = None,
+) -> list[tuple[bool, float | None]]:
+    async def check(url: str) -> tuple[bool, float | None]:
+        allowed = await robots_allows(url)
+        delay = await robots_crawl_delay(url) if allowed and robots_crawl_delay is not None else None
+        return allowed, delay
+
+    decisions: list[tuple[bool, float | None]] = []
+    for offset in range(0, len(urls), _ROBOTS_ADMISSION_CHUNK_SIZE):
+        decisions.extend(
+            await asyncio.gather(
+                *(check(url) for url in urls[offset : offset + _ROBOTS_ADMISSION_CHUNK_SIZE])
+            )
+        )
+    return decisions
+
+
+async def _gather_robots_allowed(urls: list[str], robots_allows: RobotsAllows) -> list[bool]:
+    return list(await asyncio.gather(*(robots_allows(url) for url in urls)))
+
+
+def _frontier_identity(value: Any) -> str | None:
+    raw_url: Any
+    if isinstance(value, FrontierEntry):
+        raw_url = value.url
+    elif isinstance(value, tuple) and len(value) > 1:
+        raw_url = getattr(value[1], "normalized_url", None)
+        if not isinstance(raw_url, str) and isinstance(value[0], str):
+            raw_url = value[0]
+    elif isinstance(value, dict):
+        raw_url = value.get("url")
+    elif isinstance(value, str):
+        raw_url = value
+    else:
+        raw_url = getattr(value, "normalized_url", None)
+    if not isinstance(raw_url, str) or not raw_url:
+        return None
+    identity = canonical_page_identity(raw_url)
+    return str(identity or raw_url)
+
+
+def _candidate_stream(
+    links: Iterable[Any],
+    *,
+    next_depth: int,
+    known: set[str],
+    scope_pattern: re.Pattern[str] | None,
+    want_document_bodies: bool,
+) -> Iterable[AdmittedLink]:
+    for link in links:
+        values = _link_values(link)
+        if values is None:
+            continue
+        normalized_raw, original, delay_host = values
+        normalized = canonical_page_identity(normalized_raw)
+        if normalized is None or normalized in known:
+            continue
+        if is_analytics_host(normalized):
+            continue
+        if not want_document_bodies and is_document_url(normalized):
+            continue
+        if scope_pattern is not None and not scope_allows(scope_pattern, normalized):
+            continue
+        domain = registrable_domain(normalized)
+        yield AdmittedLink(
+            original_url=original,
+            normalized_url=normalized,
+            domain=domain,
+            delay_domain=delay_host or domain,
+            depth=next_depth,
+        )
+
+
+@dataclass(frozen=True)
+class AdmittedLink:
+    original_url: str
+    normalized_url: NormalizedUrl
+    domain: str
+    delay_domain: str
+    depth: int
+
+
+@dataclass(frozen=True)
+class AdmissionOutcome:
+    accepted: int = 0
+    cap_blocked: int = 0
+    robots_blocked: int = 0
+    # Candidates dropped because their canonical identity was already admitted
+    # (within this call or by the job's existing state). Counted separately from
+    # `cap_blocked` so a cap report never hides a dedupe decision.
+    duplicates_skipped: int = 0
+
+
+def _link_values(link: Any) -> tuple[str, str, str | None] | None:
+    if isinstance(link, str):
+        return link, link, None
+    if isinstance(link, dict):
+        normalized = link.get("normalized_url")
+        original = link.get("url")
+        host = link.get("host")
+    else:
+        normalized = getattr(link, "normalized_url", None)
+        original = getattr(link, "url", None)
+        host = getattr(link, "host", None)
+    if not isinstance(normalized, str) or not normalized:
+        return None
+    return normalized, original if isinstance(original, str) else normalized, host if isinstance(host, str) else None
+
+
+async def admit_discovered_links(
+    links: Iterable[Any],
+    *,
+    source_depth: int,
+    max_depth: int,
+    max_pages: int,
+    known: set[str],
+    frontier: MutableSequence[T],
+    make_entry: Callable[[AdmittedLink], T],
+    scope_pattern: re.Pattern[str] | None,
+    want_document_bodies: bool,
+    respect_robots: bool,
+    robots_allows: RobotsAllows,
+    robots_crawl_delay: RobotsCrawlDelay | None,
+    commit_crawl_delay: CommitCrawlDelay,
+    reserve_admitted: bool = False,
+    occupied: int | None = None,
+) -> AdmissionOutcome:
+    if source_depth >= max_depth:
+        return AdmissionOutcome()
+    next_depth = source_depth + 1
+    normalized_known = {
+        str(canonical_page_identity(url) or url)
+        for url in known
+        if isinstance(url, str) and url
+    }
+    known.clear()
+    known.update(normalized_known)
+    reserved = set(known)
+    for value in frontier:
+        identity = _frontier_identity(value)
+        if identity is not None:
+            reserved.add(identity)
+    current_occupied = occupied if occupied is not None else len(reserved)
+    accepted = 0
+    cap_blocked = 0
+    robots_blocked = 0
+    duplicates_skipped = 0
+    stopped = False
+    candidates = iter(
+        _candidate_stream(
+            links,
+            next_depth=next_depth,
+            known=known,
+            scope_pattern=scope_pattern,
+            want_document_bodies=want_document_bodies,
+        )
+    )
+    while not stopped:
+        capacity = remaining_page_capacity(current_occupied, max_pages)
+        chunk_limit = _ROBOTS_ADMISSION_CHUNK_SIZE
+        if capacity is not None:
+            chunk_limit = min(chunk_limit, max(1, capacity + 1))
+        chunk: list[AdmittedLink] = []
+        for _ in range(chunk_limit):
+            try:
+                chunk.append(next(candidates))
+            except StopIteration:
+                break
+        if not chunk:
+            break
+        # Drop identities the job already admitted BEFORE any per-candidate
+        # work. A duplicate alias otherwise pays a robots fetch and a crawl-delay
+        # commit for a page that will never be crawled.
+        if reserved:
+            before = len(chunk)
+            chunk = [candidate for candidate in chunk if candidate.normalized_url not in reserved]
+            duplicates_skipped += before - len(chunk)
+            if not chunk:
+                continue
+        if respect_robots:
+            allowed_values = await _gather_robots_allowed(
+                [candidate.normalized_url for candidate in chunk], robots_allows
+            )
+        else:
+            allowed_values = [True] * len(chunk)
+        for candidate, allowed in zip(chunk, allowed_values, strict=True):
+            if not allowed:
+                robots_blocked += 1
+                continue
+            # `reserved` can grow inside this loop (an accepted candidate is
+            # reserved), so two aliases within one chunk are caught here too.
+            if candidate.normalized_url in reserved:
+                duplicates_skipped += 1
+                continue
+            delay = None
+            # The crawl-delay lookup is a robots artifact: with robots disabled
+            # it must not run, or a crawl that explicitly disabled robots still
+            # fetched /robots.txt to learn a delay it never asked to honor.
+            if respect_robots and robots_crawl_delay is not None:
+                delay = await robots_crawl_delay(candidate.normalized_url)
+            if delay is not None and delay > 0:
+                commit_crawl_delay(candidate.delay_domain, delay)
+            if candidate.normalized_url in reserved:
+                continue
+            capacity = remaining_page_capacity(current_occupied, max_pages)
+            if capacity is not None and capacity <= 0:
+                cap_blocked = 1
+                stopped = True
+                break
+            entry = make_entry(candidate)
+            frontier.append(entry)
+            accepted += 1
+            reserved.add(candidate.normalized_url)
+            if reserve_admitted:
+                known.add(candidate.normalized_url)
+            current_occupied += 1
+    return AdmissionOutcome(
+        accepted=accepted,
+        cap_blocked=cap_blocked,
+        robots_blocked=robots_blocked,
+        duplicates_skipped=duplicates_skipped,
+    )
+
+
+class RobotsGate:
+    def __init__(self, policy: Any, settings: Any) -> None:
+        self._timeout_seconds = max(
+            1,
+            _bounded_int(
+                policy_limits(policy).get("timeout_seconds"),
+                default=int(getattr(settings, "default_timeout_seconds", 30)),
+            ),
+        )
+        self._cache: BoundedTTLCache[str, tuple[list[tuple[bool, str]], float | None]] = BoundedTTLCache(
+            max_entries=_ROBOTS_CACHE_MAX_ENTRIES,
+            ttl=_ROBOTS_CACHE_TTL_SECONDS,
+        )
+        self._inflight: dict[str, asyncio.Task[tuple[list[tuple[bool, str]], float | None]]] = {}
+
+    async def _load_rules(self, origin: str) -> tuple[list[tuple[bool, str]], float | None]:
+        body, status = await _fetch_and_decode(
+            _default_http_fetcher,
+            f"{origin}/robots.txt",
+            {},
+            self._timeout_seconds,
+        )
+        ttl = _ROBOTS_CACHE_TTL_SECONDS
+        if status == 200 and body is not None:
+            value = (parse_robots_rules(body), parse_robots_crawl_delay(body))
+        elif status == 404:
+            value = ([], None)
+        else:
+            value = ([(False, "/")], None)
+            ttl = _ROBOTS_FAILURE_TTL_SECONDS
+        self._cache.put(origin, value, ttl=ttl)
+        return value
+
+    async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
+        identity = canonical_page_identity(url)
+        parsed = urlparse(identity or url)
+        origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+        cached = self._cache.get(origin)
+        if cached is not None:
+            return cached
+        return await _single_flight(self._inflight, origin, lambda: self._load_rules(origin))
+
+    async def allows(self, url: str) -> bool:
+        from app.crawl.engine import _robots_allows
+
+        rules, _delay = await self._rules(url)
+        return _robots_allows(url, rules)
+
+    async def crawl_delay(self, url: str) -> float | None:
+        _rules, delay = await self._rules(url)
+        return delay
+
+
+@dataclass
+class JobAdmissionContext:
+    policy: dict[str, Any]
+    max_depth: int
+    max_pages: int
+    scope_pattern: re.Pattern[str] | None
+    want_document_bodies: bool
+    respect_robots: bool
+    seed_sitemaps: bool
+    timeout_seconds: int
+    robots: RobotsGate
+    scheduler: DomainScheduler
+    delayed_hosts: set[str] = field(default_factory=set)
+
+    def commit_crawl_delay(self, domain: str, delay: float) -> None:
+        self.scheduler.set_domain_min_delay(domain, delay)
+        self.delayed_hosts.add(domain.lower())
+
+    @classmethod
+    def create(cls, policy: Any, settings: Any) -> JobAdmissionContext:
+        normalized = normalized_policy(policy)
+        limits = policy_limits(normalized)
+        robots = RobotsGate(normalized, settings)
+        scheduler = DomainScheduler(
+            global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
+            per_domain_limit=max(1, int(getattr(settings, "per_domain_concurrency", 2))),
+            delay_seconds=max(0.0, float(getattr(settings, "per_domain_delay_ms", 500)) / 1000),
+            max_rps=float(limits.get("max_rps", 0) or 0),
+            adaptive=bool(getattr(settings, "adaptive_throttling", True)),
+            adaptive_min_delay=float(getattr(settings, "adaptive_min_delay", 0.5)),
+            adaptive_max_delay=float(getattr(settings, "adaptive_max_delay", 30.0)),
+            adaptive_latency_factor=float(getattr(settings, "adaptive_latency_factor", 1.0)),
+        )
+        discovery = normalized.get("discovery")
+        discovery_map = discovery if isinstance(discovery, dict) else {}
+        return cls(
+            policy=normalized,
+            max_depth=max(0, _bounded_int(limits.get("max_depth"))),
+            max_pages=max(0, _bounded_int(limits.get("max_pages"))),
+            scope_pattern=compile_scope_pattern(normalized.get("scope_regex")),
+            want_document_bodies=normalized.get("extraction") == "document",
+            respect_robots=bool(limits.get("respect_robots", True)),
+            seed_sitemaps=bool(discovery_map.get("sitemaps", False)),
+            timeout_seconds=max(
+                1,
+                _bounded_int(
+                    limits.get("timeout_seconds"),
+                    default=int(getattr(settings, "default_timeout_seconds", 30)),
+                ),
+            ),
+            robots=robots,
+            scheduler=scheduler,
+        )
+
+
+def admitted_page_identities(job: Any) -> set[str]:
+    """Union of canonical identities already admitted across the job's state.
+
+    No normalization pass: entries are canonical by construction (ingress and
+    the shared admission chokepoint), and rows are normalized once at the
+    storage boundary. Re-scanning the whole job here put a per-URL
+    canonicalization pass on every batch's hot path.
+    """
+    identities: set[str] = set()
+    values = set(job.visited) | {entry.url for entry in job.in_flight} | {
+        entry.url for entry in job.frontier
+    }
+    for value in values:
+        if isinstance(value, str) and value:
+            identities.add(str(canonical_page_identity(value) or value))
+    return identities
+
+
+def normalize_sitemap_candidates(
+    found: Iterable[tuple[str, str | None]],
+    *,
+    scope_pattern: re.Pattern[str] | None,
+) -> list[tuple[NormalizedUrl, str | None]]:
+    candidates: list[tuple[NormalizedUrl, str | None]] = []
+    seen: set[str] = set()
+    for loc, lastmod in found:
+        normalized = canonical_page_identity(loc)
+        if normalized is None or normalized in seen:
+            continue
+        if scope_pattern is not None and not scope_allows(scope_pattern, normalized):
+            continue
+        seen.add(str(normalized))
+        candidates.append((normalized, lastmod))
+    return candidates
+
+
+def record_cap_truncated(job: Any) -> None:
+    if job.stats.get("cap_truncated", 0) == 0:
+        logger.info(
+            "job_runner_cap_truncated",
+            extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
+        )
+    job.stats["cap_truncated"] = 1
+
+
+def record_cap_overcommitted(job: Any) -> None:
+    if job.stats.get("cap_overcommitted", 0) == 0:
+        logger.warning(
+            "job_runner_cap_overcommitted",
+            extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
+        )
+    job.stats["cap_overcommitted"] = 1
+
+
+async def admit_job_links(
+    job: Any,
+    links: Iterable[Any],
+    *,
+    source_depth: int,
+    context: JobAdmissionContext,
+) -> AdmissionOutcome:
+    known = admitted_page_identities(job)
+    outcome = await admit_discovered_links(
+        links,
+        source_depth=source_depth,
+        max_depth=context.max_depth,
+        max_pages=context.max_pages,
+        known=known,
+        frontier=job.frontier,
+        make_entry=lambda link: FrontierEntry(url=link.normalized_url, depth=link.depth),
+        scope_pattern=context.scope_pattern,
+        want_document_bodies=context.want_document_bodies,
+        respect_robots=context.respect_robots,
+        robots_allows=context.robots.allows,
+        robots_crawl_delay=context.robots.crawl_delay,
+        commit_crawl_delay=context.commit_crawl_delay,
+        reserve_admitted=True,
+    )
+    if outcome.cap_blocked:
+        record_cap_truncated(job)
+    return outcome
+
+
+def requeue_admitted_pages(job: Any, entries: Iterable[FrontierEntry]) -> AdmissionOutcome:
+    known = admitted_page_identities(job)
+    accepted_entries: list[FrontierEntry] = []
+    cap_blocked = 0
+    for entry in entries:
+        identity = canonical_page_identity(entry.url) or entry.url
+        if identity in known:
+            continue
+        capacity = remaining_page_capacity(len(known), job_max_pages(job.policy))
+        if capacity is not None and capacity <= 0:
+            cap_blocked += 1
+        accepted_entries.append(FrontierEntry(url=identity, depth=entry.depth))
+        known.add(identity)
+    job.frontier.extend(accepted_entries)
+    if cap_blocked:
+        record_cap_overcommitted(job)
+    return AdmissionOutcome(accepted=len(accepted_entries), cap_blocked=cap_blocked)
+
+
+async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionContext) -> list[str]:
+    parsed = urlparse(root_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return []
+    sitemap_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", "/sitemap.xml")
+    found = await fetch_sitemap_urls(
+        _default_http_fetcher,
+        sitemap_url,
+        context.timeout_seconds,
+    )
+    return sorted({url for url, _lastmod in found if isinstance(url, str)})
+
+
+__all__ = [
+    "AdmittedLink",
+    "AdmissionOutcome",
+    "JobAdmissionContext",
+    "RobotsGate",
+    "admit_discovered_links",
+    "admit_job_links",
+    "admitted_page_identities",
+    "canonical_page_identity",
+    "compile_scope_pattern",
+    "fetch_job_sitemap_candidates",
+    "gather_robots_decisions",
+    "job_max_depth",
+    "job_max_pages",
+    "normalize_job_state",
+    "normalize_sitemap_candidates",
+    "normalized_policy",
+    "policy_limits",
+    "record_cap_overcommitted",
+    "record_cap_truncated",
+    "remaining_page_capacity",
+    "requeue_admitted_pages",
+]

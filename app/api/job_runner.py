@@ -26,14 +26,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import abuild_unified_result, frontier_link_url
+from app.api.response_shaping import abuild_unified_result
 from app.constants import MAX_URL_TRANSIENT_ATTEMPTS
-from app.crawl.job_store import JobKind, JobStatus, JobStore
+from app.crawl.admission import (
+    JobAdmissionContext,
+    admit_job_links,
+    canonical_page_identity,
+    fetch_job_sitemap_candidates,
+    job_max_pages,
+    normalize_job_state,
+    normalized_policy,
+    policy_limits,
+    record_cap_overcommitted,
+    record_cap_truncated,
+    remaining_page_capacity,
+    requeue_admitted_pages,
+)
+from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore
 from app.crawl.strategies.browser import TRANSIENT_CLASSIFICATIONS
+from app.models import CrawlResult, CrawlTask
 
 logger = logging.getLogger(__name__)
 
@@ -125,38 +141,101 @@ async def recover_and_start_pending_jobs(
     return started
 
 
-def _pop_frontier(job: Any) -> list[str]:
-    """Pop up to BATCH_SIZE urls off the persisted frontier (in order)."""
-    batch = job.frontier[:BATCH_SIZE]
-    del job.frontier[: len(batch)]
-    known = job.__dict__.get("_frontier_set")
-    if known is not None:
-        for url in batch:
-            known.discard(url)
+def _pop_frontier(job: Any) -> list[FrontierEntry]:
+    normalize_job_state(job)
+    max_pages = job_max_pages(job.policy)
+    if job.in_flight:
+        fixed = {
+            canonical_page_identity(url) or url
+            for url in set(job.visited) | {entry.url for entry in job.in_flight}
+        }
+        if max_pages > 0 and len(fixed) > max_pages:
+            record_cap_overcommitted(job)
+        return list(job.in_flight[:BATCH_SIZE])
+    capacity = remaining_page_capacity(len(job.visited), max_pages)
+    if capacity is not None and capacity <= 0:
+        if job.frontier:
+            record_cap_truncated(job)
+        del job.frontier[:]
+        return []
+    count = min(BATCH_SIZE, len(job.frontier))
+    if capacity is not None:
+        count = min(count, capacity)
+    if capacity is not None and count == capacity and count < len(job.frontier):
+        record_cap_truncated(job)
+        del job.frontier[count:]
+    batch = list(job.frontier[:count])
+    del job.frontier[:count]
     return batch
 
 
-def _frontier_set(job: Any) -> set[str]:
-    """O(1) membership mirror of ``job.frontier`` for dedup checks (M2).
+def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, Any]:
+    """Build one non-recursive engine batch from a whole-site job.
 
-    The persisted frontier stays a plain list (JSON-serializable, crash-safe);
-    the set is transient — rebuilt on first use after every store load — and
-    self-heals if its size ever disagrees with the list. All mutations flow
-    through ``_pop_frontier``/``_frontier_add`` so the mirror is exact.
+    The runner owns the durable frontier; the engine is a single-page fetcher per
+    batch. Two owners of one property was the defect, so engine recursion is off.
     """
-    known = job.__dict__.get("_frontier_set")
-    if known is None or len(known) != len(job.frontier):
-        known = set(job.frontier)
-        job.__dict__["_frontier_set"] = known
-    return known
+    urls = [entry.url for entry in batch]
+    policy = normalized_policy(job.policy)
+    limits = policy_limits(policy)
+    limits["max_depth"] = 0
+    policy["limits"] = limits
+    return {
+        "urls": urls,
+        "policy": policy,
+        "url": urls[0],
+        "headers": {},
+        "request_profile": {},
+    }
 
 
-def _frontier_add(job: Any, url: str) -> None:
-    """Append to the persisted frontier and its membership mirror."""
-    job.frontier.append(url)
-    known = job.__dict__.get("_frontier_set")
-    if known is not None:
-        known.add(url)
+async def _pace_delayed_batch(
+    context: JobAdmissionContext,
+    batch: Sequence[FrontierEntry],
+) -> None:
+    tasks: list[CrawlTask] = []
+    for index, entry in enumerate(batch):
+        host = (urlparse(entry.url).hostname or "").lower()
+        identity = canonical_page_identity(entry.url)
+        if host in context.delayed_hosts and identity is not None:
+            tasks.append(
+                CrawlTask(
+                    index=index,
+                    original_url=entry.url,
+                    normalized_url=identity,
+                    domain=host,
+                )
+            )
+    if not tasks:
+        return
+
+    def pace_result(job: CrawlTask) -> CrawlResult:
+        return CrawlResult(
+            url=job.original_url,
+            status="success",
+            classification="rendered",
+            final_url=job.original_url,
+            html=None,
+            text=None,
+            attempts=0,
+            elapsed_ms=0,
+            domain=job.domain,
+        )
+
+    async def no_op(job: CrawlTask) -> CrawlResult:
+        return pace_result(job)
+
+    await context.scheduler.run(
+        tasks,
+        no_op,
+        failed_result=lambda job, exc: pace_result(job),
+    )
+
+
+async def _seed_job_sitemaps(job: Any, context: JobAdmissionContext) -> None:
+    candidates = await fetch_job_sitemap_candidates(job.root_url, context)
+    outcome = await admit_job_links(job, candidates, source_depth=-1, context=context)
+    job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + outcome.accepted
 
 
 async def _run_job(
@@ -169,39 +248,26 @@ async def _run_job(
     job = job_store.load(job_id)
     if job is None:
         return
-    if job.in_flight:
-        # Re-queue a batch that was popped (write-ahead) but never recorded because
-        # the process died inside the engine call. At-least-once: visited + the
-        # content cache make the re-fetch cheap and non-duplicating, so a crash
-        # resumes instead of silently completing with the batch lost.
-        for url in job.in_flight:
-            if url not in job.visited and url not in _frontier_set(job):
-                _frontier_add(job, url)
-        job.in_flight = []
-    # Claim RUNNING on the control plane (fresh PENDING start). A resumed job
-    # is already RUNNING -- resume_job claimed the transition atomically, so
-    # CAS failure with a RUNNING row means we own it; anything else
-    # (PAUSED/CANCELLED/terminal) means a control write beat us to it.
     claimed = await asyncio.to_thread(
         job_store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING
     )
     if not claimed and job.status is not JobStatus.RUNNING:
         return
-    # JobStore.save json-dumps the whole row (frontier/visited/results/stats)
-    # and commits SQLite -- blocking work that must never run on the loop.
-    # It carries the DATA plane only; status lives behind set_status (H3).
     await asyncio.to_thread(job_store.save, job)
 
     try:
+        context = JobAdmissionContext.create(job.policy, settings)
+        if context.max_depth > 0 and context.seed_sitemaps:
+            await _seed_job_sitemaps(job, context)
+            await asyncio.to_thread(job_store.save, job)
+
         while True:
             job = job_store.load(job_id)
             if job is None:
-                return  # deleted mid-run; row is gone, nothing to update
+                return
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
-                return  # control transition already persisted by handler
+                return
             if shutdown_event.is_set():
-                # Pure control transition: the data plane is already persisted
-                # (write-ahead save precedes the engine call).
                 await asyncio.to_thread(
                     job_store.set_status, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
                 )
@@ -209,72 +275,58 @@ async def _run_job(
 
             batch = _pop_frontier(job)
             if not batch:
-                job.in_flight = []  # clean terminal state even if a crash left it set
                 await asyncio.to_thread(job_store.save, job)
-                # Terminal claim: a concurrent cancel/pause during the final
-                # batch stands (CAS False) -- the user's control state wins,
-                # and the committed data survives either way.
                 await asyncio.to_thread(
                     job_store.set_status, job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
                 )
                 return
-            # Write-ahead the pop: the post-engine reload must see the
-            # shrunk frontier or the loop refetches the same batch forever.
-            # Record the batch as in_flight in the same save so a crash before
-            # the results commit re-queues exactly these urls (at-least-once).
-            job.in_flight = list(batch)
+            if not job.in_flight:
+                job.in_flight = list(batch)
             await asyncio.to_thread(job_store.save, job)
+            await _pace_delayed_batch(context, batch)
 
-            payload: dict[str, Any] = {
-                "urls": batch,
-                "policy": dict(job.policy or {}),
-                "url": batch[0],
-                "headers": {},
-                "request_profile": {},
-            }
-            result = await _execute_crawl(payload, settings=settings, shutdown_event=shutdown_event)
+            result = await _execute_crawl(
+                _job_engine_payload(job, batch),
+                settings=settings,
+                shutdown_event=shutdown_event,
+            )
             items = result.get("results", [])
-
-            # The engine call has completed — its work must be recorded even
-            # if a control transition lands mid-batch: results are real,
-            # discovered links are real, and the frontier already reflects
-            # the write-ahead pop. Record, then honor the transition below.
             job = job_store.load(job_id)
             if job is None:
                 return
 
-            failed = 0
-            # Index each item by every URL it is known by (final_url,
-            # normalized_url, original_url). First writer WINS on collision
-            # (``key not in resolved``), deliberately not last-writer-wins:
-            # items arrive in submission order, so the first claimant of a key
-            # is the result that was actually crawled for that URL. Two
-            # distinct results can share a spelling -- one item's final_url can
-            # be another's original_url across a redirect -- and letting the
-            # later one overwrite would clobber the authoritative outcome: a
-            # real success flips to a failure (or vice versa), job counts drift
-            # from what was crawled, and a transient relabel re-queues a page
-            # that was already answered.
-            #
-            # The union itself exists because the frontier carries the
-            # PRE-redirect URL while the engine reports final_url, so a
-            # single-key index misses a redirected page -> outcome
-            # "transient" -> re-queued and re-crawled forever, then counted
-            # failed and dropped without its content ever reaching job.results
-            # (H2).
+            # Index results by every URL they are known by, in TWO passes with
+            # different priority. A result's own `original_url` is what the
+            # caller submitted and is therefore authoritative for that entry;
+            # redirect aliases (final_url/normalized_url) only fill identities
+            # no result claimed for itself. A single first-writer-wins pass made
+            # a redirect steal another entry's slot: with batch [a, b] where `a`
+            # redirects to `b/`, the redirect result claimed b's identity first
+            # and b's real result was never recorded.
             resolved: dict[str, dict[str, Any]] = {}
-            for it in items:
-                for key in (
-                    it.get("final_url"),
-                    it.get("normalized_url"),
-                    it.get("original_url"),
-                ):
-                    if key and key not in resolved:
-                        resolved[key] = it
-            for url in batch:
-                item = resolved.get(url)
+            for item in items:
+                original = item.get("original_url")
+                if isinstance(original, str) and original:
+                    resolved.setdefault(canonical_page_identity(original) or original, item)
+            for item in items:
+                for key in (item.get("final_url"), item.get("normalized_url")):
+                    if not isinstance(key, str) or not key:
+                        continue
+                    identity = canonical_page_identity(key) or key
+                    resolved.setdefault(identity, item)
+
+            failed = 0
+            for entry in batch:
+                url = entry.url
+                identity = canonical_page_identity(url) or url
+                job.in_flight = [
+                    pending
+                    for pending in job.in_flight
+                    if (canonical_page_identity(pending.url) or pending.url) != identity
+                ]
+                item = resolved.get(identity)
                 if item is None:
-                    outcome = "transient"  # no outcome for a popped URL is not a definitive answer
+                    outcome = "transient"
                 elif item.get("status") != "failed":
                     outcome = "success"
                 elif item.get("classification") in TRANSIENT_CLASSIFICATIONS:
@@ -284,30 +336,18 @@ async def _run_job(
 
                 if (
                     outcome == "transient"
-                    and job.transient_retries.get(url, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS
+                    and job.transient_retries.get(identity, 0) + 1 < MAX_URL_TRANSIENT_ATTEMPTS
                 ):
-                    # Unreachable for now (network/dns/tls/timeout/crash): re-queue for a
-                    # later batch or the next connected window, and do NOT mark visited.
-                    # Committing it as done is what let a whole-site job drain to a
-                    # seed-only "completed" while the network was down.
-                    job.transient_retries[url] = job.transient_retries.get(url, 0) + 1
-                    if url not in _frontier_set(job):
-                        _frontier_add(job, url)
+                    job.transient_retries[identity] = job.transient_retries.get(identity, 0) + 1
+                    requeue_admitted_pages(job, (FrontierEntry(url=identity, depth=entry.depth),))
                     continue
 
-                # Terminal outcome: success, permanent failure, or transient retries
-                # exhausted after MAX_URL_TRANSIENT_ATTEMPTS (bounded, so a
-                # permanently-dead page can't spin the frontier forever).
-                job.transient_retries.pop(url, None)
-                job.visited.add(url)
+                job.transient_retries.pop(identity, None)
+                job.visited.add(identity)
                 if item is None:
                     failed += 1
                     continue
-                exhausted = outcome == "transient"
-                if exhausted:
-                    # Transient failure, but the durable retry budget is spent: record it
-                    # terminal so the whole-site job can finish. build_unified_result
-                    # propagates this item.error into the committed result.
+                if outcome == "transient":
                     item = {**item, "status": "failed", "error": "retries_exhausted"}
                 try:
                     unified = await abuild_unified_result(item)
@@ -318,26 +358,21 @@ async def _run_job(
                     if item.get("status") == "failed":
                         failed += 1
                 else:
-                    failed += 1  # a dropped item is a failed crawl, not silence
-                for link in item.get("discovered_links") or []:
-                    link_url = frontier_link_url(link)
-                    if not link_url:
-                        continue
-                    if link_url not in job.visited and link_url not in _frontier_set(job):
-                        _frontier_add(job, link_url)
-                        job.stats["total_discovered"] += 1
+                    failed += 1
+                admitted = await admit_job_links(
+                    job,
+                    item.get("discovered_links") or [],
+                    source_depth=entry.depth,
+                    context=context,
+                )
+                job.stats["total_discovered"] = (
+                    job.stats.get("total_discovered", 0) + admitted.accepted
+                )
             job.stats["total_crawled"] = len(job.visited)
-            # `failed` accumulates across the batch: merge it once, outside
-            # the loop, or every item re-adds the running total (1+2+...+n).
             if failed:
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
-            job.in_flight = []  # batch committed; a later resume must not re-crawl it
             await asyncio.to_thread(job_store.save, job)
-            # (No post-save status check here: it could only read this task's
-            # own stale copy. The loop-top reload detects pause/cancel with a
-            # fresh row -- the only honest observation point.)
     except asyncio.CancelledError:
-        # delete()/shutdown cancellation: leave any pre-cancel state intact.
         raise
     except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
@@ -348,6 +383,7 @@ async def _run_job(
             await asyncio.to_thread(
                 job_store.set_status, job_id, JobStatus.FAILED, expected=JobStatus.RUNNING
             )
+
 
 
 def start_job(

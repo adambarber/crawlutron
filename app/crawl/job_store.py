@@ -17,11 +17,13 @@ import time
 logger = logging.getLogger(__name__)
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from app.crawl.ids import new_job_id
-from app.crawl.sqlite_store import connect_store
+from app.crawl.sqlite_store import connect_store, table_has_column
+from app.validation import safe_public_url_or_none
 
 
 def _json_default(obj):
@@ -49,6 +51,247 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"  # Explicitly cancelled
 
 
+@dataclass(frozen=True)
+class FrontierEntry:
+    """One canonical URL and its admitted crawl depth."""
+
+    url: str
+    depth: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"url": self.url, "depth": self.depth}
+
+
+# Cap on memoized canonical-identity entries. The job store re-reads the same
+# durable URL set on every loop iteration; the cap keeps a very large crawl's
+# working set bounded while covering the repeated reads that made the old
+# per-read re-derivation expensive.
+_CANONICAL_CACHE_MAX = 50_000
+
+
+@lru_cache(maxsize=_CANONICAL_CACHE_MAX)
+def _canonical_cached(url: str) -> str:
+    return str(safe_public_url_or_none(url) or url)
+
+
+def _canonical_or_raw(url: str) -> str:
+    """Canonical page identity for ``url``, or the raw value when it has none.
+
+    Memoized: the job store re-reads the same durable collections on every loop
+    iteration, and re-deriving identity for every stored URL on every read made
+    a 20k-entry job cost ~0.23s per load and stalled the event loop with it. The
+    mapping is a pure function of the URL and the process's SSRF posture (which
+    is itself resolved once per process), so a bounded cache cannot disagree
+    with the uncached result.
+    """
+    if not url:
+        return url
+    return _canonical_cached(url)
+
+
+def normalized_policy(policy: Any) -> dict[str, Any]:
+    if not isinstance(policy, dict):
+        return {}
+    normalized = dict(policy)
+    if "limits" in normalized and not isinstance(normalized["limits"], dict):
+        normalized["limits"] = {}
+    return normalized
+
+
+def policy_limits(policy: Any) -> dict[str, Any]:
+    limits = normalized_policy(policy).get("limits")
+    return dict(limits) if isinstance(limits, dict) else {}
+
+
+def job_max_depth(policy: Any) -> int:
+    value = policy_limits(policy).get("max_depth")
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def job_max_pages(policy: Any) -> int:
+    value = policy_limits(policy).get("max_pages")
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _entry_depth(value: Any, fallback: int) -> int:
+    if isinstance(value, bool):
+        return fallback
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _entry_payload(entry: Any) -> Any:
+    """Serialize a frontier entry, tolerating the legacy bare-string shape.
+
+    The store does not rewrite a caller's collections: a row written with bare
+    strings stays bare, and :meth:`CrawlJobState.from_json` recognizes that
+    shape as legacy and normalizes it once on read. Coercing here instead would
+    make a non-canonical row LOOK canonical to that structural check, which is
+    how a stored "already canonical" flag becomes a lie.
+    """
+    return entry.to_dict() if isinstance(entry, FrontierEntry) else entry
+
+
+def _row_is_canonical(*collections: Any) -> bool:
+    """Whether persisted collections already hold ``{url, depth}`` records.
+
+    Canonical form is read from the DATA, never from a stored flag: a flag can
+    disagree with the row it claims to describe (a direct SQL write, a migration,
+    an older writer), and then the read path would skip normalization on a row
+    that needs it. Every writer in this codebase emits records, and a legacy row
+    holds bare strings, so the shape is the honest signal -- and it costs one
+    isinstance check per entry instead of a URL parse.
+    """
+    for values in collections:
+        if not isinstance(values, (list, tuple)):
+            return False
+        for value in values:
+            if not isinstance(value, dict) or "url" not in value or "depth" not in value:
+                return False
+    return True
+
+
+def normalize_frontier(
+    values: Any,
+    *,
+    root_url: str,
+    policy: dict[str, Any],
+    canonicalize: bool = True,
+) -> list[FrontierEntry]:
+    """Coerce persisted/runner-supplied frontier values into ``FrontierEntry`` records.
+
+    ``canonicalize=False`` is the steady-state read path for rows this writer
+    already stored in canonical form (the persisted ``canonicalized`` marker):
+    it still coerces shape, keeps the shallowest depth per identity, and drops
+    unusable entries, but skips the per-URL canonicalization work. Skipping it
+    on EVERY load/save instead cost 65-146x the pre-normalization persistence
+    time and stalled the event loop for a quarter second on a 20k-entry job.
+    """
+    if not isinstance(values, (list, tuple)):
+        return []
+    canonical_root = _canonical_or_raw(root_url) if canonicalize else root_url
+    legacy_depth = job_max_depth(policy)
+    entries: dict[str, FrontierEntry] = {}
+    order: list[str] = []
+    for value in values:
+        raw_url: Any
+        depth: Any
+        if isinstance(value, FrontierEntry):
+            raw_url = value.url
+            depth = value.depth
+        elif isinstance(value, dict):
+            raw_url = value.get("url")
+            depth = value.get("depth", legacy_depth)
+        else:
+            raw_url = value
+            depth = legacy_depth
+        if not isinstance(raw_url, str) or not raw_url:
+            continue
+        url = _canonical_or_raw(raw_url) if canonicalize else raw_url
+        entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
+        entry = FrontierEntry(url=url, depth=entry_depth)
+        previous = entries.get(url)
+        if previous is None:
+            entries[url] = entry
+            order.append(url)
+        elif entry_depth < previous.depth:
+            entries[url] = entry
+    return [entries[url] for url in order]
+
+
+def normalize_job_collections(
+    *,
+    root_url: str,
+    policy: dict[str, Any],
+    visited: Any,
+    frontier: Any,
+    in_flight: Any,
+) -> tuple[set[str], list[FrontierEntry], list[FrontierEntry]]:
+    canonical_root = _canonical_or_raw(root_url)
+    normalized_policy_value = normalized_policy(policy)
+    if isinstance(visited, str):
+        visited_values = [visited]
+    else:
+        try:
+            visited_values = list(visited or [])
+        except TypeError:
+            visited_values = []
+    normalized_visited = {
+        _canonical_or_raw(url)
+        for url in visited_values
+        if isinstance(url, str) and url
+    }
+    normalized_frontier = normalize_frontier(
+        frontier, root_url=canonical_root, policy=normalized_policy_value
+    )
+    normalized_in_flight = normalize_frontier(
+        in_flight, root_url=canonical_root, policy=normalized_policy_value
+    )
+    frontier_by_url = {entry.url: entry for entry in normalized_frontier}
+    normalized_in_flight = [
+        FrontierEntry(
+            url=entry.url,
+            depth=min(entry.depth, frontier_by_url[entry.url].depth)
+            if entry.url in frontier_by_url
+            else entry.depth,
+        )
+        for entry in normalized_in_flight
+        if entry.url not in normalized_visited
+    ]
+    in_flight_ids = {entry.url for entry in normalized_in_flight}
+    normalized_frontier = [
+        entry
+        for entry in normalized_frontier
+        if entry.url not in normalized_visited and entry.url not in in_flight_ids
+    ]
+    return normalized_visited, normalized_frontier, normalized_in_flight
+
+
+# Stats a job row always carries. ``total_discovered`` is deliberately NOT in
+# this tuple: it is frontier-derived, so only the whole-site runner may report
+# it, and a single-shot job has no frontier to derive it from.
+_STATS_KEYS = ("total_crawled", "total_failed", "cap_truncated", "cap_overcommitted")
+
+
+def _default_stats() -> dict[str, int]:
+    return {key: 0 for key in _STATS_KEYS}
+
+
+def _normalized_stats(value: Any) -> dict[str, int]:
+    stats = _default_stats()
+    if isinstance(value, dict):
+        for key in (*_STATS_KEYS, "total_discovered"):
+            # ``total_discovered`` is frontier-derived and is reported only when
+            # the whole-site runner actually counted admissions. Seeding it to 0
+            # for every job kind makes a single-shot job -- which has no
+            # frontier, so the quantity is undefined rather than zero -- report
+            # a fabricated zero; that contract belongs to
+            # app/api/async_crawl_runner.py. A value already stored (whole-site
+            # rows) is preserved.
+            if key == "total_discovered" and key not in value:
+                continue
+            raw = value.get(key, 0)
+            if isinstance(raw, bool):
+                continue
+            try:
+                stats[key] = int(raw)
+            except (TypeError, ValueError):
+                continue
+    return stats
+
+
 @dataclass
 class CrawlJobState:
     """Persistent state of a crawl job (whole-site or single-shot)."""
@@ -59,9 +302,9 @@ class CrawlJobState:
     policy: dict[str, Any] = field(default_factory=dict)
     status: JobStatus = JobStatus.PENDING
     # Whole-site fields (used when kind == WHOLE_SITE)
-    frontier: list[str] = field(default_factory=list)  # URLs pending crawl
-    visited: set[str] = field(default_factory=set)  # URLs already crawled
-    in_flight: list[str] = field(default_factory=list)  # batch inside the engine call
+    frontier: list[FrontierEntry] = field(default_factory=list)
+    visited: set[str] = field(default_factory=set)
+    in_flight: list[FrontierEntry] = field(default_factory=list)
     transient_retries: dict[str, int] = field(default_factory=dict)  # url -> transient retry count
     # Single-shot fields (used when kind == SINGLE_SHOT)
     # root_url holds the first URL (or "" for batch); results holds completed crawl results
@@ -69,30 +312,126 @@ class CrawlJobState:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
     error: str | None = None
-    stats: dict[str, int] = field(
-        default_factory=lambda: {
-            "total_discovered": 0,
-            "total_crawled": 0,
-            "total_failed": 0,
-        }
-    )
+    stats: dict[str, int] = field(default_factory=_default_stats)
 
     def to_json(self) -> dict[str, Any]:
-        """Serialize to JSON-serializable dict."""
+        """Serialize to JSON-serializable dict.
+
+        Normalizes first, so the serialized form carries canonical page identity
+        (the read boundary enforces it too, but a writer that emits an alias
+        makes every reader pay for it). This is affordable only because
+        canonicalization is memoized in :func:`_canonical_or_raw`: the same
+        durable URL set is re-serialized on every job loop iteration.
+        """
+        normalize_job_state(self)
         data = asdict(self)
-        data["visited"] = list(self.visited)
+        data["frontier"] = [_entry_payload(entry) for entry in self.frontier]
+        data["in_flight"] = [_entry_payload(entry) for entry in self.in_flight]
+        data["visited"] = sorted(self.visited)
+        data["stats"] = _normalized_stats(self.stats)
         data["status"] = self.status.value
         data["kind"] = self.kind.value
         return data
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> CrawlJobState:
-        """Deserialize from JSON dict."""
-        data = dict(data)
-        data["visited"] = set(data.get("visited", []))
-        data["status"] = JobStatus(data["status"])
-        data["kind"] = JobKind(data.get("kind", JobKind.WHOLE_SITE.value))
-        return cls(**data)
+        """Deserialize from JSON dict.
+
+        The read boundary always normalizes: canonical identity, cross-list
+        dedupe, shallowest depth and legacy bare-string depths are enforced
+        here, so a row written by any writer -- including one that put
+        non-canonical URLs inside well-formed records -- cannot reintroduce a
+        second identity for a page. The cost is bounded by the canonicalization
+        memo in :func:`_canonical_or_raw` rather than by skipping the work.
+        """
+        canonicalized = False
+        status = data.get("status", JobStatus.PENDING.value)
+        kind = data.get("kind", JobKind.WHOLE_SITE.value)
+        policy = normalized_policy(data.get("policy"))
+        root_url = str(data.get("root_url") or "")
+        if not canonicalized:
+            root_url = _canonical_or_raw(root_url)
+        visited_raw = data.get("visited", [])
+        if isinstance(visited_raw, list):
+            visited = {
+                (url if canonicalized else _canonical_or_raw(url))
+                for url in visited_raw
+                if isinstance(url, str) and url
+            }
+        else:
+            visited = set()
+        transient_raw = data.get("transient_retries", {})
+        transient_retries: dict[str, int] = {}
+        if isinstance(transient_raw, dict):
+            for url, attempts in transient_raw.items():
+                if not isinstance(url, str):
+                    continue
+                try:
+                    key = url if canonicalized else _canonical_or_raw(url)
+                    transient_retries[key] = max(0, int(attempts))
+                except (TypeError, ValueError):
+                    continue
+        job = cls(
+            job_id=str(data.get("job_id") or ""),
+            kind=JobKind(kind),
+            root_url=root_url,
+            policy=policy,
+            status=JobStatus(status),
+            frontier=normalize_frontier(
+                data.get("frontier", []),
+                root_url=root_url,
+                policy=policy,
+                canonicalize=not canonicalized,
+            ),
+            visited=visited,
+            in_flight=normalize_frontier(
+                data.get("in_flight", []),
+                root_url=root_url,
+                policy=policy,
+                canonicalize=not canonicalized,
+            ),
+            transient_retries=transient_retries,
+            results=list(data.get("results", [])) if isinstance(data.get("results", []), list) else [],
+            created_at=float(data.get("created_at", 0.0)),
+            updated_at=float(data.get("updated_at", 0.0)),
+            error=data.get("error") if isinstance(data.get("error"), str) else None,
+            stats=_normalized_stats(data.get("stats", {})),
+        )
+        if not canonicalized:
+            # Legacy row: the one place full normalization is owed. The marker is
+            # set on the next save, so this cost is paid once per legacy row.
+            normalize_job_state(job)
+        return job
+
+
+def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
+    root_url = _canonical_or_raw(job.root_url)
+    policy = normalized_policy(job.policy)
+    visited, frontier, in_flight = normalize_job_collections(
+        root_url=root_url,
+        policy=policy,
+        visited=job.visited,
+        frontier=job.frontier,
+        in_flight=job.in_flight,
+    )
+    transient_retries: dict[str, int] = {}
+    for url, attempts in job.transient_retries.items():
+        if not isinstance(url, str) or not url:
+            continue
+        try:
+            value = max(0, int(attempts))
+        except (TypeError, ValueError):
+            continue
+        identity = _canonical_or_raw(url)
+        transient_retries[identity] = max(transient_retries.get(identity, 0), value)
+    job.root_url = root_url
+    job.policy = policy
+    job.visited = visited
+    job.frontier = frontier
+    job.in_flight = in_flight
+    job.transient_retries = transient_retries
+    job.stats = _normalized_stats(job.stats)
+    return job
 
 
 class JobStore:
@@ -107,7 +446,14 @@ class JobStore:
         # Serialize all connection use across threads (sqlite3 connections are
         # not safe for concurrent use even with check_same_thread=False).
         self._lock = threading.Lock()
+        # Column-addressed rows: the schema grows by migration, so positional
+        # indexing for columns added later (e.g. canonicalized) would couple the
+        # read path to ALTER ordering. sqlite3.Row still supports row[n].
+        self._conn.row_factory = sqlite3.Row
         self._init_schema()
+
+    def _column_exists(self, column: str) -> bool:
+        return table_has_column(self._conn, "crawl_jobs", column)
 
     def _init_schema(self) -> None:
         self._conn.execute("""
@@ -117,69 +463,71 @@ class JobStore:
                 root_url TEXT NOT NULL DEFAULT '',
                 policy TEXT NOT NULL DEFAULT '{}',        -- JSON
                 status TEXT NOT NULL,           -- JobStatus enum value
-                frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of URLs
-                visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of URLs
-                in_flight TEXT NOT NULL DEFAULT '[]',      -- JSON array: batch inside the engine call
+                frontier TEXT NOT NULL DEFAULT '[]',      -- JSON array of {url, depth} entries
+                visited TEXT NOT NULL DEFAULT '[]',       -- JSON array of canonical URLs
+                in_flight TEXT NOT NULL DEFAULT '[]',      -- JSON array of {url, depth} entries
                 transient_retries TEXT NOT NULL DEFAULT '{}', -- JSON dict: url -> transient retry count
                 results TEXT NOT NULL DEFAULT '[]',       -- JSON array of result objects
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
                 error TEXT,
-                stats TEXT NOT NULL DEFAULT '{}'            -- JSON dict
+                stats TEXT NOT NULL DEFAULT '{}'           -- JSON dict
             )
         """)
-        # Migration: add kind column if table was created before this column existed
-        try:
+        # Migrations. Existence is decided by the schema itself (PRAGMA
+        # table_info), NOT by swallowing OperationalError: the old shape caught
+        # that exception around every ALTER, so a disk-full, permission or
+        # corruption failure looked identical to "column already exists" and the
+        # migration silently did not run. Only the absence of the column is
+        # tolerated now; every other error propagates.
+        if not self._column_exists("kind"):
             self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'whole_site'")
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            # Column already exists; ignore
-            pass
-        # Migration: add in_flight column for mid-batch crash recovery (re-queue).
-        try:
+        # in_flight: mid-batch crash recovery (re-queue popped work).
+        if not self._column_exists("in_flight"):
             self._conn.execute("ALTER TABLE crawl_jobs ADD COLUMN in_flight TEXT NOT NULL DEFAULT '[]'")
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass
-        # Migration: add transient_retries for bounded whole-site transient retries.
-        try:
+        # transient_retries: bounded whole-site transient retries.
+        if not self._column_exists("transient_retries"):
             self._conn.execute(
                 "ALTER TABLE crawl_jobs ADD COLUMN transient_retries TEXT NOT NULL DEFAULT '{}'"
             )
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        # Canonical-form detection is structural (see _row_is_canonical), so no
+        # marker column is stored: a flag can disagree with the data it claims
+        # to describe, while the data itself cannot.
         self._conn.commit()
 
     def _row_to_job(self, row) -> CrawlJobState:
-        return CrawlJobState(
-            job_id=row[0],
-            kind=JobKind(row[1]),
-            root_url=row[2],
-            policy=json.loads(row[3]),
-            status=JobStatus(row[4]),
-            frontier=json.loads(row[5]),
-            visited=set(json.loads(row[6])),
-            results=json.loads(row[7]),
-            created_at=row[8],
-            updated_at=row[9],
-            error=row[10],
-            stats=json.loads(row[11]),
-            in_flight=json.loads(row[12]),
-            transient_retries=json.loads(row[13]),
+        return CrawlJobState.from_json(
+            {
+                "job_id": row[0],
+                "kind": row[1],
+                "root_url": row[2],
+                "policy": json.loads(row[3]),
+                "status": row[4],
+                "frontier": json.loads(row[5]),
+                "visited": json.loads(row[6]),
+                "results": json.loads(row[7]),
+                "created_at": row[8],
+                "updated_at": row[9],
+                "error": row[10],
+                "stats": json.loads(row[11]),
+                "in_flight": json.loads(row[12]),
+                "transient_retries": json.loads(row[13]),
+            }
         )
 
     def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
         job_id = new_job_id()
+        canonical_root = _canonical_or_raw(root_url)
+        normalized = normalized_policy(policy)
         job = CrawlJobState(
             job_id=job_id,
             kind=JobKind.WHOLE_SITE,
-            root_url=root_url,
-            policy=policy,
+            root_url=canonical_root,
+            policy=normalized,
             status=JobStatus.PENDING,
-            frontier=[root_url],
+            frontier=[FrontierEntry(url=canonical_root, depth=0)],
         )
         with self._lock:
             self._persist(job)
@@ -190,8 +538,8 @@ class JobStore:
         job = CrawlJobState(
             job_id=job_id,
             kind=JobKind.SINGLE_SHOT,
-            root_url=root_url,
-            policy=policy,
+            root_url=_canonical_or_raw(root_url),
+            policy=normalized_policy(policy),
             status=JobStatus.PENDING,
         )
         with self._lock:
@@ -228,8 +576,21 @@ class JobStore:
         await asyncio.to_thread(self.save, job)
 
     def _persist(self, job: CrawlJobState) -> None:
-        """Write job state to SQLite. Caller must hold ``self._lock``."""
+        """Write job state to SQLite. Caller must hold ``self._lock``.
+
+        No normalization pass: identity is established at ingress and the row is
+        written with the ``canonicalized`` marker, so re-deriving every URL here
+        would multiply the job loop's cost by the whole page history on every
+        batch persist. Legacy rows are normalized once when they are read.
+        """
         job.updated_at = time.time()
+        root_url = job.root_url
+        policy = job.policy
+        frontier = job.frontier
+        in_flight = job.in_flight
+        visited = job.visited
+        stats = job.stats
+        transient_retries = job.transient_retries
         self._conn.execute(
             """
                   INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
@@ -251,18 +612,26 @@ class JobStore:
             (
                 job.job_id,
                 job.kind.value,
-                job.root_url,
-                json.dumps(job.policy, separators=(",", ":"), default=_json_default),
+                root_url,
+                json.dumps(policy, separators=(",", ":"), default=_json_default),
                 job.status.value,
-                json.dumps(job.frontier, separators=(",", ":"), default=_json_default),
-                json.dumps(list(job.visited), separators=(",", ":"), default=_json_default),
+                json.dumps(
+                    [_entry_payload(entry) for entry in frontier],
+                    separators=(",", ":"),
+                    default=_json_default,
+                ),
+                json.dumps(list(visited), separators=(",", ":"), default=_json_default),
                 json.dumps(job.results, separators=(",", ":"), default=_json_default),
                 job.created_at,
                 job.updated_at,
                 job.error,
-                json.dumps(job.stats, separators=(",", ":"), default=_json_default),
-                json.dumps(job.in_flight, separators=(",", ":"), default=_json_default),
-                json.dumps(job.transient_retries, separators=(",", ":"), default=_json_default),
+                json.dumps(stats, separators=(",", ":"), default=_json_default),
+                json.dumps(
+                    [_entry_payload(entry) for entry in in_flight],
+                    separators=(",", ":"),
+                    default=_json_default,
+                ),
+                json.dumps(transient_retries, separators=(",", ":"), default=_json_default),
             ),
         )
         self._conn.commit()
@@ -298,7 +667,8 @@ class JobStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT job_id, kind, root_url, policy, status, frontier, visited, results, "
-                "created_at, updated_at, error, stats, in_flight, transient_retries FROM crawl_jobs WHERE job_id = ?",
+                "created_at, updated_at, error, stats, in_flight, transient_retries "
+                "FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
@@ -325,7 +695,8 @@ class JobStore:
                 SELECT job_id, root_url, status, kind, created_at, updated_at,
                        json_array_length(frontier) as frontier_size,
                        json_array_length(visited) as visited_size,
-                       json_array_length(results) as results_count
+                       json_array_length(results) as results_count,
+                       COALESCE(json_extract(stats, '$.cap_truncated'), 0) as cap_truncated
                 FROM crawl_jobs
                 ORDER BY created_at DESC
             """).fetchall()
@@ -340,6 +711,7 @@ class JobStore:
                 "frontier_size": r[6] or 0,
                 "visited_size": r[7] or 0,
                 "results_count": r[8] or 0,
+                "cap_truncated": bool(r[9]),
             }
             for r in rows
         ]

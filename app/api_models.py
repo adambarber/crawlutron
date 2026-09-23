@@ -153,13 +153,13 @@ class CrawlPolicyLimits(BaseModel):
         0,
         ge=0,
         le=20,
-        description="Bounded recursive crawl depth. 0 disables recursion (single-page crawl). When > 0 the engine follows in-scope discovered links up to max_pages total.",
+        description="Bounded recursive crawl depth. 0 means a single-page crawl for both /v1/crawl and /v1/jobs. Positive values admit in-scope, robots-allowed links through that depth; durable jobs persist each frontier entry's depth.",
     )
     max_pages: int = Field(
         0,
         ge=0,
         le=2000,
-        description="Bounded total pages for recursive crawls. 0 disables the cap (bounded only by max_depth).",
+        description="Total-page bound. For /v1/crawl, 0 selects the bounded service default. For /v1/jobs, 0 or omission disables the page cap; positive values cap canonical page identities across admission, recovery, and execution. A positive cap that truncates eligible queued or discovered work sets cap_truncated; already-admitted in-flight work is preserved and recorded as cap_overcommitted.",
     )
     max_rps: float = Field(
         0.0,
@@ -263,11 +263,11 @@ class CrawlPolicy(BaseModel):
     )
     discovery: DiscoveryConfig | None = Field(
         None,
-        description="Optional discovery configuration. Only robots, sitemaps, and feeds are recognized. Omit to use defaults (all enabled).",
+        description="Optional discovery toggles. Set robots, sitemaps, or feeds true to enable that source; omitted or null leaves the stored discovery map empty.",
     )
     scope_regex: str | None = Field(
         None,
-        description="Optional regex applied to each discovered link URL to filter out-of-scope links before returning. Links whose normalized URL does not match are dropped from discovered_links.",
+        description="Optional regex applied to each canonical discovered-link identity before recursive frontier admission. Non-matching links may still be reported in discovered_links but are not followed by /v1/crawl or /v1/jobs.",
     )
     css_selector: str | None = Field(
         None,
@@ -732,7 +732,7 @@ class JobCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    root_url: str = Field(..., description="Root public HTTP(S) URL to crawl recursively.")
+    root_url: str = Field(..., description="Root public HTTP(S) URL; stored canonically at crawl depth 0.")
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy, description="Crawl policy (strategies, limits, scope_regex, extraction)."
     )
@@ -762,7 +762,14 @@ class JobStatusResponse(BaseModel):
     frontier_size: int
     visited_size: int
     results_count: int
-    stats: dict[str, int] = Field(default_factory=dict)
+    cap_truncated: bool = Field(
+        default=False,
+        description="True only when a positive job max_pages cap refused or truncated eligible queued or discovered pages. Ordinary BATCH_SIZE chunking does not set it; already-admitted in-flight overcommit is reported separately in stats.cap_overcommitted.",
+    )
+    stats: dict[str, int] = Field(
+        default_factory=dict,
+        description="Job counters; cap_truncated marks eligible queued/discovered work refused by a positive cap, while cap_overcommitted marks already-admitted in-flight work preserved beyond that cap.",
+    )
     error: str | None = None
 
 
