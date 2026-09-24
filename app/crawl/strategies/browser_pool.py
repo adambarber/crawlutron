@@ -148,6 +148,9 @@ class BrowserPool:
         return BROWSER_HEADLESS
 
 
+_BROWSER_STRATEGIES: frozenset[CrawlStrategyName] = frozenset({BROWSER_HEADLESS, BROWSER_HEADED_WARMED})
+
+
 class PooledBrowserWorker:
     """Callable that acquires a renderer from the pool, renders, and releases.
 
@@ -162,9 +165,19 @@ class PooledBrowserWorker:
         self._pool = pool
         # Explicit when the caller knows which chain entry it is rendering for;
         # otherwise the pool's own renderer configuration supplies the real
-        # browser mode (headless, or headed-warmed when the profile carries
-        # warmup URLs). Never an invented strategy name.
-        self._strategy = strategy
+        # browser mode. Never an invented strategy name.
+        #
+        # Validated HERE, not at use. `CrawlStrategyName` includes the two HTTP
+        # strategies, so a browser worker could be built with
+        # `HTTP_DECLARED_CRAWLER` and emit it as a browser result's
+        # `selected_strategy`; a name outside the enum was accepted here and
+        # rejected much later by `CrawlResult.__post_init__`. An annotation is
+        # not a runtime check.
+        if strategy is not None and strategy not in _BROWSER_STRATEGIES:
+            raise ValueError(
+                f"browser worker strategy must be one of {sorted(_BROWSER_STRATEGIES)}, got {strategy!r}"
+            )
+        self._strategy: CrawlStrategyName | None = strategy
 
     def _configured_strategy(self) -> CrawlStrategyName:  # pyright: ignore[reportReturnType]
         if self._strategy is not None:

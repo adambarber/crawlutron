@@ -41,6 +41,9 @@ from __future__ import annotations
 import ast
 import math
 import pathlib
+import re
+import subprocess
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -112,7 +115,13 @@ def _span(node: ast.AST, body: list[ast.stmt]) -> int:
 
 def _abc_size(node: ast.AST) -> int:
     nodes = list(ast.walk(node))
-    assignments = sum(1 for item in nodes if isinstance(item, ast.Assign))
+    # `AnnAssign` counts. A function with thirty `x: int = ...` statements is
+    # not less complex than one with thirty `x = ...`; the distinction is
+    # whether the author wrote a type, not whether the code branches. An earlier
+    # version counted only `Assign`, so annotating every local scored ABC 0 --
+    # the metric could be driven to zero by adding type hints, which is the
+    # opposite of what a complexity budget is for.
+    assignments = sum(1 for item in nodes if isinstance(item, (ast.Assign, ast.AnnAssign)))
     branches = sum(1 for item in nodes if isinstance(item, _BRANCH_NODES))
     conditions = sum(1 for item in nodes if isinstance(item, ast.comprehension))
     return round(math.sqrt(assignments**2 + branches**2 + conditions**2))
@@ -258,3 +267,96 @@ def test_metric_collection_is_deterministic() -> None:
     """The numbers in the budgets came from somewhere; make that somewhere checkable."""
     for metric in _BUDGETS:
         assert offenders(metric) == offenders(metric), f"{metric} collection is not deterministic"
+
+
+def test_metric_budgets_have_never_risen() -> None:
+    """The budget gate and the tight-budget check can both be satisfied at once by
+    RAISING the budget alongside a new offender. That is not hypothetical: the
+    per-file line budget in the safety suite was raised ten times in one day and
+    lowered zero times, and the tight check could not see it because both
+    assertions read the same table.
+
+    A monotonicity test closes that: the budget history is read from git, so the
+    only way to raise one is to edit history, which a reviewer sees. This is the
+    one check here that needs a full clone; a shallow one cannot see the past and
+    is skipped rather than passed, because a gate that silently goes inert is
+    worse than one that is absent.
+    """
+    service_root = pathlib.Path(__file__).resolve().parent.parent
+    # Git paths are repo-root-relative, not service-relative. Getting this wrong
+    # makes every `git show` fail, `history` come back empty, and the whole
+    # check pass vacuously -- which is exactly what the first version of this
+    # test did. The `assert history` below is the guard against that class of
+    # silent no-op ever recurring.
+    root = pathlib.Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=service_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+    tracked = str(pathlib.Path(__file__).resolve().relative_to(root))
+    try:
+        log = subprocess.run(
+            ["git", "log", "--format=%H", "--", tracked],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+    except (subprocess.CalledProcessError, FileNotFoundError) as error:
+        pytest.skip(f"git history unavailable: {error}")
+    if not log:
+        pytest.skip("no history for this file in this clone")
+
+    shallow = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if shallow.stdout.strip() == "true" and len(log) < 5:
+        pytest.skip("shallow clone: cannot see the budget's history")
+
+    pattern = re.compile(r'^\s{4}"(?P<name>[a-z ]+)":\s*(?P<value>\d+),$')
+    history: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for revision in log:
+        source = subprocess.run(
+            ["git", "show", f"{revision}:{tracked}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if source.returncode != 0:
+            continue
+        for line in source.stdout.splitlines():
+            found = pattern.match(line)
+            if found and found.group("name") in _BUDGETS:
+                history[found.group("name")].append((revision[:9], int(found.group("value"))))
+
+    assert history, (
+        f"read {len(log)} revisions of {tracked} and found no budget values in any of "
+        f"them. The parse pattern has drifted from the file it reads; a gate that "
+        f"collects nothing must fail rather than pass."
+    )
+    regressions = []
+    for name, entries in history.items():
+        # `entries` is newest-first, so each adjacent pair runs (newer, older).
+        # A regression is the newer value being HIGHER than the older one, i.e.
+        # the budget went up over time. Note the direction: reading this as
+        # (older, newer) inverts the test and makes a correctly falling ratchet
+        # look like four regressions.
+        for (newer, newer_value), (_, older) in zip(entries, entries[1:], strict=False):
+            if newer_value > older:
+                regressions.append(
+                    f"  {name}: rose from {older} to {newer_value} in {newer}"
+                )
+    assert not regressions, (
+        "a complexity budget rose in this repository's history. The rule is that "
+        "these only fall; each wave lowers the number it reduced. Fix the offenders "
+        "instead, or delete the entry that no longer applies.\n" + "\n".join(regressions)
+    )

@@ -64,12 +64,12 @@ graph LR
     api_metrics_router --> metrics
     api_middleware --> api_exceptions
     api_policy_defaults --> constants
-    api_render --> crawl_engine
     api_render --> crawl_ids
     api_render --> crawl_payload_helpers
     api_render --> crawl_render_options
     api_render --> crawl_result_helpers
     api_render --> crawl_strategies_browser_pool
+    api_render --> crawl_worker
     api_render --> models
     api_render --> scheduler
     api_render --> settings
@@ -110,30 +110,19 @@ graph LR
     crawl_admission --> validation
     crawl_content_cache --> atomic_write
     crawl_content_cache --> constants
-    crawl_engine --> api_models
     crawl_engine --> constants
-    crawl_engine --> crawl_admission
     crawl_engine --> crawl_cache
     crawl_engine --> crawl_content_cache
-    crawl_engine --> crawl_extraction
     crawl_engine --> crawl_fetch_helpers
-    crawl_engine --> crawl_ids
     crawl_engine --> crawl_payload_helpers
-    crawl_engine --> crawl_recursive
-    crawl_engine --> crawl_render_options
-    crawl_engine --> crawl_result_helpers
-    crawl_engine --> crawl_strategies_body_decode
-    crawl_engine --> crawl_strategies_browser
+    crawl_engine --> crawl_request_pipeline
     crawl_engine --> crawl_strategies_content_cache_key
     crawl_engine --> crawl_strategies_cookie_jar
     crawl_engine --> crawl_strategies_fetchers
-    crawl_engine --> crawl_strategies_http
     crawl_engine --> crawl_strategies_request_profile
-    crawl_engine --> memory_pressure
     crawl_engine --> models
     crawl_engine --> resource_pressure
     crawl_engine --> safe_regex
-    crawl_engine --> scheduler
     crawl_engine --> settings
     crawl_engine --> validation
     crawl_extraction --> crawl_llm_format
@@ -166,13 +155,39 @@ graph LR
     crawl_payload_helpers --> validation
     crawl_recursive --> constants
     crawl_recursive --> crawl_admission
+    crawl_recursive --> crawl_recursive_admission
     crawl_recursive --> crawl_result_helpers
     crawl_recursive --> metrics
     crawl_recursive --> models
     crawl_recursive --> resource_pressure
+    crawl_recursive --> safe_regex
     crawl_recursive --> scheduler
     crawl_recursive --> validation
+    crawl_recursive_admission --> constants
+    crawl_recursive_admission --> crawl_admission
+    crawl_recursive_admission --> metrics
+    crawl_recursive_admission --> models
+    crawl_recursive_admission --> resource_pressure
+    crawl_recursive_admission --> scheduler
     crawl_render_options --> models
+    crawl_request_pipeline --> api_models
+    crawl_request_pipeline --> constants
+    crawl_request_pipeline --> crawl_admission
+    crawl_request_pipeline --> crawl_cache
+    crawl_request_pipeline --> crawl_content_cache
+    crawl_request_pipeline --> crawl_fetch_helpers
+    crawl_request_pipeline --> crawl_ids
+    crawl_request_pipeline --> crawl_recursive
+    crawl_request_pipeline --> crawl_render_options
+    crawl_request_pipeline --> crawl_result_helpers
+    crawl_request_pipeline --> crawl_strategy_chain
+    crawl_request_pipeline --> memory_pressure
+    crawl_request_pipeline --> models
+    crawl_request_pipeline --> resource_pressure
+    crawl_request_pipeline --> safe_regex
+    crawl_request_pipeline --> scheduler
+    crawl_request_pipeline --> settings
+    crawl_request_pipeline --> validation
     crawl_result_helpers --> constants
     crawl_result_helpers --> crawl_decompression
     crawl_result_helpers --> crawl_scheduler_exceptions
@@ -201,6 +216,14 @@ graph LR
     crawl_strategies_browser_pool --> models
     crawl_strategies_browser_pool --> resource_pressure
     crawl_strategies_browser_pool --> settings
+    crawl_strategies_browser_result --> constants
+    crawl_strategies_browser_result --> crawl_extraction
+    crawl_strategies_browser_result --> crawl_render_options
+    crawl_strategies_browser_result --> crawl_result_helpers
+    crawl_strategies_browser_result --> crawl_strategies_body_decode
+    crawl_strategies_browser_result --> crawl_worker
+    crawl_strategies_browser_result --> models
+    crawl_strategies_browser_result --> validation
     crawl_strategies_content_cache_key --> constants
     crawl_strategies_content_cache_key --> crawl_content_cache
     crawl_strategies_content_cache_key --> settings
@@ -245,6 +268,15 @@ graph LR
     crawl_strategies_request_profile --> constants
     crawl_strategies_request_profile --> crawl_credentials
     crawl_strategies_request_profile --> crawl_strategies_cookie_jar
+    crawl_strategy_chain --> constants
+    crawl_strategy_chain --> crawl_result_helpers
+    crawl_strategy_chain --> crawl_strategies_browser
+    crawl_strategy_chain --> crawl_strategies_browser_result
+    crawl_strategy_chain --> crawl_strategies_http
+    crawl_strategy_chain --> models
+    crawl_strategy_chain --> scheduler
+    crawl_strategy_chain --> validation
+    crawl_worker --> models
     discovery_agent_hints --> api_policy_defaults
     discovery_agent_hints --> api_models
     discovery_agent_hints --> constants

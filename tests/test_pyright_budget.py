@@ -58,30 +58,25 @@ SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # engine.py's two clear the moment wave 1's split lands, and the tight-budget
 # test below fails the moment they do, which is how every other ratchet here
 # closes. Zero is the target and nothing else is acceptable at the end.
-# Fourteen on first run. Thirteen are fixed or suppressed with a documented
-# reason. ONE remains, and it is a proven false positive that pyright will not
-# suppress:
+# Fourteen on first run. Thirteen were fixed or suppressed with a documented
+# reason. The fourteenth was misdiagnosed twice before it was fixed correctly,
+# and the way it was misdiagnosed is the part worth keeping:
 #
-#   browser_pool.py  `_configured_strategy` returns `self._pool.browser_strategy`.
-#     A `reveal_type` probe on a `BrowserPool` parameter reports the property as
-#     the exact four-member Literal, so the value reaching the return IS a
-#     declared member. Three suppression forms were tried and pyright honours
-#     none of them at an annotation position, and two candidate root causes were
-#     tested and refuted -- annotating the constants `Final[Literal[...]]`, and
-#     the module-level singleton sharing the name `_pool` (since renamed to
-#     `_browser_pool_singleton`, which was worth doing regardless).
+# It was first called a false positive on the strength of a `reveal_type` probe
+# that showed the `browser_strategy` PROPERTY is the exact four-member Literal.
+# That was true, and it said nothing about the other branch. The real defect was
+# the constructor: `strategy` is annotated `CrawlStrategyName`, which includes
+# the two HTTP strategies, so a browser worker could be constructed with
+# `HTTP_DECLARED_CRAWLER` and emit it as a browser result's `selected_strategy`.
+# A name outside the enum was worse -- accepted at construction, rejected much
+# later by `CrawlResult.__post_init__` as a ValueError from a property nobody
+# reading that constructor would predict. An annotation is not a runtime check.
 #
-#     It stays in the budget rather than being worked around in code. The one
-#     restructuring that would silence it is resolving the strategy eagerly in
-#     `__init__`, and that property must stay lazy: reading it before the pool
-#     initializes is the path that labels a worker which failed before acquire,
-#     which is the pool-exhaustion terminal result. Trading a real contract for a
-#     green checker is the wrong direction.
-#
-# Wave 1's split cleared the other three, including both `regex.Pattern` /
-# `re.Pattern` lies in engine.py -- the ones mypy cannot see because it reads
-# `regex` as untyped and degrades it to `Any`.
-BUDGET = 1
+# So: probing one branch of a function and generalising to the whole function is
+# how a real defect gets filed as a tool bug. The budget is zero and the gate
+# stays at zero -- the six documented suppressions for pydantic and lxml remain,
+# each with its reason at the call site.
+BUDGET = 0
 
 
 def _strip_jsonc(text: str) -> str:
@@ -148,9 +143,8 @@ def test_pyright_budget_is_tight() -> None:
     actual = len(report["generalDiagnostics"])
     assert BUDGET <= actual, (
         f"the pyright budget of {BUDGET} is stale -- only {actual} findings remain. "
-        f"Tighten it in this file. The target is zero; the one finding still open "
-        f"is a proven pyright false positive that suppresses in no form, and the "
-        f"reasoning for keeping it is written above."
+        f"Tighten it in this file. Zero is the target and there is no allowance "
+        f"left in it."
     )
 
 

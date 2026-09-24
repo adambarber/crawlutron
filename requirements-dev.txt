@@ -17,3 +17,12 @@ pytest-xdist>=3.0.0  # parallel suite runs: pytest -n auto (suite is xdist-safe)
 # part of the required quality gate. Pinned so a new mypy release cannot turn
 # a build red with no repository change.
 mypy==2.3.1
+# Second static type-checker, and the one that catches annotation lies mypy
+# structurally cannot here: mypy reads the `regex` package as untyped and
+# degrades its values to Any, so a `regex.Pattern` passed where `re.Pattern[str]`
+# was declared passes. It also found an unvalidated constructor parameter that
+# accepted a valid strategy from the wrong domain. The tree is at ZERO findings
+# and tests/test_pyright_budget.py is a fail gate on it, so this pin cannot be
+# removed without replacing that gate. Pinned for the same reason as mypy: a new
+# release must not turn a build red with no repository change.
+pyright==1.1.406

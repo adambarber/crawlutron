@@ -132,16 +132,12 @@ def _decompress_brotli(
 ) -> bytes | bytearray | None:
     """Decode a brotli body within a cap, or None if this build cannot.
 
-    The brotli ecosystem ships two incompatible streaming APIs: brotlicffi
-    exposes ``.decompress(data, cap)`` and google-brotli exposes
-    ``.process(data)`` with no cap. Which one is installed is not knowable
-    statically, so ``hasattr`` is the discriminator and the cast records what
-    that check just proved -- the decoder is typed ``object`` precisely because
-    its type depends on the package. Declaring the two shapes as protocols also
-    documents them, which ``hasattr`` on an ``object`` did not.
-
-    Returns None when brotli is unavailable or fails, so the caller can decide
-    between passthrough and an error rather than this function guessing.
+    The two brotli APIs are incompatible: brotlicffi exposes
+    ``.decompress(data, cap)`` and google-brotli ``.process(data)`` with no cap.
+    Which is installed is not knowable statically, so ``hasattr`` is the
+    discriminator and the cast records what that check just proved -- the decoder
+    is typed ``object`` for exactly that reason. The Protocols document the two
+    shapes, which ``hasattr`` on an ``object`` did not.
     """
     try:
         import brotli

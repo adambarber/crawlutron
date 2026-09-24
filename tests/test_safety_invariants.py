@@ -54,7 +54,19 @@ __all__ = [
 # tree. One exact whole-tree ceiling is the ratchet instead: growth must be paid
 # for by shrinkage elsewhere in the same change, and a shrink must lower this
 # integer so the saved capacity cannot be spent later.
-_APP_TREE_LINE_BUDGET = 22_065
+#
+# It has moved exactly ONCE, from 22,065 to 22,074, and that move is recorded
+# here because the reason is the point: the P1 that forced it was a constructor
+# taking an unvalidated `strategy` that accepted a member of the WRONG domain
+# (`HTTP_DECLARED_CRAWLER` as a browser worker's strategy) and a name outside the
+# enum entirely, which failed only much later inside `CrawlResult.__post_init__`.
+# Nine lines of runtime validation at that chokepoint is the fix, and trimming
+# the comments I had added around it recovered most of the cost first. If this
+# integer moves a second time, the one-authorised-move story is no longer true
+# and the ceiling has become the per-file table it replaced -- at which point the
+# metrics budgets' history-based monotonicity test in
+# tests/test_metrics_budget.py is the pattern to copy here, not another raise.
+_APP_TREE_LINE_BUDGET = 22_074
 
 
 def test_app_tree_line_count_does_not_grow():

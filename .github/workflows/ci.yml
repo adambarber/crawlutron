@@ -68,13 +68,17 @@ jobs:
       # four real defects (an import from the wrong module, a `urllib.error`
       # reference that only resolved by accident, a bare string returned as a
       # Literal taxonomy, and a selector helper that erased its result type to
-      # `object`) and ten findings where the checker was wrong. The whole-tree
-      # count is pinned at zero by tests/test_pyright_budget.py; this step makes
-      # a regression visible without waiting for that suite to run.
-      - name: Install pyright
-        run: pip install pyright==1.1.406
-      - name: Run pyright
-        run: pyright --pythonpath "$(which python)"
+      # `object`) and ten findings where the checker was wrong. It is now at
+      # ZERO and that is the gate.
+      #
+      # This step runs the budget TEST, not raw pyright, and the distinction
+      # matters: a raw exit code here and in the pre-commit hook would be two
+      # places holding the same exception list, and the first review of this work
+      # caught exactly that -- the hook allowed one finding while this step
+      # allowed none, so the required CI job was permanently red. The budget
+      # assertion is the single place the count and its reasoning live.
+      - name: Run pyright budget
+        run: python3 -m pytest tests/test_pyright_budget.py -q -p no:randomly -o addopts=
 
   test-fast:
     name: Test suite (fast)

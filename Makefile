@@ -35,7 +35,7 @@ lint:
 # three seconds, so it runs on every commit rather than on a schedule.
 typecheck:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
-	cd "$(SUITE_DIR)" && .venv/bin/pyright --pythonpath .venv/bin/python
+	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest tests/test_pyright_budget.py -q -p no:randomly
 
 # Module coupling report: fan-in hubs, fan-out reachers, and import cycles.
 # The ranked report is the work list for the splitting programme -- a file's size
