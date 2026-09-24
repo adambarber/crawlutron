@@ -90,22 +90,23 @@ class ResourceGauge:
     ``_usage_ratio``.
     """
 
+    _default_target: float
+    _default_hard: float
+
     def __init__(
         self,
-        target: float,
+        target: float | None = None,
         *,
         hard: float | None = None,
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
     ):
-        # ``target`` is a plain float here, not optional: the gauge arithmetic
-        # below (ratio - target, hard - target) has no defined value without one,
-        # and ``ResourceGate()`` used to reach this constructor with None and
-        # raise TypeError inside ``_hard``. Callers that want the self-managed
-        # default resolve it in their own constructor (see ``MemoryGate`` /
-        # ``CpuGate``) before delegating, which is where the optional really
-        # belongs.
+        use_default_target = target is None
+        if target is None:
+            target = self._default_target
+        if hard is None and use_default_target:
+            hard = self._default_hard
         self.target = target
         self.hard = self._hard(target) if hard is None else hard
         self.poll_seconds = poll_seconds
@@ -163,34 +164,15 @@ class MemoryGate(ResourceGauge):
     the hard-ceiling wait; only the dispatch scale uses the leading estimate.
     """
 
+    _default_target = _DEFAULT_TARGET
+    _default_hard = _DEFAULT_HARD
+
+    _prev_ratio: float | None = None
+    _prev_time: float = 0.0
+    _slope: float = 0.0
+
     # How much of a fast climb to fold into the leading estimate (capped).
     _MAX_ANTICIPATION = 0.15
-
-    def __init__(
-        self,
-        target: float | None = None,
-        *,
-        hard: float | None = None,
-        poll_seconds: float = 0.1,
-        max_wait_seconds: float = 30.0,
-        cgroup_root: str = "/sys/fs/cgroup",
-    ):
-        use_default_target = target is None
-        target = _DEFAULT_TARGET if target is None else target
-        if hard is None:
-            # Only the self-managed default uses the explicit _DEFAULT_HARD; an
-            # explicit target keeps the derived target+0.05 behavior.
-            hard = _DEFAULT_HARD if use_default_target else None
-        super().__init__(
-            target=target,
-            hard=hard,
-            poll_seconds=poll_seconds,
-            max_wait_seconds=max_wait_seconds,
-            cgroup_root=cgroup_root,
-        )
-        self._prev_ratio: float | None = None
-        self._prev_time: float = 0.0
-        self._slope: float = 0.0
 
     def _usage_ratio(self) -> float:
         """Current trailing fraction. Pure read (L7): never mutates slope

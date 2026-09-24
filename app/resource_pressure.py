@@ -21,6 +21,7 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from app.cgroup_sense import _read_int, _read_text
 from app.memory_pressure import (
@@ -209,31 +210,19 @@ class CpuGate(ResourceGauge):
     wait) -- there is no measured ceiling to defend, so it stays out of the way.
     """
 
+    _default_target = _DEFAULT_CPU_TARGET
+    _default_hard = _DEFAULT_CPU_HARD
+
     def __init__(
         self,
         target: float | None = None,
         *,
-        hard: float | None = None,
-        poll_seconds: float = 0.1,
-        max_wait_seconds: float = 30.0,
-        cgroup_root: str = "/sys/fs/cgroup",
         sample_seconds: float = 0.25,
         min_window_seconds: float = 0.05,
         cpu_budget: float | None = None,
+        **kwargs: Any,
     ):
-        use_default_target = target is None
-        target = _DEFAULT_CPU_TARGET if target is None else target
-        if hard is None:
-            # Only the self-managed default uses the explicit _DEFAULT_CPU_HARD;
-            # an explicit target keeps the derived target+0.05 behavior.
-            hard = _DEFAULT_CPU_HARD if use_default_target else None
-        super().__init__(
-            target=target,
-            hard=hard,
-            poll_seconds=poll_seconds,
-            max_wait_seconds=max_wait_seconds,
-            cgroup_root=cgroup_root,
-        )
+        super().__init__(target=target, **kwargs)
         self.sample_seconds = sample_seconds
         self.min_window_seconds = min_window_seconds
         self._cpu_budget = cpu_budget if cpu_budget is not None else _DEFAULT_CPU_BUDGET
