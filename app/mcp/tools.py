@@ -77,6 +77,11 @@ def _validation_message(error: Exception) -> str:
     return str(error)
 
 
+def _tool_error(error: HTTPException | ValueError) -> ToolResult:
+    message = _http_exception_message(error) if isinstance(error, HTTPException) else str(error)
+    return ToolResult(text=message, is_error=True)
+
+
 async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
     if "async_mode" in args or "webhook_url" in args:
         return ToolResult(
@@ -100,8 +105,8 @@ async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolR
             submitted_count=result["submitted_count"],
             policy_schema_version=result["policy_schema_version"],
         )
-    except HTTPException as error:
-        return ToolResult(text=_http_exception_message(error), is_error=True)
+    except (HTTPException, ValueError) as error:
+        return _tool_error(error)
     dump = unified.model_dump()
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
@@ -113,8 +118,8 @@ async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolRes
         return ToolResult(text=_validation_message(error), is_error=True)
     try:
         frontier = await map_site(payload, settings=settings, shutdown_event=shutdown_event)
-    except HTTPException as error:
-        return ToolResult(text=_http_exception_message(error), is_error=True)
+    except (HTTPException, ValueError) as error:
+        return _tool_error(error)
     return ToolResult(text=json.dumps(frontier, default=json_default), structured=frontier)
 
 
@@ -130,8 +135,8 @@ async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> Tool
         )
     try:
         unified = await render_endpoint_handler(payload, settings=settings)
-    except HTTPException as error:
-        return ToolResult(text=_http_exception_message(error), is_error=True)
+    except (HTTPException, ValueError) as error:
+        return _tool_error(error)
     dump = unified.model_dump()
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
@@ -143,8 +148,8 @@ async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> Tool
         return ToolResult(text=_validation_message(error), is_error=True)
     try:
         response = await search_endpoint_handler(payload, settings=settings)
-    except HTTPException as error:
-        return ToolResult(text=_http_exception_message(error), is_error=True)
+    except (HTTPException, ValueError) as error:
+        return _tool_error(error)
     dump = response.model_dump()
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 

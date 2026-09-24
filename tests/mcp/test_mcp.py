@@ -248,6 +248,37 @@ class TestToolsCall:
         assert result["isError"] is True
         assert "async_mode" in result["content"][0]["text"]
 
+    @pytest.mark.parametrize(
+        ("name", "handler_name", "arguments"),
+        [
+            ("crawl", "execute_crawl", {"url": "https://blocked.test/"}),
+            ("map", "map_site", {"url": "https://blocked.test/"}),
+            ("render", "render_endpoint_handler", {"url": "https://blocked.test/"}),
+            ("search", "search_endpoint_handler", {"query": "blocked"}),
+        ],
+    )
+    async def test_policy_refusal_is_a_tool_error_for_every_tool(
+        self, async_client, monkeypatch, name, handler_name, arguments
+    ):
+        async def refuse(*args, **kwargs):
+            raise ValueError("host_denied")
+
+        monkeypatch.setattr(f"app.mcp.tools.{handler_name}", refuse)
+        if name == "render":
+            monkeypatch.setattr("app.mcp.tools.get_browser_pool", lambda: object())
+        body = _body(
+            "tools/call",
+            params={"name": name, "arguments": arguments, "_meta": _META},
+        )
+        resp = await _mcp(async_client, body)
+
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert "error" not in payload
+        result = payload["result"]
+        assert result["isError"] is True
+        assert "host_denied" in result["content"][0]["text"]
+
     async def test_unknown_tool_returns_protocol_error(self, async_client):
         body = _body(
             "tools/call",

@@ -64,6 +64,7 @@ __all__ = [
 #   render.py           shared admission validation rejects a refused target
 #                       before render work is scheduled, so no refusal becomes a
 #                       per-URL result or a successful submission
+#   mcp/tools.py        one tool-error envelope for every MCP refusal
 _APP_FILE_LINE_BUDGETS = {
     "app/__init__.py": 1,
     "app/api/async_crawl_runner.py": 199,
@@ -150,7 +151,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/mcp/protocol.py": 140,
     "app/mcp/router.py": 72,
     "app/mcp/server.py": 259,
-    "app/mcp/tools.py": 272,
+    "app/mcp/tools.py": 277,
     "app/memory_pressure.py": 234,
     "app/metrics.py": 169,
     "app/models.py": 433,
