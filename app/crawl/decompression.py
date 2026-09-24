@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
-import io
 import zlib
 from typing import Protocol, cast
 
@@ -42,18 +40,30 @@ def _passthrough(body: bytes | bytearray | memoryview) -> bytes:
     return body if isinstance(body, bytes) else bytes(body)
 
 
-def _decompress_streaming(make_fileobj, compressed: bytes, max_output_bytes: int) -> bytes:
-    """Decompress ``compressed`` in bounded chunks, raising on overflow."""
-    out = bytearray()
-    with make_fileobj(compressed) as fh:
-        while True:
-            chunk = fh.read(65536)
-            if not chunk:
-                break
+def _decompress_bounded(make_decompressor, compressed: bytes, max_output_bytes: int) -> bytes:
+    try:
+        out = bytearray()
+        decompressor = make_decompressor()
+        pending = compressed
+        while pending:
+            read_size = min(65536, max_output_bytes - len(out) + 1)
+            chunk = decompressor.decompress(pending, read_size)
+            pending = decompressor.unconsumed_tail
             out.extend(chunk)
             if len(out) > max_output_bytes:
                 raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
-    return bytes(out)
+            if decompressor.eof:
+                pending = decompressor.unused_data
+                if pending:
+                    decompressor = make_decompressor()
+        out.extend(decompressor.flush())
+        if len(out) > max_output_bytes:
+            raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
+        return bytes(out)
+    except DecompressionTooLargeError:
+        raise
+    except Exception:
+        return _passthrough(compressed)
 
 
 def decompress_body(
@@ -88,33 +98,14 @@ def decompress_body(
     """
     encoding = content_encoding.lower().strip()
 
-    if "gzip" in encoding:
-        try:
-            return _decompress_streaming(
-                lambda data: gzip.GzipFile(fileobj=io.BytesIO(data)),
-                _passthrough(body),
-                max_output_bytes,
-            )
-        except DecompressionTooLargeError:
-            raise
-        except Exception:
-            return _passthrough(body)
-
-    if "deflate" in encoding:
-        try:
-            out = bytearray()
-            d = zlib.decompressobj()
-            out.extend(d.decompress(body, max_output_bytes + 1))
-            if len(out) > max_output_bytes or d.unconsumed_tail:
-                raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
-            out.extend(d.flush())
-            if len(out) > max_output_bytes:
-                raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
-            return bytes(out)
-        except DecompressionTooLargeError:
-            raise
-        except Exception:
-            return _passthrough(body)
+    if "gzip" in encoding or "deflate" in encoding:
+        return _decompress_bounded(
+            lambda: zlib.decompressobj(16 + zlib.MAX_WBITS)
+            if "gzip" in encoding
+            else zlib.decompressobj(),
+            _passthrough(body),
+            max_output_bytes,
+        )
 
     if "br" in encoding:
         decoded = _decompress_brotli(body, max_output_bytes)

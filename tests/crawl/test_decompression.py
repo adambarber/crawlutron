@@ -5,7 +5,7 @@ import zlib
 
 import pytest
 
-from app.crawl.decompression import DecompressionTooLargeError, decompress_body
+from app.crawl.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
 from app.crawl.strategies.body_decode import _decode_body
 
 _CAP = 10_000_000
@@ -201,6 +201,26 @@ def test_decompression_raises_when_output_exceeds_limit():
     bomb = _gzip_bomb(1_000_000)  # ~1 MB expanded, ~1 KB on the wire
     with pytest.raises(DecompressionTooLargeError):
         decompress_body(bomb, "gzip", max_output_bytes=10_000)
+
+
+def test_bounded_decompressor_reads_only_remaining_cap():
+    requested: list[int] = []
+
+    class FakeDecompressor:
+        unconsumed_tail = b""
+        eof = True
+        unused_data = b""
+
+        def decompress(self, data, max_length):
+            requested.append(max_length)
+            return b"A" * max_length
+
+        def flush(self):
+            return b""
+
+    with pytest.raises(DecompressionTooLargeError):
+        _decompress_bounded(FakeDecompressor, b"payload", 10)
+    assert requested == [11]
 
 
 def test_decompression_succeeds_under_limit():

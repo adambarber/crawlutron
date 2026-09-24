@@ -66,7 +66,7 @@ __all__ = [
 # and the ceiling has become the per-file table it replaced -- at which point the
 # metrics budgets' history-based monotonicity test in
 # tests/test_metrics_budget.py is the pattern to copy here, not another raise.
-_APP_TREE_LINE_BUDGET = 22_074
+_APP_TREE_LINE_BUDGET = 22_065
 
 
 def test_app_tree_line_count_does_not_grow():

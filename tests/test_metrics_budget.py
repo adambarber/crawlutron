@@ -63,7 +63,7 @@ BLOCK_LENGTH = 40
 # suite, so a budget cannot be quietly inflated -- the code has to actually get
 # smaller first.
 _BUDGETS = {
-    "function length": 41,
+    "function length": 40,
     "abc size": 6,
     "class length": 3,
     "block length": 14,
