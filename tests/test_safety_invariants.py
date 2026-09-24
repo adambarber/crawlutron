@@ -1171,21 +1171,21 @@ def test_robots_scanner_detector_bites():
 # Test-fake construction (jscpd #6: sanctioned builders over hand-built fakes)
 # ---------------------------------------------------------------------------
 
-_FAKE_BUILDER_SANCTIONED = frozenset({"_testkit.py"})
+_FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py"})
 
 
 def _testkit_builder_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag a test file hand-building a model the testkit already fabricates.
+    """Flag a test file hand-building a model the fetcher factory already fabricates.
 
     HttpFetchResult's field set is the crawl contract; a fixture that spells
     it out by hand silently diverges when the contract grows (the exact
-    drift #1797 is about). _testkit.make_fetch is the sanctioned builder.
+    drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
     """
     offenders: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
-                offender(path, node.lineno, "use _testkit.make_fetch instead of HttpFetchResult(...)")
+                offender(path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
             )
     return offenders
 
@@ -1197,7 +1197,7 @@ def test_tests_do_not_hand_build_http_fetch_results():
         if path.name in _FAKE_BUILDER_SANCTIONED:
             continue
         offenders.extend(_testkit_builder_offenders(tree, path))
-    assert not offenders, "Use _testkit.make_fetch(): " + ", ".join(offenders)
+    assert not offenders, "Use _fetcher_factories.make_fetch(): " + ", ".join(offenders)
 
 
 def test_fetch_builder_detector_bites():
