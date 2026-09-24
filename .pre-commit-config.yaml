@@ -60,11 +60,32 @@ repos:
       # the exact failure a ratchet exists to prevent, so lowering this number is
       # part of CLOSING a de-duplication, not a separate chore to remember.
       #
-      # It is 0.66 because that is the tightest value that passes the current
-      # measurement. Earlier numbers here (0.9, then 1.03) came from jscpd's
-      # ROUNDED summary line, and a threshold read off that display can be
-      # stricter than the thing it measures -- 0.9 would have failed a tree at
-      # 1.02. Verify against the committed tree before writing a number here.
+      # It is 0.66, and here is the honest reason it is not tighter. The exact
+      # value at 0de8e65 was 141 duplicated lines of 21,716 total =
+      # 0.649290845...%, so 0.65 passed there. It then FAILED at 0.65 moments
+      # later on a tree where an unrelated change had removed 46 lines of
+      # non-duplicated code: 141 of 21,670 is 0.6504%, which is over the
+      # threshold. A percentage ratchet punishes shrinkage -- the denominator
+      # moves when good work happens elsewhere, so deleting correct code can
+      # fail a duplication gate that the duplication itself never caused.
+      #
+      # That is why this sits one step above the tightest committed value rather
+      # than at it, and why the number is re-derived whenever the total moves.
+      # The alternative is an exact integer gate on duplicated lines. jscpd's
+      # --max-lines is NOT that: it filters out clones longer than N, so a low
+      # value makes jscpd report "analyzed no files" and exit 0, which is a
+      # silent pass rather than a gate. If you want the integer gate it has to
+      # read jscpd's JSON report and compare the count, which is code in the
+      # hook rather than configuration. Until that decision is made, 0.66 is the
+      # tightest value that survives ordinary line-count movement, and the
+      # duplicated LINE count (141) is the number to watch in review.
+      #
+      # Earlier numbers here (0.9, then 1.03, then 0.66) came from jscpd's
+      # ROUNDED summary line or from arithmetic on a rounded value, and both
+      # mistakes had the same effect: a threshold that is not actually tight, or
+      # one stricter than the thing it measures. 0.9 would have failed a tree at
+      # 1.02; 0.66 was set one step above the real value and a review caught it
+      # by RUNNING the threshold rather than reading it.
       #
       # The sanctioned pair is documented rather than exempt (Classification and
       # CrawlError share a prefix by design, pinned by
