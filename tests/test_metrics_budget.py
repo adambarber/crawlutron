@@ -1,0 +1,260 @@
+"""Metrics ratchets: the RuboCop Metrics family, for a project Ruff does not cover.
+
+Ruff owns the complexity half of this family and fails it outright at the
+current worst (`C901`, `PLR0911`, `PLR0912`, `PLR0913`, `PLR0915`). It has no
+equivalent for the four measures below, so they live here, in the project's
+existing AST home, rather than in a second linter that would own one rule and
+split the enforcement story across two exit codes.
+
+    function length   body span in lines
+    ABC size          sqrt(assignments^2 + branches^2 + conditions^2)
+    class length      body span in lines
+    block length      span of one compound statement's body
+
+Each is a BUDGET, not a threshold. The budget is the number of offenders the
+tree is currently allowed to have, so this suite is green on the day it lands
+and every later failure means the tree got worse. The offender list is in the
+failure message, which makes the gate and the work list the same artifact --
+there is no separate report to fall out of date.
+
+The target is zero in every case. At zero the budget does the failing on its
+own, so the flip from "warn" to "enforce" is not a change to this file; it is
+four integers in `_BUDGETS` reaching the value they are already heading for.
+That is the whole reason this is a count and not a severity threshold: a
+severity threshold never reaches zero on its own, and a gate that can be
+satisfied forever is not a ratchet.
+
+To see the current work list without failing anything, run this module and read
+the counts, or call the collectors directly from a shell:
+
+    python -c "import sys; sys.path[:0]=['tests']; \\
+      import test_metrics_budget as m; m.report()"
+
+Thresholds are deliberately aggressive. A ratchet set at the current worst is
+a ratchet that has already failed; these sit low enough that the worst
+functions in the tree are offenders, and low enough that the count moves
+noticeably when a file is split.
+"""
+
+from __future__ import annotations
+
+import ast
+import math
+import pathlib
+from collections.abc import Iterator
+from dataclasses import dataclass
+
+import pytest
+
+APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
+
+FUNCTION_LENGTH = 60
+ABC_SIZE = 30
+CLASS_LENGTH = 250
+BLOCK_LENGTH = 40
+
+# Offender counts the tree is currently allowed to have. These are the
+# measurements at 0a87dd2, and they are the whole mechanism: a wave that
+# splits a file lowers the number it is allowed to have, in the same commit
+# that did the splitting. Lowering a budget below the true count fails the
+# suite, so a budget cannot be quietly inflated -- the code has to actually get
+# smaller first.
+_BUDGETS = {
+    "function length": 45,
+    "abc size": 10,
+    "class length": 3,
+    "block length": 17,
+}
+
+_BRANCH_NODES = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.ExceptHandler,
+    ast.With,
+    ast.AsyncWith,
+    ast.Assert,
+    ast.BoolOp,
+)
+
+_COMPOUND_NODES = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+)
+
+
+@dataclass(frozen=True)
+class Offender:
+    metric: str
+    where: str
+    name: str
+    size: int
+
+    def __str__(self) -> str:
+        return f"{self.metric}: {self.where} {self.name} ({self.size})"
+
+
+def _app_files() -> list[pathlib.Path]:
+    return sorted(APP_ROOT.rglob("*.py"))
+
+
+def _span(node: ast.AST, body: list[ast.stmt]) -> int:
+    if not body:
+        return 0
+    return (body[-1].end_lineno or body[-1].lineno) - node.lineno + 1
+
+
+def _abc_size(node: ast.AST) -> int:
+    nodes = list(ast.walk(node))
+    assignments = sum(1 for item in nodes if isinstance(item, ast.Assign))
+    branches = sum(1 for item in nodes if isinstance(item, _BRANCH_NODES))
+    conditions = sum(1 for item in nodes if isinstance(item, ast.comprehension))
+    return round(math.sqrt(assignments**2 + branches**2 + conditions**2))
+
+
+def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
+    """Oversized compound statements, counting each region once.
+
+    A `try` that contains a 50-line `with` is one oversized region, not two, and
+    an `if`/`elif`/`else` ladder is several. Reporting the inner spans too would
+    inflate the count by measuring the same lines twice, which makes the budget
+    meaningless. So a block is kept only when no already-claimed enclosing span
+    contains it: outermost first, and nesting never double-counts.
+    """
+    candidates: list[tuple[int, int, int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, _COMPOUND_NODES):
+            continue
+        body = list(node.body)
+        if not body:
+            continue
+        end = body[-1].end_lineno or body[-1].lineno
+        candidates.append((node.lineno, end, end - node.lineno + 1, type(node).__name__))
+    candidates.sort(key=lambda item: (item[0], -item[1]))
+
+    claimed: list[tuple[int, int]] = []
+    kept: list[tuple[int, int, str]] = []
+    for start, end, size, label in candidates:
+        if any(low <= start and end <= high for low, high in claimed):
+            continue
+        if size > BLOCK_LENGTH:
+            kept.append((start, size, label))
+        claimed.append((start, end))
+    return kept
+
+
+_METRIC_LIMITS = {
+    "function length": FUNCTION_LENGTH,
+    "abc size": ABC_SIZE,
+    "class length": CLASS_LENGTH,
+    "block length": BLOCK_LENGTH,
+}
+
+
+def _candidates(tree: ast.AST) -> list[tuple[str, int, str, int]]:
+    """Every (metric, size, label, line) this tree offers, over-limit or not.
+
+    Measuring first and filtering once keeps the per-node cases to a single
+    expression each, instead of a repeated collect-and-append per metric. The
+    line travels with the candidate because method names repeat -- every class
+    in the tree has an `__init__` -- so a name is not an identity.
+    """
+    found: list[tuple[str, int, str, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.append(("function length", _span(node, node.body), node.name, node.lineno))
+            found.append(("abc size", _abc_size(node), node.name, node.lineno))
+        elif isinstance(node, ast.ClassDef):
+            found.append(("class length", _span(node, node.body), node.name, node.lineno))
+    for start, size, label in _outer_blocks(tree):
+        found.append(("block length", size, label, start))
+    return found
+
+
+def offenders(metric: str) -> list[Offender]:
+    limit = _METRIC_LIMITS[metric]
+    found: list[Offender] = []
+    for path in _app_files():
+        relative = path.relative_to(APP_ROOT.parent).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for candidate_metric, size, label, line in _candidates(tree):
+            if candidate_metric == metric and size > limit:
+                found.append(Offender(metric, f"{relative}:{line}", label, size))
+    return sorted(found, key=lambda item: (-item.size, item.where))
+
+
+def report() -> None:
+    for metric, budget in _BUDGETS.items():
+        found = offenders(metric)
+        state = "OVER" if len(found) > budget else "ok"
+        print(f"{metric:<16} {len(found):>3} / budget {budget:<3} [{state}]")
+        for item in found:
+            print(f"    {item}")
+
+
+@pytest.mark.parametrize("metric", sorted(_BUDGETS))
+def test_metric_budget_is_not_exceeded(metric: str) -> None:
+    budget = _BUDGETS[metric]
+    found = offenders(metric)
+    assert len(found) <= budget, (
+        f"{metric}: {len(found)} offenders exceeds the budget of {budget}.\n"
+        f"Each of these is work that was already on the list; a wave that fixes one "
+        f"lowers the budget in `_BUDGETS` in the same commit. The target is 0, at which "
+        f"point this assertion enforces the rule on its own.\n"
+        + "\n".join(f"  {item}" for item in found)
+    )
+
+
+@pytest.mark.parametrize("metric", sorted(_BUDGETS))
+def test_metric_budget_is_tight(metric: str) -> None:
+    """A budget must not sit above the measurement, or it is a standing allowance."""
+    budget = _BUDGETS[metric]
+    actual = len(offenders(metric))
+    assert budget <= actual, (
+        f"{metric}: the budget of {budget} is stale -- only {actual} offenders remain. "
+        f"Tighten it to {actual} in `_BUDGETS` in the same commit that reduced them. "
+        f"A budget that outlives the work it was counting is not a ratchet."
+    )
+
+
+def test_metric_collectors_see_the_whole_tree() -> None:
+    """The gate is only worth what it scans.
+
+    An empty scan and a whole-tree scan both report zero offenders, so a broken
+    collector would otherwise turn this module into four permanently-passing
+    tests. This pins that the walkers reach real code rather than proving it by
+    counting offenders, which is the mistake the zero-observation proof in
+    `test_safety_invariants.py` already made once.
+    """
+    total = sum(1 for _ in APP_ROOT.rglob("*.py"))
+    assert total > 50, f"expected a real app tree, found {total} files"
+
+    functions = 0
+    classes = 0
+    for path in _app_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions += 1
+            elif isinstance(node, ast.ClassDef):
+                classes += 1
+    assert functions > 500, f"function walk reached only {functions} definitions"
+    assert classes > 50, f"class walk reached only {classes} definitions"
+
+
+def _iter_definitions() -> Iterator[ast.AST]:
+    for path in _app_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        yield from ast.walk(tree)
+
+
+def test_metric_collection_is_deterministic() -> None:
+    """The numbers in the budgets came from somewhere; make that somewhere checkable."""
+    for metric in _BUDGETS:
+        assert offenders(metric) == offenders(metric), f"{metric} collection is not deterministic"
