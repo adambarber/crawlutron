@@ -122,14 +122,37 @@ ignore = [
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["Depends", "fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
 
+# Complexity ratchets. These are 10% UNDER the worst offender in app/ at the time
+# of writing, not round numbers, because a round number is a number nobody
+# re-derived: the point is that every threshold names a function that exists and
+# is still too big. Measure with
+#   ruff check --isolated --preview --select C901,PLR0912,PLR0915 --output-format concise app
+# and take the top value per rule; read it as the CURRENT worst.
+#
+# The thresholds ship with the refactor that brought the tree under them, not
+# after it. Setting them above the pre-refactor worst would let the next wave
+# start already red, which trains people to expect red and to re-baseline it.
+#
+# History: 42 / 46 / 164 before the HTTP subsystem split. The split took
+# _http_strategy_result (the 164-statement monolith) to 5 / 4 / 17, which left
+# _run_job as the worst offender at 30 / 31 / 87, so the thresholds came down to
+# exactly that. Lowering them here rather than later is the rule: a ratchet that
+# waits for a cleanup phase is a ratchet nobody pulls.
+#
+# Each tightening hands the next wave its target for free. _run_job is the
+# subject of the job-runner split, and when it comes down the next-worst moves
+# again, so this block is expected to keep coming down.
 [tool.ruff.lint.mccabe]
-max-complexity = 37
+max-complexity = 30
 
 [tool.ruff.lint.pylint]
-max-branches = 41
-max-statements = 147
-# PLR0911 and PLR0913 remain pending: extraction.py:530 and result_helpers.py:341
-# belong to the follow-up return/argument de-fanging wave.
+max-branches = 31
+max-statements = 87
+# PLR0911 (returns) and PLR0913 (arguments) are still unselected. Their maxima
+# are 10 and 24, against the 9 and 21 that a 10%-under ratchet would demand, and
+# both are the same two functions: extraction.py:530 and result_helpers.py:341.
+# Those are de-fanged in the extraction and result-helper waves, and both rules
+# turn on in the same commit that fixes them.
 
 [tool.ruff.lint.flake8-bandit]
 # The scheduler's random.uniform crawl-delay jitter is throughput shaping, not
