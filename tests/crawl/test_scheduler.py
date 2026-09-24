@@ -6,8 +6,7 @@ import time
 from typing import Any
 
 import pytest
-from _testkit import *
-from _testkit import make_job, make_result
+from _result_builders import make_job, make_result
 
 from app.crawl.result_helpers import _failed_result_for
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
@@ -404,8 +403,9 @@ class TestSchedulerPolicies:
         Uses an ``asyncio.Event`` (not ``asyncio.sleep``) to force ordering,
         because the test environment patches ``sleep`` to be instant.
         """
+        from _result_builders import make_job, make_result
+
         from app.scheduler import DomainScheduler
-        from tests._testkit import make_job, make_result
 
         on_result_order: list[int] = []
         release_slow = asyncio.Event()
@@ -435,8 +435,9 @@ class TestSchedulerPolicies:
 
     async def test_run_returns_results_keyed_by_index_without_on_result(self):
         """Backward-compatible path (recursive frontier) still returns results."""
+        from _result_builders import make_job, make_result
+
         from app.scheduler import DomainScheduler
-        from tests._testkit import make_job, make_result
 
         sched = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
 

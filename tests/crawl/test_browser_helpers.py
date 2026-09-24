@@ -13,7 +13,7 @@ os.environ.setdefault(
     "BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl")
 )
 
-from _testkit import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions

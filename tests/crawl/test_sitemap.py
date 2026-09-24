@@ -3,7 +3,9 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from _testkit import UNRESTRICTED_HOST_POLICY, install_to_thread_spy, make_fetch
+from _assertions import install_to_thread_spy
+from _fetcher_factories import make_fetch
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds

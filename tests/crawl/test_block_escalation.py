@@ -8,7 +8,8 @@ from pathlib import Path
 
 os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "bc-block-test.jsonl"))
 
-from _testkit import assert_result_success, make_fetch
+from _assertions import assert_result_success
+from _fetcher_factories import make_fetch
 
 from app.constants import (
     HTTP_CFFI_IMPERSONATE,

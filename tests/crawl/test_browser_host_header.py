@@ -6,7 +6,8 @@ subsequent navigations) carries the spoofed Host. The render must set it
 for the navigation, then clear it.
 """
 
-from _testkit import UNRESTRICTED_HOST_POLICY, pinned_renderer
+from _browser_doubles import pinned_renderer
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
 from app.models import RenderOptions

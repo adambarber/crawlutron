@@ -6,7 +6,8 @@ defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 """
 
 import pytest
-from _testkit import BOOL_ENV_CASES, set_optional_env
+from _assertions import set_optional_env
+from _policy_factories import BOOL_ENV_CASES
 
 from app.crawl.strategies.browser import BrowserRenderer
 

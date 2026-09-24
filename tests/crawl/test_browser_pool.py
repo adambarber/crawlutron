@@ -3,7 +3,7 @@
 import inspect
 
 import pytest
-from _testkit import *
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser_pool as bp
 from app import resource_pressure as rp

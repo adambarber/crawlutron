@@ -11,7 +11,7 @@ atomic compare-and-set on the row itself.
 
 import ast
 
-from _testkit import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from tests.chokepoint_walks import app_trees, offender

@@ -7,7 +7,7 @@ import threading
 from unittest.mock import patch
 
 import pytest
-from _testkit import make_fetch
+from _fetcher_factories import make_fetch
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER

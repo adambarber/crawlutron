@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import socket
 
-from _testkit import UNRESTRICTED_HOST_POLICY, block_private_targets
+from _assertions import block_private_targets
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler

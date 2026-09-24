@@ -151,7 +151,7 @@ def pytest_collection_modifyitems(config, items):
     Camoufox/Playwright instead of failing mid-suite. When a browser is present
     the marker is left intact so the tests actually execute.
     """
-    from _testkit import browser_available
+    from _assertions import browser_available
 
     if browser_available():
         return
@@ -310,7 +310,7 @@ def _cleanup_extraction_executors():
 @pytest.fixture
 def base_policy():
     """Fresh minimal crawl policy; tests may mutate their copy freely."""
-    from _testkit import make_base_policy
+    from _policy_factories import make_base_policy
 
     return make_base_policy()
 
@@ -318,7 +318,7 @@ def base_policy():
 @pytest.fixture
 def job_store(tmp_path):
     """JobStore backed by a per-test SQLite db under ``tmp_path``."""
-    from _testkit import make_job_store
+    from _job_harnesses import make_job_store
 
     return make_job_store(str(tmp_path))
 

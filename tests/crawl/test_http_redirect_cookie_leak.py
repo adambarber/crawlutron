@@ -1,4 +1,4 @@
-from _testkit import MockResponse, patch_http_fetcher_transport
+from _transport_doubles import MockResponse, patch_http_fetcher_transport
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy

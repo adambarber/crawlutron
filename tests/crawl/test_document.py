@@ -2,8 +2,19 @@
 
 from pathlib import Path
 
-from _testkit import *
-from _testkit import make_fetch
+from _extraction_helpers import (
+    _collect_document_item_lines,
+    _default_document_text_extractor,
+    _document_item_range,
+    _format_extracted_document_text,
+    _is_document_item_marker,
+    _is_document_non_item_section,
+    _join_document_paragraph_lines,
+    _looks_like_document_heading,
+    _next_non_empty_document_line,
+    _should_join_document_paragraph,
+)
+from _fetcher_factories import make_fetch
 
 from app.crawl.strategies.document import (
     _extract_pdf_bytes_to_markdown,

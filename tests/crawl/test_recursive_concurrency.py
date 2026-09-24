@@ -8,7 +8,7 @@ no rate limiting).
 import asyncio
 from urllib.parse import urlparse
 
-from _testkit import make_fetch
+from _fetcher_factories import make_fetch
 
 from app.crawl.engine import crawl_request
 from app.settings import CrawlerSettings

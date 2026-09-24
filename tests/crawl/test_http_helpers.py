@@ -1,17 +1,19 @@
 """Fetch and service helpers: headers, cookie handling, quality scoring, decode and rendering."""
 
 import asyncio
+import gzip
 
 import pytest
-from _testkit import *
-from _testkit import (
-    assert_result_failed,
-    assert_result_success,
-    make_base_policy,
-    make_fetch,
-    ok_fetcher,
-    raise_fetcher,
+from _assertions import assert_result_failed, assert_result_success
+from _extraction_helpers import _extract_discovered_links
+from _fetcher_factories import make_fetch, ok_fetcher, raise_fetcher
+from _http_test_helpers import (
+    HTTP_CFFI_IMPERSONATE,
+    _decode_body,
+    _quality_score,
+    decompress_body,
 )
+from _policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
 
 from app.api.render import _render_options
 from app.constants import (

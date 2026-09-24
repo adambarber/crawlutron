@@ -1,6 +1,5 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
-from _testkit import *
 
 
 class TestResultHelpersEdges:

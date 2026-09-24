@@ -7,8 +7,15 @@ import time
 
 import bs4
 import pytest
-from _testkit import *
-from _testkit import BOOL_ENV_CASES, set_optional_env
+from _assertions import set_optional_env
+from _extraction_helpers import (
+    _detect_pagination,
+    _extract_discovered_links,
+    _html_diagnostics,
+    extract_content,
+    extract_js_endpoints,
+)
+from _policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
 
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
@@ -316,7 +323,7 @@ class TestSelectedExtraction:
 
 class TestLinkExtraction:
     def test_engine_parse_robots_blank_line(self):
-        from _testkit import _extract_discovered_links
+        from _extraction_helpers import _extract_discovered_links
 
         # Test link extraction with mixed quote styles (covers edge cases)
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"

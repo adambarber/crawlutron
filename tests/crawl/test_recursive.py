@@ -4,7 +4,7 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-from _testkit import run_scoped_crawl, site_fetcher
+from _fetcher_factories import run_scoped_crawl, site_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
@@ -121,7 +121,7 @@ class TestRecursiveCrawl:
 
 class TestRecursiveCrawlServer:
     async def test_real_server_recursive_follows_links(self, base_url):
-        from _testkit import run_crawl_async
+        from _fetcher_factories import run_crawl_async
 
         payload = {
             "url": f"{base_url}/",

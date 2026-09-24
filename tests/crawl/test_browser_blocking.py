@@ -2,11 +2,12 @@
 
 import asyncio
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _testkit import *
-from _testkit import BrowserFakePage
+from _browser_doubles import BrowserFakePage
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 from pydantic import ValidationError
 
 import app.crawl.strategies.browser as browser_mod
@@ -283,7 +284,7 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 @pytest.mark.browser
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from _testkit import block_private_targets
+    from _assertions import block_private_targets
 
     from app.crawl.strategies.browser import _make_ssrf_websocket_handler
 

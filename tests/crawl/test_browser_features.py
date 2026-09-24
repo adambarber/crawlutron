@@ -11,7 +11,7 @@ unittest.mock) so the orchestration logic is exercised deterministically.
 
 import base64
 
-from _testkit import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions

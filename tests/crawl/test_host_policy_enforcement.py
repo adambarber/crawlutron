@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from _testkit import make_fetch
+from _fetcher_factories import make_fetch
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as pool_mod

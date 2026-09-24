@@ -10,7 +10,7 @@ connection-scoped, so "configure at connect time" is a one-call contract).
 
 import ast
 
-from _testkit import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.job_store import JobStore
 from app.crawl.result_store import CrawlResultStore

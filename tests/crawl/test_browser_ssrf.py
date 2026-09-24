@@ -4,12 +4,8 @@ pytestmark = pytest.mark.browser
 
 import urllib.request
 
-from _testkit import (
-    UNRESTRICTED_HOST_POLICY,
-    BrowserFakePage,
-    build_pinned_renderer,
-    pinned_renderer,
-)
+from _browser_doubles import BrowserFakePage, build_pinned_renderer, pinned_renderer
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod

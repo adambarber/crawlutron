@@ -7,8 +7,11 @@ code previously fell through to a second, unconditional fetch because neither
 round-trips and doubled origin load for one crawl.
 """
 
-from _testkit import *  # noqa: F403 (test wildcard seam)
+from _fetcher_factories import make_fetch
 
+from app.constants import HTTP_DECLARED_CRAWLER
+from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
 from app.validation import HostPolicy
 
 

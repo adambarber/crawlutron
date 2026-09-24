@@ -2,8 +2,6 @@
 
 import threading
 
-from _testkit import *
-
 from app.crawl.cache import HttpCache
 
 

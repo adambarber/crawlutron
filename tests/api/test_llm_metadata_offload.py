@@ -7,7 +7,7 @@ parse with ``asyncio.to_thread`` via the additive async shaping API.
 
 import asyncio
 
-from _testkit import install_to_thread_spy
+from _assertions import install_to_thread_spy
 
 from app.api.response_shaping import (
     abuild_unified_crawl_response,

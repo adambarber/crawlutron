@@ -8,11 +8,14 @@ contract: overlapping checks must be observable via an in-flight counter.
 
 import asyncio
 
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _result_builders import Spill, make_engine_result
+from _scheduler_doubles import FakeScheduler
+
 from app.crawl.admission import RobotsGate
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.settings import CrawlerSettings
-from tests._testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, Spill, make_engine_result
 
 
 def _make_job(index: int, host: str) -> CrawlTask:

@@ -159,13 +159,9 @@ max-statements = 87
 # security-sensitive; its S311 finding is suppressed via per-file-ignores below.
 
 [tool.ruff.lint.per-file-ignores]
-# Test suites import the shared helper namespace with star imports, set up
-# env/monkeypatch state before imports, and exercise security-sensitive shapes
-# (asserts, fake creds) that bandit/bugbear flag; strict hygiene does not apply.
-"tests/**" = ["E402", "F403", "F405", "S", "B", "C901", "PLR0912", "PLR0915"]
-# _testkit is the single home for shared test factories and re-exports the
-# coverage-suite surface (app internals) for star-import suites by design.
-"tests/_testkit.py" = ["F401"]
+# Test suites exercise security-sensitive shapes (asserts, fake creds) that
+# bandit/bugbear flag; strict hygiene does not apply.
+"tests/**" = ["E402", "S", "B", "C901", "PLR0912", "PLR0915"]
 # Engine/strategy modules perform deferred heavy imports (optional browser
 # bindings) after module-level constants are computed; E402 is deliberate.
 # ARG002: _MatchAll.match(path) accepts `path` for surface parity with the other

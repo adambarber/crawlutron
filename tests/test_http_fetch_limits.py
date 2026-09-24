@@ -5,11 +5,12 @@ The fetcher must reject (413) responses that would expand to more than
 for chunked (no Content-Length) responses.
 """
 
+import asyncio
 import gzip
 import http.server
 import threading
 
-from _testkit import _spawn_fetch, asyncio
+from _fetcher_factories import _spawn_fetch
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy

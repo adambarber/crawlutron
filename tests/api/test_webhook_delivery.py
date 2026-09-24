@@ -10,7 +10,7 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _testkit import block_private_targets
+from _assertions import block_private_targets
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore

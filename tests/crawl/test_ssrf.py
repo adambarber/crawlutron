@@ -4,7 +4,7 @@ import socket
 from unittest.mock import patch
 
 import pytest
-from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
+from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host

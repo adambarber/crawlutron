@@ -12,7 +12,6 @@ by the chokepoint that already scrubs cookies.
 """
 
 import pytest
-from _testkit import *  # noqa: F403 (test seam per project convention)
 
 from app.api_models import CrawlPolicy, Credential
 from app.crawl.payload_helpers import _payload_policy

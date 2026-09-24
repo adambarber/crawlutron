@@ -9,7 +9,7 @@ import sys
 
 import httpx
 import pytest
-from _testkit import _temp_cache, make_content_cache_with_entry, make_fetch
+from _fetcher_factories import _temp_cache, make_content_cache_with_entry, make_fetch
 from helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc

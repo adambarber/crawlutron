@@ -1,6 +1,9 @@
 """URL and network policy validation: schemes, private networks, registrable domains."""
 
-from _testkit import *
+import os
+
+import pytest
+from _validation_helpers import normalize_public_http_url, public_url_or_none, registrable_domain
 
 from app.validation import HostPolicy
 

@@ -2,8 +2,7 @@
 
 import json
 
-from _testkit import *
-from _testkit import pytest
+import pytest
 
 from app.output_formats import (
     SUPPORTED_OUTPUT_FORMATS,

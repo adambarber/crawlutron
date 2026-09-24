@@ -1,5 +1,6 @@
 """App lifecycle edge cases: import failures, lifespan startup/shutdown paths."""
 
+import asyncio
 import inspect
 
 
@@ -12,7 +13,6 @@ def _read_main_source() -> str:
 
 
 
-from _testkit import *
 
 
 class TestAppLifecycleEdges:

@@ -6,8 +6,8 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from _testkit import *
-from _testkit import make_job_store
+from _job_harnesses import make_job_store
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
 

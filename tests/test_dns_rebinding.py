@@ -10,7 +10,7 @@ import socket
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from _testkit import assert_dns_pinning_uses_first_resolution, block_private_targets
+from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy

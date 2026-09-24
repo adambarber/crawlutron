@@ -3,7 +3,7 @@
 from collections import deque
 
 import pytest
-from _testkit import *
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
@@ -92,7 +92,7 @@ class TestPoolExhaustionRequeue:
         classification was destroyed at the scheduler envelope (AttributeError
         -> network_error) and the re-queue never fired.
         """
-        from _testkit import run_crawl_async
+        from _fetcher_factories import run_crawl_async
 
         from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES
         from app.crawl.strategies.browser_pool import PooledBrowserWorker

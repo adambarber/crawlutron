@@ -3,11 +3,15 @@
 import inspect
 
 import pytest
-from _testkit import *
 
 from app import constants as app_constants
 from app.api_models import CrawlClassification
-from app.classify import CLASSIFICATION_SIGNATURES, STRONG_CLASSIFICATION_MARKERS, classify_page
+from app.classify import (
+    CLASSIFICATION_SIGNATURES,
+    STRONG_CLASSIFICATION_MARKERS,
+    classify_page,
+    classify_page_with_evidence,
+)
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     CLASSIFICATION_STATUS_BY_LABEL,

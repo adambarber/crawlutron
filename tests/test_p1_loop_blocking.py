@@ -17,10 +17,12 @@ import time
 from pathlib import Path
 
 import pytest
-from _testkit import HttpCache, make_job_store, site_fetcher
+from _fetcher_factories import site_fetcher
+from _job_harnesses import make_job_store
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
+from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _ResultSpill, crawl_request
 from app.crawl.job_store import JobStatus
@@ -354,7 +356,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     async def test_run_async_crawl_save_does_not_block_the_event_loop(
         self, real_sleeps, monkeypatch, tmp_path
     ) -> None:
-        from _testkit import make_job_store
+        from _job_harnesses import make_job_store
 
         from app.api.async_crawl_runner import run_async_crawl
         from app.crawl.result_store import CrawlResultStore

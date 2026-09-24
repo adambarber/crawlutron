@@ -5,7 +5,8 @@ import json
 import time
 
 import pytest
-from _testkit import browser_available, make_crawl_payload
+from _assertions import browser_available
+from _fetcher_factories import make_crawl_payload
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER

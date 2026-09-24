@@ -2,7 +2,6 @@ import multiprocessing
 import os
 
 import pytest
-from _testkit import *
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
 

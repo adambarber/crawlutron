@@ -1,7 +1,12 @@
 """HTTP body handling through a live server: caching, rate-limit cooldown, cffi."""
 
-from _testkit import *
+import pytest
+from _extraction_helpers import _default_http_fetcher
+from _policy_factories import _policy
 
+from app.constants import HTTP_DECLARED_CRAWLER
+from app.crawl.cache import HttpCache
+from app.crawl.engine import crawl_request
 from app.validation import HostPolicy
 
 

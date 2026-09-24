@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from _testkit import make_fetch
+from _fetcher_factories import make_fetch
 
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request

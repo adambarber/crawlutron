@@ -1,7 +1,9 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
 import pytest
-from _testkit import UNRESTRICTED_HOST_POLICY, make_crawl_payload, poll_until
+from _assertions import poll_until
+from _fetcher_factories import make_crawl_payload
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 from helpers.server import WEBHOOK_RECEIVED
 
 

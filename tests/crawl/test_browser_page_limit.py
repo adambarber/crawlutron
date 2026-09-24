@@ -11,7 +11,7 @@ tabs and crashes/OOMs the shared Camoufox process.
 
 import asyncio
 
-from _testkit import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions

@@ -8,7 +8,7 @@ When the client sends a Transfer-Encoding: chunked request with multiple
 
 import inspect
 
-from _testkit import extract_function_body
+from _assertions import extract_function_body
 
 
 def _read_main_source() -> str:

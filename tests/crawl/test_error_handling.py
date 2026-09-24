@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 import httpx
 import pytest
-from _testkit import *
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception

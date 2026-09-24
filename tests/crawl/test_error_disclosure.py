@@ -10,7 +10,8 @@ import json
 import socket
 
 import httpx
-from _testkit import http_strategy_policy, invoke_http_strategy
+from _fetcher_factories import invoke_http_strategy
+from _policy_factories import http_strategy_policy
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.result_helpers import _classify_error_code

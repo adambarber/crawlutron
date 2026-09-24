@@ -9,7 +9,7 @@ pathological patterns) and uses the compiled pattern's .search() in the loop.
 
 import re
 
-from _testkit import run_scoped_crawl, site_fetcher
+from _fetcher_factories import run_scoped_crawl, site_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request

@@ -1,6 +1,6 @@
 """Payload helpers: policy construction, advertised limits and invalid-limit handling."""
 
-from _testkit import *
+import pytest
 
 from app.crawl.payload_helpers import _payload_policy
 from app.settings import CrawlerSettings

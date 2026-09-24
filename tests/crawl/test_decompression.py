@@ -4,7 +4,6 @@ import gzip
 import zlib
 
 import pytest
-from _testkit import *
 
 from app.crawl.decompression import DecompressionTooLargeError, decompress_body
 from app.crawl.strategies.body_decode import _decode_body

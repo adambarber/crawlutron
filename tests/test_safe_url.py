@@ -15,7 +15,8 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
-from _testkit import UNRESTRICTED_HOST_POLICY, block_private_targets
+from _assertions import block_private_targets
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.safe_url import SafeUrl
 

@@ -3,7 +3,9 @@
 import asyncio
 
 import pytest
-from _testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, site_fetcher
+from _fetcher_factories import site_fetcher
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _scheduler_doubles import FakeScheduler
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -398,7 +400,7 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
     Returns the (envelope, waits) pair: the combined ResourceGate is
     exercised with only the pinned resource driving the throttle.
     """
-    from _testkit import site_fetcher
+    from _fetcher_factories import site_fetcher
 
     import app.crawl.engine as engine_mod
     from app.crawl.cache import HttpCache

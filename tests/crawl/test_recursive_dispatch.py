@@ -7,11 +7,14 @@ full engine (the reason the dispatch was extracted from ``crawl_request``).
 
 import asyncio
 
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _result_builders import Spill, make_engine_result
+from _scheduler_doubles import FakeScheduler
+
 from app.constants import BROWSER_HEADLESS
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.scheduler import DomainScheduler
-from tests._testkit import UNRESTRICTED_HOST_POLICY, FakeScheduler, Spill, make_engine_result
 
 
 class _Scheduler(FakeScheduler):

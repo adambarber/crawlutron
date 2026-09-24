@@ -1,7 +1,7 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
-from _testkit import make_fetch
+from _fetcher_factories import make_fetch
 
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import CrawlResult

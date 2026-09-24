@@ -2,8 +2,7 @@
 
 import inspect
 import json
-
-from _testkit import os
+import os
 
 from app.crawl.engine import _ResultSpill
 
