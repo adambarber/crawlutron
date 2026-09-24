@@ -456,7 +456,12 @@ def test_host_policy_probe_table_matches_entry_table():
 
 async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch):
     from app.api import render
+    from app.crawl import payload_helpers
 
-    monkeypatch.setattr(render, "normalize_public_http_url", lambda url, *, policy: url)
+    def allow(url, *, policy):
+        return url
+
+    monkeypatch.setattr(payload_helpers, "normalize_public_http_url", allow)
+    monkeypatch.setattr(render, "normalize_public_http_url", allow)
     with pytest.raises(AssertionError):
         await _probe_render(monkeypatch)

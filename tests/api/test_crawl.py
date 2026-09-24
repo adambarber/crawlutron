@@ -420,21 +420,14 @@ class TestDiscoveryAndRenderApi:
         assert item["selected_strategy"] == BROWSER_HEADLESS, item
         assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADLESS, item
 
-    async def test_v1_render_strategy_is_null_when_no_browser_served(self, monkeypatch):
-        """A result no browser produced (here a policy refusal on a malformed
-        URL) must fall back to null, never an invented member: the pool never
-        ran, so claiming it ran headless would be the same invention the
-        hard-coded label was."""
+    async def test_v1_render_rejects_invalid_url_before_browser(self, monkeypatch):
         old = self._warmed_pool_endpoint(monkeypatch, ["https://warmup.example/"])
         try:
             resp = await self.client.post("/v1/render", json={"url": "not a url"})
         finally:
             set_browser_pool(old)
-        assert resp.status_code == 200, resp.text
-        item = resp.json()["results"][0]
-        assert item["status"] == "disallowed", item
-        assert item["selected_strategy"] is None, item
-        assert item["attempted_strategies"][0]["strategy"] is None, item
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "validation_error"
 
     async def test_validation_exception_handler_returns_422(self):
         from fastapi import Request

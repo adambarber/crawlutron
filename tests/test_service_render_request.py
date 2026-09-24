@@ -17,15 +17,15 @@ class TestServiceRenderRequest:
         assert out["submitted_count"] == 1
         assert out["results"][0]["status"] == "success"
 
-    async def test_render_request_disallowed_url(self):
+    async def test_render_request_disallowed_url_is_not_accepted(self):
         from app.settings import CrawlerSettings
 
-        out = await render_request(
-            {"url": "not a url"},
-            settings=CrawlerSettings.from_mapping(),
-            worker=_fake_browser(html="<html></html>", text="t"),
-        )
-        assert out["results"][0]["status"] == "disallowed"
+        with pytest.raises(ValueError, match="invalid_url"):
+            await render_request(
+                {"url": "not a url"},
+                settings=CrawlerSettings.from_mapping(),
+                worker=_fake_browser(html="<html></html>", text="t"),
+            )
 
     async def test_render_request_duplicate_urls_return_one_result_each(self):
         """Exact-duplicate URLs in one request collapse to a single submission."""

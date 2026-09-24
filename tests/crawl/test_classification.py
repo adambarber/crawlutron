@@ -372,16 +372,6 @@ class TestStatusAgreesWithClassification:
         )
         assert result.status == status_for_classification("robots_disallowed") == "skipped"
 
-    @pytest.mark.parametrize(
-        "classification", ["invalid_url", "unsupported_scheme", "private_network_target"]
-    )
-    def test_policy_refusal_builder_status_matches_the_table(self, classification):
-        from app.api.render import _disallowed_result
-        from app.constants import status_for_classification
-
-        result = _disallowed_result((0, "http://example.com/"), classification)
-        assert result.status == status_for_classification(classification) == "disallowed"
-
     def test_browser_retry_exhausted_status_matches_the_table(self):
         """The browser retry loop's terminal verdict for a navigation timeout."""
         from app.constants import status_for_classification

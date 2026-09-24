@@ -21,13 +21,11 @@ from app.crawl.result_helpers import (
     _terminal_crawl_result,
 )
 from app.models import (
-    Classification,
     CrawlJob,
     CrawlResult,
     CrawlWorker,
     EngineCrawlResult,
     RenderOptions,
-    as_classification,
     to_dict,
 )
 from app.scheduler import DomainScheduler
@@ -49,21 +47,6 @@ def _render_options(payload: dict[str, Any], settings: CrawlerSettings) -> Rende
             "max_retries": settings.default_max_retries,
             "respect_robots": settings.respect_robots,
         },
-    )
-
-
-def _disallowed_result(
-    index_url: tuple[int, str], classification: Classification, elapsed_ms: int = 0
-) -> CrawlResult:
-    index, url = index_url
-    return _terminal_crawl_result(
-        url=url,
-        status="disallowed",
-        classification=classification,
-        attempts=0,
-        elapsed_ms=elapsed_ms,
-        domain="",
-        error=classification,
     )
 
 
@@ -99,31 +82,15 @@ async def render_request(
         payload,
         active_settings.max_batch_size,
         host_policy=host_policy,
-        validate_targets=False,
     )
 
     options = _render_options(payload, active_settings)
     started = time.monotonic()
-    immediate_results: dict[int, CrawlResult] = {}
     jobs: list[CrawlJob] = []
 
     for index, url in enumerate(urls):
-        try:
-            normalized = normalize_public_http_url(url, policy=host_policy)
-            domain = registrable_domain(normalized)
-        except ValueError as error:
-            # ``normalize_public_http_url`` raises with the taxonomy code itself
-            # (unsupported_scheme / invalid_url / private_network_target), so the
-            # code is already a classification member -- but ``str(exc)`` is
-            # unproven at this layer, and ``classification`` is a wire enum a
-            # caller can switch on. Accept it only if it names a real member;
-            # anything else is an untriaged refusal, not a page verdict.
-            code = str(error)
-            classification = as_classification(code, default="invalid_url")
-            immediate_results[index] = _disallowed_result(
-                (index, url), classification, int((time.monotonic() - started) * 1000)
-            )
-            continue
+        normalized = normalize_public_http_url(url, policy=host_policy)
+        domain = registrable_domain(normalized)
         jobs.append(
             CrawlJob(
                 index=index,
@@ -148,7 +115,7 @@ async def render_request(
     # missing slot becomes a per-URL failed result instead of a 500.
     from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 
-    by_index = dict(immediate_results)
+    by_index: dict[int, CrawlResult] = {}
     worker_errors: dict[int, BaseException] = {}
 
     async def _collect(index: int, result: EngineCrawlResult | CrawlResult) -> None:
@@ -229,4 +196,4 @@ async def render_request(
     }
 
 
-__all__ = ["render_request", "_render_options", "_disallowed_result"]
+__all__ = ["render_request", "_render_options"]

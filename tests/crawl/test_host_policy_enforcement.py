@@ -182,13 +182,13 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
 
     from app.api.render import render_request
 
-    response = await render_request(
-        {"url": "https://blocked.test/secret"},
-        settings=_settings(denied="blocked.test"),
-        worker=worker,
-    )
+    with pytest.raises(ValueError, match="host_denied"):
+        await render_request(
+            {"url": "https://blocked.test/secret"},
+            settings=_settings(denied="blocked.test"),
+            worker=worker,
+        )
 
-    assert response["results"][0]["status"] == "disallowed"
     assert calls == []
 
 

@@ -61,11 +61,9 @@ __all__ = [
 #   migrations/manifest.py  column comparison consolidated to one by-name function
 #   extraction.py       frame URL disclosure filtering (a DIFFERENT fix)
 #   fetch_policy.py     feed URL disclosure filtering (a DIFFERENT fix)
-#   render.py           one line that OPTS OUT of admission validation, because
-#                       render reports a refusal as a per-URL result rather than
-#                       rejecting the request. That reporting shape is itself a
-#                       confirmed finding, so this entry is provisional: it moves
-#                       again when render validates at admission.
+#   render.py           shared admission validation rejects a refused target
+#                       before render work is scheduled, so no refusal becomes a
+#                       per-URL result or a successful submission
 _APP_FILE_LINE_BUDGETS = {
     "app/__init__.py": 1,
     "app/api/async_crawl_runner.py": 199,
@@ -82,7 +80,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/api/metrics_router.py": 21,
     "app/api/middleware.py": 83,
     "app/api/policy_defaults.py": 34,
-    "app/api/render.py": 232,
+    "app/api/render.py": 199,
     "app/api/render_endpoint.py": 85,
     "app/api/render_router.py": 34,
     "app/api/response_shaping.py": 393,
@@ -114,7 +112,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/__main__.py": 6,
     "app/crawl/migrations/manifest.py": 216,
     "app/crawl/migrations/runner.py": 179,
-    "app/crawl/payload_helpers.py": 217,
+    "app/crawl/payload_helpers.py": 204,
     "app/crawl/recursive.py": 438,
     "app/crawl/render_options.py": 93,
     "app/crawl/result_helpers.py": 534,
