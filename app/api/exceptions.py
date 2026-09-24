@@ -56,6 +56,15 @@ def http_error(status_code: int, code: str, message: str, details: dict | None =
     return HTTPException(status_code=status_code, detail=error_envelope(code, message, details))
 
 
+def validation_http_error(error: ValueError) -> HTTPException:
+    return http_error(
+        422,
+        "validation_error",
+        "Request validation failed",
+        {"errors": [{"msg": str(error)}]},
+    )
+
+
 BROWSER_POOL_MESSAGE = "Browser pool is not initialized; the service is starting up or shutting down."
 
 
@@ -114,5 +123,6 @@ __all__ = [
     "error_envelope_from_detail",
     "http_error",
     "http_exception_handler",
+    "validation_http_error",
     "validation_exception_handler",
 ]

@@ -23,7 +23,8 @@ from fastapi.responses import JSONResponse, Response
 from starlette.requests import Request
 
 from app.api.crawl_executor import execute_crawl
-from app.api.exceptions import http_error
+from app.api.exceptions import http_error, validation_http_error
+from app.api.main_helpers import record_crawl_completion
 from app.api.response_shaping import abuild_unified_crawl_response
 from app.api.webhooks import validate_webhook_url_async
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
@@ -132,11 +133,12 @@ async def crawl(
             result = await crawl_awaitable
         else:
             result = await await_or_client_gone(crawl_awaitable, request)
-        get_metrics().observe_crawl(
-            results=result.get("results", []),
-            elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
+        record_crawl_completion(
+            result,
+            _crawl_started,
+            event="crawl_request_completed",
+            logger=logger,
         )
-        logger.info("crawl_request_completed", extra={"url_count": len(result.get("results", []))})
         response_model = await abuild_unified_crawl_response(
             result.get("results", []),
             request_id=result["request_id"],
@@ -160,12 +162,7 @@ async def crawl(
     except ValueError as error:
         get_metrics().observe_crawl(errors=1)
         logger.warning("crawl_request_rejected", extra={"error": str(error)})
-        raise http_error(
-            422,
-            "validation_error",
-            "Request validation failed",
-            {"errors": [{"msg": str(error)}]},
-        ) from error
+        raise validation_http_error(error) from error
     finally:
         readiness_state.end_request()
 

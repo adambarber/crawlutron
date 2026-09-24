@@ -962,8 +962,8 @@ async def _crawl_request_impl(
             )
         return index, result
 
-    async def _robots_allows_target(target_url: str) -> bool:
-        rules, _sitemaps, _crawl_delay = await load_robots_rules(
+    async def _load_robots_for_target(target_url: str):
+        return await load_robots_rules(
             _robots_policy.robots_origin(target_url, policy=host_policy),
             fetcher,
             policy["limits"]["timeout_seconds"],
@@ -972,18 +972,13 @@ async def _crawl_request_impl(
             ),
             policy=host_policy,
         )
+
+    async def _robots_allows_target(target_url: str) -> bool:
+        rules, _sitemaps, _crawl_delay = await _load_robots_for_target(target_url)
         return _robots_allows(target_url, rules)
 
     async def _robots_crawl_delay_for(target_url: str) -> float | None:
-        _rules, _sitemaps, crawl_delay = await load_robots_rules(
-            _robots_policy.robots_origin(target_url, policy=host_policy),
-            fetcher,
-            policy["limits"]["timeout_seconds"],
-            fetch_and_decode=(
-                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
-            ),
-            policy=host_policy,
-        )
+        _rules, _sitemaps, crawl_delay = await _load_robots_for_target(target_url)
         return crawl_delay
 
     def _robots_sitemaps_for(origin: str) -> list[str] | None:

@@ -170,7 +170,7 @@ class CrawlClassification(str, Enum):
 # silently drift apart across modules. Derived from the taxonomy above so a
 # grouping can never name a label the enum does not know about.
 # ---------------------------------------------------------------------------
-HTTP_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
+BROWSER_BLOCKED_CLASSIFICATIONS = frozenset(
     member.value
     for member in (
         CrawlClassification.captcha_detected,
@@ -179,23 +179,17 @@ HTTP_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
         CrawlClassification.login_required,
         CrawlClassification.paywall_detected,
         CrawlClassification.rate_limited,
+    )
+)
+
+HTTP_BLOCKED_CLASSIFICATIONS = BROWSER_BLOCKED_CLASSIFICATIONS | frozenset(
+    member.value
+    for member in (
         CrawlClassification.cookie_consent_required,
         CrawlClassification.javascript_required,
         CrawlClassification.unsupported_browser,
         CrawlClassification.geolocation_blocked,
         CrawlClassification.waf_challenge_detected,
-    )
-)
-
-BROWSER_BLOCKED_CLASSIFICATIONS: frozenset[str] = frozenset(
-    member.value
-    for member in (
-        CrawlClassification.captcha_detected,
-        CrawlClassification.bot_challenge_detected,
-        CrawlClassification.access_denied,
-        CrawlClassification.login_required,
-        CrawlClassification.paywall_detected,
-        CrawlClassification.rate_limited,
     )
 )
 

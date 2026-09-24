@@ -82,6 +82,11 @@ def _tool_error(error: HTTPException | ValueError) -> ToolResult:
     return ToolResult(text=message, is_error=True)
 
 
+def _tool_success(value: BaseModel | dict[str, Any]) -> ToolResult:
+    dump = value.model_dump() if isinstance(value, BaseModel) else value
+    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
+
+
 async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
     if "async_mode" in args or "webhook_url" in args:
         return ToolResult(
@@ -107,8 +112,7 @@ async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolR
         )
     except (HTTPException, ValueError) as error:
         return _tool_error(error)
-    dump = unified.model_dump()
-    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
+    return _tool_success(unified)
 
 
 async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -120,7 +124,7 @@ async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolRes
         frontier = await map_site(payload, settings=settings, shutdown_event=shutdown_event)
     except (HTTPException, ValueError) as error:
         return _tool_error(error)
-    return ToolResult(text=json.dumps(frontier, default=json_default), structured=frontier)
+    return _tool_success(frontier)
 
 
 async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -137,8 +141,7 @@ async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> Tool
         unified = await render_endpoint_handler(payload, settings=settings)
     except (HTTPException, ValueError) as error:
         return _tool_error(error)
-    dump = unified.model_dump()
-    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
+    return _tool_success(unified)
 
 
 async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
@@ -150,8 +153,7 @@ async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> Tool
         response = await search_endpoint_handler(payload, settings=settings)
     except (HTTPException, ValueError) as error:
         return _tool_error(error)
-    dump = response.model_dump()
-    return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
+    return _tool_success(response)
 
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:

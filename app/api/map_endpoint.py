@@ -13,12 +13,12 @@ import logging
 import time
 
 from app.api.crawl_executor import execute_crawl
-from app.api.exceptions import http_error
+from app.api.exceptions import validation_http_error
+from app.api.main_helpers import record_crawl_completion
 from app.api_models import MapRequest
 from app.constants import MAX_DISCOVERED_LINKS
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.map import build_site_map
-from app.metrics import get_metrics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
@@ -51,23 +51,16 @@ async def map_site(
             settings=active_settings,
             shutdown_event=shutdown_event,
         )
-        get_metrics().observe_crawl(
-            results=result.get("results", []),
-            elapsed_ms=(time.monotonic() - _crawl_started) * 1000,
-        )
-        logger.info(
-            "map_request_completed",
-            extra={"url_count": len(result.get("results", []))},
+        record_crawl_completion(
+            result,
+            _crawl_started,
+            event="map_request_completed",
+            logger=logger,
         )
         return build_site_map(result, host_policy=HostPolicy.from_settings(active_settings))
     except ValueError as error:
         logger.warning("map_request_rejected", extra={"error": str(error)})
-        raise http_error(
-            422,
-            "validation_error",
-            "Request validation failed",
-            {"errors": [{"msg": str(error)}]},
-        ) from error
+        raise validation_http_error(error) from error
     finally:
         readiness_state.end_request()
 

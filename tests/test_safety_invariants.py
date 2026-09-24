@@ -65,6 +65,8 @@ __all__ = [
 #                       before render work is scheduled, so no refusal becomes a
 #                       per-URL result or a successful submission
 #   mcp/tools.py        one tool-error envelope for every MCP refusal
+#   main_helpers.py     shared crawl completion metrics and logging
+#   exceptions.py       shared validation error-envelope construction
 _APP_FILE_LINE_BUDGETS = {
     "app/__init__.py": 1,
     "app/api/async_crawl_runner.py": 199,
@@ -72,10 +74,10 @@ _APP_FILE_LINE_BUDGETS = {
     "app/api/crawl_executor.py": 85,
     "app/api/crawl_router.py": 134,
     "app/api/dependencies.py": 37,
-    "app/api/exceptions.py": 118,
+    "app/api/exceptions.py": 128,
     "app/api/job_runner.py": 469,
     "app/api/jobs_router.py": 173,
-    "app/api/main_helpers.py": 27,
+    "app/api/main_helpers.py": 46,
     "app/api/map_endpoint.py": 75,
     "app/api/map_router.py": 35,
     "app/api/metrics_router.py": 21,
@@ -151,7 +153,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/mcp/protocol.py": 140,
     "app/mcp/router.py": 72,
     "app/mcp/server.py": 259,
-    "app/mcp/tools.py": 277,
+    "app/mcp/tools.py": 279,
     "app/memory_pressure.py": 234,
     "app/metrics.py": 169,
     "app/models.py": 433,
