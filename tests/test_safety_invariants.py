@@ -72,6 +72,7 @@ __all__ = [
 #   worker.py           the single sync/async worker-dispatch door
 #   browser_result.py   browser capture, extraction, discovery, and result phases
 #   strategy_chain.py   one-target strategy escalation and cookie retry phases
+#   recursive_admission.py  resource, tier, dedupe, and robots admission for one batch
 #
 # Seven more moved in the pyright-enablement commit, and again not for one reason:
 #
@@ -145,7 +146,8 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/manifest.py": 216,
     "app/crawl/migrations/runner.py": 189,
     "app/crawl/payload_helpers.py": 204,
-    "app/crawl/recursive.py": 438,
+    "app/crawl/recursive.py": 335,
+    "app/crawl/recursive_admission.py": 212,
     "app/crawl/render_options.py": 93,
     "app/crawl/result_helpers.py": 534,
     "app/crawl/result_store.py": 85,

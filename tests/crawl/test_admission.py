@@ -13,7 +13,8 @@ from app.crawl.admission import admit_discovered_links
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.payload_helpers import _payload_policy
-from app.crawl.recursive import _batch_is_http_heavy, run_recursive_crawl
+from app.crawl.recursive import run_recursive_crawl
+from app.crawl.recursive_admission import _batch_is_http_heavy
 from app.health.readiness import ReadinessState
 from app.memory_pressure import (
     MemoryGate,

@@ -56,7 +56,7 @@ load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
-from app.crawl.admission import normalize_sitemap_candidates
+from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
@@ -64,7 +64,6 @@ from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.recursive import (
     RECURSIVE_RAMP_MAX,
     _spill_write,
-    gather_robots_decisions,
     run_recursive_crawl,
 )
 from app.crawl.render_options import policy_wants_html

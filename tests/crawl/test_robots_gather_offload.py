@@ -176,7 +176,7 @@ async def test_nonrecursive_robots_checks_run_concurrently(real_sleeps, monkeypa
 
 async def test_gather_preserves_order_and_skips_delay_when_disallowed():
     """Order is input order; disallowed URLs never pay for a crawl-delay fetch."""
-    from app.crawl.recursive import gather_robots_decisions
+    from app.crawl.admission import gather_robots_decisions
 
     delay_calls: list[str] = []
 

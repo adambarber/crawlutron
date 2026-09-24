@@ -11,25 +11,19 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import logging
 import re
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
-from itertools import islice
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, cast
 
-from app.constants import (
-    BROWSER_STRATEGIES,
-    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-    HTTP_STRATEGIES,
-)
+from app.constants import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 from app.crawl.admission import (
     AdmittedLink,
     admit_discovered_links,
     canonical_page_identity,
-    gather_robots_decisions,
 )
+from app.crawl.recursive_admission import admit_recursive_batch
 from app.crawl.result_helpers import _failed_result_for
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
@@ -82,8 +76,6 @@ def requeue_pool_exhausted(
     return True
 
 
-logger = logging.getLogger(__name__)
-
 # Self-managed concurrency ceiling (#self-tuning): the recursive dispatcher
 # ramps its per-batch concurrency up to this many base units while the resource
 # gate is open, then the gate's scale factor pulls it back under pressure. This
@@ -99,36 +91,6 @@ RECURSIVE_RAMP_MAX: int = 128
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
-def _batch_is_http_heavy(
-    scheduler: DomainScheduler,
-    frontier: deque[tuple[int, CrawlTask]],
-    sample: int,
-) -> bool:
-    """True when the majority of the sampled frontier is HTTP-pinned work.
-
-    A task counts as HTTP-heavy only when its domain was already pinned to an
-    HTTP strategy (i.e. it has proven it can be fetched without a browser).
-    Browser-pinned and cold (unpinned) domains keep the conservative combined
-    memory+CPU gate: unpinned work may still escalate to a browser, and browser
-    work is memory+CPU heavy. This is the safety that lets HTTP-heavy batches
-    ride spare CPU headroom instead of being throttled by memory held by
-    browser processes.
-    """
-    if not frontier or sample <= 0:
-        return False
-    get_pin = getattr(scheduler, "get_pinned_strategy", None)
-    counted = 0
-    http_count = 0
-    # Slice the deque without materializing the whole frontier (islice avoids an
-    # O(n) copy per batch on large crawls).
-    for _, task in islice(frontier, sample):
-        if task.domain is None:
-            continue
-        counted += 1
-        pinned = get_pin(task.domain) if get_pin is not None else None
-        if pinned is not None and pinned in HTTP_STRATEGIES:
-            http_count += 1
-    return counted > 0 and http_count >= counted / 2
 
 
 async def _spill_write(spill: Any, index: int, result: Any) -> None:
@@ -145,53 +107,170 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
         await res
 
 
-def _count_strategy_tiers(scheduler, frontier, n):
-    """Count HTTP vs browser tasks among the next ``n`` frontier entries.
 
-    A task whose domain is pinned to a browser strategy is counted as browser;
-    everything else (HTTP-pinned or cold/unpinned) is counted as HTTP -- we are
-    optimistic that cold domains fetch without a browser and escalate later.
-    """
-    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
-    http = browser = 0
-    for _, task in islice(frontier, n):
-        if get_pinned is None:
-            http += 1
+
+@dataclass
+class _RecursiveState:
+    frontier: deque[tuple[int, CrawlTask]]
+    visited: set[str]
+    next_index: int
+    ramp: float
+    page_count: int = 0
+    pool_exhaustion_attempts: dict[str, int] = field(default_factory=dict)
+
+    def make_admitted_task(self, link: AdmittedLink) -> tuple[int, CrawlTask]:
+        task = CrawlTask(
+            index=self.next_index,
+            original_url=link.original_url,
+            normalized_url=link.normalized_url,
+            domain=link.delay_domain,
+        )
+        self.next_index += 1
+        return link.depth, task
+
+
+@dataclass
+class _RecursiveRun:
+    scheduler: DomainScheduler
+    worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
+    robots_allows: Callable[[str], Awaitable[bool]]
+    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None
+    robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
+    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
+    spill: Any
+    max_depth: int
+    max_pages: int
+    respect_robots: bool
+    include_html: bool
+    want_document_bodies: bool
+    scope_pattern: Any
+    global_concurrency: int
+    seed_sitemaps: bool
+    resource_gate: ResourceGate
+    admission: WeightedAdmission
+    host_policy: HostPolicy
+    ramp_max: int
+    http_heavy_lookahead: int
+    spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]]
+
+
+async def _seed_recursive_frontier(
+    run: _RecursiveRun,
+    state: _RecursiveState,
+    frontier: deque[tuple[int, CrawlTask]],
+    seed_identities: set[str],
+) -> None:
+    if not run.seed_sitemaps:
+        return
+    for seed in await run.sitemap_seeds():
+        identity = canonical_page_identity(seed, host_policy=run.host_policy) or seed
+        if identity in seed_identities:
             continue
-        pinned = get_pinned(task.domain)
-        if pinned is not None and pinned in BROWSER_STRATEGIES:
-            browser += 1
-        else:
-            http += 1
-    return http, browser
+        seed_identities.add(identity)
+        task = CrawlTask(
+            index=state.next_index,
+            original_url=seed,
+            normalized_url=identity,
+            domain=registrable_domain(identity),
+        )
+        frontier.append((0, task))
+        state.next_index += 1
 
 
-def _pop_admitted(frontier, admit_h, admit_b, scheduler):
-    """Pop up to ``admit_h + admit_b`` tasks, HTTP-first, capping browser tasks.
 
-    Excess (not admitted this batch) is returned to the front of the frontier so
-    it is retried on the next batch rather than dropped.
-    """
-    if admit_h + admit_b == 0:
-        return []
-    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
-    taken: list[tuple[int, CrawlTask]] = []
-    while frontier and len(taken) < admit_h + admit_b:
-        taken.append(frontier.popleft())
-    http_tasks: list = []
-    browser_tasks: list = []
-    for item in taken:
-        _, task = item
-        is_browser = False
-        if get_pinned is not None:
-            pinned = get_pinned(task.domain)
-            is_browser = pinned is not None and pinned in BROWSER_STRATEGIES
-        (browser_tasks if is_browser else http_tasks).append(item)
-    selected = http_tasks[:admit_h] + browser_tasks[:admit_b]
-    excess = http_tasks[admit_h:] + browser_tasks[admit_b:]
-    for item in reversed(excess):
-        frontier.appendleft(item)
-    return selected
+
+async def _crawl_recursive_batch(
+    run: _RecursiveRun,
+    allowed_jobs: list[tuple[int, CrawlTask]],
+) -> dict[int, EngineCrawlResult] | None:
+    if not allowed_jobs:
+        return {}
+    return await run.scheduler.run(
+        [job for _, job in allowed_jobs],
+        run.worker,
+        failed_result=_engine_envelope,
+    )
+
+
+async def _commit_recursive_result(
+    run: _RecursiveRun,
+    state: _RecursiveState,
+    job: CrawlTask,
+    depth: int,
+    result: EngineCrawlResult,
+) -> bool:
+    if result.classification == "browser_pool_exhausted" and requeue_pool_exhausted(
+        job,
+        depth=depth,
+        frontier=state.frontier,
+        attempts=state.pool_exhaustion_attempts,
+    ):
+        state.visited.discard(job.normalized_url)
+        return False
+    if not run.include_html:
+        result = replace(result, html=None, text=None)
+    await _spill_write(run.spill, job.index, result)
+    state.page_count += 1
+    return True
+
+
+async def _expand_recursive_result(
+    run: _RecursiveRun,
+    state: _RecursiveState,
+    depth: int,
+    result: EngineCrawlResult,
+) -> None:
+    await admit_discovered_links(
+        result.discovered_links,
+        source_depth=depth,
+        max_depth=run.max_depth,
+        max_pages=run.max_pages,
+        known=state.visited,
+        frontier=state.frontier,
+        make_entry=state.make_admitted_task,
+        scope_pattern=run.scope_pattern,
+        want_document_bodies=run.want_document_bodies,
+        respect_robots=run.respect_robots,
+        robots_allows=run.robots_allows,
+        robots_crawl_delay=run.robots_crawl_delay,
+        commit_crawl_delay=lambda domain, delay: run.scheduler.set_domain_min_delay(domain, delay),
+        host_policy=run.host_policy,
+        occupied=state.page_count + len(state.frontier),
+    )
+
+
+async def _commit_recursive_results(
+    run: _RecursiveRun,
+    state: _RecursiveState,
+    allowed_jobs: list[tuple[int, CrawlTask]],
+    scheduled_results: dict[int, EngineCrawlResult] | None,
+) -> None:
+    assert scheduled_results is not None
+    for depth, job in allowed_jobs:
+        result = scheduled_results[job.index]
+        if not await _commit_recursive_result(run, state, job, depth, result):
+            continue
+        if depth >= run.max_depth:
+            continue
+        await _expand_recursive_result(run, state, depth, result)
+
+
+async def _start_recursive_state(
+    run: _RecursiveRun,
+    jobs: list[CrawlTask],
+) -> _RecursiveState:
+    state = _RecursiveState(
+        frontier=deque((0, job) for job in jobs),
+        visited=set(),
+        next_index=len(jobs),
+        ramp=float(run.global_concurrency),
+    )
+    seed_identities: set[str] = {
+        canonical_page_identity(job.normalized_url, host_policy=run.host_policy) or job.normalized_url
+        for job in jobs
+    }
+    await _seed_recursive_frontier(run, state, state.frontier, seed_identities)
+    return state
 
 
 async def run_recursive_crawl(
@@ -224,215 +303,33 @@ async def run_recursive_crawl(
     closures so this stays a pure dispatch function.
     """
     metrics = get_metrics()
-
-    admission = admission or default_admission_policy(resource_gate)
-
-    visited: set[str] = set()
-    # How many times each URL has been re-queued for pool exhaustion, so the
-    # cap in requeue_pool_exhausted can bound a permanently oversubscribed crawl.
-    pool_exhaustion_attempts: dict[str, int] = {}
-    frontier: deque[tuple[int, CrawlTask]] = deque([(0, job) for job in jobs])
-    seed_identities = {
-        canonical_page_identity(job.normalized_url, host_policy=host_policy) or job.normalized_url
-        for job in jobs
-    }
-    next_index = len(jobs)
-
-    def make_admitted_task(link: AdmittedLink) -> tuple[int, CrawlTask]:
-        nonlocal next_index
-        task = CrawlTask(
-            index=next_index,
-            original_url=link.original_url,
-            normalized_url=link.normalized_url,
-            domain=link.delay_domain,
-        )
-        next_index += 1
-        return link.depth, task
-
-    page_count = 0
-    # bounded recursive BFS (#11) seeded by sitemaps (#13)
-    if seed_sitemaps:
-        for seed in await sitemap_seeds():
-            identity = canonical_page_identity(seed, host_policy=host_policy) or seed
-            if identity in seed_identities:
-                continue
-            seed_identities.add(identity)
-            frontier.append(
-                (
-                    0,
-                    CrawlTask(
-                        index=next_index,
-                        original_url=seed,
-                        normalized_url=identity,
-                        domain=registrable_domain(identity),
-                    ),
-                )
-            )
-            next_index += 1
-    _ramp = float(global_concurrency)
-    while frontier and page_count < max_pages:
+    run = _RecursiveRun(
+        scheduler=scheduler,
+        worker=worker,
+        robots_allows=robots_allows,
+        robots_crawl_delay=robots_crawl_delay,
+        robots_disallowed=robots_disallowed,
+        sitemap_seeds=sitemap_seeds,
+        spill=spill,
+        max_depth=max_depth,
+        max_pages=max_pages,
+        respect_robots=respect_robots,
+        include_html=include_html,
+        want_document_bodies=want_document_bodies,
+        scope_pattern=scope_pattern,
+        global_concurrency=global_concurrency,
+        seed_sitemaps=seed_sitemaps,
+        resource_gate=resource_gate,
+        admission=admission or default_admission_policy(resource_gate),
+        host_policy=host_policy,
+        ramp_max=RECURSIVE_RAMP_MAX,
+        http_heavy_lookahead=_HTTP_HEAVY_LOOKAHEAD,
+        spill_write=_spill_write,
+    )
+    state = await _start_recursive_state(run, jobs)
+    while state.frontier and state.page_count < max_pages:
         if shutdown_event.is_set():
             break
-        # Pull a batch sized to the configured concurrency (and the remaining
-        # page budget) so discovered links are fetched *through the scheduler*
-        # concurrently instead of strictly one-by-one. Without this the
-        # recursive crawl ignores global_concurrency entirely.
-        # #self-tuning: ride at the resource targets instead of OOMing (memory)
-        # or tripping the kernel CPU throttle (CPU). Above either hard ceiling
-        # dispatch pauses until usage drains; in the soft zone batches shrink
-        # proportionally to the most-contended resource.
-        # Resource signals (kept for metrics + the HTTP-aware two-tier scale).
-        scale = resource_gate.batch_scale_factor()
-        metrics.resource_memory_utilization = resource_gate.memory_ratio()
-        metrics.resource_cpu_utilization = resource_gate.cpu_ratio()
-        # #self-tuning HTTP-aware admission (item 7): browser crawls are the
-        # memory hog, which would otherwise throttle the whole batch. When the
-        # upcoming batch is predominantly HTTP-pinned, ride the CPU-aware HTTP
-        # scale instead of the memory-held-by-browsers combined gate.
-        _http_scale = getattr(resource_gate, "http_scale_factor", None)
-        if _http_scale is not None and _batch_is_http_heavy(scheduler, frontier, _HTTP_HEAVY_LOOKAHEAD):
-            scale = _http_scale()
-        # #self-tuning first-batch warmup: until the CPU gate has a sample, cap
-        # the first batch at base concurrency.
-        _cpu = getattr(resource_gate, "cpu", None)
-        _concurrency_mult = ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-        if _cpu is not None and not _cpu.is_warm():
-            _concurrency_mult = 1
-        # Self-managing concurrency: ramp per-batch concurrency up while the gate
-        # is open, let the gate's scale shrink it under pressure. global_concurrency
-        # is the floor; RECURSIVE_RAMP_MAX the ceiling (bounded so one batch
-        # cannot overshoot the hard headroom). The weighted admission below is
-        # the real RAM/CPU backstop.
-        if scale >= 1.0:
-            _ramp = min(float(RECURSIVE_RAMP_MAX), _ramp * 1.10)
-        else:
-            _ramp = max(float(global_concurrency), _ramp * scale)
-        _base = max(1, int(_ramp))
-        batch_size = min(
-            len(frontier),
-            max(1, _base * _concurrency_mult),
-            max(1, max_pages - page_count),
-        )
-        if scale < 1.0:
-            _limited = "cpu" if resource_gate.cpu_ratio() >= resource_gate.memory_ratio() else "memory"
-            logger.debug(
-                "resource admission: throttling batch (scale=%.2f, limited_by=%s, mem=%.2f cpu=%.2f)",
-                scale,
-                _limited,
-                metrics.resource_memory_utilization,
-                metrics.resource_cpu_utilization,
-            )
-            batch_size = max(1, int(batch_size * scale))
-            metrics.resource_throttle_batches_total += 1
-        # Two-tier weighted admission (replaces the stop-the-world pause): grant
-        # as many HTTP tasks as fit the live RAM/CPU headroom, then up to the
-        # browser-tier cap. If nothing fits we yield briefly (backpressure)
-        # rather than parking the whole crawl, so the cheap HTTP path scales to
-        # hundreds of concurrent pages while the browser tier stays RAM-budgeted.
-        _want_http, _want_browser = _count_strategy_tiers(scheduler, frontier, batch_size)
-        _admit_h, _admit_b = await admission.admit(_want_http, _want_browser)
-        if _admit_h + _admit_b < batch_size:
-            metrics.resource_throttle_batches_total += 1
-            batch_size = _admit_h + _admit_b
-        batch = _pop_admitted(frontier, _admit_h, _admit_b, scheduler)
-
-        # Dedupe the batch against visited AND itself (in input order) before
-        # screening: the old sequential loop marked visited as it went, so a
-        # repeated URL in one batch was crawled once. The concurrent screen
-        # below must see the same de-duplicated set.
-        pending: list[tuple[int, CrawlTask]] = []
-        seen_in_batch: set[str] = set()
-        for depth, job in batch:
-            if job.normalized_url in visited or job.normalized_url in seen_in_batch:
-                continue
-            seen_in_batch.add(job.normalized_url)
-            pending.append((depth, job))
-        if respect_robots:
-            decisions = await gather_robots_decisions(
-                [job.normalized_url for _, job in pending], robots_allows, robots_crawl_delay
-            )
-        else:
-            decisions = [(True, None)] * len(pending)
-        allowed_jobs: list[tuple[int, CrawlTask]] = []
-        for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
-            if respect_robots and not allowed:
-                await _spill_write(spill, job.index, robots_disallowed(job))
-                visited.add(job.normalized_url)
-                page_count += 1
-                continue
-            # Honor a host's robots Crawl-delay as a per-domain minimum delay
-            # (adversarial perf #2.6). Applied on top of the scheduler's global/
-            # adaptive pacing. Applied in batch order so same-domain races
-            # resolve deterministically (last write wins, as before).
-            if respect_robots and delay and delay > 0:
-                scheduler.set_domain_min_delay(job.domain, delay)
-            allowed_jobs.append((depth, job))
-            visited.add(job.normalized_url)
-
-        scheduled_results = (
-            await scheduler.run(
-                [job for _, job in allowed_jobs],
-                worker,
-                failed_result=_engine_envelope,
-            )
-            if allowed_jobs
-            else {}
-        )
-
-        for depth, job in allowed_jobs:
-            # Align each result with its own job by index. ``scheduler.run``
-            # reports a ``job.index -> result`` mapping (completion order is
-            # arbitrary), so a positional zip against ``allowed_jobs`` -- which
-            # ``_pop_admitted`` has already tier-reordered (HTTP first) -- would
-            # write each result to the wrong spill index whenever HTTP and
-            # browser tasks interleave, and shift every subsequent pairing after
-            # a failed job (B1).
-            #
-            # A job can never be absent from the mapping: the scheduler's
-            # worker-exception chokepoint builds a classified terminal result
-            # for any worker that raised.
-            # ``scheduled_results`` is None only when the scheduler was asked to
-            # deliver nothing; this branch runs inside the loop that consumed the
-            # same jobs list, so a mapping is present by construction. Stating it
-            # locally keeps the lookup honest without a broad ``assert``.
-            assert scheduled_results is not None
-            result = scheduled_results[job.index]
-            # A pool-exhausted URL was never attempted: re-queue it to the
-            # frontier tail under the per-job cap (at-least-once for capacity
-            # failures) instead of recording a permanent page failure. Safe to
-            # skip link expansion below: exception-path envelopes carry no
-            # discovered_links (pinned in tests/crawl/test_error_handling.py).
-            if result.classification == "browser_pool_exhausted" and requeue_pool_exhausted(
-                job, depth=depth, frontier=frontier, attempts=pool_exhaustion_attempts
-            ):
-                visited.discard(job.normalized_url)
-                # No page was crawled: the URL goes back on the frontier for a
-                # retry, so this must NOT consume a max_pages slot. Counting it
-                # here let a burst of pool-exhaustion events terminate the crawl
-                # before its real page budget was spent.
-                continue
-            # Strip heavy payloads inside the loop so they are not retained
-            # for the whole crawl when the caller did not ask for them (#1).
-            if not include_html:
-                result = replace(result, html=None, text=None)
-            await _spill_write(spill, job.index, result)
-            page_count += 1
-            if depth >= max_depth:
-                continue
-            await admit_discovered_links(
-                result.discovered_links,
-                source_depth=depth,
-                max_depth=max_depth,
-                max_pages=max_pages,
-                known=visited,
-                frontier=frontier,
-                make_entry=make_admitted_task,
-                scope_pattern=scope_pattern,
-                want_document_bodies=want_document_bodies,
-                respect_robots=respect_robots,
-                robots_allows=robots_allows,
-                robots_crawl_delay=robots_crawl_delay,
-                commit_crawl_delay=lambda domain, delay: scheduler.set_domain_min_delay(domain, delay),
-                host_policy=host_policy,
-                occupied=page_count + len(frontier),
-            )
+        allowed_jobs = await admit_recursive_batch(cast(Any, run), state, metrics)
+        scheduled_results = await _crawl_recursive_batch(run, allowed_jobs)
+        await _commit_recursive_results(run, state, allowed_jobs, scheduled_results)
