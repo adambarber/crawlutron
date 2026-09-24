@@ -56,7 +56,7 @@ class TestDecompressionEncodings:
         original = b"hello world " * 10
         compressed = zlib.compress(original)
         result = decompress_body(compressed, "deflate", max_output_bytes=10_000_000)
-        assert (result) is not None
+        assert result == original
 
     def test_decompression_gzip(self):
         import gzip
@@ -66,7 +66,7 @@ class TestDecompressionEncodings:
         original = b"hello world " * 10
         compressed = gzip.compress(original)
         result = decompress_body(compressed, "gzip", max_output_bytes=10_000_000)
-        assert (result) is not None
+        assert result == original
 
     def test_decompression_unknown_encoding(self):
         from app.crawl.decompression import decompress_body

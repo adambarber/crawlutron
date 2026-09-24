@@ -289,18 +289,33 @@ async def test_extract_document_kill_switch(monkeypatch):
 
 
 class TestExtractionMethods:
-    def test_extraction_different_methods(self):
-        from app.crawl.extraction import extract_content
+    @pytest.mark.parametrize(
+        ("content", "content_type", "expected_text", "expected_branch"),
+        [
+            ("<html><body><p>Hello world</p></body></html>", "text/html", "html", "html"),
+            (b"%PDF-1.7 fake bytes", "application/pdf", "document", "document"),
+            ("plain text", "text/plain", "plain text", None),
+            (b"raw bytes", "application/octet-stream", "raw bytes", None),
+        ],
+    )
+    def test_extraction_routes_by_content_type(
+        self, monkeypatch, content, content_type, expected_text, expected_branch
+    ):
+        calls = []
 
-        html = "<html><body><p>Hello world</p></body></html>"
-        for method, content_type in [
-            ("trafilatura", "text/html"),
-            ("document", "application/pdf"),
-            ("dom_text", "text/html"),
-            ("full", "text/html"),
-        ]:
-            result = extract_content(html, content_type, "http://example.com/", None, None)
-            assert (result) is not None
+        def fake_html(html, url):
+            calls.append("html")
+            return ExtractedContent("html", "html")
+
+        def fake_document(body, url):
+            calls.append("document")
+            return ExtractedContent("document", "document")
+
+        monkeypatch.setattr(extraction, "_extract_html", fake_html)
+        monkeypatch.setattr(extraction, "_extract_document", fake_document)
+        result = extraction.extract_content(content, content_type, "http://example.com/")
+        assert result.text == expected_text
+        assert calls == ([] if expected_branch is None else [expected_branch])
 
 
 class TestHtmlTreeParsing:
@@ -308,8 +323,8 @@ class TestHtmlTreeParsing:
         from app.crawl.extraction import _parse_html_tree
 
         result = _parse_html_tree("{{invalid html")
-        # Should not raise - lxml is forgiving
-        assert (result) is not None
+        assert result is not None
+        assert result.tag == "html"
 
 
 class TestSelectedExtraction:
@@ -318,7 +333,8 @@ class TestSelectedExtraction:
 
         html = "<html><body><div>Hello</div></body></html>"
         result = _extract_selected(html, "http://x/", css_selector=None, xpath="//div/text()")
-        assert (result) is not None
+        assert result.text == "Hello"
+        assert result.markdown == "Hello"
 
 
 class TestLinkExtraction:
@@ -693,7 +709,8 @@ class TestExtractionEdges:
         from app.crawl.extraction import _parse_html_tree
 
         result = _parse_html_tree("<")
-        assert (result) is not None
+        assert result is not None
+        assert result.tag == "html"
 
 
 class TestExtractionGaps:
