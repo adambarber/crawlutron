@@ -28,6 +28,7 @@ from chokepoint_walks import (
     file_tree,
     offender,
     resolved_call_name,
+    resolved_expr_name,
     trees_under,
 )
 from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
@@ -1306,7 +1307,9 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if resolved_expr_name(tree, node.func).rsplit(".", 1)[-1] == "getattr":
+            continue
+        fname = resolved_call_name(tree, node).rsplit(".", 1)[-1]
         if fname not in _DECOMPRESS_FUNCS:
             continue
         kwargs = {kw.arg for kw in node.keywords if kw.arg}
@@ -1324,11 +1327,40 @@ def test_all_decompress_calls_pass_a_cap():
 
 
 def test_decompress_cap_detector_bites():
+    path = REPO_ROOT / "app" / "crawl" / "_synthetic.py"
     bad = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc)\n")
-    offenders = _decompress_cap_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    offenders = _decompress_cap_offenders(bad, path)
     assert len(offenders) == 1, offenders
+
+    alias_shapes = {
+        "import as": (
+            "import app.crawl.decompression as compression\n"
+            "def f(raw, enc):\n"
+            "    return compression.decompress_body(raw, enc)\n"
+        ),
+        "from import as": (
+            "from app.crawl.decompression import decompress_body as decode\n"
+            "def f(raw, enc):\n"
+            "    return decode(raw, enc)\n"
+        ),
+        "assignment alias": (
+            "from app.crawl.decompression import decompress_body\n"
+            "decode = decompress_body\n"
+            "def f(raw, enc):\n"
+            "    return decode(raw, enc)\n"
+        ),
+        "getattr": (
+            "import app.crawl.decompression as compression\n"
+            "def f(raw, enc):\n"
+            "    return getattr(compression, 'decompress_body')(raw, enc)\n"
+        ),
+    }
+    for label, source in alias_shapes.items():
+        offenders = _decompress_cap_offenders(ast.parse(source), path)
+        assert len(offenders) == 1, (label, offenders)
+
     good = ast.parse("def f(raw, enc):\n    return decompress_body(raw, enc, max_output_bytes=1024)\n")
-    assert not _decompress_cap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert not _decompress_cap_offenders(good, path)
 
 
 # ---------------------------------------------------------------------------
