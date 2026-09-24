@@ -65,16 +65,22 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
     try:
 
         class MockHeaders:
+            def __init__(self):
+                self.get_list_calls = []
+
             def get_list(self, key):
+                self.get_list_calls.append(key)
                 if key.lower() == "set-cookie":
                     return ["session=abc; Path=/", "csrf=xyz; Path=/"]
                 return []
 
             def items(self):
-                return []
+                raise AssertionError("Set-Cookie extraction must use get_list")
 
-        _store_set_cookies("http://example.com/", MockHeaders())
+        headers = MockHeaders()
+        _store_set_cookies("http://example.com/", headers)
 
+        assert headers.get_list_calls == ["set-cookie"]
         cookie_header = jar.cookie_header_for("http://example.com/")
         assert "session=abc" in cookie_header
         assert "csrf=xyz" in cookie_header

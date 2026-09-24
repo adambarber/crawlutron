@@ -86,6 +86,7 @@ class TestCrashRecovery:
         job = job_store.load(job.job_id)
         assert job.visited == {"http://example.test/a"}, "in-flight batch was dropped, not re-crawled"
         assert job.in_flight == []
+        assert job.stats["total_crawled"] == 1
 
     async def test_in_flight_requeue_survives_job_wide_page_cap(self, job_store):
         root = "http://example.test/a"
