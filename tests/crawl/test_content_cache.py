@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import shutil
 import sys
 
@@ -501,6 +502,33 @@ class TestContentCacheByteBudget:
         cache.set("big", {"body": "x" * 10_000}, ttl=60)
         assert cache.get("big") is None
         assert list(tmp_path.glob("*.json")) == []
+
+    def test_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
+        now = 1000.0
+        value = {"body": "x" * 150}
+        envelope = {"expires": now + 60, "value": value, "cached_at": now}
+        cap = len(json.dumps(envelope))
+        assert cap > len(json.dumps(value))
+
+        cache = _make_cache(tmp_path, max_entry_bytes=cap, clock=lambda: now)
+        cache.set("at-cap", value, ttl=60)
+
+        assert cache.get("at-cap") == value
+        path = next(tmp_path.glob("*.json"))
+        assert path.stat().st_size == cap
+
+    async def test_async_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
+        now = 1000.0
+        value = {"body": "x" * 150}
+        envelope = {"expires": now + 60, "value": value, "cached_at": now}
+        cap = len(json.dumps(envelope))
+        cache = _make_cache(tmp_path / "async", max_entry_bytes=cap, clock=lambda: now)
+
+        await cache.aset("at-cap", value, ttl=60)
+
+        assert await cache.aget("at-cap") == value
+        path = next((tmp_path / "async").glob("*.json"))
+        assert path.stat().st_size == cap
 
     def test_total_budget_evicts_lru_first(self, tmp_path):
         cache = _make_cache(
