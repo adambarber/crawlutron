@@ -28,6 +28,24 @@ from app.validation import HostPolicy, registrable_domain
 BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
 
 
+@dataclass(frozen=True)
+class _ChainContext:
+    original_url: str
+    normalized_url: str
+    policy: dict[str, Any]
+    http_fetcher: HttpFetcher
+    cffi_fetcher: HttpFetcher
+    browser_worker: CrawlWorker | None
+    cache: Any
+    content_cache: Any
+    scheduler: DomainScheduler | None
+    domain: str
+    caller_validators: dict[str, str] | None
+    robots_sitemaps: list[str] | None
+    host_policy: HostPolicy
+    global_concurrency: int | None
+
+
 @dataclass
 class _ChainState:
     attempts: list[CrawlStrategyAttempt]
@@ -36,116 +54,85 @@ class _ChainState:
     cffi_retry_done: bool = False
 
 
-def _starting_strategies(
-    policy: dict[str, Any],
-    scheduler: DomainScheduler | None,
-    domain: str,
-) -> list[CrawlStrategyName]:
-    strategies = list(policy["strategies"])
-    if scheduler is None:
+def _starting_strategies(context: _ChainContext) -> list[CrawlStrategyName]:
+    strategies = list(context.policy["strategies"])
+    if context.scheduler is None:
         return strategies
-    pinned = scheduler.get_pinned_strategy(domain)
+    pinned = context.scheduler.get_pinned_strategy(context.domain)
     if pinned is not None and pinned in strategies:
         return strategies[strategies.index(pinned) :]
     return strategies
 
 
 async def _run_http_strategy(
+    context: _ChainContext,
     strategy: CrawlStrategyName,
-    *,
-    original_url: str,
-    normalized_url: str,
-    policy: dict[str, Any],
-    http_fetcher: HttpFetcher,
-    cffi_fetcher: HttpFetcher,
-    cache: Any,
-    content_cache: Any,
-    caller_validators: dict[str, str] | None,
-    robots_sitemaps: list[str] | None,
-    host_policy: HostPolicy,
-    global_concurrency: int | None,
 ) -> EngineCrawlResult:
-    fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
+    fetcher = context.cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else context.http_fetcher
     return await _http_strategy_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
+        original_url=context.original_url,
+        normalized_url=context.normalized_url,
         strategy=strategy,
-        policy=policy,
+        policy=context.policy,
         http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
-        caller_validators=caller_validators,
-        robots_sitemaps=robots_sitemaps,
-        host_policy=host_policy,
-        global_concurrency=global_concurrency,
+        cache=context.cache,
+        content_cache=context.content_cache,
+        caller_validators=context.caller_validators,
+        robots_sitemaps=context.robots_sitemaps,
+        host_policy=context.host_policy,
+        global_concurrency=context.global_concurrency,
     )
 
 
 async def _run_browser_strategy(
+    context: _ChainContext,
     strategy: CrawlStrategyName,
-    *,
-    original_url: str,
-    normalized_url: str,
-    policy: dict[str, Any],
-    browser_worker: CrawlWorker | None,
-    host_policy: HostPolicy,
 ) -> EngineCrawlResult:
-    if browser_worker is None:
+    if context.browser_worker is None:
         return _failed_engine_result(
-            original_url=original_url,
-            normalized_url=normalized_url,
+            original_url=context.original_url,
+            normalized_url=context.normalized_url,
             strategy=strategy,
             classification="browser_crash",
             error="browser_worker_unavailable",
             diagnostics={
-                "browser_profile": policy.get("browser_profile") or {},
+                "browser_profile": context.policy.get("browser_profile") or {},
                 "runtime": {"error": "browser_worker_unavailable"},
             },
         )
     return await browser_strategy_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
+        original_url=context.original_url,
+        normalized_url=context.normalized_url,
         strategy=strategy,
-        policy=policy,
-        browser_worker=browser_worker,
-        host_policy=host_policy,
+        policy=context.policy,
+        browser_worker=context.browser_worker,
+        host_policy=context.host_policy,
     )
 
 
 def _record_result(
+    context: _ChainContext,
     state: _ChainState,
     strategy: CrawlStrategyName,
     result: EngineCrawlResult,
-    scheduler: DomainScheduler | None,
-    domain: str,
 ) -> None:
     state.attempts.extend(result.attempted_strategies)
     state.last_result = result
     if strategy == HTTP_CFFI_IMPERSONATE and result.status != "success":
         state.cffi_was_blocked = True
-    if result.classification != "rate_limited" or scheduler is None:
+    if result.classification != "rate_limited" or context.scheduler is None:
         return
     cooldown = result.diagnostics.get("cooldown") or {}
     retry_after = cooldown.get("retry_after_seconds")
     if retry_after is not None:
-        scheduler.set_domain_cooldown(domain, float(retry_after))
+        context.scheduler.set_domain_cooldown(context.domain, float(retry_after))
 
 
 async def _retry_browser_cookies(
-    *,
+    context: _ChainContext,
+    state: _ChainState,
     strategy: CrawlStrategyName,
     result: EngineCrawlResult,
-    state: _ChainState,
-    original_url: str,
-    normalized_url: str,
-    policy: dict[str, Any],
-    cffi_fetcher: HttpFetcher,
-    cache: Any,
-    content_cache: Any,
-    caller_validators: dict[str, str] | None,
-    robots_sitemaps: list[str] | None,
-    host_policy: HostPolicy,
-    global_concurrency: int | None,
 ) -> EngineCrawlResult | None:
     if not (
         result.status == "success"
@@ -158,26 +145,14 @@ async def _retry_browser_cookies(
     state.cffi_retry_done = True
     from app.crawl.strategies.browser import get_browser_cookies_for
 
-    cookie_header = get_browser_cookies_for(registrable_domain(original_url))
+    cookie_header = get_browser_cookies_for(registrable_domain(context.original_url))
     if not cookie_header:
         return None
-    retry_policy = dict(policy)
+    retry_policy = dict(context.policy)
     retry_headers = dict(retry_policy.get("headers") or {})
     retry_headers["Cookie"] = cookie_header
     retry_policy["headers"] = retry_headers
-    retry_result = await _http_strategy_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=HTTP_CFFI_IMPERSONATE,
-        policy=retry_policy,
-        http_fetcher=cffi_fetcher,
-        cache=cache,
-        content_cache=content_cache,
-        caller_validators=caller_validators,
-        robots_sitemaps=robots_sitemaps,
-        host_policy=host_policy,
-        global_concurrency=global_concurrency,
-    )
+    retry_result = await _run_http_strategy(replace(context, policy=retry_policy), HTTP_CFFI_IMPERSONATE)
     state.attempts.extend(retry_result.attempted_strategies)
     if retry_result.status == "success" and retry_result.quality_score > 0:
         return replace(retry_result, attempted_strategies=state.attempts)
@@ -192,48 +167,16 @@ def _is_usable(result: EngineCrawlResult) -> bool:
 
 
 async def _execute_strategy(
+    context: _ChainContext,
     strategy: CrawlStrategyName,
-    *,
-    original_url: str,
-    normalized_url: str,
-    policy: dict[str, Any],
-    http_fetcher: HttpFetcher,
-    cffi_fetcher: HttpFetcher,
-    browser_worker: CrawlWorker | None,
-    cache: Any,
-    content_cache: Any,
-    caller_validators: dict[str, str] | None,
-    robots_sitemaps: list[str] | None,
-    host_policy: HostPolicy,
-    global_concurrency: int | None,
 ) -> EngineCrawlResult:
     if strategy in HTTP_STRATEGIES:
-        return await _run_http_strategy(
-            strategy,
-            original_url=original_url,
-            normalized_url=normalized_url,
-            policy=policy,
-            http_fetcher=http_fetcher,
-            cffi_fetcher=cffi_fetcher,
-            cache=cache,
-            content_cache=content_cache,
-            caller_validators=caller_validators,
-            robots_sitemaps=robots_sitemaps,
-            host_policy=host_policy,
-            global_concurrency=global_concurrency,
-        )
+        return await _run_http_strategy(context, strategy)
     if strategy in BROWSER_STRATEGIES:
-        return await _run_browser_strategy(
-            strategy,
-            original_url=original_url,
-            normalized_url=normalized_url,
-            policy=policy,
-            browser_worker=browser_worker,
-            host_policy=host_policy,
-        )
+        return await _run_browser_strategy(context, strategy)
     return _failed_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
+        original_url=context.original_url,
+        normalized_url=context.normalized_url,
         strategy=strategy,
         classification="unknown_error",
         error="unsupported_strategy",
@@ -257,46 +200,34 @@ async def execute_crawl_chain(
     host_policy: HostPolicy,
     global_concurrency: int | None = None,
 ) -> EngineCrawlResult:
+    context = _ChainContext(
+        original_url=original_url,
+        normalized_url=normalized_url,
+        policy=policy,
+        http_fetcher=http_fetcher,
+        cffi_fetcher=cffi_fetcher,
+        browser_worker=browser_worker,
+        cache=cache,
+        content_cache=content_cache,
+        scheduler=scheduler,
+        domain=domain,
+        caller_validators=caller_validators,
+        robots_sitemaps=robots_sitemaps,
+        host_policy=host_policy,
+        global_concurrency=global_concurrency,
+    )
     state = _ChainState(attempts=[])
-    for strategy in _starting_strategies(policy, scheduler, domain):
-        result = await _execute_strategy(
-            strategy,
-            original_url=original_url,
-            normalized_url=normalized_url,
-            policy=policy,
-            http_fetcher=http_fetcher,
-            cffi_fetcher=cffi_fetcher,
-            browser_worker=browser_worker,
-            cache=cache,
-            content_cache=content_cache,
-            caller_validators=caller_validators,
-            robots_sitemaps=robots_sitemaps,
-            host_policy=host_policy,
-            global_concurrency=global_concurrency,
-        )
-        _record_result(state, strategy, result, scheduler, domain)
+    for strategy in _starting_strategies(context):
+        result = await _execute_strategy(context, strategy)
+        _record_result(context, state, strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:
             continue
-        retry_result = await _retry_browser_cookies(
-            strategy=strategy,
-            result=result,
-            state=state,
-            original_url=original_url,
-            normalized_url=normalized_url,
-            policy=policy,
-            cffi_fetcher=cffi_fetcher,
-            cache=cache,
-            content_cache=content_cache,
-            caller_validators=caller_validators,
-            robots_sitemaps=robots_sitemaps,
-            host_policy=host_policy,
-            global_concurrency=global_concurrency,
-        )
+        retry_result = await _retry_browser_cookies(context, state, strategy, result)
         if retry_result is not None:
             return retry_result
         if _is_usable(result):
-            if scheduler is not None:
-                scheduler.set_pinned_strategy(domain, strategy)
+            if context.scheduler is not None:
+                context.scheduler.set_pinned_strategy(context.domain, strategy)
             return replace(result, attempted_strategies=state.attempts)
     assert state.last_result is not None
     return replace(state.last_result, attempted_strategies=state.attempts)

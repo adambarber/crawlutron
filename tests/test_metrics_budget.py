@@ -60,10 +60,10 @@ BLOCK_LENGTH = 40
 # suite, so a budget cannot be quietly inflated -- the code has to actually get
 # smaller first.
 _BUDGETS = {
-    "function length": 45,
-    "abc size": 10,
+    "function length": 43,
+    "abc size": 8,
     "class length": 3,
-    "block length": 17,
+    "block length": 16,
 }
 
 _BRANCH_NODES = (

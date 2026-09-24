@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -78,39 +79,38 @@ async def _extract_browser_content(
             extraction_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
         )
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
+    extractor: Callable[..., Any]
+    args: tuple[Any, ...]
+    options: dict[str, Any] = {}
     if extraction == EXTRACTION_DOCUMENT:
-        extracted = await asyncio.to_thread(
-            _extract_document,
+        extractor = _extract_document
+        args = (
             content.encode("utf-8", "replace") if isinstance(content, str) else content,
             result.final_url,
         )
-        text = extracted.text or ""
-        markdown = extracted.markdown
         method = EXTRACTION_METHOD_DOCUMENT
     elif extraction == EXTRACTION_TRAFILATURA:
-        extracted = await asyncio.to_thread(
-            _extract_html,
-            content,
-            result.final_url,
-            css_selector=policy.get("css_selector"),
-            xpath=policy.get("xpath"),
-        )
-        text = extracted.text or ""
-        markdown = extracted.markdown
+        options = {
+            "css_selector": policy.get("css_selector"),
+            "xpath": policy.get("xpath"),
+        }
+        extractor = _extract_html
+        args = (content, result.final_url)
         method = EXTRACTION_METHOD_TRAFILATURA
     else:
-        extracted = await asyncio.to_thread(
-            extract_content,
-            content,
-            None,
-            result.final_url,
-            css_selector=policy.get("css_selector"),
-            xpath=policy.get("xpath"),
-        )
-        text = extracted.text or ""
-        markdown = extracted.markdown
+        options = {
+            "css_selector": policy.get("css_selector"),
+            "xpath": policy.get("xpath"),
+        }
+        extractor = extract_content
+        args = (content, None, result.final_url)
         method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
-    return _BrowserContent(text=text, markdown=markdown, extraction_method=method)
+    extracted = await asyncio.to_thread(extractor, *args, **options)
+    return _BrowserContent(
+        text=extracted.text or "",
+        markdown=extracted.markdown,
+        extraction_method=method,
+    )
 
 
 async def _discover_browser_content(
