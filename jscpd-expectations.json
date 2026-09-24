@@ -3,7 +3,7 @@
   "pairs": [
     {
       "id": "classification-crawl-error-taxonomy",
-      "profiles": ["app", "all"],
+      "profiles": ["all"],
       "first": {
         "path": "app/models.py",
         "start": 13,

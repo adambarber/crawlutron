@@ -73,12 +73,12 @@ repos:
       # named expectations file; the command-line thresholds below are the only
       # threshold source.
       - id: jscpd-app
-        name: jscpd app/ (ratchet, 30 tokens)
+        name: jscpd app/ (zero tolerance, 50 tokens)
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python tests/_jscpd_gate.py app --fail-on-empty
-          --min-lines 5 --min-tokens 30 --threshold 0.42
+          --min-lines 5 --min-tokens 50 --threshold 0
         language: system
         files: ^(docker/browser-crawler/)?app/.*\.py$
         pass_filenames: false
