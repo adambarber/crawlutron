@@ -48,175 +48,24 @@ __all__ = [
     "trees_under",
 ]
 
-# Per-file no-growth budget for app/. A new file starts at 0; a file may not grow.
-# The budget is a ratchet that moves ONLY in the commit that legitimately shrinks
-# or justifies a file, so a gate is never a reason to stop removing code. Seven
-# entries moved in the policy-enforcement commit, and they did NOT all move for
-# the same reason -- a review checked each one, and an earlier blanket
-# justification here was wrong. The actual reasons, per file:
-#
-#   payload_helpers.py  the shared `_validated_url` admission helper itself
-#   jobs_router.py      admission wiring: refuse before the job is created
-#   migrations/runner.py    startup conformance, partial stamp, truthful CLI status
-#   migrations/manifest.py  column comparison consolidated to one by-name function
-#   extraction.py       frame URL disclosure filtering (a DIFFERENT fix)
-#   fetch_policy.py     feed URL disclosure filtering (a DIFFERENT fix)
-#   render.py           shared admission validation rejects a refused target
-#                       before render work is scheduled, so no refusal becomes a
-#                       per-URL result or a successful submission
-#   mcp/tools.py        one tool-error envelope for every MCP refusal
-#   main_helpers.py     shared crawl completion metrics and logging
-#   exceptions.py       shared validation error-envelope construction
-#   request_profile.py  the C1b resolved-profile handoff and typed Set-Cookie
-#                       header protocol needed to keep both consumers on one value
-#   worker.py           the single sync/async worker-dispatch door
-#   browser_result.py   browser capture, extraction, discovery, and result phases
-#   strategy_chain.py   one-target strategy escalation and cookie retry phases
-#   recursive_admission.py  resource, tier, dedupe, and robots admission for one batch
-#   request_pipeline.py  the execution phases behind engine.crawl_request's single door
-#
-# Seven more moved in the pyright-enablement commit, and again not for one reason:
-#
-#   api_models.py    the shared explanation for six pydantic `default_factory`
-#                    suppressions, plus the per-line ignore comments themselves
-#   classify.py      two `Final[Classification]` constants so a bare string in
-#                    return position stops widening to `str`, and the routing of
-#                    the dict-derived name through `as_classification`
-#   decompression.py  two Protocols naming the incompatible brotli streaming APIs
-#                    that `hasattr` used to describe and the checker could not see,
-#                    and the brotli branch lifted into its own function because
-#                    those additions had pushed one `if` block from 39 to 48 lines
-#                    and the metrics gate caught it
-#   extraction.py    a sentinel class for the selector timeout, so the evaluator
-#                    stops erasing its result type to `object` -- that erasure is
-#                    what made `for tag in selected` unchecked
-#   migrations/runner.py  the reason yoyo's `Migration.id` needs an ignore
-#   browser_pool.py  the reason pyright widens a Literal-annotated property
-#   scheduler.py     three `...` bodies on Protocol properties
-#
-# Every one of those is a type declaration or the note explaining why a checker
-# needs help, not new behaviour. They are counted honestly rather than hidden in
-# a doc file: moving the reasoning out of the source to satisfy a line count
-# would be gaming the metric, and the reasoning is the part a reviewer needs.
-_APP_FILE_LINE_BUDGETS = {
-    "app/__init__.py": 1,
-    "app/api/async_crawl_runner.py": 199,
-    "app/api/crawl_endpoint.py": 195,
-    "app/api/crawl_executor.py": 85,
-    "app/api/crawl_router.py": 134,
-    "app/api/dependencies.py": 37,
-    "app/api/exceptions.py": 128,
-    "app/api/job_runner.py": 469,
-    "app/api/jobs_router.py": 173,
-    "app/api/main_helpers.py": 46,
-    "app/api/map_endpoint.py": 75,
-    "app/api/map_router.py": 35,
-    "app/api/metrics_router.py": 21,
-    "app/api/middleware.py": 83,
-    "app/api/policy_defaults.py": 34,
-    "app/api/render.py": 199,
-    "app/api/render_endpoint.py": 85,
-    "app/api/render_router.py": 34,
-    "app/api/response_shaping.py": 393,
-    "app/api/webhooks.py": 224,
-    "app/api_models.py": 802,
-    "app/atomic_write.py": 40,
-    "app/bounded_io.py": 45,
-    "app/bounded_ttl.py": 116,
-    "app/cgroup_sense.py": 59,
-    "app/classify.py": 344,
-    "app/constants.py": 547,
-    "app/crawl/__init__.py": 1,
-    "app/crawl/admission.py": 539,
-    "app/crawl/cache.py": 118,
-    "app/crawl/content_cache.py": 518,
-    "app/crawl/credentials.py": 88,
-    "app/crawl/decompression.py": 197,
-    "app/crawl/document_text.py": 180,
-    "app/crawl/engine.py": 429,
-    "app/crawl/extraction.py": 1163,
-    "app/crawl/fetch_helpers.py": 264,
-    "app/crawl/ids.py": 23,
-    "app/crawl/job_store.py": 697,
-    "app/crawl/llm_format.py": 131,
-    "app/crawl/migrations/0001_crawl_jobs_initial.py": 14,
-    "app/crawl/migrations/0001_results_initial.py": 14,
-    "app/crawl/migrations/0002_crawl_jobs_drop_canonicalized.py": 24,
-    "app/crawl/migrations/__init__.py": 35,
-    "app/crawl/migrations/__main__.py": 6,
-    "app/crawl/migrations/manifest.py": 216,
-    "app/crawl/migrations/runner.py": 189,
-    "app/crawl/payload_helpers.py": 204,
-    "app/crawl/recursive.py": 335,
-    "app/crawl/request_pipeline.py": 374,
-    "app/crawl/recursive_admission.py": 212,
-    "app/crawl/render_options.py": 93,
-    "app/crawl/result_helpers.py": 534,
-    "app/crawl/result_store.py": 85,
-    "app/crawl/robots.py": 238,
-    "app/crawl/robots_parse.py": 159,
-    "app/crawl/scheduler_exceptions.py": 21,
-    "app/crawl/scope_match.py": 31,
-    "app/crawl/strategy_chain.py": 305,
-    "app/crawl/worker.py": 44,
-    "app/crawl/sqlite_store.py": 112,
-    "app/crawl/strategies/__init__.py": 1,
-    "app/crawl/strategies/body_decode.py": 114,
-    "app/crawl/strategies/browser.py": 1220,
-    "app/crawl/strategies/browser_result.py": 239,
-    "app/crawl/strategies/browser_pool.py": 255,
-    "app/crawl/strategies/content_cache_key.py": 85,
-    "app/crawl/strategies/cookie_jar.py": 168,
-    "app/crawl/strategies/document.py": 146,
-    "app/crawl/strategies/fetch_policy.py": 245,
-    "app/crawl/strategies/fetchers.py": 328,
-    "app/crawl/strategies/http.py": 659,
-    "app/crawl/strategies/http_client_pool.py": 482,
-    "app/crawl/strategies/pinned_transport.py": 256,
-    "app/crawl/strategies/request_profile.py": 218,
-    "app/discovery/__init__.py": 1,
-    "app/discovery/agent_hints.py": 106,
-    "app/discovery/capabilities.py": 131,
-    "app/discovery/well_known.py": 57,
-    "app/health/__init__.py": 1,
-    "app/health/readiness.py": 150,
-    "app/json_safe.py": 35,
-    "app/logging_config.py": 162,
-    "app/main.py": 251,
-    "app/map.py": 94,
-    "app/mcp/__init__.py": 11,
-    "app/mcp/constants.py": 59,
-    "app/mcp/protocol.py": 140,
-    "app/mcp/router.py": 72,
-    "app/mcp/server.py": 259,
-    "app/mcp/tools.py": 279,
-    "app/memory_pressure.py": 234,
-    "app/metrics.py": 169,
-    "app/models.py": 433,
-    "app/output_formats.py": 140,
-    "app/resource_pressure.py": 633,
-    "app/safe_regex.py": 81,
-    "app/safe_url.py": 102,
-    "app/scheduler.py": 438,
-    "app/search/__init__.py": 19,
-    "app/search/endpoint.py": 65,
-    "app/search/providers.py": 420,
-    "app/search/router.py": 46,
-    "app/settings.py": 250,
-    "app/timeouts.py": 47,
-    "app/validation.py": 685,
-}
+# A hand-maintained per-file table turns every line increase into a request to
+# edit one more exception. Its entries and justifications drift independently of
+# the code, and moving lines between files can satisfy it without reducing the
+# tree. One exact whole-tree ceiling is the ratchet instead: growth must be paid
+# for by shrinkage elsewhere in the same change, and a shrink must lower this
+# integer so the saved capacity cannot be spent later.
+_APP_TREE_LINE_BUDGET = 22_089
 
 
-def test_app_files_do_not_grow():
-    offenders: list[str] = []
-    for path, _tree in app_trees(exclude=frozenset()):
-        relative = path.relative_to(REPO_ROOT).as_posix()
-        actual = len(path.read_text(encoding="utf-8").splitlines())
-        allowed = _APP_FILE_LINE_BUDGETS.get(relative, 0)
-        if actual > allowed:
-            offenders.append(f"{relative}: {actual} > {allowed}")
-    assert not offenders, "app file line budget exceeded: " + ", ".join(offenders)
+def test_app_tree_line_count_does_not_grow():
+    actual = sum(
+        len(path.read_text(encoding="utf-8").splitlines())
+        for path in app_python_files(exclude=frozenset())
+    )
+    assert actual == _APP_TREE_LINE_BUDGET, (
+        f"app/ contains exactly {actual} Python lines; the whole-tree ceiling is "
+        f"{_APP_TREE_LINE_BUDGET}. Lower the ceiling when code is removed; never raise it."
+    )
 
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
