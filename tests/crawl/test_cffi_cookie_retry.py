@@ -3,7 +3,7 @@ the browser-minted session cookies before accepting the render result."""
 
 from _testkit import make_fetch
 
-from app.crawl.engine import _execute_crawl_chain
+from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import CrawlResult
 from app.validation import HostPolicy
 
@@ -82,7 +82,7 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
         "headers": {},
         "discovery": {"robots": True},
     }
-    result = await _execute_crawl_chain(
+    result = await execute_crawl_chain(
         original_url="http://example.com/",
         normalized_url="http://example.com/",
         policy=policy,

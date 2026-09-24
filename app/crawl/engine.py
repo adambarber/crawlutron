@@ -9,7 +9,6 @@ FastAPI layer (``app.main``) calls into.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import os
@@ -20,25 +19,16 @@ from collections.abc import Iterable
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any, TypeGuard, overload
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
-    BROWSER_BLOCKED_CLASSIFICATIONS,
-    BROWSER_STRATEGIES,
     DEFAULT_EXTRACTION,
     DEFAULT_STRATEGIES,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
     EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_DOCUMENT,
-    EXTRACTION_METHOD_DOM_TEXT,
-    EXTRACTION_METHOD_TRAFILATURA,
-    EXTRACTION_TRAFILATURA,
-    HTTP_BLOCKED_CLASSIFICATIONS,
-    HTTP_CFFI_IMPERSONATE,
-    HTTP_STRATEGIES,
 )
 from app.crawl import robots as _robots_policy
 from app.crawl.ids import new_request_id
@@ -69,12 +59,6 @@ _resource_gate = ResourceGate()
 from app.crawl.admission import normalize_sitemap_candidates
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.extraction import (
-    _extract_document,
-    _extract_html,
-    extract_content,
-    extract_post_fetch_discovery,
-)
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.recursive import (
@@ -83,28 +67,19 @@ from app.crawl.recursive import (
     gather_robots_decisions,
     run_recursive_crawl,
 )
-from app.crawl.render_options import policy_wants_html, resolve_render_options
+from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     _engine_result_from_exception,
-    _failed_engine_result,
-    _make_engine_result,
     _skipped_engine_result,
 )
-from app.crawl.strategies.body_decode import _quality_score
 from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
-from app.crawl.strategies.http import _http_strategy_result
+from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import (
-    AsyncCrawlWorker,
-    CrawlJob,
-    CrawlResult,
-    CrawlStrategyAttempt,
-    CrawlStrategyName,
     CrawlTask,
     CrawlWorker,
     EngineCrawlResult,
     HttpFetcher,
     NormalizedUrl,
-    SyncCrawlWorker,
     to_dict,
 )
 from app.resource_pressure import derive_browser_pool_size
@@ -112,7 +87,6 @@ from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import (
     HostPolicy,
-    filter_js_endpoints,
     get_env_int,
     normalize_public_http_url,
     registrable_domain,
@@ -140,71 +114,6 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
-def _is_sync_worker(worker: CrawlWorker) -> TypeGuard[SyncCrawlWorker]:
-    """True when ``worker`` must run in a thread, not be awaited.
-
-    The inverse of ``_is_async_worker``, stated as its own positive guard:
-    a ``TypeGuard`` only narrows the branch it returns True for, so the sync
-    branch of ``_call_worker`` cannot rely on the negative of the async guard.
-    Both guards are computed from the same runtime probe, so exactly one is
-    True for any real worker and neither silently widens the other's member.
-    """
-    return not (inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__))
-
-
-def _is_async_worker(worker: CrawlWorker) -> TypeGuard[AsyncCrawlWorker]:
-    """True when ``worker`` must be awaited, not run in a thread.
-
-    Dispatches on the callable itself, never by invoking first and sniffing
-    the return: the old shape ran ``worker(job)`` on the event-loop thread
-    (blocking the loop and keeping side effects), found a non-coroutine, then
-    called it a SECOND time via ``to_thread`` and discarded the first result.
-    ``iscoroutinefunction`` sees through bound methods and objects whose type
-    defines ``async __call__`` (the render path's worker instance).
-
-    The ``TypeGuard`` carries the narrowing mypy cannot derive from
-    ``iscoroutinefunction`` alone; ``_is_sync_worker`` is the positive inverse
-    because a ``TypeGuard`` only narrows the branch it accepts.
-    """
-    return inspect.iscoroutinefunction(worker) or inspect.iscoroutinefunction(type(worker).__call__)
-
-
-@overload
-async def _call_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
-
-
-@overload
-async def _call_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult: ...
-
-
-async def _call_worker(worker: CrawlWorker, job: CrawlJob) -> CrawlResult:
-    # The two ``@overload``s above state the dispatch statically, and the two
-    # TypeGuards narrow the union inside; together each branch is typed against
-    # the union member it runs, so the runtime probe is visible to the type
-    # checker instead of hiding inside a bool it cannot see through. Both
-    # branches test positively (never the inverse of a guard) because a
-    # TypeGuard only narrows the case it accepts.
-    if _is_async_worker(worker):
-        return await _invoke_async_worker(worker, job)
-    if _is_sync_worker(worker):
-        return await asyncio.to_thread(_invoke_sync_worker, worker, job)
-    raise TypeError(f"worker is neither async nor sync: {type(worker)!r}")
-
-
-async def _invoke_async_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> CrawlResult:
-    """Run a coroutine-function worker on the event loop."""
-    return await worker(job)
-
-
-def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
-    """Run a synchronous worker off the event loop.
-
-    ``CrawlWorker`` is a union of the async and sync worker shapes, and the
-    ``iscoroutinefunction`` check above selects which member runs. The helper
-    states that per branch instead of casting, so a worker that is neither
-    shape surfaces here rather than being silently typed through.
-    """
-    return worker(job)
 
 
 # A single user-supplied scope_regex is applied to every discovered link.
@@ -231,310 +140,8 @@ def _compile_scope_regex_safe(scope_regex: str | None):
         return None
 
 
-async def _browser_strategy_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName,
-    policy: dict[str, Any],
-    browser_worker: CrawlWorker,
-    host_policy: HostPolicy,
-) -> EngineCrawlResult:
-    # The crawl pipeline owns the capture knobs: the captured HTML feeds
-    # markdown extraction, classification, and discovery below BEFORE the
-    # caller's payload knob (policy_wants_html) is applied at spill time,
-    # so a caller asking to drop HTML from the payload must not silently
-    # turn capture off here. Everything else is the policy's effective value.
-    options = resolve_render_options(
-        None,
-        {
-            "timeout_seconds": policy["limits"]["timeout_seconds"],
-            "max_retries": policy["limits"]["max_retries"],
-            "respect_robots": True,
-            "include_html": True,
-            "include_text": True,
-            "browser_profile": policy.get("browser_profile") or {},
-        },
-    )
-    job = CrawlJob(
-        index=0,
-        url=normalized_url,
-        domain=registrable_domain(normalized_url),
-        options=options,
-        host_policy=host_policy,
-    )
-    result = await _call_worker(browser_worker, job)
-    extraction = policy.get("extraction", DEFAULT_EXTRACTION)
-    content = result.html if result.html else result.text
-    if content:
-        if extraction == EXTRACTION_DOCUMENT:
-            extracted = await asyncio.to_thread(
-                _extract_document,
-                content.encode("utf-8", "replace") if isinstance(content, str) else content,
-                result.final_url,
-            )
-            text = extracted.text or ""
-            markdown = extracted.markdown
-            extraction_method = EXTRACTION_METHOD_DOCUMENT
-        elif extraction == EXTRACTION_TRAFILATURA:
-            # trafilatura is CPU-bound: keep it off the event loop (perf throughput #3).
-            extracted = await asyncio.to_thread(
-                _extract_html,
-                content,
-                result.final_url,
-                css_selector=policy.get("css_selector"),
-                xpath=policy.get("xpath"),
-            )
-            text = extracted.text or ""
-            markdown = extracted.markdown
-            extraction_method = EXTRACTION_METHOD_TRAFILATURA
-        else:
-            extracted = await asyncio.to_thread(
-                extract_content,
-                content,
-                None,
-                result.final_url,
-                css_selector=policy.get("css_selector"),
-                xpath=policy.get("xpath"),
-            )
-            text = extracted.text or ""
-            markdown = extracted.markdown
-            extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
-    else:
-        text = ""
-        markdown = None
-        extraction_method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
-
-    # Post-fetch discovery (perf #9): the lxml parse + link/frame/form/JS/
-    # pagination passes run in a worker thread (single parse, shared tree
-    # inside). Only plain data returns; egress filtering below is unchanged.
-    post_fetch = await asyncio.to_thread(
-        extract_post_fetch_discovery,
-        result.html,
-        result.final_url,
-        js_base_url=result.final_url,
-        max_links=policy["limits"]["max_discovered_links"],
-        include_diagnostics=True,
-        include_links=result.status == "success",
-        include_js_endpoints=True,
-        include_metadata=True,
-        host_policy=host_policy,
-    )
-    # Surface browser-captured dynamic discovery (XHR/fetch) into diagnostics.
-    diagnostics: dict[str, Any] = {
-        "browser_profile": policy.get("browser_profile") or {},
-        "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
-        "content_metrics": {
-            "visible_text_length": len((text or "").strip()),
-            "html_length": len((result.html or "").strip()),
-        },
-        **post_fetch["diagnostics"],
-    }
-    intercepted = result.metadata.get("intercepted_xhr")
-    if intercepted:
-        diagnostics["intercepted_xhr"] = intercepted
-    screenshot = result.metadata.get("screenshot")
-    if screenshot:
-        diagnostics["screenshot"] = screenshot
-
-    quality = _quality_score(result.status, result.classification, text, result.html, None)
-    discovered_links = post_fetch["discovered_links"]
-    discovered_link_count = post_fetch["discovered_link_count"]
-    discovered_links_truncated = post_fetch["discovered_links_truncated"]
-    next_page_url = post_fetch["next_page_url"]
-    if next_page_url:
-        diagnostics["next_page_url"] = next_page_url
-    diagnostics["js_endpoints"] = filter_js_endpoints(
-        post_fetch["js_endpoints"],
-        resolve_against=result.final_url,
-        policy=host_policy,
-    )
-    attempt = CrawlStrategyAttempt(
-        strategy=strategy,
-        status=result.status,
-        classification=result.classification,
-        http_status=None,
-        content_type=None,
-        elapsed_ms=result.elapsed_ms,
-        error=result.error,
-    )
-    return _make_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        final_url=result.final_url,
-        status=result.status,
-        classification=result.classification,
-        selected_strategy=strategy if result.status == "success" else None,
-        attempt=attempt,
-        http_status=None,
-        headers={},
-        content_type=None,
-        html=result.html,
-        text=text,
-        markdown=markdown,
-        extraction_method=extraction_method,
-        quality_score=quality,
-        classification_evidence=[],
-        diagnostics=diagnostics,
-        discovered_link_count=discovered_link_count,
-        discovered_links_truncated=discovered_links_truncated,
-        discovered_links=discovered_links,
-        error=result.error,
-        next_page_url=next_page_url,
-        # A browser render has no HTTP layer, so there is no etag/last-modified
-        # to surface: validators is empty by construction. Passed explicitly
-        # rather than inherited from the builder's default so the empty value
-        # stays a statement, not an omission.
-        validators={},
-        llm_metadata=post_fetch["llm_metadata"] or None,
-    )
 
 
-# Block/challenge classifications that should trigger strategy auto-escalation (#7).
-BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS
-
-
-async def _execute_crawl_chain(
-    *,
-    original_url: str,
-    normalized_url: str,
-    policy: dict[str, Any],
-    http_fetcher: HttpFetcher,
-    cffi_fetcher: HttpFetcher,
-    browser_worker: CrawlWorker | None,
-    cache: HttpCache | None = None,
-    content_cache: ContentCache | None = None,
-    scheduler: DomainScheduler | None = None,
-    domain: str = "",
-    caller_validators: dict[str, str] | None = None,
-    robots_sitemaps: list[str] | None = None,
-    host_policy: HostPolicy,
-    global_concurrency: int | None = None,
-) -> EngineCrawlResult:
-    attempts: list[CrawlStrategyAttempt] = []
-    last_result: EngineCrawlResult | None = None
-    cffi_was_blocked = False
-    cffi_retry_done = False
-
-    # Strategy pinning: if this domain has a pinned strategy from a prior
-    # successful fetch in this job, start the chain at that strategy (skip
-    # cheaper strategies that already failed for this domain).
-    strategies = policy["strategies"]
-    if scheduler is not None:
-        pinned = scheduler.get_pinned_strategy(domain)
-        if pinned is not None and pinned in strategies:
-            start_idx = strategies.index(pinned)
-            strategies = strategies[start_idx:]
-
-    for strategy in strategies:
-        if strategy in HTTP_STRATEGIES:
-            strategy_fetcher = cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else http_fetcher
-            result = await _http_strategy_result(
-                original_url=original_url,
-                normalized_url=normalized_url,
-                strategy=strategy,
-                policy=policy,
-                http_fetcher=strategy_fetcher,
-                cache=cache,
-                content_cache=content_cache,
-                caller_validators=caller_validators,
-                robots_sitemaps=robots_sitemaps,
-                host_policy=host_policy,
-                global_concurrency=global_concurrency,
-            )
-        elif strategy in BROWSER_STRATEGIES:
-            if browser_worker is None:
-                result = _failed_engine_result(
-                    original_url=original_url,
-                    normalized_url=normalized_url,
-                    strategy=strategy,
-                    classification="browser_crash",
-                    error="browser_worker_unavailable",
-                    diagnostics={
-                        "browser_profile": policy.get("browser_profile") or {},
-                        "runtime": {"error": "browser_worker_unavailable"},
-                    },
-                )
-            else:
-                result = await _browser_strategy_result(
-                    original_url=original_url,
-                    normalized_url=normalized_url,
-                    strategy=strategy,
-                    policy=policy,
-                    browser_worker=browser_worker,
-                    host_policy=host_policy,
-                )
-        else:
-            result = _failed_engine_result(
-                original_url=original_url,
-                normalized_url=normalized_url,
-                strategy=strategy,
-                classification="unknown_error",
-                error="unsupported_strategy",
-            )
-        attempts.extend(result.attempted_strategies)
-        last_result = result
-        if strategy == HTTP_CFFI_IMPERSONATE and result.status != "success":
-            cffi_was_blocked = True
-        if result.classification == "rate_limited" and scheduler is not None:
-            cooldown = result.diagnostics.get("cooldown") or {}
-            retry_after = cooldown.get("retry_after_seconds")
-            if retry_after is not None:
-                scheduler.set_domain_cooldown(domain, float(retry_after))
-        if result.classification in BLOCKED_CLASSIFICATIONS:
-            # A challenge/block page (CAPTCHA, Cloudflare/WAF, login wall, etc.) is not a
-            # usable result. Auto-escalate to the next strategy in the chain (e.g. direct
-            # HTTP -> curl_cffi TLS impersonation -> headless browser) before giving up (#7).
-            # The final fallback keeps the last (blocked) result.
-            continue
-        # not_modified is terminal: the caller's validators proved freshness, so
-        # escalating to the next strategy would just re-fetch the page.
-        # Cookie bootstrap: after a successful render on a domain where cffi
-        # was blocked, retry cffi once with browser-minted session cookies.
-        from app.crawl.strategies.browser import get_browser_cookies_for
-
-        if (
-            result.status == "success"
-            and result.classification == "rendered"
-            and strategy in BROWSER_STRATEGIES
-            and cffi_was_blocked
-            and not cffi_retry_done
-        ):
-            cffi_retry_done = True
-            cookie_header = get_browser_cookies_for(registrable_domain(original_url))
-            if cookie_header:
-                retry_policy = dict(policy)
-                retry_headers = dict(retry_policy.get("headers") or {})
-                retry_headers["Cookie"] = cookie_header
-                retry_policy["headers"] = retry_headers
-                retry_result = await _http_strategy_result(
-                    original_url=original_url,
-                    normalized_url=normalized_url,
-                    strategy=HTTP_CFFI_IMPERSONATE,
-                    policy=retry_policy,
-                    http_fetcher=cffi_fetcher,
-                    cache=cache,
-                    content_cache=content_cache,
-                    caller_validators=caller_validators,
-                    robots_sitemaps=robots_sitemaps,
-                    host_policy=host_policy,
-                    global_concurrency=global_concurrency,
-                )
-                attempts.extend(retry_result.attempted_strategies)
-                if retry_result.status == "success" and retry_result.quality_score > 0:
-                    return replace(retry_result, attempted_strategies=attempts)
-                last_result = result
-
-        if result.status == "success" and (
-            result.quality_score > 0 or result.classification == "not_modified"
-        ):
-            # Pin the successful strategy for this domain so subsequent fetches
-            # in the same job start here instead of re-climbing the ladder.
-            if scheduler is not None:
-                scheduler.set_pinned_strategy(domain, strategy)
-            return replace(result, attempted_strategies=attempts)
-    assert last_result is not None
-    return replace(last_result, attempted_strategies=attempts)
 
 
 def _purge_robots_cache(now: float | None = None) -> int:
@@ -924,7 +531,7 @@ async def _crawl_request_impl(
         )
         try:
             result = await asyncio.wait_for(
-                _execute_crawl_chain(
+                execute_crawl_chain(
                     original_url=original_url,
                     normalized_url=normalized_url,
                     policy=policy,

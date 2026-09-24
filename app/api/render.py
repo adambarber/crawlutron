@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from app.crawl.engine import _call_worker
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.render_options import resolve_render_options
@@ -20,6 +19,7 @@ from app.crawl.result_helpers import (
     _failed_result_for,
     _terminal_crawl_result,
 )
+from app.crawl.worker import call_worker
 from app.models import (
     CrawlJob,
     CrawlResult,
@@ -140,7 +140,7 @@ async def render_request(
         # boundary that consumes both, so this function stays honest about the
         # one shape it actually returns.
         try:
-            return await _call_worker(worker, job)
+            return await call_worker(worker, job)
         except Exception as capture_error:
             worker_errors[job.index] = capture_error
             raise

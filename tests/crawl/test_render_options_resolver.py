@@ -24,8 +24,8 @@ from __future__ import annotations
 import pytest
 
 from app.api.render import _render_options
-from app.crawl.engine import _browser_strategy_result
 from app.crawl.render_options import policy_wants_html, resolve_render_options
+from app.crawl.strategies.browser_result import browser_strategy_result
 from app.models import CrawlResult
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -144,7 +144,7 @@ class TestEngineConsumesResolver:
             )
 
         policy = _browser_policy()
-        result = await _browser_strategy_result(
+        result = await browser_strategy_result(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             strategy="BROWSER_HEADLESS",

@@ -196,7 +196,7 @@ class TestCallWorkerExecutesOnce:
     async def test_sync_worker_runs_once_off_loop(self):
         import asyncio
 
-        from app.crawl.engine import _call_worker
+        from app.crawl.worker import call_worker
 
         calls: list[str] = []
         loop_thread = asyncio.get_running_loop().run_in_executor(None, lambda: None)
@@ -206,12 +206,12 @@ class TestCallWorkerExecutesOnce:
             calls.append(job)
             return "result"
 
-        result = await _call_worker(worker, "job")
+        result = await call_worker(worker, "job")
         assert len(calls) == 1, f"sync worker invoked {len(calls)}x (side effects kept, result discarded)"
         assert result == "result"
 
     async def test_async_worker_awaits_directly(self):
-        from app.crawl.engine import _call_worker
+        from app.crawl.worker import call_worker
 
         calls: list[str] = []
 
@@ -219,7 +219,7 @@ class TestCallWorkerExecutesOnce:
             calls.append(job)
             return "async-result"
 
-        result = await _call_worker(worker, "job")
+        result = await call_worker(worker, "job")
         assert len(calls) == 1
         assert result == "async-result"
 

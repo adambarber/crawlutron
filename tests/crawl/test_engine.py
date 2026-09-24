@@ -313,7 +313,7 @@ class TestEngineChainEdges:
             "headers": {},
             "request_profile": {},
         }
-        result = await _execute_crawl_chain(
+        result = await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             policy=policy,
@@ -434,7 +434,7 @@ class TestEngineScopeEdges:
         assert result.status == status_for_classification("robots_disallowed")
 
     async def test_crawl_chain_continue_on_skip(self):
-        from app.crawl.engine import _execute_crawl_chain
+        from app.crawl.strategy_chain import execute_crawl_chain
         from app.scheduler import DomainScheduler
 
         def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
@@ -456,7 +456,7 @@ class TestEngineScopeEdges:
             "request_profile": {},
         }
         # HTTP returns access_denied (blocked), browser_worker is None -> browser_crash
-        result = await _execute_crawl_chain(
+        result = await execute_crawl_chain(
             original_url="http://example.com/page",
             normalized_url="http://example.com/page",
             policy=policy,

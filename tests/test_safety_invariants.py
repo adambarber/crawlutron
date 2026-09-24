@@ -69,6 +69,9 @@ __all__ = [
 #   exceptions.py       shared validation error-envelope construction
 #   request_profile.py  the C1b resolved-profile handoff and typed Set-Cookie
 #                       header protocol needed to keep both consumers on one value
+#   worker.py           the single sync/async worker-dispatch door
+#   browser_result.py   browser capture, extraction, discovery, and result phases
+#   strategy_chain.py   one-target strategy escalation and cookie retry phases
 #
 # Seven more moved in the pyright-enablement commit, and again not for one reason:
 #
@@ -78,7 +81,10 @@ __all__ = [
 #                    return position stops widening to `str`, and the routing of
 #                    the dict-derived name through `as_classification`
 #   decompression.py  two Protocols naming the incompatible brotli streaming APIs
-#                    that `hasattr` used to describe and the checker could not see
+#                    that `hasattr` used to describe and the checker could not see,
+#                    and the brotli branch lifted into its own function because
+#                    those additions had pushed one `if` block from 39 to 48 lines
+#                    and the metrics gate caught it
 #   extraction.py    a sentinel class for the selector timeout, so the evaluator
 #                    stops erasing its result type to `object` -- that erasure is
 #                    what made `for tag in selected` unchecked
@@ -123,7 +129,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/cache.py": 118,
     "app/crawl/content_cache.py": 518,
     "app/crawl/credentials.py": 88,
-    "app/crawl/decompression.py": 187,
+    "app/crawl/decompression.py": 197,
     "app/crawl/document_text.py": 180,
     "app/crawl/engine.py": 1166,
     "app/crawl/extraction.py": 1163,
@@ -147,10 +153,13 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/robots_parse.py": 159,
     "app/crawl/scheduler_exceptions.py": 21,
     "app/crawl/scope_match.py": 31,
+    "app/crawl/strategy_chain.py": 305,
+    "app/crawl/worker.py": 44,
     "app/crawl/sqlite_store.py": 112,
     "app/crawl/strategies/__init__.py": 1,
     "app/crawl/strategies/body_decode.py": 114,
     "app/crawl/strategies/browser.py": 1220,
+    "app/crawl/strategies/browser_result.py": 239,
     "app/crawl/strategies/browser_pool.py": 255,
     "app/crawl/strategies/content_cache_key.py": 85,
     "app/crawl/strategies/cookie_jar.py": 168,

@@ -31,8 +31,6 @@ from app.crawl.document_text import (
     _should_join_document_paragraph,
 )
 from app.crawl.engine import (
-    _call_worker,
-    _execute_crawl_chain,
     _payload_policy,
     crawl_request,
 )
@@ -54,6 +52,8 @@ from app.crawl.strategies.request_profile import (
     _headers_for_strategy,
     _select_fingerprint,
 )
+from app.crawl.strategy_chain import execute_crawl_chain
+from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
@@ -345,7 +345,7 @@ class TestHttpStrategyResult:
 
 class TestExecuteCrawlChain:
     async def _run_chain(self, strategy, **kwargs):
-        return await _execute_crawl_chain(
+        return await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             policy=dict(make_base_policy(), strategies=[strategy]),
@@ -535,7 +535,7 @@ class TestCallWorkerContract:
         async def coro_worker(job):
             return "coro-result"
 
-        assert await _call_worker(coro_worker, _Job()) == "coro-result"
+        assert await call_worker(coro_worker, _Job()) == "coro-result"
 
     async def test_runs_sync_worker_in_thread(self) -> None:
         class _Job:
@@ -544,7 +544,7 @@ class TestCallWorkerContract:
         def sync_worker(job):
             return "sync-result"
 
-        assert await _call_worker(sync_worker, _Job()) == "sync-result"
+        assert await call_worker(sync_worker, _Job()) == "sync-result"
 
 
 class TestFingerprintInjectionRotation:

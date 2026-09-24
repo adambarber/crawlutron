@@ -651,7 +651,7 @@ async def invoke_browser_strategy(
     monkeypatch: Any, *, policy: dict[str, Any], html: str, text: str = "Hello world"
 ) -> Any:
     """Drive ``_browser_strategy_result`` with an in-memory browser worker."""
-    from app.crawl.engine import _browser_strategy_result
+    from app.crawl.strategies.browser_result import browser_strategy_result
     from app.models import CrawlResult
 
     async def browser_worker(job):
@@ -668,7 +668,7 @@ async def invoke_browser_strategy(
             metadata={},
         )
 
-    return await _browser_strategy_result(
+    return await browser_strategy_result(
         original_url="http://example.com/",
         normalized_url="http://example.com/",
         strategy="BROWSER_HEADLESS",
@@ -896,10 +896,7 @@ from app.crawl.document_text import (
     _next_non_empty_document_line,
     _should_join_document_paragraph,
 )
-from app.crawl.engine import (
-    _execute_crawl_chain,
-    _payload_policy,
-)
+from app.crawl.engine import _payload_policy
 from app.crawl.extraction import (
     _detect_pagination as _detect_pagination_with_policy,
 )
@@ -925,6 +922,7 @@ from app.crawl.strategies.document import (
 )
 from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http_fetcher_with_policy
 from app.crawl.strategies.request_profile import _cookie_header_for_url, _headers_for_strategy
+from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import CrawlJob, CrawlResult, RenderOptions, to_dict
 from app.validation import (
     get_env_int,
@@ -1090,7 +1088,7 @@ __all__ = [
     "_default_document_text_extractor",
     "_default_http_fetcher",
     "_document_item_range",
-    "_execute_crawl_chain",
+    "execute_crawl_chain",
     "_extract_discovered_links",
     "_extract_llm_metadata",
     "_fake_browser",

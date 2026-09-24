@@ -14,13 +14,13 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from app.crawl.engine import _execute_crawl_chain
+from app.crawl.strategy_chain import execute_crawl_chain
 from app.validation import HostPolicy
 
 
 class TestBlockAutoEscalation:
     async def _run_chain(self, strategies, fetcher, base_policy, **kwargs):
-        return await _execute_crawl_chain(
+        return await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
             policy=dict(base_policy, strategies=list(strategies)),
