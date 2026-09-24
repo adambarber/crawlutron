@@ -80,7 +80,7 @@ repos:
           .venv/bin/python tests/_jscpd_gate.py app --fail-on-empty
           --min-lines 5 --min-tokens 50 --threshold 0
         language: system
-        files: ^(docker/browser-crawler/)?app/.*\.py$
+        files: ^(docker/browser-crawler/)?(app/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
         pass_filenames: false
 
       - id: jscpd-tests
@@ -91,7 +91,7 @@ repos:
           .venv/bin/python tests/_jscpd_gate.py tests --fail-on-empty
           --min-lines 5 --min-tokens 50 --threshold 0
         language: system
-        files: ^(docker/browser-crawler/)?tests/.*\.py$
+        files: ^(docker/browser-crawler/)?(tests/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
         pass_filenames: false
 
       - id: jscpd-all
@@ -102,7 +102,7 @@ repos:
           .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
           --min-lines 10 --min-tokens 30 --threshold 0
         language: system
-        files: ^(docker/browser-crawler/)?(app|tests|scripts)/.*\.py$
+        files: ^(docker/browser-crawler/)?((app|tests|scripts)/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
         pass_filenames: false
 
       # Type gate: catches the stringly-typed-identity class statically, and is
@@ -117,7 +117,7 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
         pass_filenames: false
-        stages: [pre-push]
+        stages: [pre-commit, pre-push]
 
       # The project-specific safety predicates (chokepoint detectors). They are
       # the real architecture gate and the only exit path for those rules, so
@@ -133,4 +133,4 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
         pass_filenames: false
-        stages: [pre-push]
+        stages: [pre-commit, pre-push]
