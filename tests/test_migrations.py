@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,12 +13,15 @@ from app.crawl.job_store import JobStatus, JobStore
 from app.crawl.migrations import (
     CURRENT_SCHEMAS,
     MIGRATION_IDS,
+    ColumnSchema,
     StoreSchema,
+    TableSchema,
     create_table_sql,
     rollback_store,
     schema_drift,
     stamp_store,
 )
+from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
 from app.validation import HostPolicy
 
@@ -74,6 +78,22 @@ def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
             "INSERT INTO results (request_id, stored_at, payload) VALUES (?, ?, ?)",
             ("legacy-request", 30.0, '{"request_id": "legacy-request", "results": []}'),
         )
+    conn.commit()
+    conn.close()
+
+
+def _table_with_column(table: TableSchema, column: ColumnSchema) -> TableSchema:
+    return replace(
+        table,
+        columns=tuple(column if current.name == column.name else current for current in table.columns),
+    )
+
+
+def _rewrite_store_table(db_path: Path, table: TableSchema) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.execute(f'ALTER TABLE "{table.name}" RENAME TO "{table.name}_old"')
+    conn.execute(create_table_sql(table))
+    conn.execute(f'DROP TABLE "{table.name}_old"')
     conn.commit()
     conn.close()
 
@@ -181,6 +201,45 @@ def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsy
 def test_explicit_stamp_docstring_describes_satisfied_migrations():
     assert "satisfied" in (stamp_store.__doc__ or "")
     assert "current" not in (stamp_store.__doc__ or "")
+
+
+@pytest.mark.parametrize(
+    "changed_column",
+    [
+        replace(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS].columns[0], sqlite_type="BLOB"),
+        replace(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS].columns[1], not_null=False),
+        replace(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS].columns[1], default="'single_shot'"),
+        replace(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS].columns[0], primary_key_position=0),
+    ],
+    ids=("type", "nullability", "default", "primary-key"),
+)
+def test_store_rejects_out_of_band_column_drift(tmp_path, changed_column):
+    db_path = tmp_path / f"drift-{changed_column.name}.db"
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store.close()
+    _rewrite_store_table(
+        db_path,
+        _table_with_column(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS], changed_column),
+    )
+
+    with pytest.raises(LegacySchemaMismatch, match=changed_column.name):
+        JobStore(db_path, policy=HostPolicy.unrestricted())
+
+
+def test_store_accepts_reordered_columns_at_startup(tmp_path):
+    db_path = tmp_path / "reordered.db"
+    table = CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store.close()
+    reordered = replace(table, columns=tuple(reversed(table.columns)))
+    _rewrite_store_table(db_path, reordered)
+
+    reopened = JobStore(db_path, policy=HostPolicy.unrestricted())
+    reopened.close()
+    conn = sqlite3.connect(db_path)
+    actual = tuple(str(row[1]) for row in conn.execute("PRAGMA table_info(crawl_jobs)"))
+    conn.close()
+    assert actual == tuple(column.name for column in reordered.columns)
 
 
 def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_path):
