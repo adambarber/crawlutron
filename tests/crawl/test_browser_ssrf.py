@@ -4,7 +4,7 @@ pytestmark = pytest.mark.browser
 
 import urllib.request
 
-from _browser_doubles import BrowserFakePage, build_pinned_renderer, pinned_renderer
+from _browser_doubles import BrowserFakePage, FakeRequest, FakeRoute, build_pinned_renderer, pinned_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
@@ -135,27 +135,12 @@ async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    class _Route:
-        def __init__(self):
-            self.aborted = False
-            self.continued = False
-
-        async def abort(self):
-            self.aborted = True
-
-        async def continue_(self, url=None, headers=None):
-            self.continued = True
-
-    class _Req:
-        def __init__(self, url):
-            self.url = url
-
-    bad = _Route()
-    await handler(bad, _Req("http://127.0.0.1:9/"))
+    bad = FakeRoute()
+    await handler(bad, FakeRequest("http://127.0.0.1:9/", "document"))
     assert bad.aborted and not bad.continued
 
-    good = _Route()
-    await handler(good, _Req("http://1.2.3.4/"))
+    good = FakeRoute()
+    await handler(good, FakeRequest("http://1.2.3.4/", "document"))
     assert good.continued and not good.aborted
 
 

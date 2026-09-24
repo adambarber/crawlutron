@@ -15,32 +15,11 @@ from __future__ import annotations
 import socket
 
 from _assertions import block_private_targets
+from _browser_doubles import ROUTE_ARG_UNSET, FakeRequest, FakeRoute
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.browser import _make_ssrf_route_handler
-
-
-class _FakeRoute:
-    def __init__(self) -> None:
-        self.aborted = False
-        self.continued = False
-        self.continued_url: str | None = None
-        self.continued_headers: dict | None = None
-
-    async def abort(self) -> None:
-        self.aborted = True
-
-    async def continue_(self, url=None, headers=None) -> None:
-        self.continued = True
-        self.continued_url = url
-        self.continued_headers = headers
-
-
-class _FakeRequest:
-    def __init__(self, url: str, resource_type: str = "document") -> None:
-        self.url = url
-        self.resource_type = resource_type
 
 
 async def test_https_subresource_to_a_private_target_is_aborted(monkeypatch) -> None:
@@ -53,8 +32,8 @@ async def test_https_subresource_to_a_private_target_is_aborted(monkeypatch) -> 
         "https://[::1]:9/",
         "https://localhost:9/admin",
     ):
-        route = _FakeRoute()
-        await handler(route, _FakeRequest(url))
+        route = FakeRoute()
+        await handler(route, FakeRequest(url, "document"))
         assert route.aborted, f"private target was not blocked: {url}"
         assert not route.continued
 
@@ -63,11 +42,11 @@ async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) ->
     """The browser keeps the original hostname for HTTPS (SNI/cert verification)."""
     block_private_targets(monkeypatch)
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    route = _FakeRoute()
-    await handler(route, _FakeRequest("https://1.2.3.4/x"))
+    route = FakeRoute()
+    await handler(route, FakeRequest("https://1.2.3.4/x", "document"))
     assert route.continued
     assert route.continued_url == "https://1.2.3.4/x"
-    assert route.continued_headers in (None, {})
+    assert route.continued_headers is ROUTE_ARG_UNSET
 
 
 async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
@@ -84,8 +63,8 @@ async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
 
     monkeypatch.setattr(socket, "getaddrinfo", counting)
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    await handler(_FakeRoute(), _FakeRequest("https://1.2.3.4/a"))
-    await handler(_FakeRoute(), _FakeRequest("https://1.2.3.4/b"))
+    await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))
+    await handler(FakeRoute(), FakeRequest("https://1.2.3.4/b", "document"))
     assert len(lookups) == 1, f"expected one shared lookup, got {lookups}"
 
 
@@ -103,8 +82,8 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
 
     monkeypatch.setattr(http_mod, "_resolve_ips", recording)
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    route = _FakeRoute()
-    await handler(route, _FakeRequest("http://1.2.3.4/x"))
+    route = FakeRoute()
+    await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
     assert route.continued
     assert route.continued_url == "http://1.2.3.4/x"
     assert route.continued_headers == {"Host": "1.2.3.4"}

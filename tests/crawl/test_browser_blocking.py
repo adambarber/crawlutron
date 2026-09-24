@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _browser_doubles import BrowserFakePage
+from _browser_doubles import BrowserFakePage, FakeRequest, FakeRoute
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from pydantic import ValidationError
 
@@ -15,30 +15,24 @@ from app.api_models import CrawlPolicy
 from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
 
 
-@pytest.mark.browser
-class MockRequest:
-    def __init__(self, url):
-        self.url = url
-
-
-@pytest.mark.browser
-class MockRoute:
-    def __init__(self):
-        self.aborted = False
-        self.continued = False
-        self.continued_url = None
-
-    async def abort(self):
-        self.aborted = True
-
-    async def continue_(self, url=None, headers=None):
-        self.continued = True
-        self.continued_url = url
-
-
 def slow_build_pinned_request(url, headers):
     time.sleep(0.05)  # Blocking call - would block event loop if run directly
     return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+
+async def _concurrent_route_elapsed(handler):
+    start_times = []
+    end_times = []
+
+    async def call_handler(i):
+        route = FakeRoute()
+        request = FakeRequest(f"http://example.com/{i}", "document")
+        start_times.append(time.monotonic())
+        await handler(route, request)
+        end_times.append(time.monotonic())
+
+    await asyncio.gather(*(call_handler(i) for i in range(5)))
+    return max(end_times) - min(start_times)
 
 
 @pytest.mark.browser
@@ -63,8 +57,8 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
 
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    route = MockRoute()
-    request = MockRequest("http://example.com/")
+    route = FakeRoute()
+    request = FakeRequest("http://example.com/", "document")
 
     # Run handler - should complete and run the blocking check in a thread
     await handler(route, request)
@@ -85,27 +79,9 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
 
     ``real_sleeps`` so the concurrency assertion actually measures real timing.
     """
-    start_times = []
-    end_times = []
-
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
-
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    async def call_handler(i):
-        route = MockRoute()
-        request = MockRequest(f"http://example.com/{i}")
-        start_times.append(time.monotonic())
-        await handler(route, request)
-        end_times.append(time.monotonic())
-
-    # Launch 5 concurrent handlers
-    await asyncio.gather(*[call_handler(i) for i in range(5)])
-
-    # If properly using thread pool, all 5 should run concurrently in threads
-    # and total elapsed time should be ~50ms, not 250ms (5 * 50ms)
-    total_time = max(end_times) - min(start_times)
-    # Allow some overhead, but should be well under 200ms
+    total_time = await _concurrent_route_elapsed(handler)
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
 
 
@@ -128,25 +104,8 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
 
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.aborted = False
-            self.continued_url = None
-            self.continued_headers = None
-
-        async def abort(self):
-            self.aborted = True
-
-        async def continue_(self, url=None, headers=None):
-            self.continued_url = url
-            self.continued_headers = headers
-
-    route = MockRoute()
-    request = MockRequest("http://example.com/path")
+    route = FakeRoute()
+    request = FakeRequest("http://example.com/path", "document")
     await handler(route, request)
 
     assert route.aborted is False
@@ -165,8 +124,8 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
 
-    route = MockRoute()
-    request = MockRequest("http://127.0.0.1:9/")
+    route = FakeRoute()
+    request = FakeRequest("http://127.0.0.1:9/", "document")
     await handler(route, request)
 
     assert route.aborted is True
@@ -191,8 +150,8 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
 
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    route = MockRoute()
-    request = MockRequest("http://example.com/")
+    route = FakeRoute()
+    request = FakeRequest("http://example.com/", "document")
     await handler(route, request)
 
     assert route.continued_url == "http://1.2.3.4:80/"
@@ -205,54 +164,10 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
 @pytest.mark.browser
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
     """Multiple concurrent pinning operations should not block each other."""
-    start_times = []
-    end_times = []
-
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
-
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    class MockRequest:
-        def __init__(self, url):
-            self.url = url
-
-    class MockRoute:
-        def __init__(self):
-            self.continued = False
-
-        async def continue_(self, **kwargs):
-            self.continued = True
-
-    async def call_handler(i):
-        route = MockRoute()
-        request = MockRequest(f"http://example.com/{i}")
-        start_times.append(time.monotonic())
-        await handler(route, request)
-        end_times.append(time.monotonic())
-
-    await asyncio.gather(*[call_handler(i) for i in range(5)])
-
-    total_time = max(end_times) - min(start_times)
+    total_time = await _concurrent_route_elapsed(handler)
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
-
-
-@pytest.mark.browser
-class _Req:
-    def __init__(self, url):
-        self.url = url
-
-
-@pytest.mark.browser
-class _Route:
-    def __init__(self):
-        self.aborted = False
-        self.continued = False
-
-    async def abort(self):
-        self.aborted = True
-
-    async def continue_(self, **k):
-        self.continued = True
 
 
 @pytest.mark.browser
@@ -265,8 +180,8 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", boom)
 
-    route = _Route()
-    await handler(route, _Req("http://example.com/"))
+    route = FakeRoute()
+    await handler(route, FakeRequest("http://example.com/", "document"))
     assert route.aborted is True and route.continued is False
 
 
@@ -276,8 +191,8 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     for scheme_url in ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"):
-        route = _Route()
-        await handler(route, _Req(scheme_url))
+        route = FakeRoute()
+        await handler(route, FakeRequest(scheme_url, "document"))
         assert route.continued is True and route.aborted is False, scheme_url
 
 
@@ -304,28 +219,6 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
     assert internal.closed is True, "internal WS not closed"
 
 
-@pytest.mark.browser
-class _FakeRoute:
-    def __init__(self):
-        self.actions = []
-
-    async def abort(self):
-        self.actions.append(("abort",))
-
-    async def continue_(self, **kw):
-        self.actions.append(("continue", kw))
-
-    def decision(self):
-        return self.actions[-1][0] if self.actions else None
-
-
-@pytest.mark.browser
-class _FakeRequest:
-    def __init__(self, url, resource_type="document"):
-        self.url = url
-        self.resource_type = resource_type
-
-
 def _handler_for(resource_mode=None, *, include_screenshot=False):
     return _make_ssrf_route_handler(
         resource_mode,
@@ -336,18 +229,18 @@ def _handler_for(resource_mode=None, *, include_screenshot=False):
 
 @pytest.mark.browser
 async def test_analytics_aborted_regardless_of_mode():
-    route = _FakeRoute()
+    route = FakeRoute()
     handler = _handler_for(None)
-    await handler(route, _FakeRequest("https://www.google-analytics.com/analytics.js", "script"))
-    assert route.decision() == "abort"
+    await handler(route, FakeRequest("https://www.google-analytics.com/analytics.js", "script"))
+    assert route.decision == "abort"
 
 
 @pytest.mark.browser
 async def test_pinterest_aborted_with_and_without_www():
     for url in ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"):
-        route = _FakeRoute()
-        await _handler_for(None)(route, _FakeRequest(url, "document"))
-        assert route.decision() == "abort", url
+        route = FakeRoute()
+        await _handler_for(None)(route, FakeRequest(url, "document"))
+        assert route.decision == "abort", url
 
 
 @pytest.mark.browser
@@ -357,9 +250,9 @@ async def test_cdcgov_aborted_with_and_without_www():
     # route handler must let it through. Suffix match still covers apex
     # and subdomains alike for hosts that ARE on the list (see pinterest).
     for url in ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"):
-        route = _FakeRoute()
-        await _handler_for(None)(route, _FakeRequest(url, "document"))
-        assert route.decision() == "continue", url
+        route = FakeRoute()
+        await _handler_for(None)(route, FakeRequest(url, "document"))
+        assert route.decision == "continue", url
 
 
 @pytest.mark.browser
@@ -367,40 +260,40 @@ async def test_xcom_aborted_regardless_of_mode():
     # x.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
     # including bare-apex and www subdomain forms.
     for url in ("https://x.com/i/web/status/1", "https://www.x.com/home"):
-        route = _FakeRoute()
-        await _handler_for(None)(route, _FakeRequest(url, "document"))
-        assert route.decision() == "abort", url
+        route = FakeRoute()
+        await _handler_for(None)(route, FakeRequest(url, "document"))
+        assert route.decision == "abort", url
 
 
 @pytest.mark.browser
 async def test_image_blocked_by_default_unless_screenshot():
     # default (no screenshot requested) -> abort unconditionally (#4)
-    route = _FakeRoute()
-    await _handler_for(None)(route, _FakeRequest("https://x.test/logo.png", "image"))
-    assert route.decision() == "abort"
+    route = FakeRoute()
+    await _handler_for(None)(route, FakeRequest("https://x.test/logo.png", "image"))
+    assert route.decision == "abort"
 
     # reduced mode -> also abort
-    route = _FakeRoute()
-    await _handler_for("reduced")(route, _FakeRequest("https://x.test/logo.png", "image"))
-    assert route.decision() == "abort"
+    route = FakeRoute()
+    await _handler_for("reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
+    assert route.decision == "abort"
 
     # screenshot explicitly requested -> continue (renders need images/fonts)
-    route = _FakeRoute()
+    route = FakeRoute()
     with patch.object(browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {})):
         await _handler_for(None, include_screenshot=True)(
-            route, _FakeRequest("https://x.test/logo.png", "image")
+            route, FakeRequest("https://x.test/logo.png", "image")
         )
-    assert route.decision() == "continue"
+    assert route.decision == "continue"
 
 
 @pytest.mark.browser
 async def test_document_always_continues_with_pinned_url():
-    route = _FakeRoute()
+    route = FakeRoute()
     with patch.object(
         browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {"Host": "x.test"})
     ):
-        await _handler_for(None)(route, _FakeRequest("https://x.test/page", "document"))
-    assert route.decision() == "continue"
+        await _handler_for(None)(route, FakeRequest("https://x.test/page", "document"))
+    assert route.decision == "continue"
     assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
 
 
