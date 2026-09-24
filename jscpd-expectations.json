@@ -15,7 +15,8 @@
         "end": 137
       },
       "reason": "Classification and CrawlError intentionally share the page-outcome Literal prefix; the test_crawl_error_members_derive_from_classification invariant pins the shared members and the documented pipeline-only additions.",
-      "guard": "tests/test_safety_invariants.py::test_crawl_error_members_derive_from_classification"
+      "guard": "tests/test_safety_invariants.py::test_crawl_error_members_derive_from_classification",
+      "fragment_sha256": "e77c3d73454033cf8621b0eb6b548eb40a32763ba20dc040f2ef670579b790e7"
     }
   ]
 }
