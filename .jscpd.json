@@ -1,5 +1,4 @@
 {
-  "threshold": 0,
   "ignore": [
     "**/__pycache__/**",
     "**/.pytest_cache/**",
