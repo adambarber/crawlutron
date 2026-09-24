@@ -27,14 +27,23 @@ test-all:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest -o addopts=
 
 lint:
-	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests
+	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests scripts
 
-# Type-check the app tree with mypy. The config lives in mypy.ini (files = app).
-# This started as an advisory target against a never-typechecked tree; the
-# backlog it warned about is cleared (0 errors across 85 files) and CI now runs
-# this as part of the required quality gate, so a type error fails a build.
+# Type-check with mypy (the fail gate) and pyright (the third opinion that finds
+# annotation lies mypy cannot see, because the `regex` package is untyped in
+# mypy.ini and degrades its values to Any). Pyright analyses 101 files in under
+# three seconds, so it runs on every commit rather than on a schedule.
 typecheck:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
+	cd "$(SUITE_DIR)" && .venv/bin/pyright --pythonpath .venv/bin/python
+
+# Module coupling report: fan-in hubs, fan-out reachers, and import cycles.
+# The ranked report is the work list for the splitting programme -- a file's size
+# says how much work a split is, its fan-in says how much risk. `--mermaid`
+# regenerates docs/module-graph.md.
+graph:
+	cd "$(SUITE_DIR)" && $(PYTHON) scripts/module_graph.py
+	cd "$(SUITE_DIR)" && $(PYTHON) scripts/module_graph.py --mermaid -o docs/module-graph.md
 
 clean:
 	# Remove top-level caches and patterns first; ignore-missing tolerates

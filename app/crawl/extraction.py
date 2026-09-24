@@ -25,9 +25,10 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from html import unescape
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urljoin, urlparse
 
 from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
@@ -410,10 +411,32 @@ _EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int(
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
 
 
-_EXTRACTION_SELECTOR_SENTINEL = object()
+class _SelectorTimedOut:
+    """Type of the timeout sentinel, so a timeout does not erase the result type.
+
+    The sentinel used to be a bare ``object()``, which forced the evaluator's
+    return type to ``T | object`` -- and a union with ``object`` collapses to
+    ``object`` at every call site. That erasure is why ``for tag in selected``
+    type-checked as iterating an ``object``: the selector's real result type was
+    thrown away before the loop could see it. A sentinel with its own class
+    keeps the union narrow, so the caller's ``isinstance(..., _SelectorTimedOut)``
+    check narrows the rest to the callable's actual return type. Identity is not
+    enough here: pyright does not narrow a union on ``is`` against a module-level
+    instance, so the timeout path stayed in the type and the selector loop below
+    still type-checked as iterating a sentinel.
+    """
+
+    __slots__ = ()
 
 
-def _eval_selector(fn, timeout):
+_EXTRACTION_SELECTOR_SENTINEL = _SelectorTimedOut()
+
+_SelectorResult = TypeVar("_SelectorResult")
+
+
+def _eval_selector(
+    fn: Callable[[], _SelectorResult], timeout: float
+) -> _SelectorResult | _SelectorTimedOut:
     """Run a selector evaluation in a worker thread so it cannot hang a request.
 
     Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
@@ -538,7 +561,7 @@ def _extract_selected(
             return ExtractedContent(None, None)
         soup = BeautifulSoup(html, "html.parser")
         selected = _eval_selector(lambda: soup.select(css_selector), _EXTRACTION_SELECTOR_TIMEOUT)
-        if selected is _EXTRACTION_SELECTOR_SENTINEL:
+        if isinstance(selected, _SelectorTimedOut):
             logger.warning(
                 "extraction_selector_timeout",
                 extra={"selector_type": "css", "selector": css_selector},
@@ -555,7 +578,7 @@ def _extract_selected(
             nodes = _eval_selector(lambda: tree.xpath(xpath), _EXTRACTION_SELECTOR_TIMEOUT)
         except Exception:  # invalid XPath is caller error, not extraction
             return ExtractedContent(None, None)
-        if nodes is _EXTRACTION_SELECTOR_SENTINEL:
+        if isinstance(nodes, _SelectorTimedOut):
             logger.warning(
                 "extraction_selector_timeout",
                 extra={"selector_type": "xpath", "selector": xpath},
@@ -563,7 +586,11 @@ def _extract_selected(
             return ExtractedContent(None, None)
         if not nodes:
             return ExtractedContent(None, None)
-        from lxml import etree
+        # lxml ships partial stubs: `etree` is absent from the bundled lxml-stubs
+        # even though `from lxml import etree` succeeds on the installed 6.1.3
+        # (verified directly, not assumed). Remove these ignores when lxml's
+        # bundled stubs declare the etree symbol.
+        from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
 
         parts: list[str] = []
         for node in nodes:
@@ -755,7 +782,8 @@ def _parse_html_tree(html: str | None):
     if not html:
         return None
     try:
-        from lxml import etree
+        # Same incomplete-stub reason as the other etree import above.
+        from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
         from lxml.etree import ParserError
     except ImportError:
         return None

@@ -43,7 +43,7 @@ ok = r.status_code == 200
 body = r.json() if ok else {}
 res = (body.get("results") or [{}])[0]
 check("crawl sync 200", ok, r.text[:200])
-check("rendered", res.get("status") == "success", f"{res.get('status')}/{res.get('classification')} in {time.time()-t0:.1f}s")
+check("rendered", res.get("status") == "success", f"{res.get('status')}/{res.get('classification')} in {time.time() - t0:.1f}s")
 check("markdown content", len(res.get("markdown") or "") > 200)
 rid = body.get("request_id", "")
 check("request_id issued", rid.startswith("crawl_"))

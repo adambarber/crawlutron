@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Final
 
-from app.models import Classification
+from app.models import Classification, as_classification
+
+# Declared as Final[Classification] rather than returned as bare literals. A
+# string literal in return position widens to `str`, which is how a function
+# annotated `-> tuple[Classification, ...]` ends up handing its caller a plain
+# string that merely happens to spell a member. Naming the two values once, with
+# the taxonomy type attached, makes the return sites honest and gives the
+# membership drift test something to pin.
+_BINARY_NO_TEXT: Final[Classification] = "binary_no_text"
+_RENDERED: Final[Classification] = "rendered"
 
 CLASSIFICATION_SIGNATURES: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
@@ -149,7 +158,7 @@ def classify_page_with_evidence(
     visible_haystack = f"{title or ''}\n{text or ''}".lower()
     html_haystack = stripped_html
     if not (text or "").strip() and not (title or "").strip() and _html_has_no_user_visible_content(html):
-        return "binary_no_text", [
+        return _BINARY_NO_TEXT, [
             {
                 "classification": "binary_no_text",
                 "signature": "empty_visible_content",
@@ -201,7 +210,7 @@ def classify_page_with_evidence(
                     )
                     break  # earliest source is enough for this signature
     if not matches:
-        return "rendered", []
+        return _RENDERED, []
 
     distinct_classifications = {name for name, _match in matches}
     best_priority = min(match["priority"] for _name, match in matches)
@@ -213,13 +222,13 @@ def classify_page_with_evidence(
     # keeps its ``Classification`` type instead of being read back off an
     # ``Any`` dict, which would widen a taxonomy member to plain ``str`` at the
     # exact point the declared return has to hold.
-    classification = next(name for name, match in matches if match is chosen)
+    classification = as_classification(next(name for name, match in matches if match is chosen))
 
     # Corroboration: >= 2 independent signals anywhere on the page (either two
     # different block classifications, or two distinct phrases of the same one).
     corroborated = len(distinct_classifications) >= 2 or len(matches) >= 2
     if classification in SOFT_SINGLE_SIGNAL_CLASSIFICATIONS and not corroborated:
-        return "rendered", []
+        return _RENDERED, []
 
     return classification, [
         _evidence(

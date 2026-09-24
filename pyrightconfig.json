@@ -1,4 +1,16 @@
 {
+    // Pyright is the THIRD type checker here, alongside mypy (the fail gate) and
+    // whatever AFT runs for live diagnostics. It earns its place by finding
+    // annotation lies both declared gates miss: a `regex.Pattern` passed where a
+    // `re.Pattern[str]` was declared, a symbol imported from the wrong module,
+    // a `urllib.error` reference that only resolves because another import
+    // happened to bind the submodule. Mypy passes those because the `regex`
+    // package is untyped in its config and degrades the value to `Any`.
+    //
+    // Ruff is the single owner of style and the custom AST suite is the single
+    // owner of project-specific safety predicates; this file is the single owner
+    // of "the type annotation is a lie". Gated by tests/test_pyright_budget.py
+    // and a pre-commit hook, both at zero.
     "include": ["app"],
     "exclude": [
         "tests",
@@ -6,14 +18,34 @@
         "**/__pycache__",
         "**/.pytest_cache"
     ],
-    "pythonVersion": "3.11",
+
+    // The service runs 3.12. This was pinned to 3.11 and had never been run
+    // against the real interpreter, so every finding it would have produced was
+    // hypothetical. A config nobody executes is documentation, not a gate.
+    "pythonVersion": "3.12",
     "typeCheckingMode": "basic",
-    "reportUnusedImport": "error",
+
     "reportMissingTypeStubs": "none",
     "reportUnknownMemberType": "none",
     "reportUnknownVariableType": "none",
     "reportUnknownArgumentType": "none",
     "reportUnknownParameterType": "none",
     "reportUnknownLambdaType": "none",
-    "reportMissingTypeArgument": "none"
+    "reportMissingTypeArgument": "none",
+
+    // curl_cffi and lxml do not mark re-exports, so importing a name that IS
+    // present at runtime is reported as a private import. Verified directly
+    // rather than assumed: `from curl_cffi.requests.models import STREAM_END`
+    // succeeds on the installed 0.16.3, and `from lxml import etree` succeeds on
+    // 6.1.3. Turning this off costs nothing and silences four findings that were
+    // all wrong. It would have cost a great deal the other way: "fixing" the
+    // STREAM_END import to satisfy the checker would have silently routed every
+    // streaming fetch through the httpx fallback, because the import sits inside
+    // a `try: ... except ImportError: return _fallback_to_httpx(...)`.
+    //
+    // The pydantic `Field(default_factory=...)` findings cannot be configured
+    // away -- they are reportArgumentType, which is a rule we want -- so the six
+    // of them carry a per-line ignore with a shared explanation at the top of
+    // app/api_models.py.
+    "reportPrivateImportUsage": "none"
 }

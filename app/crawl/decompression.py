@@ -1,8 +1,25 @@
 """Response body decompression utilities."""
 
+from __future__ import annotations
+
 import gzip
 import io
 import zlib
+from typing import Protocol, cast
+
+
+class _BoundedDecompressor(Protocol):
+    """The brotlicffi-style API: one call, bounded by an explicit output cap."""
+
+    def decompress(
+        self, data: bytes | bytearray | memoryview[int], max_length: int, /
+    ) -> bytes: ...
+
+
+class _StreamingDecompressor(Protocol):
+    """The google-brotli API: feed a slice at a time, no cap parameter."""
+
+    def process(self, data: bytes | bytearray | memoryview[int], /) -> bytes: ...
 
 
 class DecompressionTooLargeError(Exception):
@@ -100,47 +117,65 @@ def decompress_body(
             return _passthrough(body)
 
     if "br" in encoding:
-        try:
-            import brotli
-        except ImportError:
+        decoded = _decompress_brotli(body, max_output_bytes)
+        if decoded is None:
             return _passthrough(body)
-        # Bounded brotli decompression. The brotli ecosystem has two
-        # incompatible streaming APIs (google-brotli exposes .process(),
-        # brotlicffi exposes .decompress(data, cap)) -- detect and use whichever
-        # exists. Fall back to full decompress + post-hoc cap check.
-        try:
-            decoder: object | None = brotli.Decompressor()
-        except Exception:
-            decoder = None
-
-        try:
-            if decoder is not None and hasattr(decoder, "decompress"):
-                # brotlicffi-style bounded API
-                decoded: bytes | bytearray = decoder.decompress(body, max_output_bytes + 1)
-            elif decoder is not None and hasattr(decoder, "process"):
-                # google-brotli streaming API: feed incrementally and stop
-                # past the cap (H6). A single process(body) call would
-                # materialize the entire bomb in RAM. Stopping early leaves
-                # out over the cap, which the post-hoc check below turns
-                # into DecompressionTooLargeError (raising here would be
-                # swallowed by the passthrough handler around this block).
-                chunks = bytearray()
-                step = 16_384
-                for offset in range(0, len(body), step):
-                    chunks.extend(decoder.process(body[offset : offset + step]))
-                    if len(chunks) > max_output_bytes:
-                        break
-                decoded = chunks
-            else:
-                decoded = brotli.decompress(body)
-        except Exception:
-            return _passthrough(body)
-
         if len(decoded) > max_output_bytes:
             raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
         return bytes(decoded)
 
     return _passthrough(body)
+
+
+def _decompress_brotli(
+    body: bytes | bytearray | memoryview[int], max_output_bytes: int
+) -> bytes | bytearray | None:
+    """Decode a brotli body within a cap, or None if this build cannot.
+
+    The brotli ecosystem ships two incompatible streaming APIs: brotlicffi
+    exposes ``.decompress(data, cap)`` and google-brotli exposes
+    ``.process(data)`` with no cap. Which one is installed is not knowable
+    statically, so ``hasattr`` is the discriminator and the cast records what
+    that check just proved -- the decoder is typed ``object`` precisely because
+    its type depends on the package. Declaring the two shapes as protocols also
+    documents them, which ``hasattr`` on an ``object`` did not.
+
+    Returns None when brotli is unavailable or fails, so the caller can decide
+    between passthrough and an error rather than this function guessing.
+    """
+    try:
+        import brotli
+    except ImportError:
+        return None
+    try:
+        decoder: object | None = brotli.Decompressor()
+    except Exception:
+        decoder = None
+
+    try:
+        if decoder is not None and hasattr(decoder, "decompress"):
+            # brotlicffi-style bounded API
+            bounded = cast("_BoundedDecompressor", decoder)
+            decoded: bytes | bytearray = bounded.decompress(body, max_output_bytes + 1)
+        elif decoder is not None and hasattr(decoder, "process"):
+            streaming = cast("_StreamingDecompressor", decoder)
+            # google-brotli streaming API: feed incrementally and stop past the
+            # cap (H6). A single process(body) call would materialize the entire
+            # bomb in RAM. Stopping early leaves the output over the cap, which
+            # the caller's post-hoc check turns into DecompressionTooLargeError
+            # (raising here would be swallowed by the passthrough handler).
+            chunks = bytearray()
+            step = 16_384
+            for offset in range(0, len(body), step):
+                chunks.extend(streaming.process(body[offset : offset + step]))
+                if len(chunks) > max_output_bytes:
+                    break
+            decoded = chunks
+        else:
+            decoded = brotli.decompress(body)
+    except Exception:
+        return None
+    return decoded
 
 
 def detect_decompression_failure(

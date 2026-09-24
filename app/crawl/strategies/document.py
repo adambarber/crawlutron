@@ -9,6 +9,7 @@ Markdown tables rather than being flattened into prose.
 from __future__ import annotations
 
 import io
+import urllib.error
 import urllib.request
 from typing import Any
 

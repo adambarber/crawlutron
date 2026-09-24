@@ -32,9 +32,40 @@ repos:
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          .venv/bin/python -m ruff check app tests
+          .venv/bin/python -m ruff check app tests scripts
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
+        pass_filenames: false
+
+      # Third type checker, scoped to the files being committed. Mypy is the
+      # fail gate and Ruff owns style; this one exists because pyright finds
+      # annotation lies both declared gates miss -- a `regex.Pattern` passed
+      # where `re.Pattern[str]` was declared, a symbol imported from the wrong
+      # module, a `urllib.error` reference that only resolved because another
+      # import happened to bind the submodule. Mypy passes those because the
+      # `regex` package is untyped in its config and degrades the value to Any.
+      #
+      # The hook runs the BUDGET TEST, not raw pyright, and that distinction is
+      # the point. A raw exit code would have to be either a hard fail -- which
+      # it cannot be while one proven false positive survives, since pyright
+      # honours none of the three suppression forms at an annotation position --
+      # or advisory, which is what "CI runs it separately" always decays into.
+      # The budget assertion is the third option: any NEW annotation lie fails
+      # this commit, the one known-bad finding is documented in exactly one place
+      # (the test), and the test's tight-budget check fails the day the count
+      # drops so the allowance cannot linger.
+      #
+      # Cost is ~15s (pytest startup plus 2.8s of analysis) against a 110s suite,
+      # which is the right order for a gate that catches a class of defect mypy
+      # structurally cannot see here.
+      - id: pyright
+        name: pyright budget
+        entry: >-
+          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          .venv/bin/python -m pytest tests/test_pyright_budget.py -q -p no:randomly
+        language: system
+        files: ^(docker/browser-crawler/)?(app|tests|pyrightconfig).*
         pass_filenames: false
 
       # Copy/paste detection at zero tolerance, with --fail-on-empty so a future
@@ -55,6 +86,14 @@ repos:
       # pairs across the MCP refusal paths, the render admission path and the
       # migration/schema reporting, taking it to 11 pairs / 99 lines (0.46%) at
       # 19dcdc7 -- so the threshold moved again in the same commit as the work.
+      # Wave 1 then split engine.py and recursive.py, and that is where this
+      # ratchet nearly went the wrong way. The first strategy extraction COPIED
+      # engine.py's chain and browser-result code into three new modules instead
+      # of moving it, so duplication went 11 -> 22 pairs (0.46% -> 0.83%) and the
+      # commit was correctly blocked. Consolidating the seams rather than
+      # re-baselining took it to 10 pairs / 91 lines of 22,077 (0.41%), so the
+      # threshold moved down a third time -- to 0.42, which is the tightest
+      # two-decimal value that passes (0.41 fails: 91/22077 is 0.41222%).
       #
       # The threshold is a RATCHET, and it moves the moment the baseline moves --
       # not at the end of a phase. A review caught it still sitting at the old
@@ -102,7 +141,7 @@ repos:
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.46 --fail-on-empty app
+          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.42 --fail-on-empty app
         language: system
         files: ^(docker/browser-crawler/)?app/.*\.py$
         pass_filenames: false

@@ -34,10 +34,12 @@ class ScheduledJob(Protocol):
     @property
     def index(self) -> int:
         """Submission order; the key the caller aligns results against."""
+        ...
 
     @property
     def domain(self) -> str:
         """Registrable domain pacing/breakers are scoped to."""
+        ...
 
 
 _Job = TypeVar("_Job", bound=ScheduledJob)
@@ -54,6 +56,7 @@ class SchedulerResult(Protocol):
     @property
     def status(self) -> ResultStatus:
         """Terminal status of this job's attempt."""
+        ...
 
 
 _Result = TypeVar("_Result", bound=SchedulerResult)

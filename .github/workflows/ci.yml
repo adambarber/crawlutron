@@ -33,7 +33,7 @@ jobs:
       # app/api-only subset plus an advisory full tree (`|| true`) was a gate
       # that could not fail on the code most likely to drift.
       - name: Run ruff check
-        run: ruff check app tests
+        run: ruff check app tests scripts
       # Formatting is still advisory: the tree carries format debt (the
       # previous blocking subset was red on it). It becomes blocking in the
       # same commit that formats the tree — not before.
@@ -41,7 +41,7 @@ jobs:
         run: ruff format --check app tests || true
 
   typecheck:
-    name: Typecheck (mypy)
+    name: Typecheck (mypy + pyright)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,6 +61,20 @@ jobs:
       # caught statically.
       - name: Run mypy
         run: python3 -m mypy app
+      # Pyright is the third opinion, and it is here because it finds annotation
+      # lies mypy structurally cannot: mypy reads the `regex` package as untyped
+      # and degrades its values to Any, so a `regex.Pattern` handed to a
+      # parameter declared `re.Pattern[str]` passes. On first run it found 14 --
+      # four real defects (an import from the wrong module, a `urllib.error`
+      # reference that only resolved by accident, a bare string returned as a
+      # Literal taxonomy, and a selector helper that erased its result type to
+      # `object`) and ten findings where the checker was wrong. The whole-tree
+      # count is pinned at zero by tests/test_pyright_budget.py; this step makes
+      # a regression visible without waiting for that suite to run.
+      - name: Install pyright
+        run: pip install pyright==1.1.406
+      - name: Run pyright
+        run: pyright --pythonpath "$(which python)"
 
   test-fast:
     name: Test suite (fast)

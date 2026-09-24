@@ -147,7 +147,13 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> str:
             to_mark = [migration for migration in pending if migration.id == initial_id]
         if to_mark:
             backend.mark_migrations(to_mark)
-        return to_mark[-1].id if to_mark else "none"
+        # `Migration.id` is assigned in `__init__` and never declared as a class
+        # annotation, and `MigrationList.__getitem__` carries no return type, so
+        # this reads as an attribute access on the container. Both facts were
+        # confirmed by reading yoyo's `Migration.__init__` rather than inferred:
+        # `self.id = id` is the first assignment. Remove this ignore when yoyo
+        # ships annotations (a py.typed marker with declared attributes).
+        return to_mark[-1].id if to_mark else "none"  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def rollback_store(db_path: str | Path, schema: StoreSchema | str) -> None:

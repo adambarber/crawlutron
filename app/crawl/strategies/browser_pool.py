@@ -166,9 +166,17 @@ class PooledBrowserWorker:
         # warmup URLs). Never an invented strategy name.
         self._strategy = strategy
 
-    def _configured_strategy(self) -> CrawlStrategyName:
+    def _configured_strategy(self) -> CrawlStrategyName:  # pyright: ignore[reportReturnType]
         if self._strategy is not None:
             return self._strategy
+        # The finding above is a false positive, verified rather than assumed: a
+        # scratch module calling `reveal_type(pool.browser_strategy)` on a
+        # `BrowserPool` parameter reports
+        # `Literal['HTTP_DECLARED_CRAWLER', 'HTTP_CFFI_IMPERSONATE',
+        # 'BROWSER_HEADLESS', 'BROWSER_HEADED_WARMED']` -- exactly this alias.
+        # So the value reaching the return is a declared member and pyright is
+        # mis-resolving `self._pool` at this one site; annotating the constants
+        # `Final[Literal[...]]` did not change it. Remove when it does.
         return self._pool.browser_strategy
 
     async def __call__(self, job: Any) -> CrawlResult:
@@ -208,7 +216,7 @@ class PooledBrowserWorker:
 
 
 # Global pool instance (initialized at startup)
-_pool: BrowserPool | None = None
+_browser_pool_singleton: BrowserPool | None = None
 
 
 def get_browser_pool() -> BrowserPool | None:
@@ -220,28 +228,28 @@ def get_browser_pool() -> BrowserPool | None:
     not re-derived here. Callers that need the pool before startup (i.e. only
     browser strategies) must ensure startup ordering.
     """
-    return _pool
+    return _browser_pool_singleton
 
 
 def set_browser_pool(pool: BrowserPool | None) -> BrowserPool | None:
     """Set the global browser pool (for testing). Returns previous pool."""
-    global _pool
-    old = _pool
-    _pool = pool
+    global _browser_pool_singleton
+    old = _browser_pool_singleton
+    _browser_pool_singleton = pool
     return old
 
 
 async def initialize_browser_pool(settings: CrawlerSettings | None = None) -> BrowserPool:
     """Initialize the global browser pool with settings."""
-    global _pool
-    _pool = BrowserPool(settings=settings)
-    await _pool.initialize()
-    return _pool
+    global _browser_pool_singleton
+    _browser_pool_singleton = BrowserPool(settings=settings)
+    await _browser_pool_singleton.initialize()
+    return _browser_pool_singleton
 
 
 async def close_browser_pool() -> None:
     """Close the global browser pool."""
-    global _pool
-    if _pool is not None:
-        await _pool.close()
-        _pool = None
+    global _browser_pool_singleton
+    if _browser_pool_singleton is not None:
+        await _browser_pool_singleton.close()
+        _browser_pool_singleton = None
