@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 import httpx
@@ -65,6 +65,11 @@ def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
     return "; ".join(parts)
 
 
+@runtime_checkable
+class _HeadersWithList(Protocol):
+    def get_list(self, key: str) -> list[str]: ...
+
+
 def _store_set_cookies(
     url: str,
     response_headers: httpx.Headers | dict[str, str],
@@ -81,10 +86,11 @@ def _store_set_cookies(
     if namespace is None:
         namespace = _COOKIE_NAMESPACE.get()
     # Accept both httpx.Headers (for get_list) and plain dict (for tests)
-    if hasattr(response_headers, "get_list"):
+    if isinstance(response_headers, httpx.Headers):
+        set_cookies = response_headers.get_list("set-cookie")
+    elif isinstance(response_headers, _HeadersWithList):
         set_cookies = response_headers.get_list("set-cookie")
     else:
-        # Fallback for plain dict (test mocks) - iterate items
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]
     for cookie in set_cookies:
         cookie_jar._GLOBAL_COOKIE_JAR.add_cookie_header(url, cookie, namespace=namespace)
@@ -113,7 +119,7 @@ def _domain_seed(url: str) -> str:
     return urlparse(url).hostname or ""
 
 
-def _rotating_index(profile: dict[str, Any], domain: str, pool_size: int) -> int:
+def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> int:
     """Deterministic per-host pool index so repeated crawls of the same host keep a
     stable fingerprint (the disk content-cache key stays consistent) while different
     hosts rotate through the pool (#11)."""
@@ -121,7 +127,7 @@ def _rotating_index(profile: dict[str, Any], domain: str, pool_size: int) -> int
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
-def _select_fingerprint(profile: dict[str, Any], domain: str) -> dict[str, str]:
+def _select_fingerprint(profile: Mapping[str, Any], domain: str) -> dict[str, str]:
     """Select fingerprint signals for a host (#11). Rotation is deterministic per host.
     Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
     falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
@@ -140,8 +146,14 @@ def _select_fingerprint(profile: dict[str, Any], domain: str) -> dict[str, str]:
     return out
 
 
-def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> dict[str, str]:
-    profile = _validated_request_profile(policy)
+def _headers_for_strategy(
+    strategy: str,
+    policy: Mapping[str, Any],
+    url: str,
+    *,
+    profile: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    resolved_profile = profile if profile is not None else _validated_request_profile(policy)
     headers = {
         "User-Agent": DEFAULT_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -151,11 +163,11 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",
     }
-    user_agent_family = str(profile.get("user_agent_family", "generic_crawler"))
+    user_agent_family = str(resolved_profile.get("user_agent_family", "generic_crawler"))
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
     # Fingerprint injection/rotation (#11): deterministic per-host selection so a single
     # crawl rotates fingerprints across hosts while staying stable per host.
-    fp = _select_fingerprint(profile, _domain_seed(url))
+    fp = _select_fingerprint(resolved_profile, _domain_seed(url))
     if "user_agent" in fp:
         headers["User-Agent"] = fp["user_agent"]
         is_browser_like = is_browser_like or "Mozilla" in fp["user_agent"]
@@ -195,7 +207,7 @@ def _headers_for_strategy(strategy: str, policy: dict[str, Any], url: str) -> di
     configured_user_agent = os.environ.get("BROWSER_CRAWLER_USER_AGENT", "").strip()
     if configured_user_agent:
         headers["User-Agent"] = configured_user_agent
-    cookie_header = _cookie_header_for_url(profile, url)
+    cookie_header = _cookie_header_for_url(resolved_profile, url)
     if cookie_header:
         headers["Cookie"] = cookie_header
     headers.update(policy["headers"])

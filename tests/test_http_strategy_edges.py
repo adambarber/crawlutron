@@ -228,3 +228,77 @@ async def test_http_strategy_rejects_non_mapping_request_profile():
                 http_fetcher=fetcher,
                 host_policy=HostPolicy.unrestricted(),
             )
+
+
+async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnostics():
+    from collections.abc import Mapping
+
+    from app.crawl.strategies.http import _http_strategy_result
+
+    class StatefulProfile(Mapping[str, object]):
+        def __init__(self):
+            self.snapshot = 0
+
+        def __iter__(self):
+            self.snapshot += 1
+            yield "user_agent_family"
+            yield "cookie_jar"
+            yield "cookies"
+
+        def __len__(self):
+            return 3
+
+        def __getitem__(self, key):
+            if self.snapshot == 1:
+                values = {
+                    "user_agent_family": "desktop_chrome",
+                    "cookie_jar": "none",
+                    "cookies": {},
+                }
+            else:
+                values = {
+                    "user_agent_family": "generic_crawler",
+                    "cookie_jar": "per_host",
+                    "cookies": {"profile.example": {"session": "second"}},
+                }
+            return values[key]
+
+    profile = StatefulProfile()
+    captured_headers: dict[str, str] = {}
+
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        captured_headers.update(headers)
+        return type(
+            "Response",
+            (),
+            {
+                "url": url,
+                "final_url": url,
+                "status_code": 200,
+                "headers": {"content-type": "text/html"},
+                "body": b"<html><body>profile content</body></html>",
+                "elapsed_ms": 1,
+            },
+        )()
+
+    result = await _http_strategy_result(
+        original_url="http://profile.example/",
+        normalized_url="http://profile.example/",
+        strategy="HTTP_DECLARED_CRAWLER",
+        policy={
+            "strategies": ["HTTP_DECLARED_CRAWLER"],
+            "extraction": "full",
+            "headers": {},
+            "request_profile": profile,
+            "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
+        },
+        http_fetcher=fetcher,
+        host_policy=HostPolicy.unrestricted(),
+    )
+
+    assert result.diagnostics["request_profile"] == {
+        "user_agent_family": "desktop_chrome",
+        "cookie_jar": "none",
+    }
+    assert "Cookie" not in captured_headers
+    assert profile.snapshot == 1
