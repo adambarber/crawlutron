@@ -34,8 +34,7 @@ async def test_https_subresource_to_a_private_target_is_aborted(monkeypatch) -> 
     ):
         route = FakeRoute()
         await handler(route, FakeRequest(url, "document"))
-        assert route.aborted, f"private target was not blocked: {url}"
-        assert not route.continued
+        assert route.decision == "abort", f"private target was not blocked: {url}"
 
 
 async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) -> None:
@@ -44,7 +43,7 @@ async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) ->
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
     route = FakeRoute()
     await handler(route, FakeRequest("https://1.2.3.4/x", "document"))
-    assert route.continued
+    assert route.decision == "continue"
     assert route.continued_url == "https://1.2.3.4/x"
     assert route.continued_headers is ROUTE_ARG_UNSET
 
@@ -84,7 +83,7 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
     route = FakeRoute()
     await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
-    assert route.continued
+    assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4/x"
     assert route.continued_headers == {"Host": "1.2.3.4"}
     # The pin governs the connection, so its resolve is still uncached.

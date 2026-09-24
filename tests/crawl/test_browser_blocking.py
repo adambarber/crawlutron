@@ -63,8 +63,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     # Run handler - should complete and run the blocking check in a thread
     await handler(route, request)
 
-    assert route.aborted is False
-    assert route.continued is True
+    assert route.decision == "continue"
     # The check should have run in a different thread (thread pool)
     assert check_thread_id is not None
     # Main thread ID
@@ -108,7 +107,7 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     request = FakeRequest("http://example.com/path", "document")
     await handler(route, request)
 
-    assert route.aborted is False
+    assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4:80/path"
     assert route.continued_headers == {"Host": "example.com"}
 
@@ -128,8 +127,7 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     request = FakeRequest("http://127.0.0.1:9/", "document")
     await handler(route, request)
 
-    assert route.aborted is True
-    assert route.continued is False
+    assert route.decision == "abort"
 
 
 @pytest.mark.browser
@@ -154,6 +152,7 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     request = FakeRequest("http://example.com/", "document")
     await handler(route, request)
 
+    assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4:80/"
     assert check_thread_id is not None
     import threading
@@ -182,7 +181,7 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 
     route = FakeRoute()
     await handler(route, FakeRequest("http://example.com/", "document"))
-    assert route.aborted is True and route.continued is False
+    assert route.decision == "abort"
 
 
 @pytest.mark.browser
@@ -193,7 +192,7 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
     for scheme_url in ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"):
         route = FakeRoute()
         await handler(route, FakeRequest(scheme_url, "document"))
-        assert route.continued is True and route.aborted is False, scheme_url
+        assert route.decision == "continue", scheme_url
 
 
 @pytest.mark.browser

@@ -137,11 +137,11 @@ async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
 
     bad = FakeRoute()
     await handler(bad, FakeRequest("http://127.0.0.1:9/", "document"))
-    assert bad.aborted and not bad.continued
+    assert bad.decision == "abort"
 
     good = FakeRoute()
     await handler(good, FakeRequest("http://1.2.3.4/", "document"))
-    assert good.continued and not good.aborted
+    assert good.decision == "continue"
 
 
 async def test_render_registers_ssrf_route_guard(monkeypatch):
