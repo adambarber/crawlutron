@@ -142,7 +142,7 @@ def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
         ctx.limits, ctx.global_concurrency
     )
     ctx.base_headers = request_profile._headers_for_strategy(
-        ctx.strategy, ctx.policy, ctx.normalized_url
+        ctx.strategy, ctx.policy, ctx.normalized_url, profile=ctx.profile
     )
     ctx.request_headers = dict(ctx.base_headers)
     if ctx.cache is not None:
