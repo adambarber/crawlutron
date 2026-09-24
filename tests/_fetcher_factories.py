@@ -195,6 +195,35 @@ def _spawn_fetch(fn):
         server.stop()
 
 
+async def run_http_strategy(
+    *,
+    url: str,
+    policy: dict[str, Any],
+    http_fetcher: Any,
+    cache: Any = None,
+    content_cache: Any = None,
+    **extra: Any,
+) -> Any:
+    from app.crawl.strategies.http import _http_strategy_result
+    from app.validation import HostPolicy
+
+    kwargs: dict[str, Any] = {}
+    if cache is not None:
+        kwargs["cache"] = cache
+    if content_cache is not None:
+        kwargs["content_cache"] = content_cache
+    return await _http_strategy_result(
+        original_url=url,
+        normalized_url=url,
+        strategy=HTTP_DECLARED_CRAWLER,
+        policy=policy,
+        http_fetcher=http_fetcher,
+        host_policy=HostPolicy.unrestricted(),
+        **kwargs,
+        **extra,
+    )
+
+
 async def invoke_http_strategy(
     monkeypatch: Any,
     *,
@@ -204,8 +233,6 @@ async def invoke_http_strategy(
     global_concurrency: int | None = None,
     cap_capture: list[int] | None = None,
 ) -> Any:
-    from app.crawl.strategies.http import _http_strategy_result
-
     if dedupe_patch:
         import trafilatura.core
 
@@ -219,14 +246,9 @@ async def invoke_http_strategy(
     kwargs: dict[str, Any] = {}
     if global_concurrency is not None:
         kwargs["global_concurrency"] = global_concurrency
-    from app.validation import HostPolicy
-
-    return await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
+    return await run_http_strategy(
+        url="http://example.com/",
         policy=policy,
-        host_policy=HostPolicy.unrestricted(),
         http_fetcher=fetcher,
         **kwargs,
     )
@@ -275,6 +297,7 @@ __all__ = [
     "make_content_cache_with_entry",
     "make_crawl_payload",
     "make_fetch",
+    "run_http_strategy",
     "ok_fetcher",
     "raise_fetcher",
     "run_crawl_async",

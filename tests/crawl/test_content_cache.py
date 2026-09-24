@@ -10,7 +10,7 @@ import sys
 
 import httpx
 import pytest
-from _fetcher_factories import _temp_cache, make_content_cache_with_entry, make_fetch
+from _fetcher_factories import _temp_cache, make_content_cache_with_entry, make_fetch, run_http_strategy
 from helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc
@@ -18,7 +18,6 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.fetchers import _default_http_fetcher
-from app.crawl.strategies.http import _http_strategy_result
 from app.validation import HostPolicy
 
 
@@ -40,6 +39,16 @@ def _make_etag_test_setup(tmp_path, etag_server):
     cache = HttpCache()
     content_cache = ContentCache(tmp_path)
     return url, policy, fetcher, cache, content_cache
+
+
+async def _run_cached_strategy(url, policy, fetcher, cache=None, content_cache=None):
+    return await run_http_strategy(
+        url=url,
+        policy=policy,
+        http_fetcher=fetcher,
+        cache=cache,
+        content_cache=content_cache,
+    )
 
 
 def test_set_get_roundtrip(tmp_path):
@@ -139,7 +148,6 @@ def test_cache_short_circuits_real_fetch(counting_server, tmp_path):
 
 async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
     from app.crawl.strategies.fetchers import _default_http_fetcher
-    from app.crawl.strategies.http import _http_strategy_result
 
     cache = ContentCache(cache_dir=tmp_path / "hs", default_ttl=3600)
     url = base_url + "/"
@@ -157,57 +165,22 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
             policy=HostPolicy.unrestricted(),
         )
 
-    r1 = await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy,
-        http_fetcher=counting_fetcher,
-        content_cache=cache,
-        host_policy=HostPolicy.unrestricted(),
-    )
-    r2 = await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy,
-        http_fetcher=counting_fetcher,
-        content_cache=cache,
-        host_policy=HostPolicy.unrestricted(),
-    )
+    r1 = await _run_cached_strategy(url, policy, counting_fetcher, content_cache=cache)
+    r2 = await _run_cached_strategy(url, policy, counting_fetcher, content_cache=cache)
     assert r1.status == "success" and r2.status == "success"
     assert calls["n"] == 1  # cache prevented the second real fetch
 
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
-    from app.crawl.strategies.http import _http_strategy_result
 
     url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
     # First crawl: stores 200 + etag.
-    r1 = await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy,
-        http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
-        host_policy=HostPolicy.unrestricted(),
-    )
+    r1 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
     assert r1.status == "success"
     assert etag_server.hits == 1
     # Second crawl: content HIT + validator present -> conditional revalidation (304) -> cache served.
-    r2 = await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy,
-        http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
-        host_policy=HostPolicy.unrestricted(),
-    )
+    r2 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
     assert r2.status == "success"
     # Server was re-hit once for the conditional GET (304, no body re-download).
     assert etag_server.hits == 2
@@ -217,30 +190,12 @@ async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
 async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
     """If the etag changed, revalidation returns 200 and fresh content is served (#5)."""
     url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
-    await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy=policy,
-        http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
-        host_policy=HostPolicy.unrestricted(),
-    )
+    await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
     # Simulate the upstream page changing its etag + body.
     try:
         EtagHandler.etag = "v2"
         EtagHandler.body = b"<html><body>changed content</body></html>"
-        r2 = await _http_strategy_result(
-            original_url=url,
-            normalized_url=url,
-            strategy="HTTP_DECLARED_CRAWLER",
-            policy=policy,
-            http_fetcher=fetcher,
-            cache=cache,
-            content_cache=content_cache,
-            host_policy=HostPolicy.unrestricted(),
-        )
+        r2 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
         assert r2.status == "success"
         assert "changed content" in (r2.markdown or "")
     finally:

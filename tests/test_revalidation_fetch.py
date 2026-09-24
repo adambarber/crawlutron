@@ -7,12 +7,20 @@ code previously fell through to a second, unconditional fetch because neither
 round-trips and doubled origin load for one crawl.
 """
 
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, run_http_strategy
 
-from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.validation import HostPolicy
+
+
+async def _run_revalidation(url, policy, fetcher, cache, content_cache):
+    return await run_http_strategy(
+        url=url,
+        policy=policy,
+        http_fetcher=fetcher,
+        cache=cache,
+        content_cache=content_cache,
+    )
 
 
 class _CountingFetcher:
@@ -48,40 +56,20 @@ class TestRevalidationFetchesOnce:
         }
 
     async def test_validator_hit_with_200_origin_does_not_refetch(self, tmp_path):
-        from app.crawl.strategies.http import _http_strategy_result
-
         fetcher = _CountingFetcher()
         url = "http://example.com/etagged"
         cache = HttpCache()
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
         # First crawl: no cache entry yet, one fetch, stores it with its etag.
-        first = await _http_strategy_result(
-            original_url=url,
-            normalized_url=url,
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=self._policy(),
-            http_fetcher=fetcher,
-            cache=cache,
-            content_cache=content_cache,
-            host_policy=HostPolicy.unrestricted(),
-        )
+        first = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
         assert first.status == "success"
         assert fetcher.calls == 1, fetcher.calls
 
         # Second crawl: cache hit with a validator. The origin returns 200
         # (content "changed"), so the revalidation response is used directly.
         # The bug re-fetched unconditionally here, giving 3 fetches total.
-        second = await _http_strategy_result(
-            original_url=url,
-            normalized_url=url,
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=self._policy(),
-            http_fetcher=fetcher,
-            cache=cache,
-            content_cache=content_cache,
-            host_policy=HostPolicy.unrestricted(),
-        )
+        second = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
         assert second.status == "success"
         assert fetcher.calls == 2, (
             f"expected one fetch for the revalidation, got {fetcher.calls - 1}"
@@ -101,8 +89,6 @@ class TestRevalidationFetchesOnce:
         in-hand is dataflow (response is not None); served-from-cache is the
         flag's only meaning.
         """
-        from app.crawl.strategies.http import _http_strategy_result
-
         class _ScriptedFetcher(_CountingFetcher):
             def __init__(self) -> None:
                 super().__init__()
@@ -127,16 +113,7 @@ class TestRevalidationFetchesOnce:
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
         async def _crawl():
-            result = await _http_strategy_result(
-                original_url=url,
-                normalized_url=url,
-                strategy=HTTP_DECLARED_CRAWLER,
-                policy=self._policy(),
-                http_fetcher=fetcher,
-                cache=cache,
-                content_cache=content_cache,
-                host_policy=HostPolicy.unrestricted(),
-            )
+            result = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
             assert result.status == "success"
             return result
 

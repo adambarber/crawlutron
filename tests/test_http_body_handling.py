@@ -11,16 +11,6 @@ from app.validation import HostPolicy
 
 
 class TestHttpBodyHandling:
-    def _policy(self, extra=None):
-        policy = {
-            "request_profile": {},
-            "headers": {},
-            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50},
-        }
-        if extra:
-            policy.update(extra)
-        return policy
-
     async def test_cache_last_modified_store(self, base_url):
         from app.crawl.strategies.http import _http_strategy_result
 

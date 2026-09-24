@@ -32,6 +32,18 @@ def _engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
     )
 
 
+def _adaptive_scheduler() -> DomainScheduler:
+    return DomainScheduler(
+        global_limit=2,
+        per_domain_limit=1,
+        delay_seconds=1.0,
+        adaptive=True,
+        adaptive_min_delay=0.5,
+        adaptive_max_delay=30.0,
+        adaptive_latency_factor=1.0,
+    )
+
+
 class TestScheduler:
     def test_jitter_in_range(self):
         scheduler = DomainScheduler(global_limit=5, per_domain_limit=3, delay_seconds=1.0)
@@ -85,30 +97,14 @@ class TestAdaptiveThrottling:
         assert s.current_delay("example.com") == 1.0
 
     def test_delay_increases_after_slow_response(self):
-        s = DomainScheduler(
-            global_limit=2,
-            per_domain_limit=1,
-            delay_seconds=1.0,
-            adaptive=True,
-            adaptive_min_delay=0.5,
-            adaptive_max_delay=30.0,
-            adaptive_latency_factor=1.0,
-        )
+        s = _adaptive_scheduler()
         s.record_latency("example.com", 5000)  # 5s latency
         d = s.current_delay("example.com")
         assert d > 1.0
         assert d <= 30.0
 
     def test_delay_floors_after_fast_response(self):
-        s = DomainScheduler(
-            global_limit=2,
-            per_domain_limit=1,
-            delay_seconds=1.0,
-            adaptive=True,
-            adaptive_min_delay=0.5,
-            adaptive_max_delay=30.0,
-            adaptive_latency_factor=1.0,
-        )
+        s = _adaptive_scheduler()
         s.record_latency("example.com", 50)  # 50ms latency
         assert s.current_delay("example.com") == 0.5
 

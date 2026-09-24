@@ -58,58 +58,6 @@ class TestExecuteCrawlChainPinning:
         # Pin the domain to browser
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
 
-        # Track which strategies were attempted
-        attempted = []
-
-        async def fake_http_fetcher(*args, **kwargs):
-            attempted.append("http")
-            # Return a blocked result so it would normally escalate
-            from app.crawl.result_helpers import _make_engine_result
-            from app.models import CrawlStrategyAttempt
-
-            return _make_engine_result(
-                original_url="http://example.com/test",
-                normalized_url="http://example.com/test",
-                final_url="http://example.com/test",
-                status="blocked",
-                classification="bot_challenge_detected",
-                error="blocked",
-                strategy=HTTP_DECLARED_CRAWLER,
-                attempt=CrawlStrategyAttempt(
-                    strategy=HTTP_DECLARED_CRAWLER,
-                    status="blocked",
-                    classification="bot_challenge_detected",
-                    content_type=None,
-                    http_status=None,
-                    elapsed_ms=0,
-                    error="blocked",
-                ),
-            )
-
-        async def fake_cffi_fetcher(*args, **kwargs):
-            attempted.append("cffi")
-            from app.crawl.result_helpers import _make_engine_result
-            from app.models import CrawlStrategyAttempt
-
-            return _make_engine_result(
-                original_url="http://example.com/test",
-                normalized_url="http://example.com/test",
-                final_url="http://example.com/test",
-                status="blocked",
-                classification="bot_challenge_detected",
-                error="blocked",
-                strategy=HTTP_CFFI_IMPERSONATE,
-                attempt=CrawlStrategyAttempt(
-                    strategy=HTTP_CFFI_IMPERSONATE,
-                    status="blocked",
-                    classification="bot_challenge_detected",
-                    content_type=None,
-                    http_status=None,
-                    elapsed_ms=0,
-                    error="blocked",
-                ),
-            )
-
         policy = {
             "strategies": [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS],
             "timeout_ms": 5000,

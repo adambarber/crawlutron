@@ -32,18 +32,7 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
 
     async def http_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         calls.append(("http", dict(headers)))
-        return type(
-            "R",
-            (),
-            {
-                "url": url,
-                "final_url": url,
-                "status_code": 403,
-                "headers": {},
-                "body": b"denied",
-                "elapsed_ms": 1,
-            },
-        )()
+        return make_fetch(url=url, final_url=url, status=403, headers={}, body=b"denied")
 
     async def cffi_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         calls.append(("cffi", dict(headers)))
@@ -55,18 +44,7 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
                 ctype="text/html",
                 body=b"<html><body>cffi success</body></html>",
             )
-        return type(
-            "R",
-            (),
-            {
-                "url": url,
-                "final_url": url,
-                "status_code": 403,
-                "headers": {},
-                "body": b"denied",
-                "elapsed_ms": 1,
-            },
-        )()
+        return make_fetch(url=url, final_url=url, status=403, headers={}, body=b"denied")
 
     async def browser_worker(job):
         return _crawl_result(job.url)

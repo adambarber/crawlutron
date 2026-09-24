@@ -13,37 +13,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.engine import _payload_policy, crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategy_chain import execute_crawl_chain
-from app.models import CrawlResult, CrawlStrategyAttempt, EngineCrawlResult, to_dict
-
-
-def make_result(links):
-    return EngineCrawlResult(
-        original_url="https://example.com/",
-        normalized_url="https://example.com/",
-        final_url="https://example.com/",
-        status="success",
-        classification="rendered",
-        selected_strategy=HTTP_DECLARED_CRAWLER,
-        attempted_strategies=[
-            CrawlStrategyAttempt(
-                strategy=HTTP_DECLARED_CRAWLER,
-                status="success",
-                classification="rendered",
-                http_status=200,
-                content_type="text/html",
-                elapsed_ms=1,
-            )
-        ],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="<html></html>",
-        text="x",
-        extraction_method="http_html",
-        quality_score=1.0,
-        discovered_link_count=len(links),
-        discovered_links=links,
-    )
+from app.models import CrawlResult, to_dict
 
 
 class TestEngineCrawlRequest:

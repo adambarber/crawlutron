@@ -383,19 +383,6 @@ class TestSeedingIsOffLoop:
                 body=b"<html><body>page</body></html>",
             )
 
-        payload = {
-            "url": _CRAWL_URL,
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "discovery": {"sitemaps": True},
-                "limits": {
-                    "timeout_seconds": 10,
-                    "max_retries": 0,
-                    "max_discovered_links": 10,
-                    "max_depth": 1,
-                },
-            },
-        }
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 
         assert "_stale_seeds" in seen, "freshness filtering was not offloaded off the loop"

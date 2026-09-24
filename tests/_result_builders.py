@@ -18,9 +18,17 @@ def make_job(index: int, url: str):
     )
 
 
-def make_result(url: str, domain: str):
-    from app.models import CrawlStrategyAttempt, EngineCrawlResult
+def _successful_engine_result(
+    url: str,
+    *,
+    attempted_strategies: list[Any],
+    text: str,
+    markdown: str | None = None,
+    links: list[Any] | None = None,
+):
+    from app.models import EngineCrawlResult
 
+    discovered_links = list(links or [])
     return EngineCrawlResult(
         original_url=url,
         normalized_url=url,
@@ -28,6 +36,25 @@ def make_result(url: str, domain: str):
         status="success",
         classification="rendered",
         selected_strategy=HTTP_DECLARED_CRAWLER,
+        attempted_strategies=attempted_strategies,
+        http_status=200,
+        headers={},
+        content_type="text/html",
+        html="<html></html>",
+        text=text,
+        markdown=markdown,
+        extraction_method="http_html",
+        quality_score=1.0,
+        discovered_link_count=len(discovered_links),
+        discovered_links=discovered_links,
+    )
+
+
+def make_result(url: str, domain: str):
+    from app.models import CrawlStrategyAttempt
+
+    return _successful_engine_result(
+        url,
         attempted_strategies=[
             CrawlStrategyAttempt(
                 strategy=HTTP_DECLARED_CRAWLER,
@@ -39,44 +66,13 @@ def make_result(url: str, domain: str):
                 error=None,
             )
         ],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="<html></html>",
         text="ok",
         markdown="ok",
-        extraction_method="http_html",
-        quality_score=1.0,
-        classification_evidence=[],
-        diagnostics={},
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        discovered_links=[],
-        error=None,
-        next_page_url=None,
     )
 
 
 def make_engine_result(url: str, links=()):
-    from app.models import EngineCrawlResult
-
-    return EngineCrawlResult(
-        original_url=url,
-        normalized_url=url,
-        final_url=url,
-        status="success",
-        classification="rendered",
-        selected_strategy=HTTP_DECLARED_CRAWLER,
-        attempted_strategies=[],
-        http_status=200,
-        headers={},
-        content_type="text/html",
-        html="<html></html>",
-        text="t",
-        extraction_method="http_html",
-        quality_score=1.0,
-        discovered_links=list(links),
-    )
+    return _successful_engine_result(url, attempted_strategies=[], text="t", links=list(links))
 
 
 class Spill:
