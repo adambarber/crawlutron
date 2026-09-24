@@ -1,8 +1,8 @@
-from app.validation import HostPolicy, get_env_int, registrable_domain
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+from app.validation import get_env_int, registrable_domain
 from app.validation import normalize_public_http_url as _normalize_public_http_url
 from app.validation import public_url_or_none as _public_url_or_none
-
-UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
 def normalize_public_http_url(url, *, policy=UNRESTRICTED_HOST_POLICY):

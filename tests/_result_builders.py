@@ -1,9 +1,8 @@
 from typing import Any
 
-from app.constants import HTTP_DECLARED_CRAWLER
-from app.validation import HostPolicy
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 
-UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
+from app.constants import HTTP_DECLARED_CRAWLER
 
 
 def make_job(index: int, url: str):

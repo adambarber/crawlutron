@@ -1,5 +1,7 @@
+import ast
 import asyncio
 import functools
+import inspect
 import os
 
 import pytest
@@ -49,14 +51,15 @@ def assert_result_failed(result, classification: str) -> None:
 
 async def poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1, message: str | None = None):
     async def _runner() -> bool:
-        deadline = asyncio.get_event_loop().time() + timeout
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         while True:
             value = predicate()
-            if asyncio.iscoroutine(value):
+            if inspect.isawaitable(value):
                 value = await value
             if value:
                 return True
-            if asyncio.get_event_loop().time() >= deadline:
+            if loop.time() >= deadline:
                 return False
             await asyncio.sleep(interval)
 
@@ -85,18 +88,13 @@ def install_to_thread_spy(monkeypatch):
 
 
 def extract_function_body(source: str, name: str) -> str:
-    import re
-
-    pattern = re.compile(
-        r"^[ \t]*async def "
-        + re.escape(name)
-        + r"\b.*?^[ \t]*(?=@app\.middleware|class |def |async def [a-zA-Z]|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(source)
-    if not match:
-        raise AssertionError(f"Could not find function {name}")
-    return match.group(0)
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            segment = ast.get_source_segment(source, node)
+            if segment is not None:
+                return segment
+    raise AssertionError(f"Could not find function {name}")
 
 
 def provider_results(*items) -> str:
@@ -105,11 +103,13 @@ def provider_results(*items) -> str:
     return json.dumps({"results": list(items)})
 
 
+@functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
     try:
         from camoufox.utils import launch_path
 
-        return bool(launch_path()) and os.path.exists(launch_path())
+        path = launch_path()
+        return bool(path) and os.path.exists(path)
     except Exception:
         pass
     try:

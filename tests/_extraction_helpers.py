@@ -1,3 +1,5 @@
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+
 from app.crawl.document_text import (
     _collect_document_item_lines,
     _document_item_range,
@@ -25,9 +27,6 @@ from app.crawl.strategies.document import (
 )
 from app.crawl.strategies.document import _format_table
 from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http_fetcher_with_policy
-from app.validation import HostPolicy
-
-UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
 def _html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):

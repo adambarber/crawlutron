@@ -32,7 +32,10 @@ class MockClient:
         return response
 
 
-def patch_http_fetcher_transport(monkeypatch, responses):
+def patch_http_fetcher_transport(monkeypatch, responses, *, allow_ssrf_bypass: bool):
+    if not allow_ssrf_bypass:
+        raise ValueError("patch_http_fetcher_transport requires allow_ssrf_bypass=True")
+
     from app.crawl.strategies import http_client_pool as pool_mod
     from app.crawl.strategies import pinned_transport as pinned_mod
 

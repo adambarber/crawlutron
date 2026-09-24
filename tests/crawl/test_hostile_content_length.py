@@ -14,6 +14,14 @@ from app.crawl.strategies.pinned_transport import _declared_length_exceeds
 from app.validation import HostPolicy
 
 
+def _patch_transport(monkeypatch, response):
+    return patch_http_fetcher_transport(
+        monkeypatch,
+        [response],
+        allow_ssrf_bypass=True,
+    )
+
+
 class TestDeclaredLengthPredicate:
     def test_numeric_over_limit_is_oversized(self):
         assert _declared_length_exceeds("2000", 1000) is True
@@ -39,9 +47,9 @@ class TestDeclaredLengthPredicate:
 
 async def test_httpx_fetcher_serves_body_despite_garbage_content_length(monkeypatch):
     """A small body under a bogus Content-Length streams normally (no raise)."""
-    patch_http_fetcher_transport(
+    _patch_transport(
         monkeypatch,
-        [MockResponse(200, {"content-type": "text/html", "content-length": "abc"}, b"<html>ok</html>")],
+        MockResponse(200, {"content-type": "text/html", "content-length": "abc"}, b"<html>ok</html>"),
     )
     result = await _default_http_fetcher(
             "http://example.com/",
@@ -56,9 +64,9 @@ async def test_httpx_fetcher_serves_body_despite_garbage_content_length(monkeypa
 
 async def test_httpx_fetcher_still_rejects_valid_oversized_declared_length(monkeypatch):
     """A well-formed oversized Content-Length keeps the pre-flight 413 behavior."""
-    patch_http_fetcher_transport(
+    _patch_transport(
         monkeypatch,
-        [MockResponse(200, {"content-type": "text/html", "content-length": "5000"}, b"<html>ok</html>")],
+        MockResponse(200, {"content-type": "text/html", "content-length": "5000"}, b"<html>ok</html>"),
     )
     result = await _default_http_fetcher(
             "http://example.com/",

@@ -2,12 +2,10 @@ import asyncio
 import pathlib
 from typing import Any
 
+from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _result_builders import _canned_result
 
 from app.crawl.job_store import JobStatus, JobStore
-from app.validation import HostPolicy
-
-UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
 
 
 def make_job_store(tmpdir: str) -> JobStore:
