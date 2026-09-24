@@ -10,7 +10,7 @@ import asyncio
 
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _result_builders import Spill, make_engine_result
-from _scheduler_doubles import FakeScheduler
+from _scheduler_doubles import FakeScheduler as _Scheduler
 
 from app.crawl.admission import RobotsGate
 from app.crawl.recursive import run_recursive_crawl
@@ -21,16 +21,6 @@ from app.settings import CrawlerSettings
 def _make_job(index: int, host: str) -> CrawlTask:
     url = f"http://{host}/page{index}"
     return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
-
-
-class _Scheduler(FakeScheduler):
-    """Local subclass kept only to preserve the tests' existing symbol name."""
-
-    def get_pinned_strategy(self, domain):
-        return None
-        return None
-
-
 class _Gate:
     def batch_scale_factor(self):
         return 1.0
