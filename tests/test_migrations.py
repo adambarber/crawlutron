@@ -161,6 +161,28 @@ def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
     after.close()
 
 
+def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsys):
+    db_path = tmp_path / "cli-stamped-historical-jobs.db"
+    _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
+    conn = sqlite3.connect(db_path)
+    conn.execute("ALTER TABLE crawl_jobs ADD COLUMN canonicalized INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+    conn.close()
+
+    from app.crawl.migrations.runner import main
+
+    main(["stamp", str(db_path), StoreSchema.CRAWL_JOBS.value])
+
+    output = capsys.readouterr().out
+    assert "0001_crawl_jobs_initial" in output
+    assert "0002_crawl_jobs_drop_canonicalized" not in output
+
+
+def test_explicit_stamp_docstring_describes_satisfied_migrations():
+    assert "satisfied" in (stamp_store.__doc__ or "")
+    assert "current" not in (stamp_store.__doc__ or "")
+
+
 def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_path):
     db_path = tmp_path / "legacy-results.db"
     _create_legacy_database(db_path, StoreSchema.RESULTS)

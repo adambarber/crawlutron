@@ -129,8 +129,8 @@ def migrate_store(
         _require_current_schema(backend.connection, selected)
 
 
-def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> None:
-    """Mark an exact pre-ledger schema as current without executing its migration."""
+def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> str:
+    """Mark only migrations whose declared schema is already satisfied, without executing them."""
     selected = _schema(schema)
     migrations = _migrations(selected)
     with _locked_backend(db_path) as backend:
@@ -147,6 +147,7 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> None:
             to_mark = [migration for migration in pending if migration.id == initial_id]
         if to_mark:
             backend.mark_migrations(to_mark)
+        return to_mark[-1].id if to_mark else "none"
 
 
 def rollback_store(db_path: str | Path, schema: StoreSchema | str) -> None:
@@ -170,9 +171,12 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> None:
     args = _parser().parse_args(argv)
     schema = _schema(args.schema)
+    if args.command == "stamp":
+        marked = stamp_store(args.database, schema)
+        print(f"stamp {marked} on {args.database}")
+        return
     operations = {
         "apply": migrate_store,
-        "stamp": stamp_store,
         "rollback": rollback_store,
     }
     operations[args.command](args.database, schema)

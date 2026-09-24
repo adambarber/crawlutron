@@ -57,7 +57,7 @@ __all__ = [
 #
 #   payload_helpers.py  the shared `_validated_url` admission helper itself
 #   jobs_router.py      admission wiring: refuse before the job is created
-#   migrations/runner.py    startup conformance on the no-op path; partial stamp
+#   migrations/runner.py    startup conformance, partial stamp, truthful CLI status
 #   migrations/manifest.py  column comparison consolidated to one by-name function
 #   extraction.py       frame URL disclosure filtering (a DIFFERENT fix)
 #   fetch_policy.py     feed URL disclosure filtering (a DIFFERENT fix)
@@ -111,7 +111,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/__init__.py": 35,
     "app/crawl/migrations/__main__.py": 6,
     "app/crawl/migrations/manifest.py": 216,
-    "app/crawl/migrations/runner.py": 179,
+    "app/crawl/migrations/runner.py": 183,
     "app/crawl/payload_helpers.py": 204,
     "app/crawl/recursive.py": 438,
     "app/crawl/render_options.py": 93,
