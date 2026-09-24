@@ -20,7 +20,11 @@ class _StreamingDecompressor(Protocol):
     def process(self, data: bytes | bytearray | memoryview[int], /) -> bytes: ...
 
 
-class DecompressionTooLargeError(Exception):
+class DecompressionError(ValueError):
+    """Raised when a body does not match its declared Content-Encoding."""
+
+
+class DecompressionTooLargeError(DecompressionError):
     """Raised when decompressed output exceeds the configured size limit.
 
     Used as a decompression-bomb guard: a small compressed payload (e.g. a 1 MB
@@ -29,18 +33,18 @@ class DecompressionTooLargeError(Exception):
 
 
 def _passthrough(body: bytes | bytearray | memoryview) -> bytes:
-    """Return undecodable input as ``bytes`` without copying when it is already bytes.
-
-    The passthrough sites (gzip/deflate/brotli failure, missing brotli, and the
-    no-recognized-encoding tail) all return the caller's buffer; routing them
-    through one helper keeps the "do not trust the label" normalization in a
-    single place, so a passthrough cannot drift back into handing a caller a
-    ``memoryview`` over a buffer the caller may have reused.
-    """
+    """Normalize unencoded input to bytes without copying an existing bytes value."""
     return body if isinstance(body, bytes) else bytes(body)
 
 
-def _decompress_bounded(make_decompressor, compressed: bytes, max_output_bytes: int) -> bytes:
+def _decompress_bounded(
+    make_decompressor,
+    compressed: bytes,
+    max_output_bytes: int,
+    *,
+    allow_concatenated: bool,
+) -> bytes:
+    """Decode every declared member or raise a typed decompression error."""
     try:
         out = bytearray()
         decompressor = make_decompressor()
@@ -54,6 +58,8 @@ def _decompress_bounded(make_decompressor, compressed: bytes, max_output_bytes: 
                 raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
             if decompressor.eof:
                 pending = decompressor.unused_data
+                if pending and not allow_concatenated:
+                    raise zlib.error("trailing data after deflate stream")
                 if pending:
                     decompressor = make_decompressor()
         if not decompressor.eof:
@@ -64,8 +70,8 @@ def _decompress_bounded(make_decompressor, compressed: bytes, max_output_bytes: 
         return bytes(out)
     except DecompressionTooLargeError:
         raise
-    except Exception:
-        return _passthrough(compressed)
+    except Exception as error:
+        raise DecompressionError("invalid compressed stream") from error
 
 
 def decompress_body(
@@ -81,15 +87,12 @@ def decompress_body(
     expand attacker-compressed bytes without a cap (H2 closure — the optional
     default existed only for the uncapped legacy branches, which are gone).
 
-    Exception-safe: if a decoder is unavailable or the body was already
-    decompressed (e.g. a transport auto-decompresses and leaves the
-    ``Content-Encoding`` header on the response), the original body is
-    returned unchanged instead of raising. A genuine over-cap expansion
-    raises :class:`DecompressionTooLargeError`.
+    Malformed, truncated, or unavailable decoder input raises
+    :class:`DecompressionError`; a genuine over-cap expansion raises
+    :class:`DecompressionTooLargeError`. Unknown encodings pass through unchanged.
 
-    ``body`` accepts bytes-like input; passthrough branches normalize it to ``bytes`` at
-    this boundary because all consumers read the result as bytes and compare it with
-    the original body.
+    ``body`` accepts bytes-like input; the unknown-encoding passthrough normalizes
+    it to ``bytes`` at this boundary because all consumers read the result as bytes.
     """
     encoding = content_encoding.lower().strip()
 
@@ -100,12 +103,11 @@ def decompress_body(
             else zlib.decompressobj(),
             _passthrough(body),
             max_output_bytes,
+            allow_concatenated="gzip" in encoding,
         )
 
     if "br" in encoding:
         decoded = _decompress_brotli(body, max_output_bytes)
-        if decoded is None:
-            return _passthrough(body)
         if len(decoded) > max_output_bytes:
             raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
         return bytes(decoded)
@@ -115,8 +117,8 @@ def decompress_body(
 
 def _decompress_brotli(
     body: bytes | bytearray | memoryview[int], max_output_bytes: int
-) -> bytes | bytearray | None:
-    """Decode a brotli body within a cap, or None if this build cannot.
+) -> bytes | bytearray:
+    """Decode a brotli body within a cap or raise a typed error.
 
     The two brotli APIs are incompatible: brotlicffi exposes
     ``.decompress(data, cap)`` and google-brotli ``.process(data)`` with no cap.
@@ -127,8 +129,8 @@ def _decompress_brotli(
     """
     try:
         import brotli
-    except ImportError:
-        return None
+    except ImportError as error:
+        raise DecompressionError("brotli decoder is unavailable") from error
     try:
         decoder: object | None = brotli.Decompressor()
     except Exception:
@@ -144,8 +146,7 @@ def _decompress_brotli(
             # google-brotli streaming API: feed incrementally and stop past the
             # cap (H6). A single process(body) call would materialize the entire
             # bomb in RAM. Stopping early leaves the output over the cap, which
-            # the caller's post-hoc check turns into DecompressionTooLargeError
-            # (raising here would be swallowed by the passthrough handler).
+            # the caller's post-hoc check turns into DecompressionTooLargeError.
             chunks = bytearray()
             step = 16_384
             for offset in range(0, len(body), step):
@@ -155,28 +156,9 @@ def _decompress_brotli(
             decoded = chunks
         else:
             decoded = brotli.decompress(body)
-    except Exception:
-        return None
+    except Exception as error:
+        raise DecompressionError("invalid brotli stream") from error
     return decoded
 
 
-def detect_decompression_failure(
-    body: bytes,
-    encoding: str,
-    decoded: bytes,
-) -> bool:
-    """Return True when ``decoded`` is just ``body`` passed through unchanged.
-
-    ``decompress_body`` swallows decoder failures and returns the input bytes.
-    When a Content-Encoding was advertised but the output equals the raw
-    compressed input, the body is garbage and must not be trusted as content.
-    """
-    if not encoding:
-        return False
-    codec = encoding.lower().strip()
-    if codec in {"identity", "none", ""}:
-        return False
-    return bool(body) and decoded == body
-
-
-__all__ = ["DecompressionTooLargeError", "decompress_body", "detect_decompression_failure"]
+__all__ = ["DecompressionError", "DecompressionTooLargeError", "decompress_body"]

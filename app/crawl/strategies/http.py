@@ -27,7 +27,6 @@ from app.constants import (
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
-from app.crawl.decompression import detect_decompression_failure
 from app.crawl.document_text import _format_extracted_document_text
 from app.crawl.extraction import (
     _extract_document,
@@ -323,9 +322,7 @@ async def _extract_http_phase(
         decompressed = _decompress_body(
             response.body, content_encoding, max_output_bytes=ctx.max_content_length
         )
-        strategy_decompression_failed = detect_decompression_failure(
-            response.body, content_encoding, decompressed
-        )
+        strategy_decompression_failed = False
     else:
         decompressed = response.body
         strategy_decompression_failed = bool(getattr(response, "decompression_failed", False))

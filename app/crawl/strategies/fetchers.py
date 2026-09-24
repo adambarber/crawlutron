@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
-from app.crawl.decompression import DecompressionTooLargeError, detect_decompression_failure
+from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies import http_client_pool, pinned_transport
 from app.crawl.strategies.request_profile import _store_set_cookies
@@ -309,7 +309,6 @@ async def _default_cffi_fetcher(
                 body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
             except DecompressionTooLargeError:
                 return _cffi_too_large_result(url, current_url, response, elapsed_ms)
-            cffi_decompression_failed = detect_decompression_failure(raw_bytes, encoding, body)
             resp_headers = {key.lower(): value for key, value in response.headers.items()}
             resp_headers.pop("content-encoding", None)
             _store_set_cookies(current_url, response.headers)
@@ -320,8 +319,9 @@ async def _default_cffi_fetcher(
                 headers=resp_headers,
                 body=body,
                 elapsed_ms=elapsed_ms,
-                decompression_failed=cffi_decompression_failed,
             )
+    except DecompressionError:
+        raise
     except Exception:  # any cffi failure falls back to plain httpx
         return await _fallback_to_httpx(
             url, headers, timeout_seconds, max_content_length, policy=policy

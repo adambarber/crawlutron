@@ -66,7 +66,7 @@ __all__ = [
 # and the ceiling has become the per-file table it replaced -- at which point the
 # metrics budgets' history-based monotonicity test in
 # tests/test_metrics_budget.py is the pattern to copy here, not another raise.
-_APP_TREE_LINE_BUDGET = 22_060
+_APP_TREE_LINE_BUDGET = 22_039
 
 
 def test_app_tree_line_count_does_not_grow():
@@ -91,7 +91,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/safe_regex.py": (8, 3),
     "app/crawl/robots.py": (13, 4),
     "app/bounded_io.py": (3, 2),
-    "app/crawl/decompression.py": (3, 2),
+    "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
     "app/safe_url.py": (1, 1),

@@ -5,6 +5,7 @@ import zlib
 
 import pytest
 
+from app.crawl import decompression as decompression_mod
 from app.crawl.decompression import DecompressionTooLargeError, _decompress_bounded, decompress_body
 from app.crawl.strategies.body_decode import _decode_body
 
@@ -18,13 +19,38 @@ def test_cap_is_required_keyword():
         decompress_body(gzip.compress(b"hello"), "gzip")
 
 
-def test_garbage_input_still_passes_through_under_cap():
-    assert decompress_body(b"not gzip at all", "gzip", max_output_bytes=_CAP) == b"not gzip at all"
+def test_garbage_gzip_is_rejected_under_cap():
+    with pytest.raises(decompression_mod.DecompressionError):
+        decompress_body(b"not gzip at all", "gzip", max_output_bytes=_CAP)
 
 
-def test_truncated_gzip_passes_through():
+def test_truncated_gzip_is_rejected():
     body = gzip.compress(b"hello")[:-2]
-    assert decompress_body(body, "gzip", max_output_bytes=100) == body
+    with pytest.raises(decompression_mod.DecompressionError):
+        decompress_body(body, "gzip", max_output_bytes=100)
+
+
+def test_truncated_deflate_is_rejected():
+    body = zlib.compress(b"hello world")[:-2]
+    with pytest.raises(decompression_mod.DecompressionError):
+        decompress_body(body, "deflate", max_output_bytes=100)
+
+
+def test_deflate_with_trailing_junk_is_rejected():
+    body = zlib.compress(b"first") + b"junk"
+    with pytest.raises(decompression_mod.DecompressionError):
+        decompress_body(body, "deflate", max_output_bytes=100)
+
+
+def test_concatenated_deflate_is_rejected():
+    body = zlib.compress(b"first") + zlib.compress(b"second")
+    with pytest.raises(decompression_mod.DecompressionError):
+        decompress_body(body, "deflate", max_output_bytes=100)
+
+
+def test_concatenated_gzip_members_are_decoded():
+    body = gzip.compress(b"first") + gzip.compress(b"second")
+    assert decompress_body(body, "gzip", max_output_bytes=100) == b"firstsecond"
 
 
 def test_decode_body_no_longer_decompresses():
@@ -87,15 +113,12 @@ class TestDecompressionEncodings:
         assert result == b"some data"
 
 
-class TestDecompressionFallback:
-    def test_decompression_brotli_exception(self):
+class TestInvalidCompressedInput:
+    def test_invalid_gzip_has_typed_error(self):
         from app.crawl.decompression import decompress_body
 
-        try:
-            result = decompress_body(b"not gzip data", "gzip", max_output_bytes=10_000_000)
-            assert result == b"not gzip data"
-        except Exception:
-            pass
+        with pytest.raises(decompression_mod.DecompressionError):
+            decompress_body(b"not gzip data", "gzip", max_output_bytes=10_000_000)
 
 
 class TestBodyCharsetDecoding:
@@ -171,12 +194,11 @@ def test_decode_handles_bytearray_and_headers():
 def test_accepts_bytearray_gzip():
     import gzip
 
-    from app.crawl.decompression import decompress_body, detect_decompression_failure
+    from app.crawl.decompression import decompress_body
 
     body = bytearray(gzip.compress(b"hello world"))
     out = decompress_body(body, "gzip", max_output_bytes=1024)
     assert out == b"hello world"
-    assert detect_decompression_failure(bytes(body), "gzip", out) is False
 
 
 def test_accepts_bytearray_brotli():
@@ -224,7 +246,7 @@ def test_bounded_decompressor_reads_only_remaining_cap():
             return b""
 
     with pytest.raises(DecompressionTooLargeError):
-        _decompress_bounded(FakeDecompressor, b"payload", 10)
+        _decompress_bounded(FakeDecompressor, b"payload", 10, allow_concatenated=False)
     assert requested == [11]
 
 
@@ -287,25 +309,25 @@ def test_brotli_feeds_incrementally(monkeypatch):
 
 
 class TestDecompressionSelection:
-    def test_gzip_failure_returns_body(self):
-        assert decompress_body(b"not gzip", "gzip", max_output_bytes=10_000_000) == b"not gzip"
+    def test_gzip_failure_is_rejected(self):
+        with pytest.raises(decompression_mod.DecompressionError):
+            decompress_body(b"not gzip", "gzip", max_output_bytes=10_000_000)
 
-    def test_deflate_failure_returns_body(self):
-        assert decompress_body(b"not deflate", "deflate", max_output_bytes=10_000_000) == b"not deflate"
+    def test_deflate_failure_is_rejected(self):
+        with pytest.raises(decompression_mod.DecompressionError):
+            decompress_body(b"not deflate", "deflate", max_output_bytes=10_000_000)
 
-    def test_brotli_failure_returns_body(self):
-        assert decompress_body(b"not brotli", "br", max_output_bytes=10_000_000) == b"not brotli"
+    def test_brotli_failure_is_rejected(self):
+        with pytest.raises(decompression_mod.DecompressionError):
+            decompress_body(b"not brotli", "br", max_output_bytes=10_000_000)
 
     def test_plain_passthrough(self):
         assert decompress_body(b"plain", "identity", max_output_bytes=10_000_000) == b"plain"
 
 
-class TestBrotliImportErrorFallback:
-    """Brotli import failure degrades to raw bytes"""
-
-    def test_decompress_body_brotli_import_error(self):
+class TestBrotliFailure:
+    def test_decompress_body_rejects_invalid_brotli(self):
         from app.crawl.decompression import decompress_body
 
-        body = b"not brotli"
-        result = decompress_body(body, "br", max_output_bytes=10_000_000)
-        assert result == body
+        with pytest.raises(decompression_mod.DecompressionError):
+            decompress_body(b"not brotli", "br", max_output_bytes=10_000_000)

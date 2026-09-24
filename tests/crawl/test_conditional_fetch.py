@@ -205,15 +205,12 @@ def test_conditional_headers_rejected_without_validators():
     assert request.policy.headers == {"Accept": "text/html"}
 
 
-async def test_decompression_failure_flagged_and_downgraded():
-    """A Content-Encoding that fails to decompress yields garbage; it must be
-    flagged in diagnostics and must not score as high-quality content."""
+async def test_malformed_gzip_is_rejected_by_strategy():
     import gzip
 
     compressed = bytearray(gzip.compress(_html("real content").encode()))
-    for i in range(2, 12):  # corrupt the deflate stream itself
+    for i in range(2, 12):
         compressed[i] ^= 0xFF
-    real_body = bytes(compressed)
 
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         return make_fetch(
@@ -221,12 +218,14 @@ async def test_decompression_failure_flagged_and_downgraded():
             final_url=url,
             status=200,
             headers={"content-type": "text/html", "content-encoding": "gzip"},
-            body=real_body,
+            body=bytes(compressed),
         )
 
     result = await _run_http(fetcher)
-    assert result.diagnostics["decompression_failed"] is True
-    assert result.quality_score <= 0.25
+    assert result.status == "failed"
+    assert result.error == "value_error"
+    assert result.html is None
+    assert result.text is None
 
 
 class TestNotModifiedResponse:
