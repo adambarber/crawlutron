@@ -12,14 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
-from app.crawl.job_store import (
-    FrontierEntry,
-    job_max_depth,
-    job_max_pages,
-    normalize_job_state,
-    normalized_policy,
-    policy_limits,
-)
+from app.crawl.job_store import FrontierEntry, job_max_pages, normalized_policy, policy_limits
 from app.crawl.robots import load_robots_rules, robots_allows, robots_cache, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import _default_http_fetcher
@@ -30,7 +23,7 @@ from app.validation import HostPolicy, registrable_domain, safe_public_url_or_no
 
 _DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 RobotsAllows = Callable[[str], Awaitable[bool]]
 RobotsCrawlDelay = Callable[[str], Awaitable[float | None]]
@@ -429,7 +422,7 @@ def normalize_sitemap_candidates(
 
 def record_cap_truncated(job: Any) -> None:
     if job.stats.get("cap_truncated", 0) == 0:
-        logger.info(
+        _logger.info(
             "job_runner_cap_truncated",
             extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
         )
@@ -438,7 +431,7 @@ def record_cap_truncated(job: Any) -> None:
 
 def record_cap_overcommitted(job: Any) -> None:
     if job.stats.get("cap_overcommitted", 0) == 0:
-        logger.warning(
+        _logger.warning(
             "job_runner_cap_overcommitted",
             extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
         )
@@ -514,26 +507,4 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
     )
 
 
-__all__ = [
-    "AdmittedLink",
-    "AdmissionOutcome",
-    "JobAdmissionContext",
-    "RobotsGate",
-    "admit_discovered_links",
-    "admit_job_links",
-    "admitted_page_identities",
-    "canonical_page_identity",
-    "compile_scope_pattern",
-    "fetch_job_sitemap_candidates",
-    "gather_robots_decisions",
-    "job_max_depth",
-    "job_max_pages",
-    "normalize_job_state",
-    "normalize_sitemap_candidates",
-    "normalized_policy",
-    "policy_limits",
-    "record_cap_overcommitted",
-    "record_cap_truncated",
-    "remaining_page_capacity",
-    "requeue_admitted_pages",
-]
+__all__ = ["AdmittedLink", "AdmissionOutcome", "CommitCrawlDelay", "JobAdmissionContext", "RobotsAllows", "RobotsCrawlDelay", "RobotsGate", "T", "admit_discovered_links", "admit_job_links", "admitted_page_identities", "canonical_page_identity", "compile_scope_pattern", "fetch_job_sitemap_candidates", "gather_robots_decisions", "normalize_sitemap_candidates", "record_cap_overcommitted", "record_cap_truncated", "remaining_page_capacity", "requeue_admitted_pages"]

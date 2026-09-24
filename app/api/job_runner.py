@@ -39,7 +39,6 @@ from app.crawl.admission import (
     canonical_page_identity,
     fetch_job_sitemap_candidates,
     job_max_pages,
-    normalize_job_state,
     normalized_policy,
     policy_limits,
     record_cap_overcommitted,
@@ -47,7 +46,7 @@ from app.crawl.admission import (
     remaining_page_capacity,
     requeue_admitted_pages,
 )
-from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore
+from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore, normalize_job_state
 from app.crawl.strategies.browser import TRANSIENT_CLASSIFICATIONS
 from app.models import CrawlResult, CrawlTask
 

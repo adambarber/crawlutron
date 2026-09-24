@@ -243,3 +243,6 @@ async def _discovery_diagnostics(
     if sitemap_urls or feeds:
         diagnostics["discovery"] = {"sitemap_urls": sitemap_urls, "feeds": feeds}
     return diagnostics
+
+
+__all__ = []

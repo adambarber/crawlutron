@@ -54,7 +54,7 @@ __all__ = [
 # tree. One exact whole-tree ceiling is the ratchet instead: growth must be paid
 # for by shrinkage elsewhere in the same change, and a shrink must lower this
 # integer so the saved capacity cannot be spent later.
-_APP_TREE_LINE_BUDGET = 22_089
+_APP_TREE_LINE_BUDGET = 22_065
 
 
 def test_app_tree_line_count_does_not_grow():
@@ -66,6 +66,138 @@ def test_app_tree_line_count_does_not_grow():
         f"app/ contains exactly {actual} Python lines; the whole-tree ceiling is "
         f"{_APP_TREE_LINE_BUDGET}. Lower the ceiling when code is removed; never raise it."
     )
+
+
+# Values are (declared public symbols, executable entry points). Public data
+# classes, exceptions, type aliases, and constants remain part of the contract,
+# but only functions and classes with their own methods are alternate ways in.
+_OWNER_PUBLIC_SURFACE_RATCHET = {
+    "app/crawl/admission.py": (20, 14),
+    "app/validation.py": (16, 12),
+    "app/api/response_shaping.py": (8, 8),
+    "app/crawl/sqlite_store.py": (7, 5),
+    "app/safe_regex.py": (8, 3),
+    "app/crawl/robots.py": (13, 4),
+    "app/bounded_io.py": (3, 2),
+    "app/crawl/decompression.py": (3, 2),
+    "app/crawl/credentials.py": (3, 3),
+    "app/crawl/render_options.py": (2, 2),
+    "app/safe_url.py": (1, 1),
+    "app/crawl/payload_helpers.py": (3, 1),
+    "app/crawl/result_helpers.py": (0, 0),
+    "app/crawl/strategies/fetch_policy.py": (0, 0),
+}
+_PUBLIC_SURFACE_PROPERTY = Property(
+    name="one-public-door",
+    owner_module="app/crawl/sqlite_store.py",
+    owner_symbols=(),
+    definition_site="tests/test_safety_invariants.py:_public_surface_offenders",
+    fingerprints=("public_surface",),
+    reason="A property owner declares one public surface and cannot add another entry point.",
+)
+
+
+def _owned_public_symbols(tree: ast.AST) -> set[str]:
+    public: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if not node.name.startswith("_"):
+                public.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            public.update(
+                target.id
+                for target in targets
+                if isinstance(target, ast.Name) and not target.id.startswith("_")
+            )
+    return public
+
+
+def _entry_point_symbols(tree: ast.AST) -> set[str]:
+    entry_points: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+            entry_points.add(node.name)
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
+            if any(isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) for child in node.body):
+                entry_points.add(node.name)
+    return entry_points
+
+
+def _declared_public_symbols(tree: ast.AST) -> set[str] | None:
+    declarations = [
+        node
+        for node in tree.body
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "__all__" for target in node.targets)
+        )
+        or (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "__all__"
+        )
+    ]
+    if len(declarations) != 1:
+        return None
+    value = declarations[0].value
+    try:
+        declared = ast.literal_eval(value)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(declared, (list, tuple, set)) or not all(isinstance(name, str) for name in declared):
+        return None
+    return set(declared)
+
+
+def _public_surface_offenders(tree, path, _prop, *, modules=None) -> list[str]:
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    actual = _owned_public_symbols(tree)
+    declared = _declared_public_symbols(tree)
+    if declared is None:
+        return [f"{relative}: public symbols are not declared by one literal __all__"]
+    if actual == declared:
+        return []
+    missing = ", ".join(sorted(actual - declared)) or "none"
+    extra = ", ".join(sorted(declared - actual)) or "none"
+    return [f"{relative}: __all__ mismatch (missing: {missing}; extra: {extra})"]
+
+
+def _owner_surface_counts(tree: ast.AST) -> tuple[int, int]:
+    return len(_owned_public_symbols(tree)), len(_entry_point_symbols(tree))
+
+
+def test_property_owner_public_surfaces_equal_all():
+    offenders: list[str] = []
+    for relative in _OWNER_PUBLIC_SURFACE_RATCHET:
+        path = REPO_ROOT / relative
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        offenders.extend(_public_surface_offenders(tree, path, _PUBLIC_SURFACE_PROPERTY))
+    assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
+
+
+def test_property_owner_public_surface_counts_do_not_grow():
+    offenders: list[str] = []
+    for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
+        path = REPO_ROOT / relative
+        surface_count, entry_count = _owner_surface_counts(ast.parse(path.read_text(encoding="utf-8")))
+        if surface_count > surface_budget or entry_count > entry_budget:
+            offenders.append(
+                f"{relative}: surface {surface_count}/{surface_budget}, entry points {entry_count}/{entry_budget}"
+            )
+    assert not offenders, "property owner public surface grew: " + ", ".join(offenders)
+
+
+def test_property_owner_public_surface_budgets_are_tight():
+    stale: list[str] = []
+    for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
+        path = REPO_ROOT / relative
+        surface_count, entry_count = _owner_surface_counts(ast.parse(path.read_text(encoding="utf-8")))
+        if surface_count < surface_budget or entry_count < entry_budget:
+            stale.append(
+                f"{relative}: surface {surface_count}/{surface_budget}, entry points {entry_count}/{entry_budget}"
+            )
+    assert not stale, "property owner budgets are stale; lower them to: " + ", ".join(stale)
 
 
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
@@ -4731,6 +4863,47 @@ def assert_property_detector_bites(
     for label, source in quiet_sources.items():
         quiet_offenders = run_case(source, resolved_quiet_path)
         assert not quiet_offenders, f"{prop.name} detector flagged {label}: {quiet_offenders}"
+
+
+def test_public_surface_detector_bites():
+    historical_sqlite_owner = '''"""The single durability configuration for every SQLite store in the service.
+
+Connection settings (busy_timeout, journal_mode) are a service decision, not
+a per-store one: CrawlResultStore once plain-connected while JobStore ran
+WAL + busy_timeout, so the same process gave two stores different
+concurrency behavior (M1). New stores call :func:`connect_store` instead of
+``sqlite3.connect`` directly; the confinement invariant in
+tests/test_store_pragma_chokepoint.py keeps every PRAGMA in this file.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+_BUSY_TIMEOUT_MS = 5000
+
+
+def configure_store_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
+    # Wait for the write lock instead of raising "database is locked" under
+    # concurrent access from FastAPI's worker threads.
+    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    # WAL: better concurrent read/write performance for the read-heavy stores.
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def connect_store(db_path: str | Path) -> sqlite3.Connection:
+    """Open a store connection with the service-wide configuration applied."""
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    return configure_store_connection(conn)
+'''
+    assert_property_detector_bites(
+        _PUBLIC_SURFACE_PROPERTY,
+        _public_surface_offenders,
+        caught={"real M1 SQLite split at bc10b4b": (historical_sqlite_owner, 1)},
+        quiet=(REPO_ROOT / "app" / "crawl" / "credentials.py").read_text(encoding="utf-8"),
+    )
 
 
 def test_public_target_detector_bites():

@@ -43,3 +43,6 @@ async def read_capped_async(chunks: AsyncIterator[bytes], cap: int) -> bytes:
         if len(raw) > cap:
             raise BodyTooLarge(f"streamed body exceeds {cap}-byte cap")
     return bytes(raw)
+
+
+__all__ = ["BodyTooLarge", "read_capped_async", "read_capped_sync"]

@@ -201,4 +201,4 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     }
 
 
-__all__ = ["_payload_urls", "checked_payload_urls", "_payload_policy", "SUPPORTED_EXTRACTION_METHODS"]
+__all__ = ["DEFAULT_MAX_PAGES", "SUPPORTED_EXTRACTION_METHODS", "checked_payload_urls"]

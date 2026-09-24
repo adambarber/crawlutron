@@ -25,7 +25,7 @@ from app.api_models import CrawlStatus, PageMetadata, UnifiedCrawlResponse, Unif
 from app.constants import CrawlClassification
 from app.validation import HostPolicy, safe_public_url_or_none
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def format_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
@@ -290,7 +290,7 @@ def _shape_all(results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]
             # Log loudly: the original bug was a bare except that swallowed
             # the exception, degraded the item to site_error, and left no
             # trace of which shape failed or why.
-            logger.warning(
+            _logger.warning(
                 "response shaping failed for one item; degrading it to a terminal failure",
                 exc_info=True,
             )
@@ -319,7 +319,7 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
             for key in ("normalized_url", "original_url", "url", "final_url", "error")
         }
     except Exception:
-        logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
+        _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
     url = peeked.get("normalized_url") or peeked.get("original_url") or peeked.get("url") or ""
     return UnifiedCrawlResult(
         original_url=peeked.get("original_url") or peeked.get("url") or url,
@@ -381,12 +381,4 @@ async def abuild_unified_crawl_response(
     return _unified_response(list(shaped), **fields)
 
 
-__all__ = [
-    "aformat_crawl_item",
-    "abuild_unified_result",
-    "abuild_unified_crawl_response",
-    "format_crawl_item",
-    "build_unified_result",
-    "render_result_to_unified",
-    "build_unified_crawl_response",
-]
+__all__ = ["aformat_crawl_item", "abuild_unified_result", "abuild_unified_crawl_response", "format_crawl_item", "build_unified_result", "render_result_to_unified", "frontier_link_url", "build_unified_crawl_response"]

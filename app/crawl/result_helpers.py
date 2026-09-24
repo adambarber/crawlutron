@@ -26,7 +26,7 @@ from app.models import (
 _JobT = TypeVar("_JobT")
 
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def _enforce_status_classification(classification: Classification, status: ResultStatus) -> None:
@@ -143,7 +143,7 @@ def _engine_result_from_exception(
     """
     classification = known_classification if known_classification is not None else _classify_error_code(error)
     elapsed = elapsed_ms if elapsed_ms is not None else 0
-    logger.warning(
+    _logger.warning(
         "strategy_result_error",
         extra={
             "strategy": strategy,
@@ -317,7 +317,7 @@ def _crawl_result_from_exception(
     the at-least-once frontier layer can re-queue the URL.
     """
     classification = _classify_error_code(error)
-    logger.warning(
+    _logger.warning(
         "render_result_error",
         extra={"strategy": strategy, "error_code": classification, "error_detail": str(error)},
     )
@@ -532,3 +532,6 @@ def _binary_no_text_result(
         extraction_method="binary_no_text",
         diagnostics={},
     )
+
+
+__all__ = []

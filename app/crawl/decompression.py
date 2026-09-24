@@ -195,3 +195,6 @@ def detect_decompression_failure(
     if codec in {"identity", "none", ""}:
         return False
     return bool(body) and decoded == body
+
+
+__all__ = ["DecompressionTooLargeError", "decompress_body", "detect_decompression_failure"]

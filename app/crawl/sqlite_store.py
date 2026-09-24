@@ -110,3 +110,6 @@ def table_indexes(conn: sqlite3.Connection, table: str) -> tuple[IndexInfo, ...]
             )
         )
     return tuple(indexes)
+
+
+__all__ = ["ColumnInfo", "IndexInfo", "configure_store_connection", "connect_store", "table_columns", "table_has_column", "table_indexes"]

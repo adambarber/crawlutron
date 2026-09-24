@@ -100,3 +100,6 @@ class SafeUrl:
         if parsed.hostname:
             headers["Host"] = f"{parsed.hostname}{port}"
         return connect_url, headers
+
+
+__all__ = ["SafeUrl"]

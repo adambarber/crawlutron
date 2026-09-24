@@ -79,3 +79,6 @@ def match_bounded(
 
 def search_bounded(compiled, text: str, *, timeout: float = DEFAULT_MATCH_TIMEOUT_SECONDS):
     return match_bounded(compiled, text, op="search", timeout=timeout)
+
+
+__all__ = ["BoundedPattern", "DEFAULT_MATCH_TIMEOUT_SECONDS", "MAX_PATTERN_LENGTH", "RegexTimeout", "UnsafePattern", "compile_untrusted", "match_bounded", "search_bounded"]
