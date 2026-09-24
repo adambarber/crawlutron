@@ -22,6 +22,11 @@ def test_garbage_input_still_passes_through_under_cap():
     assert decompress_body(b"not gzip at all", "gzip", max_output_bytes=_CAP) == b"not gzip at all"
 
 
+def test_truncated_gzip_passes_through():
+    body = gzip.compress(b"hello")[:-2]
+    assert decompress_body(body, "gzip", max_output_bytes=100) == body
+
+
 def test_decode_body_no_longer_decompresses():
     # Decompression lives at the chokepoint, not inside the text decoder;
     # the headers parameter existed only to double-decompress uncapped.

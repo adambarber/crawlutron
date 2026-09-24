@@ -56,6 +56,8 @@ def _decompress_bounded(make_decompressor, compressed: bytes, max_output_bytes: 
                 pending = decompressor.unused_data
                 if pending:
                     decompressor = make_decompressor()
+        if not decompressor.eof:
+            raise zlib.error("incomplete compressed stream")
         out.extend(decompressor.flush())
         if len(out) > max_output_bytes:
             raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
@@ -85,16 +87,9 @@ def decompress_body(
     returned unchanged instead of raising. A genuine over-cap expansion
     raises :class:`DecompressionTooLargeError`.
 
-    ``body`` accepts any readable buffer (callers hold ``bytes``, ``bytearray``
-    from incremental assembly, or a ``memoryview`` over a transport buffer).
-    The passthrough branches return that same content normalized to ``bytes``:
-    a "do not trust the label" fallback for a transport that auto-decompressed
-    but left the header. Returning the caller's own buffer type would make the
-    return type polymorphic for no caller benefit -- every consumer
-    (``HttpFetchResult.body`` is ``bytes``, and
-    ``detect_decompression_failure`` compares against the original) reads it as
-    bytes -- so the normalization happens at this boundary instead of at each
-    passthrough site.
+    ``body`` accepts bytes-like input; passthrough branches normalize it to ``bytes`` at
+    this boundary because all consumers read the result as bytes and compare it with
+    the original body.
     """
     encoding = content_encoding.lower().strip()
 
