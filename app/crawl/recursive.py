@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import re
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -28,6 +27,7 @@ from app.crawl.result_helpers import _failed_result_for
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission, default_admission_policy
+from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.validation import HostPolicy, registrable_domain
 
@@ -143,7 +143,7 @@ class _RecursiveRun:
     respect_robots: bool
     include_html: bool
     want_document_bodies: bool
-    scope_pattern: Any
+    scope_pattern: BoundedPattern | None
     global_concurrency: int
     seed_sitemaps: bool
     resource_gate: ResourceGate
@@ -289,7 +289,7 @@ async def run_recursive_crawl(
     respect_robots: bool,
     include_html: bool,
     want_document_bodies: bool,
-    scope_pattern: re.Pattern[str] | None,
+    scope_pattern: BoundedPattern | None,
     global_concurrency: int,
     seed_sitemaps: bool,
     resource_gate: ResourceGate,

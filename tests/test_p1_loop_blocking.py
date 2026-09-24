@@ -413,7 +413,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
 
 
 class TestSpillAssemblyOffTheEventLoop:
-    """``_crawl_request_impl`` reassembles the spilled results with
+    """``run_crawl_request`` reassembles the spilled results with
     ``load_ordered``: a full file scan plus a ``json.loads`` per line. That is
     blocking work and must not run on the event loop."""
 

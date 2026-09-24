@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 from urllib.parse import urljoin, urlparse
 
 from app.constants import is_analytics_host, is_document_url
@@ -25,7 +24,7 @@ from app.crawl.robots import load_robots_rules, robots_allows, robots_cache, rob
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import NormalizedUrl
-from app.safe_regex import UnsafePattern, compile_untrusted
+from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 from app.scheduler import DomainScheduler
 from app.validation import HostPolicy, registrable_domain, safe_public_url_or_none
 
@@ -61,15 +60,12 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
     return max(0, max_pages - max(0, admitted_count))
 
 
-def compile_scope_pattern(scope_regex: Any) -> re.Pattern[str] | None:
+def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
     if not isinstance(scope_regex, str) or not scope_regex:
         return None
     try:
-        return cast(
-            re.Pattern[str],
-            compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN),
-        )
-    except (UnsafePattern, re.error):
+        return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
+    except UnsafePattern:
         return None
 
 
@@ -122,7 +118,7 @@ def _candidate_stream(
     *,
     next_depth: int,
     known: set[str],
-    scope_pattern: re.Pattern[str] | None,
+    scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     host_policy: HostPolicy,
 ) -> Iterable[AdmittedLink]:
@@ -195,7 +191,7 @@ async def admit_discovered_links(
     known: set[str],
     frontier: MutableSequence[T],
     make_entry: Callable[[AdmittedLink], T],
-    scope_pattern: re.Pattern[str] | None,
+    scope_pattern: BoundedPattern | None,
     want_document_bodies: bool,
     respect_robots: bool,
     robots_allows: RobotsAllows,
@@ -342,7 +338,7 @@ class JobAdmissionContext:
     host_policy: HostPolicy
     max_depth: int
     max_pages: int
-    scope_pattern: re.Pattern[str] | None
+    scope_pattern: BoundedPattern | None
     want_document_bodies: bool
     respect_robots: bool
     seed_sitemaps: bool
@@ -415,7 +411,7 @@ def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
 def normalize_sitemap_candidates(
     found: Iterable[tuple[str, str | None]],
     *,
-    scope_pattern: re.Pattern[str] | None,
+    scope_pattern: BoundedPattern | None,
     host_policy: HostPolicy,
 ) -> list[tuple[NormalizedUrl, str | None]]:
     candidates: list[tuple[NormalizedUrl, str | None]] = []

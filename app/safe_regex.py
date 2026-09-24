@@ -13,8 +13,11 @@ class as curl_cffi under fast_sleeps, #1746).
 
 from __future__ import annotations
 
-import regex as _engine
+from typing import TypeAlias
 
+import regex
+
+BoundedPattern: TypeAlias = regex.Pattern[str]
 DEFAULT_MATCH_TIMEOUT_SECONDS = 0.5
 
 
@@ -29,7 +32,11 @@ class UnsafePattern(ValueError):
 MAX_PATTERN_LENGTH = 256
 
 
-def compile_untrusted(pattern: str | None, *, max_len: int = MAX_PATTERN_LENGTH):
+def compile_untrusted(
+    pattern: str | None,
+    *,
+    max_len: int = MAX_PATTERN_LENGTH,
+) -> BoundedPattern | None:
     """Compile ``pattern`` with the bounded ``regex`` engine.
 
     Rejects only structurally unusable input — empty, over-long, or
@@ -43,8 +50,8 @@ def compile_untrusted(pattern: str | None, *, max_len: int = MAX_PATTERN_LENGTH)
     if not pattern or len(pattern) > max_len:
         raise UnsafePattern(f"pattern rejected: length {len(pattern)} > {max_len}")
     try:
-        return _engine.compile(pattern)
-    except _engine.error as error:
+        return regex.compile(pattern)
+    except regex.error as error:
         raise UnsafePattern(f"pattern rejected: {error}") from error
 
 

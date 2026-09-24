@@ -16,25 +16,17 @@ import re
 import tempfile
 import time
 from collections.abc import Iterable
-from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
-from urllib.parse import urljoin, urlparse
 
-from app.api_models import POLICY_SCHEMA_VERSION
 from app.constants import (
     DEFAULT_EXTRACTION,
     DEFAULT_STRATEGIES,
-    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-    EXTRACTION_DOCUMENT,
 )
 from app.crawl import robots as _robots_policy
-from app.crawl.ids import new_request_id
-from app.memory_pressure import read_memory_stats
-from app.resource_pressure import ResourceGate, WeightedAdmission, _build_admission_policy, doc_worker_count
-from app.safe_regex import UnsafePattern, compile_untrusted
+from app.resource_pressure import ResourceGate
+from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -56,40 +48,22 @@ load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
-from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
+from app.crawl.fetch_helpers import _fetch_and_decode
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
-from app.crawl.recursive import (
-    RECURSIVE_RAMP_MAX,
-    _spill_write,
-    run_recursive_crawl,
-)
-from app.crawl.render_options import policy_wants_html
-from app.crawl.result_helpers import (
-    _engine_result_from_exception,
-    _skipped_engine_result,
-)
+from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
-from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import (
-    CrawlTask,
     CrawlWorker,
     EngineCrawlResult,
     HttpFetcher,
-    NormalizedUrl,
     to_dict,
 )
-from app.resource_pressure import derive_browser_pool_size
-from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
 from app.validation import (
     HostPolicy,
     get_env_int,
-    normalize_public_http_url,
-    registrable_domain,
-    safe_public_url_or_none,
 )
 
 _DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
@@ -120,7 +94,7 @@ def _get_shared_content_cache() -> ContentCache:
 _MAX_SCOPE_PATTERN_LEN = 256
 
 
-def _compile_scope_regex_safe(scope_regex: str | None):
+def _compile_scope_regex_safe(scope_regex: str | None) -> BoundedPattern | None:
     """Compile a user-supplied scope regex for bounded matching.
 
     Defense in depth (N-1): static shape rejection is bypassable by
@@ -389,6 +363,19 @@ class _ResultSpill:
                 pass
 
 
+def _set_cookie_namespace(policy: dict[str, Any]):
+    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+    from app.crawl.strategies.request_profile import cookie_namespace_for
+
+    return _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
+
+
+def _reset_cookie_namespace(token: Any) -> None:
+    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
+
+    _COOKIE_NAMESPACE.reset(token)
+
+
 async def crawl_request(
     payload: dict[str, Any],
     *,
@@ -423,345 +410,20 @@ async def crawl_request(
     # ``_GLOBAL_COOKIE_JAR``. Defaults to "" (legacy shared behavior) so
     # single-tenant callers and tests see no change (adversarial review
     # F-cookie-cross-contamination).
-    from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
-    from app.crawl.strategies.request_profile import cookie_namespace_for
-
-    _cookie_token = _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
+    _cookie_token = _set_cookie_namespace(policy)
     try:
-        return await _crawl_request_impl(
-            payload,
-            active_settings,
-            urls,
-            policy,
-            fetcher,
-            cffi,
-            host_policy,
-            shutdown_event,
-            browser_worker=browser_worker,
-            cache=cache,
-            content_cache=content_cache,
-            webhook_url=webhook_url,
-            spill_path=spill_path,
+        state = _PipelineState(
+            payload=payload, settings=active_settings, urls=urls, policy=policy,
+            fetcher=fetcher, cffi=cffi, host_policy=host_policy, shutdown_event=shutdown_event,
+            browser_worker=browser_worker, cache=cache, content_cache=content_cache,
+            webhook_url=webhook_url, spill_path=spill_path,
+            dependencies=_PipelineDependencies(
+                get_content_cache=_get_shared_content_cache, make_spill=_ResultSpill,
+                compile_scope_regex_safe=_compile_scope_regex_safe, stale_seeds=_stale_seeds,
+                fetch_and_decode=_fetch_and_decode, default_fetch_and_decode=_DEFAULT_FETCH_AND_DECODE,
+                shared_http_cache=_SHARED_HTTP_CACHE, resource_gate=_resource_gate,
+            ),
         )
+        return await run_crawl_request(state)
     finally:
-        _COOKIE_NAMESPACE.reset(_cookie_token)
-
-
-async def _crawl_request_impl(
-    payload: dict[str, Any],
-    active_settings: CrawlerSettings,
-    urls: list[str],
-    policy: dict[str, Any],
-    fetcher: Any,
-    cffi: Any,
-    host_policy: HostPolicy,
-    shutdown_event: asyncio.Event,
-    *,
-    browser_worker: CrawlWorker | None,
-    cache: HttpCache | None,
-    content_cache: ContentCache | None,
-    webhook_url: str | None,
-    spill_path: str | None,
-) -> dict[str, Any]:
-
-    jobs: list[CrawlTask] = []
-    for index, original_url in enumerate(urls):
-        try:
-            normalized_url = normalize_public_http_url(original_url, policy=host_policy)
-            domain = registrable_domain(normalized_url)
-        except ValueError as error:
-            raise ValueError(f"invalid_url: {error}") from error
-        jobs.append(
-            CrawlTask(index=index, original_url=original_url, normalized_url=normalized_url, domain=domain)
-        )
-
-    # Limits are the same for all jobs; extract once for scheduler config
-    limits = policy.get("limits", {})
-    scheduler = DomainScheduler(
-        # No fixed external concurrency cap: let the recursive dispatcher's
-        # self-tuning ramp (RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
-        # = 8 * 2 = 16) size real concurrency to the cgroup budget; the resource
-        # gate is the sole authority. This limit mirrors that real ceiling so a
-        # single scheduler batch cannot exceed the dispatcher's own ramp bound.
-        global_limit=RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-        per_domain_limit=active_settings.per_domain_concurrency,
-        delay_seconds=active_settings.per_domain_delay_ms / 1000,
-        max_rps=float(limits.get("max_rps", 0) or 0),
-        adaptive=active_settings.adaptive_throttling,
-        adaptive_min_delay=active_settings.adaptive_min_delay,
-        adaptive_max_delay=active_settings.adaptive_max_delay,
-        adaptive_latency_factor=active_settings.adaptive_latency_factor,
-    )
-
-    # Conditional revalidation (freshness): caller-supplied validators keyed by
-    # URL (original or normalized form both accepted).
-    validators_raw = payload.get("validators") or {}
-    validators_by_url: dict[str, dict[str, str]] = {}
-    for v_url, v in validators_raw.items():
-        entry = {"if_none_match": v.get("if_none_match"), "if_modified_since": v.get("if_modified_since")}
-        entry = {k: val for k, val in entry.items() if val}
-        if not entry:
-            continue
-        validators_by_url[v_url] = entry
-        validators_by_url.setdefault(
-            safe_public_url_or_none(v_url, policy=host_policy)
-            or v_url,
-            entry,
-        )
-
-    def _validators_for(job: CrawlTask) -> dict[str, str] | None:
-        return validators_by_url.get(job.normalized_url) or validators_by_url.get(job.original_url)
-
-    async def run_job(job: CrawlTask) -> tuple[int, EngineCrawlResult]:
-        index = job.index
-        original_url = job.original_url
-        normalized_url = job.normalized_url
-        robots_sitemaps = [] if not respect_robots else cached_sitemaps(
-            f"{urlparse(normalized_url).scheme}://{urlparse(normalized_url).netloc}",
-            policy=host_policy,
-        )
-        # Hard per-URL deadline over the WHOLE strategy chain (#adversarial 2.2):
-        # a poisoned/tarpit URL must not hold its global concurrency slot for
-        # (strategies x retries x timeout + browser challenge waits) ~ minutes
-        # while the resource gate reports idle capacity. If the chain blows the
-        # budget we fail the URL as network_error and free the slot.
-        budget = float(
-            (policy.get("limits") or {}).get("total_url_budget_seconds") or DEFAULT_TOTAL_URL_BUDGET_SECONDS
-        )
-        try:
-            result = await asyncio.wait_for(
-                execute_crawl_chain(
-                    original_url=original_url,
-                    normalized_url=normalized_url,
-                    policy=policy,
-                    http_fetcher=fetcher,
-                    cffi_fetcher=cffi,
-                    browser_worker=browser_worker,
-                    global_concurrency=active_settings.global_concurrency,
-                    cache=cache or _SHARED_HTTP_CACHE,
-                    # Content cache is opt-in (#5): only use the shared instance when explicitly
-                    # enabled via settings, so test suites that fake per-test content for the
-                    # same URL stay isolated. Callers may still pass an explicit ``content_cache``.
-                    content_cache=content_cache
-                    or (_get_shared_content_cache() if active_settings.content_cache_enabled else None),
-                    scheduler=scheduler,
-                    domain=job.domain,
-                    robots_sitemaps=robots_sitemaps,
-                    host_policy=host_policy,
-                    caller_validators=_validators_for(job),
-                ),
-                timeout=budget,
-            )
-        except TimeoutError as error:
-            # The budget raises bare TimeoutError; its classification is known
-            # precisely (not derivable from the exception type), so pass it
-            # through the primitive rather than hand-building a result. The
-            # budget wraps the whole strategy chain, so no single strategy is
-            # implicated: None is the honest "no specific strategy" label.
-            result = _engine_result_from_exception(
-                error=error,
-                original_url=original_url,
-                normalized_url=normalized_url,
-                strategy=None,
-                known_classification="url_budget_exceeded",
-                extra_diagnostics={"url_budget_seconds": budget},
-            )
-        return index, result
-
-    async def _load_robots_for_target(target_url: str):
-        return await load_robots_rules(
-            _robots_policy.robots_origin(target_url, policy=host_policy),
-            fetcher,
-            policy["limits"]["timeout_seconds"],
-            fetch_and_decode=(
-                _fetch_and_decode if _fetch_and_decode is not _DEFAULT_FETCH_AND_DECODE else None
-            ),
-            policy=host_policy,
-        )
-
-    async def _robots_allows_target(target_url: str) -> bool:
-        rules, _sitemaps, _crawl_delay = await _load_robots_for_target(target_url)
-        return _robots_allows(target_url, rules)
-
-    async def _robots_crawl_delay_for(target_url: str) -> float | None:
-        _rules, _sitemaps, crawl_delay = await _load_robots_for_target(target_url)
-        return crawl_delay
-
-    def _robots_sitemaps_for(origin: str) -> list[str] | None:
-        return cached_sitemaps(origin, policy=host_policy)
-
-    def _robots_disallowed_result(job: CrawlTask) -> EngineCrawlResult:
-        # strategy=None: the URL was screened out by robots.txt before any
-        # strategy ran, and "no strategy was attempted" is not a strategy. The
-        # neighbouring failure envelopes pass None for the same reason; a label
-        # here would claim an HTTP attempt that never happened.
-        return _skipped_engine_result(
-            original_url=job.original_url,
-            normalized_url=job.normalized_url,
-            strategy=None,
-            classification="robots_disallowed",
-            error="robots_txt_disallowed",
-            diagnostics={"robots": {"allowed": False}},
-        )
-
-    async def _sitemap_seed_urls() -> list[NormalizedUrl]:
-        # Fetch each seed origin's /sitemap.xml concurrently: slow/unreachable
-        # origins must not serialize the others' seeding. Seeds are hostile
-        # input: normalize every <loc> and apply the scope filter before it can
-        # reach the frontier (adversarial review M-5).
-        async def seeds_for(job: CrawlTask) -> list[NormalizedUrl]:
-            parsed = urlparse(job.normalized_url)
-            origin = f"{parsed.scheme}://{parsed.netloc}"
-            sitemap_url = urljoin(origin, "/sitemap.xml")
-            # Recursive: follows sitemap indexes down to page URLs.
-            found = await fetch_sitemap_urls(
-                fetcher,
-                sitemap_url,
-                policy["limits"]["timeout_seconds"],
-                host_policy=host_policy,
-            )
-            candidates = normalize_sitemap_candidates(
-                ((urljoin(sitemap_url, loc), lastmod) for loc, lastmod in found),
-                scope_pattern=scope_pattern,
-                host_policy=host_policy,
-            )
-            # #3: skip URLs whose content we already cache and that the
-            # sitemap says have not changed since we cached them. Each check
-            # reads+parses the envelope from disk, so the whole batch runs off
-            # the event loop in one worker thread (perf tier-2 T7).
-            if candidates:
-                stale = await asyncio.to_thread(_stale_seeds, candidates, content_cache, policy)
-            else:
-                stale = set()
-            return [url for url, _lastmod in candidates if url not in stale]
-
-        per_job = await asyncio.gather(*[seeds_for(job) for job in jobs])
-        return [seed for seeds in per_job for seed in seeds]
-
-    # --- crawl orchestration ---
-    limits = policy["limits"]
-    max_depth = int(limits.get("max_depth") or 0)
-    # F4: 0 is no longer "unlimited"; the policy always emits a bounded
-    # value (DEFAULT_MAX_PAGES when unset), but guard here too so a 0 never
-    # loops forever.
-    max_pages = int(limits.get("max_pages") or 0)
-    respect_robots = bool(limits.get("respect_robots"))
-    include_html = policy_wants_html(policy)
-    discovery = policy.get("discovery") or {}
-    scope_regex = policy.get("scope_regex")
-    # Compile the user-supplied scope regex ONCE with the safe guard so the
-    # recursive loop never applies a raw re.search (ReDoS) to every link.
-    scope_pattern = _compile_scope_regex_safe(scope_regex)
-    recursive = max_depth > 0
-    # Document bodies (PDFs etc.) yield no further HTML links: unless the
-    # caller explicitly wants file contents, expansion records their URLs but
-    # never downloads them.
-    want_document_bodies = policy.get("extraction", DEFAULT_EXTRACTION) == EXTRACTION_DOCUMENT
-
-    async def _worker(job: CrawlTask) -> EngineCrawlResult:
-        _, result = await run_job(job)
-        return result
-
-    # #2-stream: serialize each page result to disk as its batch completes so
-    # peak memory scales with batch size, not total pages. RAM never holds the
-    # full result set; the response is reassembled from the spill at the end.
-    spill = _ResultSpill(spill_path)
-
-    if not recursive:
-        allowed_jobs: list[CrawlTask] = []
-        if respect_robots:
-            # Screen the whole batch concurrently (perf throughput #1): same
-            # _robots_allows_target/_robots_crawl_delay_for closures (same
-            # robots_cache chokepoint + SSRF semantics), only awaited via
-            # asyncio.gather instead of one-by-one.
-            decisions = await gather_robots_decisions(
-                [job.normalized_url for job in jobs],
-                _robots_allows_target,
-                _robots_crawl_delay_for,
-            )
-        else:
-            decisions = [(True, None)] * len(jobs)
-        for job, (allowed, crawl_delay) in zip(jobs, decisions, strict=True):
-            if respect_robots and not allowed:
-                await _spill_write(spill, job.index, _robots_disallowed_result(job))
-                continue
-            # Honor a host's robots Crawl-delay as a per-domain minimum
-            # inter-request delay (adversarial perf #2.6). Applied on top of
-            # the global/adaptive pacing inside the scheduler.
-            if respect_robots and crawl_delay and crawl_delay > 0:
-                scheduler.set_domain_min_delay(job.domain, crawl_delay)
-            allowed_jobs.append(job)
-
-        # #3.1: stream each completed result to disk immediately so peak RAM tracks
-        # the in-flight set, not the whole batch. Heavy payloads are stripped
-        # before spilling when the caller did not request them (#1).
-        async def _spill_one(index: int, result: EngineCrawlResult) -> None:
-            if not include_html:
-                result = replace(result, html=None, text=None)
-            await _spill_write(spill, index, result)
-
-        if allowed_jobs:
-            await scheduler.run(
-                allowed_jobs,
-                _worker,
-                on_result=_spill_one,
-                failed_result=lambda job, exc: _engine_result_from_exception(
-                    error=exc,
-                    original_url=job.original_url,
-                    normalized_url=job.normalized_url,
-                    strategy=None,
-                ),
-            )
-    else:
-        # Two-tier weighted admission: size HTTP concurrency to the live RAM/CPU
-        # headroom (RAM-derived from the cgroup limit and browser-pool reserve)
-        # so the cheap HTTP path scales wide while the browser tier stays
-        # RAM-budgeted. Replaces the old stop-the-world pause.
-        _admission = WeightedAdmission(
-            _resource_gate,
-            _build_admission_policy(
-                read_memory_stats().total_bytes or 0,
-                pool_size=derive_browser_pool_size(),
-                max_concurrent_pages=active_settings.max_concurrent_pages,
-                doc_workers=doc_worker_count(),
-            ),
-        )
-        await run_recursive_crawl(
-            jobs=jobs,
-            scheduler=scheduler,
-            worker=_worker,
-            robots_allows=_robots_allows_target,
-            robots_crawl_delay=_robots_crawl_delay_for,
-            robots_disallowed=_robots_disallowed_result,
-            sitemap_seeds=_sitemap_seed_urls,
-            spill=spill,
-            shutdown_event=shutdown_event,
-            max_depth=max_depth,
-            max_pages=max_pages,
-            respect_robots=respect_robots,
-            include_html=include_html,
-            want_document_bodies=want_document_bodies,
-            scope_pattern=scope_pattern,
-            global_concurrency=active_settings.global_concurrency,
-            seed_sitemaps=bool(discovery.get("sitemaps")),
-            resource_gate=_resource_gate,
-            admission=_admission,
-            host_policy=host_policy,
-        )
-    response = {
-        "request_id": new_request_id(),
-        "submitted_count": len(urls),
-        # Report the service's own schema version: echoing the caller-supplied
-        # value would let responses claim a contract the service never ran.
-        "policy_schema_version": POLICY_SCHEMA_VERSION,
-        # #2-stream: reassembled from the on-disk spill in submission order.
-        # The read-back is a blocking file scan plus a json.loads per line, so
-        # it runs in a worker thread; the in-RAM materialization is inherent to
-        # the response contract (see load_ordered) and is paid by the caller,
-        # not by the event loop.
-        "results": await asyncio.to_thread(spill.load_ordered),
-    }
-    if webhook_url is not None:
-        response["webhook_url"] = webhook_url
-    spill.close()
-    return response
+        _reset_cookie_namespace(_cookie_token)

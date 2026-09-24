@@ -361,7 +361,7 @@ class TestStatusAgreesWithClassification:
 
     def test_robots_disallowed_builder_status_matches_the_table(self):
         from app.constants import status_for_classification
-        from app.crawl.engine import _skipped_engine_result
+        from app.crawl.result_helpers import _skipped_engine_result
 
         result = _skipped_engine_result(
             original_url="http://example.com/",

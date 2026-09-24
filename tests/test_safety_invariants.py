@@ -73,6 +73,7 @@ __all__ = [
 #   browser_result.py   browser capture, extraction, discovery, and result phases
 #   strategy_chain.py   one-target strategy escalation and cookie retry phases
 #   recursive_admission.py  resource, tier, dedupe, and robots admission for one batch
+#   request_pipeline.py  the execution phases behind engine.crawl_request's single door
 #
 # Seven more moved in the pyright-enablement commit, and again not for one reason:
 #
@@ -126,13 +127,13 @@ _APP_FILE_LINE_BUDGETS = {
     "app/classify.py": 344,
     "app/constants.py": 547,
     "app/crawl/__init__.py": 1,
-    "app/crawl/admission.py": 543,
+    "app/crawl/admission.py": 539,
     "app/crawl/cache.py": 118,
     "app/crawl/content_cache.py": 518,
     "app/crawl/credentials.py": 88,
     "app/crawl/decompression.py": 197,
     "app/crawl/document_text.py": 180,
-    "app/crawl/engine.py": 1166,
+    "app/crawl/engine.py": 429,
     "app/crawl/extraction.py": 1163,
     "app/crawl/fetch_helpers.py": 264,
     "app/crawl/ids.py": 23,
@@ -147,6 +148,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/runner.py": 189,
     "app/crawl/payload_helpers.py": 204,
     "app/crawl/recursive.py": 335,
+    "app/crawl/request_pipeline.py": 374,
     "app/crawl/recursive_admission.py": 212,
     "app/crawl/render_options.py": 93,
     "app/crawl/result_helpers.py": 534,
@@ -193,7 +195,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/models.py": 433,
     "app/output_formats.py": 140,
     "app/resource_pressure.py": 633,
-    "app/safe_regex.py": 74,
+    "app/safe_regex.py": 81,
     "app/safe_url.py": 102,
     "app/scheduler.py": 438,
     "app/search/__init__.py": 19,

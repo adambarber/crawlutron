@@ -412,11 +412,8 @@ class TestEngineScopeEdges:
     """Cover remaining branches in engine.py"""
 
     def test_crawl_chain_robots_disallowed(self):
-        # _robots_disallowed_result is nested inside crawl_request; exercise it
-        # through _skipped_engine_result, the primitive the production path uses
-        # (a disallow is a deliberate non-attempt, never a failure).
         from app.constants import status_for_classification
-        from app.crawl.engine import _skipped_engine_result
+        from app.crawl.result_helpers import _skipped_engine_result
 
         result = _skipped_engine_result(
             original_url="http://example.com/page",
