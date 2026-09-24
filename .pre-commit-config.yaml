@@ -51,7 +51,10 @@ repos:
       # tails, a rejection path restated across crawl_endpoint and map_endpoint,
       # two provider request builders. The HTTP subsystem split then collapsed six
       # of those pairs, taking the baseline to 16 pairs / 141 lines (0.65%) at
-      # 0de8e65, and this threshold moved with it.
+      # 0de8e65, and this threshold moved with it. Wave 0h then removed five more
+      # pairs across the MCP refusal paths, the render admission path and the
+      # migration/schema reporting, taking it to 11 pairs / 99 lines (0.46%) at
+      # 19dcdc7 -- so the threshold moved again in the same commit as the work.
       #
       # The threshold is a RATCHET, and it moves the moment the baseline moves --
       # not at the end of a phase. A review caught it still sitting at the old
@@ -60,32 +63,28 @@ repos:
       # the exact failure a ratchet exists to prevent, so lowering this number is
       # part of CLOSING a de-duplication, not a separate chore to remember.
       #
-      # It is 0.66, and here is the honest reason it is not tighter. The exact
-      # value at 0de8e65 was 141 duplicated lines of 21,716 total =
-      # 0.649290845...%, so 0.65 passed there. It then FAILED at 0.65 moments
-      # later on a tree where an unrelated change had removed 46 lines of
-      # non-duplicated code: 141 of 21,670 is 0.6504%, which is over the
-      # threshold. A percentage ratchet punishes shrinkage -- the denominator
-      # moves when good work happens elsewhere, so deleting correct code can
-      # fail a duplication gate that the duplication itself never caused.
+      # It is 0.46, verified by RUNNING both candidates: 0.46 exits 0 and 0.45
+      # exits 1. Earlier numbers here (0.9, then 1.03, then 0.66) came from
+      # jscpd's ROUNDED summary line or from arithmetic on a rounded value, and
+      # both mistakes had the same effect: a threshold that is not actually
+      # tight, or one stricter than the thing it measures. 0.9 would have failed
+      # a tree at 1.02; 0.66 was one step above the real value and a review
+      # caught it by running the threshold rather than reading it.
       #
-      # That is why this sits one step above the tightest committed value rather
-      # than at it, and why the number is re-derived whenever the total moves.
-      # The alternative is an exact integer gate on duplicated lines. jscpd's
-      # --max-lines is NOT that: it filters out clones longer than N, so a low
-      # value makes jscpd report "analyzed no files" and exit 0, which is a
-      # silent pass rather than a gate. If you want the integer gate it has to
-      # read jscpd's JSON report and compare the count, which is code in the
-      # hook rather than configuration. Until that decision is made, 0.66 is the
-      # tightest value that survives ordinary line-count movement, and the
-      # duplicated LINE count (141) is the number to watch in review.
+      # It stays a PERCENTAGE, and that has a known cost worth restating: the
+      # denominator is the whole tree, so the number moves when good work
+      # happens elsewhere. Deleting 46 lines of non-duplicated code once pushed
+      # 141/21716 (0.6493%) to 141/21670 (0.6504%) and failed a gate the
+      # duplication never caused. At 99 lines the window is roughly 167 lines of
+      # shrinkage downward or 311 of growth upward, so re-derive this number
+      # whenever the total moves materially rather than assuming it held.
       #
-      # Earlier numbers here (0.9, then 1.03, then 0.66) came from jscpd's
-      # ROUNDED summary line or from arithmetic on a rounded value, and both
-      # mistakes had the same effect: a threshold that is not actually tight, or
-      # one stricter than the thing it measures. 0.9 would have failed a tree at
-      # 1.02; 0.66 was set one step above the real value and a review caught it
-      # by RUNNING the threshold rather than reading it.
+      # jscpd's --max-lines is NOT the integer gate it looks like: it filters out
+      # clones longer than N, so a low value makes jscpd report "analyzed no
+      # files" and exit 0 -- a silent pass rather than a gate. An exact integer
+      # gate would read jscpd's JSON report instead, which is code in the hook
+      # rather than configuration. Until that is decided, the duplicated LINE
+      # count is the number to watch in review.
       #
       # The sanctioned pair is documented rather than exempt (Classification and
       # CrawlError share a prefix by design, pinned by
@@ -103,7 +102,7 @@ repos:
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.66 --fail-on-empty app
+          jscpd -f python --min-lines 5 --min-tokens 30 --threshold 0.46 --fail-on-empty app
         language: system
         files: ^(docker/browser-crawler/)?app/.*\.py$
         pass_filenames: false
