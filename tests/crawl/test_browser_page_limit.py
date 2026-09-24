@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.browser
-
 """Throughput regression test: concurrent browser renders are capped.
 
 Each render opens a browser tab; without a cap a burst of N requests opens N

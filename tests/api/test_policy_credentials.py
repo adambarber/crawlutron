@@ -84,7 +84,7 @@ class TestApplyCredentials:
             0,
             policy=HostPolicy.unrestricted(),
         )
-        assert result is not None
+        assert result == ("https://other.test/a", {})
         _, forwarded = result
         assert "Authorization" not in forwarded
 

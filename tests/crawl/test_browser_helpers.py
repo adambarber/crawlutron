@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.browser
-
 """Real tests for browser.py logic (no browser; inject failing factories)."""
 
 

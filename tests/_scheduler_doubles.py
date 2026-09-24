@@ -1,7 +1,7 @@
 class FakeScheduler:
-    def __init__(self):
+    def __init__(self, pins=None):
         self.runs = 0
-        self.pins: dict[str, str] = {}
+        self.pins: dict[str, str] = dict(pins or {})
 
     def get_pinned_strategy(self, domain: str):
         return self.pins.get(domain)

@@ -1,9 +1,6 @@
-import pytest
-
-pytestmark = pytest.mark.browser
-
 import urllib.request
 
+import pytest
 from _browser_doubles import BrowserFakePage, FakeRequest, FakeRoute, build_pinned_renderer, pinned_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
@@ -27,7 +24,9 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
     # F2: the unprotected urllib urlopen must not be pointed at loopback.
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf")
+        doc_mod._default_document_text_extractor(
+            "http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY
+        )
 
 
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
@@ -52,7 +51,7 @@ async def test_document_extractor_invokes_ssrf_check(monkeypatch):
 
     # pdfplumber will fail to parse the fake bytes -> returns ""; we only care
     # that the SSRF gate was invoked with the requested URL.
-    doc_mod._default_document_text_extractor("http://example.com/x.pdf")
+    doc_mod._default_document_text_extractor("http://example.com/x.pdf", UNRESTRICTED_HOST_POLICY)
     assert seen.get("url") == "http://example.com/x.pdf"
 
 
@@ -65,9 +64,11 @@ async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
     monkeypatch.setattr(
         browser_mod,
         "_build_pinned_request",
-        lambda url, headers: ("http://1.2.3.4:80/path", {"Host": "example.com"}),
+        lambda url, headers, *, policy: ("http://1.2.3.4:80/path", {"Host": "example.com"}),
     )
-    pinned_url, headers = _resolve_browser_target("http://example.com/path")
+    pinned_url, headers = _resolve_browser_target(
+        "http://example.com/path", policy=UNRESTRICTED_HOST_POLICY
+    )
     assert pinned_url == "http://1.2.3.4:80/path"
     assert headers == {"Host": "example.com"}
 
@@ -75,9 +76,9 @@ async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
 async def test_assert_safe_final_url_blocks_internal(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        _assert_safe_final_url("http://127.0.0.1:9/")
+        _assert_safe_final_url("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY)
     # A public IP literal is allowed.
-    _assert_safe_final_url("http://1.2.3.4/")
+    _assert_safe_final_url("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY)
 
 
 # --------------------------------------------------------------------------
@@ -108,7 +109,7 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
     monkeypatch.setattr(
         browser_mod,
         "_build_pinned_request",
-        lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
+        lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
     )
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
@@ -126,9 +127,11 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 
 async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
-    assert _is_ssrf_blocked("http://127.0.0.1:9/") is True
-    assert _is_ssrf_blocked("http://169.254.169.254/latest/") is True
-    assert _is_ssrf_blocked("http://1.2.3.4/") is False
+    assert _is_ssrf_blocked("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY) is True
+    assert _is_ssrf_blocked(
+        "http://169.254.169.254/latest/", policy=UNRESTRICTED_HOST_POLICY
+    ) is True
+    assert _is_ssrf_blocked("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY) is False
 
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
@@ -150,7 +153,7 @@ async def test_render_registers_ssrf_route_guard(monkeypatch):
     monkeypatch.setattr(
         browser_mod,
         "_build_pinned_request",
-        lambda url, headers: ("http://1.2.3.4:80/", {"Host": "example.com"}),
+        lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
     )
     await renderer._render_with_browser(
             "http://example.com/",

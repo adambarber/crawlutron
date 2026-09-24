@@ -1,5 +1,7 @@
 """Tests for async single-shot crawl jobs (Option 3 / Item 3)."""
 
+import json
+
 import pytest
 from _assertions import poll_until
 from _fetcher_factories import make_crawl_payload
@@ -128,7 +130,7 @@ class TestAsyncCrawlApi:
             message="Webhook not delivered in time",
         )
 
-        delivered = delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
+        delivered = json.loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["request_id"] == request_id
         assert delivered["success"] is True
         assert len(delivered["results"]) == 1
@@ -263,7 +265,7 @@ class TestAsyncCrawlApi:
             message="Webhook not delivered in time",
         )
 
-        delivered = __import__("json").loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
+        delivered = json.loads(WEBHOOK_RECEIVED[0].decode("utf-8"))
         assert delivered["success"] is True
 
     async def test_v1_crawl_async_mode_invalid_webhook_rejected(self):

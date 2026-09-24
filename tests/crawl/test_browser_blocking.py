@@ -15,7 +15,7 @@ from app.api_models import CrawlPolicy
 from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
 
 
-def slow_build_pinned_request(url, headers):
+def slow_build_pinned_request(url, headers, *, policy):
     time.sleep(0.05)  # Blocking call - would block event loop if run directly
     return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
@@ -35,7 +35,6 @@ async def _concurrent_route_elapsed(handler):
     return max(end_times) - min(start_times)
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread to avoid
     blocking the event loop with synchronous DNS lookups (Fix 2 + F7/F8 pinning).
@@ -45,7 +44,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     # Track which thread the check runs on
     check_thread_id = None
 
-    def blocking_build_pinned_request(url, headers):
+    def blocking_build_pinned_request(url, headers, *, policy):
         nonlocal check_thread_id
         import threading
 
@@ -72,7 +71,6 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
     assert check_thread_id != threading.main_thread().ident
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch, real_sleeps):
     """Multiple concurrent route handler calls should not block each other.
 
@@ -90,14 +88,13 @@ async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monk
 # ============================================================
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     """Safe subresource requests should be pinned to validated IP and continued
     with the pinned URL and original Host header."""
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     # Mock _build_pinned_request (sync - runs in thread pool via asyncio.to_thread)
-    def mock_build_pinned_request(url, headers):
+    def mock_build_pinned_request(url, headers, *, policy):
         # Simulate DNS resolution + pinning
         return ("http://1.2.3.4:80/path", {"Host": "example.com"})
 
@@ -112,13 +109,12 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     assert route.continued_headers == {"Host": "example.com"}
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     # Mock _build_pinned_request (sync) to raise ValueError for unsafe target
-    def mock_build_pinned_request(url, headers):
+    def mock_build_pinned_request(url, headers, *, policy):
         raise ValueError("SSRF protection: hostname resolves to private IP")
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
@@ -130,13 +126,12 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     assert route.decision == "abort"
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread
     to avoid blocking the event loop with synchronous DNS lookups."""
     check_thread_id = None
 
-    def blocking_build_pinned_request(url, headers):
+    def blocking_build_pinned_request(url, headers, *, policy):
         nonlocal check_thread_id
         import threading
 
@@ -160,7 +155,6 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     assert check_thread_id != threading.main_thread().ident
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
     """Multiple concurrent pinning operations should not block each other."""
     monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
@@ -169,12 +163,11 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, rea
     assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):
     """Non-ValueError resolver failures (DNS timeout etc.) must abort, not pass."""
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
-    def boom(url, headers):
+    def boom(url, headers, *, policy):
         raise TimeoutError("dns lookup timed out")
 
     monkeypatch.setattr(browser_mod, "_build_pinned_request", boom)
@@ -184,7 +177,6 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
     assert route.decision == "abort"
 
 
-@pytest.mark.browser
 async def test_ssrf_route_handler_allows_non_network_schemes():
     """data:/blob:/about: requests never touch DNS; they must pass through."""
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
@@ -195,7 +187,6 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
         assert route.decision == "continue", scheme_url
 
 
-@pytest.mark.browser
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
     from _assertions import block_private_targets
@@ -203,7 +194,7 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
     from app.crawl.strategies.browser import _make_ssrf_websocket_handler
 
     block_private_targets(monkeypatch)
-    handler = _make_ssrf_websocket_handler()
+    handler = _make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     class Ws:
         def __init__(self, url):
@@ -226,7 +217,6 @@ def _handler_for(resource_mode=None, *, include_screenshot=False):
     )
 
 
-@pytest.mark.browser
 async def test_analytics_aborted_regardless_of_mode():
     route = FakeRoute()
     handler = _handler_for(None)
@@ -234,7 +224,6 @@ async def test_analytics_aborted_regardless_of_mode():
     assert route.decision == "abort"
 
 
-@pytest.mark.browser
 async def test_pinterest_aborted_with_and_without_www():
     for url in ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"):
         route = FakeRoute()
@@ -242,7 +231,6 @@ async def test_pinterest_aborted_with_and_without_www():
         assert route.decision == "abort", url
 
 
-@pytest.mark.browser
 async def test_cdcgov_aborted_with_and_without_www():
     # H3: cdc.gov is a government CONTENT host, not tracking infrastructure.
     # It was removed from ANALYTICS_HOST_SUFFIXES (data poisoning); the
@@ -254,7 +242,6 @@ async def test_cdcgov_aborted_with_and_without_www():
         assert route.decision == "continue", url
 
 
-@pytest.mark.browser
 async def test_xcom_aborted_regardless_of_mode():
     # x.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
     # including bare-apex and www subdomain forms.
@@ -264,7 +251,6 @@ async def test_xcom_aborted_regardless_of_mode():
         assert route.decision == "abort", url
 
 
-@pytest.mark.browser
 async def test_image_blocked_by_default_unless_screenshot():
     # default (no screenshot requested) -> abort unconditionally (#4)
     route = FakeRoute()
@@ -285,18 +271,16 @@ async def test_image_blocked_by_default_unless_screenshot():
     assert route.decision == "continue"
 
 
-@pytest.mark.browser
 async def test_document_always_continues_with_pinned_url():
     route = FakeRoute()
     with patch.object(
         browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {"Host": "x.test"})
     ):
-        await _handler_for(None)(route, FakeRequest("https://x.test/page", "document"))
+        await _handler_for(None)(route, FakeRequest("http://x.test/page", "document"))
     assert route.decision == "continue"
     assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
 
 
-@pytest.mark.browser
 class _FakeResponse:
     def __init__(self, url, payload):
         self.url = url
@@ -308,7 +292,6 @@ class _FakeResponse:
         return self._payload
 
 
-@pytest.mark.browser
 async def test_response_handler_caps_entries_and_payload_size():
     collected = []
     handler = BrowserRenderer._make_response_handler(collected)

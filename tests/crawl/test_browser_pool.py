@@ -52,6 +52,15 @@ class _StubPool:
         self.closed = True
 
 
+class _ExplodingContextManager:
+    def __init__(self):
+        self.exits = 0
+
+    async def __aexit__(self, *args):
+        self.exits += 1
+        raise RuntimeError("teardown failed")
+
+
 def _clear():
     set_browser_pool(None)
 
@@ -155,16 +164,25 @@ class TestWorkerExtractorErrorDegrades:
         from app.crawl.strategies.browser import BrowserRenderer
 
         renderer = BrowserRenderer()
+        context_manager = _ExplodingContextManager()
+        renderer._browser = object()
+        renderer._browser_cm = context_manager
         await renderer._reset_browser()
-        renderer._browser = None
-        await renderer._reset_browser()
+        assert renderer._browser is None
+        assert renderer._browser_cm is None
+        assert context_manager.exits == 1
 
     async def test_browser_renderer_close_error(self):
         from app.crawl.strategies.browser import BrowserRenderer
 
         renderer = BrowserRenderer()
+        context_manager = _ExplodingContextManager()
+        renderer._browser = object()
+        renderer._browser_cm = context_manager
         await renderer.close()
-        await renderer.close()
+        assert renderer._browser is None
+        assert renderer._browser_cm is None
+        assert context_manager.exits == 1
 
     def test_browser_renderer_pdf_text_extractor_error(self):
         from app.crawl.strategies.browser import BrowserRenderer
@@ -193,11 +211,15 @@ class TestWorkerExtractorErrorDegrades:
 
         renderer = BrowserRenderer()
 
+        calls = []
+
         class MockPage:
             async def evaluate(self, _):
+                calls.append("evaluate")
                 raise Exception("flatten failed")
 
         await renderer._flatten_shadow_dom(MockPage())
+        assert calls == ["evaluate"]
 
     async def test_browser_renderer_extract_with_challenge_wait_timeout(self):
         from app.crawl.strategies.browser import BrowserRenderer

@@ -183,7 +183,6 @@ def _with_clean_cache(fn):
         browser_mod._BROWSER_COOKIES_BY_DOMAIN.update(saved)
 
 
-@pytest.mark.browser
 def test_cookie_cache_capped():
     def run():
         for i in range(600):
@@ -196,7 +195,6 @@ def test_cookie_cache_capped():
     _with_clean_cache(run)
 
 
-@pytest.mark.browser
 def test_lru_keeps_recently_used():
     def run():
         for i in range(_BROWSER_COOKIES_MAX + 50):

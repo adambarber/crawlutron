@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from _fetcher_factories import site_fetcher
 from _policy_factories import UNRESTRICTED_HOST_POLICY
-from _scheduler_doubles import FakeScheduler
+from _scheduler_doubles import FakeScheduler as _Scheduler
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -482,12 +482,6 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
 # ---------------------------------------------------------------------------
 # Pure helper: does the upcoming batch look HTTP-heavy?
 # ---------------------------------------------------------------------------
-class _HSScheduler(FakeScheduler):
-    """Fake scheduler exposing per-domain pinned strategies."""
-
-    def __init__(self, pins=None):
-        super().__init__()
-        self.pins = dict(pins or {})
 
 
 
@@ -498,25 +492,25 @@ def _task(domain):
 
 class TestBatchIsHttpHeavy:
     def test_all_http_pinned(self):
-        sched = _HSScheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
+        sched = _Scheduler({f"site{i}.gov": HTTP_DECLARED_CRAWLER for i in range(4)})
         frontier = [(0, _task(f"site{i}.gov")) for i in range(4)]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is True
 
     def test_majority_http_pinned(self):
         # 2 of 3 pinned HTTP; the 3rd unpinned (not yet proven cheap)
-        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER, "b.gov": HTTP_DECLARED_CRAWLER})
+        sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER, "b.gov": HTTP_DECLARED_CRAWLER})
         frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is True
 
     def test_half_or_less_not_http_heavy(self):
         # 1 of 3 pinned HTTP -> not HTTP-heavy (conservative)
-        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER})
+        sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER})
         frontier = [(0, _task(d)) for d in ["a.gov", "b.gov", "c.gov"]]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is False
 
     def test_browser_pinned_counts_against(self):
         # 2 browser-pinned, 1 HTTP-pinned -> not HTTP-heavy
-        sched = _HSScheduler(
+        sched = _Scheduler(
             {
                 "a.gov": BROWSER_HEADLESS,
                 "b.gov": BROWSER_HEADLESS,
@@ -527,17 +521,17 @@ class TestBatchIsHttpHeavy:
         assert _batch_is_http_heavy(sched, frontier, sample=8) is False
 
     def test_no_pins_is_false(self):
-        sched = _HSScheduler({})  # cold start, nothing proven cheap
+        sched = _Scheduler({})  # cold start, nothing proven cheap
         frontier = [(0, _task(f"site{i}.gov")) for i in range(4)]
         assert _batch_is_http_heavy(sched, frontier, sample=8) is False
 
     def test_empty_frontier_is_false(self):
-        sched = _HSScheduler({})
+        sched = _Scheduler({})
         assert _batch_is_http_heavy(sched, [], sample=8) is False
 
     def test_sample_window_limits_lookahead(self):
         # Beyond the sample window the composition is not considered.
-        sched = _HSScheduler({"a.gov": HTTP_DECLARED_CRAWLER})
+        sched = _Scheduler({"a.gov": HTTP_DECLARED_CRAWLER})
         # first task unpinned, second pinned HTTP; sample=1 looks only at first
         frontier = [(0, _task("z.gov")), (0, _task("a.gov"))]
         assert _batch_is_http_heavy(sched, frontier, sample=1) is False
@@ -635,7 +629,7 @@ async def _run_with_gate(sched, gate, jobs):
 class TestDispatcherStrategyAwareScaling:
     async def test_http_heavy_batch_uses_http_scale(self):
         # Two domains already proven HTTP (pinned) -> dispatcher consults http_scale_factor
-        sched = _HSScheduler(
+        sched = _Scheduler(
             {
                 "a.gov": HTTP_DECLARED_CRAWLER,
                 "b.gov": HTTP_DECLARED_CRAWLER,
@@ -652,7 +646,7 @@ class TestDispatcherStrategyAwareScaling:
 
     async def test_browser_bound_batch_uses_combined_scale(self):
         # Browser-pinned domains -> dispatcher stays on the combined gate
-        sched = _HSScheduler(
+        sched = _Scheduler(
             {
                 "a.gov": BROWSER_HEADLESS,
                 "b.gov": BROWSER_HEADLESS,
@@ -668,7 +662,7 @@ class TestDispatcherStrategyAwareScaling:
     async def test_cold_unpinned_batch_stays_on_combined_scale(self):
         # No pins yet (cold start) -> conservative combined gate (safety):
         # unpinned tasks may escalate to browser, so do not ignore memory.
-        sched = _HSScheduler({})  # cold start
+        sched = _Scheduler({})  # cold start
         jobs = [_task("a.gov"), _task("b.gov")]
         gate = _RecordingGate(batch=1.0, http=1.0)
         await _run_with_gate(sched, gate, jobs)

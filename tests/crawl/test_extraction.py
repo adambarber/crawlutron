@@ -323,7 +323,6 @@ class TestHtmlTreeParsing:
         from app.crawl.extraction import _parse_html_tree
 
         result = _parse_html_tree("{{invalid html")
-        assert result is not None
         assert result.tag == "html"
 
 
@@ -709,7 +708,6 @@ class TestExtractionEdges:
         from app.crawl.extraction import _parse_html_tree
 
         result = _parse_html_tree("<")
-        assert result is not None
         assert result.tag == "html"
 
 
