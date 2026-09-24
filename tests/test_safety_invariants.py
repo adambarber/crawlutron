@@ -67,6 +67,29 @@ __all__ = [
 #   mcp/tools.py        one tool-error envelope for every MCP refusal
 #   main_helpers.py     shared crawl completion metrics and logging
 #   exceptions.py       shared validation error-envelope construction
+#   request_profile.py  the C1b resolved-profile handoff and typed Set-Cookie
+#                       header protocol needed to keep both consumers on one value
+#
+# Seven more moved in the pyright-enablement commit, and again not for one reason:
+#
+#   api_models.py    the shared explanation for six pydantic `default_factory`
+#                    suppressions, plus the per-line ignore comments themselves
+#   classify.py      two `Final[Classification]` constants so a bare string in
+#                    return position stops widening to `str`, and the routing of
+#                    the dict-derived name through `as_classification`
+#   decompression.py  two Protocols naming the incompatible brotli streaming APIs
+#                    that `hasattr` used to describe and the checker could not see
+#   extraction.py    a sentinel class for the selector timeout, so the evaluator
+#                    stops erasing its result type to `object` -- that erasure is
+#                    what made `for tag in selected` unchecked
+#   migrations/runner.py  the reason yoyo's `Migration.id` needs an ignore
+#   browser_pool.py  the reason pyright widens a Literal-annotated property
+#   scheduler.py     three `...` bodies on Protocol properties
+#
+# Every one of those is a type declaration or the note explaining why a checker
+# needs help, not new behaviour. They are counted honestly rather than hidden in
+# a doc file: moving the reasoning out of the source to satisfy a line count
+# would be gaming the metric, and the reasoning is the part a reviewer needs.
 _APP_FILE_LINE_BUDGETS = {
     "app/__init__.py": 1,
     "app/api/async_crawl_runner.py": 199,
@@ -88,22 +111,22 @@ _APP_FILE_LINE_BUDGETS = {
     "app/api/render_router.py": 34,
     "app/api/response_shaping.py": 393,
     "app/api/webhooks.py": 224,
-    "app/api_models.py": 789,
+    "app/api_models.py": 802,
     "app/atomic_write.py": 40,
     "app/bounded_io.py": 45,
     "app/bounded_ttl.py": 116,
     "app/cgroup_sense.py": 59,
-    "app/classify.py": 335,
+    "app/classify.py": 344,
     "app/constants.py": 547,
     "app/crawl/__init__.py": 1,
     "app/crawl/admission.py": 543,
     "app/crawl/cache.py": 118,
     "app/crawl/content_cache.py": 518,
     "app/crawl/credentials.py": 88,
-    "app/crawl/decompression.py": 162,
+    "app/crawl/decompression.py": 187,
     "app/crawl/document_text.py": 180,
     "app/crawl/engine.py": 1166,
-    "app/crawl/extraction.py": 1139,
+    "app/crawl/extraction.py": 1163,
     "app/crawl/fetch_helpers.py": 264,
     "app/crawl/ids.py": 23,
     "app/crawl/job_store.py": 697,
@@ -114,7 +137,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/migrations/__init__.py": 35,
     "app/crawl/migrations/__main__.py": 6,
     "app/crawl/migrations/manifest.py": 216,
-    "app/crawl/migrations/runner.py": 183,
+    "app/crawl/migrations/runner.py": 189,
     "app/crawl/payload_helpers.py": 204,
     "app/crawl/recursive.py": 438,
     "app/crawl/render_options.py": 93,
@@ -128,16 +151,16 @@ _APP_FILE_LINE_BUDGETS = {
     "app/crawl/strategies/__init__.py": 1,
     "app/crawl/strategies/body_decode.py": 114,
     "app/crawl/strategies/browser.py": 1220,
-    "app/crawl/strategies/browser_pool.py": 247,
+    "app/crawl/strategies/browser_pool.py": 255,
     "app/crawl/strategies/content_cache_key.py": 85,
     "app/crawl/strategies/cookie_jar.py": 168,
-    "app/crawl/strategies/document.py": 145,
+    "app/crawl/strategies/document.py": 146,
     "app/crawl/strategies/fetch_policy.py": 245,
     "app/crawl/strategies/fetchers.py": 328,
     "app/crawl/strategies/http.py": 659,
     "app/crawl/strategies/http_client_pool.py": 482,
     "app/crawl/strategies/pinned_transport.py": 256,
-    "app/crawl/strategies/request_profile.py": 206,
+    "app/crawl/strategies/request_profile.py": 218,
     "app/discovery/__init__.py": 1,
     "app/discovery/agent_hints.py": 106,
     "app/discovery/capabilities.py": 131,
@@ -161,7 +184,7 @@ _APP_FILE_LINE_BUDGETS = {
     "app/resource_pressure.py": 633,
     "app/safe_regex.py": 74,
     "app/safe_url.py": 102,
-    "app/scheduler.py": 435,
+    "app/scheduler.py": 438,
     "app/search/__init__.py": 19,
     "app/search/endpoint.py": 65,
     "app/search/providers.py": 420,
