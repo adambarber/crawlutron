@@ -1174,7 +1174,7 @@ def test_robots_scanner_detector_bites():
 _FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py"})
 
 
-def _testkit_builder_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a test file hand-building a model the fetcher factory already fabricates.
 
     HttpFetchResult's field set is the crawl contract; a fixture that spells
@@ -1196,21 +1196,21 @@ def test_tests_do_not_hand_build_http_fetch_results():
     for path, tree in trees_under(TESTS_DIR):
         if path.name in _FAKE_BUILDER_SANCTIONED:
             continue
-        offenders.extend(_testkit_builder_offenders(tree, path))
+        offenders.extend(_fetcher_factory_offenders(tree, path))
     assert not offenders, "Use _fetcher_factories.make_fetch(): " + ", ".join(offenders)
 
 
 def test_fetch_builder_detector_bites():
     bad = ast.parse("def f():\n    return HttpFetchResult(url='u')\n")
-    offenders = _testkit_builder_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
+    offenders = _fetcher_factory_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
     assert len(offenders) == 1, offenders
     good = ast.parse("def f():\n    return make_fetch(url='u')\n")
-    assert not _testkit_builder_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
+    assert not _fetcher_factory_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
 # Poll-loop reimplementation (jscpd test-side drift, sibling to the fake
-# builder finding): _testkit.poll_until is the sanctioned predicate poller.
+# builder finding): _assertions.poll_until is the sanctioned predicate poller.
 # A hand-rolled ``while True`` poller that awaits ``asyncio.wait_for`` without
 # a ``pytest.fail`` termination silently returns False on timeout, diverging
 # from the one that names the failing condition. Flag the shape.
@@ -1240,7 +1240,7 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         )
         if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
             continue
-        # The sanctioned _testkit.poll_until terminates with pytest.fail. A
+        # The sanctioned _assertions.poll_until terminates with pytest.fail. A
         # docstring may *claim* a fail; only a real call node counts.
         if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
             continue

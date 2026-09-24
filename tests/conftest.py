@@ -38,7 +38,7 @@ for candidate in (str(ROOT), str(HERE)):
 #     BROWSER_CRAWLER_TEST_STRICT_SSRF=1 pytest
 #
 # Tests that exercise the SSRF guard itself should opt out via
-# ``_testkit.block_private_targets(monkeypatch)`` or the
+# ``_assertions.block_private_targets(monkeypatch)`` or the
 # ``ssrf_guard_required`` fixture regardless of mode.
 os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
 
@@ -82,7 +82,7 @@ def ssrf_guard_required(monkeypatch):
 
     The suite defaults to private-targets ON so the loopback helper server
     works; tests that intentionally probe the SSRF guard MUST opt back in
-    via ``_testkit.block_private_targets(monkeypatch)`` or
+    via ``_assertions.block_private_targets(monkeypatch)`` or
     ``monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")``.
     Failure to opt out is a silent false-positive: the SSRF code path is
     short-circuited before the actual guard runs.
@@ -106,7 +106,7 @@ def ssrf_guard_required(monkeypatch):
                     f"{name} was called but BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS "
                     f"is still enabled (value={os.environ.get('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS')!r}). "
                     f"This test exercises the SSRF guard and must opt out via "
-                    f"_testkit.block_private_targets(monkeypatch) or "
+                    f"_assertions.block_private_targets(monkeypatch) or "
                     f"monkeypatch.setenv('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS', '0') "
                     f"BEFORE invoking the SSRF helper."
                 )

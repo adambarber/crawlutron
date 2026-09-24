@@ -262,28 +262,9 @@ async def invoke_browser_strategy(
     )
 
 
-def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
-    def worker(job):
-        return CrawlResult(
-            url=job.url,
-            status=status,
-            classification=classification,
-            final_url=job.url,
-            html=html,
-            text=text,
-            attempts=1,
-            elapsed_ms=1,
-            domain="x",
-            metadata=metadata or {},
-        )
-
-    return worker
-
-
 __all__ = [
     "LLM_FORMAT_TEST_HTML",
     "SCOPE_KEEP_DROP_PAGES",
-    "_fake_browser",
     "_spawn_fetch",
     "_temp_cache",
     "build_payload",

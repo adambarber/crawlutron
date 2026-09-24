@@ -1,7 +1,7 @@
 """TestServiceRenderRequest coverage tests (split from tests/test_coverage_gaps.py)."""
 
 import pytest
-from _fetcher_factories import _fake_browser
+from _browser_doubles import _fake_browser
 
 from app.api.render import render_request
 

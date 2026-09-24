@@ -4,7 +4,8 @@ import urllib.error
 
 import pytest
 from _assertions import browser_available
-from _fetcher_factories import _fake_browser, make_fetch
+from _browser_doubles import _fake_browser
+from _fetcher_factories import make_fetch
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER

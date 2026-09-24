@@ -2,7 +2,7 @@ import asyncio
 import pathlib
 from typing import Any
 
-from _result_builders import _canned_result, _link, _scripted_result_map, _small_link_graph_results
+from _result_builders import _canned_result
 
 from app.crawl.job_store import JobStatus, JobStore
 from app.validation import HostPolicy
@@ -217,15 +217,12 @@ __all__ = [
     "_execution_urls",
     "_fake_execute",
     "_fake_execute_scripted",
-    "_link",
     "_make_app",
     "_run_job_to_completed",
     "_run_persisted_job",
     "_run_scripted_job",
     "_run_scripted_persisted_job",
-    "_scripted_result_map",
     "_seed_job",
-    "_small_link_graph_results",
     "_wait_status",
     "_wait_until",
     "make_job_store",

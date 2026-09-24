@@ -125,12 +125,33 @@ class FakeRequest:
         self.resource_type = resource_type
 
 
+def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):
+    from app.models import CrawlResult
+
+    def worker(job):
+        return CrawlResult(
+            url=job.url,
+            status=status,
+            classification=classification,
+            final_url=job.url,
+            html=html,
+            text=text,
+            attempts=1,
+            elapsed_ms=1,
+            domain="x",
+            metadata=metadata or {},
+        )
+
+    return worker
+
+
 __all__ = [
     "BrowserFakeBrowser",
     "BrowserFakePage",
     "FakeRequest",
     "FakeRoute",
     "ROUTE_ARG_UNSET",
+    "_fake_browser",
     "build_pinned_renderer",
     "pinned_renderer",
 ]
