@@ -644,7 +644,7 @@ class TestRunnerLifecycle:
         job = job_store.create("http://example.test/a", {})
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
 
-        recovered = job_runner.recover_orphaned_running_jobs(job_store)
+        recovered = await job_runner.recover_orphaned_running_jobs(job_store)
         assert recovered == 1
         assert job_store.load(job.job_id).status == JobStatus.PENDING
 

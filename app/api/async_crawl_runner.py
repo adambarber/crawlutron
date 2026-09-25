@@ -97,14 +97,14 @@ async def run_async_crawl(
     ``urls`` carries the endpoint's already-gated batch forward (tier-2 T3).
     """
     # Load job and mark RUNNING
-    job = job_store.load(request_id)
+    job = await job_store.aload(request_id)
     if job is None:
         logger.error("async_crawl_job_missing", extra={"request_id": request_id})
         return
     # Claim RUNNING on the control plane (H3: status moves only via CAS;
     # a lost claim means the row was deleted or already transitioned).
-    claimed = await asyncio.to_thread(
-        job_store.set_status, request_id, JobStatus.RUNNING, expected=JobStatus.PENDING
+    claimed = await job_store.aset_status(
+        request_id, JobStatus.RUNNING, expected=JobStatus.PENDING
     )
     if not claimed:
         logger.error("async_crawl_claim_lost", extra={"request_id": request_id})
@@ -149,13 +149,13 @@ async def run_async_crawl(
                 "total_failed": failed,
             }
             await job_store.asave(job)
-            await asyncio.to_thread(
-                job_store.set_status, request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
+            await job_store.aset_status(
+                request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
             )
 
             # Also store in result_store for backward compat (sync path reads from here)
             try:
-                result_store.put(request_id, response_payload)
+                await result_store.aput(request_id, response_payload)
             except Exception:
                 logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
 
@@ -171,13 +171,11 @@ async def run_async_crawl(
 
     except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
-        job = job_store.load(request_id)
+        job = await job_store.aload(request_id)
         if job is not None:
             job.error = str(exc)
             await job_store.asave(job)
-            await asyncio.to_thread(
-                job_store.set_status, request_id, JobStatus.FAILED, expected=JobStatus.RUNNING
-            )
+            await job_store.aset_status(request_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
         if webhook_url:
             try:
                 error_payload = (

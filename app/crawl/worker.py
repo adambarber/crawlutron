@@ -22,7 +22,18 @@ async def _invoke_async_worker(worker: AsyncCrawlWorker, job: CrawlJob) -> Crawl
 
 
 def _invoke_sync_worker(worker: SyncCrawlWorker, job: CrawlJob) -> CrawlResult:
-    return worker(job)
+    result = worker(job)
+    if inspect.isawaitable(result):
+        # A sync worker that returns a coroutine is a WORKER-SHAPE mistake, and
+        # it used to surface ~100 lines away as a strategy error -- a browser
+        # page's ``.html`` on a never-awaited coroutine, reported as a
+        # ``network_error``. Naming it here is the difference between a test
+        # double that can be fixed and a crawler that looks broken.
+        raise TypeError(
+            f"sync worker {worker!r} returned an awaitable; a worker is either a "
+            "coroutine function or a plain function returning a CrawlResult"
+        )
+    return result
 
 
 @overload

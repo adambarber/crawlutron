@@ -1,7 +1,9 @@
 """CrawlerSettings defaults tuned for faster parallel single-domain crawls (#7)."""
 
 import logging
+from unittest.mock import patch
 
+import app.settings as settings_mod
 from app.settings import CrawlerSettings
 from app.validation import parse_bool_value
 
@@ -14,6 +16,59 @@ def test_parallelism_defaults():
     # Adaptive throttling capped so a slow server cannot serialize crawls to
     # a 30s-per-request crawl.
     assert s.adaptive_max_delay == 10.0
+
+
+class _Memory:
+    """The one attribute ``_default_http_max_connections`` reads."""
+
+    def __init__(self, total_bytes: int):
+        self.total_bytes = total_bytes
+
+
+def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
+    """The pool ceiling is RAM-derived, so it must be read when settings are built.
+
+    Both pool fields used to call their derivation as a default value in the
+    dataclass body, which evaluated it ONCE -- at import. The derivation reads
+    the cgroup memory limit, and falls back to 4 GiB when that read raises, so a
+    process whose limit only became readable after the first import (or whose
+    read failed) kept that number for its whole life, with nothing in the
+    config able to explain the pool it was running.
+    """
+    limit = 8 * 1024 * 1024 * 1024
+    with patch.object(settings_mod, "read_memory_stats", lambda: _Memory(limit)):
+        expected = max(
+            100,
+            settings_mod.max_http_concurrency_for(
+                limit, settings_mod.derive_browser_pool_size(limit)
+            ),
+        )
+        built = CrawlerSettings()
+        assert built.http_max_connections == expected
+        assert built.http_max_keepalive == max(20, min(128, expected // 2))
+        # from_mapping used to read these off the class, which a default_factory
+        # field does not have -- so it has to call the same factory.
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+
+            os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", None)
+            os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", None)
+            from_env = CrawlerSettings.from_mapping()
+        assert from_env.http_max_connections == expected
+
+
+def test_a_failed_memory_read_still_yields_the_declared_fallback_every_time():
+    """The 4 GiB fallback is a per-construction decision, not a cached verdict.
+
+    Pinned because a frozen fallback is indistinguishable from a derived one
+    once it is wrong: the only evidence is that a later, readable limit does
+    not change the number.
+    """
+    with patch.object(settings_mod, "read_memory_stats", lambda: _Memory(64 * 1024**3)):
+        derived = CrawlerSettings().http_max_connections
+    with patch.object(settings_mod, "read_memory_stats", side_effect=OSError("no cgroup")):
+        fell_back = CrawlerSettings().http_max_connections
+    assert derived != fell_back, "both paths produced the same pool; the read is not happening"
 
 
 class TestFromMappingHardening:

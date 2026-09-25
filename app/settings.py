@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.constants import (
     DEFAULT_BROWSER_POOL_SIZE,
@@ -83,9 +83,14 @@ class CrawlerSettings:
     adaptive_latency_factor: float = 1.0
     cookie_persistence_enabled: bool = False
     cookie_jar_path: str = "./cache/cookie_jar.json"
-    # HTTP client connection pool tuning
-    http_max_connections: int = _default_http_max_connections()
-    http_max_keepalive: int = _default_http_keepalive()
+    # HTTP client connection pool tuning. ``default_factory``, not a call in the
+    # class body: the derivation READS the memory limit, so a class-body call was
+    # import-time I/O, frozen for the process -- a box whose limit only became
+    # readable after the first import kept that wrong ceiling forever. A
+    # default_factory field also has no class attribute, so from_mapping calls
+    # the same factory instead of reading one off the class.
+    http_max_connections: int = field(default_factory=_default_http_max_connections)
+    http_max_keepalive: int = field(default_factory=_default_http_keepalive)
     http_keepalive_expiry: float = 60.0
     # Browser runtime limits (previously read from raw BROWSER_CRAWLER_*
     # env vars inside browser.py; centralized here so they share the env
@@ -196,10 +201,10 @@ class CrawlerSettings:
             ),
             cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", cls.cookie_jar_path),
             http_max_connections=get_mapping_int(
-                source, "BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", cls.http_max_connections
+                source, "BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", _default_http_max_connections()
             ),
             http_max_keepalive=get_mapping_int(
-                source, "BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", cls.http_max_keepalive
+                source, "BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", _default_http_keepalive()
             ),
             http_keepalive_expiry=get_mapping_float(
                 source, "BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry

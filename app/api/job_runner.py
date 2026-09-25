@@ -101,14 +101,17 @@ def reset_job_runner() -> None:
     reset_execute_crawl()
 
 
-def recover_orphaned_running_jobs(job_store: JobStore) -> int:
-    """Rewind RUNNING rows to PENDING (crash recovery). Returns count."""
+async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
+    """Rewind RUNNING rows to PENDING (crash recovery). Returns count.
+
+    Async: the lifespan calls it with a live loop, and it reads every job row.
+    """
     recovered = 0
-    for summary in job_store.list_jobs():
+    for summary in await job_store.alist_jobs():
         if summary.get("status") == JobStatus.RUNNING.value:
             # Control-plane CAS: rewind RUNNING -> PENDING without rewriting
             # the row's data (H3: save() no longer carries status anyway).
-            if job_store.set_status(
+            if await job_store.aset_status(
                 summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING
             ):
                 recovered += 1
@@ -125,14 +128,14 @@ async def recover_and_start_pending_jobs(
     Whole-site jobs resume from their persisted frontier; returns the number
     of runner tasks started.
     """
-    recover_orphaned_running_jobs(job_store)
+    await recover_orphaned_running_jobs(job_store)
     started = 0
-    for summary in job_store.list_jobs():
+    for summary in await job_store.alist_jobs():
         if summary.get("status") != JobStatus.PENDING.value:
             continue
         if summary.get("kind") not in (None, JobKind.WHOLE_SITE.value):
             continue
-        job = job_store.load(summary["job_id"])
+        job = await job_store.aload(summary["job_id"])
         if job is None:
             continue
         start_job(job.job_id, job_store, settings, shutdown_event)
@@ -244,44 +247,42 @@ async def _run_job(
     shutdown_event: asyncio.Event,
 ) -> None:
     """Whole-site engine loop for one job. Runs until terminal/paused/cancel."""
-    job = job_store.load(job_id)
+    job = await job_store.aload(job_id)
     if job is None:
         return
-    claimed = await asyncio.to_thread(
-        job_store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING
-    )
+    claimed = await job_store.aset_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     if not claimed and job.status is not JobStatus.RUNNING:
         return
-    await asyncio.to_thread(job_store.save, job)
+    await job_store.asave(job)
 
     try:
         context = JobAdmissionContext.create(job.policy, settings)
         if context.max_depth > 0 and context.seed_sitemaps:
             await _seed_job_sitemaps(job, context)
-            await asyncio.to_thread(job_store.save, job)
+            await job_store.asave(job)
 
         while True:
-            job = job_store.load(job_id)
+            job = await job_store.aload(job_id)
             if job is None:
                 return
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
                 return
             if shutdown_event.is_set():
-                await asyncio.to_thread(
-                    job_store.set_status, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
+                await job_store.aset_status(
+                    job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
                 )
                 return
 
             batch = _pop_frontier(job)
             if not batch:
-                await asyncio.to_thread(job_store.save, job)
-                await asyncio.to_thread(
-                    job_store.set_status, job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
+                await job_store.asave(job)
+                await job_store.aset_status(
+                    job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
                 )
                 return
             if not job.in_flight:
                 job.in_flight = list(batch)
-            await asyncio.to_thread(job_store.save, job)
+            await job_store.asave(job)
             await _pace_delayed_batch(context, batch)
 
             result = await _execute_crawl(
@@ -290,7 +291,7 @@ async def _run_job(
                 shutdown_event=shutdown_event,
             )
             items = result.get("results", [])
-            job = job_store.load(job_id)
+            job = await job_store.aload(job_id)
             if job is None:
                 return
 
@@ -380,18 +381,16 @@ async def _run_job(
             job.stats["total_crawled"] = len(job.visited)
             if failed:
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
-            await asyncio.to_thread(job_store.save, job)
+            await job_store.asave(job)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
-        job = job_store.load(job_id)
+        job = await job_store.aload(job_id)
         if job is not None and job.status == JobStatus.RUNNING:
             job.error = str(exc)
-            await asyncio.to_thread(job_store.save, job)
-            await asyncio.to_thread(
-                job_store.set_status, job_id, JobStatus.FAILED, expected=JobStatus.RUNNING
-            )
+            await job_store.asave(job)
+            await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
 
 
 
@@ -420,21 +419,17 @@ def cancel_job_task(job_id: str) -> None:
 
 async def pause_job(job_id: str, job_store: JobStore) -> str:
     """Pause: flip the row; the task exits at the next batch boundary."""
-    ok = await asyncio.to_thread(
-        job_store.set_status, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
-    )
+    ok = await job_store.aset_status(job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
     if ok:
         return "ok"
-    return "missing" if job_store.load(job_id) is None else "conflict"
+    return "missing" if await job_store.aload(job_id) is None else "conflict"
 
 
 async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_event: asyncio.Event) -> str:
     """Resume a paused job by respawning its runner task."""
-    ok = await asyncio.to_thread(
-        job_store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED
-    )
+    ok = await job_store.aset_status(job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
     if not ok:
-        return "missing" if job_store.load(job_id) is None else "conflict"
+        return "missing" if await job_store.aload(job_id) is None else "conflict"
     start_job(job_id, job_store, settings, shutdown_event)
     return "ok"
 
@@ -442,15 +437,14 @@ async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_e
 async def cancel_job(job_id: str, job_store: JobStore) -> str:
     """Cancel: flip the row; the task exits at the next batch boundary (the
     in-flight batch is still recorded — the engine already did the work)."""
-    ok = await asyncio.to_thread(
-        job_store.set_status,
+    ok = await job_store.aset_status(
         job_id,
         JobStatus.CANCELLED,
         expected=frozenset({JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.PENDING}),
     )
     if ok:
         return "ok"
-    return "missing" if job_store.load(job_id) is None else "conflict"
+    return "missing" if await job_store.aload(job_id) is None else "conflict"
 
 
 __all__ = [

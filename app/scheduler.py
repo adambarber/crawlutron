@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import random
 import time
@@ -10,6 +11,8 @@ from typing import Protocol, TypeVar
 
 from .crawl.scheduler_exceptions import _CircuitBreakerOpen
 from .models import ResultStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ScheduledJob(Protocol):
@@ -316,11 +319,22 @@ class DomainScheduler:
         # Both a worker's return and the failure envelopes are ``_Result``: the
         # caller supplies ``failed_result`` so the shape a broken job gets is
         # decided by the pipeline that owns the contract, not assumed here.
+        #
+        # A sink failure is LOGGED and swallowed. It must not propagate: the
+        # caller's sink raising is not evidence the job failed, so letting it out
+        # was answered with a failure envelope for a page that succeeded -- then
+        # delivered through the same broken sink, and discarded by gather's
+        # return_exceptions with no log line. The H1 "job vanished" shape.
         async def deliver(index: int, result: _Result) -> None:
-            if on_result is not None:
-                await on_result(index, result)
-            else:
+            if on_result is None:
                 results[index] = result
+                return
+            try:
+                await on_result(index, result)
+            except Exception:
+                logger.exception(
+                    "on_result_failed index=%s status=%s", index, getattr(result, "status", None)
+                )
 
         async def run_one(job: _Job) -> None:
             # Domain cooldown MUST be awaited *before* acquiring the global
@@ -377,9 +391,8 @@ class DomainScheduler:
                         result = await worker(job)
                         if result.status == "success":
                             self.record_success(job.domain)
-                            # Feed observed latency into the adaptive estimator (#6).
-                            # Render results (CrawlResult) may not carry diagnostics, so
-                            # guard attribute access.
+                            # Feed observed latency into the adaptive estimator
+                            # (#6); render results may carry no diagnostics at all.
                             diag = getattr(result, "diagnostics", None)
                             latency = None
                             if isinstance(diag, dict):
@@ -389,8 +402,6 @@ class DomainScheduler:
                                 self.record_latency(job.domain, latency)
                         elif result.status in ("failed", "network_error"):
                             self.record_failure(job.domain)
-                        # Stream to the caller immediately; do not retain.
-                        await deliver(job.index, result)
                     except Exception as error:
                         self.record_failure(job.domain)
                         # Chokepoint for "a worker raised": build a classified
@@ -403,6 +414,10 @@ class DomainScheduler:
                         # always gets back its own result shape.
                         await deliver(job.index, failed_result(job, error))
                         return
+                    # Delivery sits OUTSIDE the worker's ``try`` (which covers
+                    # the work, and only the work): a raising sink is a delivery
+                    # failure, not a reason to charge the domain's breaker.
+                    await deliver(job.index, result)
 
         # return_exceptions=True: a single job failure must not cancel the
         # other in-flight jobs (HIGH #6). Exceptions are captured here; the

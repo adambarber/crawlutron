@@ -228,6 +228,23 @@ class TestCallWorkerExecutesOnce:
         assert len(calls) == 1
         assert result == "async-result"
 
+    async def test_a_sync_worker_returning_a_coroutine_is_named_at_the_seam(self):
+        """The mistake is reported where it is made, not 100 lines downstream.
+
+        A ``lambda job: render(job.url)`` is a plain function, so it took the
+        sync branch and handed the strategy an un-awaited coroutine. The browser
+        strategy then read ``.html`` off it and reported a ``network_error``,
+        which reads like a site problem and sent the investigation at the page
+        instead of at the double.
+        """
+        from app.crawl.worker import call_worker
+
+        async def render(job):
+            return "rendered"
+
+        with pytest.raises(TypeError, match="returned an awaitable"):
+            await call_worker(lambda job: render(job), "job")
+
 
 class TestShapeAllGuardsPerItem:
     """One malformed item must not kill the whole batch at the endpoint.

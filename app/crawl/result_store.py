@@ -8,6 +8,7 @@ keyed by ``request_id`` with TTL + entry-count retention guardrails.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -74,6 +75,14 @@ class CrawlResultStore:
         if self._ttl_seconds > 0 and stored_at < cutoff:
             return None
         return json.loads(payload)
+
+    async def aput(self, request_id: str, payload: dict) -> None:
+        """Async :meth:`put`: the prune, the payload dumps and both commits off-loop."""
+        await asyncio.to_thread(self.put, request_id, payload)
+
+    async def aget(self, request_id: str) -> dict | None:
+        """Async :meth:`get`: a status-poll read must not park the loop."""
+        return await asyncio.to_thread(self.get, request_id)
 
     def _prune(self, now: float) -> None:
         if self._ttl_seconds <= 0:

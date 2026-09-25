@@ -649,3 +649,82 @@ async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
     assert sleeps.delays == [0, 0], (
         f"a zero-delay scheduler must request only zero-second yields, saw {sleeps.delays}"
     )
+
+
+class TestDeliveryFailuresAreNotWorkerFailures:
+    """``on_result`` is a SINK, and a sink that raises says nothing about the work.
+
+    The callback is where a crawl spills a result to disk. When that spill
+    raised, delivery happened inside the worker's ``try``, so the scheduler
+    answered with ``record_failure`` and a fabricated ``failed_result`` envelope
+    delivered through the same broken sink -- three things wrong at once: a page
+    that succeeded was counted against its domain's circuit breaker (real
+    traffic for that domain then gets skipped), the caller was handed a failure
+    envelope for a page it had already fetched, and ``gather``'s
+    ``return_exceptions=True`` swallowed what was left with no log line at all.
+    """
+
+    async def test_a_raising_sink_does_not_trip_the_circuit_breaker(self, caplog):
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
+        )
+        jobs = [make_job(0, "https://example.com/a")]
+
+        async def exploding_sink(index, result):
+            raise OSError("spill failed: disk full")
+
+        with caplog.at_level("ERROR"):
+            await scheduler.run(jobs, _ok, on_result=exploding_sink, failed_result=_engine_envelope)
+
+        assert scheduler.domain_cooldowns == {}, (
+            "a failed RESULT SPILL was charged to the domain's circuit breaker; the page "
+            f"itself succeeded, so real traffic for that domain is now skipped: "
+            f"{scheduler.domain_cooldowns}"
+        )
+        assert any("on_result" in record.message for record in caplog.records), (
+            "the swallowed delivery failure left no log line, which is what made H1 "
+            f"undiagnosable: {[record.message for record in caplog.records]}"
+        )
+
+    async def test_a_raising_sink_gets_exactly_one_call_per_job(self, caplog):
+        """No retry, and above all no fabricated envelope for a page that worked.
+
+        The old shape delivered a second result for the same job -- the
+        ``failed_result`` envelope -- which a spill-based sink would have
+        written to disk as though the crawl had failed.
+        """
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
+        )
+        jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+        seen: list[tuple[int, str]] = []
+
+        async def exploding_sink(index, result):
+            seen.append((index, result.status))
+            raise OSError("spill failed")
+
+        with caplog.at_level("ERROR"):
+            await scheduler.run(jobs, _ok, on_result=exploding_sink, failed_result=_engine_envelope)
+
+        assert sorted(seen) == [(0, "success"), (1, "success")], (
+            f"the sink must see one real result per job and no fabricated envelope: {seen}"
+        )
+
+    async def test_one_job_sink_failure_does_not_cost_a_healthy_job_its_result(self):
+        """The healthy job's result still reaches a working sink on the next call."""
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
+        )
+        jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+        delivered: list[tuple[int, str]] = []
+
+        async def flaky_sink(index, result):
+            if index == 0:
+                raise OSError("spill failed")
+            delivered.append((index, result.status))
+
+        await scheduler.run(jobs, _ok, on_result=flaky_sink, failed_result=_engine_envelope)
+
+        assert delivered == [(1, "success")], (
+            f"one job's failed spill must not swallow another job's result: {delivered}"
+        )

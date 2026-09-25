@@ -57,7 +57,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | B5 | Caller policy bounds (page count, depth, rps, content length, volume) are **rejected** when out of range, never silently clamped into a different contract | `app/api_models.py` + `app/crawl/payload_helpers.py:_payload_policy` | runtime construction | validation tests for each field | `GATED` |
 | B6 | Sitemap `lastmod` cannot place a seed in the future beyond the configured skew — future-dated freshness always re-fetches | `app/crawl/engine.py:_parse_lastmod` | runtime construction | sitemap tests | `GATED` |
 | B7 | Browser screenshot output is bounded in both count and bytes | `app/crawl/strategies/browser.py` | — | none | `UNGATED` |
-| B8 | A browser action chain has a total budget and a rejected action count, not only a per-action ceiling | `app/crawl/strategies/browser.py` | — | none | `UNGATED` |
+| B8 | A browser action chain has a total budget and a rejected action count, not only a per-action ceiling | `app/crawl/strategies/browser.py:_run_action_chain` | runtime construction | `test_the_action_chain_is_always_invoked_with_a_budget` (AST, tree-wide) + paired bites; budget-exhaustion behavior test | `PARTIAL` — the total budget is gated now and its exhaustion is logged with the URL; the rejected-action COUNT is still not produced (each swallowed failure is logged on its own, so 50 failed actions leave 50 lines and no tally) |
 | B9 | Profile knobs have ceilings, not floors only | browser profile parsers | — | floor-only today | `PARTIAL` |
 | B10 | A durable job's results do not grow one SQLite row without bound | `app/crawl/job_store.py` | — | none (known unsolved; the growth route is a separate results store) | `UNGATED` |
 
@@ -82,19 +82,22 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | D2 | Schema changes only through the migration ledger, and a migrated database matches the declared schema | `app/crawl/migrations/` | AST route + runtime | DDL confinement detector + fresh/legacy/drift tests | `PARTIAL` — the drift helper has NO production caller: `migrate_store` returns early when nothing is pending and never verifies, so an out-of-band change is accepted at startup and fails later at query time. The tests proved the helper, not the seam |
 | D3 | SQLite durability configuration is set in one place | `app/crawl/sqlite_store.py:connect_store` | config | `test_store_pragma_chokepoint` | `GATED` |
 | D4 | Persisted collections hold canonical identity, and a legacy row is normalized once at the storage boundary | `app/crawl/job_store.py:from_json` | runtime construction | store tests incl. legacy row shape | `GATED` |
-| D5 | Job persistence does not block the event loop | `app/api/job_runner.py` (store `asave`) | runtime construction | off-loop save tests | `GATED` |
+| D5 | Job and result persistence never blocks the event loop: the store owns the offload, so no async frame can reach a blocking store call at all | `app/crawl/job_store.py`, `app/crawl/result_store.py` (every public method has an `a`-twin) | runtime construction | `test_no_sync_store_method_is_called_from_an_async_frame` (AST, tree-wide) + paired bites; four loop-guard tests that drive real store operations on a loop and fail if one runs on it | `GATED` — was per-call-site `to_thread` wrappers, which is the shape the next method added without one; the gate is now the seam |
 | D6 | A job's frontier is never mutated outside the admission chokepoint | `app/crawl/admission.py` | AST route | frontier-growth detector | `GATED` |
 | D7 | Recursive admission has exactly one owner for identity, filters, robots, delay and the cap predicate | `app/crawl/admission.py` | runtime construction | payload-confinement + filter re-inline detectors | `GATED` — new this cycle |
+| D8 | A result-callback failure is never reported as a work failure, and a raising sink is always logged | `app/scheduler.py:DomainScheduler.run` (the `deliver` closure) | runtime construction | delivery-is-outside-the-worker-try drift test (AST, tree-wide) + paired bites; a behavior test driving a raising sink | `GATED` — new this cycle |
 
 ## E. Resources, concurrency and the event loop
 
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
-| E1 | Blocking I/O never runs on the event loop | call sites | AST route + spy | await-inside-lock detector; `asyncio.to_thread` spy in tests | `PARTIAL` — the spy records but does not enforce; coverage is per-call-site |
+| E1 | Blocking I/O never runs on the event loop | the store family owns it (D5); other callers | AST route + spy | await-inside-lock detector; `test_no_sync_store_method_is_called_from_an_async_frame` | `PARTIAL` — the two SQLite stores are now gated at the seam rather than per call site, but the property is wider than that family and the remaining blocking calls (decompress, file writes) are not swept tree-wide |
 | E2 | No lock is held across blocking disk I/O | `app/crawl/content_cache.py` | runtime construction | AST detector + race tests | `GATED` |
 | E3 | Loop-bound primitives are rebound when the loop changes | `app/crawl/strategies/http_client_pool.py:_LoopBoundPooledClient`, async runner semaphore | runtime construction | loop-bound detector | `GATED` |
 | E4 | Remote politeness directives cannot install an unbounded sleep | `app/scheduler.py` | runtime construction | clamp tests | `GATED` |
 | E5 | Work submitted to a closing loop cannot raise into a completed task | `app/crawl/strategies/http_client_pool.py` close helpers | runtime construction | deterministic close-race tests | `GATED` |
+| E6 | A worker handed to the pipeline is a coroutine function or a plain function returning a result — never a plain function returning a coroutine | `app/crawl/worker.py:call_worker` | runtime construction | the seam raises `TypeError` naming the worker; `test_a_sync_worker_returning_a_coroutine_is_named_at_the_seam` | `GATED` — new this cycle; before it, the mistake surfaced ~100 lines downstream as a browser `network_error` |
+| E7 | A pooled browser slot is held for one deadline, not one per action | `app/crawl/strategies/browser.py:_run_action_chain` | runtime construction | `test_the_action_chain_is_always_invoked_with_a_budget` (AST, tree-wide) + paired bites; budget-exhaustion behavior test | `GATED` — new this cycle; the deadline is an optional argument so a test can drive the raw executor, and the sweep is what keeps production honest |
 
 ## F. Configuration ownership
 
@@ -105,6 +108,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 | F3 | Two documented knobs cannot silently collapse onto one settings field | `app/settings.py:ENVIRONMENT_FIELD_ALIASES` | runtime construction | alias integrity check | `PARTIAL` — duplicate targets were accepted (being fixed) |
 | F4 | Numeric settings are read through never-raise readers that warn and fall back; there is one int face and one float face | `app/validation.py:_mapping_number` | runtime construction | differential tests over bounds, garbage, non-finite | `GATED` |
 | F5 | The process bind port is owned by the process invocation, not duplicated into application settings | Dockerfile / compose | config | documented-knob detector (field removed) | `GATED` |
+| F6 | A settings default that DEPENDS on the machine is derived when the settings are constructed, never evaluated once at import | `app/settings.py` (the two httpx pool fields) | runtime construction | `test_the_pool_default_is_derived_per_construction_not_frozen_at_import` — patches the memory read and asserts a freshly built instance follows it | `GATED` — new this cycle; a call in the class body froze the cgroup read (and its 4 GiB failure fallback) for the process lifetime, and nothing in the config could explain the resulting number |
 
 ## G. Process level
 
@@ -183,12 +187,15 @@ Ordered by what a violation costs. This is the budget the remaining waves spend.
 4. **C6 wire schemas are model-derived** — MCP input schemas are hand-written
    and have already drifted from the models the handlers use. *Gate: direct
    schema equality against the models.*
-5. **B7 / B8 browser output bounds** — unbounded screenshots and an unbounded
-   action chain. Resource exhaustion. *Gate: behavioral caps with a count and
-   byte ceiling.*
-6. **E1 blocking I/O on the loop** — enforcement is a spy, not a gate, and
-   coverage is per call site. *Gate: an AST rule for known blocking callees
-   outside an offload helper.*
+5. **B7 / B8 browser output bounds** — B8's total budget is now gated (this
+   cycle: one deadline per chain, tree-wide enforced); what remains is the
+   rejected-action COUNT and B7's unbounded screenshots. Resource exhaustion.
+   *Gate: behavioral caps with a count and byte ceiling.*
+6. **E1 blocking I/O on the loop** — the two SQLite stores now own their
+   offload and a tree-wide AST rule fails on any async frame reaching a
+   blocking store call (this cycle), but the property is wider than that
+   family: decompress and file writes are still unswept. *Gate: the same AST
+   rule widened to the remaining known blocking callees.*
 7. **G1 telemetry** — currently a document. *Gate: a dependency-allowlist check
    at install time.*
 8. **W1 / W2 property fingerprints** — every registered property shares the

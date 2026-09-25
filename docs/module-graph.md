@@ -111,6 +111,7 @@ graph LR
     crawl_content_cache --> atomic_write
     crawl_content_cache --> constants
     crawl_engine --> constants
+    crawl_engine --> crawl_admission
     crawl_engine --> crawl_cache
     crawl_engine --> crawl_content_cache
     crawl_engine --> crawl_fetch_helpers
@@ -122,7 +123,6 @@ graph LR
     crawl_engine --> crawl_strategies_request_profile
     crawl_engine --> models
     crawl_engine --> resource_pressure
-    crawl_engine --> safe_regex
     crawl_engine --> settings
     crawl_engine --> validation
     crawl_extraction --> crawl_llm_format
@@ -142,7 +142,10 @@ graph LR
     crawl_migrations --> crawl_migrations_manifest
     crawl_migrations --> crawl_migrations_runner
     crawl_migrations_0001_crawl_jobs_initial --> crawl_migrations_manifest
+    crawl_migrations_0001_crawl_jobs_initial --> crawl_migrations_runner
     crawl_migrations_0001_results_initial --> crawl_migrations_manifest
+    crawl_migrations_0001_results_initial --> crawl_migrations_runner
+    crawl_migrations_0002_crawl_jobs_drop_canonicalized --> crawl_migrations_runner
     crawl_migrations_0002_crawl_jobs_drop_canonicalized --> crawl_sqlite_store
     crawl_migrations___main__ --> crawl_migrations_runner
     crawl_migrations_manifest --> crawl_sqlite_store

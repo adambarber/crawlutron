@@ -199,7 +199,7 @@ async def _assert_refused(awaitable, effects: dict[str, list]) -> None:
     assert all(not values for values in effects.values())
 
 
-async def _probe_crawl_endpoint(monkeypatch):
+async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     import asyncio
 
     from fastapi import BackgroundTasks
@@ -223,7 +223,7 @@ async def _probe_crawl_endpoint(monkeypatch):
     )
 
 
-async def _probe_crawl_executor(monkeypatch):
+async def _probe_crawl_executor(monkeypatch, tmp_path):
     from app.api import crawl_executor
 
     effects = {"fetched": []}
@@ -244,7 +244,7 @@ async def _probe_crawl_executor(monkeypatch):
     )
 
 
-async def _probe_jobs_router(monkeypatch):
+async def _probe_jobs_router(monkeypatch, tmp_path):
     from app.api import jobs_router
     from app.api_models import JobCreateRequest
 
@@ -269,7 +269,7 @@ async def _probe_jobs_router(monkeypatch):
     )
 
 
-async def _probe_map_endpoint(monkeypatch):
+async def _probe_map_endpoint(monkeypatch, tmp_path):
     from app.api import map_endpoint
     from app.api_models import MapRequest
 
@@ -291,7 +291,7 @@ async def _probe_map_endpoint(monkeypatch):
     )
 
 
-async def _probe_render(monkeypatch):
+async def _probe_render(monkeypatch, tmp_path):
     from app.api.render import render_request
 
     effects = {"worker": []}
@@ -306,30 +306,25 @@ async def _probe_render(monkeypatch):
     )
 
 
-async def _probe_async_runner(monkeypatch):
+async def _probe_async_runner(monkeypatch, tmp_path):
     import asyncio
 
     from app.api import async_crawl_runner
 
     effects = {"webhook": []}
-    job = type("Job", (), {"job_id": "job", "results": [], "stats": {}, "error": None})()
+    # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted
+    # the moment a call site moved to the async twin and reported a contract
+    # change as an AttributeError, which is noise, not a finding. A real store
+    # on a tmp path also proves the refusal happens with nothing persisted.
+    from _job_harnesses import make_job_store
 
-    class Store:
-        def load(self, request_id):
-            return job
+    from app.crawl.result_store import CrawlResultStore
 
-        def set_status(self, *args, **kwargs):
-            return True
-
-        async def asave(self, value):
-            return None
+    job_store = make_job_store(str(tmp_path))
+    results_store = CrawlResultStore(tmp_path / "results.db")
 
     async def denied_execute(*args, **kwargs):
         return {"results": [], "request_id": "job", "submitted_count": 0, "policy_schema_version": ""}
-
-    class Results:
-        def put(self, *args):
-            return None
 
     monkeypatch.setattr(async_crawl_runner, "execute_crawl", denied_execute)
     await _assert_refused(
@@ -338,8 +333,8 @@ async def _probe_async_runner(monkeypatch):
             {"url": _BLOCKED_URL},
             _BLOCKED_URL,
             _denied_settings(),
-            Store(),
-            Results(),
+            job_store,
+            results_store,
             asyncio.Event(),
             urls=[_BLOCKED_URL],
         ),
@@ -347,7 +342,7 @@ async def _probe_async_runner(monkeypatch):
     )
 
 
-async def _probe_response_shaping(monkeypatch):
+async def _probe_response_shaping(monkeypatch, tmp_path):
     from app.api.response_shaping import frontier_link_url
 
     async def invoke():
@@ -356,7 +351,7 @@ async def _probe_response_shaping(monkeypatch):
     await _assert_refused(invoke(), {"wire": []})
 
 
-async def _probe_webhook(monkeypatch):
+async def _probe_webhook(monkeypatch, tmp_path):
     from app.api import webhooks
 
     effects = {"wire": []}
@@ -371,7 +366,7 @@ async def _probe_webhook(monkeypatch):
     )
 
 
-async def _probe_webhook_delivery(monkeypatch):
+async def _probe_webhook_delivery(monkeypatch, tmp_path):
     import httpx
 
     from app.api import webhooks
@@ -399,21 +394,21 @@ def _blocked_http(*args, **kwargs):
     raise HTTPException(status_code=422, detail="blocked by host policy")
 
 
-async def _probe_mcp_crawl(monkeypatch):
+async def _probe_mcp_crawl(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
     await _assert_refused(tools._handle_crawl({"url": _BLOCKED_URL}, _denied_settings(), None), {})
 
 
-async def _probe_mcp_map(monkeypatch):
+async def _probe_mcp_map(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "map_site", _blocked_http)
     await _assert_refused(tools._handle_map({"url": _BLOCKED_URL}, _denied_settings(), None), {})
 
 
-async def _probe_mcp_render(monkeypatch):
+async def _probe_mcp_render(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "get_browser_pool", lambda: object())
@@ -421,7 +416,7 @@ async def _probe_mcp_render(monkeypatch):
     await _assert_refused(tools._handle_render({"url": _BLOCKED_URL}, _denied_settings(), None), {})
 
 
-async def _probe_mcp_search(monkeypatch):
+async def _probe_mcp_search(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "search_endpoint_handler", _blocked_http)
@@ -446,15 +441,15 @@ _PROBES = {
 
 
 @pytest.mark.parametrize("entry", sorted(_table_entries()))
-async def test_host_policy_entry_point_refuses(entry, monkeypatch):
-    await _PROBES[entry](monkeypatch)
+async def test_host_policy_entry_point_refuses(entry, monkeypatch, tmp_path):
+    await _PROBES[entry](monkeypatch, tmp_path)
 
 
 def test_host_policy_probe_table_matches_entry_table():
     assert set(_PROBES) == _table_entries()
 
 
-async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch):
+async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch, tmp_path):
     from app.api import render
     from app.crawl import payload_helpers
 
@@ -464,4 +459,4 @@ async def test_render_probe_fails_when_policy_enforcement_is_removed(monkeypatch
     monkeypatch.setattr(payload_helpers, "normalize_public_http_url", allow)
     monkeypatch.setattr(render, "normalize_public_http_url", allow)
     with pytest.raises(AssertionError):
-        await _probe_render(monkeypatch)
+        await _probe_render(monkeypatch, tmp_path)

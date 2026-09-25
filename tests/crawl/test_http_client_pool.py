@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import os
 import warnings
 from unittest.mock import MagicMock, patch
 
@@ -821,3 +822,35 @@ def test_env_override_still_wins():
     with patch.dict("os.environ", {"BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS": "200"}):
         s = settings_mod.CrawlerSettings.from_mapping()
         assert s.http_max_connections == 200
+
+
+def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
+    """The derivation READS the memory limit, so it is I/O -- and a call in the
+    class body made it import-time I/O, run once and frozen for the process.
+
+    That is not a style point. A box whose limit only becomes readable after
+    the module was first imported (a cgroup limit the runtime applies late), or
+    whose read failed and silently took the 4 GiB fallback, kept that wrong
+    ceiling for its whole life with nothing in the config saying so. Deriving
+    per construction means the number is always derived from the limit the
+    running process actually has.
+    """
+    limit = 8 * 1024 * 1024 * 1024
+    expected = max(
+        100,
+        settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
+    )
+    with (
+        patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)),
+        patch.dict("os.environ"),
+    ):
+        os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", None)
+        os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", None)
+        derived = settings_mod.CrawlerSettings()
+        assert derived.http_max_connections == expected
+        assert derived.http_max_keepalive == max(20, min(128, expected // 2))
+        # The env path must derive too. A ``default_factory`` field has no class
+        # attribute to read, so this is the line where that trap shows up.
+        from_env = settings_mod.CrawlerSettings.from_mapping()
+        assert from_env.http_max_connections == expected
+        assert from_env.http_max_keepalive == max(20, min(128, expected // 2))

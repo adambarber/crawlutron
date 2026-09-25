@@ -52,6 +52,11 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"  # Explicitly cancelled
 
 
+#: The states a compare-and-set accepts: one status, or the set a transition is
+#: legal from. Named once so the sync method and its async twin cannot diverge.
+_Expected = JobStatus | frozenset[JobStatus]
+
+
 @dataclass(frozen=True)
 class FrontierEntry:
     """One canonical URL and its admitted crawl depth."""
@@ -433,7 +438,13 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
 
 
 class JobStore:
-    """SQLite-backed store for crawl job states."""
+    """SQLite-backed store for crawl job states.
+
+    Every method is synchronous SQLite work, so every method has an
+    ``a``-prefixed twin that runs the call off the event loop, and any caller
+    that CAN reach a loop goes through the twin (``self._lock`` serializes
+    every connection use, so a twin never races a direct sync call).
+    """
 
     def __init__(self, db_path: str | Path, *, policy: HostPolicy):
         self.db_path = Path(db_path)
@@ -517,21 +528,25 @@ class JobStore:
             self._persist(job)
 
     async def asave(self, job: CrawlJobState) -> None:
-        """Async :meth:`save`: offload the whole row -- the ``json.dumps`` of
-        results, visited and frontier plus the SQLite commit -- to a worker
-        thread so the event loop is never stalled.
-
-        Synchronous callers must keep using :meth:`save`: startup recovery
-        (``recover_orphaned_running_jobs``) is sync by design and runs before a
-        loop exists. This is the same sibling shape ``ContentCache`` uses for
-        ``set``/``aset``, and it keeps the offload discipline inside the store
-        rather than at each call site, so a new async caller cannot forget it
-        the way ``run_async_crawl`` did.
-
-        ``self._lock`` serializes every connection use, so a save run here is
-        safe against a concurrent sync ``save`` from the startup/recovery path.
-        """
         await asyncio.to_thread(self.save, job)
+
+    async def acreate(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
+        return await asyncio.to_thread(self.create, root_url, policy)
+
+    async def acreate_single_shot(self, job_id: str, root_url: str, policy: dict[str, Any]):
+        return await asyncio.to_thread(self.create_single_shot, job_id, root_url, policy)
+
+    async def aset_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
+        return await asyncio.to_thread(self.set_status, job_id, new, expected=expected)
+
+    async def aload(self, job_id: str) -> CrawlJobState | None:
+        return await asyncio.to_thread(self.load, job_id)
+
+    async def adelete(self, job_id: str) -> bool:
+        return await asyncio.to_thread(self.delete, job_id)
+
+    async def alist_jobs(self) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.list_jobs)
 
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
@@ -594,13 +609,7 @@ class JobStore:
         )
         self._conn.commit()
 
-    def set_status(
-        self,
-        job_id: str,
-        new: JobStatus,
-        *,
-        expected: JobStatus | frozenset[JobStatus],
-    ) -> bool:
+    def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
         """Atomic compare-and-set on the row's status (the control plane).
 
         Returns True iff the row existed in one of the ``expected`` states

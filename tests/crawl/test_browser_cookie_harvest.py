@@ -8,6 +8,7 @@ retry that follows the render.
 
 import asyncio
 
+from _browser_doubles import BrowserFakePage
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies import browser as browser_mod
@@ -104,3 +105,108 @@ class TestHarvestWaitBounded:
                 browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
             else:
                 browser_mod._BROWSER_COOKIES_BY_DOMAIN[domain] = old
+
+
+class TestActionChainFailuresAreVisible:
+    """Best-effort is the right policy for an action chain; silence is not.
+
+    Every action error was swallowed by a bare ``except Exception: continue``,
+    including the common one -- a ``wait`` for a selector the page never grows.
+    That costs extraction quality on exactly the pages an operator most wants to
+    hear about (SPA content that never arrived), and it left no evidence at all.
+
+    These drive a REAL ``BrowserRenderer`` and the REAL ``_run_action_chain``.
+    The shared ``build_pinned_renderer`` helper monkeypatches that method to a
+    no-op (it is there to drive the render), so a test using it asserts against
+    the stub and passes no matter what the production chain does.
+    """
+
+    @staticmethod
+    def _real_renderer():
+        from app.crawl.strategies.browser import BrowserRenderer
+
+        return BrowserRenderer(warmup_urls=[])
+
+    async def test_a_selector_timeout_names_the_selector_url_and_budget(self, caplog):
+        renderer = self._real_renderer()
+        page = BrowserFakePage()
+
+        async def never_appears(selector, timeout=None, **kwargs):
+            raise TimeoutError(f"waiting for selector {selector!r} timed out after {timeout}ms")
+
+        page.wait_for_selector = never_appears
+
+        with caplog.at_level("WARNING"):
+            await renderer._run_action_chain(
+                page,
+                [{"type": "wait", "selector": "#hydration-done", "timeout": 2500}],
+                url="http://example.com/page",
+                budget_seconds=5.0,
+            )
+
+        # The module logs structured records (``extra=``), which is what the
+        # JSONL sink emits, so the evidence is in the fields rather than the
+        # message.
+        failures = [r for r in caplog.records if r.__dict__.get("action") == "wait"]
+        assert failures, f"an action failure left no structured record: {caplog.records!r}"
+        fields = failures[0].__dict__
+        assert fields.get("selector") == "#hydration-done", f"the failing selector is not named: {fields!r}"
+        assert fields.get("wait_ms") == 2500, f"the requested wait budget is not named: {fields!r}"
+        assert fields.get("url") == "http://example.com/page", f"the URL is not named: {fields!r}"
+
+
+class TestActionChainIsOneBoundedHold:
+    """A pool slot may be held for the render's budget, not for the chain's.
+
+    The page semaphore is held for the whole render, but the only deadline in it
+    was the navigation's -- the action chain after it had none, only a
+    PER-ACTION clamp. Three ``wait`` actions were therefore 3x10s of pooled
+    renderer, on a pool whose whole reason for existing is that concurrent tabs
+    crash the shared process, and the exhaustion that follows is reported as
+    ``browser_pool_exhausted`` with nothing saying a chain was still waiting.
+    One deadline for the chain, taken from the same per-URL budget the
+    navigation got, removes the multiplier.
+    """
+
+    async def test_a_wedged_chain_releases_the_slot_at_the_render_budget(self, caplog):
+        renderer = BrowserRenderer(warmup_urls=[])
+        page = BrowserFakePage()
+        observed: list[float | None] = []
+
+        async def never_appears(selector, timeout=None, **kwargs):
+            # Records the budget each action was allowed, then wedges: the
+            # realistic shape of an SPA that never grows the awaited element.
+            observed.append(timeout)
+            await asyncio.Event().wait()
+
+        page.wait_for_selector = never_appears
+        actions = [
+            {"type": "wait", "selector": "#one", "timeout": 60_000},
+            {"type": "wait", "selector": "#two", "timeout": 60_000},
+            {"type": "wait", "selector": "#three", "timeout": 60_000},
+        ]
+        # 0.05s stands in for the per-URL budget: the deadline is enforced with
+        # loop-time-based wait_for, which the suite's sleep patch cannot fake.
+        with caplog.at_level("WARNING"):
+            await asyncio.wait_for(
+                renderer._run_action_chain(
+                    page, actions, url="http://example.com/page", budget_seconds=0.05
+                ),
+                timeout=10.0,
+            )
+
+        assert len(observed) < len(actions), (
+            f"the chain started all {len(actions)} actions inside a 50ms budget: the "
+            f"per-action clamps multiplied into a {len(observed)}x10s hold of a pooled "
+            "renderer, which is how a pool drains with no log line pointing here"
+        )
+        exhausted = [
+            r
+            for r in caplog.records
+            if r.__dict__.get("budget_seconds") is not None
+        ]
+        assert exhausted, (
+            "the chain ran out of budget on a pooled slot and said nothing: "
+            f"{[r.getMessage() for r in caplog.records]!r}"
+        )
+        assert exhausted[0].__dict__.get("url") == "http://example.com/page"

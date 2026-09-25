@@ -263,6 +263,20 @@ LAZY_SCROLL_DELAY_SECONDS = DEFAULT_LAZY_SCROLL_DELAY_SECONDS
 _MAX_ACTION_WAIT_SECONDS = 10.0
 
 
+def _action_wait_ms(action: dict[str, Any]) -> int:
+    """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is (M9).
+
+    Unbounded values park the render for as long as the caller likes, and 0
+    disables Playwright's timeout entirely instead of meaning "immediately".
+    Garbage falls back to the 5s default rather than failing the action.
+    """
+    try:
+        requested_ms = int(action.get("timeout", 5000))
+    except (TypeError, ValueError):
+        requested_ms = 5000
+    return max(1, min(requested_ms, int(_MAX_ACTION_WAIT_SECONDS * 1000)))
+
+
 def _profile_int(profile: dict[str, Any], key: str, default: int) -> int:
     """Read a non-negative int knob from a browser_profile (never raises)."""
     try:
@@ -711,7 +725,9 @@ class BrowserRenderer:
             # Browser action chains (#10): run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
             if actions:
-                await self._run_action_chain(page, actions)
+                await self._run_action_chain(
+                    page, actions, url=url, budget_seconds=navigation_timeout
+                )
 
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
             await self._lazy_load_scroll(page, options.browser_profile)
@@ -796,7 +812,49 @@ class BrowserRenderer:
             # browser recycle logic bounds total attempts per browser instance.
             self._render_count += 1
 
-    async def _run_action_chain(self, page: Any, actions: list[dict[str, Any]]) -> None:
+    async def _run_action_chain(
+        self,
+        page: Any,
+        actions: list[dict[str, Any]],
+        *,
+        url: str = "",
+        budget_seconds: float | None = None,
+    ) -> None:
+        """Run policy-specified actions under ONE deadline, then move on.
+
+        The chain had no deadline at all -- only the navigation above it was
+        bounded -- so N ``wait`` actions held the page semaphore (one slot of the
+        pool that exists because concurrent tabs crash the shared process) for
+        N x ``_MAX_ACTION_WAIT_SECONDS``, and the exhaustion that followed said
+        nothing about the chain still waiting. The budget is the per-URL number
+        the navigation already got, so the render's worst case stops growing
+        with the chain length.
+
+        ``budget_seconds=None`` is the unbounded form, for driving the chain
+        directly; production must pass the render budget, which
+        ``test_the_action_chain_is_always_invoked_with_a_budget`` enforces
+        tree-wide, since an optional deadline is only as good as that gate.
+        """
+        if not actions:
+            return
+        if budget_seconds is None:
+            await self._perform_action_chain(page, actions, url=url)
+            return
+        try:
+            await asyncio.wait_for(
+                self._perform_action_chain(page, actions, url=url), timeout=budget_seconds
+            )
+        except TimeoutError:
+            logger.warning(
+                "browser_action_chain_budget_exhausted",
+                extra={
+                    "url": url,
+                    "budget_seconds": budget_seconds,
+                    "actions": len(actions),
+                },
+            )
+
+    async def _perform_action_chain(self, page: Any, actions: list[dict[str, Any]], *, url: str) -> None:
         """Execute a sequence of browser actions before extraction (#10).
 
         Supported action types: ``click``, ``fill``, ``hover``, ``scroll``
@@ -807,6 +865,10 @@ class BrowserRenderer:
         running caller-supplied scripts in the browser context is an RCE-class
         risk (cookie/localStorage theft, requests to internal services with no
         SSRF guard).
+
+        Actions are best-effort -- one bad selector must not cost the page its
+        extraction -- but not silent, since a ``wait`` for an element a SPA
+        never grows is an invisible extraction-quality loss.
         """
         for action in actions:
             if not isinstance(action, dict):
@@ -827,24 +889,24 @@ class BrowserRenderer:
                 elif action_type == "scroll_bottom":
                     await page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
                 elif action_type == "wait" and selector:
-                    # Clamp caller-supplied timeouts like wait_seconds (M9):
-                    # unbounded values park the render, and 0 would disable
-                    # Playwright's timeout entirely. Garbage falls back.
-                    try:
-                        requested_timeout = int(action.get("timeout", 5000))
-                    except (TypeError, ValueError):
-                        requested_timeout = 5000
-                    await page.wait_for_selector(
-                        selector,
-                        timeout=max(1, min(requested_timeout, int(_MAX_ACTION_WAIT_SECONDS * 1000))),
-                    )
+                    await page.wait_for_selector(selector, timeout=_action_wait_ms(action))
                 elif action_type == "wait_seconds":
                     await self._async_sleep(min(float(action.get("seconds", 1)), _MAX_ACTION_WAIT_SECONDS))
                 elif action_type == "execute_js":
                     # Refuse arbitrary JS execution (RCE-class risk). Callers must
                     # not be able to run scripts in the browser context.
                     continue
-            except Exception:  # action chains are best-effort
+            except Exception as error:  # action chains are best-effort, not silent
+                logger.warning(
+                    "browser_action_failed",
+                    extra={
+                        "url": url,
+                        "action": action_type,
+                        "selector": selector,
+                        "wait_ms": action.get("timeout"),
+                        "error": str(error),
+                    },
+                )
                 continue
 
     async def _capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:

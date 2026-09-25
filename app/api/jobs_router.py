@@ -72,11 +72,11 @@ async def create_job(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        job = job_store.create(checked[0], payload.policy.model_dump())
+        job = await job_store.acreate(checked[0], payload.policy.model_dump())
     except ValueError as error:
         raise http_error(422, "validation_error", "Request validation failed", {"errors": [{"msg": str(error)}]}) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
-    job = job_store.load(job.job_id)
+    job = await job_store.aload(job.job_id)
     return JobCreateResponse(
         job_id=job.job_id,
         status=job.status.value if job is not None else JobStatus.PENDING.value,
@@ -91,7 +91,7 @@ async def create_job(
     description="Return a list of all crawl jobs with basic status info.",
 )
 async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
-    jobs = job_store.list_jobs()
+    jobs = await job_store.alist_jobs()
     return JobListResponse(jobs=[JobStatusResponse(**j) for j in jobs])
 
 
@@ -105,7 +105,7 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
-    job = job_store.load(job_id)
+    job = await job_store.aload(job_id)
     if job is None:
         _raise_not_found(job_id)
     assert job is not None
@@ -137,7 +137,7 @@ async def control_job(
     action = payload.action.lower()
     if action not in {"pause", "resume", "cancel"}:
         raise http_error(422, "invalid_action", f"Unknown action: {action}")
-    if job_store.load(job_id) is None:
+    if await job_store.aload(job_id) is None:
         _raise_not_found(job_id)
 
     if action == "pause":
@@ -151,7 +151,7 @@ async def control_job(
         _raise_not_found(job_id)
     if outcome == "conflict":
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
-    job = job_store.load(job_id)
+    job = await job_store.aload(job_id)
     assert job is not None
     return _job_status(job)
 
@@ -165,7 +165,7 @@ async def control_job(
 async def delete_job(job_id: str, job_store=Depends(get_job_store)) -> dict[str, str]:
     if job_runner.is_running(job_id):
         job_runner.cancel_job_task(job_id)
-    if not job_store.delete(job_id):
+    if not await job_store.adelete(job_id):
         _raise_not_found(job_id)
     return {"status": "deleted", "job_id": job_id}
 

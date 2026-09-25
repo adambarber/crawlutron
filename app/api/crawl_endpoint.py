@@ -99,7 +99,7 @@ async def crawl(
             if webhook_url:
                 await validate_webhook_url_async(webhook_url, host_policy=host_policy)
             request_id = new_request_id()
-            job_store.create_single_shot(request_id, checked[0], payload_dict)
+            await job_store.acreate_single_shot(request_id, checked[0], payload_dict)
             from app.api.async_crawl_runner import run_async_crawl
 
             background_tasks.add_task(
@@ -146,7 +146,7 @@ async def crawl(
             policy_schema_version=result["policy_schema_version"],
         )
         try:
-            result_store.put(result["request_id"], response_model.model_dump())
+            await result_store.aput(result["request_id"], response_model.model_dump())
         except Exception:
             logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
         output_format = payload.output_format
@@ -173,10 +173,10 @@ async def get_crawl_result(
     result_store,
 ) -> UnifiedCrawlResponse:
     """Retrieve a completed crawl response by request_id."""
-    stored = result_store.get(request_id)
+    stored = await result_store.aget(request_id)
     if stored is not None:
         return UnifiedCrawlResponse(**stored)
-    job = job_store.load(request_id)
+    job = await job_store.aload(request_id)
     if job is not None and job.kind == JobKind.SINGLE_SHOT:
         if job.results:
             return UnifiedCrawlResponse(**job.results[0])

@@ -81,29 +81,29 @@ async def _extract_browser_content(
     extraction = policy.get("extraction", DEFAULT_EXTRACTION)
     extractor: Callable[..., Any]
     args: tuple[Any, ...]
-    options: dict[str, Any] = {}
+    # The selector pair belongs to the two HTML paths only; the document path
+    # takes neither, and handing it one is a TypeError.
+    selector_options = {
+        "css_selector": policy.get("css_selector"),
+        "xpath": policy.get("xpath"),
+    }
     if extraction == EXTRACTION_DOCUMENT:
         extractor = _extract_document
         args = (
             content.encode("utf-8", "replace") if isinstance(content, str) else content,
             result.final_url,
         )
+        options: dict[str, Any] = {}
         method = EXTRACTION_METHOD_DOCUMENT
     elif extraction == EXTRACTION_TRAFILATURA:
-        options = {
-            "css_selector": policy.get("css_selector"),
-            "xpath": policy.get("xpath"),
-        }
         extractor = _extract_html
         args = (content, result.final_url)
+        options = selector_options
         method = EXTRACTION_METHOD_TRAFILATURA
     else:
-        options = {
-            "css_selector": policy.get("css_selector"),
-            "xpath": policy.get("xpath"),
-        }
         extractor = extract_content
         args = (content, None, result.final_url)
+        options = selector_options
         method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
     extracted = await asyncio.to_thread(extractor, *args, **options)
     return _BrowserContent(

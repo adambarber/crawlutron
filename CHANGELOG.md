@@ -634,6 +634,108 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     (cancel-on-disconnect, result passthrough, error propagation; `real_sleeps`
     because the watcher depends on genuine loop yielding).
 
+### Chokepoint hardening (bug-closure invariants)
+- **A raising strategy is a failed STEP, not a dead URL**
+  (app/crawl/strategy_chain.py): the HTTP strategy has its own broad-except
+  sink and the browser worker catches inside `render`, but a raise at the
+  adapter boundary between them escaped `execute_crawl_chain` and was
+  enveloped by whatever ran the URL — with no strategy attribution and every
+  remaining ladder step skipped, so one `BROWSER_HEADLESS` binding error
+  ended a URL that still had `BROWSER_HEADED_WARMED` to try. `_execute_strategy`
+  now converts any raise into a classified failed result through
+  `_engine_result_from_exception`, and both `_run_*` helpers **and** the cffi
+  cookie retry route through it, so a raise has exactly one place it can
+  become a result. Wire-visible: a URL that used to come back as a generic
+  unclassified envelope now reports the strategy that failed and its
+  classification (`attempted_strategies`), and a ladder step after it can still
+  succeed. Tree-wide AST invariant
+  (`test_every_strategy_runner_call_is_guarded`) fails CI if a strategy runner
+  is ever invoked outside a `try`/`except Exception` — a narrow handler does
+  not satisfy it — with a paired bites case.
+- **One scope-regex compiler, one length bound** (app/crawl/admission.py,
+  app/crawl/engine.py): "compile a caller-supplied `scope_regex`, refuse a
+  pathological one, bound the length" had two implementations — a public
+  `compile_scope_pattern` in admission and a private
+  `_compile_scope_regex_safe` in engine — that disagreed in their `except`
+  clause (engine also caught `re.error`), behind a second module constant of
+  the same name and value. Admission keeps the definition and now carries the
+  union of both arms plus the N-1 rationale, so the crawl path and the durable
+  admission path cannot compile different things from one policy. Pinning
+  `test_scope_regex_compiler_has_exactly_one_definition` counts one compiler
+  **and** one bound, tree-wide. Behavior for a caller is unchanged: a
+  pathological pattern is still refused and a normal one still compiles.
+- **Dead weight the invariants exposed** (app/scheduler.py, app/models.py,
+  app/crawl/job_store.py, app/crawl/migrations/manifest.py,
+  app/crawl/admission.py, app/api/render.py): `job_store.from_json` branched on
+  a `canonicalized` flag hardcoded `False` whose column migration `0002` had
+  already dropped, and three docstrings described the dropped marker as if it
+  still existed; `_row_is_canonical` was the same removed flag's other half and
+  nothing called it. `DomainScheduler._job_url` had no caller, and `run`'s
+  `url_of` parameter existed only to be ignored — the render pipeline was
+  passing an argument that silently did nothing. `_is_classification` had been
+  replaced by the `_CLASSIFICATION_TABLE` lookup below it (its docstring still
+  claimed otherwise), `create_index_statements` had no caller and no schema
+  declaring an index, and `RobotsGate._cache` was assigned and never read.
+  `app/` is 50 lines smaller and the whole-tree line ceiling came with it. No
+  behavior change: every removal was verified unreferenced across `app/`,
+  `tests/`, `scripts/`, and `docs/` first (a naive private-name scan is
+  worthless here — string-literal `cast()` targets and FastAPI route functions
+  both read as unreferenced and neither is dead).
+- **No store method runs on the event loop** (app/crawl/job_store.py,
+  app/crawl/result_store.py, app/api/jobs_router.py, app/api/job_runner.py,
+  app/api/async_crawl_runner.py, app/api/crawl_endpoint.py): `JobStore` and
+  `CrawlResultStore` are synchronous by design (SQLite plus `os.fsync`), and
+  every async caller was reaching them directly — a `.save()` of a large job
+  row blocked the whole loop, one request at a time. Each public method now has
+  an `a`-prefixed twin that offloads through `asyncio.to_thread`, and every
+  async frame calls the twin. The sync methods stay for the tests and for the
+  thread-affine lifecycle (`close`, reset); they are not deleted, so the ratchet
+  gain here is behavioral rather than cosmetic. Tree-wide AST invariant
+  (`test_no_sync_store_method_is_called_from_an_async_frame`) fails CI if a sync
+  store method is ever called from an `async def`, with a paired bites case; and
+  four loop-guard tests drive real store operations on a loop and fail loudly if
+  the operation ever runs on it, so the twins cannot silently become no-ops.
+- **A callback failure is not a worker failure** (app/scheduler.py,
+  tests/crawl/test_scheduler.py): `on_result` was awaited inside the worker's
+  own `try`/`except`, which made a raising result-callback report as a failed
+  *fetch* and vice versa — two unrelated failure classes sharing one log line
+  and one status field. The callback now runs outside the worker's handler (it
+  still runs exactly once, on a slot the fan-in has already released, so a
+  callback storm cannot starve live work), and its own failure is logged
+  separately instead of vanishing into a retried crawl. Tree-wide drift test
+  (`test_a_worker_call_on_result_is_guarded_by_its_own_handler`) fails if the
+  two are ever merged back, with a paired bites case.
+- **HTTP pool defaults are derived, not frozen at import**
+  (app/settings.py, tests/test_crawler_settings_defaults.py): the two httpx pool
+  fields called their derivation as a default value in the dataclass body, so
+  they were evaluated once — at import — and the cgroup memory read behind them
+  (with its 4 GiB fallback on failure) was frozen for the process lifetime. A
+  process whose memory limit only became readable after import, or that hit the
+  fallback, then ran a pool sized from a number nothing in the config could
+  explain. Both fields are now `field(default_factory=...)`, so every
+  construction re-derives, and `from_mapping` can no longer read a stale
+  class-level default. Shipped numbers are unchanged in the normal case.
+- **A wedged action chain releases the slot at the render budget, and says so**
+  (app/crawl/strategies/browser.py, tests/crawl/test_browser_cookie_harvest.py):
+  `_run_action_chain` was bounded by the selector timeout alone, but a
+  `page.hover` or `page.wait_for_function` that never returns is not a selector
+  wait, so a hostile page could hold a pooled browser slot far past the timeout
+  that was supposed to bound it. The chain now runs under the render budget as
+  one bounded hold, and the per-action failures it already swallowed (each
+  best-effort action continuing to the next) are logged with the URL instead of
+  being invisible — a selector timeout, in particular, is now identifiable
+  because the log names the URL it was waiting on.
+- **A worker of the wrong shape is named at the seam** (app/crawl/worker.py,
+  tests/crawl/test_error_handling.py): `call_worker` dispatches on whether the
+  worker is a coroutine function, so a plain function that RETURNS a coroutine
+  (the shape `lambda job: render(job.url)` produces) took the sync branch and
+  handed the strategy an un-awaited coroutine. The browser strategy then read
+  `.html` off it and reported a `network_error` — which reads like a site
+  problem and points the investigation at the page instead of at the double.
+  A sync worker returning an awaitable now raises `TypeError` naming the worker.
+  Found by the full sweep, which un-deselects the `browser`-marked tests the
+  default `addopts` skips: one of them had been failing on this since before it
+  was marked opt-in.
 ### Deployment posture
 - **Zero-telemetry invariant** (Dockerfile runtime ENV + docker-compose.yml):
   `ORT_DISABLE_TELEMETRY=1` disables onnxruntime's native client telemetry (via
