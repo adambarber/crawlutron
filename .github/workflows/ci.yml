@@ -1,5 +1,14 @@
 name: CI
 
+# GitHub only loads workflows from a repository root's .github/workflows/. This
+# file lives inside the service because the service carries its own tooling, and
+# it is written for the layout where the service IS that repository: every path
+# below is relative to the root and carries no parent-directory prefix, because
+# the extraction is a file copy and a prefix naming a directory that will not
+# exist there is the one thing a copy cannot carry. The jobs need no
+# `working-directory` for the same reason -- the root is already the service.
+# tests/test_precommit_ci_contract.py asserts both.
+
 on:
   push:
     branches: [main]
@@ -14,16 +23,13 @@ jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: docker/browser-crawler/pyproject.toml
+          cache-dependency-path: pyproject.toml
       # Pinned, not ranged: a floating `ruff>=0.5` means a new rule can turn a
       # merge red with no repository change. Same reasoning as the pinned
       # pre-commit hooks.
@@ -49,28 +55,28 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: docker/browser-crawler/pyproject.toml
+          cache-dependency-path: pyproject.toml
+      # The venv is the service's own, because the hook entries resolve
+      # `.venv/bin/python` relative to the service root. Every hook is
+      # `language: system`, so this is the only place the tools come from.
       - name: Install CI hook environment
         run: |
-          python3 -m venv docker/browser-crawler/.venv
-          docker/browser-crawler/.venv/bin/python -m pip install -e "./docker/browser-crawler[dev]"
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -e ".[dev]"
           python3 -m pip install "pre-commit==4.6.2"
       - name: Run all configured hooks
-        run: pre-commit run --all-files --config docker/browser-crawler/.pre-commit-config.yaml
+        run: pre-commit run --all-files --config .pre-commit-config.yaml
 
   typecheck:
     name: Typecheck (mypy + pyright)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: docker/browser-crawler/pyproject.toml
+          cache-dependency-path: pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
       # The gate existed (`make typecheck`, mypy config, pydantic plugin) and
@@ -101,16 +107,13 @@ jobs:
   test-fast:
     name: Test suite (fast)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: docker/browser-crawler/pyproject.toml
+          cache-dependency-path: pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
       # Includes the project-specific safety predicates (tests/test_safety_invariants.py
@@ -125,16 +128,13 @@ jobs:
     # Manual only: needs the Camoufox binary. Not part of the required gate
     # until it has actually run green against a known-good commit.
     if: ${{ github.event_name == 'workflow_dispatch' }}
-    defaults:
-      run:
-        working-directory: docker/browser-crawler
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: docker/browser-crawler/pyproject.toml
+          cache-dependency-path: pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
       - name: Install Camoufox browser binary

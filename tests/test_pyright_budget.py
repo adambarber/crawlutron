@@ -117,6 +117,20 @@ def _require_pyright() -> str:
     return executable
 
 
+def _readable(path: str) -> str:
+    """A finding's path relative to the service root, wherever pyright ran from.
+
+    Splitting on the service's own directory name assumed the service is nested
+    under a parent directory of that name, which stops being true the moment it
+    is its own repository -- and then every reported finding in a failure
+    message shows an absolute path from whatever machine ran it.
+    """
+    try:
+        return pathlib.Path(path).resolve().relative_to(SERVICE_ROOT).as_posix()
+    except ValueError:
+        return pathlib.Path(path).name
+
+
 def _interpreter() -> str:
     """The interpreter pyright should resolve imports against.
 
@@ -180,7 +194,7 @@ def test_pyright_whole_tree_is_clean() -> None:
         f"code to satisfy a finding that was wrong, is how the curl_cffi import "
         f"nearly became a silent httpx fallback.\n"
         + "\n".join(
-            f"  {item['file'].split('browser-crawler/')[-1]}"
+            f"  {_readable(item['file'])}"
             f":{item['range']['start']['line'] + 1}  "
             f"{item.get('rule', '?')}: {item['message'].splitlines()[0]}"
             for item in diagnostics

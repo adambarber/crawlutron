@@ -14,7 +14,19 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
-ENFORCEMENT_COMMAND = "pre-commit run --all-files --config docker/browser-crawler/.pre-commit-config.yaml"
+# The config as the workflow must name it. The workflow is a repository-root
+# `.github/workflows/ci.yml` and is written for the layout where this service IS
+# the repository, so the config it names is this service's own file at the root
+# of that repository. Deriving the expected string from SERVICE_ROOT keeps this
+# test correct in both layouts: the workflow and this file are copied verbatim on
+# extraction, and the one thing that must never reappear is a
+# `docker/browser-crawler/` prefix, which stops naming anything the moment the
+# service becomes its own repository. `relative_to` is not a no-op assertion: if
+# the config ever moved off the service root, this would say so.
+WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
+ENFORCEMENT_COMMAND = (
+    f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
+)
 REPORTING_JOBS = {"lint", "typecheck", "test-fast"}
 # GitHub's template form for an errexit shell. The required aggregate is a chain
 # of `test` lines, so its exit code is its last line's without errexit.
@@ -376,3 +388,45 @@ def test_every_gate_fires_on_every_enforcement_input() -> None:
             # root once the service is extracted.
             for candidate in (f"docker/browser-crawler/{name}", name):
                 assert re.search(pattern, candidate), f"hook {hook_id} does not fire on {candidate}"
+
+
+def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> None:
+    """GitHub only loads workflows from a repository root.
+
+    This file is nested inside the service today, so it has never run and is
+    currently documentation. It is written for the layout where the service is
+    the repository, which is where it is going: the extraction is a file copy,
+    so every path in it has to already be true at a root. A `docker/browser-crawler/`
+    prefix is the one thing that cannot survive that copy, because it names a
+    directory that will not exist there.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "docker/browser-crawler" not in workflow, (
+        "the workflow names a path that will not exist once the service is its own repository"
+    )
+    assert f"--config {WORKFLOW_ROOT_CONFIG}" in workflow
+    for name, job in _jobs(workflow).items():
+        run_defaults = (job.get("defaults") or {}).get("run") or {}
+        assert "working-directory" not in run_defaults, (
+            f"job {name} runs in {run_defaults['working-directory']}, which is not the repository root"
+        )
+
+
+def test_every_hook_resolves_the_service_root_in_both_layouts() -> None:
+    """The config travels, so its commands must work at either root.
+
+    Each entry cds to `<repo root>/docker/browser-crawler` and falls back to the
+    repository root when that directory is not there. That fallback is the only
+    reason one config file governs the service nested in dev-stack today and at
+    the root of the extracted repository, so it is asserted rather than assumed:
+    losing it makes every hook fail on its first cd in one of the two layouts.
+    """
+    for hook_id, block in _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8")):
+        entry = _entry(block)
+        assert 'git rev-parse --show-toplevel)/docker/browser-crawler' in entry, (
+            f"hook {hook_id} does not try the nested service path"
+        )
+        assert "||" in entry and 'cd "$(git rev-parse --show-toplevel)"' in entry, (
+            f"hook {hook_id} has no fallback to the repository root, so it cannot run "
+            "at the root of the extracted repository"
+        )
