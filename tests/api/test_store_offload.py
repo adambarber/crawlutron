@@ -140,8 +140,16 @@ class TestJobEndpointsStayOffTheLoop:
     async def test_the_whole_job_endpoint_surface_stays_off_the_loop(
         self, jobs_client, loop_guard_store
     ):
+        # The crawl is held open across every assertion. Without it this test
+        # raced its own background task: POST /v1/jobs starts the runner, the
+        # fake engine returned instantly, and the job reached COMPLETED before
+        # the cancel arrived -- so ``control`` answered 409 and the suite went
+        # red at random under full-suite load while passing in isolation. A test
+        # that only fails when the machine is busy is asserting on timing, not
+        # on the off-the-loop behaviour it is named for.
+        hang = asyncio.Event()
         job_runner.reset_job_runner()
-        job_runner.install_execute_crawl(_fake_execute([_canned_result(_ROOT)]))
+        job_runner.install_execute_crawl(_fake_execute([_canned_result(_ROOT)], hang=hang))
         try:
             created = await jobs_client.post(
                 "/v1/jobs",
@@ -166,6 +174,9 @@ class TestJobEndpointsStayOffTheLoop:
             assert deleted.status_code == 200, deleted.text
             assert await _off_loop(loop_guard_store.load, job_id) is None
         finally:
+            # Release the held crawl before the store fixture tears down, or the
+            # background task outlives the loop and writes to a closed DB.
+            hang.set()
             job_runner.reset_job_runner()
 
 

@@ -324,6 +324,120 @@ def status_for_classification(classification: str) -> ResultStatus:
     return CLASSIFICATION_STATUS_BY_LABEL.get(classification, UNKNOWN_CLASSIFICATION_STATUS)
 
 
+# ---------------------------------------------------------------------------
+# Classification transience: is a page that failed this way worth another pass?
+# ---------------------------------------------------------------------------
+# The second axis of the taxonomy, beside the status table above. Status answers
+# "what do we tell the caller"; transience answers "should we come back", and the
+# two are independent -- a capacity skip and a page-level 404 are both "failed"
+# but only one deserves a retry.
+#
+# WHY the taxonomy owns it rather than a local constant: three call sites each
+# answered "is this transient?" with their own hardcoded list and they had
+# already drifted. The browser strategy authorized retries for ``dns_error`` -- a
+# code nothing produced -- while omitting ``connection_error``, which is the label
+# the classifier actually emits for every DNS, connect, timeout and reset
+# failure. The durable job runner imported that same set to decide whether to
+# re-queue, so a one-second DNS blip marked the URL visited and dropped it from a
+# whole-site crawl. A fourth answer would appear next sprint for the same reason.
+#
+# The rule, so membership is decidable rather than tasteful: TRANSIENT is for
+# codes where our fetch died without forming a verdict about the page, or where
+# the verdict was a statement about our own capacity. A page the origin
+# characterized is terminal; re-queueing one of those either re-attempts what
+# robots forbids or hammers an origin that just refused us.
+TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
+    member.value
+    for member in (
+        # Transport died before any verdict about the page.
+        CrawlClassification.network_error,
+        CrawlClassification.connection_error,
+        CrawlClassification.dns_error,
+        CrawlClassification.tls_error,
+        CrawlClassification.http_error,
+        CrawlClassification.too_many_redirects,
+        # A deadline overran: the page was alive, just slow, so a later pass can
+        # hit a warm cache or a quieter moment.
+        CrawlClassification.navigation_timeout,
+        CrawlClassification.url_budget_exceeded,
+        # Capacity, not a dead page: the URL was never attempted. The status
+        # table already says "failed" for both; this says the page is still
+        # eligible, which is what the frontier re-queue consumes.
+        CrawlClassification.browser_pool_exhausted,
+        CrawlClassification.circuit_breaker_open,
+        # A renderer died rather than a page.
+        CrawlClassification.browser_crash,
+        # Untriaged: the one case where another pass is pure upside.
+        CrawlClassification.unknown_error,
+    )
+)
+# The other side, stated rather than left to a default so the taxonomy stays
+# fully covered: a frozenset of the affirmative cases alone cannot tell "we
+# decided this is terminal" from "nobody has triaged this yet", so a new member
+# would silently inherit whichever default the set implied. The pair's union is
+# the complete verdict the completeness test derives from -- the same discipline
+# as CLASSIFICATION_STATUS_BY_LABEL above.
+#
+# robots_disallowed is the clearest no: re-queueing it re-attempts exactly what
+# the policy forbids. rate_limited is the breaker and the politeness floor's
+# lever, not ours -- a second immediate attempt is the abusive hammer. site_error
+# and http_status_error are deliberate origin responses, so the per-URL budget
+# must not fight the domain breaker's backoff by re-queueing underneath it.
+# payload_too_large is deterministic: the next fetch downloads the same oversized
+# body. value_error and the three policy refusals are ours, not the page's -- they
+# resolve only when the caller changes. The refusal and capability members
+# (access_denied, login_required, paywall, captcha, bot and WAF challenges,
+# cookie consent, javascript_required, unsupported_browser, geolocation) are
+# pages the origin characterized, or capabilities we chose not to use. not_found
+# and gone are statuses the origin chose. rendered and not_modified are not
+# failures at all.
+NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
+    member.value
+    for member in (
+        CrawlClassification.rendered,
+        CrawlClassification.captcha_detected,
+        CrawlClassification.bot_challenge_detected,
+        CrawlClassification.access_denied,
+        CrawlClassification.login_required,
+        CrawlClassification.paywall_detected,
+        CrawlClassification.rate_limited,
+        CrawlClassification.cookie_consent_required,
+        CrawlClassification.javascript_required,
+        CrawlClassification.unsupported_browser,
+        CrawlClassification.geolocation_blocked,
+        CrawlClassification.waf_challenge_detected,
+        CrawlClassification.not_found,
+        CrawlClassification.site_error,
+        CrawlClassification.gone,
+        CrawlClassification.binary_no_text,
+        CrawlClassification.robots_disallowed,
+        CrawlClassification.payload_too_large,
+        CrawlClassification.http_status_error,
+        CrawlClassification.value_error,
+        CrawlClassification.invalid_url,
+        CrawlClassification.unsupported_scheme,
+        CrawlClassification.private_network_target,
+        CrawlClassification.not_modified,
+    )
+)
+
+
+def is_transient_classification(classification: str | None) -> bool:
+    """Return whether a page that failed as ``classification`` deserves another pass.
+
+    The single answer for every retry decision: the render layer's
+    503-vs-permanent split, the crawl layer's ``diagnostics["retryable"]`` flag,
+    the recursive crawler's re-queue, and the durable job runner's per-URL
+    transient budget all route through here.
+
+    Fails closed, and ``None`` with it: a missing or unrecognized label -- a
+    result row that never carried a classification, or a new taxonomy member
+    nobody has triaged -- is not retried, because retrying an untriaged failure
+    is the direction that costs politeness.
+    """
+    return classification in TRANSIENT_CLASSIFICATIONS
+
+
 # The exhaustive set of classifications whose result status is NOT determined
 # by the label alone, each mapped to the statuses a builder may legitimately
 # pair it with beyond the table default.

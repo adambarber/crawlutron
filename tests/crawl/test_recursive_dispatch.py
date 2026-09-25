@@ -242,7 +242,7 @@ async def test_failed_job_does_not_shift_other_results():
 
 
 async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
-    """A re-queued pool-exhausted URL was never crawled, so it must not cost a
+    """A re-queued transiently-failed URL was never crawled, so it must not cost a
     page against ``max_pages``. Before the fix each re-queue incremented
     ``page_count`` and a burst of exhaustion events could terminate the crawl
     before its real page budget was spent.
@@ -252,10 +252,10 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     budget admits exactly that real page after all the retries, so it is
     reached only when the retries themselves cost nothing.
     """
-    from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES
+    from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
     from app.models import EngineCrawlResult
 
-    total_attempts = 1 + MAX_POOL_EXHAUSTION_REQUEUES
+    total_attempts = 1 + MAX_TRANSIENT_REQUEUES
 
     async def worker(job):
         if job.normalized_url == "http://a/seed":

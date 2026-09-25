@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import abuild_unified_result
-from app.constants import MAX_URL_TRANSIENT_ATTEMPTS
+from app.constants import MAX_URL_TRANSIENT_ATTEMPTS, is_transient_classification
 from app.crawl.admission import (
     JobAdmissionContext,
     admit_job_links,
@@ -47,7 +47,6 @@ from app.crawl.admission import (
     requeue_admitted_pages,
 )
 from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore, normalize_job_state
-from app.crawl.strategies.browser import TRANSIENT_CLASSIFICATIONS
 from app.models import CrawlResult, CrawlTask
 
 logger = logging.getLogger(__name__)
@@ -335,7 +334,7 @@ async def _run_job(
                     outcome = "transient"
                 elif item.get("status") != "failed":
                     outcome = "success"
-                elif item.get("classification") in TRANSIENT_CLASSIFICATIONS:
+                elif is_transient_classification(item.get("classification")):
                     outcome = "transient"
                 else:
                     outcome = "terminal_failed"

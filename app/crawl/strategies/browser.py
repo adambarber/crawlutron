@@ -237,14 +237,6 @@ def _make_ssrf_websocket_handler(*, policy: HostPolicy):
     return _ws_handler
 
 
-TRANSIENT_CLASSIFICATIONS = {
-    "navigation_timeout",
-    "browser_crash",
-    "network_error",
-    "tls_error",
-    "dns_error",
-    "unknown_error",
-}
 # The blocked/failed label groups live in app.constants now, alongside the
 # classification -> status table both strategies share, so the HTTP and browser
 # paths cannot disagree about a label again. Importers use the constants

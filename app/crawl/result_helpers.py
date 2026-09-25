@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 
 import httpx
 
-from app.constants import status_agrees_with_classification
+from app.constants import is_transient_classification, status_agrees_with_classification
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models import (
@@ -48,6 +48,60 @@ def _enforce_status_classification(classification: Classification, status: Resul
         )
 
 
+# The exception -> classification table, in precedence order: the first row
+# whose types match wins. Written as data rather than an if-ladder because this
+# function is the chokepoint every error in the crawl path passes through, and
+# an if-ladder had outgrown the function-length ceiling -- a ladder that cannot
+# hold its own contents is a ladder whose ordering has stopped being reviewable.
+# Order carries the semantics, so it is the one thing to preserve here:
+#   * ``DecompressionError`` (ours) subclasses ``ValueError``, so the
+#     ``payload_too_large`` row has to precede ``value_error`` or an oversized
+#     body would be reported as a caller error.
+#   * ``httpx.TimeoutException`` and ``httpx.TransportError`` both subclass
+#     ``httpx.HTTPError``, so the ``http_error`` catch-all has to come after the
+#     ``connection_error`` row or every transport failure would flatten into it.
+#   * ``socket.gaierror`` and ``ssl.SSLError`` are both ``OSError`` subclasses;
+#     keeping their rows above the broad fallbacks is what stops a name that
+#     would not resolve from being reported as a generic network error.
+_CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Classification], ...] = (
+    ((BrowserPoolExhaustedError,), "browser_pool_exhausted"),
+    # Capacity, not a page failure: the URL was never attempted, which is why it
+    # stays distinct from the transport rows below and stays retryable.
+    ((_CircuitBreakerOpen,), "circuit_breaker_open"),
+    ((DecompressionTooLargeError,), "payload_too_large"),
+    ((httpx.TooManyRedirects,), "too_many_redirects"),
+    # Name resolution never got off the host. This row is why ``dns_error`` is a
+    # live member: before it existed, a name that would not resolve was reported
+    # as "connection_error", a category error that also left the declared
+    # dns_error member with no producer anywhere in app/.
+    ((socket.gaierror, socket.herror), "dns_error"),
+    (
+        (
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.ConnectError,
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.CloseError,
+            httpx.RemoteProtocolError,
+            httpx.ProtocolError,
+            ConnectionError,
+            ConnectionRefusedError,
+            ConnectionResetError,
+            TimeoutError,
+            asyncio.TimeoutError,
+        ),
+        "connection_error",
+    ),
+    ((ssl.SSLError,), "tls_error"),
+    ((httpx.HTTPStatusError,), "http_status_error"),
+    ((httpx.HTTPError,), "http_error"),
+    ((ValueError,), "value_error"),
+)
+
+
 def _classify_error_code(exc: BaseException) -> Classification:
     """Map an internal exception to a stable, non-leaking error code.
 
@@ -60,52 +114,18 @@ def _classify_error_code(exc: BaseException) -> Classification:
     housing it in one strategy would make the other reach across module
     boundaries for a shared taxonomy decision.
 
-    ``browser_pool_exhausted`` is kept distinct from the transport errors: it
-    means the URL was never attempted because renderer capacity was
-    unavailable, so it is a retry candidate, not a page failure.
+    The mapping itself is the ordered table
+    :data:`_CLASSIFICATION_BY_EXCEPTION`; the unrecognized case falls through to
+    ``network_error``.
 
-    Every branch returns a :data:`Classification` taxonomy member; the return
-    type states that so the callers that feed this straight into an
-    ``EngineCrawlResult`` get a statically-enforced classification instead of
-    an unproven string.
+    Every row returns a :data:`Classification` taxonomy member; the return type
+    states that so the callers that feed this straight into an
+    ``EngineCrawlResult`` get a statically-enforced classification instead of an
+    unproven string.
     """
-    if isinstance(exc, BrowserPoolExhaustedError):
-        return "browser_pool_exhausted"
-    if isinstance(exc, _CircuitBreakerOpen):
-        return "circuit_breaker_open"
-    if isinstance(exc, DecompressionTooLargeError):
-        return "payload_too_large"
-    if isinstance(exc, httpx.TooManyRedirects):
-        return "too_many_redirects"
-    if isinstance(
-        exc,
-        (
-            httpx.ConnectTimeout,
-            httpx.ReadTimeout,
-            httpx.WriteTimeout,
-            httpx.ConnectError,
-            httpx.ReadError,
-            httpx.WriteError,
-            httpx.RemoteProtocolError,
-            httpx.ProtocolError,
-            socket.gaierror,
-            socket.herror,
-            ConnectionError,
-            ConnectionRefusedError,
-            ConnectionResetError,
-            TimeoutError,
-            asyncio.TimeoutError,
-        ),
-    ):
-        return "connection_error"
-    if isinstance(exc, ssl.SSLError):
-        return "tls_error"
-    if isinstance(exc, httpx.HTTPStatusError):
-        return "http_status_error"
-    if isinstance(exc, httpx.HTTPError):
-        return "http_error"
-    if isinstance(exc, ValueError):
-        return "value_error"
+    for types, classification in _CLASSIFICATION_BY_EXCEPTION:
+        if isinstance(exc, types):
+            return classification
     return "network_error"
 
 
@@ -151,10 +171,10 @@ def _engine_result_from_exception(
             "error_detail": str(error),
         },
     )
-    # Pool exhaustion is a capacity condition, not a dead page: the URL was
-    # never attempted. Flag it so the frontier layer can re-queue rather than
-    # record a permanent failure.
-    retryable = classification == "browser_pool_exhausted"
+    # A capacity skip is not a dead page: the URL was never attempted, so the
+    # frontier can re-queue rather than record a permanent failure. The verdict
+    # is the taxonomy's, so it cannot disagree with the other three call sites'.
+    retryable = is_transient_classification(classification)
     diagnostics: dict = {"retryable": retryable, "error_code": classification}
     # A domain circuit opening is a scheduler capacity decision, not a page
     # failure: callers and dashboards key off this marker to tell "the site is
@@ -321,10 +341,10 @@ def _crawl_result_from_exception(
         "render_result_error",
         extra={"strategy": strategy, "error_code": classification, "error_detail": str(error)},
     )
-    # Pool exhaustion is a capacity condition, not a dead page: the URL was
-    # never attempted. Flag it so the render layer answers 503 and the
-    # frontier layer re-queues rather than records a permanent failure.
-    retryable = classification == "browser_pool_exhausted"
+    # The taxonomy's verdict, not a comparison against the one label this line
+    # originally spelled out: the render layer must answer 503 for a transport
+    # blip too, or a retrying client is handed a cached permanent failure.
+    retryable = is_transient_classification(classification)
     return _terminal_crawl_result(
         url=url,
         status="failed",

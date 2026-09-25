@@ -39,7 +39,7 @@ async def _run(exc):
 
 
 def test_classify_error_codes_map_to_stable_values():
-    assert _classify_error_code(socket.gaierror("boom")) == "connection_error"
+    assert _classify_error_code(socket.gaierror("boom")) == "dns_error"
     assert _classify_error_code(httpx.ConnectError("x")) == "connection_error"
     assert _classify_error_code(ValueError("bad")) == "value_error"
     assert _classify_error_code(DecompressionTooLargeError("big")) == "payload_too_large"
@@ -50,8 +50,11 @@ def test_classify_error_codes_map_to_stable_values():
 async def test_http_strategy_result_hides_raw_dns_error():
     res = await _run(socket.gaierror("[Errno -2] Name or service not known"))
     assert res.status == "failed"
-    # Stable code, never the raw message.
-    assert res.error == "connection_error"
+    # Stable code, never the raw message. dns_error is its own label because a
+    # name that never resolved is a distinct diagnosis from a refused connection,
+    # and reporting one as the other is what left it a taxonomy member with no
+    # producer.
+    assert res.error == "dns_error"
     assert res.error != "[Errno -2] Name or service not known"
     # Raw exception text must NOT be returned anywhere in the API diagnostics.
     assert "error_detail" not in res.diagnostics

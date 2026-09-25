@@ -55,7 +55,7 @@ class TestBrowserWorkerGuard:
 
 
 @pytest.mark.asyncio
-class TestPoolExhaustionRequeue:
+class TestTransientRequeue:
     """A capacity-exhausted URL goes back on the frontier, once."""
 
     async def test_pool_exhausted_url_is_requeued_to_the_frontier_tail(self):
@@ -63,21 +63,21 @@ class TestPoolExhaustionRequeue:
         attempted, so recording it as a permanent failure loses work. The
         recursive loop must re-queue it at the frontier tail under a per-job
         cap so a permanently oversubscribed crawl degrades instead of spinning."""
-        from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES, requeue_pool_exhausted
+        from app.crawl.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
         from app.models import CrawlTask
 
         task = CrawlTask(index=0, original_url="http://a.example/x", normalized_url="http://a.example/x", domain="a.example")
         frontier = deque()
 
         # A first exhaustion is re-queued to the tail.
-        assert requeue_pool_exhausted(task, depth=1, frontier=frontier, attempts={}) is True
+        assert requeue_transient(task, depth=1, frontier=frontier, attempts={}) is True
         assert len(frontier) == 1
         assert frontier[0][0] == 1
 
-        # The cap bounds it: after MAX_POOL_EXHAUSTION_REQUEUES attempts the URL
+        # The cap bounds it: after MAX_TRANSIENT_REQUEUES attempts the URL
         # is allowed to fail permanently rather than spin forever.
-        attempts = {task.normalized_url: MAX_POOL_EXHAUSTION_REQUEUES}
-        assert requeue_pool_exhausted(task, depth=1, frontier=frontier, attempts=attempts) is False
+        attempts = {task.normalized_url: MAX_TRANSIENT_REQUEUES}
+        assert requeue_transient(task, depth=1, frontier=frontier, attempts=attempts) is False
         assert len(frontier) == 1, "a capped URL must not be re-queued again"
 
     async def test_pool_exhausted_url_is_requeued_through_the_real_crawl_path(self, base_url):
@@ -94,7 +94,7 @@ class TestPoolExhaustionRequeue:
         """
         from _fetcher_factories import run_crawl_async
 
-        from app.crawl.recursive import MAX_POOL_EXHAUSTION_REQUEUES
+        from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
 
         class ExhaustedPool:
@@ -136,5 +136,5 @@ class TestPoolExhaustionRequeue:
         assert result["classification"] == "browser_pool_exhausted"
         # One initial attempt plus the cap of frontier re-queues: the URL was
         # retried at least once rather than recorded as a permanent failure.
-        assert len(invocations) == 1 + MAX_POOL_EXHAUSTION_REQUEUES, invocations
+        assert len(invocations) == 1 + MAX_TRANSIENT_REQUEUES, invocations
 

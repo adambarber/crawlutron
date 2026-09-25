@@ -44,7 +44,9 @@ heavy ``helpers`` -> engine -> settings import chain.
 from __future__ import annotations
 
 import ast
+import io
 import pathlib
+import tokenize
 import weakref
 from collections.abc import Iterator
 from functools import cache, lru_cache
@@ -97,6 +99,63 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
         cached = tuple(ast.walk(root))
         _NODES_BY_ROOT[root] = cached
     return cached
+
+
+_STRUCTURAL_TOKENS = frozenset(
+    {
+        tokenize.COMMENT,
+        tokenize.NL,
+        tokenize.NEWLINE,
+        tokenize.INDENT,
+        tokenize.DEDENT,
+        tokenize.ENDMARKER,
+        tokenize.ENCODING,
+    }
+)
+
+
+def code_line_count(source: str) -> int:
+    """Count the lines that carry code: no comments, no blanks, no docstrings.
+
+    A whole-tree ceiling is an anti-sprawl gate, and a counter that charges for
+    prose fails at exactly the moment prose is what the work needs: every
+    non-obvious chokepoint wants the reason it exists beside it, so a
+    comment-counting ratchet taxes the documentation that makes the next change
+    safe and quietly permits an equal number of lines of fresh logic. Comments
+    and docstrings are prose *about* code, not code, so neither is charged.
+
+    Both are found with the real parsers -- ``tokenize`` for comments,
+    ``ast`` for docstring line spans -- never by pattern, so a ``#`` inside a
+    string literal, or a triple-quoted string holding code, cannot fool it.
+
+    The interior lines of a multi-line non-docstring string are not charged
+    either: ``tokenize`` reports one STRING token on the opening line only. That
+    undercounts rather than overcounts, which is the right way for a ceiling to
+    be wrong.
+    """
+    docstring_lines: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            continue
+        body = getattr(node, "body", None)
+        first = body[0] if body else None
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            docstring_lines.update(
+                range(first.lineno, (first.end_lineno or first.lineno) + 1)
+            )
+
+    code_lines = {
+        tok.start[0]
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline)
+        if tok.type not in _STRUCTURAL_TOKENS
+    }
+    return len(code_lines - docstring_lines)
 
 
 def app_python_files(*, exclude: frozenset[str] = SANCTIONED) -> tuple[pathlib.Path, ...]:

@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
-from app.constants import ENGINE_BATCH_CONCURRENCY_MULTIPLIER
+from app.constants import ENGINE_BATCH_CONCURRENCY_MULTIPLIER, is_transient_classification
 from app.crawl.admission import (
     AdmittedLink,
     admit_discovered_links,
@@ -31,13 +31,15 @@ from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.validation import HostPolicy, registrable_domain
 
-# A pool-exhausted URL was never attempted: the page is fine, capacity was the
-# problem. The recursive loop re-queues it onto the frontier tail so the
-# at-least-once contract holds for capacity failures the same way it holds for
-# crash recovery (memory #1947). The cap stops a permanently oversubscribed
-# crawl from spinning one URL forever: after this many re-queues the URL fails
-# for real and the crawl degrades instead of livelocking.
-MAX_POOL_EXHAUSTION_REQUEUES = 3
+# A transiently-failed URL is not a dead page: our fetch died, or capacity was
+# the problem, so the page itself is still worth having. The recursive loop
+# re-queues such a task onto the frontier tail so the at-least-once contract
+# holds for a DNS blip and an exhausted renderer pool alike (memory #1947). The
+# cap stops a permanently unreachable host from spinning one URL forever: after
+# this many re-queues the URL fails for real and the crawl degrades instead of
+# livelocking. Which failures qualify is the taxonomy's call, not a local list
+# -- see ``app.constants.is_transient_classification``.
+MAX_TRANSIENT_REQUEUES = 3
 
 
 def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
@@ -51,27 +53,32 @@ def _engine_envelope(job: CrawlTask, exc: BaseException) -> EngineCrawlResult:
     return _failed_result_for(job, exc, url_of=lambda j: j.original_url)
 
 
-def requeue_pool_exhausted(
+def requeue_transient(
     task: CrawlTask,
     *,
     depth: int,
     frontier: deque[tuple[int, CrawlTask]],
     attempts: dict[str, int],
 ) -> bool:
-    """Re-queue a pool-exhausted task to the frontier tail, up to the cap.
+    """Re-queue a transiently-failed task to the frontier tail, up to the cap.
 
     Returns True when the task was re-queued (the caller must NOT record it as
     a permanent failure) and False when the cap is exhausted (the caller lets
     the classified result stand). ``attempts`` maps the normalized URL to how
     many times it has already been re-queued and is mutated in place.
+
+    Whether a classification is transient at all is the taxonomy's call (see
+    ``app.constants.is_transient_classification``); this function owns only the
+    bound, so the cap cannot be sidestepped by a caller re-queueing for its own
+    reason.
     """
     count = attempts.get(task.normalized_url, 0)
-    if count >= MAX_POOL_EXHAUSTION_REQUEUES:
+    if count >= MAX_TRANSIENT_REQUEUES:
         return False
     attempts[task.normalized_url] = count + 1
-    # Depth stays unchanged: a capacity retry is not a deeper crawl, and
-    # re-queueing at the tail preserves BFS order so an oversubscribed crawl
-    # does not starve the rest of the batch.
+    # Depth stays unchanged: a retry is not a deeper crawl, and re-queueing at
+    # the tail preserves BFS order so an oversubscribed crawl does not starve
+    # the rest of the batch.
     frontier.append((depth, task))
     return True
 
@@ -116,7 +123,7 @@ class _RecursiveState:
     next_index: int
     ramp: float
     page_count: int = 0
-    pool_exhaustion_attempts: dict[str, int] = field(default_factory=dict)
+    transient_requeues: dict[str, int] = field(default_factory=dict)
 
     def make_admitted_task(self, link: AdmittedLink) -> tuple[int, CrawlTask]:
         task = CrawlTask(
@@ -199,11 +206,11 @@ async def _commit_recursive_result(
     depth: int,
     result: EngineCrawlResult,
 ) -> bool:
-    if result.classification == "browser_pool_exhausted" and requeue_pool_exhausted(
+    if is_transient_classification(result.classification) and requeue_transient(
         job,
         depth=depth,
         frontier=state.frontier,
-        attempts=state.pool_exhaustion_attempts,
+        attempts=state.transient_requeues,
     ):
         state.visited.discard(job.normalized_url)
         return False
