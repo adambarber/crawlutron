@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
+# A clone's location: repo-relative path and the line range jscpd reported.
+LocationKey = tuple[str, int, int]
+# Both sides of a clone, sorted so the pair has one representation.
+LocationPair = tuple[LocationKey, LocationKey]
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
 MIN_SOURCES = {"all": 200}
@@ -88,21 +92,6 @@ def _validate_scan_config(path: Path) -> None:
             f"(added={added}, removed={removed}); the sanctioned globs live in "
             f"_jscpd_gate.SANCTIONED_IGNORE_GLOBS"
         )
-
-
-def _pair_id(duplicate: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
-    locations = []
-    for side in ("firstFile", "secondFile"):
-        location = duplicate[side]
-        path = str(location["name"])
-        locations.append(
-            (
-                path if "/" in path else f"app/{path}",
-                int(location["start"]),
-                int(location["end"]),
-            )
-        )
-    return tuple(sorted(locations))
 
 
 def _fragment_hash(duplicate: dict[str, Any]) -> str:
@@ -194,18 +183,35 @@ def _expected_pairs() -> list[dict[str, Any]]:
     return document["pairs"]
 
 
-def _expected_id(pair: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
-    locations = []
-    for side in ("first", "second"):
-        location = pair[side]
-        locations.append(
-            (
-                str(location["path"]),
-                int(location["start"]),
-                int(location["end"]),
-            )
-        )
-    return tuple(sorted(locations))
+def _location_pair(entries: list[LocationKey]) -> LocationPair:
+    first, second = sorted(entries)
+    return (first, second)
+
+
+def _location(container: dict[str, Any], side: str, path_key: str, default_dir: str | None = None) -> LocationKey:
+    path = str(container[side][path_key])
+    if default_dir is not None and "/" not in path:
+        path = f"{default_dir}/{path}"
+    return (path, int(container[side]["start"]), int(container[side]["end"]))
+
+
+def _expected_locations(pair: dict[str, Any]) -> LocationPair:
+    return _location_pair([_location(pair, side, "path") for side in ("first", "second")])
+
+
+def _pair_id(duplicate: dict[str, Any]) -> LocationPair:
+    """Where jscpd says a clone is.
+
+    Its `name` is relative to the scan root, so a name with no directory
+    component is a file at the root of the tree. Those are attributed to `app/`,
+    the strictest tree, so a stray root-level file is gated as production rather
+    than passing through unclassified.
+    """
+    return _location_pair([_location(duplicate, side, "name", "app") for side in ("firstFile", "secondFile")])
+
+
+def _short(fragment_hash: str) -> str:
+    return fragment_hash[:12]
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -244,48 +250,91 @@ def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        actual_duplicates: dict[tuple[tuple[str, int, int], ...], dict[str, Any]] = {}
-        actual_fragments: dict[tuple[tuple[str, int, int], ...], str] = {}
+        # A sanctioned clone is identified by its CONTENT. Identity used to be
+        # (path, start, end), and `missing` was tested before `mismatched`, so
+        # inserting one comment line above a sanctioned clone reported it as a
+        # disappearance and the fix-forward was to copy the coordinates out of
+        # the error message into the expectation -- an expectation whose stated
+        # location nothing ever checked. Content identity makes a moved clone
+        # the same clone, which turns that into drift: a failure that names the
+        # expectation and states where the content is now, so correcting it is a
+        # reviewed edit rather than a copy of whatever the tool printed.
+        actual_locations: dict[str, set[LocationPair]] = {}
+        actual_duplicate: dict[str, dict[str, Any]] = {}
         for duplicate in report["duplicates"]:
-            pair_id = _pair_id(duplicate)
             fragment_hash = _fragment_hash(duplicate)
-            if pair_id in actual_fragments and actual_fragments[pair_id] != fragment_hash:
-                raise ValueError(f"jscpd reported conflicting fragments for {pair_id}")
-            actual_duplicates[pair_id] = duplicate
-            actual_fragments[pair_id] = fragment_hash
-        actual = set(actual_fragments)
-        expected = {_expected_id(pair): pair for pair in _expected_pairs()}
-        missing = sorted(expected.keys() - actual)
-        if missing:
-            for pair_id in missing:
-                print(f"jscpd {args.profile}: expected clone is missing: {pair_id}", file=sys.stderr)
-            return 1
-        mismatched = [
-            pair_id
-            for pair_id, pair in expected.items()
-            if actual_fragments[pair_id] != pair["fragment_sha256"]
-        ]
-        if mismatched:
-            for pair_id in sorted(mismatched):
-                print(f"jscpd {args.profile}: expected clone fragment changed: {pair_id}", file=sys.stderr)
-            return 1
-        unexpected = actual - expected.keys()
-        if unexpected:
-            for pair_id in sorted(unexpected):
-                print(f"jscpd {args.profile}: unsanctioned clone: {pair_id}", file=sys.stderr)
+            actual_locations.setdefault(fragment_hash, set()).add(_pair_id(duplicate))
+            actual_duplicate.setdefault(fragment_hash, duplicate)
+
+        expected: dict[str, dict[str, Any]] = {}
+        for pair in _expected_pairs():
+            fragment_hash = str(pair["fragment_sha256"])
+            if fragment_hash in expected:
+                raise ValueError(
+                    f"two jscpd expectations ({expected[fragment_hash]['id']!r} and {pair['id']!r}) "
+                    f"claim the same fragment { _short(fragment_hash) }"
+                )
+            expected[fragment_hash] = pair
+
+        unsanctioned = sorted(set(actual_locations) - set(expected))
+        missing = sorted(set(expected) - set(actual_locations))
+        drifted: list[tuple[dict[str, Any], tuple[LocationPair, ...]]] = []
+        undeclared: list[tuple[dict[str, Any], list[LocationPair]]] = []
+        for fragment_hash, pair in expected.items():
+            found = actual_locations.get(fragment_hash)
+            if not found:
+                continue
+            found_keys = {key for location_pair in found for key in location_pair}
+            declared = _expected_locations(pair)
+            if not set(declared) <= found_keys:
+                drifted.append((pair, tuple(sorted(found))))
+                continue
+            extra = sorted(found_keys - set(declared))
+            if extra:
+                undeclared.append((pair, extra))
+
+        if unsanctioned or missing or drifted or undeclared:
+            for fragment_hash in unsanctioned:
+                for location in sorted(actual_locations[fragment_hash]):
+                    print(
+                        f"jscpd {args.profile}: unsanctioned clone: {location} "
+                        f"sha256={_short(fragment_hash)}",
+                        file=sys.stderr,
+                    )
+            for fragment_hash in missing:
+                print(
+                    f"jscpd {args.profile}: expected clone is missing: "
+                    f"id={expected[fragment_hash]['id']} sha256={_short(fragment_hash)}. "
+                    f"Either the duplication was fixed, in which case delete the expectation on "
+                    f"purpose, or its content changed, in which case it is an unsanctioned clone above.",
+                    file=sys.stderr,
+                )
+            for pair, found in drifted:
+                print(
+                    f"jscpd {args.profile}: expected clone drifted: id={pair['id']} declares "
+                    f"{_expected_locations(pair)} but its content is now at {list(found)}. "
+                    f"Update the expectation to match, in this commit, on purpose.",
+                    file=sys.stderr,
+                )
+            for pair, extra in undeclared:
+                print(
+                    f"jscpd {args.profile}: sanctioned clone also appears undeclared: "
+                    f"id={pair['id']} at {extra}",
+                    file=sys.stderr,
+                )
             return 1
         percentage = float(statistics["percentage"])
         duplicated_lines = int(statistics["duplicatedLines"])
         sanctioned_lines = sum(
             min(
-                int(actual_duplicates[pair_id]["firstFile"]["end"])
-                - int(actual_duplicates[pair_id]["firstFile"]["start"])
+                int(actual_duplicate[fragment_hash]["firstFile"]["end"])
+                - int(actual_duplicate[fragment_hash]["firstFile"]["start"])
                 + 1,
-                int(actual_duplicates[pair_id]["secondFile"]["end"])
-                - int(actual_duplicates[pair_id]["secondFile"]["start"])
+                int(actual_duplicate[fragment_hash]["secondFile"]["end"])
+                - int(actual_duplicate[fragment_hash]["secondFile"]["start"])
                 + 1,
             )
-            for pair_id in expected
+            for fragment_hash in expected
         )
         unsanctioned_lines = max(0, duplicated_lines - sanctioned_lines)
         total_lines = int(statistics.get("lines", 0))
@@ -302,7 +351,7 @@ def _run(args: argparse.Namespace) -> int:
             return 1
         sanctioned = len(expected)
         print(
-            f"jscpd {args.profile}: {len(actual)} pairs, {sanctioned} sanctioned, "
+            f"jscpd {args.profile}: {len(actual_duplicate)} pairs, {sanctioned} sanctioned, "
             f"{statistics['duplicatedLines']} duplicated lines ({percentage:.6f}%)"
         )
         return 0

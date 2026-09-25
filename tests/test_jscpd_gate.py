@@ -206,6 +206,55 @@ def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
     gate._validate_scan_config(gate.CONFIG_PATH)
 
 
+def _at(first: tuple[str, int, int], second: tuple[str, int, int], fragment: str = "duplicate") -> dict:
+    (first_path, first_start, first_end), (second_path, second_start, second_end) = first, second
+    return {
+        "firstFile": {"name": first_path, "start": first_start, "end": first_end},
+        "secondFile": {"name": second_path, "start": second_start, "end": second_end},
+        "fragment": fragment,
+    }
+
+
+DECLARED_FIRST = ("app/new.py", 10, 20)
+DECLARED_SECOND = ("app/other.py", 30, 40)
+
+
+def _shifted_by_one_line() -> dict:
+    """The same content one line lower: a comment was inserted above the clone."""
+    return _at(("app/new.py", 11, 21), ("app/other.py", 31, 41))
+
+
+def test_a_sanctioned_clone_that_moved_is_drift_not_a_disappearance(monkeypatch, tmp_path, capsys) -> None:
+    """Identity is the content, so moving a clone is recognised, not lost.
+
+    Identity used to be (path, start, end) and `missing` was checked before
+    `mismatched`, so inserting one comment line above a sanctioned clone
+    reported it as missing and the way forward was to copy the new coordinates
+    out of the error message into the expectation. The expectation's location
+    was therefore a self-report the gate never checked.
+    """
+    _configure(monkeypatch, tmp_path, _valid_pair(), [_shifted_by_one_line()])
+    assert gate.main() == 1
+    reported = capsys.readouterr().err
+    assert "missing" not in reported, f"a moved clone is not a missing clone:\n{reported}"
+    assert "new-clone" in reported, f"the failure must name the expectation, not coordinates:\n{reported}"
+    assert "drift" in reported.lower(), f"the failure must be reported as drift:\n{reported}"
+    assert "app/new.py" in reported and "11" in reported, (
+        f"the drift must state where it is now, so the expectation edit is deliberate:\n{reported}"
+    )
+
+
+def test_expectation_location_must_match_the_report_it_claims_to_pin(monkeypatch, tmp_path, capsys) -> None:
+    """The declared bounds are checked, so they cannot quietly go stale."""
+    pair = _valid_pair()
+    pair["first"] = {"path": "app/new.py", "start": 999, "end": 1000}
+    _configure(monkeypatch, tmp_path, pair, [_at(DECLARED_FIRST, DECLARED_SECOND)])
+    assert gate.main() == 1
+    reported = capsys.readouterr().err
+    assert "drift" in reported.lower(), f"a wrong declared location must be drift:\n{reported}"
+    assert "999" in reported, f"the failure must show the location the expectation claims:\n{reported}"
+
+
 def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered() -> None:
     """The exclusion is a subtree, not a list of today's migration files.
 
