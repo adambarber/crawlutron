@@ -21,8 +21,12 @@ there is no known-acceptable finding left, so any new one is either a real defec
 or a suppression that has to be argued for in pyrightconfig.json. A count would
 only be a number to ratchet, and this one did not need one.
 
-Skipped when pyright is absent, so a runtime-only install does not fail the
-suite on a development tool it was never given.
+This gate FAILS when pyright is absent. It used to skip, and that was how a
+green result came to mean nothing: CI installs `.[dev]`, pyright was only ever
+in requirements-dev.txt, which no workflow reads, so the pre-commit hook
+printed "pyright budget ... Passed" while both substantive checks skipped. A
+gate that cannot tell "clean" from "not run" is not a gate, so the tool is now
+a declared dev dependency and its absence is an error.
 """
 
 from __future__ import annotations
@@ -31,10 +35,13 @@ import json
 import pathlib
 import shutil
 import subprocess
+import sys
+import tomllib
 
 import pytest
 
 SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
+_THIS_MODULE = sys.modules[__name__]
 
 # Fourteen on first run. Eleven were fixed or suppressed with a documented
 # reason. The four that remain are:
@@ -91,16 +98,70 @@ def _pyright() -> str | None:
     return shutil.which("pyright")
 
 
-def test_pyright_whole_tree_is_clean() -> None:
+def _require_pyright() -> str:
+    """The tool, or a failure. Never a skip.
+
+    A skip here is indistinguishable from a pass in a pre-commit hook's output
+    and in a CI log's green tick, which is the whole reason this function
+    exists: the budget is a gate, and a gate that reports success without
+    running has to be the loudest thing in the file.
+    """
     executable = _pyright()
     if executable is None:
-        pytest.skip("pyright is not installed; install the dev requirements")
+        pytest.fail(
+            "pyright is not installed, so this gate proved nothing: the budget is "
+            "asserted against no analysis at all. It is declared in the dev extra "
+            "that CI installs, so this means the environment is wrong, not that "
+            "the tree is clean. Install it with `pip install -e .[dev]`."
+        )
+    return executable
+
+
+def _interpreter() -> str:
+    """The interpreter pyright should resolve imports against.
+
+    CI creates no `.venv` -- it installs the package into the runner's Python --
+    so pointing pyright at a venv that is not there made the gate depend on a
+    path that only exists locally.
+    """
+    venv_python = SERVICE_ROOT / ".venv" / "bin" / "python"
+    return str(venv_python if venv_python.exists() else pathlib.Path(sys.executable))
+
+
+def test_pyright_is_declared_in_the_dev_extra_ci_installs() -> None:
+    """requirements-dev.txt is not read by any workflow, so it is not a source.
+
+    `pip install -e ".[dev]"` is what CI runs, so a tool that is only in
+    requirements-dev.txt is absent in CI and the gate that needs it is the one
+    thing that cannot tell.
+    """
+    pyproject = tomllib.loads((SERVICE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dev = pyproject["project"]["optional-dependencies"]["dev"]
+    pinned = [entry for entry in dev if entry.split("==")[0].strip() == "pyright"]
+    assert pinned, f"pyright is not in the dev extra CI installs: {dev}"
+    assert "==" in pinned[0], f"pyright must be pinned, like every other gate tool: {pinned[0]!r}"
+
+
+def test_a_missing_pyright_is_a_failure_not_a_skip(monkeypatch) -> None:
+    monkeypatch.setattr(_THIS_MODULE, "_pyright", lambda: None)
+    with pytest.raises(pytest.fail.Exception):
+        _require_pyright()
+
+
+def test_the_gate_resolves_the_interpreter_that_actually_ran_it() -> None:
+    """A venv path that only exists locally is not a resolution strategy."""
+    resolved = pathlib.Path(_interpreter())
+    assert resolved.exists(), f"pyright would be pointed at a missing interpreter: {resolved}"
+
+
+def test_pyright_whole_tree_is_clean() -> None:
+    executable = _require_pyright()
 
     completed = subprocess.run(
         [
             executable,
             "--pythonpath",
-            str(SERVICE_ROOT / ".venv" / "bin" / "python"),
+            _interpreter(),
             "--outputjson",
         ],
         cwd=SERVICE_ROOT,
@@ -129,11 +190,9 @@ def test_pyright_whole_tree_is_clean() -> None:
 
 def test_pyright_budget_is_tight() -> None:
     """A budget above the measurement is a standing allowance, not a ratchet."""
-    executable = _pyright()
-    if executable is None:
-        pytest.skip("pyright is not installed; install the dev requirements")
+    executable = _require_pyright()
     completed = subprocess.run(
-        [executable, "--pythonpath", str(SERVICE_ROOT / ".venv" / "bin" / "python"), "--outputjson"],
+        [executable, "--pythonpath", _interpreter(), "--outputjson"],
         cwd=SERVICE_ROOT,
         capture_output=True,
         text=True,

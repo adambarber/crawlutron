@@ -86,6 +86,14 @@ dev = [
     "types-regex==2026.9.10.20260911",
     "types-lxml==2026.2.16",
     "mypy==2.3.1",
+    # The third type checker, and the only one that sees annotation lies mypy
+    # structurally cannot here. It was pinned only in requirements-dev.txt, which
+    # no workflow reads: CI installs this extra, so pyright was absent there and
+    # tests/test_pyright_budget.py -- a fail gate on it -- skipped in both the
+    # `typecheck` job and the pre-commit hook while reporting success. Pinned for
+    # the same reason as mypy: a new release must not turn a build red with no
+    # repository change.
+    "pyright==1.1.406",
 ]
 
 [project.urls]
