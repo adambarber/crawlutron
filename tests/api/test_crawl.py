@@ -7,10 +7,10 @@ import time
 import pytest
 from _assertions import browser_available
 from _fetcher_factories import make_crawl_payload
+from _job_harnesses import post_render_with_pool
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.crawl.strategies.browser_pool import set_browser_pool
 from app.main import app
 
 
@@ -263,10 +263,7 @@ class TestDiscoveryAndRenderApi:
         import app.api.render_endpoint as render_endpoint
         from app.constants import BROWSER_HEADLESS
         from app.crawl.result_helpers import _crawl_result_from_exception
-        from app.crawl.strategies.browser_pool import (
-            BrowserPoolExhaustedError,
-            set_browser_pool,
-        )
+        from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 
         class _ExhaustedWorker:
             def __init__(self, pool):
@@ -285,11 +282,7 @@ class TestDiscoveryAndRenderApi:
                     )
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _ExhaustedWorker)
-        old = set_browser_pool(object())
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
+        resp = await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x")
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
 
@@ -309,7 +302,6 @@ class TestDiscoveryAndRenderApi:
         # only static signal of the polymorphism, so nothing else catches a
         # future caller that lets one escape.
         import app.api.render_endpoint as render_endpoint
-        from app.crawl.strategies.browser_pool import set_browser_pool
 
         secret = "SECRET_TOKEN_ABC123_INTERNAL_PATH=/etc"
 
@@ -321,11 +313,7 @@ class TestDiscoveryAndRenderApi:
                 raise RuntimeError(f"boom: {secret}")
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _RaisingWorker)
-        old = set_browser_pool(object())
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
+        resp = await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x")
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["submitted_count"] == 1
@@ -341,17 +329,11 @@ class TestDiscoveryAndRenderApi:
     async def test_v1_render_without_pool_returns_503(self):
         # M13: a None browser pool (startup/shutdown window) must surface as
         # a clean 503, not an AttributeError 500 from inside the worker.
-        from app.crawl.strategies.browser_pool import set_browser_pool
-
-        old = set_browser_pool(None)
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
+        resp = await post_render_with_pool(self.client, None, "http://127.0.0.1:1/x")
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
 
-    def _warmed_pool_endpoint(self, monkeypatch, warmup_urls):
+    def _warmed_pool(self, monkeypatch, warmup_urls):
         """A real ``/v1/render`` whose pool serves renders in a chosen mode.
 
         Only the browser is faked (no binary in CI): the pool, its
@@ -389,15 +371,12 @@ class TestDiscoveryAndRenderApi:
 
         monkeypatch.setattr(pool, "acquire", _acquire)
         monkeypatch.setattr(pool, "release", lambda _renderer: None)
-        return set_browser_pool(pool)
+        return pool
 
     async def _render_result(self, monkeypatch, warmup_urls):
         """Post through a selected browser-pool mode and return the wire result."""
-        old = self._warmed_pool_endpoint(monkeypatch, warmup_urls)
-        try:
-            response = await self.client.post("/v1/render", json={"url": "http://127.0.0.1:1/x"})
-        finally:
-            set_browser_pool(old)
+        pool = self._warmed_pool(monkeypatch, warmup_urls)
+        response = await post_render_with_pool(self.client, pool, "http://127.0.0.1:1/x")
         assert response.status_code == 200, response.text
         return response.json()["results"][0]
 
@@ -422,11 +401,8 @@ class TestDiscoveryAndRenderApi:
         assert item["attempted_strategies"][0]["strategy"] == BROWSER_HEADLESS, item
 
     async def test_v1_render_rejects_invalid_url_before_browser(self, monkeypatch):
-        old = self._warmed_pool_endpoint(monkeypatch, ["https://warmup.example/"])
-        try:
-            resp = await self.client.post("/v1/render", json={"url": "not a url"})
-        finally:
-            set_browser_pool(old)
+        pool = self._warmed_pool(monkeypatch, ["https://warmup.example/"])
+        resp = await post_render_with_pool(self.client, pool, "not a url")
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "validation_error"
 

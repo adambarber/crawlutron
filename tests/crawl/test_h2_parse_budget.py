@@ -23,11 +23,9 @@ duplicated parse inside a stage fails here rather than in a perf profile.
 """
 
 import pytest
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, run_http_strategy
 
 from app.crawl import extraction
-from app.crawl.strategies.http import _http_strategy_result
-from app.validation import HostPolicy
 
 HTML = (
     "<html><head><title>T</title></head><body>"
@@ -69,14 +67,11 @@ async def _run(policy_extra: dict, *, html: str = HTML):
             body=html.encode(),
         )
 
-    return await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
+    return await run_http_strategy(
+        url="http://example.com/",
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}, **policy_extra},
         http_fetcher=fetcher,
         caller_validators=None,
-        host_policy=HostPolicy.unrestricted(),
     )
 
 

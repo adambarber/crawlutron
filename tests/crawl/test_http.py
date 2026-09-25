@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, run_http_strategy
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
@@ -297,7 +297,6 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 class TestHttpStrategyRetry:
     async def test_http_strategy_with_cffi_retry(self):
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
 
         call_count = [0]
 
@@ -315,10 +314,8 @@ class TestHttpStrategyRetry:
 
             return Resp()
 
-        result = await _http_strategy_result(
-            original_url="http://x/",
-            normalized_url="http://x/",
-            strategy="HTTP_DECLARED_CRAWLER",
+        result = await run_http_strategy(
+            url="http://x/",
             policy={
                 "strategies": ["HTTP_DECLARED_CRAWLER"],
                 "extraction": "full",
@@ -327,6 +324,5 @@ class TestHttpStrategyRetry:
             },
             http_fetcher=retry_fetcher,
             cache=HttpCache(),
-            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "rendered"

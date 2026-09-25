@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, make_html_fetcher
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as pool_mod
@@ -23,20 +23,6 @@ def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
     )
 
 
-def _html_fetcher(calls: list[str], body: bytes):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(url)
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            ctype="text/html",
-            body=body,
-        )
-
-    return fetcher
-
-
 @pytest.mark.parametrize(
     ("allowed", "denied"),
     [
@@ -48,7 +34,7 @@ def _html_fetcher(calls: list[str], body: bytes):
 async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allowed, denied):
     calls: list[str] = []
 
-    fetcher = _html_fetcher(
+    fetcher = make_html_fetcher(
         calls,
         b'<html><body><a href="https://blocked.test/secret">blocked</a></body></html>',
     )
@@ -213,7 +199,7 @@ async def test_allow_listed_private_target_is_still_refused(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     calls: list[str] = []
 
-    fetcher = _html_fetcher(calls, b"<html></html>")
+    fetcher = make_html_fetcher(calls, b"<html></html>")
 
     with pytest.raises(ValueError, match="private_network_target"):
         await crawl_request(

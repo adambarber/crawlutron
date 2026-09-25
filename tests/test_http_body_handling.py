@@ -2,44 +2,33 @@
 
 import pytest
 from _extraction_helpers import _default_http_fetcher
+from _fetcher_factories import run_http_strategy
 from _policy_factories import _policy
 
-from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
-from app.validation import HostPolicy
 
 
 class TestHttpBodyHandling:
     async def test_cache_last_modified_store(self, base_url):
-        from app.crawl.strategies.http import _http_strategy_result
-
         cache = HttpCache()
-        out = await _http_strategy_result(
-            original_url=base_url + "/with_lastmod",
-            normalized_url=base_url + "/with_lastmod",
-            strategy=HTTP_DECLARED_CRAWLER,
+        out = await run_http_strategy(
+            url=base_url + "/with_lastmod",
             policy=_policy(),
             http_fetcher=_default_http_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         assert out.status == "success"
         etag, last_modified = cache.get(base_url + "/with_lastmod")
         assert (last_modified) is not None
 
     async def test_rate_limit_cooldown(self, base_url):
-        from app.crawl.strategies.http import _http_strategy_result
-
         cache = HttpCache()
-        out = await _http_strategy_result(
-            original_url=base_url + "/ratelimit",
-            normalized_url=base_url + "/ratelimit",
-            strategy=HTTP_DECLARED_CRAWLER,
+        out = await run_http_strategy(
+            url=base_url + "/ratelimit",
             policy=_policy(),
             http_fetcher=_default_http_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         assert out.http_status == 429
         assert "cooldown" in out.diagnostics

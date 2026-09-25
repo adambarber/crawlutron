@@ -15,25 +15,25 @@ from unittest.mock import MagicMock
 import pytest
 from _job_harnesses import (
     _create_api_job,
-    _execution_policy,
     _fake_execute,
     _fake_execute_scripted,
     _make_app,
     _run_job_to_completed,
     _run_persisted_job,
     _run_scripted_job,
-    _run_scripted_persisted_job,
     _seed_job,
     _wait_status,
     _wait_until,
+    make_job_store,
+    post_api_job,
     run_job_control_test,
+    run_seeded_scripted_job,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _result_builders import _canned_result, _link, _scripted_result_map, _small_link_graph_results
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.crawl.job_store import FrontierEntry, JobStatus, JobStore
+from app.crawl.job_store import FrontierEntry, JobStatus
 from app.settings import CrawlerSettings
 
 
@@ -47,7 +47,7 @@ def _fresh_runner():
 
 @pytest.fixture
 def job_store(tmp_path):
-    return JobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
+    return make_job_store(tmp_path)
 
 
 @pytest.fixture
@@ -572,25 +572,13 @@ class TestTransientFailureRequeue:
         assert job.visited == {"http://example.test/a"}
 
     async def test_unknown_action_rejected(self, client, job_store, real_sleeps):
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
+        resp = await post_api_job(client, "http://example.test/a")
         job_id = resp.json()["job_id"]
         bad = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "explode"})
         assert bad.status_code == 422
 
     async def test_pause_non_running_conflicts(self, client, job_store, real_sleeps):
-        resp = await client.post(
-            "/v1/jobs",
-            json={
-                "root_url": "http://example.test/a",
-                "policy": _execution_policy(None),
-            },
-        )
+        resp = await post_api_job(client, "http://example.test/a")
         job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"completed", "failed"})
         conflict = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
@@ -1067,11 +1055,12 @@ class TestWholeSiteAdmissionContract:
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        job = _seed_job(job_store, root, self._policy(1, 2), frontier=[root, child])
-        finished, attempts = await _run_scripted_persisted_job(
-            job,
+        finished, attempts = await run_seeded_scripted_job(
             job_store,
+            root,
+            self._policy(1, 2),
             _scripted_result_map((root, child), links={root: [child]}),
+            frontier=[root, child],
         )
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}
@@ -1085,11 +1074,12 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=test"
         child = "https://example.test/child"
-        job = _seed_job(job_store, root, self._policy(1, 2), frontier=[root, root_alias, child])
-        finished, attempts = await _run_scripted_persisted_job(
-            job,
+        finished, attempts = await run_seeded_scripted_job(
             job_store,
+            root,
+            self._policy(1, 2),
             _scripted_result_map((root, child)),
+            frontier=[root, root_alias, child],
         )
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}
@@ -1100,18 +1090,14 @@ class TestWholeSiteAdmissionContract:
         self, job_store, real_sleeps
     ):
         urls = [f"https://example.test/page-{index}" for index in range(10)]
-        job = _seed_job(
+        finished, attempts = await run_seeded_scripted_job(
             job_store,
             urls[0],
             self._policy(1, 2),
+            _scripted_result_map(urls),
             frontier=[],
             in_flight=urls,
             running=True,
-        )
-        finished, attempts = await _run_scripted_persisted_job(
-            job,
-            job_store,
-            _scripted_result_map(urls),
         )
         assert attempts == {url: 1 for url in urls}
         assert finished.visited == set(urls)
@@ -1123,18 +1109,14 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=legacy"
         child = "https://example.test/child"
-        job = _seed_job(
+        finished, attempts = await run_seeded_scripted_job(
             job_store,
             root,
             self._policy(1, 2),
+            _scripted_result_map((root, child)),
             frontier=[child, root_alias],
             in_flight=[root],
             running=True,
-        )
-        finished, attempts = await _run_scripted_persisted_job(
-            job,
-            job_store,
-            _scripted_result_map((root, child)),
         )
         assert attempts == {root: 1, child: 1}
         assert finished.visited == {root, child}

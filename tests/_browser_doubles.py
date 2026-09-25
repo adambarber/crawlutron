@@ -154,4 +154,55 @@ __all__ = [
     "_fake_browser",
     "build_pinned_renderer",
     "pinned_renderer",
+    "blocking_pinned_request",
+    "response_handler_double",
+    "run_blocking_document_route",
 ]
+
+
+def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
+    import threading
+    import time
+
+    def build(url, headers, *, policy):
+        thread_ids.append(threading.get_ident())
+        time.sleep(delay)
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+    return build
+
+
+def response_handler_double(url: str, payload=None, error=None):
+    from app.crawl.strategies.browser import BrowserRenderer
+
+    collected: list[dict] = []
+    handler = BrowserRenderer._make_response_handler(collected)
+    response_url = url
+
+    class FakeResponse:
+        headers = {"content-type": "application/json"}
+        url = response_url
+        status = 200
+
+        async def json(self):
+            if error is not None:
+                raise error
+            return payload
+
+    return collected, handler, FakeResponse()
+
+
+async def run_blocking_document_route(monkeypatch, browser_module):
+    import threading
+
+    from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+    from app.crawl.strategies.browser import _make_ssrf_route_handler
+
+    thread_ids: list[int] = []
+    monkeypatch.setattr(browser_module, "_build_pinned_request", blocking_pinned_request(thread_ids))
+    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    route = FakeRoute()
+    await handler(route, FakeRequest("http://example.com/", "document"))
+    ran_off_loop = bool(thread_ids and thread_ids[0] != threading.main_thread().ident)
+    return route, ran_off_loop

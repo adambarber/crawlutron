@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_html_fetcher
 
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request
@@ -27,20 +27,6 @@ def _policy(*, respect_robots: bool = True) -> dict:
             "respect_robots": respect_robots,
         },
     }
-
-
-def _page_fetcher(calls: list[str]):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(url)
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            ctype="text/html",
-            body=b"<html><body>page content</body></html>",
-        )
-
-    return fetcher
 
 
 async def test_job_fetch_populates_cache_seen_by_engine():
@@ -69,7 +55,7 @@ async def test_job_fetch_populates_cache_seen_by_engine():
     page_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://shared.test/public", "policy": _policy()},
-        http_fetcher=_page_fetcher(page_calls),
+        http_fetcher=make_html_fetcher(page_calls),
     )
     assert result["results"][0]["status"] == "success"
     assert fetch_calls == 1
@@ -86,7 +72,7 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     engine_calls: list[str] = []
     result = await crawl_request(
         {"url": "https://reverse.test/public", "policy": _policy()},
-        http_fetcher=_page_fetcher(engine_calls),
+        http_fetcher=make_html_fetcher(engine_calls),
     )
     assert result["results"][0]["status"] == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
@@ -127,7 +113,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
         *(
             crawl_request(
                 {"url": f"https://flight.test/page-{index}", "policy": _policy()},
-                http_fetcher=_page_fetcher([]),
+                http_fetcher=make_html_fetcher([]),
             )
             for index in range(5)
         )
@@ -200,7 +186,7 @@ async def test_respect_false_does_not_fetch_robots_even_when_discovery_requests_
                 "discovery": {"robots": True},
             },
         },
-        http_fetcher=_page_fetcher(calls),
+        http_fetcher=make_html_fetcher(calls),
     )
     assert result["results"][0]["status"] == "success"
     robots_diagnostics = result["results"][0]["diagnostics"]["robots"]

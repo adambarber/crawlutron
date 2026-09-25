@@ -5,11 +5,10 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, run_http_strategy
+from _policy_factories import http_strategy_policy
 
 from app.crawl.engine import crawl_request
-from app.crawl.strategies.http import _http_strategy_result
-from app.validation import HostPolicy
 
 
 def _html(body: str) -> str:
@@ -18,14 +17,11 @@ def _html(body: str) -> str:
 
 async def _run_http(fetcher, validators=None):
     """Drive _http_strategy_result with the standard single-page policy."""
-    return await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
+    return await run_http_strategy(
+        url="http://example.com/",
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"], "limits": {}, "headers": {}},
         http_fetcher=fetcher,
         caller_validators=validators,
-        host_policy=HostPolicy.unrestricted(),
     )
 
 
@@ -231,7 +227,6 @@ async def test_malformed_gzip_is_rejected_by_strategy():
 class TestNotModifiedResponse:
     async def test_http_strategy_not_modified(self):
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
 
         def not_mod_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
             class Resp:
@@ -245,18 +240,10 @@ class TestNotModifiedResponse:
 
         cache = HttpCache()
         cache.store("http://example.com/", {"etag": "v1"})
-        result = await _http_strategy_result(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            strategy="HTTP_DECLARED_CRAWLER",
-            policy={
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            },
+        result = await run_http_strategy(
+            url="http://example.com/",
+            policy=http_strategy_policy(),
             http_fetcher=not_mod_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "not_modified"

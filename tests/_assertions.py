@@ -2,6 +2,7 @@ import ast
 import asyncio
 import functools
 import inspect
+import json
 import os
 
 import pytest
@@ -133,6 +134,57 @@ __all__ = [
     "extract_function_body",
     "install_to_thread_spy",
     "poll_until",
+    "poll_crawl_completion",
+    "poll_webhook_delivery",
+    "submit_async_crawl",
     "provider_results",
     "set_optional_env",
 ]
+
+
+async def poll_webhook_delivery(records, *, timeout: float = 10.0, interval: float = 0.1):
+    await poll_until(
+        lambda: len(records) == 1,
+        timeout=timeout,
+        interval=interval,
+        message="Webhook not delivered in time",
+    )
+    return json.loads(records[0].decode("utf-8"))
+
+
+async def poll_crawl_completion(
+    client,
+    request_id: str,
+    *,
+    timeout: float = 15.0,
+    interval: float = 0.1,
+    message: str = "Async crawl did not complete in time",
+    on_pending=None,
+):
+    response = None
+
+    async def done() -> bool:
+        nonlocal response
+        response = await client.get(f"/v1/crawl/{request_id}")
+        if response.status_code != 200 and on_pending is not None:
+            on_pending(response)
+        return response.status_code == 200
+
+    await poll_until(done, timeout=timeout, interval=interval, message=message)
+    return response
+
+
+async def submit_async_crawl(
+    client,
+    payload: dict,
+    *,
+    message: str = "Async crawl did not complete in time",
+    on_pending=None,
+):
+    response = await client.post("/v1/crawl", json=payload)
+    assert response.status_code == 202, response.text
+    request_id = response.json()["request_id"]
+    completed = await poll_crawl_completion(
+        client, request_id, message=message, on_pending=on_pending
+    )
+    return request_id, completed

@@ -284,6 +284,39 @@ async def invoke_browser_strategy(
     )
 
 
+def make_html_fetcher(
+    calls: list[str], body: bytes = b"<html><body>page content</body></html>"
+):
+    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        calls.append(url)
+        return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
+
+    return fetcher
+
+
+async def run_default_http_fetcher(url: str, headers=None):
+    from app.crawl.strategies.fetchers import _default_http_fetcher
+    from app.validation import HostPolicy
+
+    return await _default_http_fetcher(
+        url, {} if headers is None else headers, 30, policy=HostPolicy.unrestricted()
+    )
+
+
+def make_expiring_cache(tmpdir, *, max_total_bytes: int = 10_000):
+    now = [1000.0]
+    cache = ContentCache(
+        tmpdir,
+        default_ttl=10,
+        clock=lambda: now[0],
+        max_entries=100,
+        max_total_bytes=max_total_bytes,
+    )
+    cache.set("a", "x" * 100)
+    cache.set("b", "x" * 100)
+    return cache, now
+
+
 __all__ = [
     "LLM_FORMAT_TEST_HTML",
     "SCOPE_KEEP_DROP_PAGES",
@@ -296,11 +329,14 @@ __all__ = [
     "make_content_cache",
     "make_content_cache_with_entry",
     "make_crawl_payload",
+    "make_expiring_cache",
     "make_fetch",
-    "run_http_strategy",
+    "make_html_fetcher",
     "ok_fetcher",
     "raise_fetcher",
     "run_crawl_async",
+    "run_default_http_fetcher",
+    "run_http_strategy",
     "run_scoped_crawl",
     "site_fetcher",
 ]

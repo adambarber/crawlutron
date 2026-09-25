@@ -1,10 +1,9 @@
 import httpx
 import pytest
+from _fetcher_factories import run_default_http_fetcher
 
-from app.crawl.strategies import fetchers as fetchers_mod
 from app.crawl.strategies import http_client_pool as pool_mod
 from app.crawl.strategies import pinned_transport as pinned_mod
-from app.validation import HostPolicy
 
 
 class _Resp:
@@ -72,12 +71,7 @@ async def test_redirect_to_unsafe_loopback_is_not_followed(monkeypatch):
     monkeypatch.setattr(pinned_mod, "_build_pinned_request", fake_build)
 
     with pytest.raises(ValueError):
-        await fetchers_mod._default_http_fetcher(
-            "http://public.example/",
-            {},
-            30,
-            policy=HostPolicy.unrestricted(),
-        )
+        await run_default_http_fetcher("http://public.example/")
 
     # Only the initial (safe) URL was fetched; the unsafe redirect target was
     # validated and rejected before any second request was issued.
@@ -97,12 +91,7 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
     # Treat every host as safe so the loop can follow.
     monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
 
-    result = await fetchers_mod._default_http_fetcher(
-            "http://public.example/",
-            {},
-            30,
-            policy=HostPolicy.unrestricted(),
-        )
+    result = await run_default_http_fetcher("http://public.example/")
 
     assert result.status_code == 200
     assert result.body == b"<html>ok</html>"
@@ -118,12 +107,7 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
     monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
 
-    result = await fetchers_mod._default_http_fetcher(
-            "http://public.example/",
-            {},
-            30,
-            policy=HostPolicy.unrestricted(),
-        )
+    result = await run_default_http_fetcher("http://public.example/")
 
     # Terminates at the hop cap and returns the last 302 rather than looping.
     assert result.status_code == 302

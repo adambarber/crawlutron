@@ -10,7 +10,13 @@ import sys
 
 import httpx
 import pytest
-from _fetcher_factories import _temp_cache, make_content_cache_with_entry, make_fetch, run_http_strategy
+from _fetcher_factories import (
+    _temp_cache,
+    make_content_cache_with_entry,
+    make_expiring_cache,
+    make_fetch,
+    run_http_strategy,
+)
 from helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc
@@ -678,20 +684,7 @@ class TestExpiredEntryFreesByteAccounting:
     """
 
     def test_expired_read_frees_byte_accounting(self, tmp_path):
-        from app.crawl.content_cache import ContentCache
-
-        now = [1000.0]
-        cache = ContentCache(
-            tmp_path / "cache",
-            default_ttl=10,
-            clock=lambda: now[0],
-            max_entries=100,
-            # Tight budget: two entries fit, three do not.
-            max_total_bytes=10_000,
-        )
-
-        cache.set("a", "x" * 100)
-        cache.set("b", "x" * 100)
+        cache, now = make_expiring_cache(tmp_path / "cache")
         size_a = cache._index_sizes["a"]
         total_before = cache._index_total_bytes
         assert total_before > 0
@@ -708,18 +701,7 @@ class TestExpiredEntryFreesByteAccounting:
         )
 
     def test_set_after_expired_read_does_not_evict_live_entry(self, tmp_path):
-        from app.crawl.content_cache import ContentCache
-
-        now = [1000.0]
-        cache = ContentCache(
-            tmp_path / "cache",
-            default_ttl=10,
-            clock=lambda: now[0],
-            max_entries=100,
-            max_total_bytes=10_000,
-        )
-        cache.set("a", "x" * 100)
-        cache.set("b", "x" * 100)
+        cache, now = make_expiring_cache(tmp_path / "cache")
         # Budget for exactly two entries.
         unit = cache._index_sizes["b"]
         cache.max_total_bytes = 2 * unit + unit // 2

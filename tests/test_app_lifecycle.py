@@ -3,6 +3,8 @@
 import asyncio
 import inspect
 
+from _job_harnesses import post_render_with_pool
+
 
 def _read_main_source() -> str:
 
@@ -24,16 +26,10 @@ class TestAppLifecycleEdges:
         assert (app.main) is not None
 
     async def test_render_endpoint_value_error(self, async_client):
-        from app.crawl.strategies.browser_pool import set_browser_pool
-
         # ASGI harness runs no lifespan, so the pool is None; M13's guard
         # answers 503 browser_pool_unavailable before URL validation.
         # Own the premise explicitly: ordering must never decide it.
-        previous = set_browser_pool(None)
-        try:
-            resp = await async_client.post("/v1/render", json={"url": "invalid"})
-        finally:
-            set_browser_pool(previous)
+        resp = await post_render_with_pool(async_client, None, "invalid")
         assert resp.status_code == 503
         assert resp.json()["code"] == "browser_pool_unavailable"
 

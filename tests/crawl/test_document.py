@@ -14,14 +14,13 @@ from _extraction_helpers import (
     _next_non_empty_document_line,
     _should_join_document_paragraph,
 )
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, run_http_strategy
 
 from app.crawl.strategies.document import (
     _extract_pdf_bytes_to_markdown,
     _format_table,
     _pdf_to_markdown,
 )
-from app.validation import HostPolicy
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
 
@@ -220,8 +219,6 @@ class TestDocumentRedirectSsrf:
 
 async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
     """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
-    from app.crawl.strategies.http import _http_strategy_result
-
     async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
         # csv served WITHOUT compression -> decompress_body returns the raw
         # buffer unchanged, which is a bytearray
@@ -233,10 +230,8 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
             body=bytearray(b"name,age\nAlice,30\nBob,25"),
         )
 
-    result = await _http_strategy_result(
-        original_url="https://sudbury.ma.us/x.csv",
-        normalized_url="https://sudbury.ma.us/x.csv",
-        strategy="HTTP_DECLARED_CRAWLER",
+    result = await run_http_strategy(
+        url="https://sudbury.ma.us/x.csv",
         policy={
             "strategies": ["HTTP_DECLARED_CRAWLER"],
             "limits": {"timeout_seconds": 10},
@@ -244,7 +239,6 @@ async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
             "extraction": "document",
         },
         http_fetcher=fetcher,
-        host_policy=HostPolicy.unrestricted(),
     )
     assert result.status == "success", (result.status, result.classification)
     assert "Alice" in (result.text or "")

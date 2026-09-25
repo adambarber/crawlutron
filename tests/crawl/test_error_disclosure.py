@@ -10,13 +10,11 @@ import json
 import socket
 
 import httpx
-from _fetcher_factories import invoke_http_strategy
+from _fetcher_factories import invoke_http_strategy, run_http_strategy
 from _policy_factories import http_strategy_policy
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.result_helpers import _classify_error_code
-from app.crawl.strategies.http import _http_strategy_result
-from app.validation import HostPolicy
 
 
 class _RaisingFetcher:
@@ -33,13 +31,10 @@ class _RaisingFetcher:
 async def _run(exc):
     fetcher = _RaisingFetcher(exc)
     policy = {"limits": {}, "extraction": "html", "headers": {}}
-    return await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="HTTP_DECLARED_CRAWLER",
+    return await run_http_strategy(
+        url="http://example.com/",
         policy=policy,
         http_fetcher=fetcher,
-        host_policy=HostPolicy.unrestricted(),
     )
 
 

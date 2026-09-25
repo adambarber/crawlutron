@@ -2,10 +2,10 @@ import multiprocessing
 import os
 
 import pytest
+from _fetcher_factories import run_http_strategy
+from _policy_factories import http_strategy_policy
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
-
-from app.validation import HostPolicy
 
 
 class _SimpleHandler(_BaseHandler):
@@ -101,7 +101,6 @@ class TestHttpStrategyEdges:
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
 
         cache = HttpCache()
 
@@ -110,19 +109,11 @@ class TestHttpStrategyEdges:
 
             raise httpx.RequestError("connection failed", request=None)
 
-        result = await _http_strategy_result(
-            original_url="http://fail.example.com/",
-            normalized_url="http://fail.example.com/",
-            strategy="HTTP_DECLARED_CRAWLER",
-            policy={
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            },
+        result = await run_http_strategy(
+            url="http://fail.example.com/",
+            policy=http_strategy_policy(),
             http_fetcher=failing_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         # A bare httpx.RequestError is the generic httpx-level tail of the
         # classifier (more specific branches map to connection_error/tls_error
@@ -133,7 +124,6 @@ class TestHttpStrategyEdges:
 
     async def test_http_strategy_result_httpx_http_status_error(self):
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
 
         cache = HttpCache()
 
@@ -148,19 +138,11 @@ class TestHttpStrategyEdges:
 
             raise httpx.HTTPStatusError("server error", request=None, response=MockResponse())
 
-        result = await _http_strategy_result(
-            original_url="http://error.example.com/",
-            normalized_url="http://error.example.com/",
-            strategy="HTTP_DECLARED_CRAWLER",
-            policy={
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            },
+        result = await run_http_strategy(
+            url="http://error.example.com/",
+            policy=http_strategy_policy(),
             http_fetcher=error_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "http_status_error"
 
@@ -174,7 +156,6 @@ class TestHttpStrategyEdges:
     async def test_http_strategy_result_binary_classification(self):
         from app.constants import EXTRACTION_METHOD_BINARY_NO_TEXT
         from app.crawl.cache import HttpCache
-        from app.crawl.strategies.http import _http_strategy_result
 
         cache = HttpCache()
 
@@ -188,51 +169,32 @@ class TestHttpStrategyEdges:
 
             return Resp()
 
-        result = await _http_strategy_result(
-            original_url="http://binary.example.com/file.bin",
-            normalized_url="http://binary.example.com/file.bin",
-            strategy="HTTP_DECLARED_CRAWLER",
-            policy={
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            },
+        result = await run_http_strategy(
+            url="http://binary.example.com/file.bin",
+            policy=http_strategy_policy(),
             http_fetcher=binary_fetcher,
             cache=cache,
-            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == EXTRACTION_METHOD_BINARY_NO_TEXT
 
 
 async def test_http_strategy_rejects_non_mapping_request_profile():
-    from app.crawl.strategies.http import _http_strategy_result
-
     async def fetcher(*args, **kwargs):
         raise AssertionError("fetcher must not run for an invalid request profile")
 
     for profile in ("hello", ["hello"]):
+        policy = http_strategy_policy()
+        policy["request_profile"] = profile
         with pytest.raises(ValueError, match="^invalid_policy_profile$"):
-            await _http_strategy_result(
-                original_url="http://profile.example/",
-                normalized_url="http://profile.example/",
-                strategy="HTTP_DECLARED_CRAWLER",
-                policy={
-                    "strategies": ["HTTP_DECLARED_CRAWLER"],
-                    "extraction": "full",
-                    "headers": {},
-                    "request_profile": profile,
-                    "limits": {"timeout_seconds": 5, "max_retries": 0},
-                },
+            await run_http_strategy(
+                url="http://profile.example/",
+                policy=policy,
                 http_fetcher=fetcher,
-                host_policy=HostPolicy.unrestricted(),
             )
 
 
 async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnostics():
     from collections.abc import Mapping
-
-    from app.crawl.strategies.http import _http_strategy_result
 
     class StatefulProfile(Mapping[str, object]):
         def __init__(self):
@@ -280,19 +242,12 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
             },
         )()
 
-    result = await _http_strategy_result(
-        original_url="http://profile.example/",
-        normalized_url="http://profile.example/",
-        strategy="HTTP_DECLARED_CRAWLER",
-        policy={
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "extraction": "full",
-            "headers": {},
-            "request_profile": profile,
-            "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-        },
+    policy = http_strategy_policy()
+    policy["request_profile"] = profile
+    result = await run_http_strategy(
+        url="http://profile.example/",
+        policy=policy,
         http_fetcher=fetcher,
-        host_policy=HostPolicy.unrestricted(),
     )
 
     assert result.diagnostics["request_profile"] == {

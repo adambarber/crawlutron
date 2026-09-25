@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from _async_harnesses import run_loop_rebind_scenario
 from curl_cffi.requests import AsyncSession
 
 import app.crawl.strategies.fetchers as fetchers_mod
@@ -314,19 +315,9 @@ def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(
     """
     monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
 
-    async def _scenario():
-        first = getattr(http_mod, getter)()
-        foreign_loop = asyncio.new_event_loop()
-        try:
-            # Stand in for "this call arrived from a different loop".
-            first._bound_loop = foreign_loop
-            second = getattr(http_mod, getter)()
-            await asyncio.sleep(0.1)  # let a scheduled close run on this loop
-        finally:
-            foreign_loop.close()
-        return first, second
-
-    first, second = asyncio.run(_scenario())
+    first, second = asyncio.run(
+        run_loop_rebind_scenario(lambda: getattr(http_mod, getter)(), delay=0.1)
+    )
     assert second is not first
     assert getattr(http_mod, slot) is second, f"{getter} did not publish the rebuilt client in {slot}"
     assert first.closed is True, f"{getter} superseded a client without closing it on the live loop"
@@ -574,19 +565,7 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch, real_
 
     monkeypatch.setattr(http_mod, "_build_cffi_session", _build)
 
-    async def _scenario():
-        first = http_mod.get_cffi_session()
-        # Stand in for "this call arrived from a different loop".
-        foreign = asyncio.new_event_loop()
-        try:
-            first._bound_loop = foreign
-            second = http_mod.get_cffi_session()
-            await asyncio.sleep(0.05)  # let a scheduled close run on this loop
-        finally:
-            foreign.close()
-        return first, second
-
-    first, second = asyncio.run(_scenario())
+    first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_cffi_session))
     assert second is not first
     assert first.closed is True, (
         "get_cffi_session superseded a real-shaped AsyncSession without closing "
@@ -609,18 +588,7 @@ def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch, real
 
     monkeypatch.setattr(http_mod, "_build_async_client", _build)
 
-    async def _scenario():
-        first = http_mod.get_async_http_client()
-        foreign = asyncio.new_event_loop()
-        try:
-            first._bound_loop = foreign
-            second = http_mod.get_async_http_client()
-            await asyncio.sleep(0.05)
-        finally:
-            foreign.close()
-        return first, second
-
-    first, second = asyncio.run(_scenario())
+    first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_async_http_client))
     assert second is not first
     assert first.closed is True, "the pooled httpx client lost its eager close"
 
@@ -686,18 +654,7 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkey
         consults_settings=False,
     )
 
-    async def _scenario():
-        first = third.get()
-        foreign = asyncio.new_event_loop()
-        try:
-            first._bound_loop = foreign
-            second = third.get()
-            await asyncio.sleep(0.05)
-        finally:
-            foreign.close()
-        return first, second
-
-    first, second = asyncio.run(_scenario())
+    first, second = asyncio.run(run_loop_rebind_scenario(third.get))
     assert second is not first
     assert first.closed is True, (
         "a pooled kind without an is_closed attribute was treated as already "

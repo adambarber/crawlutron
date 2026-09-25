@@ -132,10 +132,7 @@ async def _create_api_job(client, root_url: str, execute, policy: dict | None = 
     from app.api import job_runner
 
     job_runner.install_execute_crawl(execute)
-    response = await client.post(
-        "/v1/jobs",
-        json={"root_url": root_url, "policy": _execution_policy(policy)},
-    )
+    response = await post_api_job(client, root_url, policy)
     assert response.status_code == 200, response.text
     return response.json()["job_id"]
 
@@ -216,6 +213,9 @@ __all__ = [
     "_fake_execute",
     "_fake_execute_scripted",
     "_make_app",
+    "post_api_job",
+    "post_render_with_pool",
+    "run_seeded_scripted_job",
     "_run_job_to_completed",
     "_run_persisted_job",
     "_run_scripted_job",
@@ -226,3 +226,28 @@ __all__ = [
     "make_job_store",
     "run_job_control_test",
 ]
+
+
+async def post_api_job(client, root_url: str, policy: dict | None = None):
+    return await client.post("/v1/jobs", json={"root_url": root_url, "policy": _execution_policy(policy)})
+
+
+async def run_seeded_scripted_job(
+    job_store,
+    root_url: str,
+    policy: dict,
+    result_map: dict[str, list[dict]],
+    **seed: Any,
+):
+    job = _seed_job(job_store, root_url, policy, **seed)
+    return await _run_scripted_persisted_job(job, job_store, result_map)
+
+
+async def post_render_with_pool(client, pool, url: str):
+    from app.crawl.strategies.browser_pool import set_browser_pool
+
+    old = set_browser_pool(pool)
+    try:
+        return await client.post("/v1/render", json={"url": url})
+    finally:
+        set_browser_pool(old)

@@ -2,11 +2,16 @@
 
 import asyncio
 import time
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _browser_doubles import BrowserFakePage, FakeRequest, FakeRoute
+from _browser_doubles import (
+    BrowserFakePage,
+    FakeRequest,
+    FakeRoute,
+    response_handler_double,
+    run_blocking_document_route,
+)
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from pydantic import ValidationError
 
@@ -41,34 +46,10 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, rea
 
     ``real_sleeps`` so the blocking sleep is a true delay (not no-op'd).
     """
-    # Track which thread the check runs on
-    check_thread_id = None
-
-    def blocking_build_pinned_request(url, headers, *, policy):
-        nonlocal check_thread_id
-        import threading
-
-        check_thread_id = threading.get_ident()
-        time.sleep(0.05)  # Blocking call - would block event loop if run directly
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
-
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
-
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    route = FakeRoute()
-    request = FakeRequest("http://example.com/", "document")
-
-    # Run handler - should complete and run the blocking check in a thread
-    await handler(route, request)
+    route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
 
     assert route.decision == "continue"
-    # The check should have run in a different thread (thread pool)
-    assert check_thread_id is not None
-    # Main thread ID
-    import threading
-
-    assert check_thread_id != threading.main_thread().ident
+    assert ran_off_loop
 
 
 async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch, real_sleeps):
@@ -129,30 +110,11 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
 async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch, real_sleeps):
     """The route handler should run _build_pinned_request via asyncio.to_thread
     to avoid blocking the event loop with synchronous DNS lookups."""
-    check_thread_id = None
-
-    def blocking_build_pinned_request(url, headers, *, policy):
-        nonlocal check_thread_id
-        import threading
-
-        check_thread_id = threading.get_ident()
-        time.sleep(0.05)  # Blocking DNS
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
-
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", blocking_build_pinned_request)
-
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    route = FakeRoute()
-    request = FakeRequest("http://example.com/", "document")
-    await handler(route, request)
+    route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
 
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4:80/"
-    assert check_thread_id is not None
-    import threading
-
-    assert check_thread_id != threading.main_thread().ident
+    assert ran_off_loop
 
 
 async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
@@ -315,37 +277,17 @@ async def test_response_handler_caps_entries_and_payload_size():
 
 class TestXhrResponsePayloadCapture:
     async def test_json_payload_captured(self):
-        from app.crawl.strategies.browser import BrowserRenderer
+        collected, handler, response = response_handler_double("http://x/api/data", {"a": 1})
 
-        collected: list[dict[str, Any]] = []
-        handler = BrowserRenderer._make_response_handler(collected)
-
-        class FakeResponse:
-            headers = {"content-type": "application/json"}
-            url = "http://x/api/data"
-            status = 200
-
-            async def json(self):
-                return {"a": 1}
-
-        await handler(FakeResponse())
+        await handler(response)
         assert collected[0]["payload"] == {"a": 1}
 
     async def test_bad_json_payload_captured_as_none(self):
-        from app.crawl.strategies.browser import BrowserRenderer
+        collected, handler, response = response_handler_double(
+            "http://x/api/badjson", error=ValueError("bad json")
+        )
 
-        collected: list[dict[str, Any]] = []
-        handler = BrowserRenderer._make_response_handler(collected)
-
-        class FakeResponse:
-            headers = {"content-type": "application/json"}
-            url = "http://x/api/badjson"
-            status = 200
-
-            async def json(self):
-                raise ValueError("bad json")
-
-        await handler(FakeResponse())
+        await handler(response)
         assert len(collected) == 1
         assert (collected[0]["payload"]) is None
 
