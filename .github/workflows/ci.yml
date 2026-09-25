@@ -20,37 +20,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: Lint (ruff)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      # Pinned, not ranged: a floating `ruff>=0.5` means a new rule can turn a
-      # merge red with no repository change. Same reasoning as the pinned
-      # pre-commit hooks.
-      - name: Install ruff
-        run: pip install "ruff==0.16.8"
-      # Whole-tree and blocking. The tree is lint-clean, so the old
-      # app/api-only subset plus an advisory full tree (`|| true`) was a gate
-      # that could not fail on the code most likely to drift.
-      - name: Run ruff check
-        run: ruff check app tests scripts
-      # Formatting is still advisory: the tree carries format debt (the
-      # previous blocking subset was red on it). It becomes blocking in the
-      # same commit that formats the tree — not before.
-      - name: Advisory ruff format check (non-blocking)
-        run: ruff format --check app tests || true
-
   enforcement:
     name: Pre-commit enforcement
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -67,48 +43,13 @@ jobs:
       - name: Run all configured hooks
         run: pre-commit run --all-files --config .pre-commit-config.yaml
 
-  typecheck:
-    name: Typecheck (mypy + pyright)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: pyproject.toml
-      - name: Install package + dev dependencies
-        run: pip install -e ".[dev]"
-      # The gate existed (`make typecheck`, mypy config, pydantic plugin) and
-      # was clean at 0 errors — but no workflow ran it, so a type regression
-      # could not fail a build. This is the stringly-typed-identity class
-      # caught statically.
-      - name: Run mypy
-        run: python3 -m mypy app
-      # Pyright is the third opinion, and it is here because it finds annotation
-      # lies mypy structurally cannot: mypy reads the `regex` package as untyped
-      # and degrades its values to Any, so a `regex.Pattern` handed to a
-      # parameter declared `re.Pattern[str]` passes. On first run it found 14 --
-      # four real defects (an import from the wrong module, a `urllib.error`
-      # reference that only resolved by accident, a bare string returned as a
-      # Literal taxonomy, and a selector helper that erased its result type to
-      # `object`) and ten findings where the checker was wrong. It is now at
-      # ZERO and that is the gate.
-      #
-      # This step runs the budget TEST, not raw pyright, and the distinction
-      # matters: a raw exit code here and in the pre-commit hook would be two
-      # places holding the same exception list, and the first review of this work
-      # caught exactly that -- the hook allowed one finding while this step
-      # allowed none, so the required CI job was permanently red. The budget
-      # assertion is the single place the count and its reasoning live.
-      - name: Run pyright budget
-        run: python3 -m pytest tests/test_pyright_budget.py -q -p no:randomly -o addopts=
-
   test-fast:
     name: Test suite (fast)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -130,6 +71,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -142,13 +85,16 @@ jobs:
       - name: Run pytest (full)
         run: python3 -m pytest -o addopts=
 
-  # One required check, not four. A repository ruleset should require exactly
+  # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs
   # stay unconditional and this aggregate fails if any of them did not succeed.
+  # The only gate-carrying jobs are enforcement (every pre-commit hook) and
+  # test-fast (the suite); there is no separate lint or typecheck job because
+  # pre-commit already runs ruff, mypy and pyright inside `enforcement`.
   required:
     name: Required quality gate
     if: ${{ always() }}
-    needs: [lint, typecheck, enforcement, test-fast]
+    needs: [enforcement, test-fast]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -160,7 +106,5 @@ jobs:
         # a step-level `shell:`, or a different runner takes it away silently.
         shell: bash -e {0}
         run: |
-          test "${{ needs.lint.result }}" = "success"
-          test "${{ needs.typecheck.result }}" = "success"
           test "${{ needs.enforcement.result }}" = "success"
           test "${{ needs.test-fast.result }}" = "success"

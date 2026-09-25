@@ -1,4 +1,13 @@
-"""Run a duplication profile and reject every pair not declared in the checked-in expectations."""
+"""A duplication profile that rejects every pair not declared in the expectations baseline.
+
+The expectations file is a DECLARED BASELINE of known, reviewed duplication,
+not a record of past approvals. Each pair carries a reason and a fragment hash
+that prove the list and the code agree at the time of the assertion — a hash
+proves the list and the code agree, not that a human approved the duplication.
+The baseline changes through a reviewed commit; GitHub rulesets return 403 on
+this account, so the trust boundary is this gate plus a CODEOWNERS entry
+covering `jscpd-expectations.json`.
+"""
 
 from __future__ import annotations
 
@@ -119,15 +128,25 @@ def _reject_source_masking(ignore: list[str]) -> None:
 
 
 def _validate_scan_config(path: Path) -> None:
-    """Fail closed unless `.jscpd.json` is exactly the sanctioned ignore list.
+    """Fail closed unless `.jscpd.json` contains only the sanctioned `ignore` key.
 
     Checked before jscpd runs, not after: a scan taken under an unvalidated
     config has already decided what the gate cannot see, so there is nothing
-    left to check afterwards.
+    left to check afterwards. Only `ignore` is allowed; extra keys like
+    `maxLines`, `skipLocal`, `minLines`, `minTokens` pass straight through
+    to jscpd via `--config` and are live. Measured: `maxLines: 500` shrinks
+    production coverage from 94 sources/21506 lines to 83/13560 (37% of
+    production unscanned) while the gate still exits 0 because the expectations
+    file is satisfied by the reduced pair set.
     """
     document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or not isinstance(document.get("ignore"), list):
-        raise ValueError(f"{path.name} must be an object with an ignore list")
+    if not isinstance(document, dict):
+        raise ValueError(f"{path.name} must be an object")
+    extra = set(document) - {"ignore"}
+    if extra:
+        raise ValueError(f"{path.name} contains unknown keys: {sorted(extra)}")
+    if not isinstance(document.get("ignore"), list):
+        raise ValueError(f"{path.name} must have an ignore list")
     ignore = document["ignore"]
     if not all(isinstance(glob, str) and glob for glob in ignore):
         raise ValueError(f"{path.name} ignore entries must be non-empty strings")

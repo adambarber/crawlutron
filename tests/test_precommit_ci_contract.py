@@ -27,7 +27,7 @@ WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 ENFORCEMENT_COMMAND = (
     f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
 )
-REPORTING_JOBS = {"lint", "typecheck", "test-fast"}
+REPORTING_JOBS = {"enforcement", "test-fast"}
 # GitHub's template form for an errexit shell. The required aggregate is a chain
 # of `test` lines, so its exit code is its last line's without errexit.
 ERREXIT_SHELL = "bash -e {0}"
@@ -48,14 +48,12 @@ ENFORCEMENT_INPUTS = (
     "requirements-dev.txt",
     ".github/workflows/ci.yml",
 )
-# The single trigger pattern every hook carries. Optional leading segment so the
-# same pattern matches nested under the parent repo and at the repository root
-# once the service is extracted.
-ENFORCEMENT_TRIGGER_PATTERN = (
-    r"^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json"
-    r"|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini"
-    r"|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$"
-)
+# The single trigger pattern every hook shares, held as one YAML anchor
+# (`*service_trigger`) in .pre-commit-config.yaml so the copies cannot drift.
+# It matches any file that belongs to this service in either layout — nested
+# under the parent repo as docker/browser-crawler/*, or at the repository root
+# once extracted — and excludes the parent repo's other docker services.
+ENFORCEMENT_TRIGGER_PATTERN = r"^(docker/browser-crawler/|(?!docker/))"
 # A syntactically valid config carrying a second, quoted jscpd hook that would
 # pass a lax threshold. Nothing distinguishes it from the real config to a
 # reader of the raw text except the quotes.
@@ -396,10 +394,59 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
     assert "tests/_jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
-    assert "enforcement" in required
-    assert required - {"enforcement"} == REPORTING_JOBS
+    assert required == REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     _assert_failure_propagation(workflow)
+
+
+def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
+    """CI must not execute a gate twice inside one run.
+
+    `lint` (ruff) and `typecheck` (mypy + pyright) used to be separate jobs that
+    re-ran exactly what the pre-commit hooks inside `enforcement` already
+    execute -- three gates ran twice per CI run and nothing compared the copies.
+    This is the chokepoint that would have caught that duplication on day one:
+    any `run:` command in a workflow job must not contain a command a pre-commit
+    hook already runs. The hook entries strip the shared `bash -c 'cd...' gate`
+    wrapper; the tool invocation after it is what CI must not repeat.
+    """
+    hook_tools = {
+        "python -m ruff check",
+        "python -m mypy",
+        "python tests/_jscpd_gate.py",
+        "tests/test_pyright_budget.py",
+        "tests/test_safety_invariants.py",
+    }
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    for name, job in _jobs(workflow).items():
+        for step in job.get("steps") or []:
+            run = step.get("run")
+            if not isinstance(run, str):
+                continue
+            for tool in hook_tools:
+                assert tool not in run, (
+                    f"job {name} re-runs a pre-commit hook command ({tool!r}): "
+                    "enforcement already runs it; a duplicate is a second copy "
+                    "that can drift from the gate"
+                )
+
+
+def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
+    """Bites: adding a job that re-runs a hook command fails the check."""
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    broken = workflow.replace(
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml",
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests scripts",
+    )
+    hook_tools = {"python -m ruff check"}
+    with pytest.raises(AssertionError):
+        for name, job in _jobs(broken).items():
+            for step in job.get("steps") or []:
+                run = step.get("run")
+                if not isinstance(run, str):
+                    continue
+                for tool in hook_tools:
+                    assert tool not in run, f"job {name} re-runs a hook command"
 
 
 def _evasive_workflow(evasion: str) -> str:
@@ -511,6 +558,36 @@ def test_a_second_quoted_jscpd_hook_is_rejected() -> None:
         _require_exactly_one_jscpd_gate(QUOTED_SECOND_JSCPD_HOOK)
 
 
+def test_all_hooks_share_one_trigger() -> None:
+    """The five `files:` values are one YAML anchor, so they cannot drift apart.
+
+    The trigger was copied five times previously, and the copies were never
+    compared: it is what let the `.gitignore` edit slip through with every hook
+    Skipped. They are now `&service_trigger` / `*service_trigger`, so a divergent
+    value on any one hook is caught here.
+    """
+    hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
+    triggers = {_field(block, "files") for _, block in hooks}
+    assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
+        f"hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
+        f"got {sorted(triggers)}"
+    )
+
+
+def test_a_hook_with_a_divergent_trigger_is_caught() -> None:
+    """Bites: a hook carrying a different `files:` value fails the all-share-one check.
+
+    The anchor collapses the copies, but the chokepoint is the assertion here:
+    without it, adding a sixth hook (or reverting one copy to a per-file pattern)
+    would silently reintroduce the drift this file exists to forbid.
+    """
+    config = CONFIG_PATH.read_text(encoding="utf-8")
+    reverted = config.replace("*service_trigger", r"^(docker/browser-crawler/)?.*\.py$")
+    reverted_hooks = _hook_blocks(reverted)
+    assert _field(reverted_hooks[0][1], "files") == ENFORCEMENT_TRIGGER_PATTERN
+    assert _field(reverted_hooks[-1][1], "files") == r"^(docker/browser-crawler/)?.*\.py$"
+
+
 def test_every_gate_fires_on_every_enforcement_input() -> None:
     """No gate's own configuration can be edited without that gate running.
 
@@ -550,6 +627,31 @@ def test_the_workflow_is_written_for_the_repository_root_it_will_run_from() -> N
         assert "working-directory" not in run_defaults, (
             f"job {name} runs in {run_defaults['working-directory']}, which is not the repository root"
         )
+
+
+def test_every_job_checks_out_full_history() -> None:
+    """Every job needs `fetch-depth: 0` for the git-history budget ratchet.
+
+    tests/test_metrics_budget.py reads this service's commit history to prove
+    the complexity budgets only fall. GitHub's default checkout is a shallow
+    clone of depth 1, under which the ratchet test SKIPS -- a gate that is
+    silently inert in CI. Each job's checkout must fetch the full history.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    for name, job in _jobs(workflow).items():
+        checkouts = [
+            step
+            for step in job.get("steps") or []
+            if str(step.get("uses", "")).split("@")[0] == "actions/checkout"
+        ]
+        if not checkouts:
+            continue
+        for step in checkouts:
+            fetch_depth = (step.get("with") or {}).get("fetch-depth")
+            assert fetch_depth == 0, (
+                f"job {name} checkouts with fetch-depth={fetch_depth!r}; "
+                "the metrics-budget history ratchet needs the full history"
+            )
 
 
 def test_every_hook_resolves_the_service_root_in_both_layouts() -> None:

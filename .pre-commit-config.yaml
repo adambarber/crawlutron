@@ -12,18 +12,17 @@
 # repository root once the service stands alone. `files:` matches both shapes
 # for the same reason — a hook must not fire on the parent repo's other files.
 #
-# `files:` is a TRIGGER, and it has to cover every file the gates read to decide
-# what to enforce, not just the Python tree. It used to match only `.*\.py`, which
-# meant the commit that edited `.jscpd.json` -- the file whose `ignore` globs
-# decide which clones this config can see -- ran no hook at all. Every hook now
-# uses the same pattern, and it includes the enforcement surface
-# (.pre-commit-config.yaml, .jscpd.json, jscpd-expectations.json,
-# pyrightconfig.json, mypy.ini, pytest.ini, pyproject.toml, requirements-dev.txt,
-# .github/workflows/*.yml). tests/test_precommit_ci_contract.py asserts that
-# property, so narrowing the pattern again is a failing test rather than a silent
-# hole. A parent-repo file that happens to share a name with one of those also
-# matches; every hook here is whole-tree with `pass_filenames: false`, so a
-# spurious trigger costs a re-run and never changes a verdict.
+# `files:` is a TRIGGER, not a list of inputs. All five hooks are whole-tree
+# with `pass_filenames: false`, so the trigger decides "should this scan run"
+# not "which files this hook reads." A per-file guess drifts: the old pattern
+# listed .py and the gate configs but not `.gitignore`, so the commit that
+# edited `.gitignore` ran zero hooks (commit 6373dce). This trigger matches any
+# file that belongs to this service in either layout — nested under the parent
+# repo as `docker/browser-crawler/*`, or at the repository root once extracted —
+# and excludes the parent repo's OTHER docker services (e.g. `docker/llm/`).
+#
+# All five hooks share one YAML anchor (`*service_trigger`) so the trigger
+# cannot drift across copies: changing one automatically changes all.
 #
 # These gates are ergonomics, not enforcement: CI's required status check is the
 # authority. Their value is that each one is whole-tree and fast, so a violation
@@ -47,7 +46,7 @@ repos:
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python -m ruff check app tests scripts
         language: system
-        files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
+        files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
         pass_filenames: false
         stages: [pre-commit]
 
@@ -79,7 +78,7 @@ repos:
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python -m pytest tests/test_pyright_budget.py -q -p no:randomly
         language: system
-        files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
+        files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]
 
@@ -104,7 +103,7 @@ repos:
           --min-lines 8 --min-tokens 40 --app-min-lines 7 --app-min-tokens 35
           --threshold 0
         language: system
-        files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
+        files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]
 
@@ -117,7 +116,7 @@ repos:
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python -m mypy app
         language: system
-        files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
+        files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]
 
@@ -132,6 +131,6 @@ repos:
           tests/test_safety_invariants.py tests/test_env_regression.py
           tests/test_store_pragma_chokepoint.py tests/membership_gate.py
         language: system
-        files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
+        files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]

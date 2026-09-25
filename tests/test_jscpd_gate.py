@@ -487,3 +487,44 @@ def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
     """The ignore list exists to skip caches and vendored trees, never source."""
     with pytest.raises(ValueError, match="Python source|whole tree"):
         gate._reject_source_masking([glob])
+
+
+def test_jscpd_json_rejects_unknown_keys(tmp_path) -> None:
+    """Bites: only `ignore` is allowed in .jscpd.json.
+
+    Keys like `maxLines`, `skipLocal`, `minLines`, `minTokens` pass straight
+    through to jscpd via `--config` and are live. Measured: `maxLines: 500`
+    shrinks production coverage from 94 sources/21506 lines to 83/13560
+    (37% of production unscanned) while the gate still exits 0 because the
+    expectations file is satisfied by the reduced pair set. `skipLocal: true`
+    fails closed (exit 1) because it changes the expectations file match.
+    Only `ignore` is a sanctioned key; everything else must be rejected.
+    """
+    config = tmp_path / "jscpd.json"
+    config.write_text(
+        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, "maxLines": 500}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown keys"):
+        gate._validate_scan_config(config)
+
+
+def test_jscpd_json_rejects_skipLocal(tmp_path) -> None:
+    """skipLocal is not a sanctioned key."""
+    config = tmp_path / "jscpd.json"
+    config.write_text(
+        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, "skipLocal": True}),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unknown keys"):
+        gate._validate_scan_config(config)
+
+
+def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
+    """A config with only `ignore` passes."""
+    config = tmp_path / "jscpd.json"
+    config.write_text(
+        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS}),
+        encoding="utf-8",
+    )
+    gate._validate_scan_config(config)
