@@ -221,6 +221,10 @@ def _assert_failure_propagation(workflow: str) -> None:
 
     needs = _required_needs(workflow)
     assert "enforcement" in needs, "the required aggregate must depend on enforcement"
+    assert REPORTING_JOBS <= needs, (
+        f"the required aggregate must depend on every reporting job, "
+        f"missing {REPORTING_JOBS - needs}"
+    )
     _required_gate_shell(workflow)
     script = _required_gate_script(workflow)
     for job in sorted(needs):
@@ -276,7 +280,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "tests/_jscpd_gate.py" not in workflow
     required = _required_needs(workflow)
     assert "enforcement" in required
-    assert required - {"enforcement"} <= REPORTING_JOBS
+    assert required - {"enforcement"} == REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
     _assert_failure_propagation(workflow)
 
@@ -299,6 +303,13 @@ def _evasive_workflow(evasion: str) -> str:
         mutated = workflow.replace('          ' + _result_assertion("enforcement") + "\n", "", 1)
     elif evasion == "dropped-aggregate-need":
         mutated = workflow.replace("needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1)
+    elif evasion == "dropped-reporting-job":
+        # Drop a REPORTING job (not the aggregate) from `needs:` and its
+        # result assertion. This is the narrower-shape lie: the required
+        # aggregate still depends on enforcement, and every remaining need
+        # is asserted, but one reporting job is now invisible to it.
+        mutated = workflow.replace("needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, enforcement, test-fast]", 1)
+        mutated = mutated.replace('          ' + _result_assertion("typecheck") + "\n", "", 1)
     elif evasion == "no-always":
         mutated = workflow.replace("    if: ${{ always() }}\n", "", 1)
     elif evasion == "no-errexit":
@@ -320,6 +331,7 @@ def _evasive_workflow(evasion: str) -> str:
         "dropped-aggregate-need",
         "no-always",
         "no-errexit",
+        "dropped-reporting-job",
         "sh-shell",
     ],
 )
