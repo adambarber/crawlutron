@@ -10,8 +10,8 @@
       },
       "second": {
         "path": "app/models.py",
-        "start": 116,
-        "end": 137
+        "start": 106,
+        "end": 127
       },
       "reason": "Classification and CrawlError intentionally share the page-outcome Literal prefix; the test_crawl_error_members_derive_from_classification invariant pins the shared members and the documented pipeline-only additions.",
       "guard": "tests/test_safety_invariants.py::test_crawl_error_members_derive_from_classification",

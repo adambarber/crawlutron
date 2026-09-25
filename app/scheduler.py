@@ -67,26 +67,6 @@ _Result = TypeVar("_Result", bound=SchedulerResult)
 SchedulerWorker = Callable[[_Job], Awaitable[_Result]]
 
 
-def _job_url(job: _Job, url_of: Callable[[_Job], str | None] | None) -> str:
-    """Read the reporting URL off a job without raising.
-
-    The accessor is caller-supplied because the two production shapes carry the
-    URL under different names (``CrawlTask.original_url`` / ``CrawlJob.url``).
-    When a caller omits it, the known field names are probed in order and only
-    then does the fallback degrade to ``str()`` -- the URL feeds the error
-    envelope a caller reads, never scheduling, so a repr is the last resort
-    rather than an acceptable answer.
-    """
-    explicit = url_of(job) if url_of is not None else None
-    if explicit:
-        return explicit
-    for field in ("original_url", "url", "normalized_url"):
-        value = getattr(job, field, None)
-        if isinstance(value, str):
-            return value
-    return str(job)
-
-
 class _TokenBucket:
     """Token bucket rate limiter: refills at ``rate`` tokens/sec, caps at ``capacity``."""
 
@@ -300,7 +280,6 @@ class DomainScheduler:
         worker: SchedulerWorker[_Job, _Result],
         on_result: Callable[[int, _Result], Awaitable[None]] | None = None,
         *,
-        url_of: Callable[[_Job], str | None] | None = None,
         failed_result: Callable[[_Job, BaseException], _Result],
     ) -> dict[int, _Result] | None:
         """Run ``jobs`` through ``worker``.

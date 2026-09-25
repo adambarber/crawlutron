@@ -10,11 +10,17 @@ from dataclasses import asdict
 
 import httpx
 import pytest
+from _fetcher_factories import raise_fetcher
 
-from app.constants import BROWSER_HEADLESS
+from app.constants import (
+    BROWSER_HEADED_WARMED,
+    BROWSER_HEADLESS,
+    HTTP_DECLARED_CRAWLER,
+)
 from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
-from app.models import EngineCrawlResult
+from app.models import CrawlResult, EngineCrawlResult
+from app.validation import HostPolicy
 
 # ---------------------------------------------------------------------------
 # Classification: the taxonomy is the single source of "what went wrong"
@@ -263,3 +269,131 @@ class TestShapeAllGuardsPerItem:
 
         result = _failed_unified_result({"normalized_url": "https://example.org/a"})
         assert status_for_classification(result.classification) == result.status
+
+
+# ---------------------------------------------------------------------------
+# The chain guard: a strategy that RAISES is a failed STEP, not a dead URL
+# ---------------------------------------------------------------------------
+
+
+def _rendered(job) -> CrawlResult:
+    """A browser worker's success shape, as a real Camoufox render returns it."""
+    return CrawlResult(
+        url=job.url,
+        status="success",
+        classification="rendered",
+        final_url=job.url,
+        html="<html><body><main>rendered page body</main></body></html>",
+        text="rendered page body",
+        attempts=1,
+        elapsed_ms=5,
+        domain="example.com",
+        metadata={},
+    )
+
+
+def _chain_policy(*strategies: str) -> dict:
+    return {
+        "strategies": list(strategies),
+        "limits": {
+            "timeout_seconds": 10,
+            "max_retries": 0,
+            "max_discovered_links": 10,
+            "respect_robots": False,
+        },
+        "headers": {},
+        "discovery": {"robots": False},
+    }
+
+
+async def _unreachable_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    raise AssertionError(f"an HTTP strategy ran but should not have: {url}")
+
+
+class TestStrategyChainGuardsRaisingStrategies:
+    """``_execute_strategy`` is where a strategy's work is invoked, so it is
+    where a raise must become a result.
+
+    Below the chain, the HTTP strategy has its own broad-except sink and the
+    browser worker catches inside ``render`` -- but a raise at the ADAPTER
+    boundary between them (worker dispatch, a binding failing in a way the
+    render loop does not expect) had nowhere to go: it escaped the chain and
+    was enveloped by whatever ran the URL, with no strategy attribution and
+    with every remaining ladder step skipped. A strategy is a step in a ladder;
+    a step that blows up is a failed step, and the ladder moves on.
+    """
+
+    async def test_a_raising_step_is_enveloped_and_the_ladder_continues(self):
+        from app.crawl.strategy_chain import execute_crawl_chain
+
+        attempts: list[str] = []
+
+        class _FlakyWorker:
+            async def __call__(self, job):
+                attempts.append(job.url)
+                if len(attempts) == 1:
+                    raise RuntimeError("camoufox binding vanished mid-render")
+                return _rendered(job)
+
+        result = await execute_crawl_chain(
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            policy=_chain_policy(BROWSER_HEADLESS, BROWSER_HEADED_WARMED),
+            http_fetcher=_unreachable_fetcher,
+            cffi_fetcher=_unreachable_fetcher,
+            browser_worker=_FlakyWorker(),
+            host_policy=HostPolicy.unrestricted(),
+        )
+
+        assert len(attempts) == 2, "the ladder must continue past a raising step"
+        assert result.status == "success"
+        assert result.selected_strategy == BROWSER_HEADED_WARMED
+        # The raising step is recorded as an ATTEMPT, with the classification the
+        # shared primitive derived -- that is what a consumer reads the ladder from.
+        assert [(a.strategy, a.classification) for a in result.attempted_strategies] == [
+            (BROWSER_HEADLESS, "network_error"),
+            (BROWSER_HEADED_WARMED, "rendered"),
+        ]
+
+    async def test_a_raising_final_step_is_a_classified_terminal_result(self):
+        from app.crawl.strategy_chain import execute_crawl_chain
+
+        async def raising_worker(job):
+            raise RuntimeError("internal-host.local /etc/passwd")
+
+        result = await execute_crawl_chain(
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            policy=_chain_policy(BROWSER_HEADLESS),
+            http_fetcher=_unreachable_fetcher,
+            cffi_fetcher=_unreachable_fetcher,
+            browser_worker=raising_worker,
+            host_policy=HostPolicy.unrestricted(),
+        )
+
+        assert result.status == "failed"
+        assert result.classification == "network_error"
+        # The stable code on the wire, and the primitive's redaction contract
+        # holds at this call site too.
+        assert result.error == "network_error"
+        assert "internal-host.local" not in str(asdict(result))
+
+    async def test_the_guard_does_not_re_wrap_the_http_strategy_sink(self):
+        """The HTTP strategy already envelopes its own raise; the chain guard
+        must leave that result exactly as the sink built it."""
+        from app.crawl.strategy_chain import execute_crawl_chain
+
+        result = await execute_crawl_chain(
+            original_url="http://example.com/",
+            normalized_url="http://example.com/",
+            policy=_chain_policy(HTTP_DECLARED_CRAWLER),
+            http_fetcher=raise_fetcher,
+            cffi_fetcher=_unreachable_fetcher,
+            browser_worker=None,
+            host_policy=HostPolicy.unrestricted(),
+        )
+
+        assert result.status == "failed"
+        assert result.attempted_strategies[0].strategy == HTTP_DECLARED_CRAWLER
+        assert result.classification == "connection_error"
+        assert result.error == "connection_error"

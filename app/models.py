@@ -70,16 +70,6 @@ Classification = Literal[
 CLASSIFICATION_MEMBERS: frozenset[str] = frozenset(get_args(Classification))
 
 
-def _is_classification(value: str) -> bool:
-    """Report whether ``value`` names a real :data:`Classification` member.
-
-    The taxonomy code an exception carries is a ``str`` at the point it is read
-    off ``str(exc)``; this membership check is what lets ``as_classification``
-    hand back the Literal instead of widening every consumer to ``str``.
-    """
-    return value in CLASSIFICATION_MEMBERS
-
-
 _CLASSIFICATION_TABLE: dict[str, Classification] = {name: name for name in get_args(Classification)}
 
 

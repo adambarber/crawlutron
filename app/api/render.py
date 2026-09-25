@@ -150,7 +150,6 @@ async def render_request(
             jobs,
             _call_and_capture,
             on_result=_collect,
-            url_of=lambda job: job.url,
             failed_result=_failed_render_result,
         )
 

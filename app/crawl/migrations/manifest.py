@@ -112,19 +112,6 @@ def create_table_sql(schema: TableSchema) -> str:
     return f"CREATE TABLE {_quote_identifier(schema.name)} (\n{body}\n)"
 
 
-def create_index_statements(schema: TableSchema) -> tuple[str, ...]:
-    statements: list[str] = []
-    for index in schema.indexes:
-        unique = "UNIQUE " if index.unique else ""
-        where = f" WHERE {index.partial}" if index.partial else ""
-        columns = ", ".join(_quote_identifier(column) for column in index.columns)
-        statements.append(
-            f"CREATE {unique}INDEX {_quote_identifier(index.name)} "
-            f"ON {_quote_identifier(schema.name)} ({columns}){where}"
-        )
-    return tuple(statements)
-
-
 def _actual_columns(conn: sqlite3.Connection, table_name: str) -> tuple[ColumnSchema, ...]:
     return tuple(
         ColumnSchema(

@@ -59,18 +59,27 @@ __all__ = [
 # for by shrinkage elsewhere in the same change, and a shrink must lower this
 # integer so the saved capacity cannot be spent later.
 #
-# It has moved exactly ONCE, from 22,065 to 22,074, and that move is recorded
+# It was RAISED exactly once, from 22,065 to 22,074, and that raise is recorded
 # here because the reason is the point: the P1 that forced it was a constructor
 # taking an unvalidated `strategy` that accepted a member of the WRONG domain
 # (`HTTP_DECLARED_CRAWLER` as a browser worker's strategy) and a name outside the
 # enum entirely, which failed only much later inside `CrawlResult.__post_init__`.
 # Nine lines of runtime validation at that chokepoint is the fix, and trimming
-# the comments I had added around it recovered most of the cost first. If this
-# integer moves a second time, the one-authorised-move story is no longer true
-# and the ceiling has become the per-file table it replaced -- at which point the
-# metrics budgets' history-based monotonicity test in
-# tests/test_metrics_budget.py is the pattern to copy here, not another raise.
-_APP_TREE_LINE_BUDGET = 22_010
+# the comments I had added around it recovered most of the cost first. The
+# original comment claimed the integer had moved only once; it has since come
+# DOWN repeatedly, and each of those moves is a whole-tree deletion of dead
+# weight, never a re-baseline. The metrics budgets' history-based monotonicity
+# test in tests/test_metrics_budget.py is the pattern for tracking that history.
+#
+# 22,010 -> 21,970: the strategy-raise chokepoint, and with it the dead weight
+# it made redundant -- a "canonicalized" flag whose column migration 0002 had
+# already dropped (the local was hardcoded False, so every branch that read it
+# could only take the one path), the structural canonical-form check nothing
+# called, a robots-cache field assigned and never read, a URL accessor whose
+# only caller was a parameter that ``DomainScheduler.run`` silently ignored, a
+# migration index builder no schema or migration used, and a membership helper
+# the classifier below it had long replaced with a table lookup.
+_APP_TREE_LINE_BUDGET = 21_970
 
 
 def test_app_tree_line_count_does_not_grow():
@@ -3842,6 +3851,100 @@ def test_job_engine_payload_chokepoint_detector_bites():
         "    await _execute_crawl(payload)\n"
     )
     assert not _job_engine_payload_chokepoint_offenders(good, path)
+
+
+# The strategy chain's raise-chokepoint. A strategy is a STEP in a ladder, so
+# a step that raises must become a classified failed result and the ladder
+# must move on; the sink is a direct call to a strategy runner, and the
+# requirement is that it sits inside a try with an ``except Exception``.
+# Tree-wide, because a second module may grow a strategy runner and reach for
+# the chain's helpers.
+_STRATEGY_RUNNERS = frozenset({"_run_http_strategy", "_run_browser_strategy"})
+
+
+def _guarded_node_ids(tree: ast.AST) -> set[int]:
+    """Identity of every node in a ``try`` body that has an ``except Exception``.
+
+    Only the guarded ``body`` counts. A call in an ``except``/``else``/
+    ``finally`` clause is not protected by its own try, so including those
+    would open exactly the hole this detector closes.
+    """
+    guarded: set[int] = set()
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        if not any(
+            isinstance(handler.type, ast.Name) and handler.type.id in {"Exception", "BaseException"}
+            for handler in node.handlers
+        ):
+            continue
+        for statement in node.body:
+            guarded.update(id(child) for child in nodes_of(statement))
+    return guarded
+
+
+def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    guarded = _guarded_node_ids(tree)
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in _STRATEGY_RUNNERS
+            and id(node) not in guarded
+        ):
+            offenders.append(
+                offender(path, node.lineno, f"{node.func.id} invoked outside a try/except Exception")
+            )
+    return offenders
+
+
+def test_every_strategy_runner_call_is_guarded():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_unguarded_strategy_runner_offenders(tree, path))
+    assert not offenders, (
+        "A strategy that raises must become a failed step, not escape the chain: " + ", ".join(offenders)
+    )
+
+
+def test_strategy_runner_guard_detector_bites():
+    path = REPO_ROOT / "app" / "crawl" / "strategy_chain.py"
+    pre_fix = ast.parse(
+        "async def _execute_strategy(context, strategy):\n"
+        "    if strategy in HTTP_STRATEGIES:\n"
+        "        return await _run_http_strategy(context, strategy)\n"
+        "    return await _run_browser_strategy(context, strategy)\n"
+    )
+    assert _unguarded_strategy_runner_offenders(pre_fix, path)
+    # A narrow handler is not a guard: a bare ``except TypeError`` lets every
+    # other raise through, which is the shape the bug shipped as.
+    narrow = ast.parse(
+        "async def _execute_strategy(context, strategy):\n"
+        "    try:\n"
+        "        return await _run_http_strategy(context, strategy)\n"
+        "    except TypeError:\n"
+        "        return None\n"
+    )
+    assert _unguarded_strategy_runner_offenders(narrow, path)
+    good = ast.parse(
+        "async def _execute_strategy(context, strategy):\n"
+        "    try:\n"
+        "        return await _run_http_strategy(context, strategy)\n"
+        "    except Exception as error:\n"
+        "        return _engine_result_from_exception(error=error)\n"
+    )
+    assert not _unguarded_strategy_runner_offenders(good, path)
+    # The guard is satisfied by an enclosing try too, not only a sibling one.
+    enclosing = ast.parse(
+        "async def _execute_strategy(context, strategy):\n"
+        "    try:\n"
+        "        if strategy:\n"
+        "            return await _run_browser_strategy(context, strategy)\n"
+        "    except Exception:\n"
+        "        return None\n"
+    )
+    assert not _unguarded_strategy_runner_offenders(enclosing, path)
 
 
 def _frontier_expression(node: ast.AST) -> bool:

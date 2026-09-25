@@ -143,45 +143,27 @@ def _entry_payload(entry: Any) -> Any:
     return entry.to_dict() if isinstance(entry, FrontierEntry) else entry
 
 
-def _row_is_canonical(*collections: Any) -> bool:
-    """Whether persisted collections already hold ``{url, depth}`` records.
-
-    Canonical form is read from the DATA, never from a stored flag: a flag can
-    disagree with the row it claims to describe (a direct SQL write, a migration,
-    an older writer), and then the read path would skip normalization on a row
-    that needs it. Every writer in this codebase emits records, and a legacy row
-    holds bare strings, so the shape is the honest signal -- and it costs one
-    isinstance check per entry instead of a URL parse.
-    """
-    for values in collections:
-        if not isinstance(values, (list, tuple)):
-            return False
-        for value in values:
-            if not isinstance(value, dict) or "url" not in value or "depth" not in value:
-                return False
-    return True
-
-
 def normalize_frontier(
     values: Any,
     *,
     root_url: str,
     policy: dict[str, Any],
     host_policy: HostPolicy,
-    canonicalize: bool = True,
 ) -> list[FrontierEntry]:
     """Coerce persisted/runner-supplied frontier values into ``FrontierEntry`` records.
 
-    ``canonicalize=False`` is the steady-state read path for rows this writer
-    already stored in canonical form (the persisted ``canonicalized`` marker):
-    it still coerces shape, keeps the shallowest depth per identity, and drops
-    unusable entries, but skips the per-URL canonicalization work. Skipping it
-    on EVERY load/save instead cost 65-146x the pre-normalization persistence
-    time and stalled the event loop for a quarter second on a 20k-entry job.
+    Canonicalization is unconditional on the read path: it still coerces shape,
+    keeps the shallowest depth per identity, and drops unusable entries. It
+    used to be skipped on the strength of a persisted ``canonicalized`` column,
+    but a stored flag can disagree with the row it claims to describe (a direct
+    SQL write, a migration, an older writer) and then the read path skips
+    normalization on a row that needs it; migration 0002 dropped the column,
+    which is why the flag could not be trusted. The cost is bounded by the
+    canonicalization memo in :func:`_canonical_or_raw`.
     """
     if not isinstance(values, (list, tuple)):
         return []
-    canonical_root = _canonical_or_raw(root_url, host_policy) if canonicalize else root_url
+    canonical_root = _canonical_or_raw(root_url, host_policy)
     legacy_depth = job_max_depth(policy)
     entries: dict[str, FrontierEntry] = {}
     order: list[str] = []
@@ -199,7 +181,7 @@ def normalize_frontier(
             depth = legacy_depth
         if not isinstance(raw_url, str) or not raw_url:
             continue
-        url = _canonical_or_raw(raw_url, host_policy) if canonicalize else raw_url
+        url = _canonical_or_raw(raw_url, host_policy)
         entry_depth = 0 if url == canonical_root else _entry_depth(depth, legacy_depth)
         entry = FrontierEntry(url=url, depth=entry_depth)
         previous = entries.get(url)
@@ -352,18 +334,22 @@ class CrawlJobState:
         non-canonical URLs inside well-formed records -- cannot reintroduce a
         second identity for a page. The cost is bounded by the canonicalization
         memo in :func:`_canonical_or_raw` rather than by skipping the work.
+
+        This used to branch on a persisted ``canonicalized`` column, read from
+        a local that was hardcoded ``False`` -- the column is gone (migration
+        0002), so the branch could only ever take the normalizing path, and
+        keeping it invited a second writer to "optimize" a flag that no longer
+        exists. One path, no flag.
         """
-        canonicalized = False
         status = data.get("status", JobStatus.PENDING.value)
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
         policy = normalized_policy(data.get("policy"))
         root_url = str(data.get("root_url") or "")
-        if not canonicalized:
-            root_url = _canonical_or_raw(root_url, host_policy)
+        root_url = _canonical_or_raw(root_url, host_policy)
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-                (url if canonicalized else _canonical_or_raw(url, host_policy))
+                _canonical_or_raw(url, host_policy)
                 for url in visited_raw
                 if isinstance(url, str) and url
             }
@@ -376,7 +362,7 @@ class CrawlJobState:
                 if not isinstance(url, str):
                     continue
                 try:
-                    key = url if canonicalized else _canonical_or_raw(url, host_policy)
+                    key = _canonical_or_raw(url, host_policy)
                     transient_retries[key] = max(0, int(attempts))
                 except (TypeError, ValueError):
                     continue
@@ -391,7 +377,6 @@ class CrawlJobState:
                 root_url=root_url,
                 policy=policy,
                 host_policy=host_policy,
-                canonicalize=not canonicalized,
             ),
             visited=visited,
             in_flight=normalize_frontier(
@@ -399,7 +384,6 @@ class CrawlJobState:
                 root_url=root_url,
                 policy=policy,
                 host_policy=host_policy,
-                canonicalize=not canonicalized,
             ),
             transient_retries=transient_retries,
             results=list(data.get("results", [])) if isinstance(data.get("results", []), list) else [],
@@ -409,10 +393,11 @@ class CrawlJobState:
             stats=_normalized_stats(data.get("stats", {})),
             host_policy=host_policy,
         )
-        if not canonicalized:
-            # Legacy row: the one place full normalization is owed. The marker is
-            # set on the next save, so this cost is paid once per legacy row.
-            normalize_job_state(job)
+        # Full normalization pass on every read. from_json establishes the
+        # identity, and this re-derives it over the assembled collections
+        # (cross-list dedupe, shallowest depth) exactly once per load, so no
+        # writer can leave a row that reads as two identities for one page.
+        normalize_job_state(job)
         return job
 
 
@@ -461,8 +446,8 @@ class JobStore:
         # not safe for concurrent use even with check_same_thread=False).
         self._lock = threading.Lock()
         # Column-addressed rows: the schema grows by migration, so positional
-        # indexing for columns added later (e.g. canonicalized) would couple the
-        # read path to ALTER ordering. sqlite3.Row still supports row[n].
+        # indexing for a later-added column would couple the read path to ALTER
+        # ordering. sqlite3.Row still supports row[n].
         self._conn.row_factory = sqlite3.Row
 
     def _row_to_job(self, row) -> CrawlJobState:
@@ -551,10 +536,10 @@ class JobStore:
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
 
-        No normalization pass: identity is established at ingress and the row is
-        written with the ``canonicalized`` marker, so re-deriving every URL here
-        would multiply the job loop's cost by the whole page history on every
-        batch persist. Legacy rows are normalized once when they are read.
+        No normalization pass: identity is established at ingress, and the read
+        boundary in :meth:`from_json` re-derives it once per load. Re-deriving
+        every URL here instead would multiply the job loop's cost by the whole
+        page history on every batch persist.
         """
         job.updated_at = time.time()
         root_url = job.root_url

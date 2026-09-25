@@ -13,7 +13,7 @@ from urllib.parse import urljoin, urlparse
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
 from app.crawl.job_store import FrontierEntry, job_max_pages, normalized_policy, policy_limits
-from app.crawl.robots import load_robots_rules, robots_allows, robots_cache, robots_origin
+from app.crawl.robots import load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import NormalizedUrl
@@ -302,7 +302,6 @@ class RobotsGate:
                 default=int(getattr(settings, "default_timeout_seconds", 30)),
             ),
         )
-        self._cache = robots_cache
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(

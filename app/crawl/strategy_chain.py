@@ -12,7 +12,7 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
 )
-from app.crawl.result_helpers import _failed_engine_result
+from app.crawl.result_helpers import _engine_result_from_exception, _failed_engine_result
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import (
@@ -152,7 +152,9 @@ async def _retry_browser_cookies(
     retry_headers = dict(retry_policy.get("headers") or {})
     retry_headers["Cookie"] = cookie_header
     retry_policy["headers"] = retry_headers
-    retry_result = await _run_http_strategy(replace(context, policy=retry_policy), HTTP_CFFI_IMPERSONATE)
+    # Through _execute_strategy, not _run_http_strategy: the retry is a ladder
+    # step like any other, so its raise is enveloped like any other.
+    retry_result = await _execute_strategy(replace(context, policy=retry_policy), HTTP_CFFI_IMPERSONATE)
     state.attempts.extend(retry_result.attempted_strategies)
     if retry_result.status == "success" and retry_result.quality_score > 0:
         return replace(retry_result, attempted_strategies=state.attempts)
@@ -170,10 +172,29 @@ async def _execute_strategy(
     context: _ChainContext,
     strategy: CrawlStrategyName,
 ) -> EngineCrawlResult:
-    if strategy in HTTP_STRATEGIES:
-        return await _run_http_strategy(context, strategy)
-    if strategy in BROWSER_STRATEGIES:
-        return await _run_browser_strategy(context, strategy)
+    """Invoke ONE strategy step, converting any raise into a failed result.
+
+    A strategy is a STEP in a ladder, not a whole URL. The HTTP strategy has
+    its own broad-except sink and the browser worker catches inside
+    ``render``, but a raise at the adapter boundary between them had nowhere
+    to go: it escaped the chain, so it was enveloped with no strategy
+    attribution and every remaining ladder step skipped -- one BROWSER_HEADLESS
+    binding error ended a URL that still had BROWSER_HEADED_WARMED to try.
+    Both ``_run_*`` helpers AND the cffi cookie retry route through here, so a
+    raise has exactly one place it can become a result.
+    """
+    try:
+        if strategy in HTTP_STRATEGIES:
+            return await _run_http_strategy(context, strategy)
+        if strategy in BROWSER_STRATEGIES:
+            return await _run_browser_strategy(context, strategy)
+    except Exception as error:
+        return _engine_result_from_exception(
+            error=error,
+            original_url=context.original_url,
+            normalized_url=context.normalized_url,
+            strategy=strategy,
+        )
     return _failed_engine_result(
         original_url=context.original_url,
         normalized_url=context.normalized_url,
