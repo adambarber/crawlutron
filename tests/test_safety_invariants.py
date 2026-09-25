@@ -144,7 +144,10 @@ __all__ = [
 # prose and added no branch, and the tree-wide gate that makes the table's row
 # ORDER checkable is what stops the next row from being added in a position that
 # silently kills it.
-_APP_TREE_CODE_LINE_BUDGET = 14_363
+#
+# LOWERED to 14,361 by removing the robots allow-all shortcut: two lines of code
+# that allowed a path the same robots.txt group had just disallowed.
+_APP_TREE_CODE_LINE_BUDGET = 14_361
 
 
 def test_app_tree_code_line_count_does_not_grow():

@@ -101,8 +101,11 @@ def parse_robots_rules(text: str, *, token: str = USER_AGENT_TOKEN) -> list[tupl
     """``(is_allow, path)`` pairs for the group governing this crawler.
 
     A matched group is final even when its content is the empty-path
-    ``Disallow:`` the matcher reads as allow-all — an answer, not an
-    absence, so it never falls through to the star group.
+    ``Disallow:`` — an answer, not an absence, so it never falls through to the
+    star group. What the pair means is the matcher's question, not this one's:
+    an empty pattern is a rule to ignore (RFC 9309 2.2.2 — it has no octets, so
+    it is never the most specific match), which is why it is passed through
+    rather than dropped here.
     """
     groups = robots_groups(text, lambda key, value: key in ("allow", "disallow"))
     best, star = select_robots_values(groups, token)

@@ -208,8 +208,14 @@ def robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
     if parsed.query:
         path = f"{path}?{parsed.query}"
     host = parsed.hostname or ""
-    if any((not is_allow) and pattern == "" for is_allow, pattern in rules):
-        return True
+    # No allow-all shortcut for the empty `Disallow:` form. RFC 9309 2.2.2 makes
+    # an empty value a rule to IGNORE, not a verdict, so it is skipped with the
+    # other unmatched patterns below like any rule that cannot apply. Scanning
+    # for it up front and returning True on sight read that ignore as a verdict
+    # for the whole group: a file declaring `Disallow:` next to
+    # `Disallow: /private` -- both legal in one block -- allowed everything,
+    # including the path it had just named. A group whose ONLY rule is the empty
+    # form still allows everything, because the loop starts allowed and skips it.
     allowed = True
     best_len = -1
     for is_allow, pattern in rules:

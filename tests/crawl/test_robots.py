@@ -14,6 +14,7 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _robots_allows, _robots_pattern_to_regex, crawl_request
+from app.crawl.robots import robots_allows
 from app.crawl.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
@@ -209,11 +210,18 @@ def test_dollar_anchor_is_end_anchored():
     assert _robots_allows("http://x.example/page/sub", rules) is True
 
 
-def test_empty_disallow_overrides_prior_disallow():
-    # RFC 9309: an empty Disallow value permits everything and overrides a
-    # prior broad Disallow.
+def test_an_empty_disallow_is_ignored_and_does_not_override_a_sibling_rule():
+    # RFC 9309 2.2.2: the most specific match is the one with the most octets,
+    # and a path-pattern is "/" *UTF8-char-noctl while `empty-pattern` is a
+    # separate zero-octet form. A zero-octet rule is never the most specific
+    # match and cannot match a path, so it contributes no match at all and the
+    # group's other rules still govern. It does NOT "override a prior
+    # Disallow" -- that is not a rule the RFC contains, and reading it that way
+    # let this matcher allow a path the same block had just named.
     rules = [(False, "/"), (False, "")]
-    assert _robots_allows("http://x.example/anything/at/all", rules) is True
+    assert _robots_allows("http://x.example/anything/at/all", rules) is False
+    # With no other rule to match, nothing is found and the URI is allowed.
+    assert _robots_allows("http://x.example/anything/at/all", [(False, "")]) is True
 
 
 def test_longest_matching_rule_wins():
@@ -572,3 +580,41 @@ async def test_discovery_fetches_robots_when_no_sitemaps_passed():
     assert diag["robots"]["evaluation"] == "evaluated"
     assert diag["robots"]["reused_from_engine"] is False
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
+
+
+class TestEmptyDisallowDoesNotEraseItsGroup:
+    """RFC 9309 2.2.2: an empty ``Disallow`` value is a rule to ignore, not a verdict."""
+
+    def test_an_empty_disallow_does_not_erase_the_other_rules_in_its_group(self):
+        """The matcher used to allow-all on sight of an empty ``Disallow``.
+
+        It scanned the whole group for the empty form and returned True without
+        reading the rules that followed, so a file declaring ``Disallow:`` next
+        to ``Disallow: /private`` -- both legal in the same block -- allowed
+        everything, including the path it had just named.
+        """
+        both = parse_robots_rules(
+            "User-agent: *\nDisallow:\nDisallow: /private\n", token=HTTP_DECLARED_CRAWLER
+        )
+        assert both == [(False, ""), (False, "/private")]
+        assert robots_allows("https://example.com/private/secret", both) is False
+        assert robots_allows("https://example.com/public", both) is True
+
+    def test_a_group_whose_only_rule_is_the_empty_disallow_allows_everything(self):
+        """The form keeps the meaning it has on its own.
+
+        A group that declares nothing but ``Disallow:`` allows everything, which
+        is also exactly what the per-rule loop yields when it skips empty
+        patterns -- so the shortcut was never needed to express it.
+        """
+        only_empty = parse_robots_rules("User-agent: *\nDisallow:\n", token=HTTP_DECLARED_CRAWLER)
+        assert only_empty == [(False, "")]
+        assert robots_allows("https://example.com/private/secret", only_empty) is True
+
+    def test_an_allow_still_beats_a_longer_disallow_in_the_same_group(self):
+        both = parse_robots_rules(
+            "User-agent: *\nDisallow:\nDisallow: /private\nAllow: /private/ok\n",
+            token=HTTP_DECLARED_CRAWLER,
+        )
+        assert robots_allows("https://example.com/private/ok", both) is True
+        assert robots_allows("https://example.com/private/other", both) is False
