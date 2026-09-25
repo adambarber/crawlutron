@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from functools import cache
 
 import pytest
 
@@ -168,24 +169,37 @@ def test_the_gate_resolves_the_interpreter_that_actually_ran_it() -> None:
     assert resolved.exists(), f"pyright would be pointed at a missing interpreter: {resolved}"
 
 
-def test_pyright_whole_tree_is_clean() -> None:
-    executable = _require_pyright()
+@cache
+def _pyright_report() -> tuple[int, str]:
+    """One pyright run of the whole tree, shared by both assertions below.
 
+    The two tests asked the same question of the same unchanged tree with the
+    same command, and paid for the analysis twice: 2.29s and 2.20s, the two
+    most expensive entries in this file. That is a962c7b's argument applied
+    where it was not applied: one observation, handed to every reader, instead
+    of one observation per reader.
+
+    Memoized rather than computed at import, so running either test alone still
+    runs pyright. Cached per session, not per file, because the answer is a
+    property of the tree: if the tree changed mid-session the two assertions
+    would have disagreed, and disagreement is the failure mode, not a feature.
+    """
+    executable = _require_pyright()
     completed = subprocess.run(
-        [
-            executable,
-            "--pythonpath",
-            _interpreter(),
-            "--outputjson",
-        ],
+        [executable, "--pythonpath", _interpreter(), "--outputjson"],
         cwd=SERVICE_ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
-    assert completed.returncode in (0, 1), f"pyright failed to run:\n{completed.stderr}"
+    return completed.returncode, completed.stdout
 
-    report = json.loads(completed.stdout)
+
+def test_pyright_whole_tree_is_clean() -> None:
+    returncode, stdout = _pyright_report()
+    assert returncode in (0, 1), f"pyright failed to run with status {returncode}"
+
+    report = json.loads(stdout)
     diagnostics = report["generalDiagnostics"]
     assert len(diagnostics) <= BUDGET, (
         f"{len(diagnostics)} pyright findings, budget {BUDGET}.\n"
@@ -204,15 +218,8 @@ def test_pyright_whole_tree_is_clean() -> None:
 
 def test_pyright_budget_is_tight() -> None:
     """A budget above the measurement is a standing allowance, not a ratchet."""
-    executable = _require_pyright()
-    completed = subprocess.run(
-        [executable, "--pythonpath", _interpreter(), "--outputjson"],
-        cwd=SERVICE_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    report = json.loads(completed.stdout)
+    _returncode, stdout = _pyright_report()
+    report = json.loads(stdout)
     actual = len(report["generalDiagnostics"])
     assert BUDGET <= actual, (
         f"the pyright budget of {BUDGET} is stale -- only {actual} findings remain. "

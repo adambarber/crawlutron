@@ -44,12 +44,23 @@ import pathlib
 import re
 import subprocess
 from collections import defaultdict
-from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
+from chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
-APP_ROOT = pathlib.Path(__file__).resolve().parent.parent / "app"
+# Every collector in this file reads the same app tree, and `offenders()` is
+# called sixteen times per run (four metrics x the budget test, four x the
+# tight test, four x two in the determinism test). It used to re-glob, re-read
+# and re-parse all 106 modules on each of those, so one run paid for the same
+# parse sixteen times over -- the exact redundancy a962c7b removed from the
+# chokepoint suite, in the file next door. `app_trees` is that same owned
+# snapshot, and `nodes_of` shares the walk underneath it.
+#
+# `exclude=frozenset()` is load-bearing, not decoration: the default excludes
+# app/safe_regex.py, and these budgets are measured over EVERY app module. A
+# dropped module would lower the offender count and quietly buy budget.
+_ALL_APP = frozenset()
 
 FUNCTION_LENGTH = 60
 ABC_SIZE = 30
@@ -103,10 +114,6 @@ class Offender:
         return f"{self.metric}: {self.where} {self.name} ({self.size})"
 
 
-def _app_files() -> list[pathlib.Path]:
-    return sorted(APP_ROOT.rglob("*.py"))
-
-
 def _span(node: ast.AST, body: list[ast.stmt]) -> int:
     if not body:
         return 0
@@ -114,7 +121,7 @@ def _span(node: ast.AST, body: list[ast.stmt]) -> int:
 
 
 def _abc_size(node: ast.AST) -> int:
-    nodes = list(ast.walk(node))
+    nodes = list(nodes_of(node))
     # `AnnAssign` counts. A function with thirty `x: int = ...` statements is
     # not less complex than one with thirty `x = ...`; the distinction is
     # whether the author wrote a type, not whether the code branches. An earlier
@@ -137,7 +144,7 @@ def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
     contains it: outermost first, and nesting never double-counts.
     """
     candidates: list[tuple[int, int, int, str]] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, _COMPOUND_NODES):
             continue
         body = list(node.body)
@@ -175,7 +182,7 @@ def _candidates(tree: ast.AST) -> list[tuple[str, int, str, int]]:
     in the tree has an `__init__` -- so a name is not an identity.
     """
     found: list[tuple[str, int, str, int]] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             found.append(("function length", _span(node, node.body), node.name, node.lineno))
             found.append(("abc size", _abc_size(node), node.name, node.lineno))
@@ -189,9 +196,8 @@ def _candidates(tree: ast.AST) -> list[tuple[str, int, str, int]]:
 def offenders(metric: str) -> list[Offender]:
     limit = _METRIC_LIMITS[metric]
     found: list[Offender] = []
-    for path in _app_files():
+    for path, tree in app_trees(exclude=_ALL_APP):
         relative = path.relative_to(APP_ROOT.parent).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for candidate_metric, size, label, line in _candidates(tree):
             if candidate_metric == metric and size > limit:
                 found.append(Offender(metric, f"{relative}:{line}", label, size))
@@ -246,21 +252,14 @@ def test_metric_collectors_see_the_whole_tree() -> None:
 
     functions = 0
     classes = 0
-    for path in _app_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
+    for _path, tree in app_trees(exclude=_ALL_APP):
+        for node in nodes_of(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 functions += 1
             elif isinstance(node, ast.ClassDef):
                 classes += 1
     assert functions > 500, f"function walk reached only {functions} definitions"
     assert classes > 50, f"class walk reached only {classes} definitions"
-
-
-def _iter_definitions() -> Iterator[ast.AST]:
-    for path in _app_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        yield from ast.walk(tree)
 
 
 def test_metric_collection_is_deterministic() -> None:
