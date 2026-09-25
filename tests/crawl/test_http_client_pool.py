@@ -21,15 +21,11 @@ from app.validation import HostPolicy
 
 class TestAsyncHttpClientLifecycle:
     async def test_http_async_client_close(self):
-
-        from app.crawl.strategies.http_client_pool import close_async_http_client, get_async_http_client
+        from app.crawl.strategies.http_client_pool import close_async_http_client
 
         # Get a client, then close it
-        async def test():
-            get_async_http_client()
-            await close_async_http_client()
-
-        await test()
+        get_async_http_client()
+        await close_async_http_client()
 
 
 class TestPendingClientCloseCap:

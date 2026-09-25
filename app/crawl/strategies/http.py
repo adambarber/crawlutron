@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from app.classify import classify_page_with_evidence
@@ -307,7 +307,12 @@ def _binary_result_if_needed(
         content_type=content_type,
         elapsed_ms=response.elapsed_ms,
     )
-    return EngineCrawlResult(**{**asdict(result), "diagnostics": {"retry": ctx.retry_diagnostics}})
+    # ``replace``, not an ``asdict`` round-trip through the constructor. asdict
+    # recurses into the dataclass fields, so it silently converted the frozen
+    # CrawlStrategyAttempt list into plain dicts: the copy still compared equal
+    # field-for-field and then raised AttributeError the moment a consumer
+    # reached for an attribute, which the render adapter does on its first read.
+    return replace(result, diagnostics={"retry": ctx.retry_diagnostics})
 
 
 async def _extract_http_phase(

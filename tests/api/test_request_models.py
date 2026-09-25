@@ -52,12 +52,9 @@ class TestWebhookUrlValidation:
 
         from app.main import app
 
-        async def test():
-            transport = httpx.ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                resp = await client.post(
-                    "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}
-                )
-                assert resp.status_code == 422
-
-        await test()
+        transport = httpx.ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}
+            )
+            assert resp.status_code == 422

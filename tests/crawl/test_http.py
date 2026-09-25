@@ -6,9 +6,11 @@ from _fetcher_factories import make_fetch, run_http_strategy
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
+from app.crawl.result_helpers import _crawl_result_from_engine_result
 from app.crawl.strategies.fetch_policy import _looks_like_binary_body
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.crawl.strategies.http import _http_strategy_result
+from app.models import CrawlStrategyAttempt
 from app.validation import HostPolicy
 
 _default_http_fetcher_with_policy = partial(
@@ -130,6 +132,7 @@ class TestHttpStrategy:
         assert result.discovered_links == []
         assert result.next_page_url == f"{base_url}/page2"
         assert result.http_status == 200
+
 
     async def test_http_strategy_404_classified_not_found(self, base_url):
         result = await _run(
@@ -326,3 +329,46 @@ class TestHttpStrategyRetry:
             cache=HttpCache(),
         )
         assert result.classification == "rendered"
+
+
+async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapter():
+    """A binary response must reach the render pipeline as an EngineCrawlResult.
+
+    The binary result is the one place the HTTP strategy copies a finished
+    result to override a single field. Rebuilding that copy through
+    ``dataclasses.asdict`` recursively converts the frozen ``CrawlStrategyAttempt``
+    list into plain dicts, so the copy still *looks* right and fails only when a
+    consumer reaches for an attribute -- which the render adapter does, on the
+    first field it reads. Driving the real strategy and the real adapter together
+    is the only version of this that could have caught it: asserting on the
+    strategy's result alone passes happily with dicts in the list.
+    """
+    # An archive: inside the detector's real contract (PK magic under a
+    # non-text content type). An image would not qualify -- image/png is
+    # deliberately outside the binary set -- so widening the fixture would have
+    # been quietly testing a policy change instead of the copy bug.
+    archive = b"PK\x03\x04" + b"\x00" * 64
+
+    async def binary_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        return make_fetch(
+            url=url,
+            final_url=url,
+            status=200,
+            ctype="application/octet-stream",
+            body=archive,
+        )
+
+    result = await _run(policy=http_policy(), **_run_kwargs(binary_fetcher))
+
+    # The binary no-text terminal result: not an error, and not a render.
+    assert result.classification == "binary_no_text"
+    assert result.attempted_strategies
+    # The declared type, not a dict that merely happens to have the right keys.
+    assert all(isinstance(a, CrawlStrategyAttempt) for a in result.attempted_strategies)
+    assert result.attempted_strategies[0].elapsed_ms > 0
+
+    # And the adapter that reads those attributes must not raise.
+    adapted = _crawl_result_from_engine_result(result, url="http://x.test/")
+    assert adapted.classification == "binary_no_text"
+    assert adapted.elapsed_ms == result.attempted_strategies[0].elapsed_ms
+    assert adapted.attempts == len(result.attempted_strategies)

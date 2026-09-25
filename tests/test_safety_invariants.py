@@ -1845,6 +1845,178 @@ def test_whole_site_visited_gate_detector_bites():
 
 
 # ---------------------------------------------------------------------------
+# Collectible tests: a test pytest cannot see is a test that never runs
+# ---------------------------------------------------------------------------
+
+# pytest collects a test function only when it sits at module level or is a
+# direct method of a ``Test*`` class. A ``test_*`` def anywhere else is parsed,
+# imported, and then silently ignored -- so the suite stays green while the
+# coverage it appeared to provide is gone. Nothing in a normal test run can
+# catch that: the absence of a failure looks exactly like a passing test.
+#
+# This is not hypothetical. A test added in the middle of a test class, dedented
+# to column 0, does not raise IndentationError -- the methods that followed it
+# are absorbed as nested defs inside it, where nothing calls them. One green run
+# of 1914 tests was nine tests short of the truth, and the only reason it was
+# caught is that the count was compared against HEAD rather than assumed.
+
+
+def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Report every ``test_*`` def pytest would silently not collect."""
+    legal_owners: set[int] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            legal_owners.add(id(node))
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            legal_owners.update(id(m) for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
+
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
+            continue
+        if id(node) in legal_owners:
+            continue
+        owners = [
+            parent.name
+            for parent in ast.walk(tree)
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)) and node in ast.walk(parent) and parent is not node
+        ]
+        where = f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
+        offenders.append(offender(path, node.lineno, f"test_{node.name} is uncollectible -- {where}"))
+    return offenders
+
+
+def test_every_test_function_is_one_pytest_can_collect():
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        offenders.extend(_uncollectible_tests(tree, path))
+    assert not offenders, (
+        "these test functions are silently never run; pytest collects only "
+        "module-level tests and Test* class methods: " + ", ".join(offenders)
+    )
+
+
+def test_uncollectible_test_detector_bites():
+    """Every uncollectible shape fires; both collectible shapes stay clean."""
+    path = TESTS_DIR / "_synthetic.py"
+    fires = {
+        # Nested inside another function: the shape that silently ate 9 tests.
+        "def helper():\n    def test_inner():\n        pass\n": "nested inside helper()",
+        # A method of a class pytest will not collect from.
+        "class Cases:\n    def test_inner(self):\n        pass\n": "not a module-level test",
+        # Two levels deep inside a class, still invisible.
+        "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n": "nested inside helper()",
+    }
+    for src, expected in fires.items():
+        offenders = _uncollectible_tests(ast.parse(src), path)
+        assert len(offenders) == 1, (src, offenders)
+        assert expected in offenders[0], (src, offenders)
+
+    clean = (
+        "def test_module_level():\n    pass\n",
+        "async def test_module_level_async():\n    pass\n",
+        "class TestThings:\n    def test_method(self):\n        pass\n",
+        "class TestThings:\n    async def test_async_method(self):\n        pass\n",
+        # Fixtures and helpers are not tests and must not be reported.
+        "class TestThings:\n    def helper_fixture(self):\n        pass\n",
+        "def not_a_test_helper():\n    pass\n",
+    )
+    for src in clean:
+        assert not _uncollectible_tests(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
+# dataclass copying: replace, not asdict-and-rebuild
+# ---------------------------------------------------------------------------
+
+# ``asdict`` is a *serialization* primitive: it recurses through the field tree
+# and hands back plain dicts, so a frozen nested dataclass (a CrawlStrategyAttempt)
+# becomes a dict with the same keys. Unpacking that into a constructor call to
+# "copy with one field changed" therefore rebuilds an object whose nested fields
+# no longer match their declared types. The copy compares equal field-for-field,
+# type-checks clean under a lax annotation, and raises AttributeError the first
+# time a consumer reaches for an attribute -- which the render adapter does on
+# its first read, long after the copy was made.
+#
+# The distinction the detector draws is not asdict-allowed-or-banned: genuine
+# serialization is a legitimate use and job_store.to_json() is one. It is
+# *where the result goes*. Unpacked into a constructor call, asdict is always the
+# copy mistake; anything else, it is doing its real job. So the sink is the
+# constructor, and no file needs an exemption to keep using asdict properly.
+
+
+def _is_asdict_call(node: ast.AST) -> bool:
+    """Whether a node calls asdict, under either import spelling.
+
+    ``from dataclasses import asdict`` and ``import dataclasses`` are both in
+    use in this tree, so a detector keyed on one spelling silently stops
+    detecting the moment a module picks the other.
+    """
+    return (
+        isinstance(node, ast.Call)
+        and (
+            (isinstance(node.func, ast.Name) and node.func.id == "asdict")
+            or (isinstance(node.func, ast.Attribute) and node.func.attr == "asdict")
+        )
+    )
+
+
+def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag unpacking ``asdict(...)`` into a constructor call."""
+    offenders: list[str] = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        for keyword in call.keywords:
+            if keyword.arg is not None or not isinstance(keyword.value, ast.AST):
+                continue
+            unpacked = [n for n in ast.walk(keyword.value) if _is_asdict_call(n)]
+            if unpacked:
+                offenders.append(
+                    offender(
+                        path,
+                        unpacked[0].lineno,
+                        "asdict(...) unpacked into a constructor call: the nested "
+                        "dataclasses become dicts and the rebuilt object violates its "
+                        "declared field types -- use dataclasses.replace()",
+                    )
+                )
+                break
+    return offenders
+
+
+def test_asdict_is_never_unpacked_into_a_constructor():
+    """Copying a dataclass with asdict must not survive anywhere in app/."""
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_asdict_rebuild_offenders(tree, path))
+    assert not offenders, (
+        "copy dataclasses with dataclasses.replace(), not asdict(**...): " + ", ".join(offenders)
+    )
+
+
+def test_asdict_rebuild_detector_bites():
+    """The rebuild shape fires; genuine serialization does not."""
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    fires = [
+        "import dataclasses\ndef f(r):\n    return Thing(**{**dataclasses.asdict(r), 'd': 1})\n",
+        "from dataclasses import asdict\ndef f(r):\n    return Thing(**asdict(r))\n",
+    ]
+    for src in fires:
+        offenders = _asdict_rebuild_offenders(ast.parse(src), path)
+        assert len(offenders) == 1 and "dataclasses.replace" in offenders[0], src
+
+    # Serialization keeps asdict: a dict result used as a dict is its real job.
+    clean = [
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    return json.dumps(data)\n",
+        "import dataclasses\ndef f(s):\n    return dataclasses.asdict(s)['results']\n",
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    return data\n",
+    ]
+    for src in clean:
+        assert not _asdict_rebuild_offenders(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
 # Classification transience: one verdict, owned by the taxonomy
 # ---------------------------------------------------------------------------
 
