@@ -159,7 +159,16 @@ __all__ = [
 # dropping a retired renderer in release. Both halves were needed -- the drain
 # covers what close left queued, the drop covers the holder that returns its
 # renderer afterwards, and either one alone still hands out a closed browser.
-_APP_TREE_CODE_LINE_BUDGET = 14_383
+#
+# RAISED to 14,396 for the Accept-Encoding capability check: thirteen lines, of
+# which most is the function that names the question (_accept_encoding). The
+# two-line inline version was tried first and rejected by the abc-size ratchet,
+# which counts offenders and only ever ratchets DOWN -- so a capability
+# decision added to a builder already at the ceiling had to be named rather than
+# appended, and naming it costs the lines it costs. The alternative was leaving
+# the header asking every brotli-capable server for a body this process refuses
+# to decode whenever brotli is not installed.
+_APP_TREE_CODE_LINE_BUDGET = 14_396
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1952,9 +1961,137 @@ def test_uncollectible_test_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Age-based deletion must consult ownership, not just age
+# Advertise only the encodings this process can decode
 # ---------------------------------------------------------------------------
 
+# Request headers named `br` unconditionally while the brotli decoder is an
+# OPTIONAL dependency -- app/crawl/decompression supports two incompatible
+# brotli APIs precisely because either may be the one installed. So on a host
+# without it, every brotli-capable server was told to return a body the process
+# would then refuse, and the crawl failed on a request we chose to make that
+# way. Advertising an encoding is a promise about what this process can decode,
+# so it is checked against the decoder set rather than trusted per call site.
+_ALWAYS_DECODABLE_ENCODINGS = {"gzip", "deflate", "identity"}
+_ENCODING_TOKEN = re.compile(r"^[a-z0-9\-_+.]+$")
+# A comma-joined list is only an encoding list if it MENTIONS a real encoding.
+# Without this anchor the check reads English: api_models.py field descriptions
+# like "dom_text, etc., http_html" are comma-joined, lowercase and token-shaped,
+# and a gate that cries wolf on those gets ignored on the day it matters.
+_KNOWN_ENCODINGS = {
+    "gzip", "x-gzip", "deflate", "x-deflate", "br", "zstd", "compress",
+    "x-compress", "identity", "*",
+}
+
+
+def _decodable_encoding_tokens() -> set[str]:
+    from app.crawl.decompression import _brotli_available
+
+    tokens = set(_ALWAYS_DECODABLE_ENCODINGS)
+    if _brotli_available():
+        tokens.add("br")
+    return tokens
+
+
+def _undecodable_encoding_offenders(tree, path, *, decodable: set[str] | None = None) -> list[str]:
+    """Report encoding-list literals naming something this process cannot decode.
+
+    ``decodable`` is injectable so the detector's logic can be tested against a
+    process that has no brotli, which is exactly the deployment the live tree
+    test usually is not.
+    """
+    if decodable is None:
+        decodable = _decodable_encoding_tokens()
+    # Keyed by (line, token): ast.walk yields a dict's value Constant both under
+    # its key and as a node in its own right, so without this one bad header
+    # reports twice and the count stops meaning anything.
+    seen: dict[tuple[int, str], str] = {}
+
+    def check(node, value: str) -> None:
+        tokens = {token.strip().lower() for token in value.split(",") if token.strip()}
+        if len(tokens) < 2 or not all(_ENCODING_TOKEN.match(token) for token in tokens):
+            return
+        if not tokens & _KNOWN_ENCODINGS:
+            return
+        for token in sorted(tokens - decodable):
+            seen[(node.lineno, token)] = (
+                f"{path.name}:{node.lineno} advertises {token!r}, which app/crawl/decompression "
+                f"cannot decode here (decodable: {', '.join(sorted(decodable))})"
+            )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=False):
+                if (
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value.lower() == "accept-encoding"
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                ):
+                    check(value, value.value)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            # A standalone encoding list, however it reaches the header.
+            check(node, node.value)
+    return [seen[key] for key in sorted(seen)]
+
+
+def test_no_request_header_advertises_an_undecodable_encoding():
+    """Checked against THIS process's decoders, so the verdict is environmental.
+
+    Where brotli is installed, naming ``br`` is correct and the gate is silent;
+    where it is not, the same tree fails until the header stops asking for a
+    body the process would refuse. Either way the header's claim is checked
+    against the decoder set rather than trusted.
+    """
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_undecodable_encoding_offenders(tree, path))
+    assert not offenders, "; ".join(offenders)
+
+
+def test_undecodable_encoding_detector_bites():
+    synthetic = REPO_ROOT / "app" / "_synthetic.py"
+    # A process with no brotli decoder, which is the deployment the bug shipped to.
+    no_brotli = {"gzip", "deflate", "identity"}
+
+    # The shape that shipped: br named unconditionally, as a plain literal.
+    bad = ast.parse('HEADERS = {"Accept-Encoding": "gzip, deflate, br"}\n')
+    assert len(_undecodable_encoding_offenders(bad, synthetic, decodable=no_brotli)) == 1
+
+    # Reached indirectly, as a variable rather than inside the dict literal.
+    indirect = ast.parse('ENCODING = "gzip, deflate, br"\nHEADERS = {"Accept-Encoding": ENCODING}\n')
+    assert len(_undecodable_encoding_offenders(indirect, synthetic, decodable=no_brotli)) == 1
+
+    # The same tree is correct where the decoder exists, which is why the live
+    # test has to consult the environment rather than assert a fixed verdict.
+    assert not _undecodable_encoding_offenders(bad, synthetic, decodable={*no_brotli, "br"})
+
+    # A genuinely undecodable token is caught even with brotli present.
+    zstd = ast.parse('HEADERS = {"Accept-Encoding": "gzip, zstd"}\n')
+    assert len(_undecodable_encoding_offenders(zstd, synthetic, decodable={*no_brotli, "br"})) == 1
+
+    # The fixed shape: the optional token is appended only when it is decodable.
+    good = ast.parse(
+        'ENCODING = "gzip, deflate"\n'
+        "if available():\n"
+        '    ENCODING += ", br"\n'
+        'HEADERS = {"Accept-Encoding": ENCODING}\n'
+    )
+    assert not _undecodable_encoding_offenders(good, synthetic, decodable=no_brotli)
+
+    # Not an encoding list at all: another comma-joined header is not this gate's
+    # business, and neither is English prose that happens to be comma-joined.
+    other = ast.parse(
+        'HEADERS = {"Accept": "text/html,application/xml;q=0.9"}\n'
+        'OTHER = "dom_text, etc., http_html"\n'
+        "SINGLE = 'gzip'\n"
+    )
+    assert not _undecodable_encoding_offenders(other, synthetic, decodable=no_brotli)
+
+
+# ---------------------------------------------------------------------------
+# Age-based deletion must consult ownership, not just age
+# ---------------------------------------------------------------------------
 # A sweep, GC, evict, prune or clean function that unlinks a file is deleting
 # something a concurrent worker may still be reading. Age is not ownership: a
 # scratch file lives exactly as long as the work writing it, and a process-wide

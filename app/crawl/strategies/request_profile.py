@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
+from app.crawl import decompression
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
@@ -146,6 +147,28 @@ def _select_fingerprint(profile: Mapping[str, Any], domain: str) -> dict[str, st
     return out
 
 
+def _accept_encoding() -> str:
+    """The encodings this process will actually decode.
+
+    ``br`` is conditional because the brotli decoder is an OPTIONAL dependency
+    (see :func:`app.crawl.decompression._brotli_available`). Naming it
+    unconditionally made every brotli-capable server -- most of the modern web
+    -- return a body this process would then refuse to decode, so the crawl
+    failed on a request we had chosen to make that way.
+
+    Its own function rather than an inline branch in ``_headers_for_strategy``:
+    that builder is already at the tree's complexity ceiling, and a capability
+    decision worth making is worth naming.
+
+    The attribute lookup is late-bound on the module rather than a from-import,
+    so the capability stays the single source of truth at call time instead of
+    freezing one answer at import time.
+    """
+    if decompression._brotli_available():
+        return "gzip, deflate, br"
+    return "gzip, deflate"
+
+
 def _headers_for_strategy(
     strategy: str,
     policy: Mapping[str, Any],
@@ -158,7 +181,7 @@ def _headers_for_strategy(
         "User-Agent": DEFAULT_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": _accept_encoding(),
         "Sec-Fetch-Dest": "document",
         "Sec-Fetch-Mode": "navigate",
         "Sec-Fetch-Site": "none",

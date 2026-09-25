@@ -665,3 +665,47 @@ class TestFetchHelpersEdges:
         body = gzip.compress(b"hello world")
         out = _decode_body(decompress_body(body, "gzip", max_output_bytes=1_000_000), "text/html")
         assert out == "hello world"
+
+
+class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
+    """Asking for an encoding we cannot decode is a self-inflicted failure.
+
+    ``Accept-Encoding`` named ``br`` unconditionally while ``_decompress_brotli``
+    raises ``DecompressionError`` when the decoder is absent -- and the module
+    supports two incompatible brotli APIs precisely because either may be the
+    one installed. So on a host without brotli, every brotli-capable server
+    (most of the modern web) is told to send a body we then refuse, and the
+    crawl fails on a request we should never have made that way.
+    """
+
+    def test_br_is_advertised_when_the_decoder_is_available(self):
+        from app.crawl.decompression import _brotli_available
+
+        if not _brotli_available():
+            pytest.skip("brotli is not installed in this environment")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://e.com/")
+        assert "br" in headers["Accept-Encoding"]
+
+    def test_br_is_dropped_when_the_decoder_is_missing(self, monkeypatch):
+        import app.crawl.decompression as decompression
+
+        monkeypatch.setattr(decompression, "_brotli_available", lambda: False)
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://e.com/")
+        advertised = headers["Accept-Encoding"]
+        assert "br" not in advertised
+        # The encodings zlib always provides are unaffected.
+        assert "gzip" in advertised and "deflate" in advertised
+
+    def test_the_remaining_encodings_are_always_decodable(self):
+        # Every advertised token must survive a real round-trip through the real
+        # decompressor, whatever the decoder set looks like.
+        import gzip
+        import zlib
+
+        from app.crawl.decompression import decompress_body
+
+        for encoding, payload in (
+            ("gzip", gzip.compress(b"hello")),
+            ("deflate", zlib.compress(b"hello")),
+        ):
+            assert decompress_body(payload, encoding, max_output_bytes=1024) == b"hello"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import zlib
 from typing import Protocol, cast
 
@@ -113,6 +114,32 @@ def decompress_body(
         return bytes(decoded)
 
     return _passthrough(body)
+
+
+@functools.lru_cache(maxsize=1)
+def _brotli_available() -> bool:
+    """Whether a brotli decoder can be imported in this process.
+
+    This module supports two incompatible brotli APIs (see
+    :func:`_decompress_brotli`) precisely because either may be the one
+    installed, so "no decoder" is a supported deployment, not a bug. The answer
+    belongs here rather than at the call sites because the module that owns the
+    capability is the one that should be asked about it: a request header that
+    advertises an encoding this process cannot decode asks a server for a body
+    it will then refuse, which fails the crawl for a reason the caller chose.
+
+    Private because it is an internal capability check for the header builder,
+    not part of this module's decompression API -- naming it publicly would
+    spend the tree's public-surface budget on a question only one caller asks.
+
+    Cached because availability cannot change inside a running process, and
+    this is consulted per request.
+    """
+    try:
+        import brotli
+    except ImportError:
+        return False
+    return brotli is not None
 
 
 def _decompress_brotli(
