@@ -3,6 +3,7 @@
 import inspect
 import json
 import os
+import time
 
 from app.crawl.engine import _ResultSpill
 
@@ -128,3 +129,68 @@ class TestSpillFileOwnership:
         finally:
             if os.path.exists(target):
                 os.unlink(target)
+
+
+class TestGcNeverUnlinksASpillStillInUse:
+    """A live spill is the crawl's result, not a checkpoint that can be dropped.
+
+    ``load_ordered`` reassembles the result by opening the spill's PATH by name.
+    An unlink from a concurrent GC sweep therefore does not cost a worker its
+    local checkpoint -- it makes the finished crawl's own output unreadable, and
+    the whole crawl has already been paid for by then. A whole-site job that
+    runs past ``gc_age_seconds`` is ordinary, not exotic, so the sweep has to
+    treat "still in use" as a hard skip rather than as a tolerable loss.
+    """
+
+    @staticmethod
+    def _age(path: str, seconds: float) -> None:
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    def test_a_live_spill_survives_a_sweep_that_would_otherwise_collect_it(self):
+        spill = _ResultSpill()
+        try:
+            spill._fh.write(json.dumps({"i": 0, "r": {"n": 0}}) + "\n")
+            self._age(spill.path, 7200)
+
+            spill._gc_stale_spills(1.0)
+
+            assert os.path.exists(spill.path), "GC unlinked a spill still in use"
+            assert spill.load_ordered() == [{"n": 0}]
+        finally:
+            spill.close()
+
+    def test_an_abandoned_spill_is_still_reclaimed(self):
+        spill = _ResultSpill()
+        path = spill.path
+        spill.close()
+        # close() unlinks an owned spill, so recreate one to stand in for a
+        # spill abandoned by a worker that died without closing it.
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write('{"i":0,"r":{}}\n')
+        self._age(path, 7200)
+        try:
+            _ResultSpill()._gc_stale_spills(1.0)
+            assert not os.path.exists(path), "GC kept a spill nobody owns"
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_the_sweep_skips_only_the_spills_that_are_actually_in_use(self):
+        live = _ResultSpill()
+        abandoned = _ResultSpill()
+        live_path, abandoned_path = live.path, abandoned.path
+        live._fh.write(json.dumps({"i": 0, "r": {"n": 0}}) + "\n")
+        abandoned.close()
+        with open(abandoned_path, "w", encoding="utf-8") as handle:
+            handle.write('{"i":0,"r":{}}\n')
+        self._age(live_path, 7200)
+        self._age(abandoned_path, 7200)
+        try:
+            live._gc_stale_spills(1.0)
+            assert os.path.exists(live_path), "a live spill was collected"
+            assert not os.path.exists(abandoned_path), "an abandoned spill was kept"
+        finally:
+            live.close()
+            if os.path.exists(abandoned_path):
+                os.unlink(abandoned_path)

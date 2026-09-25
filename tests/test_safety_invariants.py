@@ -147,7 +147,13 @@ __all__ = [
 #
 # LOWERED to 14,361 by removing the robots allow-all shortcut: two lines of code
 # that allowed a path the same robots.txt group had just disallowed.
-_APP_TREE_CODE_LINE_BUDGET = 14_361
+#
+# RAISED to 14,372 for the spill ownership registry: eleven lines, and they buy
+# a property the sweep did not have -- it could ask whether a file is still in
+# use before deleting it on age alone. The alternative was to leave a sweep that
+# can delete the reassembled result of a crawl that is still running, on the
+# strength of a docstring arguing the loss was acceptable.
+_APP_TREE_CODE_LINE_BUDGET = 14_372
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1937,6 +1943,89 @@ def test_uncollectible_test_detector_bites():
     )
     for src in clean:
         assert not _uncollectible_tests(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
+# Age-based deletion must consult ownership, not just age
+# ---------------------------------------------------------------------------
+
+# A sweep, GC, evict, prune or clean function that unlinks a file is deleting
+# something a concurrent worker may still be reading. Age is not ownership: a
+# scratch file lives exactly as long as the work writing it, and a process-wide
+# sweep reaches every one of them. `_ResultSpill` learned this the hard way --
+# its sweep unlinked by age alone and documented the loss of a still-active
+# spill as acceptable, when the spill being deleted was the crawl's own
+# reassembled result. Deletion by age is fine; deletion by age alone is not.
+_SWEEP_NAME_PARTS = ("gc", "sweep", "evict", "prune", "clean", "reap", "purge")
+_OWNERSHIP_GUARDS = ("in_use", "live", "in_flight", "active", "owned", "holder", "registry")
+
+
+def _unowned_age_deletions(tree, path) -> list[str]:
+    """Report sweep-like functions that unlink without consulting ownership."""
+    offenders: list[str] = []
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        name = func.name.lower()
+        if not any(part in name for part in _SWEEP_NAME_PARTS):
+            continue
+        unlinks = [
+            node
+            for node in ast.walk(func)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("unlink", "remove", "rmdir")
+        ]
+        if not unlinks:
+            continue
+        body_names = {node.id for node in ast.walk(func) if isinstance(node, ast.Name)}
+        body_names |= {
+            node.attr for node in ast.walk(func) if isinstance(node, ast.Attribute)
+        }
+        if any(guard in candidate.lower() for candidate in body_names for guard in _OWNERSHIP_GUARDS):
+            continue
+        offenders.append(
+            f"{path.name}:{func.lineno} {func.name}() unlinks without an ownership check; "
+            f"skip paths that are live (age alone is not ownership)"
+        )
+    return offenders
+
+
+def test_age_based_deletion_consults_ownership_first():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_unowned_age_deletions(tree, path))
+    assert not offenders, "; ".join(offenders)
+
+
+def test_unowned_age_deletion_detector_bites():
+    # The shape that lost a live crawl result: a sweep that unlinks by age only.
+    bad = ast.parse(
+        "def _gc_stale(max_age):\n"
+        "    for name in os.listdir(tmp):\n"
+        "        if now - os.path.getmtime(name) > max_age:\n"
+        "            os.unlink(name)\n"
+    )
+    assert len(_unowned_age_deletions(bad, REPO_ROOT / "app" / "_synthetic.py")) == 1
+
+    # The fixed shape: the same sweep, consulting the live set first.
+    good = ast.parse(
+        "def _gc_stale(max_age):\n"
+        "    in_use = frozenset(_LIVE_SPILL_PATHS)\n"
+        "    for name in os.listdir(tmp):\n"
+        "        if name in in_use:\n"
+        "            continue\n"
+        "        os.unlink(name)\n"
+    )
+    assert not _unowned_age_deletions(good, REPO_ROOT / "app" / "_synthetic.py")
+
+    # A function that deletes but is not a sweep is not this gate's business.
+    not_a_sweep = ast.parse("def close(self):\n    os.unlink(self.path)\n")
+    assert not _unowned_age_deletions(not_a_sweep, REPO_ROOT / "app" / "_synthetic.py")
+
+    # A method named for cleanup still has to ask.
+    method = ast.parse("class C:\n    def cleanup(self):\n        os.remove(self.path)\n")
+    assert len(_unowned_age_deletions(method, REPO_ROOT / "app" / "_synthetic.py")) == 1
 
 
 # ---------------------------------------------------------------------------

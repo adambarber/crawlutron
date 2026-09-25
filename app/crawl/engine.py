@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -191,6 +192,15 @@ def _stale_seeds(
 
 _SPILL_PREFIX = "bc-spill-"
 
+# Spill paths a live _ResultSpill still owns, and the single answer the
+# stale-spill sweep consults before unlinking. Age is not ownership: a spill
+# outlives its own creation by as long as its crawl runs, and the sweep runs
+# process-wide, so any spill past gc_age_seconds is reachable by a GC pass while
+# its writer is still appending. The lock guards set operations only -- nothing
+# is awaited while it is held.
+_LIVE_SPILL_PATHS: set[str] = set()
+_LIVE_SPILL_LOCK = threading.Lock()
+
 # Cadence gate for _ResultSpill's stale-spill sweep (perf tier-2 T5): at most
 # one temp-dir scan per interval per process; None means "never scanned",
 # forcing the first construction to sweep immediately.
@@ -242,6 +252,8 @@ class _ResultSpill:
             self._fh = open(resolved, "w", encoding="utf-8")
         self.path = resolved
         self.count = 0
+        with _LIVE_SPILL_LOCK:
+            _LIVE_SPILL_PATHS.add(resolved)
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop (adversarial #1.3).
         self._write_lock = asyncio.Lock()
@@ -265,27 +277,35 @@ class _ResultSpill:
                 pass
 
     def _gc_stale_spills(self, max_age: float) -> None:
-        """Delete spill files older than ``max_age`` from the system temp dir.
+        """Delete spill files older than ``max_age`` that no live spill owns.
 
-        Race window (low risk in practice): if another worker still holds the
-        file open via ``os.fdopen`` (which we own for the lifetime of the
-        ``_ResultSpill`` instance), the unlink will remove the directory entry
-        but the inode stays alive until the last fd closes. Linux/Unix
-        semantics mean the file is fully reclaimed on close; on Windows the
-        unlink would fail with PermissionError and we silently skip it. No
-        data loss occurs because the file is owned by a single worker at a
-        time and the worst-case is "delete a still-active spill" which only
-        loses that worker's local checkpoint, not the active crawl result.
+        Age alone is not permission to unlink. A spill is reassembled by opening
+        its path BY NAME in :meth:`load_ordered`, so removing the directory entry
+        out from under a running spill does not cost that worker a local
+        checkpoint -- it makes the finished crawl's own output unreadable, after
+        the crawl has already been paid for. The earlier version of this method
+        documented that as an acceptable worst case; it is data loss, and a
+        whole-site job living past ``gc_age_seconds`` is ordinary rather than
+        exotic, so the sweep consults :data:`_LIVE_SPILL_PATHS` instead of
+        reasoning about who might still be reading.
+
+        Unlinking an unowned file is still safe on Unix (a reader holding the fd
+        keeps the inode) and raises ``PermissionError`` on Windows, which the
+        ``except OSError`` below skips.
         """
         now = time.time()
         try:
             names = os.listdir(tempfile.gettempdir())
         except OSError:
             return
+        with _LIVE_SPILL_LOCK:
+            in_use = frozenset(_LIVE_SPILL_PATHS)
         for name in names:
             if not name.startswith(_SPILL_PREFIX):
                 continue
             candidate = os.path.join(tempfile.gettempdir(), name)
+            if candidate in in_use:
+                continue
             try:
                 if now - os.path.getmtime(candidate) > max_age:
                     os.unlink(candidate)
@@ -328,6 +348,10 @@ class _ResultSpill:
             self._fh.close()
         except Exception:
             pass
+        # Release the in-use claim before the unlink, so the sweep and this
+        # cleanup cannot race over the same path.
+        with _LIVE_SPILL_LOCK:
+            _LIVE_SPILL_PATHS.discard(self.path)
         # Auto-cleanup of owned files: when this spill was created without
         # an explicit path (caller-owned spills retain their file), drop the
         # backing temp file so a happy-path close never orphans it.
