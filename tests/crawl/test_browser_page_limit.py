@@ -33,10 +33,14 @@ class _FakePage:
         return None
 
     async def goto(self, url, wait_until="load", **kwargs):
-        # Simulate render work so overlapping renders are observable.
+        # Yield once so overlapping renders are observable. A single scheduling
+        # point is all the window this needs: the cap's job is to decide how
+        # many tabs may be open at the same time, and ``tracker["max"]`` is that
+        # number. A cap that serialized renders entirely would report 1, and a
+        # cap that ignored the cap would report 6, with no stopwatch involved.
         self._tracker["n"] += 1
         self._tracker["max"] = max(self._tracker["max"], self._tracker["n"])
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0)
         self._tracker["n"] -= 1
 
     async def evaluate(self, expression):
@@ -76,7 +80,7 @@ class _FakeBrowserCM:
         return False
 
 
-async def test_concurrent_page_renders_capped(monkeypatch, real_sleeps):
+async def test_concurrent_page_renders_capped(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "2")
     tracker = {"n": 0, "max": 0}
     renderer = BrowserRenderer(browser_factory=lambda **kw: _FakeBrowserCM(tracker))

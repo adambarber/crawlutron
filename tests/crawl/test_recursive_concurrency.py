@@ -22,8 +22,16 @@ def _page_html(path: str) -> str:
     return f"<html><body>leaf {path}</body></html>"
 
 
-async def test_recursive_crawl_fetches_links_concurrently(real_sleeps):
-    """Discovered links are fetched concurrently, within the configured gates."""
+async def test_recursive_crawl_fetches_links_concurrently():
+    """Discovered links are fetched concurrently, within the configured gates.
+
+    The overlap window is a scheduling point, not a duration: the fake fetcher
+    yields once to the event loop mid-fetch, so every link the engine is willing
+    to have in flight is in flight at the same time. A crawl that awaited the
+    links one at a time would hold ``max_inflight`` at 1 and fail the lower
+    bound, so the assertion is not weakened by removing the simulated network
+    latency -- it is measuring the same thing with a cheaper instrument.
+    """
     inflight = {"n": 0}
     max_inflight = {"n": 0}
 
@@ -31,7 +39,7 @@ async def test_recursive_crawl_fetches_links_concurrently(real_sleeps):
         path = urlparse(url).path or "/"
         inflight["n"] += 1
         max_inflight["n"] = max(max_inflight["n"], inflight["n"])
-        await asyncio.sleep(0.05)  # simulate network latency
+        await asyncio.sleep(0)  # the scheduling point that makes overlap observable
         inflight["n"] -= 1
         return make_fetch(
             url=url, final_url=url, status=200, ctype="text/html", body=_page_html(path).encode()

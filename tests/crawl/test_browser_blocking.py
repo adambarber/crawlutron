@@ -1,7 +1,7 @@
 """Browser request blocking: route handlers, subresources, XHR caps, execute-js gating and consent opt-in."""
 
 import asyncio
-import time
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +13,7 @@ from _browser_doubles import (
     run_blocking_document_route,
 )
 from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _timing_harnesses import HANG_GUARD_SECONDS
 from pydantic import ValidationError
 
 import app.crawl.strategies.browser as browser_mod
@@ -20,47 +21,43 @@ from app.api_models import CrawlPolicy
 from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
 
 
-def slow_build_pinned_request(url, headers, *, policy):
-    time.sleep(0.05)  # Blocking call - would block event loop if run directly
-    return ("http://1.2.3.4:80/", {"Host": "example.com"})
+class _BlockingResolver:
+    """A synchronous, deliberately loop-blocking stand-in for the DNS resolver.
+
+    The instrument is a ``Barrier``, not a stopwatch. Five concurrent route
+    handlers each enter the resolver and wait for all five to be there: the
+    barrier can only be satisfied by five resolvers running at the same time.
+    The regression this pins is the resolver running ON the event loop, and in
+    that case the first caller wedges the loop, the other four never arrive,
+    the barrier times out, and the test fails naming exactly that -- instead of
+    a 0.2s stopwatch guessing whether five 0.05s sleeps fit inside it and
+    passing on a slow box, failing on a fast one.
+    """
+
+    def __init__(self, parties: int, timeout: float) -> None:
+        self.barrier = threading.Barrier(parties, timeout=timeout)
+        self.broken: list[str] = []
+
+    def build(self, url, headers, *, policy):
+        del url, headers, policy
+        try:
+            self.barrier.wait()
+        except threading.BrokenBarrierError:
+            self.broken.append("not all resolvers were in flight at once")
+        return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
 
-async def _concurrent_route_elapsed(handler):
-    start_times = []
-    end_times = []
+async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
+    """The route handler runs ``_build_pinned_request`` off the event loop.
 
-    async def call_handler(i):
-        route = FakeRoute()
-        request = FakeRequest(f"http://example.com/{i}", "document")
-        start_times.append(time.monotonic())
-        await handler(route, request)
-        end_times.append(time.monotonic())
-
-    await asyncio.gather(*(call_handler(i) for i in range(5)))
-    return max(end_times) - min(start_times)
-
-
-async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch, real_sleeps):
-    """The route handler should run _build_pinned_request via asyncio.to_thread to avoid
-    blocking the event loop with synchronous DNS lookups (Fix 2 + F7/F8 pinning).
-
-    ``real_sleeps`` so the blocking sleep is a true delay (not no-op'd).
+    Asserted on thread identity, which is stronger than any stopwatch: a
+    synchronous DNS lookup that ran on the loop would report the main thread's
+    id no matter how long it took.
     """
     route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
 
     assert route.decision == "continue"
     assert ran_off_loop
-
-
-async def test_ssrf_route_handler_concurrent_requests_dont_block_each_other(monkeypatch, real_sleeps):
-    """Multiple concurrent route handler calls should not block each other.
-
-    ``real_sleeps`` so the concurrency assertion actually measures real timing.
-    """
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    total_time = await _concurrent_route_elapsed(handler)
-    assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
 
 
 # ============================================================
@@ -107,7 +104,7 @@ async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     assert route.decision == "abort"
 
 
-async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch, real_sleeps):
+async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monkeypatch):
     """The route handler should run _build_pinned_request via asyncio.to_thread
     to avoid blocking the event loop with synchronous DNS lookups."""
     route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
@@ -117,12 +114,23 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     assert ran_off_loop
 
 
-async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch, real_sleeps):
-    """Multiple concurrent pinning operations should not block each other."""
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", slow_build_pinned_request)
+async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
+    """Multiple concurrent pinning operations must not block each other."""
+    resolver = _BlockingResolver(parties=5, timeout=HANG_GUARD_SECONDS)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", resolver.build)
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    total_time = await _concurrent_route_elapsed(handler)
-    assert total_time < 0.2, f"Concurrent handlers took {total_time:.3f}s, expected < 0.2s"
+
+    routes = [FakeRoute() for _ in range(5)]
+    await asyncio.gather(
+        *(handler(route, FakeRequest(f"http://example.com/{i}", "document")) for i, route in enumerate(routes))
+    )
+
+    assert not resolver.broken, (
+        "the five route handlers did not have all five DNS resolutions in flight "
+        "at once: the synchronous resolver is being run on the event loop, so "
+        "the first caller wedges the loop and the rest can never start"
+    )
+    assert all(route.decision == "continue" for route in routes)
 
 
 async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch):

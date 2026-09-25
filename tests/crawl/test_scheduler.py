@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from _result_builders import make_job, make_result
+from _timing_harnesses import recorder
 
 from app.crawl.result_helpers import _failed_result_for
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
@@ -58,16 +59,32 @@ class TestScheduler:
         assert expiry > time.time()
         assert expiry - time.time() > 4.0
 
-    async def test_cooldown_delay_applied_to_domain(self, real_sleeps):
-        """This test needs real asyncio.sleep for timing verification."""
+    async def test_cooldown_delay_applied_to_domain(self, monkeypatch):
+        """A domain in cooldown must have the cooldown awaited before the worker.
+
+        Asserted on the *request* the scheduler makes, not on how long the box
+        took to grant it: a cooldown of 0.3s is honoured by asking to sleep the
+        remaining window, and that ask is the behaviour under test. The
+        worker's own assertion pins the ordering -- it fails if the cooldown
+        branch is skipped, or if the cooldown is ever moved behind the worker.
+        """
+        sleeps = recorder(monkeypatch)
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.05)
         scheduler.set_domain_cooldown("example.com", 0.3)
         job = make_job(0, "http://example.com/")
-        started = time.monotonic()
-        results = await scheduler.run([job], ok_worker, failed_result=_engine_envelope)
-        elapsed = time.monotonic() - started
+
+        async def worker(ran_job):
+            assert sleeps.requests_over(0.29), (
+                "the worker ran before the domain cooldown was awaited; the "
+                f"recorded sleep requests were {sleeps.delays}"
+            )
+            return make_result(ran_job.url, ran_job.domain)
+
+        results = await scheduler.run([job], worker, failed_result=_engine_envelope)
         assert results[0].status == "success"
-        assert elapsed > 0.25
+        assert sleeps.requests_over(0.29), (
+            f"no cooldown sleep was requested at all (requests: {sleeps.delays})"
+        )
 
     async def test_run_returns_results_keyed_by_job_index(self):
         scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
@@ -80,14 +97,21 @@ class TestScheduler:
             f"http://example.com/{i}" for i in range(3)
         ]
 
-    async def test_delay_applied_between_same_domain_jobs(self, real_sleeps):
-        """This test needs real asyncio.sleep for timing verification."""
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.1)
+    async def test_delay_applied_between_same_domain_jobs(self, monkeypatch):
+        """Every job on a delayed domain asks for the jittered per-domain delay.
+
+        Two same-domain jobs at ``delay_seconds=0.1`` must produce two delay
+        requests inside the jitter band, not one (or none). The band is
+        production's ``uniform(0.8, 1.2)``, derived from the code rather than
+        from whatever the machine happened to do.
+        """
+        sleeps = recorder(monkeypatch)
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.1, adaptive=False)
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
-        started = time.monotonic()
         await scheduler.run(jobs, ok_worker, failed_result=_engine_envelope)
-        elapsed = time.monotonic() - started
-        assert elapsed >= 0.05
+        assert len(sleeps.in_range(0.08, 0.12)) == 2, (
+            f"expected one per-domain delay request per job, saw {sleeps.delays}"
+        )
 
 
 class TestAdaptiveThrottling:
@@ -545,75 +569,83 @@ class _PerDomainDelayScheduler(DomainScheduler):
         return 0.4 if domain == "slow.example.com" else 0.0
 
 
-async def test_domain_delay_does_not_block_other_domains(real_sleeps):
+async def test_domain_delay_does_not_block_other_domains(monkeypatch):
+    """The per-domain delay is awaited inside the *domain* gate, not the global one.
+
+    The regression this pins: sleeping on the delay while holding a global
+    concurrency slot burns that slot on pure waiting, so every other domain
+    queues behind a wait that has nothing to do with them. Proved with a
+    handshake rather than a stopwatch: the slow domain's delay will not
+    *complete* until the fast domain's worker has run. With ``global_limit=1``
+    the two orderings are then distinguishable without any timing at all -- if
+    the delay held the only global slot the fast worker could never start, the
+    handshake could never be satisfied, and the wait fails naming exactly that.
+    """
     scheduler = _PerDomainDelayScheduler(
-        global_limit=2,
+        global_limit=1,
         per_domain_limit=1,
         delay_seconds=0.0,
         adaptive=False,
     )
-    starts: dict[int, float] = {}
+    fast_started = asyncio.Event()
+    starved: list[str] = []
+    yield_to_loop = asyncio.sleep
+
+    async def _sleep(delay, *args, **kwargs):
+        del args, kwargs
+        if delay >= 0.2:
+            # slow.example.com's 0.4s per-domain delay (jittered). It may not
+            # finish until the fast domain has been served. The starvation is
+            # recorded rather than raised because ``run`` gathers with
+            # return_exceptions=True, which would swallow an exception raised
+            # from inside a worker's own await chain.
+            try:
+                await asyncio.wait_for(fast_started.wait(), 2.0)
+            except TimeoutError:
+                starved.append("fast.example.com")
+            return
+        await yield_to_loop(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _sleep)
 
     async def worker(job):
-        starts[job.index] = time.monotonic()
-        await asyncio.sleep(0.02)
+        if job.domain == "fast.example.com":
+            fast_started.set()
+        await yield_to_loop(0)
         return "ok"
 
-    t0 = time.monotonic()
     jobs = [_Job(0, "slow.example.com"), _Job(1, "fast.example.com")]
     await scheduler.run(jobs, worker, failed_result=_engine_envelope)
-
-    # fast.example.com must start immediately; with the old gate ordering it
-    # waited >= 0.4s for the global slot burned by slow.example.com's delay.
-    fast_start = starts[1] - t0
-    slow_start = starts[0] - t0
-    assert fast_start < 0.2, f"starved behind slow domain delay: {starts}"
-    assert slow_start >= 0.3, f"slow domain delay not applied: {starts}"
+    assert not starved, (
+        "fast.example.com could not run until slow.example.com's per-domain delay "
+        "finished: the delay is being awaited while holding a GLOBAL concurrency "
+        "slot, so it burns that slot on pure waiting and starves every other domain"
+    )
+    assert fast_started.is_set(), "the fast domain was never served"
 
 
 async def _ok(job: CrawlJob):
     return make_result(job.url, job.domain)
 
 
-async def _run_two_same_domain(delay: float = 0.1) -> float:
-    """Drive two same-domain jobs through the scheduler; return elapsed seconds."""
-    scheduler = DomainScheduler(
-        global_limit=1,
-        per_domain_limit=1,
-        delay_seconds=delay,
-        adaptive=False,
-    )
-    jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
-    started = time.monotonic()
-    await scheduler.run(jobs, _ok, failed_result=_engine_envelope)
-    return time.monotonic() - started
+async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
+    """The inverse: a domain configured with no delay must request no wait.
 
-
-async def test_real_sleeps_exercise_per_domain_delay(real_sleeps):
-    # Explicitly request real sleeps to verify the per-domain delay is awaited.
-    elapsed = await _run_two_same_domain(delay=0.1)
-    # Two same-domain jobs each await the per-domain delay (~0.1s w/ jitter).
-    assert elapsed >= 0.05, f"per-domain delay not exercised (got {elapsed:.3f}s)"
-
-
-async def test_real_sleeps_exercise_domain_cooldown(real_sleeps):
+    The suite's autouse patch now makes every sleep zero-second *and* yielding,
+    so "the delay was skipped" is no longer observable as elapsed time -- but
+    it is still observable as a request. A scheduler that turned a zero
+    configured delay into a positive sleep request would be inventing politeness
+    the operator never asked for, and paying it on every single job.
+    """
+    sleeps = recorder(monkeypatch)
     scheduler = DomainScheduler(
         global_limit=1,
         per_domain_limit=1,
         delay_seconds=0.0,
         adaptive=False,
     )
-    scheduler.set_domain_cooldown("example.com", 0.3)
-    job = make_job(0, "https://example.com/")
-    started = time.monotonic()
-    results = await scheduler.run([job], _ok, failed_result=_engine_envelope)
-    elapsed = time.monotonic() - started
-    assert results[0].status == "success"
-    # The single job must await the ~0.3s cooldown before running.
-    assert elapsed > 0.25, f"cooldown not exercised (got {elapsed:.3f}s)"
-
-
-async def test_default_fast_sleeps_skip_delay():
-    # fast_sleeps is autouse by default, so no delay should be awaited.
-    elapsed = await _run_two_same_domain(delay=0.1)
-    assert elapsed < 0.1, f"fast_sleeps should skip real delay (got {elapsed:.3f}s)"
+    jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
+    await scheduler.run(jobs, _ok, failed_result=_engine_envelope)
+    assert sleeps.delays == [0, 0], (
+        f"a zero-delay scheduler must request only zero-second yields, saw {sleeps.delays}"
+    )

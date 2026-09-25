@@ -10,7 +10,6 @@ importable from the package root.
 import asyncio
 import os
 import sys
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -133,15 +132,30 @@ def ssrf_guard_required(monkeypatch):
     _ = called  # silence unused warning if a future check is added
 
 
-# Save original sleep functions before any patching
+# The real asyncio.sleep, kept so the zero-second patch below can still yield.
 _ORIGINAL_ASYNCIO_SLEEP = asyncio.sleep
-_ORIGINAL_TIME_SLEEP = time.sleep
 
 
-# Provide a no-op async sleep
-async def _fast_asyncio_sleep(*args, **kwargs):
-    """No-op async sleep for tests."""
-    return None
+async def _fast_asyncio_sleep(delay, *args, **kwargs):
+    """A zero-second async sleep: it waits for nothing, but it still yields.
+
+    The previous version of this returned without ever suspending, so awaiting
+    it cost *zero* scheduling points. That is only safe for a sleep whose sole
+    purpose is a delay, and production code is full of sleeps that are also
+    scheduling points: ``await_or_client_gone`` polls the client-disconnect flag
+    with ``await asyncio.sleep(poll_interval)``, a per-domain gate releases
+    through one, a semaphore's barging check depends on one. Under a
+    never-suspending patch those loops become a hot spin that never hands the
+    loop back, so the coroutine they are waiting for can never run and the
+    test hangs rather than failing.
+
+    Yielding once through the real ``asyncio.sleep(0)`` keeps that whole class
+    of loop-shaped behaviour intact at zero wall-clock cost: the requested
+    duration is discarded, the scheduling point is not. Everything that used to
+    need ``real_sleeps`` merely to get a yield can now drop it.
+    """
+    del delay, args, kwargs
+    await _ORIGINAL_ASYNCIO_SLEEP(0)
 
 
 def pytest_collection_modifyitems(config, items):
@@ -163,12 +177,21 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(autouse=True)
 def fast_sleeps():
-    """Patch time.sleep and asyncio.sleep to be instant by default.
+    """Patch time.sleep and asyncio.sleep to be zero-second by default.
 
-    By default the test suite runs with no-op (instant) sleeps so timing
-    routines (scheduler delays, retry backoffs, browser lazy-scroll waits)
-    do not slow tests down. Tests that need real wall-clock timing must
-    explicitly request the ``real_sleeps`` fixture to undo the patch.
+    By default the test suite runs with sleeps that cost no wall-clock time, so
+    delay routines (scheduler delays, retry backoffs, browser lazy-scroll
+    waits) do not slow tests down. ``asyncio.sleep`` becomes a sleep of zero
+    seconds that still yields -- see ``_fast_asyncio_sleep``.
+
+    There is deliberately no ``real_sleeps`` escape hatch any more. A fixture
+    that restores wall-clock time cannot be excluded by ``-m "not slow"`` (it is
+    a parameter, not a marker), so it silently opted 100+ tests into depending
+    on how loaded the developer's box was; and for the concurrency assertions it
+    was the *instrument*, not the noise. Where elapsed time genuinely is the
+    property, the test now drives the boundary through a controlled trigger or
+    an injected clock, and the handful of probes that must observe real elapsed
+    time say so in their own docstring and are marked ``slow``.
     """
     with patch("time.sleep", lambda *a, **k: None), patch("asyncio.sleep", _fast_asyncio_sleep):
         yield
@@ -193,18 +216,6 @@ def stub_cffi_fetcher(request, monkeypatch):
         raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
 
     monkeypatch.setattr(engine_module, "_default_cffi_fetcher", _stub_cffi_fetcher)
-
-
-@pytest.fixture
-def real_sleeps(monkeypatch):
-    """Restore the real time.sleep / asyncio.sleep for timing-sensitive tests.
-
-    Undoes the autouse ``fast_sleeps`` patch via monkeypatch.setattr so the
-    original functions are restored for the duration of the requesting test.
-    """
-    monkeypatch.setattr(time, "sleep", _ORIGINAL_TIME_SLEEP)
-    monkeypatch.setattr(asyncio, "sleep", _ORIGINAL_ASYNCIO_SLEEP)
-    yield
 
 
 @pytest.fixture(scope="session")
