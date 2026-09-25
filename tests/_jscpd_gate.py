@@ -174,12 +174,24 @@ def _expected_pairs() -> list[dict[str, Any]]:
     if document.get("version") != 1 or not isinstance(document.get("pairs"), list):
         raise ValueError("jscpd-expectations.json must have version 1 and a pairs list")
     seen_ids: set[str] = set()
+    seen_locations: dict[LocationPair, str] = {}
     for pair in document["pairs"]:
         _validate_expectation(pair)
         pair_id = pair["id"]
         if pair_id in seen_ids:
             raise ValueError(f"duplicate jscpd expectation id: {pair_id!r}")
         seen_ids.add(pair_id)
+        # Two expectations on the same lines is not a duplicate the gate can
+        # resolve: at most one can ever be satisfied, and the loser is reported
+        # as a missing clone, which sends the reader after the duplication
+        # instead of after this file. Rejecting it names the actual mistake.
+        locations = _expected_locations(pair)
+        if locations in seen_locations:
+            raise ValueError(
+                f"jscpd expectations {seen_locations[locations]!r} and {pair_id!r} "
+                f"declare the same location: {list(locations)}"
+            )
+        seen_locations[locations] = pair_id
     return document["pairs"]
 
 

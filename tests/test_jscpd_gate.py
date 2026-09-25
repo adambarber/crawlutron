@@ -74,26 +74,25 @@ def _valid_pair() -> dict:
     }
 
 
+_GATE_ARGV = [
+    "gate",
+    "all",
+    "--min-lines",
+    "8",
+    "--min-tokens",
+    "40",
+    "--threshold",
+    "0",
+    "--fail-on-empty",
+]
+
+
 def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list[list[str]]:
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, [pair])
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
     commands = _stub_report(monkeypatch, duplicate)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "gate",
-            "all",
-            "--min-lines",
-            "8",
-            "--min-tokens",
-            "40",
-            "--threshold",
-            "0",
-            "--fail-on-empty",
-        ],
-    )
+    monkeypatch.setattr(sys, "argv", _GATE_ARGV)
     return commands
 
 
@@ -178,17 +177,7 @@ def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[lis
     monkeypatch.setattr(
         sys,
         "argv",
-        [
-            "gate",
-            "all",
-            "--min-lines",
-            "8",
-            "--min-tokens",
-            "40",
-            "--threshold",
-            "0",
-            "--fail-on-empty",
-        ],
+        _GATE_ARGV,
     )
     commands: list[list[str]] = []
 
@@ -253,6 +242,55 @@ def test_expectation_location_must_match_the_report_it_claims_to_pin(monkeypatch
     reported = capsys.readouterr().err
     assert "drift" in reported.lower(), f"a wrong declared location must be drift:\n{reported}"
     assert "999" in reported, f"the failure must show the location the expectation claims:\n{reported}"
+
+
+def _gate_says(monkeypatch, tmp_path, capsys, *pairs: dict) -> str:
+    """Run the gate over a report holding one clone, with these expectations."""
+    expectations = tmp_path / "expectations.json"
+    _write_expectations(expectations, list(pairs))
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
+    _stub_report(monkeypatch, [_duplicate()])
+    monkeypatch.setattr(sys, "argv", _GATE_ARGV)
+    assert gate.main() == 1
+    return capsys.readouterr().err
+
+
+def _relocated(second: dict) -> dict:
+    """The same expectation, moved elsewhere: new id, new content, new lines."""
+    second["id"] = "other-clone"
+    second["fragment_sha256"] = hashlib.sha256(b"a different clone").hexdigest()
+    second["first"] = {"path": "app/third.py", "start": 50, "end": 60}
+    return second
+
+
+def test_two_expectations_cannot_claim_the_same_location(monkeypatch, tmp_path, capsys) -> None:
+    """A location is claimed once or not at all.
+
+    Two expectations pinning the same lines is not a duplicate the gate can
+    resolve: at most one can ever be satisfied, and the loser used to be reported
+    as a missing clone, which sends the reader after the duplication instead of
+    after the expectations file.
+    """
+    second = _relocated(_valid_pair())
+    second["first"] = _valid_pair()["first"]
+    second["second"] = _valid_pair()["second"]
+    reported = _gate_says(monkeypatch, tmp_path, capsys, _valid_pair(), second)
+    assert "same location" in reported, f"a double-claimed location must be named as one:\n{reported}"
+    assert "other-clone" in reported and "new-clone" in reported, f"both claimants must be named:\n{reported}"
+
+
+def test_two_expectations_cannot_claim_the_same_fragment(monkeypatch, tmp_path, capsys) -> None:
+    second = _relocated(_valid_pair())
+    second["fragment_sha256"] = _valid_pair()["fragment_sha256"]
+    reported = _gate_says(monkeypatch, tmp_path, capsys, _valid_pair(), second)
+    assert "same fragment" in reported, f"two expectations on one fragment must be refused:\n{reported}"
+
+
+def test_two_expectations_cannot_share_an_id(monkeypatch, tmp_path, capsys) -> None:
+    second = _relocated(_valid_pair())
+    second["id"] = _valid_pair()["id"]
+    reported = _gate_says(monkeypatch, tmp_path, capsys, _valid_pair(), second)
+    assert "duplicate jscpd expectation id" in reported, f"a shared id must be refused:\n{reported}"
 
 
 def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered() -> None:
