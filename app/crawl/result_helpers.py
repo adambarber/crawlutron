@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 import httpx
 
 from app.constants import is_transient_classification, status_agrees_with_classification
-from app.crawl.decompression import DecompressionTooLargeError
+from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.scheduler_exceptions import _CircuitBreakerOpen
 from app.models import (
     BrowserPoolExhaustedError,
@@ -69,6 +69,14 @@ _CLASSIFICATION_BY_EXCEPTION: tuple[tuple[tuple[type[BaseException], ...], Class
     # stays distinct from the transport rows below and stays retryable.
     ((_CircuitBreakerOpen,), "circuit_breaker_open"),
     ((DecompressionTooLargeError,), "payload_too_large"),
+    # The server declared an encoding and then did not deliver a body that
+    # decodes under it. It subclasses ValueError only as an implementation
+    # detail of zlib's error, so without this row the caller-error catch-all
+    # below claimed it: a truncated response or an interfering proxy was
+    # reported as "value_error" -- a terminal code reading as "the caller asked
+    # for something invalid", which in a durable job marks the URL visited
+    # instead of retrying a fault that a second attempt often clears.
+    ((DecompressionError,), "http_error"),
     ((httpx.TooManyRedirects,), "too_many_redirects"),
     # Name resolution never got off the host. This row is why ``dns_error`` is a
     # live member: before it existed, a name that would not resolve was reported

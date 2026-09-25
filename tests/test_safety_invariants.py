@@ -133,7 +133,18 @@ __all__ = [
 # decide whether to re-queue, so a one-second DNS blip marked the URL visited
 # and dropped it from a whole-site crawl. A tree-wide detector with its own
 # bites proof guards against a fourth local copy.
-_APP_TREE_CODE_LINE_BUDGET = 14_362
+#
+# RAISED once more, for one line: the classification table gained an explicit
+# ``DecompressionError`` row. A row is a verdict, and without that row the type
+# had none -- it inherited ``value_error`` from the caller-error catch-all
+# because it happens to subclass ``ValueError``, which reported a corrupt
+# response body as a terminal caller error and marked the URL visited in a
+# durable job instead of retrying. This is the smallest possible expression of
+# that decision: one tuple. It is not a net feature either -- it replaced no
+# prose and added no branch, and the tree-wide gate that makes the table's row
+# ORDER checkable is what stops the next row from being added in a position that
+# silently kills it.
+_APP_TREE_CODE_LINE_BUDGET = 14_363
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1923,6 +1934,104 @@ def test_uncollectible_test_detector_bites():
     )
     for src in clean:
         assert not _uncollectible_tests(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
+# The ordered classification table: order is semantics, so it is checked
+# ---------------------------------------------------------------------------
+
+# The table in result_helpers maps an exception to a stable error code by walking
+# rows in order and taking the first isinstance hit. That makes the row ORDER a
+# semantic, not a formatting detail -- and until now the only statement of it was
+# the comment block above the table, which no tool could hold to. A row added
+# below a superclass row is silently dead: the superclass claims every instance
+# first, so the specific verdict is unreachable and the only symptom is a wrong
+# error code on a wire.
+#
+# `DecompressionError` is the case that proves it. It subclasses ValueError and
+# had no row of its own, so the caller-error catch-all claimed it -- a corrupt
+# response body was reported as `value_error`, a terminal code reading as "the
+# caller asked for something invalid", which in a durable job marks the URL
+# visited rather than retrying a fault a second attempt often clears. Nothing in
+# the suite failed, because the code was a legal member of the taxonomy the whole
+# time; it was simply being answered by the wrong row.
+
+# Types broad enough to swallow a taxonomy decision if they are not last.
+_CATCH_ALL_EXCEPTIONS: tuple[type[BaseException], ...] = (ValueError, OSError, Exception)
+
+
+def _table_shadowing_offenders(rows) -> list[str]:
+    """Report rows that can never fire, and broad rows that are not terminal.
+
+    First-hit-wins means a row is dead the moment an EARLIER row's type is a
+    superclass of one of its own: the earlier row claims every instance, so the
+    specific verdict is unreachable no matter how it is spelled.
+    """
+    offenders: list[str] = []
+    last_index = len(rows) - 1
+    for index, (types, classification) in enumerate(rows):
+        for kind in types:
+            if kind in _CATCH_ALL_EXCEPTIONS and index != last_index:
+                offenders.append(f"{kind.__name__} at row {index} is a catch-all but rows follow it")
+            for earlier_index, (earlier_types, _) in enumerate(rows[:index]):
+                for earlier in earlier_types:
+                    if earlier is not kind and issubclass(kind, earlier):
+                        offenders.append(
+                            f"{kind.__name__} ({classification}) at row {index} can never fire: "
+                            f"{earlier.__name__} at row {earlier_index} claims it first"
+                        )
+    return offenders
+
+
+def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
+    from app.crawl.result_helpers import _CLASSIFICATION_BY_EXCEPTION
+
+    offenders = _table_shadowing_offenders(_CLASSIFICATION_BY_EXCEPTION)
+    assert not offenders, (
+        "the ordered table is matched first-hit-wins, so these rows can never fire "
+        "or would swallow later verdicts -- order the specific rows first: " + ", ".join(offenders)
+    )
+
+
+def test_table_shadowing_detector_bites():
+    """A subclass row below its superclass, and a mid-table catch-all, both fire."""
+    class Sub(ValueError):
+        pass
+
+    class Deeper(Sub):
+        pass
+
+    # The shape that lost DecompressionError's verdict: no row of its own, so the
+    # catch-all answers for it. Nothing to report -- there is no dead row, just a
+    # type nobody has decided about, which is what the missing-row test is for.
+    orphans = [((ValueError,), "value_error")]
+    assert not _table_shadowing_offenders(orphans)
+
+    # A specific row placed BELOW the superclass that already claims it: dead.
+    below_super = [((ValueError,), "value_error"), ((Sub,), "value_error")]
+    assert any("can never fire" in o for o in _table_shadowing_offenders(below_super))
+
+    # A specific row ABOVE its superclass: live, and the superclass is the
+    # catch-all, which is allowed to be last.
+    correct = [((Deeper,), "http_error"), ((Sub,), "tls_error"), ((ValueError,), "value_error")]
+    assert not _table_shadowing_offenders(correct)
+
+    # A catch-all with any row after it, whatever that row claims.
+    mid_table = [((Exception,), "http_error"), ((Deeper,), "tls_error")]
+    assert any("catch-all" in o for o in _table_shadowing_offenders(mid_table))
+
+    # A broad row mid-table also makes every later specific row dead.
+    both = [((ValueError,), "value_error"), ((Deeper,), "http_error"), ((Sub,), "tls_error")]
+    offenders = _table_shadowing_offenders(both)
+    assert any("catch-all" in o for o in offenders)
+    assert sum("can never fire" in o for o in offenders) == 2
+
+    # The live shape this was written for.
+    import httpx
+
+    assert _table_shadowing_offenders(
+        [((httpx.ConnectError,), "connection_error"), ((httpx.HTTPError,), "http_error")]
+    ) == []
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
+import pytest
 from _fetcher_factories import make_fetch, run_http_strategy
 from _policy_factories import http_strategy_policy
 
@@ -204,6 +205,8 @@ def test_conditional_headers_rejected_without_validators():
 async def test_malformed_gzip_is_rejected_by_strategy():
     import gzip
 
+    from app.crawl.decompression import DecompressionTooLargeError, decompress_body
+
     compressed = bytearray(gzip.compress(_html("real content").encode()))
     for i in range(2, 12):
         compressed[i] ^= 0xFF
@@ -219,9 +222,21 @@ async def test_malformed_gzip_is_rejected_by_strategy():
 
     result = await _run_http(fetcher)
     assert result.status == "failed"
-    assert result.error == "value_error"
+    # The body is the server's fault, not the caller's. DecompressionError
+    # subclasses ValueError only because that is what zlib's error happens to
+    # be, and letting the caller-error catch-all claim it reported a corrupt
+    # response as "value_error" -- terminal, and reading as "the caller asked
+    # for something invalid", which in a durable job marks the URL visited
+    # rather than retrying a fault a second attempt often clears.
+    assert result.error == "http_error"
     assert result.html is None
     assert result.text is None
+
+    # The sibling row keeps its own verdict: over the cap is payload_too_large
+    # and answers 413, a real stream expanding past a cap rather than a
+    # pass-through body that never had a size check applied to it.
+    with pytest.raises(DecompressionTooLargeError):
+        decompress_body(gzip.compress(b"x" * 4096), "gzip", max_output_bytes=8)
 
 
 class TestNotModifiedResponse:
