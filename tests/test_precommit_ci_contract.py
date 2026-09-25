@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -38,6 +39,12 @@ ENFORCEMENT_INPUTS = (
     "app/settings.py",
     "tests/test_jscpd_gate.py",
     "scripts/module_graph.py",
+    # The gate entry point itself. Every hook resolves to this file, so a commit
+    # that edits it changes what all five gates actually run -- exactly the
+    # "the config that decides what is checked cannot itself be the one change
+    # that skips the check" case, and the reason it is named here rather than
+    # left to the trigger to notice.
+    "scripts/gate",
     ".pre-commit-config.yaml",
     ".jscpd.json",
     "jscpd-expectations.json",
@@ -54,6 +61,24 @@ ENFORCEMENT_INPUTS = (
 # under the parent repo as docker/browser-crawler/*, or at the repository root
 # once extracted — and excludes the parent repo's other docker services.
 ENFORCEMENT_TRIGGER_PATTERN = r"^(docker/browser-crawler/|(?!docker/))"
+# The committed gate entry point every hook resolves to, and the shape of the
+# entry that resolves it. See scripts/gate for why the lookup cannot move into
+# the helper: the helper sits at two different relative paths in the two layouts
+# and pre-commit always runs hooks from the repository root.
+GATE_HELPER = SERVICE_ROOT / "scripts" / "gate"
+GATE_HELPER_PATH = "scripts/gate"
+GATE_ENTRY_END = "' gate "
+# The one-line `bash -c` prologue every entry must open with, pinned byte for
+# byte so the five copies cannot drift. YAML has no string interpolation, so
+# this cannot be an anchor the way `*service_trigger` is; checking it is the
+# substitute.
+GATE_ENTRY_PROLOGUE = (
+    "bash -c 'for d in "
+    '"$(git rev-parse --show-toplevel)/docker/browser-crawler" '
+    '"$(git rev-parse --show-toplevel)"; '
+    f'do [ -x "$d/{GATE_HELPER_PATH}" ] && exec bash "$d/{GATE_HELPER_PATH}" "$@"; '
+    f'done; echo "{GATE_HELPER_PATH} not found in either layout" >&2; exit 1\''
+)
 # A syntactically valid config carrying a second, quoted jscpd hook that would
 # pass a lax threshold. Nothing distinguishes it from the real config to a
 # reader of the raw text except the quotes.
@@ -654,21 +679,121 @@ def test_every_job_checks_out_full_history() -> None:
             )
 
 
-def test_every_hook_resolves_the_service_root_in_both_layouts() -> None:
+def test_every_hook_resolves_the_service_root_in_both_layouts(tmp_path_factory) -> None:
     """The config travels, so its commands must work at either root.
 
-    Each entry cds to `<repo root>/docker/browser-crawler` and falls back to the
-    repository root when that directory is not there. That fallback is the only
-    reason one config file governs the service nested in dev-stack today and at
-    the root of the extracted repository, so it is asserted rather than assumed:
-    losing it makes every hook fail on its first cd in one of the two layouts.
+    The dual-layout resolution used to be five VERBATIM copies of a two-line
+    preamble inlined in each entry, checked by substring-matching that preamble.
+    It now lives in one committed helper, ``scripts/gate``, and the entries keep
+    only the irreducible part: a file that is at ``docker/browser-crawler/
+    scripts/gate`` in one layout and at ``scripts/gate`` in the other cannot be
+    named by a single relative path from the repository root, which is where
+    pre-commit runs every hook.
+
+    So the property is asserted where it now lives, and by EXECUTION rather than
+    by reading the config. The contract builds a synthetic git repository in each
+    layout, installs the REAL helper and the REAL entry in it, runs them, and
+    requires the gate to end up in that layout's service root. Losing the
+    fallback makes the root layout exit non-zero, which is the failure the old
+    substring assertion was only a proxy for.
     """
-    for hook_id, block in _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8")):
+    config = CONFIG_PATH.read_text(encoding="utf-8")
+    for hook_id, block in _hook_blocks(config):
         entry = _entry(block)
-        assert 'git rev-parse --show-toplevel)/docker/browser-crawler' in entry, (
-            f"hook {hook_id} does not try the nested service path"
+        assert GATE_HELPER_PATH in entry, f"hook {hook_id} does not invoke the committed gate helper"
+        prologue, command = _split_gate_entry(entry)
+        assert command, f"hook {hook_id} resolves the gate helper but names no command to run"
+        assert "docker/browser-crawler" in prologue, (
+            f"hook {hook_id} does not try the nested service path, so it cannot run "
+            "at the repository root of the extracted service"
         )
-        assert "||" in entry and 'cd "$(git rev-parse --show-toplevel)"' in entry, (
-            f"hook {hook_id} has no fallback to the repository root, so it cannot run "
-            "at the root of the extracted repository"
+
+    for layout in ("nested", "root"):
+        service_root, completed = _run_gate_entry_in_layout(tmp_path_factory.mktemp(layout), layout)
+        assert completed.returncode == 0, (
+            f"the gate entry failed in the {layout} layout, so this config does not work "
+            f"in that layout:\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
+        assert completed.stdout.strip() == str(service_root), (
+            f"the gate ran somewhere other than the {layout} service root: "
+            f"expected {service_root}, got {completed.stdout.strip()!r}"
+        )
+
+
+def test_every_hook_shares_one_gate_entry_preamble() -> None:
+    """The five entry preambles are byte-identical, so they cannot drift.
+
+    The helper moved the semantic content out of the config, but the one-line
+    lookup that remains is still copied five times -- YAML has no string
+    interpolation, so this cannot be an anchor the way ``*service_trigger`` is.
+    What it CAN be is checked: every entry must open with the same bytes, so
+    editing one preamble and not the others fails here instead of quietly
+    working in one layout and not the other.
+    """
+    hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
+    prologues = {_split_gate_entry(_entry(block))[0] for _, block in hooks}
+    commands = {_split_gate_entry(_entry(block))[1] for _, block in hooks}
+    assert prologues == {GATE_ENTRY_PROLOGUE}, (
+        f"the gate entry preambles drifted from the one the contract pins: {sorted(prologues)}"
+    )
+    assert len(commands) == len(hooks), (
+        f"two hooks run the same gate command {sorted(commands)}; each gate must run "
+        "something different or it is a copy that can drift from the one it replaced"
+    )
+
+
+def _split_gate_entry(entry: str) -> tuple[str, str]:
+    """The entry as ``(bash -c prologue, command)``.
+
+    pre-commit shlex-splits the entry into ``bash -c SCRIPT gate ARGS...``, so
+    ``SCRIPT`` is the whole dual-layout prologue and ``ARGS`` is the gate command
+    the helper hands to the pinned interpreter. The split point is the closing
+    quote of that script followed by the gate's own ``$0`` name, which appears
+    exactly once per entry.
+    """
+    prologue, separator, command = entry.partition(GATE_ENTRY_END)
+    assert separator, f"gate entry has no {GATE_ENTRY_END!r} terminator: {entry!r}"
+    return prologue + "'", command.strip()
+
+
+def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    """Run a real hook entry against a synthetic repo laid out the named way.
+
+    ``nested`` builds ``<repo>/docker/browser-crawler`` (the service inside the
+    dev-stack parent repo, which is where this file lives today). ``root`` builds
+    the service at the repository root, which is where the extraction -- a file
+    copy -- is going to put it. The helper and the entry are the real files
+    rather than re-typed stand-ins, so a helper that stops doing its job cannot
+    pass this by agreeing with a copy of itself.
+    """
+    service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    (service_root / "scripts").mkdir(parents=True)
+    (service_root / "scripts" / "gate").write_text(
+        GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (service_root / "scripts" / "gate").chmod(0o755)
+    # The helper execs the command it is handed; the synthetic service has no
+    # venv of its own, so the command names the stub interpreter directly.
+    (service_root / ".venv" / "bin").mkdir(parents=True)
+    interpreter = service_root / ".venv" / "bin" / "python"
+    interpreter.write_text('#!/bin/sh\nexec python3 "$@"\n', encoding="utf-8")
+    interpreter.chmod(0o755)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+
+    # pre-commit runs an entry as `shlex.split(entry)` with the repository root
+    # as the working directory, so the first four tokens -- program, -c, the
+    # dual-layout script, and the gate's own $0 name -- are exactly what has to
+    # work. Only the command AFTER them is swapped for one this synthetic
+    # service can satisfy (it prints its cwd, which is the whole question).
+    prologue = shlex.split(_entry(_hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))[0][1]))[:4]
+    assert prologue[:2] == ["bash", "-c"], f"unexpected entry shape: {prologue!r}"
+    completed = subprocess.run(
+        [*prologue, ".venv/bin/python", "-c", "import os; print(os.getcwd())"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    return service_root.resolve(), completed

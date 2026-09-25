@@ -24,6 +24,26 @@
 # All five hooks share one YAML anchor (`*service_trigger`) so the trigger
 # cannot drift across copies: changing one automatically changes all.
 #
+# All five hooks also share ONE entry preamble, and it is a committed helper
+# rather than a YAML anchor. An anchor can only supply a whole scalar, and each
+# hook has to extend the preamble with its own command, so an anchored prefix is
+# not expressible in YAML; a file is. `scripts/gate` owns the two things the
+# preamble decided: which root is the service (nested under dev-stack as
+# `docker/browser-crawler/`, or the repository root after the extraction is a
+# file copy) and which interpreter runs the gate (the service's own pinned
+# `.venv`, never whatever `python3` happens to be on the machine). The entry
+# keeps only the part that cannot move: a file that lives at two different
+# relative paths in the two layouts cannot be named by one relative path from
+# the repository root, which is where pre-commit runs every hook. That behaviour
+# is asserted by EXECUTION -- the contract builds a synthetic repository in each
+# layout and runs the real entry string in it -- not by matching the config text.
+#
+# The five entries are still five copies of that one-line lookup, because YAML
+# cannot interpolate, so nothing in the file stops them from drifting apart. The
+# contract closes that gap instead: every entry must be byte-identical up to its
+# command, and `scripts/gate` is an enforcement input, so a commit that edits
+# the helper runs the gates.
+#
 # These gates are ergonomics, not enforcement: CI's required status check is the
 # authority. Their value is that each one is whole-tree and fast, so a violation
 # surfaces while the change is still in context. `language: system` means no
@@ -42,8 +62,7 @@ repos:
       - id: ruff
         name: ruff check
         entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m ruff check app tests scripts
         language: system
         files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
@@ -74,8 +93,7 @@ repos:
       - id: pyright
         name: pyright budget
         entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m pytest tests/test_pyright_budget.py -q -p no:randomly
         language: system
         files: *service_trigger
@@ -97,8 +115,7 @@ repos:
       - id: jscpd
         name: jscpd per tree (app 7/35, tests 8/40, zero tolerance)
         entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
           --min-lines 8 --min-tokens 40 --app-min-lines 7 --app-min-tokens 35
           --threshold 0
@@ -112,8 +129,7 @@ repos:
       - id: mypy
         name: mypy
         entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m mypy app
         language: system
         files: *service_trigger
@@ -125,8 +141,7 @@ repos:
       - id: safety-invariants
         name: chokepoint safety invariants
         entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python -m pytest -q -p no:randomly
           tests/test_safety_invariants.py tests/test_env_regression.py
           tests/test_store_pragma_chokepoint.py tests/membership_gate.py

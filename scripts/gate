@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# The one gate entry point every hook in .pre-commit-config.yaml runs through.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# All five hooks used to open with a VERBATIM copy of the same two-line
+# preamble:
+#
+#     bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
+#     || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
+#
+# Five copies that had to be edited together, and nothing compared them, so the
+# gate unified one trigger (`*service_trigger`, commit 670b88b) and left five
+# preambles. The trigger could become a YAML anchor because its value is a plain
+# string. This preamble could not: YAML has no string interpolation, so an
+# anchor cannot supply a prefix that each hook then extends with its own command.
+# It could be a committed file, which is what this is -- the one thing the
+# preamble decided, which root is the service, now lives in exactly one place.
+#
+# WHAT STAYS IN THE ENTRY, AND WHY
+# -------------------------------
+# The entry still names two candidate paths for this file. That is irreducible
+# rather than lazy: this helper is at `docker/browser-crawler/scripts/gate` while
+# the service is nested in dev-stack, and at `scripts/gate` once the extraction
+# is a file copy to a repository root, and pre-commit always runs hooks with the
+# repository root as the working directory. One file cannot be named by one
+# relative path in both layouts, so the lookup cannot move here. What moved here
+# is everything that can.
+#
+# The dual-layout behaviour this preserves is asserted by EXECUTION, not by
+# substring-matching the config: tests/test_precommit_ci_contract.py builds a
+# synthetic repository in each layout, runs the real entry string in it, and
+# requires this helper to run and to resolve the right service root.
+set -euo pipefail
+
+# Dual layout, tried in the same order the old inline preamble used: the nested
+# service directory first, the repository root when that directory is not there.
+top=$(git rev-parse --show-toplevel)
+if [ -d "$top/docker/browser-crawler" ]; then
+    service_root="$top/docker/browser-crawler"
+else
+    service_root="$top"
+fi
+cd "$service_root"
+
+# The gate commands name the service's own pinned interpreter themselves
+# (`.venv/bin/python -m ruff ...`), and this hands them straight through -- the
+# same `exec "$@"` the old inline preamble ended with, so the entry text stays
+# the one place a reviewer reads to see what each gate runs. The one thing worth
+# saying out loud here is what a MISSING venv looks like: `exec` on its own
+# reports "No such file or directory" and blames the gate command, which sends
+# the reader looking in the wrong file entirely.
+if [ ! -x .venv/bin/python ]; then
+    echo "scripts/gate: no interpreter at $service_root/.venv/bin/python" >&2
+    echo "scripts/gate: these gates run against the pinned toolchain in requirements-dev.txt" >&2
+    echo "scripts/gate: create the service venv before committing" >&2
+    exit 1
+fi
+
+exec "$@"
