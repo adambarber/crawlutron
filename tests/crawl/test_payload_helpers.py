@@ -162,3 +162,51 @@ class TestPayloadHelpersEdges:
                 {"policy": {"limits": {"max_depth": "not an int"}}}, CrawlerSettings.from_mapping()
             )
         assert str(cm.value) == "invalid_policy_limits"
+
+
+class TestExplicitEmptyStrategiesIsRejectedNotDefaulted:
+    """An absent list means "use the default chain"; an empty one is a mistake.
+
+    ``policy.get("strategies") or DEFAULT_STRATEGIES`` cannot tell the two
+    apart: ``[]`` is falsy, so an explicitly empty chain was replaced with the
+    full default before the ``not strategies`` guard on the next line could
+    fire. That guard was therefore dead code, and the caller got the whole
+    default chain -- including a browser, which they had asked not to run --
+    while the request they sent said otherwise.
+
+    The wire layer already refuses an empty list (the API model requires
+    min_length=1), so a 422 there and a raise here describe the same contract.
+    Silent defaulting is the one option that cannot: it lets the value on the
+    wire and the behavior of the code describe different things.
+    """
+
+    def test_explicitly_empty_strategies_is_rejected(self):
+        with pytest.raises(ValueError, match="invalid_policy_strategies"):
+            _payload_policy(
+                {"url": "https://example.com/", "policy": {"strategies": []}},
+                CrawlerSettings.from_mapping({}),
+            )
+
+    def test_an_absent_strategies_key_still_gets_the_default_chain(self):
+        """Rejection must not cost the documented default."""
+        from app.constants import DEFAULT_STRATEGIES
+
+        policy = _payload_policy(
+            {"url": "https://example.com/", "policy": {}},
+            CrawlerSettings.from_mapping({}),
+        )
+        assert policy["strategies"] == DEFAULT_STRATEGIES
+
+    def test_a_non_list_strategies_is_still_rejected(self):
+        with pytest.raises(ValueError, match="invalid_policy_strategies"):
+            _payload_policy(
+                {"url": "https://example.com/", "policy": {"strategies": "http"}},
+                CrawlerSettings.from_mapping({}),
+            )
+
+    def test_an_unsupported_strategy_is_still_rejected(self):
+        with pytest.raises(ValueError, match="invalid_policy_strategy"):
+            _payload_policy(
+                {"url": "https://example.com/", "policy": {"strategies": ["telepathy"]}},
+                CrawlerSettings.from_mapping({}),
+            )

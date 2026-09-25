@@ -116,7 +116,12 @@ def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[
     headers = policy.get("headers") or {}
     if not isinstance(headers, dict):
         raise ValueError("invalid_policy_headers")
-    strategies = policy.get("strategies") or DEFAULT_STRATEGIES
+    # Two-arg get, not `or`: an absent key means "use the default chain", but an
+    # explicitly empty one is a caller mistake that the check below rejects.
+    # With `or`, [] was replaced by the default before the guard could see it,
+    # making that guard dead -- and silently handing a caller the whole chain,
+    # browser included, when they had asked for none of it.
+    strategies = policy.get("strategies", DEFAULT_STRATEGIES)
     if (
         not isinstance(strategies, list)
         or not all(isinstance(strategy, str) for strategy in strategies)
