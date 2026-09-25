@@ -41,12 +41,17 @@ class _NeverGone:
         return False
 
 
-async def test_disconnect_cancels_the_running_crawl(real_sleeps):
+async def test_disconnect_cancels_the_running_crawl():
     cancelled = asyncio.Event()
 
     async def _slow_crawl():
         try:
-            await asyncio.sleep(5)
+            # Never resolves on its own: the disconnect poll is the only thing
+            # that can end this crawl, which is exactly what the test asserts.
+            # (It used to be a five-second sleep, which under the suite's
+            # zero-second patch became a five-second nothing -- the crawl
+            # finished before the first poll and the halt path was never taken.)
+            await asyncio.Event().wait()
             return "done"
         except asyncio.CancelledError:
             cancelled.set()
@@ -58,7 +63,7 @@ async def test_disconnect_cancels_the_running_crawl(real_sleeps):
     assert cancelled.is_set()
 
 
-async def test_connected_crawl_returns_its_result(real_sleeps):
+async def test_connected_crawl_returns_its_result():
     async def _fast_crawl():
         return "result-value"
 
@@ -68,7 +73,7 @@ async def test_connected_crawl_returns_its_result(real_sleeps):
     )
 
 
-async def test_connected_crawl_propagates_engine_errors(real_sleeps):
+async def test_connected_crawl_propagates_engine_errors():
     async def _failing_crawl():
         raise ValueError("engine exploded")
 

@@ -9,6 +9,7 @@ These tests drive the real router + runner with a faked ``execute_crawl``
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -30,10 +31,11 @@ from _job_harnesses import (
     run_seeded_scripted_job,
 )
 from _result_builders import _canned_result, _link, _scripted_result_map, _small_link_graph_results
+from _timing_harnesses import await_until
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.crawl.job_store import FrontierEntry, JobStatus
+from app.crawl.job_store import FrontierEntry, JobStatus, JobStore
 from app.settings import CrawlerSettings
 
 
@@ -68,7 +70,7 @@ class TestCrashRecovery:
     than observing an empty frontier and marking the job COMPLETED with 0 pages.
     """
 
-    async def test_crash_recovery_requeues_the_in_flight_batch(self, job_store, real_sleeps):
+    async def test_crash_recovery_requeues_the_in_flight_batch(self, job_store):
         # Persisted state exactly as a hard kill during the first engine call leaves it:
         # root popped (frontier empty), recorded as in_flight, nothing visited, RUNNING.
         job = job_store.create("http://example.test/a", {})
@@ -114,7 +116,7 @@ class TestCrashRecovery:
         assert finished.frontier == []
         assert finished.stats["total_discovered"] == 0
 
-    async def test_normal_completion_clears_in_flight(self, client, job_store, real_sleeps):
+    async def test_normal_completion_clears_in_flight(self, client, job_store):
         # A healthy run must not leave a stale in_flight that would double-crawl on a
         # later resume: the batch is cleared in the same save that records its results.
         job = await _run_job_to_completed(
@@ -208,7 +210,7 @@ class TestWholeSiteJobExecution:
         }
         assert job.policy == original_policy
 
-    async def test_run_job_uses_engine_payload_builder(self, client, job_store, real_sleeps):
+    async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = "http://example.test/a"
         captured: list[dict[str, Any]] = []
         base_execute = _fake_execute([_canned_result(root)])
@@ -241,7 +243,7 @@ class TestWholeSiteJobExecution:
         assert captured[0]["headers"] == {}
         assert captured[0]["request_profile"] == {}
 
-    async def test_max_pages_caps_the_whole_job_and_frontier_drains(self, client, job_store, real_sleeps):
+    async def test_max_pages_caps_the_whole_job_and_frontier_drains(self, client, job_store):
         job = await _run_job_to_completed(
             client,
             job_store,
@@ -257,7 +259,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 2
         assert job.stats["total_discovered"] == 1
 
-    async def test_max_pages_absent_keeps_the_whole_site_unbounded(self, client, job_store, real_sleeps):
+    async def test_max_pages_absent_keeps_the_whole_site_unbounded(self, client, job_store):
         captured: list[dict[str, Any]] = []
         base_execute = _fake_execute(_small_link_graph_results())
 
@@ -286,7 +288,7 @@ class TestWholeSiteJobExecution:
         assert captured
         assert all(payload["policy"]["limits"]["max_depth"] == 0 for payload in captured)
 
-    async def test_create_runs_to_completed(self, client, job_store, real_sleeps):
+    async def test_create_runs_to_completed(self, client, job_store):
         job_id = await _create_api_job(
             client,
             "http://example.test/a",
@@ -309,7 +311,7 @@ class TestWholeSiteJobExecution:
         # Discovered link b was crawled in a follow-up batch.
         assert len(job.results) == 2
 
-    async def test_total_failed_counts_once_per_failed_item(self, client, job_store, real_sleeps):
+    async def test_total_failed_counts_once_per_failed_item(self, client, job_store):
         # Batch 2 submits b and c, both fail: the per-item `failed` counter is
         # cumulative, so adding it inside the loop once reported 1+2=3.
         job = await _run_job_to_completed(
@@ -327,7 +329,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
 
-    async def test_failed_item_failing_to_build_counts_once(self, client, job_store, real_sleeps):
+    async def test_failed_item_failing_to_build_counts_once(self, client, job_store):
         """M3: an item that fails to build AND carries status=failed counts once.
 
         build_unified_result requires original_url; an item with a resolvable
@@ -353,7 +355,7 @@ class TestWholeSiteJobExecution:
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 1
 
-    async def test_wide_fanout_crawls_every_discovered_url_once(self, client, job_store, real_sleeps):
+    async def test_wide_fanout_crawls_every_discovered_url_once(self, client, job_store):
         """M2: a 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
         job = await _run_job_to_completed(
@@ -381,7 +383,7 @@ class TestTransientFailureRequeue:
 
     _CAP = 3  # MAX_URL_TRANSIENT_ATTEMPTS
 
-    async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store, real_sleeps):
+    async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store):
         root = "http://example.test/a"
         job, attempts = await _run_scripted_job(
             client,
@@ -403,7 +405,7 @@ class TestTransientFailureRequeue:
         assert job.stats["total_crawled"] == 1
         assert job.stats["total_failed"] == 0
 
-    async def test_transient_retries_are_bounded_then_terminal(self, client, job_store, real_sleeps):
+    async def test_transient_retries_are_bounded_then_terminal(self, client, job_store):
         root = "http://example.test/a"
         job, attempts = await _run_scripted_job(
             client,
@@ -422,7 +424,7 @@ class TestTransientFailureRequeue:
         assert job.stats["total_failed"] == 1
         assert job.frontier == []
 
-    async def test_transient_requeue_survives_job_wide_page_cap(self, client, job_store, real_sleeps):
+    async def test_transient_requeue_survives_job_wide_page_cap(self, client, job_store):
         root = "http://example.test/a"
         admitted = "http://example.test/b"
         refused = "http://example.test/c"
@@ -451,7 +453,7 @@ class TestTransientFailureRequeue:
         assert job.frontier == []
         assert job.stats["total_discovered"] == 1
 
-    async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store, real_sleeps):
+    async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store):
         root = "http://example.test/a"
         job, attempts = await _run_scripted_job(
             client,
@@ -467,7 +469,7 @@ class TestTransientFailureRequeue:
         assert job.results[0]["classification"] == "not_found"
         assert job.stats["total_failed"] == 1
 
-    async def test_frontier_expansion_uses_normalized_url(self, client, job_store, real_sleeps):
+    async def test_frontier_expansion_uses_normalized_url(self, client, job_store):
         """H1: the frontier must carry the validated URL, never the raw href.
 
         extraction.py can legitimately emit url="/rel" with normalized_url set
@@ -499,7 +501,7 @@ class TestTransientFailureRequeue:
         assert "/rel" not in job.visited
         assert all("/rel" not in batch for batch in crawled)
 
-    async def test_frontier_skips_unnormalizable_links(self, client, job_store, real_sleeps):
+    async def test_frontier_skips_unnormalizable_links(self, client, job_store):
         """A link without a validated normalized_url is never queue-eligible."""
         empty = {"url": "http://evil.test/x", "normalized_url": ""}
         bare = "http://legacy.test/string-link"
@@ -516,7 +518,7 @@ class TestTransientFailureRequeue:
         assert bare not in job.visited
         assert job.stats["total_discovered"] == 0
 
-    async def test_pause_retains_frontier_and_resume_finishes(self, client, job_store, real_sleeps):
+    async def test_pause_retains_frontier_and_resume_finishes(self, client, job_store):
         hang = asyncio.Event()
         job_id = await _create_api_job(
             client,
@@ -551,7 +553,7 @@ class TestTransientFailureRequeue:
         job = job_store.load(job_id)
         assert job.visited == {"http://example.test/a", "http://example.test/b", "http://example.test/c"}
 
-    async def test_cancel_persists_terminal_state(self, client, job_store, real_sleeps):
+    async def test_cancel_persists_terminal_state(self, client, job_store):
         hang = asyncio.Event()
         job_id = await _create_api_job(
             client,
@@ -571,20 +573,20 @@ class TestTransientFailureRequeue:
         assert job.status.value == "cancelled"
         assert job.visited == {"http://example.test/a"}
 
-    async def test_unknown_action_rejected(self, client, job_store, real_sleeps):
+    async def test_unknown_action_rejected(self, client, job_store):
         resp = await post_api_job(client, "http://example.test/a")
         job_id = resp.json()["job_id"]
         bad = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "explode"})
         assert bad.status_code == 422
 
-    async def test_pause_non_running_conflicts(self, client, job_store, real_sleeps):
+    async def test_pause_non_running_conflicts(self, client, job_store):
         resp = await post_api_job(client, "http://example.test/a")
         job_id = resp.json()["job_id"]
         await _wait_status(job_store, job_id, {"completed", "failed"})
         conflict = await client.post(f"/v1/jobs/{job_id}/control", json={"action": "pause"})
         assert conflict.status_code == 409
 
-    async def test_delete_running_job_cancels(self, client, job_store, real_sleeps):
+    async def test_delete_running_job_cancels(self, client, job_store):
         hang = asyncio.Event()
         job_id = await _create_api_job(
             client,
@@ -596,11 +598,16 @@ class TestTransientFailureRequeue:
         del_resp = await client.delete(f"/v1/jobs/{job_id}")
         assert del_resp.status_code == 200
         hang.set()
-        await asyncio.sleep(0.05)
-        assert not job_runner.is_running(job_id)
+        # The delete cancels the runner task; the wait is on the registry, not
+        # on a pause that might or might not be long enough for the
+        # cancellation to be delivered.
+        await await_until(
+            lambda: not job_runner.is_running(job_id),
+            "the deleted job is still registered as running",
+        )
         assert job_store.load(job_id) is None
 
-    async def test_discovered_links_dedupe(self, client, job_store, real_sleeps):
+    async def test_discovered_links_dedupe(self, client, job_store):
         # a discovers b and c; b discovers a again — visited dedupe wins.
         job_id = await _create_api_job(
             client,
@@ -622,7 +629,7 @@ class TestTransientFailureRequeue:
 
 
 class TestRunnerLifecycle:
-    async def test_shutdown_cancels_running_tasks(self, job_store, real_sleeps):
+    async def test_shutdown_cancels_running_tasks(self, job_store):
         hang = asyncio.Event()
         job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")], hang=hang))
         job = job_store.create("http://example.test/a", {})
@@ -641,7 +648,7 @@ class TestRunnerLifecycle:
         assert recovered == 1
         assert job_store.load(job.job_id).status == JobStatus.PENDING
 
-    async def test_recover_and_start_resumes_pending_jobs(self, job_store, real_sleeps):
+    async def test_recover_and_start_resumes_pending_jobs(self, job_store):
         import asyncio as _asyncio
 
         from app.settings import CrawlerSettings as _CS
@@ -717,6 +724,80 @@ class TestWholeSiteRedirectedUrlResolution:
         assert frontier_url in finished.visited, finished.visited
 
 
+class TestJobStateWaitContract:
+    """The wait itself is the contract, so it is pinned like one.
+
+    ``_wait_status`` used to poll the row against a 5.0s wall-clock deadline.
+    That deadline is a starvation escape hatch wearing a deadline's clothes: it
+    turned one red run under four agent sessions (62.9s user CPU inside a
+    271.5s run) into a failing suite for a job that was progressing fine. These
+    two tests hold the line so nobody quietly puts a poll-and-a-number back.
+    """
+
+    async def test_wait_status_rides_the_write_not_the_clock(self, job_store, monkeypatch):
+        """The wait blocks until the control-plane write lands, then returns it.
+
+        The runner's PENDING->RUNNING claim is held in its worker thread behind
+        a gate, so the row is guaranteed to read ``pending`` for as long as the
+        test wants it to. A waiter created before that claim can therefore not
+        have completed -- there is nothing for it to have seen -- which is what
+        makes "it was still blocked" an observation rather than a timing bet.
+        Opening the gate lets the claim through and the assertion becomes: the
+        wait returned the terminal status the job actually reached.
+        """
+        gate = threading.Event()
+        real_set_status = job_store.set_status
+
+        def gated_set_status(job_id, new, *, expected):
+            if new is JobStatus.RUNNING:
+                gate.wait(timeout=10)
+            return real_set_status(job_id, new, expected=expected)
+
+        monkeypatch.setattr(job_store, "set_status", gated_set_status)
+
+        job_id = job_store.create("http://example.test/a", {}).job_id
+        job_runner.install_execute_crawl(_fake_execute([_canned_result("http://example.test/a")]))
+        assert job_store.status_bus is not None
+
+        runner = asyncio.ensure_future(
+            job_runner._run_job(
+                job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
+            )
+        )
+        try:
+            waiter = asyncio.ensure_future(
+                _wait_status(job_store, job_id, {"completed", "failed"})
+            )
+            # One turn is enough and not a guess: the waiter task cannot run at
+            # all until the loop is handed back, and once it runs it reads a
+            # `pending` row whose claim is still gated.
+            await asyncio.sleep(0)
+            assert not waiter.done(), "the wait returned before the job moved"
+            assert job_store.load(job_id).status is JobStatus.PENDING
+
+            gate.set()
+            assert await waiter == "completed"
+        finally:
+            gate.set()
+            await asyncio.wait_for(runner, timeout=10)
+
+    async def test_wait_status_refuses_a_store_it_cannot_observe(self, job_store, tmp_path):
+        """A store with no write bus is a hard error, never a silent poll.
+
+        The fallback that would make this "work" -- poll the row until the state
+        matches -- is exactly the implementation that raced a starved box, so
+        the harness refuses the job instead of quietly reintroducing it.
+        """
+        from _job_harnesses import _wait_status as wait_status
+        from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+        bare = JobStore(tmp_path / "bare.db", policy=UNRESTRICTED_HOST_POLICY)
+        assert not hasattr(bare, "status_bus")
+        job_id = bare.create("http://example.test/a", {}).job_id
+        with pytest.raises(AssertionError, match="no status bus"):
+            await wait_status(bare, job_id, {"completed"})
+
+
 class TestJobControlTransitions:
     async def test_main_job_control_invalid_action(self):
         from app.main import app, job_store
@@ -762,7 +843,7 @@ class TestWholeSiteAdmissionContract:
             policy["scope_regex"] = scope_regex
         return policy
 
-    async def test_depth_zero_does_not_expand(self, client, job_store, real_sleeps):
+    async def test_depth_zero_does_not_expand(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         attempts: dict[str, int] = {}
@@ -782,7 +863,7 @@ class TestWholeSiteAdmissionContract:
         assert job.frontier == []
         assert job.stats["total_discovered"] == 0
 
-    async def test_depth_one_expands_exactly_one_level(self, client, job_store, real_sleeps):
+    async def test_depth_one_expands_exactly_one_level(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         grandchild = "https://example.test/grandchild"
@@ -807,7 +888,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 1
 
     async def test_scope_regex_excludes_link_before_page_slot(
-        self, client, job_store, real_sleeps
+        self, client, job_store
     ):
         root = "https://example.test/root"
         excluded = "https://example.test/excluded"
@@ -829,7 +910,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 1
 
     async def test_robots_disallowed_link_does_not_consume_page_slot(
-        self, client, job_store, monkeypatch, real_sleeps
+        self, client, job_store, monkeypatch
     ):
         root = "https://example.test/root"
         blocked = "https://example.test/blocked"
@@ -857,7 +938,7 @@ class TestWholeSiteAdmissionContract:
         assert job.visited == {"https://example.test/root", "https://example.test/included"}
         assert job.stats["total_discovered"] == 1
 
-    async def test_legacy_oversized_frontier_truncates_at_pop(self, job_store, real_sleeps):
+    async def test_legacy_oversized_frontier_truncates_at_pop(self, job_store):
         root = "https://example.test/root"
         second = "https://example.test/second"
         third = "https://example.test/third"
@@ -876,7 +957,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.frontier == []
         assert finished.stats["cap_truncated"] == 1
 
-    async def test_in_flight_recovery_keeps_every_admitted_url(self, job_store, real_sleeps):
+    async def test_in_flight_recovery_keeps_every_admitted_url(self, job_store):
         first = "https://example.test/first"
         second = "https://example.test/second"
         job = _seed_job(
@@ -900,7 +981,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.visited == {"https://example.test/first", "https://example.test/second"}
         assert finished.stats["cap_overcommitted"] == 1
 
-    async def test_canonical_root_alias_counts_once(self, client, job_store, real_sleeps):
+    async def test_canonical_root_alias_counts_once(self, client, job_store):
         root = "https://example.test"
         self_alias = "https://example.test/"
         attempts: dict[str, int] = {}
@@ -921,7 +1002,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 0
 
     async def test_cap_truncation_is_exposed_by_job_api(
-        self, client, job_store, real_sleeps
+        self, client, job_store
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
@@ -940,7 +1021,7 @@ class TestWholeSiteAdmissionContract:
 
     @pytest.mark.parametrize("policy_json", ['["corrupt"]', '{"limits":"corrupt"}'])
     async def test_non_dict_policy_shapes_do_not_raise_mid_crawl(
-        self, job_store, policy_json, real_sleeps
+        self, job_store, policy_json
     ):
         import sqlite3
 
@@ -963,7 +1044,7 @@ class TestWholeSiteAdmissionContract:
 
 
     async def test_job_seeds_sitemap_pages_through_shared_admission(
-        self, client, job_store, monkeypatch, real_sleeps
+        self, client, job_store, monkeypatch
     ):
         root = "https://example.test/root"
         seed = "https://example.test/from-sitemap"
@@ -993,7 +1074,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 1
 
     async def test_analytics_and_document_links_do_not_consume_slots(
-        self, client, job_store, real_sleeps
+        self, client, job_store
     ):
         root = "https://example.test/root"
         analytics = "https://www.google-analytics.com/analytics.js"
@@ -1016,7 +1097,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 1
 
     async def test_robots_crawl_delay_is_committed_before_admission(
-        self, client, job_store, monkeypatch, real_sleeps
+        self, client, job_store, monkeypatch
     ):
         from app.scheduler import DomainScheduler
 
@@ -1051,7 +1132,7 @@ class TestWholeSiteAdmissionContract:
 
 
     async def test_in_flight_batch_discovering_each_other_does_not_double_crawl(
-        self, job_store, real_sleeps
+        self, job_store
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
@@ -1069,7 +1150,7 @@ class TestWholeSiteAdmissionContract:
 
 
     async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(
-        self, job_store, real_sleeps
+        self, job_store
     ):
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=test"
@@ -1087,7 +1168,7 @@ class TestWholeSiteAdmissionContract:
 
 
     async def test_chunked_in_flight_recovery_never_loses_admitted_urls(
-        self, job_store, real_sleeps
+        self, job_store
     ):
         urls = [f"https://example.test/page-{index}" for index in range(10)]
         finished, attempts = await run_seeded_scripted_job(
@@ -1105,7 +1186,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.stats["cap_overcommitted"] == 1
 
 
-    async def test_cross_list_alias_identity_is_single_work_item(self, job_store, real_sleeps):
+    async def test_cross_list_alias_identity_is_single_work_item(self, job_store):
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=legacy"
         child = "https://example.test/child"
@@ -1125,7 +1206,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.frontier == []
 
     async def test_unbounded_batch_chunking_does_not_report_truncation(
-        self, client, job_store, real_sleeps
+        self, client, job_store
     ):
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
@@ -1166,7 +1247,7 @@ class TestWholeSiteAdmissionContract:
 
 
     async def test_duplicate_discovered_aliases_count_once_in_stats(
-        self, client, job_store, real_sleeps
+        self, client, job_store
     ):
         root = "https://example.test/root"
         child = "https://example.test/child"
