@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import tempfile
 import time
 from collections.abc import Iterable
@@ -26,7 +25,6 @@ from app.constants import (
 )
 from app.crawl import robots as _robots_policy
 from app.resource_pressure import ResourceGate
-from app.safe_regex import BoundedPattern, UnsafePattern, compile_untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +46,7 @@ load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
+from app.crawl.admission import compile_scope_pattern
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import _fetch_and_decode
@@ -87,30 +86,6 @@ def _get_shared_content_cache() -> ContentCache:
     return _SHARED_CONTENT_CACHE
 
 
-
-
-# A single user-supplied scope_regex is applied to every discovered link.
-# Bound the work and refuse pathological patterns (ReDoS guard).
-_MAX_SCOPE_PATTERN_LEN = 256
-
-
-def _compile_scope_regex_safe(scope_regex: str | None) -> BoundedPattern | None:
-    """Compile a user-supplied scope regex for bounded matching.
-
-    Defense in depth (N-1): static shape rejection is bypassable by
-    construction — the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
-    every enumerated heuristic — so the durable guarantee is BOUNDED
-    EXECUTION via :mod:`app.safe_regex`: every match runs on the ``regex``
-    engine with a wall-clock timeout, raising RegexTimeout instead of
-    hanging the crawl loop. The cheap heuristics below remain as an early
-    filter for obvious footguns; they are not load-bearing.
-    """
-    if not scope_regex:
-        return None
-    try:
-        return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
-    except (UnsafePattern, re.error):
-        return None
 
 
 
@@ -419,7 +394,7 @@ async def crawl_request(
             webhook_url=webhook_url, spill_path=spill_path,
             dependencies=_PipelineDependencies(
                 get_content_cache=_get_shared_content_cache, make_spill=_ResultSpill,
-                compile_scope_regex_safe=_compile_scope_regex_safe, stale_seeds=_stale_seeds,
+                compile_scope_regex_safe=compile_scope_pattern, stale_seeds=_stale_seeds,
                 fetch_and_decode=_fetch_and_decode, default_fetch_and_decode=_DEFAULT_FETCH_AND_DECODE,
                 shared_http_cache=_SHARED_HTTP_CACHE, resource_gate=_resource_gate,
             ),

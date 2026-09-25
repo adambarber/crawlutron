@@ -3,7 +3,7 @@ compiled regex, never a raw re.search(scope_regex, link).
 
 A malicious scope_regex like (a+)+$ would hang the recursive loop via
 catastrophic backtracking if applied with re.search on every discovered link.
-The fix compiles the pattern once with _compile_scope_regex_safe (which rejects
+The fix compiles the pattern once with compile_scope_pattern (which rejects
 pathological patterns) and uses the compiled pattern's .search() in the loop.
 """
 

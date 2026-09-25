@@ -71,7 +71,7 @@ __all__ = [
 # weight, never a re-baseline. The metrics budgets' history-based monotonicity
 # test in tests/test_metrics_budget.py is the pattern for tracking that history.
 #
-# 22,010 -> 21,970: the strategy-raise chokepoint, and with it the dead weight
+# 22,010 -> 21,960: the strategy-raise chokepoint, and with it the dead weight
 # it made redundant -- a "canonicalized" flag whose column migration 0002 had
 # already dropped (the local was hardcoded False, so every branch that read it
 # could only take the one path), the structural canonical-form check nothing
@@ -79,7 +79,7 @@ __all__ = [
 # only caller was a parameter that ``DomainScheduler.run`` silently ignored, a
 # migration index builder no schema or migration used, and a membership helper
 # the classifier below it had long replaced with a table lookup.
-_APP_TREE_LINE_BUDGET = 21_970
+_APP_TREE_LINE_BUDGET = 21_960
 
 
 def test_app_tree_line_count_does_not_grow():
@@ -3945,6 +3945,73 @@ def test_strategy_runner_guard_detector_bites():
         "        return None\n"
     )
     assert not _unguarded_strategy_runner_offenders(enclosing, path)
+
+
+# The scope-regex compiler: ONE definition of "compile a user-supplied scope
+# pattern, fail closed, bound the length". It had two -- a public one in
+# admission and a private one in engine -- that differed in their except
+# clause, and the length bound was a second module constant with the same name
+# and the same value. One definition, one bound, and the fail-closed arms of
+# both.
+_SCOPE_COMPILER_NAMES = frozenset({"compile_scope_pattern", "_compile_scope_regex_safe"})
+_SCOPE_PATTERN_LENGTH_BOUND = "_MAX_SCOPE_PATTERN_LEN"
+
+
+def _definitions_in(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """The scope-compiler labels one parsed tree contributes.
+
+    Split out from :func:`_scope_compiler_definitions` so the bites case can
+    hand the detector a synthetic tree: the walk owns app/ only, so a test
+    that wants to prove the detector fires has to plant the shape itself.
+    """
+    found: list[str] = []
+    for node in nodes_of(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if node.name in _SCOPE_COMPILER_NAMES:
+                found.append(offender(path, node.lineno, f"scope-regex compiler {node.name}"))
+        elif isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == _SCOPE_PATTERN_LENGTH_BOUND
+            for target in node.targets
+        ):
+            found.append(offender(path, node.lineno, "scope-regex length bound"))
+    return found
+
+
+def _scope_compiler_definitions() -> list[str]:
+    """File labels of every scope-regex compiler and of its length bound."""
+    found: list[str] = []
+    for path, tree in app_trees(exclude=frozenset()):
+        found.extend(_definitions_in(tree, path))
+    return found
+
+
+def test_scope_regex_compiler_has_exactly_one_definition():
+    """Behavior parity across the dedupe is covered by tests/crawl/test_scope_regex.py;
+    this pins that no second copy of the compiler or of its bound can creep back."""
+    found = _scope_compiler_definitions()
+    compilers = [label for label in found if "compiler" in label]
+    bounds = [label for label in found if "length bound" in label]
+    assert len(compilers) == 1, f"scope-regex compiler duplicated again: {compilers}"
+    assert len(bounds) == 1, f"scope-regex length bound duplicated again: {bounds}"
+    assert "app/crawl/admission.py" in compilers[0], compilers
+    assert "app/crawl/admission.py" in bounds[0], bounds
+
+
+def test_scope_regex_compiler_detector_bites():
+    """The detector reports one label per definition, so the tree it must
+    reject is any tree with more than one -- two compilers, or the one
+    compiler plus a second copy of its bound."""
+    path = REPO_ROOT / "app" / "crawl" / "admission.py"
+    two_compilers = ast.parse(
+        "def compile_scope_pattern(value):\n    return value\n"
+        "def _compile_scope_regex_safe(value):\n    return value\n"
+    )
+    compiler_and_bound = ast.parse(
+        "_MAX_SCOPE_PATTERN_LEN = 256\ndef compile_scope_pattern(value):\n    return value\n"
+    )
+    assert len(_definitions_in(two_compilers, path)) == 2
+    assert len(_definitions_in(compiler_and_bound, path)) == 2
+    assert not _definitions_in(ast.parse("def _helper(value):\n    return value\n"), path)
 
 
 def _frontier_expression(node: ast.AST) -> bool:

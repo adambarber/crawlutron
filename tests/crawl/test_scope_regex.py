@@ -5,7 +5,7 @@ scope_regex is applied to every discovered link URL. A pattern such as
 refuse to compile pathological patterns and bound the number of links scanned.
 """
 
-from app.crawl.engine import _compile_scope_regex_safe
+from app.crawl.admission import compile_scope_pattern as compile_scope_pattern
 from app.models import EngineCrawlResult
 
 
@@ -40,7 +40,7 @@ def test_nested_quantifiers_compile_and_match_bounded():
     from app.safe_regex import RegexTimeout, match_bounded
 
     for evil in ["(a+)+$", "(a|a)+$", "(a*)*", "(?:a+)+b", "(a+)+c"]:
-        pat = _compile_scope_regex_safe(evil)
+        pat = compile_scope_pattern(evil)
         assert pat is not None, evil
         if pat is None:
             continue
@@ -52,14 +52,14 @@ def test_nested_quantifiers_compile_and_match_bounded():
 
 
 def test_safe_compile_rejects_overlong_pattern():
-    assert _compile_scope_regex_safe("a" * 300) is None
+    assert compile_scope_pattern("a" * 300) is None
 
 
 def test_safe_compile_rejects_unparseable_pattern():
-    assert _compile_scope_regex_safe("(((a") is None
+    assert compile_scope_pattern("(((a") is None
 
 
 def test_safe_compile_accepts_normal_pattern():
-    pat = _compile_scope_regex_safe(r"example\.com")
+    pat = compile_scope_pattern(r"example\.com")
     assert pat is not None
     assert pat.search("http://example.com/x")

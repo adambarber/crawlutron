@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable, Iterable, MutableSequence
 from dataclasses import dataclass, field
 from functools import partial
@@ -54,11 +55,25 @@ def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
 
 
 def compile_scope_pattern(scope_regex: Any) -> BoundedPattern | None:
+    """Compile a user-supplied scope regex for bounded matching, or refuse it.
+
+    THE definition: the crawl path (engine) and the durable admission path
+    (job links) both bound a caller-supplied ``scope_regex`` through here, so
+    a pattern one path refuses cannot be compiled by the other.
+
+    Defense in depth (N-1): static shape rejection is bypassable by
+    construction -- the depth-3 nested-quantifier ``(((a|aa)))*`` defeated
+    every enumerated heuristic -- so the durable guarantee is BOUNDED
+    EXECUTION via :mod:`app.safe_regex`: every match runs on the ``regex``
+    engine with a wall-clock timeout, raising RegexTimeout instead of hanging
+    the crawl loop. The cheap heuristics there remain as an early filter for
+    obvious footguns; they are not load-bearing.
+    """
     if not isinstance(scope_regex, str) or not scope_regex:
         return None
     try:
         return compile_untrusted(scope_regex, max_len=_MAX_SCOPE_PATTERN_LEN)
-    except UnsafePattern:
+    except (UnsafePattern, re.error):
         return None
 
 
