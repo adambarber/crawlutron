@@ -6,6 +6,9 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+import yaml
+
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
@@ -37,34 +40,80 @@ ENFORCEMENT_TRIGGER_PATTERN = (
     r"|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini"
     r"|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$"
 )
+# A syntactically valid config carrying a second, quoted jscpd hook that would
+# pass a lax threshold. Nothing distinguishes it from the real config to a
+# reader of the raw text except the quotes.
+QUOTED_SECOND_JSCPD_HOOK = """\
+repos:
+  - repo: local
+    hooks:
+      - id: jscpd
+        name: jscpd
+        entry: .venv/bin/python tests/_jscpd_gate.py all
+        language: system
+        files: ^(docker/browser-crawler/)?.*\\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: "jscpd-legacy"
+        name: jscpd legacy
+        entry: jscpd --threshold 40 app tests || true
+        language: system
+        files: ^(docker/browser-crawler/)?.*\\.py$
+        pass_filenames: false
+        stages: [pre-commit]
+"""
 
 
-def _hook_blocks(config: str) -> list[tuple[str, str]]:
-    starts = list(re.finditer(r"^      - id: ([A-Za-z0-9_-]+)\s*$", config, re.MULTILINE))
-    return [
-        (match.group(1), config[match.start() : starts[index + 1].start() if index + 1 < len(starts) else len(config)])
-        for index, match in enumerate(starts)
-    ]
+def _hook_blocks(config: str) -> list[tuple[str, dict]]:
+    """Every hook in the config, as `(id, hook)` pairs read by a YAML parser.
+
+    This used to be a regex over the raw text anchored to exactly six spaces of
+    indentation, which meant a hook id written `- id: "jscpd-legacy"` was
+    invisible here: the contract could report one jscpd gate while the file
+    declared two. pre-commit reads ids as YAML values, so this test reads them
+    the same way. Quoting, indentation and key order are no longer ways to be
+    invisible.
+    """
+    document = yaml.safe_load(config)
+    assert isinstance(document, dict), "the pre-commit config must be a mapping"
+    hooks: list[tuple[str, dict]] = []
+    for repo in document.get("repos") or []:
+        assert isinstance(repo, dict), "each repos entry must be a mapping"
+        for hook in repo.get("hooks") or []:
+            assert isinstance(hook, dict), "each hook must be a mapping"
+            hook_id = hook.get("id")
+            assert isinstance(hook_id, str) and hook_id, f"hook is missing a string id: {hook!r}"
+            hooks.append((hook_id, hook))
+    return hooks
 
 
-def _field(block: str, name: str) -> str:
-    match = re.search(rf"^\s+{re.escape(name)}:\s*(?P<value>.*?)\s*$", block, re.MULTILINE)
-    assert match is not None, f"hook is missing {name}"
-    return match.group("value")
+def _field(block: dict, name: str) -> str:
+    assert name in block, f"hook is missing {name}"
+    return str(block[name])
 
 
-def _entry(block: str) -> str:
-    lines = block.splitlines()
-    for index, line in enumerate(lines):
-        if re.match(r"^\s+entry:\s*>-\s*$", line):
-            values = [line.split(":", 1)[1].strip()]
-            for continuation in lines[index + 1 :]:
-                if re.match(r"^\s{8}[A-Za-z][A-Za-z0-9_-]*:", continuation):
-                    break
-                if continuation.strip():
-                    values.append(continuation.strip())
-            return " ".join(values)
-    raise AssertionError("hook is missing a folded entry")
+def _entry(block: dict) -> str:
+    """The command pre-commit will execute, with folded scalars already joined.
+
+    The assertion that used to be here (that `entry:` is a `>-` block) was a
+    proxy for the thing that matters: pre-commit runs the entry as one command,
+    so a literal block would smuggle newlines into it. That is asserted directly.
+    """
+    entry = block.get("entry")
+    assert isinstance(entry, str) and entry.strip(), "hook is missing an entry"
+    assert "\n" not in entry, "entry must be a folded scalar, not a literal one"
+    return entry
+
+
+def _require_exactly_one_jscpd_gate(config: str) -> tuple[str, dict]:
+    """One duplication gate, by id, whatever the file looks like."""
+    hooks = _hook_blocks(config)
+    jscpd_hooks = [(hook_id, hook) for hook_id, hook in hooks if hook_id.split("-")[0] == "jscpd"]
+    found = [hook_id for hook_id, _ in jscpd_hooks]
+    assert len(jscpd_hooks) == 1, f"exactly one jscpd gate is required, found {found}"
+    jscpd_id, jscpd = jscpd_hooks[0]
+    assert jscpd_id == "jscpd", f"the only jscpd gate must be the whole-service one, found {jscpd_id!r}"
+    return jscpd_id, jscpd
 
 
 def _required_needs(workflow: str) -> set[str]:
@@ -81,15 +130,14 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     hooks = _hook_blocks(config)
     assert hooks
 
-    jscpd_hooks = [hook for hook in hooks if hook[0] == "jscpd" or hook[0].startswith("jscpd-")]
-    assert len(jscpd_hooks) == 1
-    jscpd_id, jscpd = jscpd_hooks[0]
+    jscpd_id, jscpd = _require_exactly_one_jscpd_gate(config)
     assert jscpd_id == "jscpd"
     assert "jscpd-app" not in config
     assert "jscpd-tests" not in config
+    assert not [hook_id for hook_id, _ in hooks if hook_id in {"jscpd-app", "jscpd-tests"}]
 
-    assert all("pre-push" not in block for _, block in hooks)
-    assert all(_field(block, "stages") == "[pre-commit]" for _, block in hooks)
+    assert all("pre-push" not in (block.get("stages") or []) for _, block in hooks)
+    assert all(block.get("stages") == ["pre-commit"] for _, block in hooks)
 
     entry = _entry(jscpd)
     assert ".venv/bin/python tests/_jscpd_gate.py all" in entry
@@ -107,6 +155,22 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "enforcement" in required
     assert required - {"enforcement"} <= REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+
+
+def test_quoted_hook_id_is_visible_to_this_contract() -> None:
+    """A hook id is a YAML value, not a line of text.
+
+    The parser used to be `^      - id: ([A-Za-z0-9_-]+)\\s*$`, so a hook
+    declared `- id: "jscpd-legacy"` did not exist as far as this contract was
+    concerned and a second, laxer duplication gate could be added undetected.
+    """
+    hooks = _hook_blocks(QUOTED_SECOND_JSCPD_HOOK)
+    assert [hook_id for hook_id, _ in hooks] == ["jscpd", "jscpd-legacy"]
+
+
+def test_a_second_quoted_jscpd_hook_is_rejected() -> None:
+    with pytest.raises(AssertionError):
+        _require_exactly_one_jscpd_gate(QUOTED_SECOND_JSCPD_HOOK)
 
 
 def test_every_gate_fires_on_every_enforcement_input() -> None:

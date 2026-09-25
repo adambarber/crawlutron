@@ -12,6 +12,10 @@ yoyo-migrations==9.0.0
 ruff==0.16.8
 jscpd==5.3.2
 pre-commit==4.6.2
+# Parsed by tests/test_precommit_ci_contract.py. Declared rather than inherited
+# from pre-commit's dependency tree: a gate test that imports a package has to
+# own it, or it works until pre-commit changes its own requirements.
+pyyaml>=6.0
 pytest-randomly>=4.0.0
 pytest-xdist>=3.0.0  # parallel suite runs: pytest -n auto (suite is xdist-safe)
 # Static type-checking. This is a real gate, not an advisory: the app tree is

@@ -73,6 +73,11 @@ dev = [
     "ruff==0.16.8",
     "jscpd==5.3.2",
     "pre-commit==4.6.2",
+    # Read by tests/test_precommit_ci_contract.py, which parses the pre-commit
+    # config and the CI workflow as YAML rather than by regex over their text.
+    # It was previously present only as a transitive dependency of pre-commit,
+    # which is not a reason for a test to depend on it.
+    "pyyaml>=6.0",
     # Static type-checking. The app tree IS mypy-clean (0 errors across 85
     # files) and `typecheck` now runs in CI as a required gate, so this is a
     # real gate, not an advisory one — the old comment claiming otherwise was
