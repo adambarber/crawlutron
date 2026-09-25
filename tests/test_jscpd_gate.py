@@ -116,6 +116,46 @@ def _valid_pair() -> dict:
     }
 
 
+_PROBE_BASENAME = "zz_probe_clone.py"
+# The real module the probe is a copy of, by its path inside the mirrored tree.
+PROBE_SOURCE = "app/crawl/ids.py"
+
+
+def _mirrored_service_tree(tmp_path: Path, payload: str) -> Path:
+    """A throwaway service tree carrying production's relative layout.
+
+    `app/crawl/ids.py` is IN the mirror, because it is the other half of the
+    production clone: the reported pair is the planted probe against the real
+    module it was copied from, and a mirror holding only the probe would report
+    nothing and pass for the wrong reason.
+
+    `jscpd` matches each ignore glob against the path RELATIVE TO ITS OWN CWD,
+    not against an absolute path, and that is what makes a tree under pytest's
+    `tmp_path` a faithful stand-in: measured by scanning `app/` from a mirror
+    rooted under `/tmp`, the `**/tmp/**` glob matched nothing while
+    `**/app/crawl/migrations/**` excluded the migration clone and left the
+    production clone reported. So this holds on a Linux checkout where
+    `tmp_path` itself lives under `/tmp`, not only on a macOS tmp dir.
+    """
+    mirror = tmp_path / "service"
+    # Two production files with identical content, plus the same content again
+    # under the excluded migrations subtree.
+    for relative in (PROBE_SOURCE, f"app/{_PROBE_BASENAME}", f"app/crawl/migrations/{_PROBE_BASENAME}"):
+        planted = mirror / relative
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(payload, encoding="utf-8")
+    # One module per remaining root: enough for the gate's "analyzed 0 sources"
+    # check, and a single file per root cannot form a pair of its own. It is the
+    # real module rather than a stub because jscpd only counts a file as a
+    # source once it holds enough tokens -- a file of trivial assignments is
+    # scored as 0 sources however many lines it has.
+    for tree in ("tests", "scripts"):
+        filler = mirror / tree / "zz_tree_filler.py"
+        filler.parent.mkdir(parents=True, exist_ok=True)
+        filler.write_text(payload, encoding="utf-8")
+    return mirror
+
+
 _GATE_ARGV = [
     "gate",
     "all",
@@ -443,22 +483,39 @@ def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered(
     assert "**/app/crawl/migrations/**" in json.loads(gate.CONFIG_PATH.read_text(encoding="utf-8"))["ignore"]
 
 
-def test_migrations_clones_are_not_reported_but_production_clones_are(capsys) -> None:
-    """One real scan, two planted clones: the migrations copy is invisible, the
-    production copy is not. Both plants are files this config never names, so
-    this also proves a migration added tomorrow is covered by the glob."""
-    probe = gate.SERVICE_ROOT / "app" / "crawl" / "ids.py"
-    in_migrations = gate.SERVICE_ROOT / "app" / "crawl" / "migrations" / "zz_probe_clone.py"
-    in_production = gate.SERVICE_ROOT / "app" / "zz_probe_clone.py"
-    payload = probe.read_text(encoding="utf-8")
+def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatch, tmp_path, capsys) -> None:
+    """One real scan of a mirrored tree, two planted clones: the migrations copy
+    is invisible, the production copy is not. Both plants are files this config
+    never names, so this also proves a migration added tomorrow is covered by
+    the glob.
+
+    The tree is mirrored rather than borrowed, and that is not a convenience.
+    This test used to plant the pair at fixed paths in the LIVE `app/` tree and
+    unlink them in a `finally`, which made the production tree a directory that
+    moves while a suite runs: every concurrent walk of `app/` became a
+    list-then-read race, and with 6 concurrent copies of this file against 6
+    concurrent copies of tests/test_safety_invariants.py, 10 tests died with
+    `FileNotFoundError: .../app/crawl/migrations/zz_probe_clone.py` -- the
+    tree-wide chokepoint detectors among them, which then reported nothing for
+    the whole run while looking green. The glob under test is about path SHAPE,
+    so a mirror with the same relative layout is what this needs anyway.
+    """
+    payload = (gate.SERVICE_ROOT / PROBE_SOURCE).read_text(encoding="utf-8")
     assert len(payload.splitlines()) >= 8, "the probe needs a clone big enough to clear the floor"
-    in_migrations.write_text(payload, encoding="utf-8")
-    in_production.write_text(payload, encoding="utf-8")
-    try:
-        assert gate._run(_args()) == 1
-    finally:
-        in_migrations.unlink()
-        in_production.unlink()
+
+    mirror = _mirrored_service_tree(tmp_path, payload)
+    _write_expectations(mirror / "expectations.json", [])
+    # The real `.jscpd.json` is NOT redirected: the ignore list is the thing
+    # under test. The venv is a property of the machine, not of the scanned
+    # tree, so the mirror borrows the real one and the jscpd invocation stays
+    # the same binary. TREE_ROOTS keeps its production values; only the source
+    # floor moves, because this tree is four files instead of three hundred.
+    (mirror / ".venv").symlink_to(gate.SERVICE_ROOT / ".venv", target_is_directory=True)
+    monkeypatch.setattr(gate, "SERVICE_ROOT", mirror)
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", mirror / "expectations.json")
+    monkeypatch.setattr(gate, "MIN_SOURCES", {"all": 1})
+
+    assert gate._run(_args()) == 1
 
     reported = capsys.readouterr().err
     assert "app/zz_probe_clone.py" in reported, f"a production clone must be reported:\n{reported}"

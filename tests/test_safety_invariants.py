@@ -5517,6 +5517,323 @@ def test_ddl_detector_bites():
                 3,
             )
         },
-        quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-        quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
+    quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
+    quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
+)
+
+
+# ===========================================================================
+# NO TEST MAY MUTATE THE PRODUCTION TREE
+#
+# `tests/test_jscpd_gate.py` proved the jscpd `ignore` glob by planting two
+# clone pairs at FIXED paths inside the live `app/` tree and unlinking them in a
+# `finally`. That made `app/` a directory that MOVES while the suite runs, and
+# anything that walks it concurrently becomes a list-then-read race: it globs
+# the file list, the probe disappears, and `read_text` raises. Measured with 6
+# concurrent copies of that file against 6 concurrent copies of this one, 10
+# tests failed with `FileNotFoundError: .../app/crawl/migrations/zz_probe_clone.py`
+# -- and the victims were the tree-wide chokepoint detectors (await-in-lock,
+# bare `re.compile`, `regex` import), so they reported nothing for the entire run
+# while appearing green. A detector that cannot see the tree cannot hold it.
+#
+# So the class closes mechanically rather than one file at a time: this sweep
+# reads every module under tests/ and reports any call that can mutate a path
+# under app/. It is a name-and-shape check over statically resolvable
+# expressions; a path handed in as a parameter and written by a caller outside
+# tests/ is invisible to it, which is why a name it DOES resolve is a hard
+# failure and not a warning.
+#
+# The sanctioned way to get a real production path SHAPE is to mirror the
+# layout under `tmp_path` and point the code under test at the mirror. A
+# `tmp_path / "app"` fixture is deliberately NOT this rule: a scratch directory
+# a test builds itself is not the production tree.
+# ===========================================================================
+
+# A path built from one of these is anchored at the service root, so the
+# segment joined onto it next names a real tree. Aliases a module binds to one
+# of them are absorbed below, so `ROOT = HERE.parent` is the same anchor.
+_SERVICE_ROOT_NAMES = frozenset({"REPO_ROOT", "SERVICE_ROOT", "HERE", "ROOT"})
+# Already inside app/ by construction: the walk helpers hand these out.
+_APP_ROOTED_NAMES = frozenset({"APP_ROOT", "STRATEGIES_DIR"})
+# Qualifiers whose mutating call takes the path as an ARGUMENT
+# (`os.remove(p)`, `shutil.rmtree(p)`) instead of as its receiver.
+_FS_MODULE_QUALIFIERS = frozenset({"os", "shutil", "pathlib", "io", "posixpath", "ntpath"})
+# Calls that change the filesystem. `str.replace` and `list.remove` are in here
+# too, which costs nothing: a call is only reported when its target resolves
+# into app/, and a string is not a path into app/.
+_MUTATING_METHODS = frozenset(
+    {
+        "unlink",
+        "write_text",
+        "write_bytes",
+        "mkdir",
+        "rmdir",
+        "rename",
+        "replace",
+        "touch",
+        "symlink_to",
+        "hardlink_to",
+        "link_to",
+        "chmod",
+        "chown",
+        "truncate",
+        "rmtree",
+        "copy",
+        "copy2",
+        "copyfile",
+        "move",
+        "remove",
+        "removedirs",
+        "makedirs",
+    }
+)
+_MUTATING_FUNCTIONS = frozenset(
+    {
+        "remove",
+        "unlink",
+        "rename",
+        "replace",
+        "mkdir",
+        "makedirs",
+        "rmdir",
+        "removedirs",
+        "truncate",
+        "rmtree",
+        "copy",
+        "copy2",
+        "copyfile",
+        "move",
+        "write_text",
+        "write_bytes",
+        "symlink",
+        "link",
+        "chmod",
+        "mkstemp",
+        "mkdtemp",
+    }
+)
+# An `open()` is a write only with a mode that says so; a mode this cannot read
+# is treated as a read, because `Path.read_text`/`open(p).read()` on an app/
+# module is a legitimate thing for a detector test to do.
+_WRITE_MODE_CHARS = ("w", "a", "x", "+")
+# Alias chains (`ROOT = HERE.parent`, `APP = REPO_ROOT / "app"`) are resolved
+# to a fixed point rather than recursively; four passes is far past the longest
+# chain a module can express in one scope and bounds the walk either way.
+_BINDING_PASSES = 4
+
+
+def _names_app_tree(component: ast.expr) -> bool:
+    """Whether one path component selects the `app/` tree.
+
+    A relative literal names the tree when its FIRST segment is `app`, so
+    `tests/fixtures/app/x.py` is a fixture and not a production path. An
+    absolute literal is a real filesystem path and any `app` segment in it
+    counts.
+    """
+    if not (isinstance(component, ast.Constant) and isinstance(component.value, str)):
+        return False
+    parts = [part for part in component.value.split("/") if part not in ("", ".")]
+    if not parts:
+        return False
+    return parts[0] == "app" or (component.value.startswith("/") and "app" in parts)
+
+
+def _path_components(expr: ast.AST) -> list[ast.AST] | None:
+    """Flatten `a / b / c`, `os.path.join(a, b)`, and `Path(a)` into components."""
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
+        head = _path_components(expr.left)
+        return None if head is None else [*head, expr.right]
+    if isinstance(expr, ast.Call):
+        name = getattr(expr.func, "attr", None) or getattr(expr.func, "id", None)
+        if name in {"Path", "PurePath"} and expr.args:
+            # `Path(APP_ROOT / "x")` is the same path as `APP_ROOT / "x"`, so
+            # the wrapped expression is flattened rather than boxed.
+            return _path_components(expr.args[0])
+        if name == "join" and expr.args:
+            head = _path_components(expr.args[0])
+            return None if head is None else [*head, *expr.args[1:]]
+    return [expr]
+
+
+def _tree_role(
+    components: list[ast.AST],
+    anchors: set[str],
+    rooted: set[str],
+) -> str:
+    """Classify a path expression as the app tree, a service root, or neither.
+
+    Returns ``"app"`` for anything that lands in `app/`, ``"root"`` for a bare
+    service root (so an alias of one can be absorbed), and ``"other"`` for every
+    expression whose first filesystem anchor this cannot name -- `tmp_path`, a
+    parameter, a value returned by a call. That last case is the whole point:
+    an unnamed anchor cannot be assumed to be the production tree.
+    """
+    for position, component in enumerate(components):
+        if isinstance(component, ast.Name) and component.id in rooted:
+            return "app"
+        if isinstance(component, ast.Attribute) and component.attr in rooted:
+            return "app"
+        if isinstance(component, (ast.Name, ast.Attribute)):
+            name = component.id if isinstance(component, ast.Name) else component.attr
+            if name in anchors:
+                following = components[position + 1 : position + 2]
+                return "app" if following and _names_app_tree(following[0]) else "root"
+            return "other"
+        if _names_app_tree(component):
+            return "app"
+        return "other"
+    return "other"
+
+
+def _absorb_path_aliases(tree: ast.AST, anchors: set[str], rooted: set[str]) -> bool:
+    """Add names this module binds to a service root or to `app/`."""
+    grew = False
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
+            continue
+        components = _path_components(node.value)
+        if components is None:
+            continue
+        role = _tree_role(components, anchors, rooted)
+        if role not in {"app", "root"}:
+            continue
+        names = (
+            [target.id for target in node.targets if isinstance(target, ast.Name)]
+            if isinstance(node, ast.Assign)
+            else [node.target.id]
+            if isinstance(node.target, ast.Name)
+            else []
+        )
+        target_set = rooted if role == "app" else anchors
+        for name in names:
+            if name not in target_set:
+                target_set.add(name)
+                grew = True
+    return grew
+
+
+def _app_path_names(tree: ast.AST) -> tuple[set[str], set[str]]:
+    """The service-root and app-tree names this module can name."""
+    anchors = set(_SERVICE_ROOT_NAMES)
+    rooted = set(_APP_ROOTED_NAMES)
+    for _ in range(_BINDING_PASSES):
+        if not _absorb_path_aliases(tree, anchors, rooted):
+            break
+    return anchors, rooted
+
+
+def _opens_for_writing(node: ast.Call) -> bool:
+    """Whether `open(...)` is called with a mode that writes."""
+    if len(node.args) < 2:
+        return False
+    mode = node.args[1]
+    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(
+        char in mode.value for char in _WRITE_MODE_CHARS
+    )
+
+
+def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Report every call in this module that can mutate a path under `app/`."""
+    anchors, rooted = _app_path_names(tree)
+    offenders: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        callee = node.func
+        if isinstance(callee, ast.Attribute):
+            name = callee.attr
+            if name not in _MUTATING_METHODS and not (name == "open" and _opens_for_writing(node)):
+                continue
+            qualifier = resolved_expr_name(tree, callee.value).rsplit(".", 1)[-1]
+            targets = node.args if qualifier in _FS_MODULE_QUALIFIERS else [callee.value]
+        elif isinstance(callee, ast.Name) and (
+            callee.id in _MUTATING_FUNCTIONS or (callee.id == "open" and _opens_for_writing(node))
+        ):
+            targets = node.args
+        else:
+            continue
+        if not targets or _tree_role(_path_components(targets[0]) or [], anchors, rooted) != "app":
+            continue
+        offenders.append(offender(path, node.lineno, f"mutates the production tree: {ast.unparse(callee)}()"))
+    return offenders
+
+
+def test_tests_do_not_mutate_the_production_tree():
+    """No test writes, unlinks, renames, or replaces a path inside `app/`.
+
+    Tree-wide, and read from the tree rather than from a file list, so the
+    sweep covers a test added tomorrow with nothing to register.
+    """
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        offenders.extend(_app_tree_mutation_offenders(tree, path))
+    assert not offenders, (
+        "mirror the path shape under tmp_path and point the code under test at the mirror: "
+        "a test that mutates app/ turns every concurrent tree walk into a list-then-read race, "
+        "and the detectors that lose it report nothing while looking green: " + "; ".join(offenders)
+    )
+
+
+def test_app_tree_mutation_detector_bites():
+    """Bites: the shapes that actually shipped, and the near-misses beside them.
+
+    The first three are the real offender -- a fixed path under the live tree,
+    written and unlinked from a test -- so the sweep has to catch the exact
+    spelling in the tree, not a paraphrase of it. The rest are the ways a
+    plausible fix could regress the rule into either a no-op or a false alarm.
+    """
+    planted = ast.parse(
+        "import _jscpd_gate as gate\n"
+        "\n"
+        "def test_migrations_clones_are_not_reported(capsys):\n"
+        "    in_migrations = gate.SERVICE_ROOT / 'app' / 'crawl' / 'migrations' / 'zz_probe.py'\n"
+        "    in_production = gate.SERVICE_ROOT / 'app' / 'zz_probe.py'\n"
+        "    in_migrations.write_text('x')\n"
+        "    try:\n"
+        "        assert True\n"
+        "    finally:\n"
+        "        in_production.unlink()\n"
+    )
+    offenders = _app_tree_mutation_offenders(planted, REPO_ROOT / "tests" / "_synthetic.py")
+    assert len(offenders) == 2, offenders
+    assert all("write_text" in found or "unlink" in found for found in offenders), offenders
+
+    module_qualified = ast.parse(
+        "from pathlib import Path\n"
+        "from chokepoint_walks import APP_ROOT\n"
+        "import shutil\n"
+        "\n"
+        "def wipe():\n"
+        "    shutil.rmtree(APP_ROOT)\n"
+        "    Path.cwd()\n"
+        "    Path(APP_ROOT / 'settings.py').replace(APP_ROOT / 'settings.py.bak')\n"
+        "    open(APP_ROOT / 'settings.py', 'w').write('x')\n"
+    )
+    qualified = _app_tree_mutation_offenders(module_qualified, REPO_ROOT / "tests" / "_synthetic.py")
+    assert len(qualified) == 3, qualified
+
+    aliased = ast.parse(
+        "from pathlib import Path\n"
+        "import os\n"
+        "\n"
+        "ROOT = Path(__file__).resolve().parent.parent\n"
+        "APP = ROOT / 'app'\n"
+        "\n"
+        "def rename_it():\n"
+        "    (APP / 'crawl' / 'ids.py').rename(APP / 'crawl' / 'ids_v2.py')\n"
+        "    os.remove(ROOT / 'app' / 'main.py')\n"
+    )
+    assert len(_app_tree_mutation_offenders(aliased, REPO_ROOT / "tests" / "_synthetic.py")) == 2
+
+    scratch = ast.parse(
+        "def test_mirrored_tree(tmp_path):\n"
+        "    app = tmp_path / 'app'\n"
+        "    (app / 'crawl' / 'migrations').mkdir(parents=True)\n"
+        "    (app / 'zz_probe.py').write_text('payload')\n"
+        "    (tmp_path / 'tests' / 'fixtures' / 'app' / 'x.py').write_text('fixture')\n"
+        "    Path = __import__('pathlib').Path\n"
+        "    (Path(__file__).resolve().parent / 'test_jscpd_gate.py').read_text()\n"
+    )
+    assert not _app_tree_mutation_offenders(scratch, REPO_ROOT / "tests" / "_synthetic.py"), (
+        "a test's own scratch tree is not the production tree"
     )
