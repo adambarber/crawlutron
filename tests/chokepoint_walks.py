@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import weakref
 from collections.abc import Iterator
 from functools import cache, lru_cache
 
@@ -50,6 +51,44 @@ STRATEGIES_DIR = APP_ROOT / "crawl" / "strategies"
 # the banned primitives, so a full-tree walk excludes it. A test that must
 # also exempt its own chokepoint module passes `exclude=SANCTIONED | {"..."}`.
 SANCTIONED = frozenset({"safe_regex.py"})
+
+# The node sequence of every root any detector has walked, keyed by the root's
+# identity. Weak so a synthetic tree a property test built for one assertion is
+# released with the test that built it, rather than pinned for the session: a
+# strong dict here would grow with every planted tree and hold a whole parsed
+# module per case. `ast.AST` supports weak references, and identity is the
+# right key -- a re-parse of an unchanged file compares equal everywhere a
+# detector looks, so only identity distinguishes "I already walked this" from
+# "this is a different tree that happens to look the same".
+_NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
+    """``tuple(ast.walk(root))``, materialized once per root and shared.
+
+    a962c7b removed the re-GLOB and the re-READ underneath the detectors. The
+    re-WALK is the same defect one level deeper and it is the larger half: this
+    tree holds 40 detectors and 91 ``ast.walk`` sites over ~105 modules, so
+    every detector re-walked every AST -- forty passes over every node where
+    one would do. Sub-walks (a detector narrowing to one function and walking
+    that) go through here too, and they are where the sharing pays most: the
+    same function body is walked by many detectors, and a key that fits in one
+    dictionary serves all of them.
+
+    The sequence is byte-for-byte what ``ast.walk`` yields -- same objects, same
+    breadth-first order -- so a detector cannot tell the difference, which is
+    the property ``test_every_detector_sees_the_same_nodes`` asserts by
+    execution. A detector that needs a fresh walk of a mutated tree must not
+    mutate one: the snapshots above are already frozen, and this makes the
+    freeze uniform instead of per-detector.
+    """
+    cached = _NODES_BY_ROOT.get(root)
+    if cached is None:
+        cached = tuple(ast.walk(root))
+        _NODES_BY_ROOT[root] = cached
+    return cached
 
 
 def app_python_files(*, exclude: frozenset[str] = SANCTIONED) -> tuple[pathlib.Path, ...]:
@@ -104,7 +143,7 @@ def app_offenders(detector, *, exclude: frozenset[str] = SANCTIONED) -> list[str
 
 def calls_named(tree: ast.AST, function_name: str) -> Iterator[ast.Call]:
     """Yield direct calls to one named function in an AST tree."""
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -122,7 +161,7 @@ def call_keyword_values(
     """Yield selected keyword values from direct calls to named functions."""
     names = {function_names} if isinstance(function_names, str) else function_names
     keywords = {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -189,7 +228,8 @@ def _static_string(expr: ast.AST, bindings: dict[str, str]) -> str | None:
 @lru_cache(maxsize=256)
 def _import_bindings(tree: ast.AST) -> dict[str, str]:
     bindings: dict[str, str] = {}
-    for node in ast.walk(tree):
+    nodes = nodes_of(tree)
+    for node in nodes:
         if isinstance(node, ast.ImportFrom) and node.module:
             for alias in node.names:
                 local = alias.asname or alias.name
@@ -198,7 +238,7 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
                 bindings[local] = alias.name if alias.asname else local
-    assignments = [node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    assignments = [node for node in nodes if isinstance(node, (ast.Assign, ast.AnnAssign))]
     changed = True
     while changed:
         changed = False

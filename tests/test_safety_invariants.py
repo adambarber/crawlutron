@@ -27,6 +27,7 @@ from chokepoint_walks import (
     call_keyword_values,
     calls_named,
     file_tree,
+    nodes_of,
     offender,
     resolved_call_name,
     resolved_expr_name,
@@ -224,7 +225,7 @@ _RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findal
 def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag re.<method>(<non-literal pattern>, ...) -- the ReDoS shape."""
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -250,7 +251,7 @@ def test_no_direct_regex_engine_import():
     """Only safe_regex.py may import the third-party `regex` engine."""
     offenders: list[str] = []
     for path, tree in app_trees():
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "regex":
@@ -265,7 +266,7 @@ def test_no_bare_re_compile_on_nonliteral():
     """Non-literal re.compile must go through app.safe_regex.compile_untrusted."""
     offenders: list[str] = []
     for path, tree in app_trees():
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -298,7 +299,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     lock_names = _threading_lock_bindings(tree)
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.With, ast.AsyncWith)):
             continue
         if isinstance(node, ast.AsyncWith):
@@ -315,7 +316,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
             )
             if not looks_like_lock:
                 continue
-            for inner in ast.walk(node):
+            for inner in nodes_of(node):
                 if isinstance(inner, ast.Await):
                     offenders.append(offender(path, inner.lineno))
             break
@@ -329,7 +330,7 @@ _THREADING_LOCK_CONSTRUCTORS = frozenset({"Lock", "RLock", "Condition", "Semapho
 def _threading_lock_bindings(tree: ast.AST) -> set[str]:
     """Names/attributes bound to threading lock-family constructors."""
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
             continue
         func = node.value.func
@@ -391,12 +392,12 @@ _REDIRECT_HOP_SANCTIONED = {"redirect_hop", "_redirect_target"}
 
 
 def _functions_with(tree: ast.AST) -> list[ast.AST]:
-    return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module))]
+    return [n for n in nodes_of(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module))]
 
 
 def _uses_redirect_status(node: ast.AST) -> bool:
     """True if the function tests a concrete redirect status constant."""
-    return any(isinstance(sub, ast.Constant) and sub.value in _REDIRECT_STATUSES for sub in ast.walk(node))
+    return any(isinstance(sub, ast.Constant) and sub.value in _REDIRECT_STATUSES for sub in nodes_of(node))
 
 
 def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -406,7 +407,7 @@ def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
             continue
         has_urljoin = any(
             isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "urljoin"
-            for n in ast.walk(func)
+            for n in nodes_of(func)
         )
         if not has_urljoin or not _uses_redirect_status(func):
             continue
@@ -415,7 +416,7 @@ def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and n.attr in _REDIRECT_HOP_SANCTIONED
             or isinstance(n, ast.Name)
             and n.id in _REDIRECT_HOP_SANCTIONED
-            for n in ast.walk(func)
+            for n in nodes_of(func)
         )
         if not uses_chokepoint:
             offenders.append(offender(path, func.lineno, f"{func.name}()"))
@@ -454,7 +455,7 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and n.func.attr == "fromkeys"
             and isinstance(n.func.value, ast.Name)
             and n.func.value.id == "dict"
-            for n in ast.walk(func)
+            for n in nodes_of(func)
         )
         if not uses_fromkeys:
             continue
@@ -463,7 +464,7 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and n.id in _CANONICALIZER
             or isinstance(n, ast.Attribute)
             and n.attr in _CANONICALIZER
-            for n in ast.walk(func)
+            for n in nodes_of(func)
         )
         if not canonicalizes:
             offenders.append(
@@ -510,7 +511,7 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     rather than a directory.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         recv = (
             node.func.value if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) else None
         )
@@ -554,7 +555,7 @@ def _scope_matcher_definitions() -> list[str]:
     """
     defs: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
                 "scope_allows",
                 "_scope_allows",
@@ -586,7 +587,7 @@ def test_no_pinned_url_leaks_into_final_url():
     """
     offenders = []
     for path, tree in app_trees():
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             # final_url = str(response.url)  (assignment)
             if isinstance(node, ast.Assign):
                 targets = [t.id for t in node.targets if isinstance(t, ast.Name) and t.id == "final_url"]
@@ -624,7 +625,7 @@ def _unpinned_safe_url_parses(tree, path):
     computed pin preference, and the classmethod defines the parameter).
     """
     offenders = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -656,7 +657,7 @@ def test_no_inline_pinned_url_composition():
     """
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset({"safe_url.py", "safe_regex.py"})):
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if not isinstance(node, ast.JoinedStr):
                 continue
             for value in node.values:
@@ -683,7 +684,7 @@ def test_no_inline_pinned_url_composition():
 
 def _url_key_reads(node: ast.AST) -> bool:
     """True if the subtree reads dict key ``"url"`` (the unvalidated raw href)."""
-    for sub in ast.walk(node):
+    for sub in nodes_of(node):
         if isinstance(sub, ast.Call):
             f = sub.func
             if (
@@ -704,9 +705,9 @@ def _frontier_sink_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``*.frontier.append(x)`` where ``x`` (or its same-function binding)
     reads the raw ``"url"`` key instead of going through frontier_link_url()."""
     offenders: list[str] = []
-    for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+    for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         tainted: set[str] = set()
-        for assign in (a for a in ast.walk(fn) if isinstance(a, ast.Assign | ast.AnnAssign)):
+        for assign in (a for a in nodes_of(fn) if isinstance(a, ast.Assign | ast.AnnAssign)):
             value = assign.value
             if value is None or _frontier_link_url_call(value):
                 continue
@@ -715,7 +716,7 @@ def _frontier_sink_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                 for t in targets:
                     if isinstance(t, ast.Name):
                         tainted.add(t.id)
-        for call in (c for c in ast.walk(fn) if isinstance(c, ast.Call)):
+        for call in (c for c in nodes_of(fn) if isinstance(c, ast.Call)):
             f = call.func
             if (
                 isinstance(f, ast.Attribute)
@@ -733,7 +734,7 @@ def _frontier_link_url_call(node: ast.AST) -> bool:
     """True if the subtree's root or any call node is frontier_link_url(...)."""
     return any(
         isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == "frontier_link_url"
-        for sub in ast.walk(node)
+        for sub in nodes_of(node)
     )
 
 
@@ -855,10 +856,10 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     the sync and async paths cannot drift (aget once lost the LRU count cap,
     and the pre-write mirror never rolled back — both invisible twins)."""
     offenders: list[str] = []
-    for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+    for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         if fn.name not in _CACHE_TWIN_METHODS:
             continue
-        for sub in ast.walk(fn):
+        for sub in nodes_of(fn):
             if (
                 isinstance(sub, ast.Subscript)
                 and isinstance(sub.value, ast.Attribute)
@@ -924,11 +925,11 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
     making an unlocked ``_*_locked`` call a hard failure anywhere in ``app``.
     """
     parents: dict[ast.AST, ast.AST] = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue
         fname = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
@@ -992,7 +993,7 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     JSONResponse/return-value variants).
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Call):
             func_name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             if func_name == "HTTPException":
@@ -1052,10 +1053,10 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
     guard, so the sink never fires on it.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) or node.name == "_collect_results":
             continue
-        subs = list(ast.walk(node))
+        subs = list(nodes_of(node))
         assigns_seen = any(
             isinstance(s, ast.AnnAssign) and getattr(s.target, "id", "") == "seen" for s in subs
         )
@@ -1123,7 +1124,7 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     gate; the tokenizer in app/crawl/robots_parse.py is now the only one.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
             continue
         if node.name == _ROBOTS_SCANNER_SANCTIONED:
@@ -1134,10 +1135,10 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             and s.args
             and isinstance(s.args[0], ast.Constant)
             and s.args[0].value in ("﻿", "\ufeff")
-            for s in ast.walk(node)
+            for s in nodes_of(node)
         )
         has_split = any(
-            isinstance(s, ast.Call) and getattr(s.func, "attr", "") == "splitlines" for s in ast.walk(node)
+            isinstance(s, ast.Call) and getattr(s.func, "attr", "") == "splitlines" for s in nodes_of(node)
         )
         if has_bom_strip and has_split:
             offenders.append(offender(path, node.lineno, f"{node.name} re-rolls the robots line-scanner"))
@@ -1185,7 +1186,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
                 offender(path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
@@ -1223,7 +1224,7 @@ def test_fetch_builder_detector_bites():
 def _call_node_names(node: ast.AST) -> set[str]:
     """Names of every call target under ``node`` (e.g. ``pytest.fail``)."""
     names: set[str] = set()
-    for child in ast.walk(node):
+    for child in nodes_of(node):
         if isinstance(child, ast.Call):
             try:
                 names.add(ast.unparse(child.func))
@@ -1234,12 +1235,12 @@ def _call_node_names(node: ast.AST) -> set[str]:
 
 def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         src = ast.dump(node)
         has_while_true = any(
-            isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in ast.walk(node)
+            isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in nodes_of(node)
         )
         if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
             continue
@@ -1306,7 +1307,7 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     against a caller reaching for an ``int`` default or ``**kwargs``.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue
         if resolved_expr_name(tree, node.func).rsplit(".", 1)[-1] == "getattr":
@@ -1386,7 +1387,7 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     callers, so this closes the bypass around it.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.split(".")[0] in _DECOMPRESS_CODECS:
@@ -1465,7 +1466,7 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     is where a shorter slice silently regresses to 48 bits.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Call):
             fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             if fname == "uuid4":
@@ -1542,19 +1543,19 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
             continue
         header_names = {
             target.id
-            for node in ast.walk(func)
+            for node in nodes_of(func)
             if isinstance(node, ast.Assign) and _reads_headers(node.value)
             for target in node.targets
             if isinstance(target, ast.Name)
         }
         guarded = {
             id(sub)
-            for node in ast.walk(func)
+            for node in nodes_of(func)
             if isinstance(node, ast.Try) and _catches_value_error(node)
-            for sub in ast.walk(node)
+            for sub in nodes_of(node)
             if _is_int_or_float_call(sub)
         }
-        for node in ast.walk(func):
+        for node in nodes_of(func):
             if not _is_int_or_float_call(node) or id(node) in guarded or not node.args:
                 continue
             arg = node.args[0]
@@ -1613,11 +1614,11 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     """
     offenders: list[str] = []
     for func in (
-        node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ):
         if func.name == "set_domain_min_delay":
             continue
-        for node in ast.walk(func):
+        for node in nodes_of(func):
             if not isinstance(node, (ast.Assign, ast.AugAssign)):
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -1678,7 +1679,7 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
             continue
         commits = [
             n
-            for n in ast.walk(func)
+            for n in nodes_of(func)
             if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Attribute)
             and n.func.attr == "add"
@@ -1689,7 +1690,7 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
         ]
         if not commits:
             continue
-        gated = any(isinstance(n, ast.Name) and n.id == "TRANSIENT_CLASSIFICATIONS" for n in ast.walk(func))
+        gated = any(isinstance(n, ast.Name) and n.id == "TRANSIENT_CLASSIFICATIONS" for n in nodes_of(func))
         if not gated:
             offenders.append(
                 offender(
@@ -1773,7 +1774,7 @@ def _hand_rolled_failed_result_offenders(tree, path):
     """Failed-result construction with a hardcoded classification outside the
     chokepoint and the engine's two config guards (no browser worker / unknown
     strategy -- those have no exception to classify)."""
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("_failed_engine_result", "_make_engine_result")):
             continue
         status = None
@@ -1827,7 +1828,7 @@ _POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py"
 def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
     """A catch of BrowserPoolExhaustedError outside the render transports and
     the worker guard is a local re-derivation of retry semantics."""
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.ExceptHandler) or node.type is None:
             continue
         names = []
@@ -1876,7 +1877,7 @@ def test_classifier_lives_in_the_neutral_home():
     in a strategy module (the old site, http.py, forced browser.py to import
     across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and node.name == "_classify_error_code"
@@ -2129,7 +2130,7 @@ def _host_policy_value(node: ast.AST | None, policy_names: set[str]) -> bool:
 
 
 def _host_policy_scope_names(tree: ast.AST, function: ast.AST) -> set[str]:
-    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
     names: set[str] = set()
     current: ast.AST | None = function
     while current is not None:
@@ -2340,7 +2341,7 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
 
 def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if _url_return_shapes(node, tree):
@@ -2492,7 +2493,7 @@ def test_resolved_call_name_handles_getattr_alias_and_static_name():
         "    name = 'ip_' + 'address'\n"
         "    return getattr(ipaddress, name)(value)\n"
     )
-    calls = [node for node in ast.walk(source) if isinstance(node, ast.Call)]
+    calls = [node for node in nodes_of(source) if isinstance(node, ast.Call)]
     attribute_calls = [call for call in calls if isinstance(call.func, ast.Name)]
     assert len(attribute_calls) == 3
     assert all(resolved_call_name(source, call) == "ipaddress.ip_address" for call in attribute_calls)
@@ -2515,12 +2516,12 @@ _NORMALIZE_OR_NONE_OFFENDERS = frozenset(
 
 def _normalize_or_none_offenders(tree, path):
     """A try/except ValueError around the normalizer outside the chokepoint."""
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Try):
             continue
         body_names = {
             getattr(n.func, "id", None) or getattr(n.func, "attr", None)
-            for n in ast.walk(node)
+            for n in nodes_of(node)
             if isinstance(n, ast.Call)
         }
         if "normalize_public_http_url" not in body_names:
@@ -2612,7 +2613,7 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
         joined: set[str] = set()
         returns_raw = False
         returns_binding = False
-        for node in ast.walk(func):
+        for node in nodes_of(func):
             if isinstance(node, ast.Assign) and _is_urljoin_call(node.value):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
@@ -2627,7 +2628,7 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
         uses_filter = any(
             (isinstance(n, ast.Name) and n.id in _EGRESS_FILTERS)
             or (isinstance(n, ast.Attribute) and n.attr in _EGRESS_FILTERS)
-            for n in ast.walk(func)
+            for n in nodes_of(func)
         )
         if not uses_filter:
             offenders.append(
@@ -2693,7 +2694,7 @@ def _is_raw_exception_text(value: ast.expr) -> bool:
 def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a wire-visible result built with the raw text of an exception."""
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (
             isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _RESULT_ERROR_SINKS
         ):
@@ -2751,7 +2752,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     if path.name == "validation.py":
         return []
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
             continue
         elt = node.elt
@@ -2981,7 +2982,7 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
     The module-level declaration has no enclosing function and is exempt.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.Name) and node.id in _SEMAPHORE_GLOBALS):
             continue
         scopes = _enclosing_defs(node, tree)
@@ -3034,7 +3035,7 @@ _DOC_POOL_ACQUIRER = "_acquire_doc_worker"
 
 
 def _has_retired_attr(node: ast.AST) -> bool:
-    return any(isinstance(sub, ast.Attribute) and sub.attr == "retired" for sub in ast.walk(node))
+    return any(isinstance(sub, ast.Attribute) and sub.attr == "retired" for sub in nodes_of(node))
 
 
 def _reaps_retired(value: ast.AST) -> bool:
@@ -3047,7 +3048,7 @@ def _reaps_retired(value: ast.AST) -> bool:
         return False
     for generator in value.generators:
         for condition in generator.ifs:
-            for node in ast.walk(condition):
+            for node in nodes_of(condition):
                 if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
                     if _has_retired_attr(node.operand):
                         return True
@@ -3068,14 +3069,14 @@ def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     regression; this detector fails the suite when it goes.
     """
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.FunctionDef) and node.name == _DOC_POOL_ACQUIRER):
             continue
         if not any(
             isinstance(child, ast.Assign)
             and any(isinstance(target, ast.Name) and target.id == _DOC_POOL_NAME for target in child.targets)
             and _reaps_retired(child.value)
-            for child in ast.walk(node)
+            for child in nodes_of(node)
         ):
             offenders.append(
                 offender(
@@ -3704,7 +3705,7 @@ def test_no_existing_double_swallows_failed_result():
     to ``**kwargs``-only would be caught by both this and the sweep above."""
     offenders: list[str] = []
     for path, tree in trees_under(TESTS_DIR):
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run"):
                 continue
             positional = [a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}]
@@ -3776,13 +3777,13 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
     has_builder = any(
         isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name == "_job_engine_payload"
-        for node in ast.walk(tree)
+        for node in nodes_of(tree)
     )
     if relative != "app/api/job_runner.py" and not has_builder:
         return []
     execute_names = {"_execute_crawl", "_real_execute_crawl"}
     builder_names = {"_job_engine_payload"}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Assign | ast.AnnAssign):
             continue
         value = node.value
@@ -3796,7 +3797,7 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
         ):
             builder_names.update(target.id for target in targets if isinstance(target, ast.Name))
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in execute_names):
             continue
         payload = node.args[0] if node.args else next(
@@ -3855,7 +3856,7 @@ def _direct_frontier_growth_offenders(
 ) -> list[str]:
     growth_methods = {"append", "extend", "insert"}
     offenders: list[str] = []
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    parents = {child: parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
 
     def is_allowed(node: ast.AST) -> bool:
         if not allowed_functions:
@@ -3879,7 +3880,7 @@ def _direct_frontier_growth_offenders(
             and _frontier_expression(node.value)
         )
 
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if is_allowed(node):
             continue
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -3955,7 +3956,7 @@ _FILTER_NAMES = {
 
 def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
     aliases: dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.ImportFrom) and node.module in {
             "app.constants",
             "app.crawl.scope_match",
@@ -3976,10 +3977,10 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
 def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     assert isinstance(tree, ast.Module)
     aliases = _imported_filter_names(tree)
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    parents = {child: parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
     function_calls: dict[ast.FunctionDef | ast.AsyncFunctionDef, set[str]] = {}
     filter_names = set(_FILTER_NAMES.values())
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
             continue
         name = aliases.get(node.func.id, node.func.id)
@@ -4054,8 +4055,8 @@ def _property(name: str) -> Property:
 
 def _property_contexts(tree: ast.AST) -> list[ast.AST]:
     symbol_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
-    contexts: list[ast.AST] = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    for scope in (tree, *(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef))):
+    contexts: list[ast.AST] = [node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for scope in (tree, *(node for node in nodes_of(tree) if isinstance(node, ast.ClassDef))):
         contexts.extend(node for node in getattr(scope, "body", []) if not isinstance(node, symbol_types))
     return contexts
 
@@ -4119,7 +4120,7 @@ def _resolved_local_nodes(
     prop: Property | None = None,
 ) -> list[tuple[ast.AST, ast.AST]]:
     definitions: dict[str, list[ast.AST]] = {}
-    for candidate in ast.walk(tree):
+    for candidate in nodes_of(tree):
         if isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)):
             definitions.setdefault(candidate.name, []).append(candidate)
     module_index = _module_definition_index(modules)
@@ -4167,7 +4168,7 @@ def _owner_definition_ids(tree: ast.AST, path: pathlib.Path, prop: Property) -> 
     if _relative_app_path(path) != prop.owner_module:
         return set()
     by_symbol: dict[str, list[ast.AST]] = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, _DEFINITION_TYPES) and node.name in prop.owner_symbols:
             by_symbol.setdefault(node.name, []).append(node)
     owner_ids: set[int] = set()
@@ -4246,7 +4247,7 @@ def _public_target_observations(tree: ast.AST, path: pathlib.Path, prop: Propert
         owner_ids = _owner_definition_ids(tree, path, prop)
         owner_nodes = [
             node
-            for node in ast.walk(tree)
+            for node in nodes_of(tree)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in owner_ids
         ]
         owner_parses, owner_ranges = _public_target_counts([(tree, node) for node in owner_nodes])
@@ -4329,7 +4330,7 @@ def _bool_env_tree_sets(
     trees = (tree,) if modules is None else tuple(module_tree for _path, module_tree in modules)
     named: dict[str, set[str]] = {}
     for module_tree in trees:
-        named.update(_bool_named_sets(ast.walk(module_tree)))
+        named.update(_bool_named_sets(nodes_of(module_tree)))
     return named
 
 
@@ -4399,7 +4400,7 @@ def _bool_env_contexts(
     if _relative_app_path(path) == prop.owner_module:
         return [
             [(tree, node)]
-            for node in ast.walk(tree)
+            for node in nodes_of(tree)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in excluded
         ]
     return [
@@ -4775,7 +4776,7 @@ def test_property_registry_owners_exist():
     definitions: dict[str, list[tuple[str, ast.AST]]] = {}
     for path, tree in app_trees(exclude=frozenset()):
         relative = _relative_app_path(path)
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if isinstance(node, _DEFINITION_TYPES):
                 definitions.setdefault(node.name, []).append((relative, node))
     failures = _property_owner_failures(PROPERTY_REGISTRY, definitions)
@@ -4807,7 +4808,7 @@ def test_property_registry_rejects_duplicate_owner_count():
     definitions = {
         "parse_bool_value": [
             ("app/validation.py", node)
-            for node in ast.walk(tree)
+            for node in nodes_of(tree)
             if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
         ]
     }
@@ -4839,7 +4840,7 @@ def test_property_owner_duplicate_is_not_sanctioned():
     )
     path = REPO_ROOT / "app" / "validation.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
-    duplicate = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"][1]
+    duplicate = [node for node in nodes_of(tree) if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"][1]
     assert len(owner_ids) == 1
     assert not _property_owner(path, prop, tree=tree, node=duplicate)
     assert _bool_env_offenders(tree, path, prop)
@@ -5251,7 +5252,7 @@ def _settings_alias_declaration_constant(
 ) -> bool:
     if _relative_app_path(path) != "app/settings.py":
         return False
-    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
     current: ast.AST = node
     while id(current) in parents:
         current = parents[id(current)]
@@ -5282,7 +5283,7 @@ def _environment_reader_reference(
     node: ast.Constant,
     field_environments: dict[str, str],
 ) -> str | None:
-    parents = {id(child): parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
     expression = parents.get(id(node))
     scope = parents.get(id(expression)) if expression is not None else None
     if (
@@ -5323,7 +5324,7 @@ def _environment_reader_reference(
 
 def _settings_fields() -> set[str]:
     tree = file_tree("app/settings.py")[1]
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.ClassDef) and node.name == "CrawlerSettings":
             return {
                 item.target.id
@@ -5359,7 +5360,7 @@ def _production_browser_knob_references() -> set[str]:
     fields = _settings_fields()
     field_knobs = {f"BROWSER_CRAWLER_{field.upper()}": field for field in fields}
     for path, tree in app_trees(exclude=frozenset()):
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
@@ -5400,7 +5401,7 @@ def _documented_knob_offenders(
 
 def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     references: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             environment = _environment_reader_reference(tree, node, ENVIRONMENT_FIELD_ALIASES)
             if environment is not None:
@@ -5485,7 +5486,7 @@ def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[st
     if _relative_app_path(path).startswith("app/crawl/migrations/"):
         return []
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
             continue
         if re.match(
@@ -5690,7 +5691,7 @@ def _tree_role(
 def _absorb_path_aliases(tree: ast.AST, anchors: set[str], rooted: set[str]) -> bool:
     """Add names this module binds to a service root or to `app/`."""
     grew = False
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
             continue
         components = _path_components(node.value)
@@ -5738,7 +5739,7 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     """Report every call in this module that can mutate a path under `app/`."""
     anchors, rooted = _app_path_names(tree)
     offenders: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue
         callee = node.func
@@ -5868,6 +5869,25 @@ def test_app_tree_mutation_detector_bites():
 # app/ -- the sweep above forbids it -- so the race is reproduced by making the
 # filesystem refuse to answer, which is what a vanished file looks like from
 # inside a list-then-read walk.
+#
+# ONE NODE SEQUENCE PER ROOT, which is the same fix one level deeper. Owning
+# the snapshot removed the re-GLOB and the re-READ; the re-WALK underneath it
+# was still there, and it was the larger half: 40 detectors and 91 `ast.walk`
+# sites over ~105 modules meant forty passes over every node where one would
+# do. `chokepoint_walks.nodes_of` materializes `tuple(ast.walk(root))` once per
+# root and every detector iterates that, so a detector's own logic is untouched
+# and what is removed is the walk it would have repeated. Sub-walks -- a
+# detector narrowing to one function and walking that -- are memoized on the
+# same terms, and they are where the sharing pays most, because the same
+# function body is walked by many detectors.
+#
+# The last two tests below are the receipt for that. A memo is the easiest
+# possible way to make forty detectors fast and blind at once: return an empty
+# tuple for an unwalked root and every one of them reports nothing, every one
+# of them stays green, and the suite is faster. So they check identity (one
+# materialization, shared), element-wise equality against a FRESH `ast.walk`
+# (the same objects in the same order, not a subset or a re-ordering), and
+# coverage of every module in the snapshot (no root is silently absent).
 # ===========================================================================
 
 
@@ -5974,3 +5994,60 @@ def test_the_tests_tree_is_walked_once_too():
     assert first, "the tests/ walk found no modules"
     assert trees_under(TESTS_DIR) is first, "the tests/ tree is re-walked per detector"
     assert trees_under(TESTS_DIR / "crawl") is not first, "a different tree must be its own snapshot"
+
+
+def test_every_detector_sees_the_same_nodes():
+    """One materialization per root, and it is the one ``ast.walk`` yields.
+
+    Three claims, each of which fails differently. IDENTITY, so a second walk
+    costs nothing and the sequence cannot have been rebuilt underneath a
+    detector mid-iteration. ELEMENT-WISE EQUALITY against a fresh
+    ``ast.walk(tree)``, so what is shared is the same objects in the same
+    breadth-first order rather than a subset, a re-ordering or a set. And
+    COVERAGE, because a memo that answered an empty tuple for a root it had not
+    walked would be fast, green and blind -- the failure this whole file exists
+    to make impossible, reintroduced through the cache.
+    """
+    expected_modules = len(app_python_files())
+    walked = 0
+    for path, tree in app_trees():
+        shared = nodes_of(tree)
+        assert shared is nodes_of(tree), f"{path.name}: the node sequence is rebuilt per caller"
+        assert list(shared) == list(ast.walk(tree)), (
+            f"{path.name}: the shared sequence is not what ast.walk yields"
+        )
+        assert shared, f"{path.name}: a materialized walk came back empty"
+        walked += 1
+    assert walked == expected_modules, (
+        f"the shared node sequence covers {walked} of {expected_modules} app modules"
+    )
+
+
+def test_a_narrowed_walk_is_shared_too():
+    """The sub-walks share on the same terms, and they are the common case.
+
+    Most detectors here narrow to one function and walk that rather than
+    walking the module, and those roots are memoized exactly like a module is.
+    Two definitions per module rather than all of them: the point is that a
+    narrowed root behaves like any other, and re-walking every function in the
+    tree inside the test that exists to avoid re-walking them would be the
+    thing it is checking.
+    """
+    checked = 0
+    for path, tree in app_trees():
+        narrowed = [
+            node
+            for node in nodes_of(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        ][:2]
+        for node in narrowed:
+            shared = nodes_of(node)
+            assert shared is nodes_of(node), f"{path.name}: a narrowed walk is rebuilt per caller"
+            assert list(shared) == list(ast.walk(node)), (
+                f"{path.name}:{node.lineno}: the narrowed sequence is not what ast.walk yields"
+            )
+            checked += 1
+    assert checked >= 100, (
+        f"only {checked} narrowed walks were checked across the tree; the assertion "
+        "has to span the snapshot to be evidence about the snapshot"
+    )

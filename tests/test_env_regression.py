@@ -21,7 +21,7 @@ single-shape detector):
 
 import ast
 
-from chokepoint_walks import app_trees, offender
+from chokepoint_walks import app_trees, nodes_of, offender
 
 
 def _is_env_get(node: ast.AST) -> bool:
@@ -56,7 +56,7 @@ def _is_env_source(node: ast.AST) -> bool:
 def _env_get_aliases(tree: ast.AST) -> set[str]:
     """Names assigned directly from an env read in this module's tree."""
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Assign) and _is_env_source(node.value):
             names.update(t.id for t in node.targets if isinstance(t, ast.Name))
         elif isinstance(node, ast.AnnAssign) and node.value is not None and _is_env_source(node.value):
@@ -96,7 +96,7 @@ def test_no_bare_env_int_or_float_in_app():
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):
         env_aliases = _env_get_aliases(tree)
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
                 continue
             if node.func.id not in ("int", "float"):

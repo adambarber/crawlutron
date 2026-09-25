@@ -13,6 +13,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from chokepoint_walks import nodes_of
+
 from app.api import webhooks as wm
 
 ISLAND_NAMES = (
@@ -58,10 +60,10 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
     callers: set[str] = set()
     for path in sorted((repo_root / "app").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            for inner in ast.walk(node):
+            for inner in nodes_of(node):
                 if (
                     isinstance(inner, ast.Call)
                     and getattr(inner.func, "id", "")

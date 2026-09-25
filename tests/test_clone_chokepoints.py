@@ -1,7 +1,7 @@
 import ast
 
 import pytest
-from chokepoint_walks import TESTS_DIR, trees_under
+from chokepoint_walks import TESTS_DIR, nodes_of, trees_under
 
 FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -35,7 +35,7 @@ def _has_call(node, name, first=None):
         isinstance(child, ast.Call)
         and _name(child.func) == name
         and (first is None or bool(child.args) and _literal(child.args[0]) == first)
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
 
 
@@ -47,7 +47,7 @@ def _has_attr_assign(node, name):
     return any(
         isinstance(child, ast.Assign)
         and any(isinstance(target, ast.Attribute) and target.attr == name for target in child.targets)
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
 
 
@@ -77,13 +77,13 @@ def _blocking_route(node):
 
 def _response_handler(node):
     return _has_call(node, "_make_response_handler") and any(
-        isinstance(child, ast.ClassDef) for child in ast.walk(node)
+        isinstance(child, ast.ClassDef) for child in nodes_of(node)
     )
 
 
 def _http_strategy(node):
     required = {"original_url", "normalized_url", "strategy", "policy", "http_fetcher", "host_policy"}
-    for child in ast.walk(node):
+    for child in nodes_of(node):
         if not isinstance(child, ast.Call) or _name(child.func) != "_http_strategy_result":
             continue
         words = {keyword.arg: keyword.value for keyword in child.keywords}
@@ -99,7 +99,7 @@ def _http_strategy(node):
 def _cache_entries(node):
     values = [
         child.args[1]
-        for child in ast.walk(node)
+        for child in nodes_of(node)
         if isinstance(child, ast.Call) and _name(child.func) == "set" and len(child.args) > 1
     ]
     hundred_byte_values = sum(
@@ -118,7 +118,7 @@ def _html_fetcher(node):
         and child.args
         and isinstance(child.args[0], ast.Name)
         and child.args[0].id == "url"
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
     exact_fetch = any(
         isinstance(child, ast.Call)
@@ -132,7 +132,7 @@ def _html_fetcher(node):
             keyword.arg == "body" and isinstance(keyword.value, ast.Name) and keyword.value.id == "body"
             for keyword in child.keywords
         )
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
     return appends_url and exact_fetch
 
@@ -154,7 +154,7 @@ def _default_fetcher(node):
             and _name(keyword.value.func) == "unrestricted"
             for keyword in child.keywords
         )
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
 
 
@@ -168,7 +168,7 @@ def _job_store(node):
             keyword.arg == "policy" and _name(keyword.value).endswith("UNRESTRICTED_HOST_POLICY")
             for keyword in child.keywords
         )
-        for child in ast.walk(node)
+        for child in nodes_of(node)
     )
 
 

@@ -4,7 +4,7 @@ import ast
 import pathlib
 
 import pytest
-from chokepoint_walks import REPO_ROOT, app_trees, resolved_call_name
+from chokepoint_walks import REPO_ROOT, app_trees, nodes_of, resolved_call_name
 from test_safety_invariants import _local_nodes, _module_definition_index
 
 from app.validation import HOST_POLICY_ENTRY_POINTS
@@ -69,7 +69,7 @@ def _call_edges(
 
 def _mcp_handlers(tree: ast.Module) -> set[str]:
     handlers: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue
         for keyword in node.keywords:
@@ -79,7 +79,7 @@ def _mcp_handlers(tree: ast.Module) -> set[str]:
 
 
 def _has_policy_reference(tree: ast.Module, node: ast.AST) -> bool:
-    for child in ast.walk(node):
+    for child in nodes_of(node):
         if isinstance(child, ast.Name) and child.id == "HostPolicy":
             return True
         if isinstance(child, ast.Attribute) and child.attr == "HostPolicy":

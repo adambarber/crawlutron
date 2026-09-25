@@ -13,7 +13,7 @@ import ast
 from _job_harnesses import make_job_store
 
 from app.crawl.result_store import CrawlResultStore
-from tests.chokepoint_walks import app_trees
+from tests.chokepoint_walks import app_trees, nodes_of
 
 
 def _pragma_exec_offenders() -> list[str]:
@@ -22,7 +22,7 @@ def _pragma_exec_offenders() -> list[str]:
     for path, tree in app_trees():
         if path.name == "sqlite_store.py":
             continue
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -58,7 +58,7 @@ def test_pragma_confinement_detector_bites():
     bad = ast.parse('conn.execute("PRAGMA journal_mode=WAL")')
     hits = [
         f"{n.lineno}"
-        for n in ast.walk(bad)
+        for n in nodes_of(bad)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "execute"

@@ -14,7 +14,7 @@ import ast
 from _job_harnesses import make_job_store
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
-from tests.chokepoint_walks import app_trees, offender
+from tests.chokepoint_walks import app_trees, nodes_of, offender
 
 
 def _store(tmp_path) -> JobStore:
@@ -88,7 +88,7 @@ def _status_assignment_offenders() -> list[str]:
     for path, tree in app_trees():
         if path.name == "job_store.py":
             continue
-        for node in ast.walk(tree):
+        for node in nodes_of(tree):
             if (
                 isinstance(node, ast.Assign)
                 and any(
@@ -111,7 +111,7 @@ def test_status_assignment_detector_bites():
     bad = ast.parse("job.status = JobStatus.RUNNING\n")
     hits = [
         n.lineno
-        for n in ast.walk(bad)
+        for n in nodes_of(bad)
         if isinstance(n, ast.Assign)
         and any(isinstance(t, ast.Attribute) and t.attr == "status" for t in n.targets)
     ]

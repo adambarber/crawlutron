@@ -3,6 +3,7 @@
 import inspect
 
 import pytest
+from chokepoint_walks import nodes_of
 
 from app import constants as app_constants
 from app.api_models import CrawlClassification
@@ -442,7 +443,7 @@ def test_groupings_are_derived_from_the_enum_not_relisted():
 
     tree = ast.parse(inspect.getsource(constants))
     assignments = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         target = None
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
             target, value = node.targets[0].id, node.value
@@ -462,14 +463,14 @@ def test_groupings_are_derived_from_the_enum_not_relisted():
         value = assignments[name]
         literals = [
             node.value
-            for node in ast.walk(value)
+            for node in nodes_of(value)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
         ]
         assert not literals, f"{name} embeds string literals: {literals}"
 
         grouped = [
             node.attr
-            for node in ast.walk(value)
+            for node in nodes_of(value)
             if isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
             and node.value.id == "CrawlClassification"

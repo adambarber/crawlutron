@@ -43,7 +43,7 @@ import ast
 import pathlib
 from collections.abc import Collection
 
-from chokepoint_walks import offender
+from chokepoint_walks import nodes_of, offender
 
 # The result dataclasses whose Literal-typed fields are the membership
 # contract. Direct construction of one anywhere in app/ is checked by the
@@ -112,7 +112,7 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
     is what callers should write.
     """
     values: dict[str, str] = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         if isinstance(node, ast.Assign):
@@ -142,7 +142,7 @@ def primitive_keyword_calls(
     detector at once instead of only the one someone edited.
     """
     hits: list[tuple[ast.Call, ast.keyword]] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
             continue
         if node.func.id not in RESULT_PRIMITIVES:
@@ -392,7 +392,7 @@ def _accepts_unused_kwargs(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool
     # Routed: the double forwards it (``**kwargs`` at a call) or binds it by
     # name (``kwargs=kwargs``, ``kwargs.get(...)``) -- either way the value
     # reaches the real contract rather than the floor.
-    for sub in ast.walk(node):
+    for sub in nodes_of(node):
         if isinstance(sub, ast.Call):
             for keyword in sub.keywords:
                 if keyword.arg is None and isinstance(keyword.value, ast.Name):
@@ -436,7 +436,7 @@ def swallowing_test_double_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     if "tests" not in path.parts:
         return []
     out: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if node.name not in _PROTOCOL_METHODS and node.name != "__call__":
@@ -493,7 +493,7 @@ def _aliased_module_bindings(tree: ast.AST) -> set[str]:
     and the old literal-name check is subsumed rather than duplicated.
     """
     bound: set[str] = set()
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name in _STDALIAS_MODULES:
@@ -512,7 +512,7 @@ def aliased_sanctioned_func_names(tree: ast.AST) -> dict[str, set[str]]:
     from one map instead of a per-detector list of spellings.
     """
     aliases: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.ImportFrom):
             continue
         module = node.module or ""
@@ -542,7 +542,7 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
     if not aliases:
         return []
     out: list[str] = []
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if not isinstance(node.func.value, ast.Name):
@@ -603,7 +603,7 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
     # outside this set is invisible to the detector that guards the canonical
     # name, which is the property this sweep reports.
     known_spellings = {"decompress_body": frozenset({"decompress_body", "_decompress_body"})}
-    for node in ast.walk(tree):
+    for node in nodes_of(tree):
         if not isinstance(node, ast.Call):
             continue
         call_name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
