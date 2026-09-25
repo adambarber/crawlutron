@@ -168,7 +168,10 @@ __all__ = [
 # appended, and naming it costs the lines it costs. The alternative was leaving
 # the header asking every brotli-capable server for a body this process refuses
 # to decode whenever brotli is not installed.
-_APP_TREE_CODE_LINE_BUDGET = 14_396
+#
+# LOWERED to 14,394 by deleting the storage_state escape hatch: two lines that
+# let three literals past the path allowlist.
+_APP_TREE_CODE_LINE_BUDGET = 14_394
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1958,6 +1961,112 @@ def test_uncollectible_test_detector_bites():
     )
     for src in clean:
         assert not _uncollectible_tests(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
+# A path validator returns a checked value, never the input it was handed
+# ---------------------------------------------------------------------------
+
+# `_validate_storage_state_path` returned the literals "default", "session" and
+# "persistent" as though they named sessions. They do not: Playwright types
+# `storage_state` as `Union[str, pathlib.Path] | Dict`, so a string is always
+# read as a FILE PATH, and the chokepoint whose documented job is stopping a
+# caller from reaching a path it should not was handing out three unvalidated
+# paths relative to the process working directory. The shape of that bug is
+# general: a function that allowlists by resolving and testing containment, then
+# returns one of its own parameters on some other branch -- so the allowlist
+# holds for most inputs and not for the ones that mattered.
+#
+# Detected against the containment check rather than the function name, because
+# the containment check is the thing whose bypass this is. A bare
+# constant-return check was tried first and was too weak: the shipped code
+# returned a Name, not a literal, so it passed the gate written for it.
+_CONTAINMENT_CALL = "relative_to"
+
+
+def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
+    """Report path validators that return an input parameter on some branch."""
+    offenders: list[str] = []
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body_calls = {
+            node.func.attr
+            for node in ast.walk(func)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        if _CONTAINMENT_CALL not in body_calls:
+            continue
+        parameters = {
+            arg.arg for arg in (*func.args.args, *func.args.posonlyargs, *func.args.kwonlyargs)
+        }
+        for node in ast.walk(func):
+            if (
+                isinstance(node, ast.Return)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in parameters
+            ):
+                offenders.append(
+                    f"{path.name}:{node.lineno} {func.name}() returns its own parameter "
+                    f"{node.value.id!r} on a branch that bypasses the containment check; "
+                    f"a path validator returns a resolved, allowlisted path or None"
+                )
+    return offenders
+
+
+def test_path_validators_never_return_an_unchecked_parameter():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(_unchecked_parameter_return_offenders(tree, path))
+    assert not offenders, "; ".join(offenders)
+
+
+def test_unchecked_parameter_return_detector_bites():
+    synthetic = REPO_ROOT / "app" / "_synthetic.py"
+    # The exact shape that shipped: an allowlist, plus a branch that returns the
+    # caller's string before the allowlist ever sees it.
+    bad = ast.parse(
+        "def _validate_storage_state_path(self, storage_state: str) -> str | None:\n"
+        '    if storage_state in {"default", "session"}:\n'
+        "        return storage_state\n"
+        "    path = Path(storage_state).resolve()\n"
+        "    for allowed in allowed_dirs:\n"
+        "        try:\n"
+        "            path.relative_to(allowed)\n"
+        "            return str(path)\n"
+        "        except ValueError:\n"
+        "            continue\n"
+        "    return None\n"
+    )
+    assert len(_unchecked_parameter_return_offenders(bad, synthetic)) == 1
+
+    # The fixed shape: only a resolved, allowlisted path ever comes back.
+    good = ast.parse(
+        "def _validate_storage_state_path(self, storage_state: str) -> str | None:\n"
+        "    path = Path(storage_state).resolve()\n"
+        "    for allowed in allowed_dirs:\n"
+        "        try:\n"
+        "            path.relative_to(allowed)\n"
+        "            return str(path)\n"
+        "        except ValueError:\n"
+        "            continue\n"
+        "    return None\n"
+    )
+    assert not _unchecked_parameter_return_offenders(good, synthetic)
+
+    # Without a containment check there is nothing to bypass, so a function that
+    # echoes its input is not this gate's business.
+    no_check = ast.parse("def _label(name: str) -> str:\n    return name\n")
+    assert not _unchecked_parameter_return_offenders(no_check, synthetic)
+
+    # Returning a derived value, or None, is what the contract allows.
+    derived = ast.parse(
+        "def _resolve(base: str, name: str) -> str | None:\n"
+        "    path = (Path(base) / name).resolve()\n"
+        "    path.relative_to(base)\n"
+        "    return str(path)\n"
+    )
+    assert not _unchecked_parameter_return_offenders(derived, synthetic)
 
 
 # ---------------------------------------------------------------------------

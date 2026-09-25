@@ -1011,6 +1011,18 @@ class BrowserRenderer:
     def _validate_storage_state_path(self, storage_state: str) -> str | None:
         """Validate storage_state path is safe (no traversal, under allowed dirs).
 
+        Returns a path that is safe to hand to Playwright, or None.
+
+        Every return value is a real path under an operator-controlled
+        directory. Playwright types ``storage_state`` as ``Union[str,
+        pathlib.Path] | Dict`` -- "can be a path to a file or a dictionary" --
+        so a string here is ALWAYS read as a file path and there is no
+        named-session form to support. This used to wave through the literals
+        "default", "session" and "persistent" as if they named sessions, which
+        made the chokepoint that exists to stop a caller reaching a path it
+        should not instead hand out three unvalidated paths relative to the
+        process working directory.
+
         When the operator has supplied a ``cache_dir`` via settings, only that
         directory is accepted. ``/tmp`` is intentionally NOT in the default
         allowlist: it is world-readable on most hosts and would let any user
@@ -1018,10 +1030,6 @@ class BrowserRenderer:
         (adversarial review F-storage-state-path-traversal).
         """
         from pathlib import Path
-
-        # Allow known keys (e.g., "default", "session")
-        if storage_state in {"default", "session", "persistent"}:
-            return storage_state
 
         # For file paths, ensure they live under an operator-controlled dir.
         try:

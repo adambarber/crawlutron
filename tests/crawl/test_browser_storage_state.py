@@ -15,12 +15,26 @@ class TestStorageStatePathValidation:
         # /app/cache is allowed
         assert r._validate_storage_state_path("/app/cache/some-storage.json") is not None
 
-    def test_storage_state_allows_known_keys(self):
+    def test_storage_state_rejects_bare_names_that_are_not_paths(self):
+        """A string is a FILE PATH to Playwright, not the name of a session.
 
+        ``storage_state`` is ``Union[str, pathlib.Path] | Dict`` -- "can be a
+        path to a file or a dictionary". There is no named-session concept, so
+        passing "default" / "session" / "persistent" asks the browser to read a
+        file of that name relative to the process CWD. The validator used to
+        return those three strings unchanged, so the one chokepoint whose
+        documented job is stopping a caller from reading a path it should not
+        was itself handing out an unvalidated relative path -- and either
+        failing the render on a missing file or, if such a file existed,
+        loading its cookies into the context.
+        """
         settings = CrawlerSettings(cache_dir="/app/cache")
         r = BrowserRenderer(settings=settings)
         for key in ("default", "session", "persistent"):
-            assert r._validate_storage_state_path(key) == key
+            assert r._validate_storage_state_path(key) is None, (
+                f"{key!r} was accepted as a storage_state, which Playwright would read as a "
+                f"file named {key!r} in the process working directory"
+            )
 
     def test_storage_state_rejects_path_traversal(self):
 
