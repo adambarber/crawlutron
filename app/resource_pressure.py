@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,12 +32,11 @@ from app.memory_pressure import (
 )
 from app.validation import get_env_float, get_env_int, parse_bool_env
 
-# Self-managed CPU admission targets (no operator knob): the gate rides at
-# TARGET and pauses at HARD against the cgroup CPU quota it discovers itself.
+# Self-managed, no operator knob (mirrors app/memory_pressure.py): the gate
+# rides at TARGET and pauses at HARD against the cgroup quota it discovers.
 _DEFAULT_CPU_TARGET = 0.90
 _DEFAULT_CPU_HARD = 0.95
-# Manual CPU budget override removed: the gate self-derives its ceiling from the
-# cgroup CPU quota (or stays open when unbounded). The app manages itself.
+# Manual CPU budget override removed; the discovered quota is the ceiling.
 _DEFAULT_CPU_BUDGET = None
 
 # Opt-in event-loop lag probe (adversarial perf #2.3: feed loop-lag into
@@ -53,12 +53,11 @@ _LOOP_LAG_SMOOTHING = 0.25
 class LoopLagProbe:
     """Best-effort event-loop lag sensor.
 
-    Runs a lightweight background tick that measures how far the loop falls
-    behind its scheduled cadence. A saturated loop (too many concurrent
-    coroutines, blocking callbacks) lags, which is an independent pressure
-    signal from CPU/memory: the cgroup CPU quota can look fine while the single
-    event loop is the bottleneck. The gate multiplies its scale by
-    :meth:`factor` so lag alone can shed load.
+    A lightweight background tick measures how far the loop falls behind its
+    scheduled cadence. A saturated loop (many concurrent coroutines, blocking
+    callbacks) lags, an independent pressure signal from CPU/memory: the cgroup
+    quota can look fine while the single event loop is the bottleneck. The gate
+    multiplies its scale by :meth:`factor` so lag alone can shed load.
     """
 
     def __init__(
@@ -150,24 +149,19 @@ def read_cpu_quota(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
         return None
 
     # cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us; quota -1 means unlimited.
-    # ``quota``/``period`` are ``int | None`` here (the file may be missing on
-    # v2-only hosts); the v2 branch above uses its own names so the two reads
-    # never share a variable that has to be both.
+    # Both reads are ``int | None`` (the files may be missing on a v2-only host),
+    # which is why the v2 branch above binds its own names.
     quota = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_quota_us"))
     period = _read_int(os.path.join(cgroup_root, "cpu", "cpu.cfs_period_us"))
-    if quota is not None and period is not None:
-        if quota < 0:
-            return None
-        if period > 0:
-            return quota / period
-    return None
+    if quota is None or quota < 0 or period is None or period <= 0:
+        return None
+    return quota / period
 
 
 def read_cpu_usage_seconds(cgroup_root: str = "/sys/fs/cgroup") -> float | None:
     """Cumulative CPU time (seconds) consumed by this cgroup.
 
-    cgroup v2: ``cpu.stat`` ``usage_usec``. cgroup v1: ``cpuacct.usage`` (ns).
-    Returns None when unavailable.
+    v2: ``cpu.stat`` ``usage_usec``; v1: ``cpuacct.usage`` (ns). None if absent.
     """
     # cgroup v2
     stat = _read_text(os.path.join(cgroup_root, "cpu.stat"))
@@ -201,13 +195,10 @@ class CpuGate(ResourceGauge):
 
     Utilization is a *rate*: we keep the last (usage, wall) sample and report
     (delta CPU seconds / delta wall seconds) / quota. Below ``target`` the gate
-    returns scale 1.0 (full speed); between target and hard it scales down
-    linearly; at/above hard the gate makes dispatchers wait until utilization
-    drains below the hard ceiling.
-
-    When the cgroup is CPU-unbounded and no manual ``cpu_budget`` is configured,
-    the gate reports utilization as None and never throttles (scale 1.0, no
-    wait) -- there is no measured ceiling to defend, so it stays out of the way.
+    returns scale 1.0; between target and hard it scales down linearly; at or
+    above hard dispatchers wait until utilization drains below the ceiling.
+    When the cgroup is CPU-unbounded and no ``cpu_budget`` is configured the
+    gate reports None and never throttles: no measured ceiling, no defence.
     """
 
     _default_target = _DEFAULT_CPU_TARGET
@@ -316,12 +307,14 @@ class ResourceGate:
         max_wait_seconds: float = 30.0,
         sample_seconds: float = 0.25,
         cpu_budget: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.memory = MemoryGate(
             target=target_mem,
             poll_seconds=poll_seconds,
             max_wait_seconds=max_wait_seconds,
             cgroup_root=cgroup_root,
+            clock=clock,
         )
         self.cpu = CpuGate(
             target=target_cpu,
@@ -369,14 +362,21 @@ class ResourceGate:
         return base * self._lag_probe.factor()
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
+        """Block while *either* resource is saturated, bounded by the budget.
+
+        One injected ``clock``, handed to both sub-gates, bounds this wait and
+        theirs; it is read back off ``memory`` because that is the gate the
+        budget comes from, so the two cannot come from different sources. See
+        ``ResourceGauge.wait_while_saturated`` for why it is injectable at all.
+        """
         budget = self.memory.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = time.monotonic() + budget
+        deadline = self.memory.clock() + budget
         while True:
             mem_r = self.memory._usage_ratio()
             cpu_r = self.cpu._usage_ratio()
             if mem_r < self.memory.hard and cpu_r < self.cpu.hard:
                 return
-            if time.monotonic() >= deadline:
+            if self.memory.clock() >= deadline:
                 return
             await asyncio.sleep(self._poll_seconds)
 
@@ -496,10 +496,9 @@ def max_http_concurrency_for(
 ) -> int:
     """Admission's HTTP concurrency ceiling for a given RAM limit + fixed pools.
 
-    Reserves the browser pool's and the doc pool's fixed RAM, then divides the
-    remainder by the per-HTTP-task estimate. This is exactly the ceiling
-    ``WeightedAdmission`` uses, so the httpx connection pool can be bound to it
-    with zero drift as RAM scales.
+    Reserves the fixed pools' RAM, then divides the remainder by the per-task
+    estimate. This is exactly the ceiling ``WeightedAdmission`` uses, so the
+    httpx pool can be bound to it with zero drift as RAM scales.
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
     reserve = pool_size * browser_task_bytes + doc_workers * doc_task_bytes
@@ -536,12 +535,7 @@ def _build_admission_policy(
     doc_workers: int = 0,
     doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
 ) -> AdmissionPolicy:
-    """Derive an admission policy from the cgroup memory limit + fixed pools.
-
-    The browser pool's and the doc pool's fixed RAM is reserved up front; the
-    remaining RAM is divided by the per-HTTP-task estimate to get the HTTP
-    concurrency ceiling.
-    """
+    """Derive an admission policy from the memory limit plus the fixed pools."""
     limit = max(limit_bytes, 256 * 1024 * 1024)
     browser_pool_reserve_bytes = pool_size * browser_task_bytes
     doc_pool_reserve_bytes = doc_workers * doc_task_bytes
@@ -566,9 +560,8 @@ def _build_admission_policy(
 def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
     """A conservative policy used when the caller does not supply one.
 
-    Assumes a 2-process browser pool and the default doc worker count (the 3 GiB
-    default) so tests / minimal deployments stay safe; production passes a
-    policy built from the real pools.
+    Assumes a 2-process browser pool and the default doc worker count, so tests
+    and minimal deployments stay safe; production passes the real pools.
     """
     stats = read_memory_stats()
     limit = stats.total_bytes or (4 * 1024 * 1024 * 1024)

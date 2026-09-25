@@ -13,13 +13,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.cgroup_sense import _read_int
 
-# Self-managed memory admission targets (no operator knob): the gate rides
-# at TARGET and pauses at HARD against the cgroup memory limit it discovers
-# itself. Removing the external override lets the app manage its own ceiling.
+# Self-managed, no operator knob: the gate rides at TARGET and pauses at HARD.
 # Lowered from 0.92/0.97 to prevent first-batch burst overshoot (was spiking
 # to ~0.96 of 3GB). Target 0.85 leaves ~0.45 GiB headroom; hard 0.92 still
 # provides ~0.24 GiB safety margin before OOM.
@@ -82,12 +81,11 @@ def batch_scale(used: float, total: float, target: float, hard: float | None = N
 class ResourceGauge:
     """Base admission gauge for one bounded resource.
 
-    A gauge senses a single resource's pressure as a fraction of its ceiling
-    via :meth:`_usage_ratio` (subclass-defined) and turns that one signal into
+    A gauge senses one resource's pressure as a fraction of its ceiling via
+    :meth:`_usage_ratio` (subclass-defined) and turns that single signal into
     both the batch-scale factor and the saturation wait. Centralizing the
-    derived logic here guarantees the two never drift apart -- the exact bug
-    class that previously let a gate's ``batch_scale_factor`` bypass
-    ``_usage_ratio``.
+    derived logic is what stops the two drifting apart -- the bug class that
+    previously let ``batch_scale_factor`` bypass ``_usage_ratio``.
     """
 
     _default_target: float
@@ -101,6 +99,7 @@ class ResourceGauge:
         poll_seconds: float = 0.1,
         max_wait_seconds: float = 30.0,
         cgroup_root: str = "/sys/fs/cgroup",
+        clock: Callable[[], float] = time.monotonic,
     ):
         use_default_target = target is None
         if target is None:
@@ -112,6 +111,7 @@ class ResourceGauge:
         self.poll_seconds = poll_seconds
         self.max_wait_seconds = max_wait_seconds
         self.cgroup_root = cgroup_root
+        self.clock = clock
 
     def _usage_ratio(self) -> float:
         """Current pressure as a fraction of the resource ceiling.
@@ -130,11 +130,18 @@ class ResourceGauge:
         return batch_scale(self._usage_ratio(), 1.0, self.target, hard=self.hard)
 
     async def wait_while_saturated(self, max_wait_seconds: float | None = None) -> None:
-        """Block while at/above the hard ceiling; release below it."""
+        """Block while at/above the hard ceiling; release below it.
+
+        The budget is a deadline read from the injected ``clock`` (the seam
+        ``app.crawl.content_cache`` uses for TTL); without it a bound can only
+        be demonstrated by spending it in real time, which is what kept one
+        admission test at ten real seconds. The rate samplers keep reading
+        ``time.monotonic`` -- they measure intervals between samples.
+        """
         budget = self.max_wait_seconds if max_wait_seconds is None else max_wait_seconds
-        deadline = time.monotonic() + budget
+        deadline = self.clock() + budget
         while self._usage_ratio() >= self.hard:
-            if time.monotonic() >= deadline:
+            if self.clock() >= deadline:
                 return
             await asyncio.sleep(self.poll_seconds)
 
@@ -156,12 +163,12 @@ class ResourceGauge:
 class MemoryGate(ResourceGauge):
     """Global admission gate consulted before each crawl batch dispatch.
 
-    Beyond the trailing ``memory.current`` fraction, the gate also tracks the
-    *rate of change* of usage (adversarial perf #2.3: ``memory.current`` is a
-    trailing signal). When usage is climbing fast it anticipates the imminent
-    pressure and throttles slightly early, so a sudden allocation spike cannot
-    blow past the hard ceiling between samples. The raw fraction still drives
-    the hard-ceiling wait; only the dispatch scale uses the leading estimate.
+    Beyond the trailing ``memory.current`` fraction, the gate tracks the *rate
+    of change* of usage (adversarial perf #2.3: the trailing fraction is a
+    trailing signal). When usage climbs fast it anticipates the imminent
+    pressure and throttles early, so a sudden allocation spike cannot blow past
+    the hard ceiling between samples. Only the dispatch scale uses that leading
+    estimate; the hard-ceiling wait reads the raw fraction.
     """
 
     _default_target = _DEFAULT_TARGET

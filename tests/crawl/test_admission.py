@@ -235,8 +235,20 @@ async def test_cpu_gate_returns_immediately_under_target(monkeypatch):
 
 
 def _saturated_gate(monkeypatch, *, cpu_ratio, memory_ratio):
-    """ResourceGate with pinned sampler ratios and a recording fake sleep."""
-    gate = ResourceGate()
+    """ResourceGate with pinned sampler ratios, a fake clock and a recording sleep.
+
+    The clock and the sleep are one seam, not two: the fake sleep advances the
+    clock by exactly the interval it was asked to wait, so the wait terminates
+    on the gate's OWN ``max_wait_seconds`` (0.05s here) instead of on a real
+    one. Faking only the sleep is what made this fixture dishonest -- with the
+    sleep free but the deadline on the real monotonic clock, the bound the
+    helper advertises is a bound no test could afford to reach, so the callers
+    below had to pass a ten-second ``max_wait_seconds`` that overrode it and
+    then sat out those ten real seconds. The wait is still a wait: the gate
+    polls, yields, and re-reads both ratios, exactly as in production.
+    """
+    now = [0.0]
+    gate = ResourceGate(clock=lambda: now[0])
     gate.memory.max_wait_seconds = 0.05
     gate.cpu.max_wait_seconds = 0.05
     monkeypatch.setattr(gate.cpu, "_usage_ratio", lambda: cpu_ratio)
@@ -245,6 +257,7 @@ def _saturated_gate(monkeypatch, *, cpu_ratio, memory_ratio):
 
     async def fake_sleep(seconds):
         waited.append(seconds)
+        now[0] += seconds
 
     monkeypatch.setattr("app.resource_pressure.asyncio.sleep", fake_sleep)
     return gate, waited
@@ -253,14 +266,34 @@ def _saturated_gate(monkeypatch, *, cpu_ratio, memory_ratio):
 async def test_resource_gate_waits_while_either_saturated(monkeypatch):
     gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
     # Memory idle, CPU saturated -> gate must still wait (either resource binds).
-    await gate.wait_while_saturated(max_wait_seconds=10)
+    # No max_wait_seconds argument, on purpose: the bound under test is the one
+    # the helper pins, not one the test supplies to make the wait affordable.
+    await gate.wait_while_saturated()
     assert waited, "ResourceGate returned without waiting while CPU was saturated"
+    assert sum(waited) >= gate.memory.max_wait_seconds, (
+        f"the gate gave up after {sum(waited)}s of a {gate.memory.max_wait_seconds}s "
+        "budget; the wait has to be bounded by the bound, not by returning early"
+    )
 
 
 async def test_resource_gate_returns_when_both_idle(monkeypatch):
     gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.0, memory_ratio=0.0)
-    await gate.wait_while_saturated(max_wait_seconds=10)
+    await gate.wait_while_saturated()
     assert waited == []
+
+
+async def test_resource_gate_explicit_budget_overrides_the_pinned_bound(monkeypatch):
+    """The argument still wins over the gate's own bound, observably.
+
+    The test above exercises the bound the helper pins (0.05s -> one poll at the
+    0.1s poll interval). This pins the other half of the contract, so "no
+    argument" cannot quietly become "the argument is ignored" and so the two
+    bounds are distinguishable in the recorded poll count rather than only in
+    the source: 0.25s of budget is three polls, 0.05s of budget is one.
+    """
+    gate, waited = _saturated_gate(monkeypatch, cpu_ratio=0.99, memory_ratio=0.0)
+    await gate.wait_while_saturated(max_wait_seconds=0.25)
+    assert len(waited) == 3, f"a 0.25s budget produced {len(waited)} polls, not 3: {waited}"
 
 
 def test_resource_gate_scale_is_min_of_resources(monkeypatch):
