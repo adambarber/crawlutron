@@ -130,7 +130,7 @@ def discover_host_policy_entry_points(
 
 
 def _app_modules() -> tuple[tuple[pathlib.Path, ast.Module], ...]:
-    return tuple(app_trees(exclude=frozenset()))
+    return app_trees(exclude=frozenset())
 
 
 def _table_entries() -> set[str]:

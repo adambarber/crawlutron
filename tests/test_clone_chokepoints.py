@@ -1,9 +1,8 @@
 import ast
-from pathlib import Path
 
 import pytest
+from chokepoint_walks import TESTS_DIR, trees_under
 
-TESTS_ROOT = Path(__file__).parent
 FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 FUNNELS = [
@@ -204,12 +203,11 @@ def _detector_bites(name, tree):
 
 def _clone_funnel_offenders():
     offenders = []
-    for path in sorted(TESTS_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for path, tree in trees_under(TESTS_DIR):
         for node in _scopes(tree.body):
             for name, owner, _source in FUNNELS:
                 if node.name != owner and DETECTORS[name](node):
-                    offenders.append(f"{path.relative_to(TESTS_ROOT)}:{node.lineno}:{name}")
+                    offenders.append(f"{path.relative_to(TESTS_DIR)}:{node.lineno}:{name}")
     return offenders
 
 

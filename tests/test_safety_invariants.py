@@ -16,6 +16,7 @@ from contextvars import ContextVar
 
 import pytest
 from chokepoint_walks import (
+    APP_ROOT,
     REPO_ROOT,
     SANCTIONED,
     STRATEGIES_DIR,
@@ -36,6 +37,7 @@ from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 from app.settings import ENVIRONMENT_FIELD_ALIASES
 
 __all__ = [
+    "APP_ROOT",
     "REPO_ROOT",
     "SANCTIONED",
     "STRATEGIES_DIR",
@@ -5837,3 +5839,138 @@ def test_app_tree_mutation_detector_bites():
     assert not _app_tree_mutation_offenders(scratch, REPO_ROOT / "tests" / "_synthetic.py"), (
         "a test's own scratch tree is not the production tree"
     )
+
+
+# ===========================================================================
+# THE CHOKEPOINT OWNS ITS TRAVERSAL (one snapshot, shared by every detector)
+#
+# `app_trees` was a generator that re-globbed, re-read and re-parsed all 105 app/
+# modules on every call, and each of the ~7 tree-walking detectors called it, so
+# one session paid for the same parse about seven times over. Measured on
+# tests/test_safety_invariants.py alone: 37.7s of a 49.4s file, led by
+# test_property_registry_fingerprints_are_observed 8.06s,
+# test_documented_browser_knobs_have_consumers 7.49s,
+# test_robots_policy_has_one_implementation 7.45s, test_bool_env_has_one_implementation
+# 5.28s, test_public_target_has_one_implementation 3.95s,
+# test_property_registry_rejects_deleted_fingerprint 3.63s and
+# test_url_returning_helpers_require_host_policy 1.83s.
+#
+# The cost was the smaller half of the defect. Because every walk observed the
+# tree at a DIFFERENT INSTANT, "list the files" and "read the files" were two
+# moments, and anything that appeared or vanished between them raised
+# FileNotFoundError inside a detector instead of being reported -- the
+# list-then-read race that tests/test_jscpd_gate.py used to cause whenever it
+# planted a file in app/ beside a chokepoint sweep. Same root cause, one fix:
+# the traversal is executed once per exclude set and every detector is handed
+# the same ast.Module objects.
+#
+# The three tests below demonstrate that by execution. None of them writes to
+# app/ -- the sweep above forbids it -- so the race is reproduced by making the
+# filesystem refuse to answer, which is what a vanished file looks like from
+# inside a list-then-read walk.
+# ===========================================================================
+
+
+def _app_reads(monkeypatch) -> list[pathlib.Path]:
+    """Record every `read_text` of a file under app/ for the rest of this test."""
+    original = pathlib.Path.read_text
+    seen: list[pathlib.Path] = []
+
+    def counting(self: pathlib.Path, *args, **kwargs) -> str:
+        if self.is_relative_to(APP_ROOT):
+            seen.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", counting)
+    return seen
+
+
+def test_every_detector_sees_the_same_app_trees():
+    """Two walks are one snapshot: the SAME ast.Module objects, not two parses.
+
+    Identity, not equality. A second parse of an unchanged file compares equal
+    for every field a detector looks at, so a detector cannot tell a
+    re-observation from a changed tree -- which is exactly the distinction the
+    shared snapshot exists to draw.
+    """
+    first = app_trees()
+    second = app_trees()
+    assert first, "the app tree walk found no modules to compare"
+    assert second is first, "each caller is being handed its own walk of app/"
+    assert all(one is other for one, other in zip(first, second, strict=True)), (
+        "the same module parsed twice is not a shared snapshot"
+    )
+
+
+def test_the_app_tree_is_read_once_however_many_detectors_walk_it(monkeypatch):
+    """N detectors cost one read per module, not N.
+
+    Bounded by the module count rather than equal to it, so the assertion is
+    true whether this test took the snapshot or an earlier one in the session
+    did. Today each walk re-reads the tree, so three walks cost three times the
+    modules and this is where the 37.7s went.
+    """
+    reads = _app_reads(monkeypatch)
+    for _ in range(3):
+        # Consumed, not merely called: a walk nobody iterates reads nothing, and
+        # this test has to be able to see a re-walk.
+        tuple(app_trees())
+        tuple(app_python_files())
+    assert len(reads) <= len(app_python_files()), (
+        f"the app tree was read {len(reads)} times for {len(app_python_files())} modules; "
+        "the traversal has to be owned by the chokepoint, not repeated per detector"
+    )
+
+
+def test_a_later_walk_cannot_observe_a_tree_that_moved(monkeypatch):
+    """The race half: once the snapshot exists, no walk touches the tree again.
+
+    The filesystem is made to refuse rather than made to change, so this proves
+    the property without a second offender. A walk that re-globbed raises here;
+    a walk that returns its snapshot cannot, because a file that disappears
+    after the snapshot is not something a snapshot can observe.
+    """
+    warm = app_trees()
+    assert warm, "the app tree walk found no modules"
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a later walk touched the tree instead of returning its snapshot")
+
+    monkeypatch.setattr(pathlib.Path, "rglob", refuse)
+    monkeypatch.setattr(pathlib.Path, "read_text", refuse)
+    assert app_trees() is warm
+
+
+def test_the_path_list_and_the_parsed_trees_are_one_traversal(monkeypatch):
+    """Asking for paths does not parse, and asking again costs nothing.
+
+    The line-budget sweep wants the file list and the detectors want the trees;
+    both are the same rglob, so the list half must not drag a parse along with
+    it and neither may be recomputed per caller.
+    """
+    reads = _app_reads(monkeypatch)
+    paths = app_python_files()
+    assert len(reads) == 0, f"listing the tree parsed {len(reads)} modules it did not need parsed"
+    trees = app_trees()
+    assert [path for path, _tree in trees] == list(paths), "the trees are not the files that were listed"
+    # Exactly one read per module when this test took the snapshot, and none at
+    # all when an earlier test in the session already did: both are "once", and
+    # the assertion has to hold whichever order the session ran in.
+    assert len(reads) in (0, len(trees)), (
+        f"{len(reads)} reads for {len(trees)} modules; the snapshot is read once, not once per caller"
+    )
+    assert app_python_files() is paths, "the file list is re-globbed per caller"
+    assert app_trees() is trees, "the tree snapshot is rebuilt per caller"
+
+
+def test_the_tests_tree_is_walked_once_too():
+    """The tests/ sweep is the same deal: five detectors, one walk.
+
+    Same return type as ``app_trees`` for the same reason, and the five
+    callers of ``trees_under(TESTS_DIR)`` now share one snapshot instead of
+    each re-parsing the tree they are all reading.
+    """
+    first = trees_under(TESTS_DIR)
+    assert first, "the tests/ walk found no modules"
+    assert trees_under(TESTS_DIR) is first, "the tests/ tree is re-walked per detector"
+    assert trees_under(TESTS_DIR / "crawl") is not first, "a different tree must be its own snapshot"
