@@ -3,13 +3,18 @@ __pycache__/
 .pytest_cache/
 report/
 .venv/
-.venv
 *.egg-info/
 .cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
+# Session-analysis residue written by the cortexkit tooling. It is ephemeral
+# per-session output, not project content, and its own managed block already
+# declares `magic-context/` untracked -- the historian XML under it was
+# committed anyway, which is how a directory full of transcript digests ended
+# up in the tree this service is extracted from.
+.cortexkit/
 logs/
 cache/
 .env
@@ -17,5 +22,4 @@ tmp/
 *.log
 .DS_Store
 
-.coverage
 .coverage.*
