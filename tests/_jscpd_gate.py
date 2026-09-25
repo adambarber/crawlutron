@@ -20,7 +20,19 @@ LocationPair = tuple[LocationKey, LocationKey]
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
 MIN_SOURCES = {"all": 200}
-PROFILE_PATHS = {"all": (".",)}
+# Which roots each floor applies to, and the trees they are allowed to be silent
+# about. Every root is scanned by its own invocation with exactly one root,
+# because jscpd reports `name` relative to the scan root: an invocation given
+# `app/ tests/ scripts/` returns `crawl/x.py` for both `app/crawl/x.py` and
+# `tests/crawl/x.py`, and a clone spanning two trees is reported against a path
+# that names neither. One root per invocation is what lets this gate's own
+# report say which tree a pair is in, and it is why PROFILE_PATHS lists the
+# roots rather than ".".
+TREE_ROOTS = {
+    "production": ("app",),
+    "test": ("tests", "scripts"),
+}
+PROFILE_PATHS = {"all": tuple(root for roots in TREE_ROOTS.values() for root in roots)}
 # `.jscpd.json` decides which files this gate never sees, so it is enforcement
 # configuration, and a config nothing validates is a config that can be edited
 # into a no-op: one added glob is enough to hide a clone, and `ignore` was read
@@ -49,11 +61,47 @@ SANCTIONED_IGNORE_GLOBS = (
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("profile", choices=tuple(PROFILE_PATHS))
+    # The looser floor, for the test and support trees. These flag names and
+    # their values are unchanged; the tighter production floor is the pair
+    # below them.
     parser.add_argument("--min-lines", type=int, required=True)
     parser.add_argument("--min-tokens", type=int, required=True)
+    parser.add_argument("--app-min-lines", type=int, required=True)
+    parser.add_argument("--app-min-tokens", type=int, required=True)
     parser.add_argument("--threshold", type=float, required=True)
     parser.add_argument("--fail-on-empty", action="store_true", required=True)
     return parser.parse_args()
+
+
+def _floors(args: argparse.Namespace) -> dict[str, tuple[int, int]]:
+    """The floor each tree is scored at, as (min_lines, min_tokens).
+
+    Separate numbers because one flat floor cannot serve both trees. At 8 lines
+    and 40 tokens this whole service reported exactly one pair, and both sides
+    of it were in `app/`: production duplication was invisible behind a floor
+    picked for test scaffolding. At 5 and 25 the same tree reports 169 pairs,
+    46 of them production. Neither end is the right answer -- the flat number
+    hid the tree that matters -- so each tree is scored on its own evidence and
+    both ratchet towards zero.
+    """
+    return {
+        "production": (args.app_min_lines, args.app_min_tokens),
+        "test": (args.min_lines, args.min_tokens),
+    }
+
+
+def _tree_of(path: str) -> str:
+    """Which tree a reported path belongs to.
+
+    Derived from the path, not declared by the expectation, so a file cannot
+    choose the floor it is judged by. Anything outside the known roots is
+    production: the tighter floor, so an unrecognised file cannot slip through
+    on the looser one.
+    """
+    for tree, roots in TREE_ROOTS.items():
+        if any(path == root or path.startswith(root + "/") for root in roots):
+            return tree
+    return "production"
 
 
 def _reject_source_masking(ignore: list[str]) -> None:
@@ -200,34 +248,37 @@ def _location_pair(entries: list[LocationKey]) -> LocationPair:
     return (first, second)
 
 
-def _location(container: dict[str, Any], side: str, path_key: str, default_dir: str | None = None) -> LocationKey:
-    path = str(container[side][path_key])
-    if default_dir is not None and "/" not in path:
-        path = f"{default_dir}/{path}"
-    return (path, int(container[side]["start"]), int(container[side]["end"]))
+def _location(container: dict[str, Any], side: str, path_key: str) -> LocationKey:
+    return (str(container[side][path_key]), int(container[side]["start"]), int(container[side]["end"]))
 
 
 def _expected_locations(pair: dict[str, Any]) -> LocationPair:
     return _location_pair([_location(pair, side, "path") for side in ("first", "second")])
 
 
-def _pair_id(duplicate: dict[str, Any]) -> LocationPair:
-    """Where jscpd says a clone is.
+def _pair_id(duplicate: dict[str, Any], root: str) -> LocationPair:
+    """Where jscpd says a clone is, in repository-relative terms.
 
-    Its `name` is relative to the scan root, so a name with no directory
-    component is a file at the root of the tree. Those are attributed to `app/`,
-    the strictest tree, so a stray root-level file is gated as production rather
-    than passing through unclassified.
+    jscpd's `name` is relative to the scan root, so the root is put back on.
+    Without it, `models.py` scanned from `app/` and `models.py` scanned from
+    `tests/` are the same string, and a single whole-tree scan cannot say which
+    tree a pair belongs to.
     """
-    return _location_pair([_location(duplicate, side, "name", "app") for side in ("firstFile", "secondFile")])
+    return _location_pair([_scoped(root, _location(duplicate, side, "name")) for side in ("firstFile", "secondFile")])
+
+
+def _scoped(root: str, key: LocationKey) -> LocationKey:
+    path = key[0]
+    scoped = path if root == "." or path == root or path.startswith(root + "/") else f"{root}/{path}"
+    return (scoped, key[1], key[2])
 
 
 def _short(fragment_hash: str) -> str:
     return fragment_hash[:12]
 
 
-def _run(args: argparse.Namespace) -> int:
-    _validate_scan_config(CONFIG_PATH)
+def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[str, Any]:
+    """One jscpd invocation over one root at one floor."""
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
         command = [
@@ -237,9 +288,9 @@ def _run(args: argparse.Namespace) -> int:
             "-f",
             "python",
             "--min-lines",
-            str(args.min_lines),
+            str(floor[0]),
             "--min-tokens",
-            str(args.min_tokens),
+            str(floor[1]),
             "--threshold",
             str(args.threshold),
             "--fail-on-empty",
@@ -247,126 +298,151 @@ def _run(args: argparse.Namespace) -> int:
             "json",
             "--output",
             str(output),
-            *PROFILE_PATHS[args.profile],
+            root,
         ]
         completed = subprocess.run(command, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
         report_path = output / "jscpd-report.json"
         if completed.returncode not in (0, 1) or not report_path.is_file():
-            print(completed.stdout + completed.stderr, file=sys.stderr)
-            return completed.returncode or 1
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        statistics = report["statistics"]["total"]
-        if int(statistics["sources"]) < MIN_SOURCES[args.profile]:
+            raise OSError(f"jscpd failed on {root}: {completed.stdout}{completed.stderr}".strip())
+        return json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def _footprint(duplicate: dict[str, Any]) -> int:
+    return min(
+        int(duplicate["firstFile"]["end"]) - int(duplicate["firstFile"]["start"]) + 1,
+        int(duplicate["secondFile"]["end"]) - int(duplicate["secondFile"]["start"]) + 1,
+    )
+
+
+def _run(args: argparse.Namespace) -> int:
+    _validate_scan_config(CONFIG_PATH)
+    floors = _floors(args)
+    # Keyed by (tree, content). The tree is part of the identity because the
+    # same fragment in `app/` and in `tests/` is two separate findings at two
+    # different floors, and a single whole-tree scan keyed on content alone
+    # cannot tell them apart.
+    observed: dict[tuple[str, str], set[LocationPair]] = {}
+    spans: dict[tuple[str, str], int] = {}
+    totals: dict[str, dict[str, int]] = {}
+    sources = 0
+    for tree, roots in TREE_ROOTS.items():
+        for root in roots:
+            report = _scan(root, floors[tree], args)
+            statistics = report["statistics"]["total"]
+            found_sources = int(statistics["sources"])
+            sources += found_sources
+            if found_sources < 1:
+                print(
+                    f"jscpd {args.profile}: [{tree}] {root} analyzed {found_sources} sources; "
+                    f"the scan root is wrong or the tree is empty",
+                    file=sys.stderr,
+                )
+                return 1
+            tree_totals = totals.setdefault(
+                tree, {"lines": 0, "duplicatedLines": 0, "pairs": 0, "sources": 0}
+            )
+            tree_totals["lines"] += int(statistics.get("lines", 0))
+            tree_totals["duplicatedLines"] += int(statistics["duplicatedLines"])
+            tree_totals["sources"] += found_sources
+            for duplicate in report["duplicates"]:
+                fragment_hash = _fragment_hash(duplicate)
+                key = (tree, fragment_hash)
+                observed.setdefault(key, set()).add(_pair_id(duplicate, root))
+                spans.setdefault(key, _footprint(duplicate))
+                tree_totals["pairs"] += 1
+
+    if sources < MIN_SOURCES[args.profile]:
+        print(f"jscpd {args.profile}: analyzed only {sources} sources", file=sys.stderr)
+        return 1
+
+    # A sanctioned clone is identified by its CONTENT, within its tree. Identity
+    # used to be (path, start, end), and `missing` was tested before
+    # `mismatched`, so inserting one comment line above a sanctioned clone
+    # reported it as a disappearance and the fix-forward was to copy the
+    # coordinates out of the error message into the expectation -- an
+    # expectation whose stated location nothing ever checked. Content identity
+    # makes a moved clone the same clone, which turns that into drift: a failure
+    # that names the expectation and states where the content is now, so
+    # correcting it is a reviewed edit rather than a copy of what was printed.
+    expected: dict[tuple[str, str], dict[str, Any]] = {}
+    for pair in _expected_pairs():
+        fragment_hash = str(pair["fragment_sha256"])
+        key = (_tree_of(_expected_locations(pair)[0][0]), fragment_hash)
+        if key in expected:
+            raise ValueError(
+                f"two jscpd expectations ({expected[key]['id']!r} and {pair['id']!r}) "
+                f"claim the same fragment { _short(fragment_hash) }"
+            )
+        expected[key] = pair
+
+    unsanctioned = sorted(set(observed) - set(expected))
+    missing = sorted(set(expected) - set(observed))
+    drifted: list[tuple[dict[str, Any], tuple[LocationPair, ...]]] = []
+    undeclared: list[tuple[dict[str, Any], list[LocationPair]]] = []
+    for key, pair in expected.items():
+        found = observed.get(key)
+        if not found:
+            continue
+        found_keys = {location for location_pair in found for location in location_pair}
+        declared = _expected_locations(pair)
+        if not set(declared) <= found_keys:
+            drifted.append((pair, tuple(sorted(found))))
+            continue
+        extra = sorted(found_keys - set(declared))
+        if extra:
+            undeclared.append((pair, extra))
+
+    if unsanctioned or missing or drifted or undeclared:
+        for key in unsanctioned:
+            for location in sorted(observed[key]):
+                print(
+                    f"jscpd {args.profile}: [{key[0]}] unsanctioned clone: {location} "
+                    f"sha256={_short(key[1])}",
+                    file=sys.stderr,
+                )
+        for key in missing:
             print(
-                f"jscpd {args.profile}: analyzed only {statistics['sources']} sources",
+                f"jscpd {args.profile}: [{key[0]}] expected clone is missing: "
+                f"id={expected[key]['id']} sha256={_short(key[1])}. "
+                f"Either the duplication was fixed, in which case delete the expectation on "
+                f"purpose, or its content changed, in which case it is an unsanctioned clone above.",
                 file=sys.stderr,
             )
-            return 1
-        # A sanctioned clone is identified by its CONTENT. Identity used to be
-        # (path, start, end), and `missing` was tested before `mismatched`, so
-        # inserting one comment line above a sanctioned clone reported it as a
-        # disappearance and the fix-forward was to copy the coordinates out of
-        # the error message into the expectation -- an expectation whose stated
-        # location nothing ever checked. Content identity makes a moved clone
-        # the same clone, which turns that into drift: a failure that names the
-        # expectation and states where the content is now, so correcting it is a
-        # reviewed edit rather than a copy of whatever the tool printed.
-        actual_locations: dict[str, set[LocationPair]] = {}
-        actual_duplicate: dict[str, dict[str, Any]] = {}
-        for duplicate in report["duplicates"]:
-            fragment_hash = _fragment_hash(duplicate)
-            actual_locations.setdefault(fragment_hash, set()).add(_pair_id(duplicate))
-            actual_duplicate.setdefault(fragment_hash, duplicate)
-
-        expected: dict[str, dict[str, Any]] = {}
-        for pair in _expected_pairs():
-            fragment_hash = str(pair["fragment_sha256"])
-            if fragment_hash in expected:
-                raise ValueError(
-                    f"two jscpd expectations ({expected[fragment_hash]['id']!r} and {pair['id']!r}) "
-                    f"claim the same fragment { _short(fragment_hash) }"
-                )
-            expected[fragment_hash] = pair
-
-        unsanctioned = sorted(set(actual_locations) - set(expected))
-        missing = sorted(set(expected) - set(actual_locations))
-        drifted: list[tuple[dict[str, Any], tuple[LocationPair, ...]]] = []
-        undeclared: list[tuple[dict[str, Any], list[LocationPair]]] = []
-        for fragment_hash, pair in expected.items():
-            found = actual_locations.get(fragment_hash)
-            if not found:
-                continue
-            found_keys = {key for location_pair in found for key in location_pair}
-            declared = _expected_locations(pair)
-            if not set(declared) <= found_keys:
-                drifted.append((pair, tuple(sorted(found))))
-                continue
-            extra = sorted(found_keys - set(declared))
-            if extra:
-                undeclared.append((pair, extra))
-
-        if unsanctioned or missing or drifted or undeclared:
-            for fragment_hash in unsanctioned:
-                for location in sorted(actual_locations[fragment_hash]):
-                    print(
-                        f"jscpd {args.profile}: unsanctioned clone: {location} "
-                        f"sha256={_short(fragment_hash)}",
-                        file=sys.stderr,
-                    )
-            for fragment_hash in missing:
-                print(
-                    f"jscpd {args.profile}: expected clone is missing: "
-                    f"id={expected[fragment_hash]['id']} sha256={_short(fragment_hash)}. "
-                    f"Either the duplication was fixed, in which case delete the expectation on "
-                    f"purpose, or its content changed, in which case it is an unsanctioned clone above.",
-                    file=sys.stderr,
-                )
-            for pair, found in drifted:
-                print(
-                    f"jscpd {args.profile}: expected clone drifted: id={pair['id']} declares "
-                    f"{_expected_locations(pair)} but its content is now at {list(found)}. "
-                    f"Update the expectation to match, in this commit, on purpose.",
-                    file=sys.stderr,
-                )
-            for pair, extra in undeclared:
-                print(
-                    f"jscpd {args.profile}: sanctioned clone also appears undeclared: "
-                    f"id={pair['id']} at {extra}",
-                    file=sys.stderr,
-                )
-            return 1
-        percentage = float(statistics["percentage"])
-        duplicated_lines = int(statistics["duplicatedLines"])
-        sanctioned_lines = sum(
-            min(
-                int(actual_duplicate[fragment_hash]["firstFile"]["end"])
-                - int(actual_duplicate[fragment_hash]["firstFile"]["start"])
-                + 1,
-                int(actual_duplicate[fragment_hash]["secondFile"]["end"])
-                - int(actual_duplicate[fragment_hash]["secondFile"]["start"])
-                + 1,
-            )
-            for fragment_hash in expected
-        )
-        unsanctioned_lines = max(0, duplicated_lines - sanctioned_lines)
-        total_lines = int(statistics.get("lines", 0))
-        if total_lines:
-            unsanctioned_percentage = 100 * unsanctioned_lines / total_lines
-        else:
-            unsanctioned_percentage = percentage
-        if unsanctioned_percentage > args.threshold:
+        for pair, found in drifted:
             print(
-                f"jscpd {args.profile}: {unsanctioned_percentage:.6f}% unsanctioned "
+                f"jscpd {args.profile}: expected clone drifted: id={pair['id']} declares "
+                f"{_expected_locations(pair)} but its content is now at {list(found)}. "
+                f"Update the expectation to match, in this commit, on purpose.",
+                file=sys.stderr,
+            )
+        for pair, extra in undeclared:
+            print(
+                f"jscpd {args.profile}: sanctioned clone also appears undeclared: "
+                f"id={pair['id']} at {extra}",
+                file=sys.stderr,
+            )
+        return 1
+
+    for tree, tree_totals in totals.items():
+        sanctioned_lines = sum(spans[key] for key in expected if key[0] == tree)
+        unsanctioned_lines = max(0, tree_totals["duplicatedLines"] - sanctioned_lines)
+        total_lines = tree_totals["lines"]
+        percentage = 100 * unsanctioned_lines / total_lines if total_lines else 0.0
+        if percentage > args.threshold:
+            print(
+                f"jscpd {args.profile}: [{tree}] {percentage:.6f}% unsanctioned "
                 f"exceeds {args.threshold:.6f}%",
                 file=sys.stderr,
             )
             return 1
-        sanctioned = len(expected)
         print(
-            f"jscpd {args.profile}: {len(actual_duplicate)} pairs, {sanctioned} sanctioned, "
-            f"{statistics['duplicatedLines']} duplicated lines ({percentage:.6f}%)"
+            f"jscpd {args.profile}: [{tree}] {tree_totals['pairs']} pairs at "
+            f"{floors[tree][0]} lines/{floors[tree][1]} tokens, "
+            f"{sum(1 for key in expected if key[0] == tree)} sanctioned, "
+            f"{tree_totals['duplicatedLines']} duplicated lines of {total_lines} "
+            f"({tree_totals['sources']} sources)"
         )
-        return 0
+    return 0
 
 
 def main() -> int:

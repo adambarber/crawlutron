@@ -83,17 +83,26 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-      # Copy/paste detection is a design gate. The checked-in wrapper reads
-      # jscpd JSON, requires a non-empty scan, and compares every pair with the
-      # named expectations file; the command-line thresholds below are the only
-      # threshold source.
+      # Copy/paste detection is a design gate, scored per tree. The checked-in
+      # wrapper reads jscpd JSON, requires a non-empty scan of every root, and
+      # compares every pair with the named expectations file; the command-line
+      # thresholds below are the only threshold source.
+      #
+      # Two floors, because one flat floor cannot serve both trees: at 8 lines /
+      # 40 tokens this whole service reported exactly one pair and both sides of
+      # it were in `app/`, so production duplication was invisible behind a
+      # number picked for test scaffolding. `app/` is scored at 7/35 and the
+      # test and support trees at 8/40, and each is scanned by its own jscpd
+      # invocation because jscpd's reported names are relative to the scan root.
+      # Both ratchet down; zero is the target for each.
       - id: jscpd
-        name: jscpd whole service (zero tolerance, 40 tokens)
+        name: jscpd per tree (app 7/35, tests 8/40, zero tolerance)
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
-          --min-lines 8 --min-tokens 40 --threshold 0
+          --min-lines 8 --min-tokens 40 --app-min-lines 7 --app-min-tokens 35
+          --threshold 0
         language: system
         files: ^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$
         pass_filenames: false

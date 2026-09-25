@@ -244,7 +244,17 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert ".venv/bin/python tests/_jscpd_gate.py all" in entry
     assert "--min-lines 8" in entry
     assert "--min-tokens 40" in entry
+    # The production tree carries its own, tighter floor, and it is on the
+    # command line rather than in the gate so the command stays the one place a
+    # reviewer looks to see what duplication costs.
+    assert "--app-min-lines 7" in entry
+    assert "--app-min-tokens 35" in entry
     assert "--threshold 0" in entry
+    production = re.search(r"--app-min-lines (\d+) --app-min-tokens (\d+)", entry)
+    assert production is not None
+    support = re.search(r"--min-lines (\d+) --min-tokens (\d+)", entry)
+    assert support is not None
+    assert int(production.group(1)) < int(support.group(1)), "the production floor must be the tighter one"
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
     expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))

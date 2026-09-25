@@ -13,10 +13,23 @@ import pytest
 
 
 def _args(threshold: float = 0) -> argparse.Namespace:
+    return _args_for(threshold=threshold)
+
+
+def _args_for(
+    threshold: float = 0,
+    *,
+    min_lines: int = 8,
+    min_tokens: int = 40,
+    app_min_lines: int = 7,
+    app_min_tokens: int = 35,
+) -> argparse.Namespace:
     return argparse.Namespace(
         profile="all",
-        min_lines=8,
-        min_tokens=40,
+        min_lines=min_lines,
+        min_tokens=min_tokens,
+        app_min_lines=app_min_lines,
+        app_min_tokens=app_min_tokens,
         threshold=threshold,
         fail_on_empty=True,
     )
@@ -30,18 +43,36 @@ def _stub_report(
     monkeypatch,
     duplicates: list[dict],
     percentage: float = 0,
-    sources: int = 200,
+    sources: int | dict[str, int] = 200,
 ) -> list[list[str]]:
-    report = {
-        "statistics": {
-            "total": {"sources": sources, "percentage": percentage, "duplicatedLines": 5}
-        },
-        "duplicates": duplicates,
-    }
     commands: list[list[str]] = []
+
+    def _inside(root: str, name: str) -> bool:
+        return root == "." or name == root or name.startswith(root + "/")
 
     def run(command, **_kwargs):
         commands.append(command)
+        root = command[-1]
+        # jscpd reports `name` relative to the scan root, so a stub that returned
+        # every duplicate for every invocation would be modelling a tool that
+        # does not exist. Only pairs inside the scanned root are reported, and
+        # their names come back root-relative.
+        scoped = [
+            {
+                **duplicate,
+                "firstFile": _root_relative(root, duplicate["firstFile"]),
+                "secondFile": _root_relative(root, duplicate["secondFile"]),
+            }
+            for duplicate in duplicates
+            if _inside(root, duplicate["firstFile"]["name"]) and _inside(root, duplicate["secondFile"]["name"])
+        ]
+        found = sources[root] if isinstance(sources, dict) else sources
+        report = {
+            "statistics": {
+                "total": {"sources": found, "percentage": percentage, "duplicatedLines": 5 * len(scoped)}
+            },
+            "duplicates": scoped,
+        }
         output = Path(command[command.index("--output") + 1])
         output.mkdir(exist_ok=True)
         (output / "jscpd-report.json").write_text(json.dumps(report), encoding="utf-8")
@@ -51,9 +82,20 @@ def _stub_report(
     return commands
 
 
+def _command_for(commands: list[list[str]], root: str) -> list[str]:
+    return next(command for command in commands if command[-1] == root)
+
+
+def _root_relative(root: str, location: dict) -> dict:
+    name = str(location["name"])
+    if root != "." and name.startswith(root + "/"):
+        name = name[len(root) + 1 :]
+    return {**location, "name": name}
+
+
 def _duplicate(
-    first_path: str = "new.py",
-    second_path: str = "other.py",
+    first_path: str = "app/new.py",
+    second_path: str = "app/other.py",
     fragment: str = "duplicate",
 ) -> dict:
     return {
@@ -81,6 +123,10 @@ _GATE_ARGV = [
     "8",
     "--min-tokens",
     "40",
+    "--app-min-lines",
+    "7",
+    "--app-min-tokens",
+    "35",
     "--threshold",
     "0",
     "--fail-on-empty",
@@ -107,11 +153,20 @@ def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
     commands = _stub_report(monkeypatch, [])
 
     assert gate._run(_args()) == 0
-    assert commands[0][0] == str(gate.SERVICE_ROOT / ".venv" / "bin" / "jscpd")
-    assert "--fail-on-empty" in commands[0]
-    assert commands[0][commands[0].index("--min-lines") + 1] == "8"
-    assert commands[0][commands[0].index("--min-tokens") + 1] == "40"
-    assert commands[0][commands[0].index("--threshold") + 1] == "0"
+    assert commands
+    for command in commands:
+        assert command[0] == str(gate.SERVICE_ROOT / ".venv" / "bin" / "jscpd")
+        assert "--fail-on-empty" in command
+        assert command[command.index("--threshold") + 1] == "0"
+    # Each tree is scanned at its own floor, so the floor a command carries is
+    # the one for the root it scans.
+    production = _command_for(commands, "app")
+    assert production[production.index("--min-lines") + 1] == "7"
+    assert production[production.index("--min-tokens") + 1] == "35"
+    support = _command_for(commands, "tests")
+    assert support[support.index("--min-lines") + 1] == "8"
+    assert support[support.index("--min-tokens") + 1] == "40"
+    assert _command_for(commands, "scripts")[_command_for(commands, "scripts").index("--min-lines") + 1] == "8"
 
 
 @pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
@@ -162,9 +217,19 @@ def test_valid_sanctioned_pair_passes(monkeypatch, tmp_path) -> None:
 def test_source_floor_fails_on_thin_scan(monkeypatch, tmp_path) -> None:
     _write_expectations(tmp_path / "expectations.json", [])
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(monkeypatch, [], sources=199)
+    _stub_report(monkeypatch, [], sources=60)
 
     assert gate._run(_args()) == 1
+
+
+def test_a_tree_that_scanned_nothing_fails(monkeypatch, tmp_path, capsys) -> None:
+    """A wrong scan root reports zero sources and no error, so it must fail."""
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    _stub_report(monkeypatch, [], sources={"app": 0, "tests": 200, "scripts": 200})
+
+    assert gate._run(_args()) == 1
+    assert "scan root is wrong" in capsys.readouterr().err
 
 
 def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[list[str]]:
@@ -291,6 +356,78 @@ def test_two_expectations_cannot_share_an_id(monkeypatch, tmp_path, capsys) -> N
     second["id"] = _valid_pair()["id"]
     reported = _gate_says(monkeypatch, tmp_path, capsys, _valid_pair(), second)
     assert "duplicate jscpd expectation id" in reported, f"a shared id must be refused:\n{reported}"
+
+
+def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
+    """One root per invocation, because jscpd's names are root-relative.
+
+    `name` is relative to the scan root, so an invocation given several roots
+    cannot tell production from test: `app/crawl/x.py` and `tests/crawl/x.py`
+    both arrive as `crawl/x.py`, and a clone spanning the two is reported
+    against a path that names neither tree. A tree may hold several roots, but
+    each of them is scanned alone, which is what makes this gate's own report
+    able to say which tree it is talking about.
+    """
+    roots = [root for tree_roots in gate.TREE_ROOTS.values() for root in tree_roots]
+    assert len(set(roots)) == len(roots), f"a root scanned twice is ambiguous: {roots}"
+    assert gate.PROFILE_PATHS["all"] == tuple(roots)
+    assert "." not in roots, (
+        "a whole-tree scan cannot be partitioned afterwards: jscpd's fragment "
+        "boundaries move with the floor, so filtering one loose scan down to a "
+        "tighter floor is not the set of pairs that floor would report"
+    )
+
+
+def test_each_root_gets_exactly_one_invocation(monkeypatch, tmp_path) -> None:
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    commands = _stub_report(monkeypatch, [])
+
+    assert gate._run(_args()) == 0
+    scanned = [command[-1] for command in commands]
+    assert scanned == list(gate.PROFILE_PATHS["all"]), f"one invocation per root, got {scanned}"
+
+
+def test_the_production_floor_is_tighter_than_the_test_floor() -> None:
+    """One flat floor cannot serve both trees.
+
+    Measured on this tree at 8 lines / 40 tokens the whole service reported
+    exactly one pair, both sides in `app/`: production duplication was hidden
+    behind a floor chosen for test scaffolding. At 5 / 25 the same tree reports
+    169 pairs, 46 of them production. The floors are separate numbers so the
+    production tree can be scored on its own evidence.
+    """
+    production = _args_for(min_lines=8, min_tokens=40, app_min_lines=7, app_min_tokens=35)
+    floors = gate._floors(production)
+    assert floors["production"] == (7, 35)
+    assert floors["test"] == (8, 40)
+    assert floors["production"] < floors["test"], "the production floor must be the tighter one"
+
+
+def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_path, capsys) -> None:
+    """Keyed by content AND tree, so the two cannot collapse into one pair.
+
+    This is the defect a single whole-tree scan at a single floor carried: the
+    same fragment appearing in `app/` and in `tests/` is one content hash, and
+    one content hash cannot say which tree it belongs to or which floor it
+    should be judged by. Test boilerplate must not become cover for production
+    code, so each is reported against the tree that actually holds it.
+    """
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    _stub_report(
+        monkeypatch,
+        [
+            _duplicate("app/one.py", "app/two.py", fragment="shared"),
+            _duplicate("tests/one.py", "tests/two.py", fragment="shared"),
+        ],
+    )
+    monkeypatch.setattr(sys, "argv", _GATE_ARGV)
+
+    assert gate.main() == 1
+    reported = capsys.readouterr().err
+    assert reported.count("unsanctioned clone") == 2, f"one pair per tree, not one collapsed pair:\n{reported}"
+    assert "[production]" in reported and "[test]" in reported, f"each pair must name its tree:\n{reported}"
 
 
 def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered() -> None:
