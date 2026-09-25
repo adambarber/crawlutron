@@ -206,6 +206,43 @@ def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
     gate._validate_scan_config(gate.CONFIG_PATH)
 
 
+def test_migrations_exclusion_is_a_directory_glob_so_new_migrations_are_covered() -> None:
+    """The exclusion is a subtree, not a list of today's migration files.
+
+    `0001_crawl_jobs_initial.py` and `0001_results_initial.py` are flagged as an
+    8L/31T clone, and that is the correct shape: migrations are replayed by name
+    and two files creating parallel tables is what they are for. A per-file glob
+    would need editing every time a migration lands, which is the failure mode
+    this whole config is now gated against.
+    """
+    assert "**/app/crawl/migrations/**" in gate.SANCTIONED_IGNORE_GLOBS
+    assert "**/app/crawl/migrations/**" in json.loads(gate.CONFIG_PATH.read_text(encoding="utf-8"))["ignore"]
+
+
+def test_migrations_clones_are_not_reported_but_production_clones_are(capsys) -> None:
+    """One real scan, two planted clones: the migrations copy is invisible, the
+    production copy is not. Both plants are files this config never names, so
+    this also proves a migration added tomorrow is covered by the glob."""
+    probe = gate.SERVICE_ROOT / "app" / "crawl" / "ids.py"
+    in_migrations = gate.SERVICE_ROOT / "app" / "crawl" / "migrations" / "zz_probe_clone.py"
+    in_production = gate.SERVICE_ROOT / "app" / "zz_probe_clone.py"
+    payload = probe.read_text(encoding="utf-8")
+    assert len(payload.splitlines()) >= 8, "the probe needs a clone big enough to clear the floor"
+    in_migrations.write_text(payload, encoding="utf-8")
+    in_production.write_text(payload, encoding="utf-8")
+    try:
+        assert gate._run(_args()) == 1
+    finally:
+        in_migrations.unlink()
+        in_production.unlink()
+
+    reported = capsys.readouterr().err
+    assert "app/zz_probe_clone.py" in reported, f"a production clone must be reported:\n{reported}"
+    assert "migrations/zz_probe_clone.py" not in reported, (
+        f"a migration clone must be excluded by the glob, not reported:\n{reported}"
+    )
+
+
 @pytest.mark.parametrize("drift", ["added-glob", "removed-glob", "whole-tree-glob"])
 def test_unowned_ignore_list_fails_before_any_scan(monkeypatch, tmp_path, drift) -> None:
     sanctioned = gate.SANCTIONED_IGNORE_GLOBS

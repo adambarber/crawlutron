@@ -20,11 +20,17 @@ PROFILE_PATHS = {"all": (".",)}
 # `.jscpd.json` decides which files this gate never sees, so it is enforcement
 # configuration, and a config nothing validates is a config that can be edited
 # into a no-op: one added glob is enough to hide a clone, and `ignore` was read
-# from disk by the subprocess below without ever being checked. These six globs
-# are the whole sanctioned set -- caches, vendored trees, and the scratch
-# directory -- and the gate holds them rather than trusting the file, so
+# from disk by the subprocess below without ever being checked. These are the
+# whole sanctioned set -- caches, vendored trees, the scratch directory, and
+# schema migrations -- and the gate holds them rather than trusting the file, so
 # widening the scan surface is a deliberate edit to this list in a reviewed
 # commit instead of a silent edit to a JSON file.
+#
+# The migrations subtree is excluded because parallel CREATE TABLE scaffolding
+# across two migration files is the correct shape, not duplication: migrations
+# are replayed by name and each one is a standalone record of one schema step.
+# It is a subtree glob so a migration added tomorrow is covered without anyone
+# editing this list, which is the only way an exclusion stays true.
 SANCTIONED_IGNORE_GLOBS = (
     "**/__pycache__/**",
     "**/.pytest_cache/**",
@@ -32,6 +38,7 @@ SANCTIONED_IGNORE_GLOBS = (
     "**/node_modules/**",
     "**/.git/**",
     "**/fixtures/**",
+    "**/app/crawl/migrations/**",
 )
 
 
