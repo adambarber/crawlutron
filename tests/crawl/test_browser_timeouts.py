@@ -51,11 +51,15 @@ class TestWaitActionClamp:
 class _HangingPage(BrowserFakePage):
     async def goto(self, url, wait_until="load", **kwargs):
         self.goto_calls.append((url, kwargs))
-        await asyncio.sleep(5)
+        # A navigation that never resolves. Sleeping five real seconds was how
+        # this used to be "slow"; an Event nothing ever sets is slower than any
+        # budget the render could be given, so the ONLY thing that can end the
+        # wait is the navigation deadline the options carry.
+        await asyncio.Event().wait()
 
 
 class TestNavigationTimeout:
-    async def test_navigation_honors_timeout_seconds(self, monkeypatch, real_sleeps):
+    async def test_navigation_honors_timeout_seconds(self, monkeypatch):
         page = _HangingPage()
         renderer = build_pinned_renderer(monkeypatch, page)
         monkeypatch.setattr(
@@ -63,10 +67,18 @@ class TestNavigationTimeout:
             "_build_pinned_request",
             lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
         )
-        options = RenderOptions(timeout_seconds=1, max_retries=0)
-        result = await renderer.render(
-            "http://example.com/",
-            options,
-            policy=UNRESTRICTED_HOST_POLICY,
+        # The deadline is enforced with asyncio.wait_for, which is loop-time
+        # based, so the suite's zero-second sleep patch does not weaken it. The
+        # caller's own guard is what makes a deadline that stopped firing a
+        # FAILURE rather than a hang: a goto that never returns would
+        # otherwise wedge the run instead of reporting.
+        options = RenderOptions(timeout_seconds=0.05, max_retries=0)
+        result = await asyncio.wait_for(
+            renderer.render(
+                "http://example.com/",
+                options,
+                policy=UNRESTRICTED_HOST_POLICY,
+            ),
+            timeout=5.0,
         )
         assert result.classification == "navigation_timeout"

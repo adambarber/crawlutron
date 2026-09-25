@@ -1,7 +1,6 @@
 """Browser cookie store: cap, LRU eviction, isolation and concurrency."""
 
 import threading
-import time
 from collections import OrderedDict
 
 import pytest
@@ -38,7 +37,7 @@ def test_store_is_a_guarded_container_not_a_bare_ordered_dict(clean_cookie_store
     assert len(clean_cookie_store) == 1
 
 
-def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store, real_sleeps):
+def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     """The regression, scheduled rather than left to GIL luck.
 
     The pre-fix store was a bare ``OrderedDict`` and its read path was
@@ -87,7 +86,6 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store, real_sl
 
     def _evict() -> None:
         reader_in_window.wait(timeout=5)
-        time.sleep(0.02)  # let the reader settle inside the open window
         old_shape["brand.new.example"] = "v"
         while len(old_shape) > _BROWSER_COOKIES_MAX:
             old_shape.popitem(last=False)  # drops the victim the reader is about to touch
@@ -107,38 +105,84 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store, real_sl
     )
 
     # --- 2: the guarded store serializes the read, deterministically --------
-    # The discriminator is the store's own lock, not GIL timing: with it held
-    # by a probe, a concurrent read must WAIT rather than observe a
-    # half-evicted map. That is only true when the read path takes the lock,
-    # so it is exactly what an unguarded store cannot fake.
+    # The discriminator is the store's own lock, not GIL timing: the read path
+    # must take that lock, and it must be able to get it once the holder
+    # releases. Both facts are observable without a stopwatch -- one from a
+    # recording lock that counts acquisitions, one from an event handshake
+    # between the probe and the reader. The previous version asserted "the
+    # reader had not finished after 200ms", which is a bet about thread
+    # scheduling that a store with NO lock would often satisfy by accident, and
+    # that a slow box could break for no reason at all.
     store = clean_cookie_store
     assert hasattr(store, "_lock"), (
         "the cookie store has no lock; reads are unsynchronized and the "
         "eviction race is wide open"
     )
+
+    class _RecordingLock:
+        """Delegating lock that records which thread acquired it, and how often.
+
+        Per-thread, not just a total: the probe below deliberately holds the
+        lock, so a plain acquisition count would be satisfied by the probe
+        alone and would pass against exactly the lock-free read this test
+        exists to reject.
+        """
+
+        def __init__(self, inner):
+            self._inner = inner
+            self.acquisitions: dict[int, int] = {}
+
+        def acquire(self, *args, **kwargs):
+            me = threading.get_ident()
+            self.acquisitions[me] = self.acquisitions.get(me, 0) + 1
+            return self._inner.acquire(*args, **kwargs)
+
+        def release(self):
+            return self._inner.release()
+
+        def locked(self):
+            return self._inner.locked()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *exc):
+            self.release()
+            return False
+
+    real_lock = store._lock
+    recording = _RecordingLock(real_lock)
+    patch = pytest.MonkeyPatch()
+    patch.setattr(store, "_lock", recording)
     box: dict[str, str | None] = {}
-    release_lock = threading.Event()
+    lock_held = threading.Event()
+    read_done = threading.Event()
 
     def _hold_the_lock() -> None:
-        with store._lock:
-            release_lock.wait(timeout=5)
+        with recording:
+            lock_held.set()
+            read_done.wait(timeout=5)
 
     def _guarded_read() -> None:
-        box["value"] = get_browser_cookies_for(victim)
+        lock_held.wait(timeout=5)
+        try:
+            box["value"] = get_browser_cookies_for(victim)
+        finally:
+            read_done.set()
 
     probe = threading.Thread(target=_hold_the_lock)
     reader = threading.Thread(target=_guarded_read)
     probe.start()
-    time.sleep(0.1)  # let the probe take the lock
     reader.start()
-    time.sleep(0.2)
-    assert "value" not in box, (
-        "the read finished while another thread held the store lock; the read "
-        "path is not serialized by the guard"
-    )
-    release_lock.set()
-    reader.join(timeout=5)
     probe.join(timeout=5)
+    reader.join(timeout=5)
+    patch.undo()
+
+    assert recording.acquisitions.get(reader.ident, 0) > 0, (
+        "the read path never took the store lock: reads are unsynchronized and "
+        "the eviction race is wide open"
+    )
     assert box.get("value") is not None, (
         "the read did not return the value once the lock was released"
     )
@@ -208,7 +252,6 @@ def test_lru_keeps_recently_used():
 
 
 @pytest.mark.real_cffi
-@pytest.mark.usefixtures("real_sleeps")
 async def test_cffi_session_does_not_replay_cookies_it_received(base_url):
     """The impersonated session's own jar must be inert (store nothing, replay
     nothing); a cookie it saw on one request must never come back on the next.

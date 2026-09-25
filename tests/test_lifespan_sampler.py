@@ -1,11 +1,8 @@
 """N10: lifespan installs the readiness utilization sampler at startup and
 uninstalls it at shutdown (symmetry with M11's wiring)."""
 
-import pytest
-
 
 class TestLifespanSamplerSymmetry:
-    @pytest.mark.usefixtures("real_sleeps")
     async def test_shutdown_uninstalls_utilization_sampler(self, monkeypatch):
         from app import main as main_mod
         from app.crawl.strategies import http_client_pool as http_mod

@@ -34,7 +34,7 @@ def test_gate_construction_never_starts_probe(monkeypatch):
     assert gate._lag_probe._task is None
 
 
-async def test_gate_probe_starts_explicitly_on_running_loop(monkeypatch, real_sleeps):
+async def test_gate_probe_starts_explicitly_on_running_loop(monkeypatch):
     monkeypatch.setattr(rp, "_LOOP_LAG_PROBE_ENABLED", True)
     gate = ResourceGate()
     gate.start_lag_probe()

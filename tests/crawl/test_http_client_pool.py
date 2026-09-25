@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from _async_harnesses import run_loop_rebind_scenario
+from _timing_harnesses import await_until
 from curl_cffi.requests import AsyncSession
 
 import app.crawl.strategies.fetchers as fetchers_mod
@@ -223,7 +224,7 @@ def test_superseded_client_is_queued_for_close_when_no_loop_is_running(builder, 
 
 
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_queued_superseded_client_is_closed_by_the_next_drain(builder, getter, slot, fake, monkeypatch, real_sleeps):
+def test_queued_superseded_client_is_closed_by_the_next_drain(builder, getter, slot, fake, monkeypatch):
     """Tracking pays off only if a live loop eventually closes the client."""
     first, _second = _supersede_without_loop(monkeypatch, builder, getter, fake)
     assert first.closed is False
@@ -303,7 +304,7 @@ def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fa
 
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
 def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(
-    builder, getter, slot, fake, monkeypatch, real_sleeps
+    builder, getter, slot, fake, monkeypatch
 ):
     """Inverse case: the queue must not have replaced the immediate close.
 
@@ -315,15 +316,13 @@ def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(
     """
     monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
 
-    first, second = asyncio.run(
-        run_loop_rebind_scenario(lambda: getattr(http_mod, getter)(), delay=0.1)
-    )
+    first, second = asyncio.run(run_loop_rebind_scenario(lambda: getattr(http_mod, getter)()))
     assert second is not first
     assert getattr(http_mod, slot) is second, f"{getter} did not publish the rebuilt client in {slot}"
     assert first.closed is True, f"{getter} superseded a client without closing it on the live loop"
 
 
-def test_both_singletons_queue_through_one_shared_implementation(monkeypatch, real_sleeps):
+def test_both_singletons_queue_through_one_shared_implementation(monkeypatch):
     """The anti-divergence guard: one reaper, two call sites.
 
     Both getters must reach the same queueing code, so a future pooled client
@@ -366,7 +365,7 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatc
     assert second in queued, "a superseded session was dropped when the rebuild failed"
 
 
-def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch, real_sleeps):
+def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
     """Coverage: a queued close is only released if the cffi path drains too.
 
     The http fetcher drains on every request; the cffi fetcher never did, so
@@ -475,18 +474,22 @@ def test_real_pooled_classes_have_no_synchronous_close():
     assert not hasattr(AsyncSession, "is_closed"), "cffi now publishes is_closed"
 
 
-def test_displaced_client_is_actually_released_when_a_loop_is_running(real_sleeps):
+def test_displaced_client_is_actually_released_when_a_loop_is_running():
     """D1: the cap's displacement must reach a real close, not a reference drop.
 
-    Needs real_sleeps: the await below must genuinely yield to the loop so the
-    scheduled close actually runs during the scenario, not as an artifact of
-    asyncio.run's teardown.
+    The wait is on the close itself: ``_release_dropped_client`` schedules the
+    teardown, and this scenario returns as soon as the scheduled coroutine has
+    finished. A fixed sleep could only ever sample the flag afterwards, which is
+    a bet about how quickly the loop got round to running the task.
     """
     displaced = _RealShapedHttpClient()
 
     async def _scenario():
         http_mod._release_dropped_client(displaced)
-        await asyncio.sleep(0.05)
+        await await_until(
+            lambda: displaced.closed,
+            "the displaced client's teardown never ran on a live loop",
+        )
 
     asyncio.run(_scenario())
     assert displaced.closed is True, (
@@ -494,16 +497,19 @@ def test_displaced_client_is_actually_released_when_a_loop_is_running(real_sleep
     )
 
 
-def test_displaced_cffi_session_is_released_not_dropped(real_sleeps):
+def test_displaced_cffi_session_is_released_not_dropped():
     """D1, cffi kind: the coroutine ``close`` is the only teardown it has.
 
-    Needs real_sleeps for the same reason as its httpx twin above.
+    Waits on the close for the same reason as its httpx twin above.
     """
     displaced = _RealShapedSession()
 
     async def _scenario():
         http_mod._release_dropped_client(displaced)
-        await asyncio.sleep(0.05)
+        await await_until(
+            lambda: displaced.closed,
+            "the displaced AsyncSession's teardown never ran on a live loop",
+        )
 
     asyncio.run(_scenario())
     assert displaced.closed is True, "a displaced AsyncSession was reference-dropped"
@@ -544,7 +550,7 @@ def test_none_displacement_is_a_noop():
     http_mod._release_dropped_client(None)
 
 
-def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch, real_sleeps):
+def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
     """D2: the eager close must fire for a session with no ``is_closed``.
 
     Driven through the production ``get_cffi_session`` rebuild path with a
@@ -574,7 +580,7 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch, real_
     )
 
 
-def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch, real_sleeps):
+def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch):
     """Inverse: moving the gate to the descriptor predicate must not cost the
     pooled httpx client the eager close it already had.
     """
@@ -593,39 +599,58 @@ def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch, real
     assert first.closed is True, "the pooled httpx client lost its eager close"
 
 
-def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypatch, real_sleeps):
+def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypatch):
     """Boundary: the descriptor predicate still recognises a closed client.
 
     A client the caller reports as closed owns no live sockets, so the rebuild
-    must drop it quietly instead of scheduling a pointless teardown task. The
-    assertion is an event, not a task-count diff: a close scheduled on the
-    loop may already have finished by the time the next statement runs, so
-    "no new task visible" would prove nothing. ``closed`` is only ever set by
-    the close coroutine itself, so observing it flip is positive evidence a
-    teardown was scheduled.
+    must drop it quietly instead of scheduling a pointless teardown task.
+
+    The assertion is on the scheduling seam, not on a task-count diff and not
+    on a flag sampled after a hopeful pause: ``_safe_aclose`` is spied, and a
+    single loop yield is enough for a teardown that WAS scheduled to have run
+    to completion. So "the spy was never called" is positive evidence that
+    nothing was scheduled, and ``closed`` is only ever set by the close
+    coroutine itself, so its staying False says the same thing a second way.
     """
+    scheduled: list[object] = []
+    real_safe_aclose = http_mod._safe_aclose
 
-    def _build(*args, **kwargs):
-        client = _RealShapedHttpClient()
-        client._bound_loop = asyncio.get_running_loop()
-        return client
+    async def _spy(client):
+        scheduled.append(client)
+        return await real_safe_aclose(client)
 
-    monkeypatch.setattr(http_mod, "_build_async_client", _build)
+    http_mod._safe_aclose = _spy
+    try:
 
-    async def _scenario():
-        first = http_mod.get_async_http_client()
-        first.is_closed = True  # someone else already closed it
-        first.closed = False  # would flip only if a teardown were scheduled
-        second = http_mod.get_async_http_client()
-        await asyncio.sleep(0.05)
-        return first, second
+        def _build(*args, **kwargs):
+            client = _RealShapedHttpClient()
+            client._bound_loop = asyncio.get_running_loop()
+            return client
 
-    first, second = asyncio.run(_scenario())
+        monkeypatch.setattr(http_mod, "_build_async_client", _build)
+
+        async def _scenario():
+            first = http_mod.get_async_http_client()
+            first.is_closed = True  # someone else already closed it
+            first.closed = False  # would flip only if a teardown were scheduled
+            second = http_mod.get_async_http_client()
+            # One yield is enough for a scheduled teardown to run: the task is
+            # put on the ready queue by ensure_future, and this hands the loop
+            # back exactly once, so the coroutine starts and (itself yielding
+            # once) finishes.
+            await asyncio.sleep(0)
+            return first, second
+
+        first, second = asyncio.run(_scenario())
+    finally:
+        http_mod._safe_aclose = real_safe_aclose
+
     assert second is not first, "a closed pooled client must be rebuilt"
+    assert scheduled == [], "an already-closed client was scheduled for close"
     assert first.closed is False, "an already-closed client was scheduled for close"
 
 
-def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkeypatch, real_sleeps):
+def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkeypatch):
     """D2's generalization: the closed-decision belongs to the descriptor.
 
     The merged guard probed for an attribute name (``is_closed``) instead of

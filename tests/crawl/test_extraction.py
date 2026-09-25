@@ -3,7 +3,7 @@ import logging
 """Content extraction: markdown/text extraction, selector timeouts, bounds and single-pass parsing."""
 
 import asyncio
-import time
+import threading
 
 import bs4
 import pytest
@@ -358,11 +358,12 @@ def _reset_doc_extraction_pool():
     yield
 
 
-async def test_extract_document_timeout_is_enforced(monkeypatch, real_sleeps):
+async def test_extract_document_timeout_is_enforced(monkeypatch):
     """A document extraction exceeding the wall-clock timeout returns None (F5).
 
-    Uses ``real_sleeps`` because the slow extraction is simulated with a real
-    ``time.sleep`` which the autouse ``fast_sleeps`` no-ops.
+    The hang lives in the worker SUBPROCESS and is injected there through the
+    environment, so the suite's in-process sleep patch is irrelevant to it --
+    which is why this test never actually needed real sleeps.
     """
     # Use env var to signal test hang to the worker subprocess (inherited).
     monkeypatch.setenv("TEST_MARKITDOWN_HANG", "1")
@@ -435,9 +436,13 @@ async def test_extract_document_normal_works(monkeypatch):
 # ============================================================
 
 
-async def test_extract_document_process_pool_isolation(monkeypatch, real_sleeps):
+async def test_extract_document_process_pool_isolation(monkeypatch):
     """Document extraction runs in a separate process so a hang can be killed
     and does not degrade the shared thread pool.
+
+    The kill is injected into the worker SUBPROCESS via the environment, so the
+    suite's in-process sleep patch is irrelevant to it -- which is why this
+    test never actually needed real sleeps.
     """
     # Use a very short timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
@@ -470,7 +475,7 @@ async def test_extract_document_process_pool_normal_works(monkeypatch):
     assert isinstance(result, ext_mod.ExtractedContent)
 
 
-async def test_extract_document_recovers_after_timeout(monkeypatch, real_sleeps):
+async def test_extract_document_recovers_after_timeout(monkeypatch):
     """After a timed-out (killed) extraction, the next call still works.
 
     Adversarial perf #3.2: a killed worker must not leave a zombie that stalls
@@ -510,19 +515,33 @@ async def test_test_hooks_inert_without_gate(monkeypatch):
     assert gated.markdown == "## hijacked"
 
 
-def test_css_selector_slow_must_not_hang(monkeypatch, real_sleeps):
+def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
+    """A selector that never returns must be bounded, not awaited.
+
+    The stub blocks on an Event nothing ever sets, for far longer than any
+    timeout this test could afford, so the ONLY thing that can end the wait is
+    ``_EXTRACTION_SELECTOR_TIMEOUT`` firing inside ``_eval_selector``. The
+    warning is the load-bearing assertion: "timed out" and "matched nothing"
+    both yield ``ExtractedContent(None, None)``, so without it a selector
+    timeout that stopped firing would still pass -- which is exactly what
+    happened when this test slept 3 real seconds against a patched no-op sleep
+    and so never exercised the timeout at all.
+    """
+    never_released = threading.Event()
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     monkeypatch.setattr(
         bs4.BeautifulSoup,
         "select",
-        lambda self, selector: time.sleep(3) or [],
+        lambda self, selector: never_released.wait(timeout=30) or [],
     )
     html = "<html><body><p class='x'>hi</p></body></html>"
-    start = time.monotonic()
-    result = _extract_selected(html, "http://example.com/", css_selector=".x")
-    elapsed = time.monotonic() - start
-    assert elapsed < 1.0, "slow CSS selector was not bounded by the timeout"
+    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+        result = _extract_selected(html, "http://example.com/", css_selector=".x")
     assert result == ExtractedContent(None, None)
+    assert "extraction_selector_timeout" in caplog.text, (
+        "the CSS selector returned empty rather than timing out: the extraction "
+        "selector deadline did not fire"
+    )
 
 
 def test_css_selector_fast_still_works(monkeypatch):
@@ -534,20 +553,33 @@ def test_css_selector_fast_still_works(monkeypatch):
 
 
 class _SlowFakeTree:
+    """An XPath tree whose evaluation blocks far past the selector deadline."""
+
+    def __init__(self) -> None:
+        self.never_released = threading.Event()
+
     def xpath(self, expr):
-        time.sleep(3)
-        return []
+        return self.never_released.wait(timeout=30) or []
 
 
-def test_xpath_selector_slow_must_not_hang(monkeypatch, real_sleeps):
+def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
+    """The XPath twin of the CSS test: same instrument, same warning assertion.
+
+    "Timed out" and "matched nothing" both return ``ExtractedContent(None, None)``,
+    so the warning is what distinguishes a working deadline from a deadline that
+    quietly stopped firing.
+    """
+    tree = _SlowFakeTree()
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
-    monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: _SlowFakeTree())
+    monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: tree)
     html = "<html><body><p>x</p></body></html>"
-    start = time.monotonic()
-    result = _extract_selected(html, "http://example.com/", xpath="//p")
-    elapsed = time.monotonic() - start
-    assert elapsed < 1.0, "slow XPath was not bounded by the timeout"
+    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+        result = _extract_selected(html, "http://example.com/", xpath="//p")
     assert result == ExtractedContent(None, None)
+    assert "extraction_selector_timeout" in caplog.text, (
+        "the XPath expression returned empty rather than timing out: the "
+        "extraction selector deadline did not fire"
+    )
 
 
 def test_xpath_selector_fast_still_works(monkeypatch):

@@ -17,7 +17,10 @@ from app.validation import registrable_domain
 
 class _FakeContext:
     async def cookies(self, url):
-        await asyncio.sleep(0.01)
+        # A scheduling point, not a duration: the point of the test is that the
+        # harvest is AWAITED, so the assertion is on what the synchronous store
+        # read sees after the await returns.
+        await asyncio.sleep(0)
         return [{"name": "sess", "value": "abc123"}]
 
 
@@ -27,7 +30,7 @@ class _FakePage:
 
 
 class TestCookieHarvestCompletes:
-    async def test_harvest_visible_to_immediate_retry(self, real_sleeps):
+    async def test_harvest_visible_to_immediate_retry(self):
         url = "http://harvest-race.test/page"
         domain = registrable_domain(url)
         old = browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
@@ -54,7 +57,7 @@ class TestHarvestWaitBounded:
     """N6: a wedged cookies() must not hold the pooled renderer for the
     whole per-URL budget; the finally-block caps the harvest wait."""
 
-    async def test_render_finally_harvest_timeout(self, real_sleeps, monkeypatch):
+    async def test_render_finally_harvest_timeout(self, monkeypatch):
         from _browser_doubles import BrowserFakePage, build_pinned_renderer
 
         from app.crawl.strategies.browser import BrowserRenderer, RenderOptions
@@ -66,6 +69,15 @@ class TestHarvestWaitBounded:
             page = BrowserFakePage()
             page.context = _WedgedContext()
             renderer = build_pinned_renderer(monkeypatch, page)
+            # The cap is the thing under test, so it is driven to a value the
+            # test can afford rather than observed as five elapsed seconds. The
+            # deadline is enforced with ``asyncio.wait_for``, which is loop-time
+            # based and therefore unaffected by the suite's zero-second sleep
+            # patch -- the old version needed real sleeps purely to let the
+            # five-second default expire, which is a slow way to assert "the cap
+            # fired". The resolution path itself is covered by
+            # ``_harvest_timeout_for``.
+            monkeypatch.setattr(renderer, "_harvest_timeout_seconds", 0.05)
 
             close_calls: list[bool] = []
 
@@ -81,13 +93,9 @@ class TestHarvestWaitBounded:
                     policy=UNRESTRICTED_HOST_POLICY,
                 )
 
-            loop = asyncio.get_running_loop()
-            started = loop.time()
             await asyncio.wait_for(call_finally(), timeout=10.0)
-            elapsed = loop.time() - started
 
-            # The 5s harvest cap fired; page close still happened afterwards.
-            assert 4.0 < elapsed < 9.5
+            # The harvest cap fired; page close still happened afterwards.
             assert close_calls == [True]
             # No cookies were stored from the wedged context.
             assert browser_mod.get_browser_cookies_for(domain) is None

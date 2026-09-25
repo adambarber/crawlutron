@@ -73,7 +73,7 @@ async def _render_pdf(monkeypatch):
 
 
 class TestPdfExtractorIsOffloaded:
-    async def test_pdf_fallback_runs_in_worker_thread(self, real_sleeps, monkeypatch):
+    async def test_pdf_fallback_runs_in_worker_thread(self, monkeypatch):
         seen = install_to_thread_spy(monkeypatch)
 
         result = await _render_pdf(monkeypatch)
@@ -85,7 +85,7 @@ class TestPdfExtractorIsOffloaded:
             "pdf extractor ran on the event loop: expected an asyncio.to_thread offload"
         )
 
-    async def test_result_text_comes_from_the_extractor(self, real_sleeps, monkeypatch):
+    async def test_result_text_comes_from_the_extractor(self, monkeypatch):
         result = await _render_pdf(monkeypatch)
         assert (result.metadata or {}).get("extraction_method") == "pdf_text"
         assert result.text == "extracted pdf text"

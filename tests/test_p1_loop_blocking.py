@@ -13,12 +13,12 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-import time
 from pathlib import Path
 
 import pytest
 from _fetcher_factories import site_fetcher
 from _job_harnesses import make_job_store
+from _timing_harnesses import HANG_GUARD_SECONDS
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
@@ -31,40 +31,47 @@ from app.crawl.job_store import JobStatus
 class _LoopLiveness:
     """A counter only the event loop can advance.
 
-    Blocking work spins on it from a worker thread and returns once the loop
-    has ticked ``needed`` times. The same work run *on* the loop observes zero
-    progress, so a fix that keeps it on the loop fails on the count.
+    The heartbeat runs on the loop and bumps the count under a
+    ``threading.Condition``; the blocking work waits on that condition and
+    returns how far the loop got. The same work run *on* the loop can never
+    tick it, so it observes zero progress and fails on the count.
+
+    This was a wall-clock race before: the heartbeat slept 0.01s a hundred
+    times to accumulate ticks while the worker busy-spun on ``time.sleep``.
+    The condition removes the race entirely -- the worker is woken BY the tick
+    it was waiting for, so there is no rate at which the loop has to tick for
+    the assertion to hold, and no timeout in the success path at all.
     """
 
     def __init__(self, needed: int = 3) -> None:
         self.needed = needed
         self.ticks = 0
+        self._condition = threading.Condition()
 
     async def heartbeat(self) -> None:
-        for _ in range(600):
-            await asyncio.sleep(0.01)
-            self.ticks += 1
+        while True:
+            await asyncio.sleep(0)
+            with self._condition:
+                self.ticks += 1
+                self._condition.notify_all()
 
-    def wait_for_progress(self, timeout: float = 5.0) -> int:
+    def wait_for_progress(self, timeout: float = HANG_GUARD_SECONDS) -> int:
         """Blocking worker: return how far the loop advanced while we waited.
 
         The baseline is snapshotted on entry, so the count can only be
-        satisfied by ticks that land WHILE the blocking work is in flight —
+        satisfied by ticks that land WHILE the blocking work is in flight --
         the same work run on the loop observes zero and fails on the count.
         """
-        baseline = self.ticks
-        deadline = time.monotonic() + timeout
-        while self.ticks - baseline < self.needed:
-            if time.monotonic() > deadline:
-                break
-            time.sleep(0.01)
-        return self.ticks - baseline
+        with self._condition:
+            baseline = self.ticks
+            self._condition.wait_for(lambda: self.ticks - baseline >= self.needed, timeout=timeout)
+            return self.ticks - baseline
 
     async def run_with_heartbeat(self, work, *, timeout: float):
         """Await ``work()`` with the heartbeat ticking; cancel the tick task.
 
-        The shared scenario scaffolding — spawn the heartbeat task, bound
-        the run, and cancel the heartbeat no matter how the work exits —
+        The shared scenario scaffolding — spawn the heartbeat task, bound the
+        run, and cancel the heartbeat no matter how the work exits —
         exists here and nowhere else, so a test cannot forget the ``finally``
         and leak the heartbeat into the next test's tick count.
         """
@@ -75,12 +82,16 @@ class _LoopLiveness:
             hb.cancel()
 
 
-async def _wait_for(flag: threading.Event, *, timeout: float = 5.0, reason: str) -> None:
-    for _ in range(int(timeout / 0.02)):
-        if flag.is_set():
-            return
-        await asyncio.sleep(0.02)
-    pytest.fail(f"{reason} (waited {timeout}s)")
+async def _wait_for(flag: threading.Event, *, reason: str) -> None:
+    """Block until a worker thread sets ``flag``.
+
+    ``flag`` is a ``threading.Event`` because it is set from a worker thread,
+    and the wait runs in a thread too -- so the event loop stays free to run
+    whatever it is the loop's job to run. A poll loop here would hold the GIL
+    for exactly as long as it is waiting on the thread that wants it.
+    """
+    if not await asyncio.to_thread(flag.wait, HANG_GUARD_SECONDS):
+        pytest.fail(f"{reason} (no signal within {HANG_GUARD_SECONDS}s)")
 
 
 def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> list[bool]:
@@ -137,7 +148,7 @@ class TestContentCacheDiskIOOffTheLock:
         return offenders
 
     async def test_envelope_read_does_not_hold_the_lock(
-        self, real_sleeps, monkeypatch, tmp_path
+        self, monkeypatch, tmp_path
     ) -> None:
         cache = ContentCache(
             str(tmp_path),
@@ -172,10 +183,17 @@ class TestContentCacheDiskIOOffTheLock:
             reading = asyncio.ensure_future(cache.aget("big"))
             await _wait_for(read_started, reason="the envelope read never started")
             # A loop-side lock holder (aset's index commit) must be able to
-            # finish while the envelope read is still in flight.
+            # finish while the envelope read is still in flight. Yield the loop
+            # until it has, rather than sleeping a hopeful tenth of a second and
+            # asking whether it had: the writer either finished or it did not,
+            # and the read is held open for the whole window either way.
             writer = asyncio.ensure_future(cache.aset("other", {"v": 1}))
-            await asyncio.sleep(0.1)
-            writer_finished_while_reading = writer.done()
+            try:
+                await asyncio.wait_for(asyncio.shield(writer), timeout=1.0)
+            except TimeoutError:
+                writer_finished_while_reading = False
+            else:
+                writer_finished_while_reading = True
             release.set()
             await asyncio.wait_for(reading, timeout=5)
             await asyncio.wait_for(writer, timeout=5)
@@ -302,7 +320,7 @@ class TestJobRunnerSavesOffTheEventLoop:
     must not run on the event loop."""
 
     async def test_save_does_not_block_the_event_loop(
-        self, real_sleeps, monkeypatch, tmp_path
+        self, monkeypatch, tmp_path
     ) -> None:
         store = make_job_store(str(tmp_path))
         job = store.create("http://example.com/", {})
@@ -354,7 +372,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(
-        self, real_sleeps, monkeypatch, tmp_path
+        self, monkeypatch, tmp_path
     ) -> None:
         from _job_harnesses import make_job_store
 
@@ -420,7 +438,7 @@ class TestSpillAssemblyOffTheEventLoop:
     blocking work and must not run on the event loop."""
 
     async def test_load_ordered_does_not_block_the_event_loop(
-        self, real_sleeps, monkeypatch
+        self, monkeypatch
     ) -> None:
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking read-back

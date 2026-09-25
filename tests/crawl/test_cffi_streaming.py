@@ -6,6 +6,7 @@ import os
 import time
 
 import pytest
+from _timing_harnesses import await_until
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 from helpers.server import spawn_threaded_server
@@ -53,10 +54,11 @@ class TestCffiImpersonateStrategy:
 
 
 class TestCffiFetcherLiveFetch:
-    async def test_http_cffi_import_fallback(self, real_sleeps):
-        # Live impersonated fetch: needs real wall-clock sleeps -- the suite's
-        # instant-asyncio.sleep patch starves curl_cffi's socket/timer loop
-        # and wedges the transfer past all client timeouts.
+    async def test_http_cffi_import_fallback(self):
+        # Live impersonated fetch. curl_cffi's socket/timer watchdog needs the
+        # event loop to make real progress, which is why this used to need real
+        # sleeps -- the suite's zero-second patch used to be a no-op that never
+        # yielded at all. It yields now, so the transfer progresses.
         from helpers.server import spawn_server
 
         server = spawn_server()
@@ -169,25 +171,24 @@ async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch)
     assert response.awaited is False, "abandoning must not await a live producer"
 
 
-async def test_cancellation_of_the_queue_wait_releases_the_handle(real_sleeps, monkeypatch):
+async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
     """The cancel exit: the engine's per-URL budget cancels fetches routinely.
 
-    Needs real_sleeps: the wait below polls with ``asyncio.sleep``, which the
-    autouse fast_sleeps patch makes a no-op, and a no-op sleep never yields to
-    the event loop -- the fetch task would never be scheduled and this poll
-    would spin until its deadline. Real sleeps are what let the two tasks
-    interleave at all.
+    The wait below is on the named state -- the fetch has taken the session
+    and the producer is wedged in the queue -- not on a deadline of seconds.
+    It used to need real sleeps only because the poll's ``asyncio.sleep`` was a
+    no-op that never yielded, so the fetch task could never be scheduled at
+    all; the zero-second patch yields now, so the poll works without wall time.
     """
     response = _Response([b"first"])  # then the producer wedges forever
     session = _patch_session(monkeypatch, response)
     released = _scheduled_closes(monkeypatch)
 
     fetch = asyncio.create_task(_default_cffi_fetcher(URL, {}, 5, 4096))
-    deadline = time.monotonic() + 10.0
-    while not (session.gets and response.queue.drained):
-        if time.monotonic() > deadline:
-            pytest.fail("cffi fetch never reached the streaming queue wait")
-        await asyncio.sleep(0.01)
+    await await_until(
+        lambda: bool(session.gets) and response.queue.drained,
+        "the cffi fetch never reached the streaming queue wait",
+    )
     fetch.cancel()
     with pytest.raises(asyncio.CancelledError):
         await fetch
@@ -411,12 +412,13 @@ async def _fetch_twice(base_url):
     return r1, r2
 
 
-async def test_cffi_session_reused_across_requests(base_url, monkeypatch, real_sleeps):
+async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
     """Two sequential fetches must construct exactly one AsyncSession.
 
-    Needs real wall-clock sleeps: curl_cffi's socket/timer watchdog uses
-    ``asyncio.sleep`` and the suite's instant-sleep patch would starve it
-    (same reason as ``test_http_cffi_import_fallback``).
+    curl_cffi's socket/timer watchdog needs the event loop to make real
+    progress, which is why this used to need real sleeps -- the suite's
+    zero-second patch used to be a no-op that never yielded at all. It yields
+    now, so the transfers progress.
     """
     import curl_cffi.requests as cffi_mod
 

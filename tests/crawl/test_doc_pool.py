@@ -200,29 +200,34 @@ def test_acquire_gives_up_instead_of_wedging_on_a_stuck_busy_flag(fake_pool):
     assert elapsed < 30.0, f"acquisition should degrade promptly, took {elapsed:.1f}s"
 
 
-def test_acquire_returns_promptly_when_a_worker_is_released(fake_pool, real_sleeps):
+def test_acquire_returns_promptly_when_a_worker_is_released(fake_pool):
     """The bound must not degrade the healthy path: a release wakes a waiter.
 
     ``_POOL_LOCK.wait(timeout)`` has to keep behaving like a condition wait --
     notified, not polled -- or every document pays the poll interval in latency.
+    The ordering is a handshake, not a pause: the waiter announces that it has
+    entered acquisition, the main thread only then frees the slot, so a
+    condition wait is the only thing that can produce the observed result. The
+    old version slept 200ms first and merely observed that nothing had come
+    back yet, which the release-then-wait version would also have satisfied.
     """
     busy = _stub_worker(5555)
     busy.busy = True
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [busy]
 
-    # Generous bound: this test would also pass if the waiter simply ran to the
-    # deadline, so the timing assertion below is what proves the notify woke it.
     box: dict[str, object] = {}
+    waiter_entered = threading.Event()
 
     def _call() -> None:
+        waiter_entered.set()
         box["worker"] = ext_mod._acquire_doc_worker()
 
     thread = threading.Thread(target=_call, daemon=True)
     thread.start()
     try:
-        time.sleep(0.2)
-        assert not box, "waiter returned before a worker was released"
+        assert waiter_entered.wait(timeout=5), "the waiter never started acquiring"
+        # Hand the slot over and notify, exactly like a real release would.
         with ext_mod._POOL_LOCK:
             busy.busy = False
             ext_mod._POOL_LOCK.notify_all()
@@ -295,60 +300,118 @@ class _LockWatcherProc(_StubProc):
         super().terminate()
 
 
-def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool, real_sleeps):
-    """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
+def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
+        """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
+        A caller blocked behind a slow in-lock operation must not find its whole
+        budget already spent when it finally enters -- it would then report "no
+        worker" for a pool that had a usable slot freed the entire time it waited.
+        The deadline is therefore computed after the lock is acquired.
 
-    A caller blocked behind a slow in-lock operation must not find its whole
-    budget already spent when it finally enters -- it would then report "no
-    worker" for a pool that had a usable slot freed the entire time it waited.
-    The deadline is therefore computed after the lock is acquired.
-    """
-    bound = 0.5
-    fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
-    worker = _stub_worker(6060)
-    worker.busy = True
-    with ext_mod._POOL_LOCK:
-        ext_mod._DOC_POOL = [worker]
-
-    box: dict[str, object] = {}
-
-    def _acquire() -> None:
-        box["worker"] = ext_mod._acquire_doc_worker()
-
-    holder_ready = threading.Event()
-    holder_done = threading.Event()
-
-    def _hold_then_free() -> None:
-        # Hold the pool lock past the acquirer's bound: this is the
-        # blocked-behind-a-slow-retirement window. The slot is deliberately
-        # STILL busy at release, so an acquirer that enters must wait.
+        The holder waits a real, bounded span under the lock -- the adverse
+        condition, and the only reason a wall clock appears here at all. The
+        assertion is on what the acquirer returned, and the test proves its own
+        precondition first: the acquirer is observed INSIDE the lock, with the
+        slot still busy, at the moment the budget is computed. The D5(a) mutant
+        (budget computed before the lock) then leaves it with an elapsed budget,
+        it gives up, and ``box["worker"]`` is ``None`` -- deterministically, not
+        by a race over which thread wins the lock.
+        """
+        bound = 0.5
+        fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
+        worker = _stub_worker(6060)
+        worker.busy = True
         with ext_mod._POOL_LOCK:
-            holder_ready.set()
-            time.sleep(bound * 2)
-        # Let the acquirer enter and (post-fix) park on the condition, then
-        # free the slot and notify, exactly like a real release would.
-        time.sleep(bound / 2)
-        with ext_mod._POOL_LOCK:
-            worker.busy = False
-            ext_mod._POOL_LOCK.notify_all()
-        holder_done.set()
+            ext_mod._DOC_POOL = [worker]
 
-    acquirer = threading.Thread(target=_acquire, daemon=True)
-    holder = threading.Thread(target=_hold_then_free, daemon=True)
-    holder.start()
-    assert holder_ready.wait(timeout=5), "the lock holder never started"
-    acquirer.start()
-    try:
-        acquirer.join(timeout=10)
-    finally:
-        holder_done.wait(timeout=10)
-        holder.join(timeout=10)
+        # The pool lock is instrumented so the test can PROVE the precondition
+        # it is asserting about: the acquirer has to be inside the lock, with
+        # the slot still busy, at the moment its budget is computed. Without
+        # that, an acquirer that happened to enter after the holder freed the
+        # slot would collect the worker with a budget it never spent and the
+        # test would pass against the D5(a) regression it exists to catch.
+        acquirer_thread: dict[str, int] = {}
+        acquirer_inside = threading.Event()
 
-    assert not acquirer.is_alive(), "_acquire_doc_worker wedged behind the lock holder"
-    assert box.get("worker") is worker, (
-        "acquire burned its whole budget waiting for the pool lock and then gave "
-        "up, even though a usable slot was freed while it waited"
-    )
+        class _RecordingLock:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def acquire(self, *args, **kwargs):
+                got = self._inner.acquire(*args, **kwargs)
+                if threading.get_ident() == acquirer_thread.get("id"):
+                    acquirer_inside.set()
+                return got
+
+            def release(self):
+                return self._inner.release()
+
+            def locked(self):
+                return self._inner.locked()
+
+            def wait(self, *args, **kwargs):
+                return self._inner.wait(*args, **kwargs)
+
+            def notify(self, *args):
+                return self._inner.notify(*args)
+
+            def notify_all(self):
+                return self._inner.notify_all()
+
+            def __enter__(self):
+                self.acquire()
+                return self
+
+            def __exit__(self, *exc):
+                self.release()
+                return False
+
+        real_lock = ext_mod._POOL_LOCK
+        fake_pool.setattr(ext_mod, "_POOL_LOCK", _RecordingLock(real_lock), raising=False)
+
+        box: dict[str, object] = {}
+
+        def _acquire() -> None:
+            acquirer_thread["id"] = threading.get_ident()
+            box["worker"] = ext_mod._acquire_doc_worker()
+
+        holder_ready = threading.Event()
+        holder_done = threading.Event()
+
+        def _hold_then_free() -> None:
+            # Hold the pool lock past the acquirer's budget: this is the
+            # blocked-behind-a-slow-retirement window. The slot is deliberately
+            # STILL busy at release, so an acquirer that enters must wait.
+            # ``Event.wait`` rather than ``time.sleep``: the suite patches the
+            # latter to a no-op, and the lock has to be held for real seconds or
+            # the budget is never actually exceeded.
+            with ext_mod._POOL_LOCK:
+                holder_ready.set()
+                threading.Event().wait(bound * 2)
+            # The acquirer is now inside the lock with the slot still busy and
+            # its budget already elapsed -- exactly the D5(a) failure point. Only
+            # now is the slot freed and the waiter notified, like a real release.
+            assert acquirer_inside.wait(timeout=10), "the acquirer never entered the pool lock"
+            with ext_mod._POOL_LOCK:
+                worker.busy = False
+                ext_mod._POOL_LOCK.notify_all()
+            holder_done.set()
+
+        acquirer = threading.Thread(target=_acquire, daemon=True)
+        holder = threading.Thread(target=_hold_then_free, daemon=True)
+        holder.start()
+        assert holder_ready.wait(timeout=5), "the lock holder never started"
+        acquirer.start()
+        try:
+            acquirer.join(timeout=10)
+        finally:
+            holder_done.wait(timeout=10)
+            holder.join(timeout=10)
+
+        assert not acquirer.is_alive(), "_acquire_doc_worker wedged behind the lock holder"
+        assert box.get("worker") is worker, (
+            "acquire burned its whole budget waiting for the pool lock and then gave "
+            "up, even though a usable slot was freed while it waited"
+        )
 
 
 def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
@@ -478,7 +541,6 @@ def seeded_doc_pool(monkeypatch):
 
 
 class TestLifespanDocPoolTeardown:
-    @pytest.mark.usefixtures("real_sleeps")
     async def test_shutdown_retires_the_document_workers(self, monkeypatch, seeded_doc_pool):
         """The document pool must be torn down by the production lifespan.
 

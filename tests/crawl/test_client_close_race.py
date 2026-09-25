@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 
+from _timing_harnesses import await_until
+
 from app.crawl.strategies import http_client_pool as http_mod
 
 
@@ -45,21 +47,22 @@ def test_schedule_client_close_survives_a_closed_loop(monkeypatch):
     asyncio.run(_drive())
 
 
-def test_schedule_client_close_schedules_on_a_live_loop(real_sleeps):
+def test_schedule_client_close_schedules_on_a_live_loop():
     """The happy path still schedules the close and holds it to completion.
 
-    ``real_sleeps`` is required: the assertion depends on the *scheduled* task
-    actually running while we yield, which the autouse fast-sleep stub (no
-    real yield) starves -- rule #1810.
+    The wait is on the close, not on a pause: the scheduled task sets
+    ``closed``, so the loop is handed back until it has -- which is the
+    observable. The inflight strong-reference set keeps the task alive until
+    then, so a close scheduled on this loop cannot be collected before it runs.
     """
 
     async def _drive() -> None:
         client = _ClosingClient()
         http_mod._schedule_client_close(client, is_closed=lambda c: False)
-        # Yield so the scheduled task runs; the inflight strong-reference set
-        # keeps it alive until then.
-        for _ in range(5):
-            await asyncio.sleep(0)
+        await await_until(
+            lambda: client.closed,
+            "the scheduled aclose never ran on a live loop",
+        )
         assert client.closed is True
 
     asyncio.run(_drive())

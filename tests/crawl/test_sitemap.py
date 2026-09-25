@@ -107,7 +107,7 @@ def _child_xml(i: int) -> str:
 
 
 class TestSitemapFanoutBound:
-    async def test_child_scheduling_capped_by_remaining_need(self, real_sleeps, monkeypatch):
+    async def test_child_scheduling_capped_by_remaining_need(self, monkeypatch):
         url = "http://fanout.test/sitemap.xml"
         _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
         index_body = _index_xml(200)
@@ -131,7 +131,11 @@ class TestSitemapFanoutBound:
                 in_flight += 1
                 max_in_flight = max(max_in_flight, in_flight)
                 try:
-                    await asyncio.sleep(0.01)
+                    # A scheduling point, not a duration: what the test
+                    # measures is how many child fetches the fan-out is willing
+                    # to have in flight at once, and one loop yield is enough
+                    # for every admitted child to be inside that window.
+                    await asyncio.sleep(0)
                     idx = int(u.split("child")[1].split(".")[0])
                     return _resp_test_sitemap_fanout(_child_xml(idx))
                 finally:

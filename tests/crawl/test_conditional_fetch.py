@@ -94,7 +94,7 @@ async def test_success_result_surfaces_origin_validators():
     assert result.validators == {"etag": '"abc123"', "last_modified": "Wed, 01 Jan 2025 00:00:00 GMT"}
 
 
-async def test_engine_routes_validators_by_url(real_sleeps):
+async def test_engine_routes_validators_by_url():
     """Batch request: validators apply only to the matching URL."""
     seen_headers: dict[str, dict] = {}
 

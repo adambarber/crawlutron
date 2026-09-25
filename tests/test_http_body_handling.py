@@ -35,7 +35,7 @@ class TestHttpBodyHandling:
         assert out.diagnostics["cooldown"]["retry_after_seconds"] == 30
 
     @pytest.mark.real_cffi
-    async def test_cffi_fetch_via_crawl_request(self, base_url, real_sleeps):
+    async def test_cffi_fetch_via_crawl_request(self, base_url):
         result = await crawl_request(
             {"url": base_url + "/", "policy": {"strategies": ["HTTP_CFFI_IMPERSONATE"]}},
             cache=HttpCache(),
