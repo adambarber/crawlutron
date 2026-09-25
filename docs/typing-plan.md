@@ -1,13 +1,13 @@
 # Typing programme
 
-**Purpose.** The type checkers are green and the boundary types are absent.
-`mypy` reports zero errors across all 106 files in `app/` and the pyright budget
-is zero, yet the code has **no structural types at all** — zero `Protocol`, zero
-`TypedDict` — and 391 references to `Any`. Those two facts are compatible only
-because the configuration asks a narrow question ("are the types you wrote
-self-consistent?") and the answer is yes. This programme replaces that with a
-question worth asking: *does the type system know what the code does at the
-places where untrusted input enters?*
+**Purpose.** At the original audit, the type checkers were green while the
+boundary types were absent: `mypy` reported zero errors across all 106 files in
+`app/` and the pyright budget was zero, yet the code had **no structural types
+at all** — zero `Protocol`, zero `TypedDict` — and 391 references to `Any`.
+Those two facts were compatible only because the configuration asked a narrow
+question ("are the types you wrote self-consistent?") and the answer was yes.
+This programme replaces that with a question worth asking: *does the type system
+know what the code does at the places where untrusted input enters?*
 
 **How to use it.** Work the steps in order. Each step is independently
 committable and independently verifiable, and step 1 is not a cleanup — it
@@ -15,9 +15,9 @@ removes instructions that were actively suppressing type information. Do not
 reorder: step 3's cost depends on which exemptions step 1 removed, and step 4's
 scope depends on step 2's types actually landing.
 
-**Baseline commit.** All figures below were measured at `78fcf13`. Re-measure
-before starting; if a number has moved, the *plan* still holds but the ordering
-of effort may not.
+**Baseline commit.** The figures below were re-measured after step 3; the original
+`78fcf13` audit remains the historical comparison point. If a number has moved,
+the *plan* still holds but the ordering of effort may not.
 
 ---
 
@@ -29,41 +29,43 @@ not estimated.
 | Measure | Value |
 |---|---|
 | files in `app/` | 106 |
-| functions | 783 |
-| arguments | 1,724 — **1,398 annotated (81.1%), 326 bare** |
-| return annotations | 750 / 783 (95.8%) |
-| `Any` references | **391, across 53 of 106 files** |
-| `Protocol` | **0** |
+| functions | 784 |
+| arguments | 1,726 — **1,399 annotated (81.1%), 327 bare** |
+| return annotations | 751 / 784 (95.8%) |
+| `Any` references | **391, across 54 of 106 files** |
+| `Protocol` | **10** |
 | `TypedDict` | **0** |
-| `NamedTuple` / `dataclass` / `cast`+`TypeVar` | 1 / 11 / 13 |
-| `mypy.ini` module exemptions | 14 |
+| `NamedTuple` / `dataclass` / `cast`+`TypeVar` | 1 / 11 / 15 |
+| `mypy.ini` module exemptions | 1 (`yoyo.*` only) |
 | `disallow_untyped_defs`, `warn_return_any` | both **off** |
 | `mypy` on `app/` | clean, 106 files |
 | pyright budget | 0 |
 
-**Where the `Any` lives.** Concentrated on the chokepoints, not spread evenly:
+**Where the `Any` lives.** Concentrated on the chokepoints, not spread evenly.
+The counts below are current file-level AST reference counts:
 
-| File | `Any` in a signature | Role |
+| File | `Any` references | Role |
 |---|---|---|
-| `app/crawl/strategies/browser.py` | 36 | browser transport, screenshots |
-| `app/crawl/job_store.py` | 27 | durable state, JSON row serialisation |
-| `app/crawl/http.py` | 24 | the HTTP strategy |
+| `app/crawl/strategies/browser.py` | 38 | browser transport, screenshots |
+| `app/crawl/job_store.py` | 28 | durable state, JSON row serialisation |
+| `app/crawl/strategies/http.py` | 25 | the HTTP strategy |
 | `app/crawl/http_client_pool.py` | 19 | pooled transports, handle lifecycle |
-| `app/crawl/response_shaping.py` | 18 | the only result-construction path |
+| `app/api/response_shaping.py` | 21 | the only result-construction path |
 | `app/crawl/admission.py` | 18 | request admission |
-| `app/crawl/extraction.py` | 18 | document extraction |
+| `app/crawl/extraction.py` | 20 | document extraction |
 | `app/crawl/browser_result.py` | 18 | browser result assembly |
-| `app/crawl/request_pipeline.py` | 14 | pipeline assembly |
-| `app/models.py` | 12 | the domain taxonomy |
+| `app/crawl/request_pipeline.py` | 15 | pipeline assembly |
+| `app/models.py` | 13 | the domain taxonomy |
 
 This is the whole argument for the programme. The four worst files are the ones
-that touch untrusted bytes and the filesystem, and they are also the files
-whose external libraries were exempted from checking (step 1).
+that touch untrusted bytes and the filesystem, and at the original audit they
+were also the files whose external libraries were exempted from checking (step 1).
 
 ## 2. The seam is silent exactly where input arrives
 
-Every third-party library these chokepoints call through is currently excluded
-from type checking. Fourteen exemptions sit in `mypy.ini`. An `ast`-free check of
+At the original audit, every third-party library these chokepoints called
+through was excluded from type checking: fourteen exemptions sat in `mypy.ini`.
+An `ast`-free check of
 the **installed distributions** — does the wheel ship a `py.typed` marker —
 separates exemptions that suppress real information from exemptions that paper
 over a genuine absence:
@@ -135,8 +137,8 @@ cause; it does not remove the symptom.
 
 ### Step 1 — delete the unjustified exemptions
 
-Remove the **nine** sections listed as unjustified above, and delete the dead
-`[mypy-tests.*]` / `[mypy-scripts.*]` sections. `mypy` itself reports them:
+Remove the **nine** sections below: the six `py.typed` libraries, the stale
+`numpy` skip, and the two dead sections. `mypy` itself reports the dead ones:
 `note: unused section(s): [mypy-tests.*], [mypy-scripts.*]` — someone wrote an
 intent that has no effect, and leaving it makes the config look more covered
 than it is.
@@ -169,10 +171,14 @@ stale, and it competes with `types-lxml` for the same import name.
 
 Add these to the dev dependency set so CI installs them.
 
-**Budget this as its own work unit.** Turning on `lxml` and `regex` types will
-surface *new, real* errors in the extraction path and in `app/safe_regex.py` —
-the ReDoS chokepoint. Those errors are currently invisible, which is the point,
-but they are work, not cleanup. Do not expect step 2 to be a quiet commit.
+**Budget this as its own work unit.** Turning on `lxml` and `regex` types was
+expected to surface new errors in the extraction path and in `app/safe_regex.py`
+— the ReDoS chokepoint. The measured run instead surfaced one
+`app/crawl/decompression.py:158` `arg-type` error: the runtime accepts the
+bytes-like input that the function already declares, while the stub names only
+`bytes`. That was a false positive, fixed with a boundary cast; no lxml or regex
+errors appeared. The expectation was useful, but the measured result is the
+record.
 
 Steps 1–3 are also the **prerequisite** for the annotation work, not an
 alternative to it. Section 4 shows the bare arguments cluster in the chokepoints,
@@ -192,7 +198,8 @@ After step 2, two imports remain that no stub package covers:
 `publicsuffixlist` is a single-function call; wrap it in a `Protocol` or a thin
 typed wrapper so the boundary becomes a contract this codebase owns rather than
 a hole it inherits. Give it a real name that says what it is, not
-`PublicSuffixListLike`.
+`PublicSuffixListLike` (the implementation uses the private-but-descriptive
+`_PublicSuffixDataset`).
 
 `yoyo` is build-time rather than request-path, so the case for typing it is
 weaker — but its exemption is exactly the kind of silence this programme
@@ -209,6 +216,16 @@ explicitly and record the decision here:
 Either way, name the surface in one module rather than importing from the
 untyped package at each call site, so the decision is visible in one place.
 
+**Decision (2026-09-25): keep the `yoyo` exemption.** In
+`app/crawl/migrations/runner.py`, `_backend` accepts a filesystem `db_path`, but
+it always constructs the fixed `sqlite:///...` URI before calling `get_backend`;
+callers do not provide a database URI or backend selector. The memory backend
+name is generated internally. The migration files now import the single
+`migration_step` surface from `runner.py`, so the untyped package is named in one
+place. Keep `[mypy-yoyo.*]` until yoyo ships a `py.typed` marker or maintained
+stubs; the existing `pyright` suppression in `stamp_store` remains because the
+runtime `Migration` object has undeclared attributes.
+
 ### Step 4 — `disallow_any_expr` per-module, never globally
 
 Enable it on the chokepoints only, starting with `browser.py`, `job_store.py`,
@@ -223,7 +240,7 @@ budgets already are.
 ## 4. What this programme is explicitly not
 
 **`disallow_untyped_defs` is not the first move — but the reason is the opposite
-of the obvious one.** An earlier draft of this document claimed the 326 bare
+of the obvious one.** At the original audit, an earlier draft claimed the 326 bare
 arguments were "mostly FastAPI route handlers and Alembic migration functions"
 where a framework already carries the contract, and therefore not worth
 annotating. **That was an inference, and it is false.** Measured attribution of
@@ -277,9 +294,9 @@ reason and at least one may be legitimate.
 
 | Step | Status |
 |---|---|
-| 1 — delete 8 unjustified exemptions | not started |
-| 2 — add `brotli-stubs`, `types-regex`, `types-lxml` | not started |
-| 3 — `Protocol` for `publicsuffixlist`; decide and record `yoyo` | not started |
+| 1 — delete 9 unjustified/dead sections | complete |
+| 2 — add `brotli-stubs`, `types-regex`, `types-lxml` | complete |
+| 3 — `Protocol` for `publicsuffixlist`; decide and record `yoyo` | complete |
 | 4 — per-module `disallow_any_expr` on 4 chokepoints | not started |
 
 When a step's status changes, the baseline in section 1 is stale and should be

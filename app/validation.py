@@ -9,13 +9,15 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING, TypeVar
+from importlib import import_module
+from typing import Protocol, TypeVar, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from app.models import NormalizedUrl
 
-if TYPE_CHECKING:
-    from publicsuffixlist import PublicSuffixList
+
+class _PublicSuffixDataset(Protocol):
+    def privatesuffix(self, domain: str) -> str | None: ...
 
 
 PRIVATE_HOSTS = {"localhost", "host.docker.internal"}
@@ -105,7 +107,7 @@ _NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
 # unavailable" -- the accessor must keep trying in the first case and must
 # never re-attempt in the second, so a plain ``None`` cannot serve both.
 _PSL_UNSET = None
-_PSL: PublicSuffixList | None = _PSL_UNSET
+_PSL: _PublicSuffixDataset | None = _PSL_UNSET
 
 # Attribution/tracking query parameters that carry no content-identity
 # information. Dropping them lets URLs that differ only by UTM/tracking tags
@@ -567,9 +569,7 @@ def _public_suffix_list():
     if getattr(sys.modules[__name__], "_PSL", _PSL_UNSET) is not _PSL_UNSET:
         return _PSL
     try:
-        from publicsuffixlist import PublicSuffixList
-
-        _PSL = PublicSuffixList()
+        _PSL = cast(_PublicSuffixDataset, import_module("publicsuffixlist").PublicSuffixList())
     except Exception:
         _PSL = None
     return _PSL

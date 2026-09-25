@@ -1,5 +1,4 @@
-from yoyo import step
-
+from app.crawl.migrations.runner import migration_step as step
 from app.crawl.sqlite_store import table_columns
 
 __depends__ = {"0001_crawl_jobs_initial"}

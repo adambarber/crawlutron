@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from yoyo import get_backend, read_migrations
+from yoyo import step as migration_step
 from yoyo.backends import DatabaseBackend, SQLiteBackend
 from yoyo.connections import DatabaseURI
 from yoyo.migrations import MigrationList, default_migration_table
@@ -22,6 +23,8 @@ from app.crawl.migrations.manifest import (
     schema_drift,
 )
 from app.crawl.sqlite_store import table_has_column
+
+__all__ = ["migration_step"]
 
 _MIGRATIONS_ROOT = Path(__file__).parent
 
