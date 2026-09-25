@@ -156,29 +156,38 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     patch = pytest.MonkeyPatch()
     patch.setattr(store, "_lock", recording)
     box: dict[str, str | None] = {}
-    lock_held = threading.Event()
-    read_done = threading.Event()
+    lock_taken = threading.Event()
+    probe_release = threading.Event()
+    read_started = threading.Event()
 
     def _hold_the_lock() -> None:
         with recording:
-            lock_held.set()
-            read_done.wait(timeout=5)
+            lock_taken.set()
+            # Held until the main thread has seen the reader start, so the read
+            # is genuinely concurrent with a lock holder. This used to be
+            # `read_done.wait(timeout=5)`, which is a deadlock the test then
+            # waited out: the reader cannot finish until the probe lets go, and
+            # the probe was waiting for the reader. Five seconds per run, and
+            # nothing was being asserted for any of it.
+            probe_release.wait(timeout=5)
 
     def _guarded_read() -> None:
-        lock_held.wait(timeout=5)
-        try:
-            box["value"] = get_browser_cookies_for(victim)
-        finally:
-            read_done.set()
+        lock_taken.wait(timeout=5)
+        read_started.set()
+        box["value"] = get_browser_cookies_for(victim)
 
     probe = threading.Thread(target=_hold_the_lock)
     reader = threading.Thread(target=_guarded_read)
     probe.start()
+    assert lock_taken.wait(timeout=5), "the lock holder never took the store lock"
     reader.start()
+    assert read_started.wait(timeout=5), "the reader never reached the read"
+    probe_release.set()
     probe.join(timeout=5)
     reader.join(timeout=5)
     patch.undo()
 
+    assert not probe.is_alive() and not reader.is_alive(), "the guarded read wedged"
     assert recording.acquisitions.get(reader.ident, 0) > 0, (
         "the read path never took the store lock: reads are unsynchronized and "
         "the eviction race is wide open"
