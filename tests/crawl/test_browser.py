@@ -73,13 +73,17 @@ class TestBrowserRenderer:
                 "limits": {"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
             },
         }
+        # An ``async def`` worker, not a sync lambda returning a coroutine: that
+        # shape is neither of the two ``call_worker`` accepts, so it reached the
+        # strategy as an un-awaited coroutine and surfaced as the confusing
+        # ``'coroutine' object has no attribute 'html'`` network error instead
+        # of a type error at the seam.
+        async def browser_worker(job):
+            return await self.renderer.render(job.url, job.options, policy=job.host_policy)
+
         response = await crawl_request(
             payload,
-            browser_worker=lambda job: self.renderer.render(
-                job.url,
-                job.options,
-                policy=job.host_policy,
-            ),
+            browser_worker=browser_worker,
             cache=HttpCache(),
         )
         assert response["submitted_count"] == 1
