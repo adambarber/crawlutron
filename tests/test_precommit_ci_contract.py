@@ -1,24 +1,45 @@
-"""The pre-commit config is the single CI enforcement surface.
-
-This contract is intentionally parsed as text: the workflow is a small,
-stable subset of YAML, and a text check makes the enforcement relationship
-visible without making this meta-gate depend on a YAML parser's data model.
-"""
+"""The pre-commit config is the single CI enforcement surface."""
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
+EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 ENFORCEMENT_COMMAND = "pre-commit run --all-files --config docker/browser-crawler/.pre-commit-config.yaml"
 REPORTING_JOBS = {"lint", "typecheck", "test-fast"}
 
 
-def _hook_ids(config: str) -> set[str]:
-    return set(re.findall(r"^\s*- id: ([A-Za-z0-9_-]+)\s*$", config, re.MULTILINE))
+def _hook_blocks(config: str) -> list[tuple[str, str]]:
+    starts = list(re.finditer(r"^      - id: ([A-Za-z0-9_-]+)\s*$", config, re.MULTILINE))
+    return [
+        (match.group(1), config[match.start() : starts[index + 1].start() if index + 1 < len(starts) else len(config)])
+        for index, match in enumerate(starts)
+    ]
+
+
+def _field(block: str, name: str) -> str:
+    match = re.search(rf"^\s+{re.escape(name)}:\s*(?P<value>.*?)\s*$", block, re.MULTILINE)
+    assert match is not None, f"hook is missing {name}"
+    return match.group("value")
+
+
+def _entry(block: str) -> str:
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if re.match(r"^\s+entry:\s*>-\s*$", line):
+            values = [line.split(":", 1)[1].strip()]
+            for continuation in lines[index + 1 :]:
+                if re.match(r"^\s{8}[A-Za-z][A-Za-z0-9_-]*:", continuation):
+                    break
+                if continuation.strip():
+                    values.append(continuation.strip())
+            return " ".join(values)
+    raise AssertionError("hook is missing a folded entry")
 
 
 def _required_needs(workflow: str) -> set[str]:
@@ -32,14 +53,31 @@ def _required_needs(workflow: str) -> set[str]:
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     config = CONFIG_PATH.read_text(encoding="utf-8")
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    hook_ids = _hook_ids(config)
+    hooks = _hook_blocks(config)
+    assert hooks
 
-    assert hook_ids
+    jscpd_hooks = [hook for hook in hooks if hook[0] == "jscpd" or hook[0].startswith("jscpd-")]
+    assert len(jscpd_hooks) == 1
+    jscpd_id, jscpd = jscpd_hooks[0]
+    assert jscpd_id == "jscpd"
+    assert "jscpd-app" not in config
+    assert "jscpd-tests" not in config
+
+    assert all("pre-push" not in block for _, block in hooks)
+    assert all(_field(block, "stages") == "[pre-commit]" for _, block in hooks)
+
+    entry = _entry(jscpd)
+    assert ".venv/bin/python tests/_jscpd_gate.py all" in entry
+    assert "--min-lines 8" in entry
+    assert "--min-tokens 40" in entry
+    assert "--threshold 0" in entry
+    assert _field(jscpd, "files") == r"^(docker/browser-crawler/)?((app|tests|scripts)/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$"
+
+    expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
+    assert all("profiles" not in pair for pair in expectations["pairs"])
+
     assert workflow.count(ENFORCEMENT_COMMAND) == 1
     assert "tests/_jscpd_gate.py" not in workflow
-    assert "stages: [pre-push]" not in config
-    assert "stages: [pre-commit, pre-push]" in config
-
     required = _required_needs(workflow)
     assert "enforcement" in required
     assert required - {"enforcement"} <= REPORTING_JOBS

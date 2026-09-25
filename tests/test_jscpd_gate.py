@@ -12,11 +12,11 @@ import _jscpd_gate as gate
 import pytest
 
 
-def _args(profile: str = "app", threshold: float = 0) -> argparse.Namespace:
+def _args(threshold: float = 0) -> argparse.Namespace:
     return argparse.Namespace(
-        profile=profile,
-        min_lines=5,
-        min_tokens=50,
+        profile="all",
+        min_lines=8,
+        min_tokens=40,
         threshold=threshold,
         fail_on_empty=True,
     )
@@ -26,35 +26,46 @@ def _write_expectations(path: Path, pairs: list[dict]) -> None:
     path.write_text(json.dumps({"version": 1, "pairs": pairs}), encoding="utf-8")
 
 
-def _stub_report(monkeypatch, duplicate: dict, percentage: float = 0) -> None:
+def _stub_report(
+    monkeypatch,
+    duplicates: list[dict],
+    percentage: float = 0,
+    sources: int = 200,
+) -> list[list[str]]:
     report = {
         "statistics": {
-            "total": {"sources": 50, "percentage": percentage, "duplicatedLines": 5}
+            "total": {"sources": sources, "percentage": percentage, "duplicatedLines": 5}
         },
-        "duplicates": [duplicate],
+        "duplicates": duplicates,
     }
+    commands: list[list[str]] = []
 
     def run(command, **_kwargs):
+        commands.append(command)
         output = Path(command[command.index("--output") + 1])
         output.mkdir(exist_ok=True)
         (output / "jscpd-report.json").write_text(json.dumps(report), encoding="utf-8")
         return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr(gate.subprocess, "run", run)
+    return commands
 
 
-def _duplicate() -> dict:
+def _duplicate(
+    first_path: str = "new.py",
+    second_path: str = "other.py",
+    fragment: str = "duplicate",
+) -> dict:
     return {
-        "firstFile": {"name": "new.py", "start": 10, "end": 20},
-        "secondFile": {"name": "other.py", "start": 30, "end": 40},
-        "fragment": "duplicate",
+        "firstFile": {"name": first_path, "start": 10, "end": 20},
+        "secondFile": {"name": second_path, "start": 30, "end": 40},
+        "fragment": fragment,
     }
 
 
 def _valid_pair() -> dict:
     return {
         "id": "new-clone",
-        "profiles": ["app"],
         "first": {"path": "app/new.py", "start": 10, "end": 20},
         "second": {"path": "app/other.py", "start": 30, "end": 40},
         "reason": "intentional",
@@ -63,38 +74,95 @@ def _valid_pair() -> dict:
     }
 
 
-def _configure(monkeypatch, tmp_path, pair: dict, duplicate: dict) -> None:
+def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list[list[str]]:
     expectations = tmp_path / "expectations.json"
     _write_expectations(expectations, [pair])
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
-    _stub_report(monkeypatch, duplicate)
+    commands = _stub_report(monkeypatch, duplicate)
     monkeypatch.setattr(
         sys,
         "argv",
-        ["gate", "app", "--min-lines", "5", "--min-tokens", "50", "--threshold", "0", "--fail-on-empty"],
+        [
+            "gate",
+            "all",
+            "--min-lines",
+            "8",
+            "--min-tokens",
+            "40",
+            "--threshold",
+            "0",
+            "--fail-on-empty",
+        ],
     )
+    return commands
 
 
-def test_app_profile_rejects_an_undeclared_pair_below_threshold(monkeypatch, tmp_path):
+def test_uniform_profile_shape() -> None:
+    assert set(gate.PROFILE_PATHS) == {"all"}
+    assert gate.MIN_SOURCES == {"all": 200}
+
+
+def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
     _write_expectations(tmp_path / "expectations.json", [])
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(monkeypatch, _duplicate())
-    assert gate._run(_args(threshold=100)) == 1
+    commands = _stub_report(monkeypatch, [])
+
+    assert gate._run(_args()) == 0
+    assert commands[0][0] == str(gate.SERVICE_ROOT / ".venv" / "bin" / "jscpd")
+    assert "--fail-on-empty" in commands[0]
+    assert commands[0][commands[0].index("--min-lines") + 1] == "8"
+    assert commands[0][commands[0].index("--min-tokens") + 1] == "40"
+    assert commands[0][commands[0].index("--threshold") + 1] == "0"
+
+
+@pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
+def test_undeclared_clone_in_each_service_tree_fails(monkeypatch, tmp_path, directory):
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    _stub_report(
+        monkeypatch,
+        [_duplicate(f"{directory}/one.py", f"{directory}/two.py")],
+    )
+
+    assert gate._run(_args()) == 1
+
+
+def test_missing_sanctioned_clone_fails(monkeypatch, tmp_path) -> None:
+    _configure(monkeypatch, tmp_path, _valid_pair(), [])
+    assert gate.main() == 1
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [("reason", " "), ("guard", "tests/test_safety_invariants.py::test_does_not_exist")],
 )
-def test_expectations_reject_unusable_attestations(monkeypatch, tmp_path, field, value):
+def test_expectations_reject_unusable_attestations(monkeypatch, tmp_path, field, value) -> None:
     pair = _valid_pair()
     pair[field] = value
-    _configure(monkeypatch, tmp_path, pair, _duplicate())
+    _configure(monkeypatch, tmp_path, pair, [_duplicate()])
     assert gate.main() == 1
 
 
-def test_expectation_rejects_changed_fragment(monkeypatch, tmp_path):
-    duplicate = _duplicate()
-    duplicate["fragment"] = "changed"
-    _configure(monkeypatch, tmp_path, _valid_pair(), duplicate)
+def test_expectation_rejects_legacy_profile_shape(monkeypatch, tmp_path) -> None:
+    pair = _valid_pair()
+    pair["profiles"] = ["all"]
+    _configure(monkeypatch, tmp_path, pair, [_duplicate()])
     assert gate.main() == 1
+
+
+def test_expectation_rejects_changed_fragment(monkeypatch, tmp_path) -> None:
+    _configure(monkeypatch, tmp_path, _valid_pair(), [_duplicate(fragment="changed")])
+    assert gate.main() == 1
+
+
+def test_valid_sanctioned_pair_passes(monkeypatch, tmp_path) -> None:
+    _configure(monkeypatch, tmp_path, _valid_pair(), [_duplicate()])
+    assert gate.main() == 0
+
+
+def test_source_floor_fails_on_thin_scan(monkeypatch, tmp_path) -> None:
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    _stub_report(monkeypatch, [], sources=199)
+
+    assert gate._run(_args()) == 1

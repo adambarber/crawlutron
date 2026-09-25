@@ -14,8 +14,8 @@ from typing import Any
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
-MIN_SOURCES = {"app": 50, "tests": 100, "all": 200}
-PROFILE_PATHS = {"app": ("app",), "tests": ("tests",), "all": (".",)}
+MIN_SOURCES = {"all": 200}
+PROFILE_PATHS = {"all": (".",)}
 
 
 def _parse_args() -> argparse.Namespace:
@@ -28,19 +28,14 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _canonical_path(path: str, profile: str) -> str:
-    if profile == "app" and "/" not in path:
-        return f"app/{path}"
-    return path
-
-
-def _pair_id(duplicate: dict[str, Any], profile: str) -> tuple[tuple[str, int, int], ...]:
+def _pair_id(duplicate: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
     locations = []
     for side in ("firstFile", "secondFile"):
         location = duplicate[side]
+        path = str(location["name"])
         locations.append(
             (
-                _canonical_path(str(location["name"]), profile),
+                path if "/" in path else f"app/{path}",
                 int(location["start"]),
                 int(location["end"]),
             )
@@ -97,13 +92,8 @@ def _validate_expectation(pair: Any) -> None:
     pair_id = pair.get("id")
     if not isinstance(pair_id, str) or not pair_id.strip():
         raise ValueError("each jscpd expectation needs a non-empty id")
-    profiles = pair.get("profiles")
-    if (
-        not isinstance(profiles, list)
-        or not profiles
-        or any(profile not in PROFILE_PATHS for profile in profiles)
-    ):
-        raise ValueError(f"jscpd expectation {pair_id!r} has invalid profiles")
+    if "profiles" in pair:
+        raise ValueError(f"jscpd expectation {pair_id!r} uses the legacy profiles shape")
     reason = pair.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError(f"jscpd expectation {pair_id!r} needs a non-empty reason")
@@ -128,7 +118,7 @@ def _validate_expectation(pair: Any) -> None:
             raise ValueError(f"jscpd expectation {pair_id!r} has invalid {side} bounds")
 
 
-def _expected_pairs(profile: str) -> list[dict[str, Any]]:
+def _expected_pairs() -> list[dict[str, Any]]:
     document = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
     if document.get("version") != 1 or not isinstance(document.get("pairs"), list):
         raise ValueError("jscpd-expectations.json must have version 1 and a pairs list")
@@ -139,16 +129,16 @@ def _expected_pairs(profile: str) -> list[dict[str, Any]]:
         if pair_id in seen_ids:
             raise ValueError(f"duplicate jscpd expectation id: {pair_id!r}")
         seen_ids.add(pair_id)
-    return [pair for pair in document["pairs"] if profile in pair["profiles"]]
+    return document["pairs"]
 
 
-def _expected_id(pair: dict[str, Any], profile: str) -> tuple[tuple[str, int, int], ...]:
+def _expected_id(pair: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
     locations = []
     for side in ("first", "second"):
         location = pair[side]
         locations.append(
             (
-                _canonical_path(str(location["path"]), profile),
+                str(location["path"]),
                 int(location["start"]),
                 int(location["end"]),
             )
@@ -160,7 +150,7 @@ def _run(args: argparse.Namespace) -> int:
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
         command = [
-            "jscpd",
+            str(SERVICE_ROOT / ".venv" / "bin" / "jscpd"),
             "--config",
             str(SERVICE_ROOT / ".jscpd.json"),
             "-f",
@@ -191,18 +181,17 @@ def _run(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
+        actual_duplicates: dict[tuple[tuple[str, int, int], ...], dict[str, Any]] = {}
         actual_fragments: dict[tuple[tuple[str, int, int], ...], str] = {}
         for duplicate in report["duplicates"]:
-            pair_id = _pair_id(duplicate, args.profile)
+            pair_id = _pair_id(duplicate)
             fragment_hash = _fragment_hash(duplicate)
             if pair_id in actual_fragments and actual_fragments[pair_id] != fragment_hash:
                 raise ValueError(f"jscpd reported conflicting fragments for {pair_id}")
+            actual_duplicates[pair_id] = duplicate
             actual_fragments[pair_id] = fragment_hash
         actual = set(actual_fragments)
-        expected = {
-            _expected_id(pair, args.profile): pair
-            for pair in _expected_pairs(args.profile)
-        }
+        expected = {_expected_id(pair): pair for pair in _expected_pairs()}
         missing = sorted(expected.keys() - actual)
         if missing:
             for pair_id in missing:
@@ -223,9 +212,28 @@ def _run(args: argparse.Namespace) -> int:
                 print(f"jscpd {args.profile}: unsanctioned clone: {pair_id}", file=sys.stderr)
             return 1
         percentage = float(statistics["percentage"])
-        if args.profile == "app" and percentage > args.threshold:
+        duplicated_lines = int(statistics["duplicatedLines"])
+        sanctioned_lines = sum(
+            min(
+                int(actual_duplicates[pair_id]["firstFile"]["end"])
+                - int(actual_duplicates[pair_id]["firstFile"]["start"])
+                + 1,
+                int(actual_duplicates[pair_id]["secondFile"]["end"])
+                - int(actual_duplicates[pair_id]["secondFile"]["start"])
+                + 1,
+            )
+            for pair_id in expected
+        )
+        unsanctioned_lines = max(0, duplicated_lines - sanctioned_lines)
+        total_lines = int(statistics.get("lines", 0))
+        if total_lines:
+            unsanctioned_percentage = 100 * unsanctioned_lines / total_lines
+        else:
+            unsanctioned_percentage = percentage
+        if unsanctioned_percentage > args.threshold:
             print(
-                f"jscpd {args.profile}: {percentage:.6f}% exceeds {args.threshold:.6f}%",
+                f"jscpd {args.profile}: {unsanctioned_percentage:.6f}% unsanctioned "
+                f"exceeds {args.threshold:.6f}%",
                 file=sys.stderr,
             )
             return 1

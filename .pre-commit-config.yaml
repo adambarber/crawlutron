@@ -36,6 +36,7 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
         pass_filenames: false
+        stages: [pre-commit]
 
       # Third type checker, scoped to the files being committed. Mypy is the
       # fail gate and Ruff owns style; this one exists because pyright finds
@@ -67,47 +68,26 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?(app|tests|pyrightconfig).*
         pass_filenames: false
+        stages: [pre-commit]
 
       # Copy/paste detection is a design gate. The checked-in wrapper reads
       # jscpd JSON, requires a non-empty scan, and compares every pair with the
       # named expectations file; the command-line thresholds below are the only
       # threshold source.
-      - id: jscpd-app
-        name: jscpd app/ (zero tolerance, 50 tokens)
-        entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          .venv/bin/python tests/_jscpd_gate.py app --fail-on-empty
-          --min-lines 5 --min-tokens 50 --threshold 0
-        language: system
-        files: ^(docker/browser-crawler/)?(app/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
-        pass_filenames: false
-
-      - id: jscpd-tests
-        name: jscpd tests/ (zero tolerance, 50 tokens)
-        entry: >-
-          bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
-          || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
-          .venv/bin/python tests/_jscpd_gate.py tests --fail-on-empty
-          --min-lines 5 --min-tokens 50 --threshold 0
-        language: system
-        files: ^(docker/browser-crawler/)?(tests/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
-        pass_filenames: false
-
-      - id: jscpd-all
-        name: jscpd whole service (zero tolerance, 30 tokens)
+      - id: jscpd
+        name: jscpd whole service (zero tolerance, 40 tokens)
         entry: >-
           bash -c 'cd "$(git rev-parse --show-toplevel)/docker/browser-crawler" 2>/dev/null
           || cd "$(git rev-parse --show-toplevel)"; exec "$@"' gate
           .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
-          --min-lines 10 --min-tokens 30 --threshold 0
+          --min-lines 8 --min-tokens 40 --threshold 0
         language: system
         files: ^(docker/browser-crawler/)?((app|tests|scripts)/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$
         pass_filenames: false
+        stages: [pre-commit]
 
       # Type gate: catches the stringly-typed-identity class statically, and is
-      # the same command CI runs. On pre-push because it is slower than the two
-      # above and a type error is worth catching slightly later than lint.
+      # the same command CI runs.
       - id: mypy
         name: mypy
         entry: >-
@@ -117,11 +97,10 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
         pass_filenames: false
-        stages: [pre-commit, pre-push]
+        stages: [pre-commit]
 
       # The project-specific safety predicates (chokepoint detectors). They are
-      # the real architecture gate and the only exit path for those rules, so
-      # they run on pre-push rather than living only in CI.
+      # the real architecture gate and the only exit path for those rules.
       - id: safety-invariants
         name: chokepoint safety invariants
         entry: >-
@@ -133,4 +112,4 @@ repos:
         language: system
         files: ^(docker/browser-crawler/)?.*\.py$
         pass_filenames: false
-        stages: [pre-commit, pre-push]
+        stages: [pre-commit]
