@@ -153,7 +153,13 @@ __all__ = [
 # use before deleting it on age alone. The alternative was to leave a sweep that
 # can delete the reassembled result of a crawl that is still running, on the
 # strength of a docstring arguing the loss was acceptable.
-_APP_TREE_CODE_LINE_BUDGET = 14_372
+#
+# RAISED to 14,383 for the pool's retired generation: eleven lines that make a
+# closed renderer impossible to acquire, by draining the idle queue in close and
+# dropping a retired renderer in release. Both halves were needed -- the drain
+# covers what close left queued, the drop covers the holder that returns its
+# renderer afterwards, and either one alone still hands out a closed browser.
+_APP_TREE_CODE_LINE_BUDGET = 14_383
 
 
 def test_app_tree_code_line_count_does_not_grow():

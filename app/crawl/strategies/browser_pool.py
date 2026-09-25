@@ -109,12 +109,33 @@ class BrowserPool:
         return renderer
 
     def release(self, renderer: BrowserRenderer) -> None:
-        """Return a renderer to the pool."""
+        """Return a renderer to the pool, unless its generation has been retired.
+
+        A renderer that was checked out when ``close`` ran has already been
+        closed by it, and returning it would put a closed renderer back in the
+        queue for the next acquire to hand out. That is the same retired-
+        generation state the queue drain in ``close`` prevents from the other
+        side, so it is dropped here -- the only place that can reintroduce it.
+        """
+        if not self._initialized or not any(r is renderer for r in self._renderers):
+            logger.debug(
+                "browser_pool_release_retired",
+                extra={"initialized": self._initialized, "available": self._available.qsize()},
+            )
+            return
         self._available.put_nowait(renderer)
         logger.debug("browser_pool_released", extra={"available": self._available.qsize()})
 
     async def close(self) -> None:
-        """Close all renderers and clean up."""
+        """Close all renderers and clean up.
+
+        The idle queue is drained as well as the renderer list cleared. Keeping
+        the closed renderers queued made the pool's two halves disagree: the
+        next ``initialize`` appended the new generation to the back of a queue
+        that already held the old one, and ``acquire`` pops the front, so the
+        first ``pool_size`` acquires after a recycle returned closed renderers
+        and ``available`` reported double the real capacity.
+        """
         async with self._lock:
             for renderer in self._renderers:
                 try:
@@ -122,8 +143,13 @@ class BrowserPool:
                 except Exception as e:
                     logger.warning("browser_pool_renderer_close_failed", extra={"error": str(e)})
             self._renderers.clear()
+            while True:
+                try:
+                    self._available.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
             self._initialized = False
-            logger.info("browser_pool_closed")
+            logger.info("browser_pool_closed", extra={"available": self._available.qsize()})
 
     @property
     def browser_strategy(self) -> CrawlStrategyName:

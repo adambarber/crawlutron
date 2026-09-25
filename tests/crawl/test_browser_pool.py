@@ -326,3 +326,77 @@ class TestWorkerExtractorErrorDegrades:
 
         result = await renderer._auto_accept_cookie_consent(MockPage(), True)
         assert result
+
+
+class TestCloseLeavesNoStaleRendererToAcquire:
+    """close() retired the renderers but kept handing them out.
+
+    ``close`` walked ``_renderers``, closed each and cleared the list, and left
+    ``_available`` full. ``initialize`` then appended the new generation to the
+    BACK of that same queue, and ``acquire`` pops the FRONT -- so the first
+    ``pool_size`` acquires after a recycle returned renderers that had already
+    been closed. The queue was also double the pool size, which quietly
+    contradicts every ``available`` count the pool logs on timeout.
+    """
+
+    @staticmethod
+    def _pool(pool_size: int = 2) -> BrowserPool:
+        # A real BrowserRenderer never launches a browser at construction, so the
+        # pool, its renderers and the whole queue lifecycle are exercised for
+        # real; the factory is simply never called because nothing renders here.
+        return BrowserPool(pool_size=pool_size, browser_factory=lambda **kwargs: None)
+
+    async def test_acquire_after_a_recycle_returns_a_live_renderer(self):
+        pool = self._pool()
+        await pool.initialize()
+        retired = list(pool._renderers)
+        in_use = await pool.acquire()
+        pool.release(in_use)
+
+        await pool.close()
+        await pool.initialize()
+        live = list(pool._renderers)
+
+        assert not set(id(r) for r in retired) & set(id(r) for r in live)
+        renderer = await pool.acquire()
+        try:
+            assert renderer in live, "acquire returned a renderer from the closed generation"
+        finally:
+            pool.release(renderer)
+            await pool.close()
+
+    async def test_a_recycled_pool_holds_exactly_pool_size_renderers(self):
+        pool = self._pool()
+        await pool.initialize()
+        await pool.close()
+        await pool.initialize()
+        try:
+            assert pool._available.qsize() == pool._pool_size
+        finally:
+            await pool.close()
+        assert pool._available.qsize() == 0, "close left closed renderers in the queue"
+
+    async def test_releasing_a_renderer_after_close_does_not_resurrect_it(self):
+        """The other route to the same retired renderer.
+
+        A renderer checked out when ``close`` runs is closed by it, and the
+        holder returns it afterwards. That is the one caller that can put a
+        closed renderer back after the drain, so the drop belongs in ``release``.
+        """
+        pool = self._pool()
+        await pool.initialize()
+        checked_out = await pool.acquire()
+
+        await pool.close()
+        pool.release(checked_out)
+
+        assert pool._available.qsize() == 0, "a closed renderer was returned to the queue"
+
+        # And the live generation still accepts its own renderers.
+        await pool.initialize()
+        try:
+            live = await pool.acquire()
+            pool.release(live)
+            assert pool._available.qsize() == pool._pool_size
+        finally:
+            await pool.close()
