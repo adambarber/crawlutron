@@ -14,8 +14,25 @@ from typing import Any
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
+CONFIG_PATH = SERVICE_ROOT / ".jscpd.json"
 MIN_SOURCES = {"all": 200}
 PROFILE_PATHS = {"all": (".",)}
+# `.jscpd.json` decides which files this gate never sees, so it is enforcement
+# configuration, and a config nothing validates is a config that can be edited
+# into a no-op: one added glob is enough to hide a clone, and `ignore` was read
+# from disk by the subprocess below without ever being checked. These six globs
+# are the whole sanctioned set -- caches, vendored trees, and the scratch
+# directory -- and the gate holds them rather than trusting the file, so
+# widening the scan surface is a deliberate edit to this list in a reviewed
+# commit instead of a silent edit to a JSON file.
+SANCTIONED_IGNORE_GLOBS = (
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/tmp/**",
+    "**/node_modules/**",
+    "**/.git/**",
+    "**/fixtures/**",
+)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -26,6 +43,44 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, required=True)
     parser.add_argument("--fail-on-empty", action="store_true", required=True)
     return parser.parse_args()
+
+
+def _reject_source_masking(ignore: list[str]) -> None:
+    """A glob that hides source is never a sanctioned exception.
+
+    Checked independently of the sanctioned list so that widening the list is
+    not itself a way to hide a clone: the rule is that this gate's ignore list
+    may skip caches and vendored trees, and nothing else.
+    """
+    for glob in ignore:
+        if glob.rstrip("/").endswith(".py") or "*.py" in glob:
+            raise ValueError(f"jscpd ignore glob would hide Python source: {glob!r}")
+        if not glob.strip("*./"):
+            raise ValueError(f"jscpd ignore glob would hide the whole tree: {glob!r}")
+
+
+def _validate_scan_config(path: Path) -> None:
+    """Fail closed unless `.jscpd.json` is exactly the sanctioned ignore list.
+
+    Checked before jscpd runs, not after: a scan taken under an unvalidated
+    config has already decided what the gate cannot see, so there is nothing
+    left to check afterwards.
+    """
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or not isinstance(document.get("ignore"), list):
+        raise ValueError(f"{path.name} must be an object with an ignore list")
+    ignore = document["ignore"]
+    if not all(isinstance(glob, str) and glob for glob in ignore):
+        raise ValueError(f"{path.name} ignore entries must be non-empty strings")
+    _reject_source_masking(ignore)
+    if tuple(ignore) != SANCTIONED_IGNORE_GLOBS:
+        added = sorted(set(ignore) - set(SANCTIONED_IGNORE_GLOBS))
+        removed = sorted(set(SANCTIONED_IGNORE_GLOBS) - set(ignore))
+        raise ValueError(
+            f"{path.name} ignore list is not the sanctioned set "
+            f"(added={added}, removed={removed}); the sanctioned globs live in "
+            f"_jscpd_gate.SANCTIONED_IGNORE_GLOBS"
+        )
 
 
 def _pair_id(duplicate: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
@@ -147,12 +202,13 @@ def _expected_id(pair: dict[str, Any]) -> tuple[tuple[str, int, int], ...]:
 
 
 def _run(args: argparse.Namespace) -> int:
+    _validate_scan_config(CONFIG_PATH)
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
         command = [
             str(SERVICE_ROOT / ".venv" / "bin" / "jscpd"),
             "--config",
-            str(SERVICE_ROOT / ".jscpd.json"),
+            str(CONFIG_PATH),
             "-f",
             "python",
             "--min-lines",

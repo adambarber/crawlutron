@@ -166,3 +166,63 @@ def test_source_floor_fails_on_thin_scan(monkeypatch, tmp_path) -> None:
     _stub_report(monkeypatch, [], sources=199)
 
     assert gate._run(_args()) == 1
+
+
+def _configure_scan_config(monkeypatch, tmp_path, ignore: list[str]) -> list[list[str]]:
+    """Point the gate at a tampered .jscpd.json and record whether jscpd was ever run."""
+    config = tmp_path / "jscpd.json"
+    config.write_text(json.dumps({"ignore": ignore}), encoding="utf-8")
+    monkeypatch.setattr(gate, "CONFIG_PATH", config)
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gate",
+            "all",
+            "--min-lines",
+            "8",
+            "--min-tokens",
+            "40",
+            "--threshold",
+            "0",
+            "--fail-on-empty",
+        ],
+    )
+    commands: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        raise AssertionError("jscpd must not run against an unvalidated scan config")
+
+    monkeypatch.setattr(gate.subprocess, "run", run)
+    return commands
+
+
+def test_checked_in_scan_config_is_owned_by_the_gate() -> None:
+    """`.jscpd.json` is enforcement configuration, so the gate validates it."""
+    assert gate.CONFIG_PATH == gate.SERVICE_ROOT / ".jscpd.json"
+    gate._validate_scan_config(gate.CONFIG_PATH)
+
+
+@pytest.mark.parametrize("drift", ["added-glob", "removed-glob", "whole-tree-glob"])
+def test_unowned_ignore_list_fails_before_any_scan(monkeypatch, tmp_path, drift) -> None:
+    sanctioned = gate.SANCTIONED_IGNORE_GLOBS
+    if drift == "added-glob":
+        ignore = [*sanctioned, "**/zz_probe_clone.py"]
+    elif drift == "removed-glob":
+        ignore = sanctioned[:-1]
+    else:
+        ignore = [*sanctioned, "**"]
+
+    commands = _configure_scan_config(monkeypatch, tmp_path, ignore)
+    assert gate.main() == 1
+    assert commands == []
+
+
+@pytest.mark.parametrize("glob", ["**/*.py", "app/*.py", "**/zz_probe_clone.py", "*", "**"])
+def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
+    """The ignore list exists to skip caches and vendored trees, never source."""
+    with pytest.raises(ValueError, match="Python source|whole tree"):
+        gate._reject_source_masking([glob])

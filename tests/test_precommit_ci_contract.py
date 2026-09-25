@@ -12,6 +12,31 @@ WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 ENFORCEMENT_COMMAND = "pre-commit run --all-files --config docker/browser-crawler/.pre-commit-config.yaml"
 REPORTING_JOBS = {"lint", "typecheck", "test-fast"}
+# Every file the gates read to decide what to enforce. A commit that edits one of
+# them must run the enforcement: the config that decides what is checked cannot
+# itself be the one change that skips the check.
+ENFORCEMENT_INPUTS = (
+    "app/settings.py",
+    "tests/test_jscpd_gate.py",
+    "scripts/module_graph.py",
+    ".pre-commit-config.yaml",
+    ".jscpd.json",
+    "jscpd-expectations.json",
+    "pyrightconfig.json",
+    "mypy.ini",
+    "pytest.ini",
+    "pyproject.toml",
+    "requirements-dev.txt",
+    ".github/workflows/ci.yml",
+)
+# The single trigger pattern every hook carries. Optional leading segment so the
+# same pattern matches nested under the parent repo and at the repository root
+# once the service is extracted.
+ENFORCEMENT_TRIGGER_PATTERN = (
+    r"^(docker/browser-crawler/)?(.*\.py|\.pre-commit-config\.yaml|\.jscpd\.json"
+    r"|jscpd-expectations\.json|pyrightconfig\.json|mypy\.ini|pytest\.ini"
+    r"|pyproject\.toml|requirements-dev\.txt|requirements\.txt|\.github/workflows/.*\.ya?ml)$"
+)
 
 
 def _hook_blocks(config: str) -> list[tuple[str, str]]:
@@ -71,7 +96,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "--min-lines 8" in entry
     assert "--min-tokens 40" in entry
     assert "--threshold 0" in entry
-    assert _field(jscpd, "files") == r"^(docker/browser-crawler/)?((app|tests|scripts)/.*\.py|jscpd-expectations\.json|\.jscpd\.json)$"
+    assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
     expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
     assert all("profiles" not in pair for pair in expectations["pairs"])
@@ -82,3 +107,22 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "enforcement" in required
     assert required - {"enforcement"} <= REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+
+
+def test_every_gate_fires_on_every_enforcement_input() -> None:
+    """No gate's own configuration can be edited without that gate running.
+
+    The `files:` pattern is a pre-commit trigger, so a config that no pattern
+    matches is a config nothing checks. `.jscpd.json` was the live instance: every
+    hook matched only `.*\\.py`, so the commit that added an ignore glob to hide a
+    clone ran no hook at all.
+    """
+    hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
+    assert hooks
+    for hook_id, block in hooks:
+        pattern = _field(block, "files")
+        for name in ENFORCEMENT_INPUTS:
+            # Both layouts: nested under the parent repo, and at the repository
+            # root once the service is extracted.
+            for candidate in (f"docker/browser-crawler/{name}", name):
+                assert re.search(pattern, candidate), f"hook {hook_id} does not fire on {candidate}"
