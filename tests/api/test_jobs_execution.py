@@ -1276,3 +1276,60 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_discovered"] == 2
         assert job.visited == {root, child, other}
         assert len(job.results) == 3
+
+
+class TestEveryVisitedUrlHasAnEnvelope:
+    """A job's results must account for every URL it marked visited.
+
+    When the engine's batch came back without a result for a URL, the runner
+    counted it in ``total_failed`` and moved on: the URL was in ``visited`` but
+    nothing in ``results`` named it, so a job read as ``total_crawled: 2`` with a
+    single result and no way to tell which page was missing. The batch's own
+    shaping path already solved this -- ``_failed_unified_result`` carries the
+    URL through and reports it as a terminal failure -- and its docstring says it
+    mirrors the runner's semantics, which is exactly the coupling that let the
+    runner drift from it.
+    """
+
+    async def test_a_url_the_engine_never_answered_still_gets_an_envelope(
+        self, client, job_store
+    ):
+        from _job_harnesses import _execution_payload, _execution_urls
+
+        async def _execute(payload_dict, *, settings, shutdown_event):
+            # Batch 1 submits /a, which discovers /gone; batch 2 submits /gone and
+            # this time the engine answers with nothing for it -- the shape that
+            # used to produce an unnameable gap in the job's results.
+            urls = await _execution_urls(payload_dict, None)
+            answered = [u for u in urls if not u.endswith("/gone")]
+            results = [
+                _canned_result(u, links=["http://example.test/gone"]) for u in answered
+            ]
+            return _execution_payload(results, len(urls))
+
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            "http://example.test/a",
+            _execute,
+        )
+        assert job.stats["total_crawled"] == 2
+        assert job.stats["total_failed"] == 1
+        # The point of the test: every visited URL is named in results.
+        assert len(job.results) == 2, "a visited URL produced no result envelope"
+        named = {r.get("normalized_url") or r.get("original_url") for r in job.results}
+        assert "http://example.test/gone" in named
+        failed = [r for r in job.results if r.get("normalized_url") == "http://example.test/gone"]
+        assert failed and failed[0].get("status") == "failed"
+
+    async def test_results_never_exceed_the_visited_set(self, client, job_store):
+        """The accounting is a partition: each visited URL, exactly one envelope."""
+        job = await _run_job_to_completed(
+            client,
+            job_store,
+            "http://example.test/a",
+            _fake_execute(
+                [_canned_result("http://example.test/a", links=["http://example.test/b"])]
+            ),
+        )
+        assert len(job.results) == job.stats["total_crawled"]

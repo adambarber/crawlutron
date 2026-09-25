@@ -177,7 +177,14 @@ __all__ = [
 # six ResultStatus members against neither arm. The table plus the method that
 # reads it is the price of a verdict existing for every status -- and of being
 # able to prove it, since the tuple had no shape a test could check.
-_APP_TREE_CODE_LINE_BUDGET = 14_407
+#
+# RAISED to 14,409 for the job runner naming every URL it visited: two lines.
+# The runner already had a chokepoint for exactly this -- response_shaping's
+# _failed_unified_result, whose docstring says it mirrors the runner -- and
+# was not calling it, so a URL the engine never answered for was counted as
+# failed and then vanished, leaving a job whose results could not account for
+# its own total_crawled.
+_APP_TREE_CODE_LINE_BUDGET = 14_409
 
 
 def test_app_tree_code_line_count_does_not_grow():

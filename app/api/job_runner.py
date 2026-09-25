@@ -31,7 +31,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
-from app.api.response_shaping import abuild_unified_result
+from app.api.response_shaping import _failed_unified_result, abuild_unified_result
 from app.constants import MAX_URL_TRANSIENT_ATTEMPTS, is_transient_classification
 from app.crawl.admission import (
     JobAdmissionContext,
@@ -354,6 +354,19 @@ async def _run_job(
                 job.transient_retries.pop(identity, None)
                 job.visited.add(identity)
                 if item is None:
+                    # The engine's batch came back without answering for this URL.
+                    # It is already in `visited`, so counting it and moving on left
+                    # the job's results unable to account for it -- total_crawled
+                    # said 2, one result existed, and nothing named the gap. The
+                    # batch's own shaping path already builds this envelope
+                    # (its docstring says it mirrors this runner's semantics,
+                    # which is the coupling that let the two drift), so the
+                    # runner uses it rather than inventing a second shape.
+                    job.results.append(
+                        _failed_unified_result(
+                            {"normalized_url": identity, "original_url": url}
+                        ).model_dump()
+                    )
                     failed += 1
                     continue
                 if outcome == "transient":
@@ -361,12 +374,14 @@ async def _run_job(
                 try:
                     unified = await abuild_unified_result(item)
                 except Exception:
-                    unified = None
-                if unified is not None:
-                    job.results.append(unified.model_dump())
-                    if item.get("status") == "failed":
-                        failed += 1
-                else:
+                    # Shaping is the batch's last line of defense and is not
+                    # meant to raise; if it does, this item is still this URL's
+                    # result and the job must still name it. Shaping degrades a
+                    # malformed item to this same terminal failure, so the two
+                    # paths now agree instead of one producing nothing.
+                    unified = _failed_unified_result(item)
+                job.results.append(unified.model_dump())
+                if item.get("status") == "failed":
                     failed += 1
                 admitted = await admit_job_links(
                     job,
