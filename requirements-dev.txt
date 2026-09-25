@@ -18,6 +18,9 @@ pytest-xdist>=3.0.0  # parallel suite runs: pytest -n auto (suite is xdist-safe)
 # mypy-clean (0 errors across 85 files) and CI runs `python3 -m mypy app` as
 # part of the required quality gate. Pinned so a new mypy release cannot turn
 # a build red with no repository change.
+brotli-stubs==1.2.0
+types-regex==2026.9.10.20260911
+types-lxml==2026.2.16
 mypy==2.3.1
 # Second static type-checker, and the one that catches annotation lies mypy
 # structurally cannot here: mypy reads the `regex` package as untyped and

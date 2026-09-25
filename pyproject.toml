@@ -77,6 +77,9 @@ dev = [
     # files) and `typecheck` now runs in CI as a required gate, so this is a
     # real gate, not an advisory one — the old comment claiming otherwise was
     # stale and would have told the next reader to ignore type errors.
+    "brotli-stubs==1.2.0",
+    "types-regex==2026.9.10.20260911",
+    "types-lxml==2026.2.16",
     "mypy==2.3.1",
 ]
 

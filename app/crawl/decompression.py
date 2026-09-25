@@ -155,7 +155,7 @@ def _decompress_brotli(
                     break
             decoded = chunks
         else:
-            decoded = brotli.decompress(body)
+            decoded = brotli.decompress(cast(bytes, body))
     except Exception as error:
         raise DecompressionError("invalid brotli stream") from error
     return decoded
