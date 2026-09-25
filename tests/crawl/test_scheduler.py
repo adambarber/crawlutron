@@ -728,3 +728,104 @@ class TestDeliveryFailuresAreNotWorkerFailures:
         assert delivered == [(1, "success")], (
             f"one job's failed spill must not swallow another job's result: {delivered}"
         )
+
+
+class TestSchedulerFailureAccountingIsAboutStatuses:
+    """A failure verdict is a STATUS; the reason is a CLASSIFICATION.
+
+    The success/failure branch tested membership in ``("failed",
+    "network_error")``, which reads as though a network fault got its own
+    accounting. It does not: ``network_error`` is a taxonomy member describing
+    WHY a page failed, and ``status_for_classification`` maps it ONTO
+    "failed" -- it is never a status itself, so the element could not match
+    anything. Meanwhile four of the six ResultStatus members matched neither
+    branch, and nothing noticed.
+
+    Total by construction now: the verdicts live in one table keyed by status,
+    and the exhaustiveness test fails if a status is added without one.
+    """
+
+    @staticmethod
+    def _terminal(job, classification: str):
+        """A real terminal result, with its status derived by the real chokepoint."""
+        from app.constants import status_for_classification
+        from app.crawl.result_helpers import _terminal_engine_result
+
+        return _terminal_engine_result(
+            original_url=job.url,
+            normalized_url=job.url,
+            strategy=None,
+            status=status_for_classification(classification),
+            classification=classification,
+            error=None,
+        )
+
+    async def test_a_network_fault_records_a_domain_failure(self):
+        """The reported case, through the real failure envelope, not a copy."""
+        import socket
+
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
+        )
+        job = make_job(0, "https://example.com/p")
+
+        async def failing_worker(job):
+            return _failed_result_for(
+                job, socket.gaierror("name resolution failed"), url_of=lambda j: j.url
+            )
+
+        results = await scheduler.run([job], failing_worker, failed_result=_engine_envelope)
+        result = results[job.index]
+        # Different axes: the status is the verdict, the classification the reason.
+        # Comparing one against the other is why the old tuple could not work.
+        assert result.status == "failed"
+        assert result.classification == "dns_error"
+        assert scheduler._domain_failures.get("example.com", 0) == 1
+
+    @pytest.mark.parametrize(
+        ("classification", "expected_failures", "why"),
+        [
+            ("navigation_timeout", 1, "attempts exhausted against the domain: a real fault"),
+            ("cookie_consent_required", 0, "a wall proves the host is alive"),
+            ("robots_disallowed", 0, "we chose not to fetch; not the host's doing"),
+            ("invalid_url", 0, "our own policy refusal, silent about the domain"),
+        ],
+    )
+    async def test_each_status_reaches_the_verdict_its_meaning_implies(
+        self, classification, expected_failures, why
+    ):
+        scheduler = DomainScheduler(
+            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
+        )
+        job = make_job(0, "https://example.com/p")
+
+        async def worker(job):
+            return self._terminal(job, classification)
+
+        await scheduler.run([job], worker, failed_result=_engine_envelope)
+        assert scheduler._domain_failures.get("example.com", 0) == expected_failures, why
+
+    def test_status_accounting_is_total(self):
+        """Every ResultStatus member has a verdict, so none can arrive unhandled.
+
+        The branch this replaced tested membership in a two-element tuple, so
+        blocked, disallowed, retry_exhausted and skipped matched nothing, and a
+        status added to the taxonomy later would have silently joined them
+        rather than forcing a decision.
+        """
+        import typing
+
+        from app.constants import ResultStatus
+        from app.scheduler import _STATUS_ACCOUNTING
+
+        members = set(typing.get_args(ResultStatus))
+        assert members, "ResultStatus must be a Literal to be checkable"
+        assert not members - set(_STATUS_ACCOUNTING), (
+            "a ResultStatus member has no domain-health verdict: "
+            f"{sorted(members - set(_STATUS_ACCOUNTING))}"
+        )
+        assert not set(_STATUS_ACCOUNTING) - members, (
+            "the accounting table names a status the taxonomy does not define: "
+            f"{sorted(set(_STATUS_ACCOUNTING) - members)}"
+        )
+        assert set(_STATUS_ACCOUNTING.values()) <= {"success", "failure", "none"}

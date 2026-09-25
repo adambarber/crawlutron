@@ -171,7 +171,13 @@ __all__ = [
 #
 # LOWERED to 14,394 by deleting the storage_state escape hatch: two lines that
 # let three literals past the path allowlist.
-_APP_TREE_CODE_LINE_BUDGET = 14_394
+#
+# RAISED to 14,407 for total status accounting in the scheduler: the branch used
+# to test membership in a two-element tuple, which silently matched four of the
+# six ResultStatus members against neither arm. The table plus the method that
+# reads it is the price of a verdict existing for every status -- and of being
+# able to prove it, since the tuple had no shape a test could check.
+_APP_TREE_CODE_LINE_BUDGET = 14_407
 
 
 def test_app_tree_code_line_count_does_not_grow():

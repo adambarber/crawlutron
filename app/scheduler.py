@@ -100,6 +100,40 @@ _MAX_COOLDOWN_WAIT = 300.0
 # dicts on every rate-limited result. ``run`` still purges up front.
 _COOLDOWN_PURGE_INTERVAL = 100
 
+# What a result's STATUS means for the domain's health, over the whole
+# ResultStatus space rather than the two values the branch used to name.
+#
+# The verdict each status carries is the one CLASSIFICATION_STATUS_BY_LABEL
+# already documents, read as a statement about the DOMAIN rather than the page:
+#  * success   -- usable content, or freshness proved by the caller's validators.
+#                 The host answered, so the domain's counters reset.
+#  * blocked   -- "the page exists, we were kept out" (anti-bot, consent). The
+#                 fetch worked and the host is healthy, so this is a success
+#                 for health purposes: a site that only ever walls us is not a
+#                 site that needs backing off.
+#  * failed    -- retrieved but unusable, or the transport died. A real fault
+#                 against this domain.
+#  * retry_exhausted -- the browser retry loop spent all its attempts. The
+#                 table's own comment says the page may be perfectly renderable
+#                 later, so the verdict describes the ATTEMPT, not the page --
+#                 but repeatedly exhausting every attempt against one host is
+#                 precisely the pressure a domain breaker exists to relieve, and
+#                 leaving it unaccounted meant such a domain never tripped.
+#  * skipped   -- robots disallowed: "we chose not to fetch". Never a failure;
+#                 counting it would let a site's robots.txt degrade its own
+#                 crawl rate, which is the opposite of what robots is for.
+#  * disallowed -- a policy refusal (invalid URL, private target). Says nothing
+#                 whatsoever about the domain, and is usually OUR decision.
+# Exhaustive on purpose: see test_status_accounting_is_total.
+_STATUS_ACCOUNTING: dict[str, str] = {
+    "success": "success",
+    "blocked": "success",
+    "failed": "failure",
+    "retry_exhausted": "failure",
+    "skipped": "none",
+    "disallowed": "none",
+}
+
 
 class DomainScheduler:
     def __init__(
@@ -183,6 +217,31 @@ class DomainScheduler:
         if self._sets_since_purge >= _COOLDOWN_PURGE_INTERVAL:
             self._sets_since_purge = 0
             self._purge_expired()
+
+    def _record_result_health(self, domain: str, result: SchedulerResult) -> None:
+        """Apply a result's domain-health verdict. See _STATUS_ACCOUNTING.
+
+        Its own method because it is one decision, not part of running a job:
+        inlined it pushed the enclosing ``async with`` in run_one over the
+        tree's block-length budget, and the verdict it reads is the whole
+        question of what a status means for a domain's health.
+        """
+        accounting = _STATUS_ACCOUNTING.get(result.status, "none")
+        if accounting == "failure":
+            self.record_failure(domain)
+            return
+        if accounting != "success":
+            return
+        self.record_success(domain)
+        # Feed observed latency into the adaptive estimator (#6); render results
+        # may carry no diagnostics at all.
+        diag = getattr(result, "diagnostics", None)
+        latency = None
+        if isinstance(diag, dict):
+            rt = diag.get("runtime") or {}
+            latency = rt.get("elapsed_ms")
+        if latency:
+            self.record_latency(domain, latency)
 
     def record_success(self, domain: str) -> None:
         """Reset the failure counter (and exponential backoff) for a domain."""
@@ -389,19 +448,7 @@ class DomainScheduler:
                 async with global_gate:
                     try:
                         result = await worker(job)
-                        if result.status == "success":
-                            self.record_success(job.domain)
-                            # Feed observed latency into the adaptive estimator
-                            # (#6); render results may carry no diagnostics at all.
-                            diag = getattr(result, "diagnostics", None)
-                            latency = None
-                            if isinstance(diag, dict):
-                                rt = diag.get("runtime") or {}
-                                latency = rt.get("elapsed_ms")
-                            if latency:
-                                self.record_latency(job.domain, latency)
-                        elif result.status in ("failed", "network_error"):
-                            self.record_failure(job.domain)
+                        self._record_result_health(job.domain, result)
                     except Exception as error:
                         self.record_failure(job.domain)
                         # Chokepoint for "a worker raised": build a classified
