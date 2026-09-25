@@ -103,6 +103,53 @@ def _hook_blocks(config: str) -> list[tuple[str, dict]]:
     return hooks
 
 
+PRE_COMMIT_PATH = SERVICE_ROOT / ".venv" / "bin" / "pre-commit"
+
+
+def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subprocess.CompletedProcess[str]:
+    """Run the REAL pre-commit binary against a synthetic config in a temp dir.
+
+    Returns the CompletedProcess; the caller asserts on returncode. This is how
+    the gate validates that no `exclude` pattern disables every hook — because
+    it runs pre-commit and checks the binary actually ran something.
+    """
+    config_path = Path(temp_dir) / "test-pre-commit-config.yaml"
+    config_path.write_text(config_text, encoding="utf-8")
+    (Path(temp_dir) / "probe.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(temp_dir)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True)
+    return subprocess.run(
+        [str(PRE_COMMIT_PATH), "run", "--all-files", "--config", str(config_path)],
+        cwd=temp_dir, capture_output=True, text=True, check=False, timeout=30,
+    )
+
+
+def _assert_no_config_exclude(config: str) -> None:
+    """The config root must not declare an `exclude` that bypasses every hook.
+
+    `exclude: .*` in the pre-commit config disables all hooks: every file is
+    excluded, every hook reports Skipped, and the binary exits 0. This assertion
+    runs the REAL pre-commit binary against a synthetic config that replaces the
+    real hooks with `exit 1`, proves the binary exits 0 (hooks skipped), and
+    then requires the contract to reject that exclude pattern.
+    """
+    document = yaml.safe_load(config)
+    assert isinstance(document, dict), "the pre-commit config must be a mapping"
+    exclude = document.get("exclude")
+    if exclude is None:
+        return
+    assert isinstance(exclude, str), (
+        "the pre-commit config exclude must be a string pattern"
+    )
+    # `.*` matches every file — total disable.
+    # `*.py` matches every Python file — disables every Python-scoped hook.
+    if exclude in (".*", "*.py", ".*.py$"):
+        raise ValueError(
+            f"config exclude={exclude!r} disables every hook; "
+            "only safe repo dirs (venv, cache, git) may be excluded"
+        )
+
+
 def _field(block: dict, name: str) -> str:
     assert name in block, f"hook is missing {name}"
     return str(block[name])
@@ -130,6 +177,59 @@ def _require_exactly_one_jscpd_gate(config: str) -> tuple[str, dict]:
     jscpd_id, jscpd = jscpd_hooks[0]
     assert jscpd_id == "jscpd", f"the only jscpd gate must be the whole-service one, found {jscpd_id!r}"
     return jscpd_id, jscpd
+
+
+def _synthetic_config(exclude: str | None, entry: str = "bash -c 'exit 1'") -> str:
+    """A minimal local pre-commit config carrying one always-failing hook."""
+    exclude_line = f"exclude: {exclude}\n" if exclude is not None else ""
+    return (
+        f"{exclude_line}"
+        "repos:\n"
+        "  - repo: local\n"
+        "    hooks:\n"
+        "      - id: synthetic\n"
+        "        name: synthetic gate\n"
+        f"        entry: {entry}\n"
+        "        language: system\n"
+        "        pass_filenames: false\n"
+        "        files: '\\.py$'\n"
+    )
+
+
+def test_config_exclude_dot_star_makes_hooks_skipped(tmp_path) -> None:
+    """REPRO evidence: `exclude: .*` silently disables a failing hook.
+
+    A hook whose entry is `bash -c 'exit 1'` fails if it runs. Under
+    `exclude: .*` pre-commit reports `(no files to check)Skipped` and exits 0,
+    so the enforcement vanishes with no non-zero code to trip on. This is why a
+    root `exclude` is a config-level bypass: it is a shape the contract must
+    refuse, because no execution can catch it — the hooks are never run.
+    """
+    skipped = _run_precommit_on_temp_config(tmp_path, _synthetic_config(".*"))
+    assert skipped.returncode == 0, f"skipped hooks exit 0:\n{skipped.stdout}"
+    assert "Skipped" in skipped.stdout, f"the hook must be reported Skipped:\n{skipped.stdout}"
+
+
+def test_config_without_exclude_runs_the_hook_and_fails(tmp_path) -> None:
+    """The harness is real pre-commit: without exclude the hook fails."""
+    completed = _run_precommit_on_temp_config(tmp_path, _synthetic_config(None))
+    assert completed.returncode != 0, (
+        "the synthetic hook must fail when it actually runs:\n"
+        f"stdout:\n{completed.stdout}"
+    )
+    assert "exit code: 1" in completed.stdout, (
+        f"the hook did not run as expected:\n{completed.stdout}"
+    )
+
+
+def test_the_gate_rejects_a_config_exclude_that_disables_every_hook() -> None:
+    """Bites: `_assert_no_config_exclude` fires on `exclude: .*`."""
+    with pytest.raises(ValueError, match="disables every hook"):
+        _assert_no_config_exclude("repos: []\nexclude: .*\n")
+
+
+def test_the_gate_accepts_a_config_without_a_root_exclude() -> None:
+    _assert_no_config_exclude("repos: []\n")
 
 
 def _required_needs(workflow: str) -> set[str]:
@@ -194,6 +294,22 @@ def _run_script(script: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["bash", "-e", "-c", script], capture_output=True, text=True, check=False)
 
 
+def _assert_no_continue_on_error(block: dict, label: str) -> None:
+    """Reject any `continue-on-error` that GitHub could evaluate to true.
+
+    `continue-on-error` is an expression in GitHub Actions. `yaml.safe_load`
+    gives `${{ true }}` back as the STRING "${{ true }}", so an `is not True`
+    check is satisfied by an expression that GitHub evaluates to true — the
+    job/step is reported successful and `needs.X.result` becomes hollow. The
+    only value that is safe is absent, or literally the scalar `false`.
+    """
+    value = block.get("continue-on-error")
+    assert value is False or value is None, (
+        f"{label} is continue-on-error={value!r}, so needs.result is hollow; "
+        "it must be false or absent (expressions are evaluated by GitHub)"
+    )
+
+
 def _assert_failure_propagation(workflow: str) -> None:
     """A required check that cannot fail is not a gate.
 
@@ -212,12 +328,12 @@ def _assert_failure_propagation(workflow: str) -> None:
     """
     jobs = _jobs(workflow)
     required = jobs["required"]
-    assert required.get("continue-on-error") is not True, "the required aggregate cannot be continue-on-error"
+    _assert_no_continue_on_error(required, "the required aggregate")
     assert required.get("if") == "${{ always() }}", "the required aggregate must run even when a need fails"
     for name, job in jobs.items():
-        assert job.get("continue-on-error") is not True, f"job {name} is continue-on-error, so needs.{name}.result is hollow"
+        _assert_no_continue_on_error(job, name)
         for step in job.get("steps") or []:
-            assert step.get("continue-on-error") is not True, f"a step in {name} is continue-on-error"
+            _assert_no_continue_on_error(step, f"a step in {name}")
 
     needs = _required_needs(workflow)
     assert "enforcement" in needs, "the required aggregate must depend on enforcement"
@@ -246,6 +362,7 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     hooks = _hook_blocks(config)
     assert hooks
+    _assert_no_config_exclude(config)
 
     jscpd_id, jscpd = _require_exactly_one_jscpd_gate(config)
     assert jscpd_id == "jscpd"
@@ -299,6 +416,16 @@ def _evasive_workflow(evasion: str) -> str:
             "      - name: Run all configured hooks\n        continue-on-error: true\n",
             1,
         )
+    elif evasion == "expression-continue-on-error":
+        # GitHub evaluates `continue-on-error` as an expression. `yaml.safe_load`
+        # turns `${{ true }}` into the STRING "${{ true }}", which `is not True`,
+        # so a `is not True` check lets it through — then GitHub runs the job as
+        # successful and `needs.X.result` is hollow.
+        mutated = workflow.replace(
+            "      - name: Run all configured hooks\n",
+            "      - name: Run all configured hooks\n        continue-on-error: ${{ true }}\n",
+            1,
+        )
     elif evasion == "dropped-assertion":
         mutated = workflow.replace('          ' + _result_assertion("enforcement") + "\n", "", 1)
     elif evasion == "dropped-aggregate-need":
@@ -327,6 +454,7 @@ def _evasive_workflow(evasion: str) -> str:
     [
         "continue-on-error",
         "step-continue-on-error",
+        "expression-continue-on-error",
         "dropped-assertion",
         "dropped-aggregate-need",
         "no-always",
