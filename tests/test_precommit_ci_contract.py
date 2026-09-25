@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 ENFORCEMENT_COMMAND = "pre-commit run --all-files --config docker/browser-crawler/.pre-commit-config.yaml"
 REPORTING_JOBS = {"lint", "typecheck", "test-fast"}
+# GitHub's template form for an errexit shell. The required aggregate is a chain
+# of `test` lines, so its exit code is its last line's without errexit.
+ERREXIT_SHELL = "bash -e {0}"
 # Every file the gates read to decide what to enforce. A commit that edits one of
 # them must run the enforcement: the config that decides what is checked cannot
 # itself be the one change that skips the check.
@@ -117,11 +121,108 @@ def _require_exactly_one_jscpd_gate(config: str) -> tuple[str, dict]:
 
 
 def _required_needs(workflow: str) -> set[str]:
-    required = re.search(r"^  required:\n(?P<body>.*?)(?=^\S|\Z)", workflow, re.MULTILINE | re.DOTALL)
-    assert required is not None, "CI must declare the required aggregate job"
-    needs = re.search(r"^\s+needs: \[(?P<jobs>[^\]]+)\]", required.group("body"), re.MULTILINE)
-    assert needs is not None, "the required aggregate must declare needs"
-    return {job.strip() for job in needs.group("jobs").split(",")}
+    required = _jobs(workflow).get("required")
+    assert isinstance(required, dict), "CI must declare the required aggregate job"
+    needs = required.get("needs")
+    assert isinstance(needs, list) and needs, "the required aggregate must declare needs"
+    return {str(job) for job in needs}
+
+
+def _jobs(workflow: str) -> dict:
+    document = yaml.safe_load(workflow)
+    assert isinstance(document, dict), "the workflow must be a mapping"
+    jobs = document.get("jobs")
+    assert isinstance(jobs, dict) and jobs, "the workflow must declare jobs"
+    return jobs
+
+
+def _result_assertion(job: str) -> str:
+    return 'test "${{ needs.' + job + '.result }}" = "success"'
+
+
+def _required_gate_step(workflow: str) -> dict:
+    for step in _jobs(workflow)["required"].get("steps") or []:
+        if str(step.get("run", "")).strip():
+            return step
+    raise AssertionError("the required aggregate must run a script")
+
+
+def _required_gate_script(workflow: str) -> str:
+    """The shell the required aggregate actually runs, expressions intact."""
+    return str(_required_gate_step(workflow)["run"])
+
+
+def _required_gate_shell(workflow: str) -> str:
+    """The aggregate's shell, which the gate depends on and so must be declared.
+
+    The script is a chain of `test` lines. A shell without errexit gives the
+    step the exit code of its LAST line, so `test "failure" = "success"` in the
+    middle is invisible: the required check reports success over a run that
+    failed. GitHub's implicit default on Linux is `bash -e {0}`, so this works
+    today by accident, and the accident is exactly what an edit to this step,
+    a `defaults.run.shell`, or a move to another runner can take away.
+    """
+    shell = _required_gate_step(workflow).get("shell")
+    assert shell == ERREXIT_SHELL, (
+        f"the required aggregate must declare shell {ERREXIT_SHELL!r}, found {shell!r}: "
+        "without errexit its exit code is the last test line's, not the failing one"
+    )
+    return str(shell)
+
+
+def _render_results(script: str, results: dict[str, str]) -> str:
+    for job, result in results.items():
+        script = script.replace("${{ needs." + job + ".result }}", result)
+    assert "${{" not in script, f"unrendered expression left in the required script:\n{script}"
+    return script
+
+
+def _run_script(script: str) -> subprocess.CompletedProcess[str]:
+    """Execute as GitHub executes it: `bash -e {0}`."""
+    return subprocess.run(["bash", "-e", "-c", script], capture_output=True, text=True, check=False)
+
+
+def _assert_failure_propagation(workflow: str) -> None:
+    """A required check that cannot fail is not a gate.
+
+    Two evasions were verified against the previous version of this contract,
+    which only counted the enforcement command and checked that `enforcement`
+    was in `needs`:
+
+      * `continue-on-error: true` on the enforcement job -- GitHub reports the
+        job as successful, so the aggregate asserts success over a run that
+        never happened.
+      * deleting `test "${{ needs.enforcement.result }}" = "success"` -- the
+        aggregate still runs, still needs enforcement, and no longer checks it.
+
+    Both are refused here, and the refusal is checked by executing the
+    aggregate's own script rather than by reading it.
+    """
+    jobs = _jobs(workflow)
+    required = jobs["required"]
+    assert required.get("continue-on-error") is not True, "the required aggregate cannot be continue-on-error"
+    assert required.get("if") == "${{ always() }}", "the required aggregate must run even when a need fails"
+    for name, job in jobs.items():
+        assert job.get("continue-on-error") is not True, f"job {name} is continue-on-error, so needs.{name}.result is hollow"
+        for step in job.get("steps") or []:
+            assert step.get("continue-on-error") is not True, f"a step in {name} is continue-on-error"
+
+    needs = _required_needs(workflow)
+    assert "enforcement" in needs, "the required aggregate must depend on enforcement"
+    _required_gate_shell(workflow)
+    script = _required_gate_script(workflow)
+    for job in sorted(needs):
+        assert _result_assertion(job) in script, f"the required aggregate never asserts needs.{job}.result succeeded"
+
+    results = {job: "success" for job in needs}
+    assert _run_script(_render_results(script, results)).returncode == 0, "all-green must pass"
+    for job in sorted(needs):
+        for outcome in ("failure", "cancelled", "skipped"):
+            broken = dict(results, **{job: outcome})
+            completed = _run_script(_render_results(script, broken))
+            assert completed.returncode != 0, (
+                f"needs.{job}.result = {outcome} still passed the required aggregate:\n{completed.stdout}"
+            )
 
 
 def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
@@ -155,6 +256,81 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     assert "enforcement" in required
     assert required - {"enforcement"} <= REPORTING_JOBS
     assert "pre-commit==4.6.2" in (SERVICE_ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    _assert_failure_propagation(workflow)
+
+
+def _evasive_workflow(evasion: str) -> str:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    if evasion == "continue-on-error":
+        mutated = workflow.replace(
+            "  enforcement:\n    name: Pre-commit enforcement\n",
+            "  enforcement:\n    name: Pre-commit enforcement\n    continue-on-error: true\n",
+            1,
+        )
+    elif evasion == "step-continue-on-error":
+        mutated = workflow.replace(
+            "      - name: Run all configured hooks\n",
+            "      - name: Run all configured hooks\n        continue-on-error: true\n",
+            1,
+        )
+    elif evasion == "dropped-assertion":
+        mutated = workflow.replace('          ' + _result_assertion("enforcement") + "\n", "", 1)
+    elif evasion == "dropped-aggregate-need":
+        mutated = workflow.replace("needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1)
+    elif evasion == "no-always":
+        mutated = workflow.replace("    if: ${{ always() }}\n", "", 1)
+    elif evasion == "no-errexit":
+        mutated = workflow.replace("        shell: " + ERREXIT_SHELL + "\n", "", 1)
+    elif evasion == "sh-shell":
+        mutated = workflow.replace("        shell: " + ERREXIT_SHELL + "\n", "        shell: sh\n", 1)
+    else:
+        raise AssertionError(f"unknown evasion: {evasion}")
+    assert mutated != workflow, f"the {evasion} mutation did not apply, so this test would prove nothing"
+    return mutated
+
+
+@pytest.mark.parametrize(
+    "evasion",
+    [
+        "continue-on-error",
+        "step-continue-on-error",
+        "dropped-assertion",
+        "dropped-aggregate-need",
+        "no-always",
+        "no-errexit",
+        "sh-shell",
+    ],
+)
+def test_required_gate_evasions_are_rejected(evasion) -> None:
+    with pytest.raises(AssertionError):
+        _assert_failure_propagation(_evasive_workflow(evasion))
+
+
+def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
+    """The enforcement assertion is the load-bearing line; prove it is executed.
+
+    Before this, the contract only read the workflow. Reading it is what let
+    both evasions through, so the propagation claim is settled by running the
+    aggregate's own script with a failed need.
+    """
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    needs = _required_needs(workflow)
+    script = _required_gate_script(workflow)
+    assert _required_gate_shell(workflow) == ERREXIT_SHELL
+    assert _run_script(_render_results(script, {job: "success" for job in needs})).returncode == 0
+    failed = _run_script(_render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"}))
+    assert failed.returncode != 0, "a failed enforcement job must fail the required aggregate"
+    # The same script under a shell without errexit reports success, which is why
+    # the declared shell above is a gate and not a style preference.
+    without_errexit = subprocess.run(
+        ["bash", "-c", _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"})],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert without_errexit.returncode == 0, (
+        "this test is only meaningful if the chain is errexit-sensitive; it no longer is"
+    )
 
 
 def test_quoted_hook_id_is_visible_to_this_contract() -> None:

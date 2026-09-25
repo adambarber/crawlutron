@@ -152,6 +152,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
+        # Declared, not inherited. The script below is a chain of `test` lines,
+        # and a shell without errexit hands the step the exit code of its LAST
+        # line -- so a failed need in the middle would be reported as a passing
+        # required check. GitHub's implicit Linux default happens to be
+        # `bash -e {0}`, which is why this worked unnoticed; a `defaults.run.shell`,
+        # a step-level `shell:`, or a different runner takes it away silently.
+        shell: bash -e {0}
         run: |
           test "${{ needs.lint.result }}" = "success"
           test "${{ needs.typecheck.result }}" = "success"
