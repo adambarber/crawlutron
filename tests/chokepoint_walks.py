@@ -15,9 +15,7 @@ it was the part it did not do: the helpers re-globbed, re-read and re-parsed all
 for the same traversal about 44 times over. Measured per traversal: 0.0018s to
 glob and 0.1121s to read and parse 105 modules, so 0.114s each, and 5.4s of that
 file's run (interleaved before/after: 47.0s -> 41.6s) plus 25.5s of a full sweep
-(132.4s -> 106.9s), because other files walk app/ too. Its seven slow detectors,
-37.7s between them, are their OWN per-node analysis and this does not touch
-them: what is removed is the traversal underneath them, not the analysis.
+(132.4s -> 106.9s), because other files walk app/ too.
 
 The cost was the smaller half of the defect. Because each walk observed the tree
 at a different instant, "list the files" and "read the files" were separate
@@ -28,6 +26,16 @@ chokepoint sweep. One snapshot per exclude set fixes both halves at once, and th
 detectors share the same ast.Module objects rather than equal copies of them: a
 re-parse compares equal everywhere a detector looks, so only identity
 distinguishes "I re-read the tree" from "the tree changed".
+
+ONE node sequence per root, which is the same argument one level down. Owning
+the snapshot removed the re-GLOB and the re-READ; the re-WALK underneath it was
+still there, and it was the larger half. ``nodes_of`` below is that fix, and the
+seven detectors left slow after the first one were slow because of it: they were
+walking the same tree forty times over, not because their own analysis was
+expensive. What is removed is the repeated walk, never the analysis -- the
+detectors' bodies are unchanged, and the receipt for that is
+``tests/test_safety_invariants.py``, which compares every detector's offender
+set before and after and finds them identical.
 
 Keeping this pure-stdlib means the static invariant tests do not pay the
 heavy ``helpers`` -> engine -> settings import chain.
