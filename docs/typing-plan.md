@@ -77,12 +77,34 @@ over a genuine absence:
 | `pdfplumber` | 0.11.10 | **yes** | `ignore_missing_imports` | unjustified |
 | `playwright` | 1.62.0 | **yes** | `ignore_missing_imports` | unjustified |
 | `numpy` | 2.5.3 | **yes** (275 inline `.pyi`) | `follow_imports = skip` | unjustified — see below |
-| `yoyo` | not installed | — | `ignore_missing_imports` | exempting an import that never happens |
 | `brotli` | 1.2.0 | no | `ignore_missing_imports` | stub package exists |
 | `regex` | 2026.9.10 | no | `ignore_missing_imports` | stub package exists, and in typeshed |
 | `lxml` | 6.1.3 | no | `ignore_missing_imports` | stub package exists |
 | `publicsuffixlist` | 1.0.2 | no | `ignore_missing_imports` | **genuinely untyped** |
+| `yoyo` | 9.0.0 | no | `ignore_missing_imports` | **genuinely untyped** — see correction below |
 | `tests.*`, `scripts.*` | — | — | `ignore_errors` | **dead** — `files = app`, so these never apply |
+
+> **Correction (2026-09-25).** An earlier revision of this table recorded `yoyo`
+> as "not installed at all — exempting an import that never happens." **That was
+> wrong, and the error was mine.** The measurement queried
+> `importlib.metadata.distribution("yoyo")`, which raises
+> `PackageNotFoundError`, but the *distribution* is named `yoyo_migrations`
+> (its dist-info is `yoyo_migrations-9.0.0.dist-info`) while the *import* name
+> is `yoyo`. `importlib.util.find_spec("yoyo")` resolves to
+> `site-packages/yoyo/__init__.py` and `yoyo.__version__` is `9.0.0`.
+>
+> The lesson generalises: **a distribution-name miss is not evidence of
+> absence.** Confirm with `find_spec` before writing an exemption off, and when
+> reporting a negative, name the lookup that produced it.
+>
+> The corrected consequence is that `yoyo` is **genuinely untyped** — no
+> `py.typed`, no inline `.pyi`, and no stub package on PyPI (`types-yoyo` and
+> `yoyo-stubs` are both 404). Its exemption is therefore *justified*, on the same
+> footing as `brotli` and `lxml` were before step 2, and restoring it is correct.
+> The seven errors that appear when it is removed are all `[import-untyped]` on
+> `yoyo` imports under `app/crawl/migrations/` — none is a defect in this
+> codebase, and none is evidence that the other nine exemptions are also
+> load-bearing.
 
 `numpy`'s exemption is justified in its own comment by "its stub's PEP 695 `type`
 statements mypy cannot parse at a 3.11 target". The config now sets
@@ -113,14 +135,22 @@ cause; it does not remove the symptom.
 
 ### Step 1 — delete the unjustified exemptions
 
-Remove the eight sections listed as unjustified above, and delete the dead
+Remove the **nine** sections listed as unjustified above, and delete the dead
 `[mypy-tests.*]` / `[mypy-scripts.*]` sections. `mypy` itself reports them:
 `note: unused section(s): [mypy-tests.*], [mypy-scripts.*]` — someone wrote an
 intent that has no effect, and leaving it makes the config look more covered
 than it is.
 
+That is the six `py.typed` libraries (`camoufox`, `curl_cffi`, `trafilatura`,
+`markitdown`, `pdfplumber`, `playwright`), the stale `numpy` skip, and the two
+dead sections. **Do NOT remove the `yoyo` exemption** — see the correction
+above; it is justified, because the library is installed and genuinely untyped.
+
 **Verify:** `mypy` still clean at 106 files. If it is not, the exemption was
-load-bearing and the finding above is wrong — stop and say so.
+load-bearing and the finding above is wrong — stop and say so. Do not add the
+exemption back to make it green, and do not add any new exemption. A step that
+needs a suppression to stay green has failed, and the finding it contradicts is
+the important output.
 
 ### Step 2 — add stub dependencies rather than hand-writing types
 
@@ -150,12 +180,34 @@ which are precisely the files whose external types are currently suppressed —
 so the types that belong in those signatures do not become available until
 steps 1 and 2 land.
 
-### Step 3 — one hand-written Protocol
+### Step 3 — hand-written Protocols for what is genuinely untyped
 
-`publicsuffixlist` 1.0.2 is the only import left with no stub package and no
-typeshed entry. It is a single-function call. Wrap it in a `Protocol` (or a
-thin typed wrapper module) at the point of use, so the one genuinely unknown
-boundary becomes a contract this codebase owns rather than a hole it inherits.
+After step 2, two imports remain that no stub package covers:
+
+| Import | Stub package | In typeshed | Surface |
+|---|---|---|---|
+| `publicsuffixlist` 1.0.2 | none | no | a single function |
+| `yoyo` 9.0.0 | none (`types-yoyo`, `yoyo-stubs` both 404) | no | `step`, `get_backend`, `read_migrations`, `DatabaseBackend`, `SQLiteBackend`, `DatabaseURI`, `MigrationList`, `default_migration_table`, used in `app/crawl/migrations/runner.py` plus three one-line `from yoyo import step` migration files |
+
+`publicsuffixlist` is a single-function call; wrap it in a `Protocol` or a thin
+typed wrapper so the boundary becomes a contract this codebase owns rather than
+a hole it inherits. Give it a real name that says what it is, not
+`PublicSuffixListLike`.
+
+`yoyo` is build-time rather than request-path, so the case for typing it is
+weaker — but its exemption is exactly the kind of silence this programme
+removes, and `runner.py:153-154` already carries a `# type: ignore` written
+after someone read yoyo's `Migration.__init__` source directly. Decide
+explicitly and record the decision here:
+
+- **Type it** if the migration runner's `get_backend` call can receive a
+  caller- or config-derived database URI. That makes it a real boundary.
+- **Keep the exemption, with a stated reason and a removal condition**, if it
+  cannot. A justified exemption with a reason is debt with a name on it; an
+  unexplained one is what step 1 just deleted elsewhere.
+
+Either way, name the surface in one module rather than importing from the
+untyped package at each call site, so the decision is visible in one place.
 
 ### Step 4 — `disallow_any_expr` per-module, never globally
 
@@ -227,7 +279,7 @@ reason and at least one may be legitimate.
 |---|---|
 | 1 — delete 8 unjustified exemptions | not started |
 | 2 — add `brotli-stubs`, `types-regex`, `types-lxml` | not started |
-| 3 — `Protocol` for `publicsuffixlist` | not started |
+| 3 — `Protocol` for `publicsuffixlist`; decide and record `yoyo` | not started |
 | 4 — per-module `disallow_any_expr` on 4 chokepoints | not started |
 
 When a step's status changes, the baseline in section 1 is stale and should be
