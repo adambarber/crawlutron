@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import traceback
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -52,6 +54,30 @@ from .discovery.well_known import create_well_known_router
 from .health.readiness import create_health_router
 
 settings = CrawlerSettings.from_mapping()
+
+_TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
+
+
+async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
+    """Run every teardown step, then report the ones that failed.
+
+    Shutdown is the one place where a single failure must not be allowed to
+    decide what else gets released: the pools below a raising ``close()`` are
+    not retried by anything, and the last of them outlives the process
+    entirely. Every step is therefore attempted regardless of what its
+    predecessor did, and the failures are raised together once the last one has
+    run -- so this widens the blast radius of a broken close without hiding it,
+    which a bare ``try``/``except``/``continue`` would.
+    """
+    failures: list[str] = []
+    for name, step in steps:
+        try:
+            await step()
+        except Exception:
+            failures.append(f"{name}: {traceback.format_exc(limit=1).strip().splitlines()[-1]}")
+    if failures:
+        raise RuntimeError("shutdown steps failed: " + " | ".join(failures))
+
 
 # Job store for resumable crawls (#3+#14)
 job_store = JobStore(
@@ -148,17 +174,35 @@ if FastAPI is not None:
 
         from .crawl.engine import _resource_gate
 
-        await close_async_http_client()
-        await close_cffi_session()
-        await close_browser_pool()
-        # The persistent document-extraction subprocesses are the last pool:
-        # they are lazy and never touched by the shutdown above, so without
-        # this every markitdown worker (and its memory and pipes) outlived the
-        # process's own shutdown and was only reaped by the test fixture.
+        # Imported here, not at module scope: this pulls in the markitdown
+        # extraction stack, and the deferred import is what keeps it off the
+        # import path of every CLI and MCP caller that never renders a PDF.
         from .crawl.extraction import _shutdown_doc_extraction_executor
 
-        await _shutdown_doc_extraction_executor()
-        _resource_gate.close()
+        async def _close_gate() -> None:
+            _resource_gate.close()
+
+        # Every step is attempted, and a failure is reported only after the last
+        # one has run. A close() that raises partway through the list would
+        # otherwise cost every pool below it its teardown -- and the
+        # document-extraction workers are the one pool nothing ever touches
+        # again, so skipping them leaks a markitdown subprocess, its memory and
+        # its pipes past the process's own shutdown. The aggregate still raises,
+        # so a genuinely broken close is still loud and still names itself.
+        await _run_shutdown_steps(
+            (
+                ("close_async_http_client", close_async_http_client),
+                ("close_cffi_session", close_cffi_session),
+                ("close_browser_pool", close_browser_pool),
+                # The persistent document-extraction subprocesses are the last
+                # pool: they are lazy and never touched by the shutdown above,
+                # so without this every markitdown worker (and its memory and
+                # pipes) outlived the process's own shutdown and was only reaped
+                # by the test fixture.
+                ("_shutdown_doc_extraction_executor", _shutdown_doc_extraction_executor),
+                ("_resource_gate.close", _close_gate),
+            )
+        )
         # Symmetry with set_utilization_sampler(...): release the closed
         # gate's ratio sampler so nothing dereferences it post-shutdown.
         READINESS_STATE.set_utilization_sampler(None)

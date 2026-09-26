@@ -228,7 +228,19 @@ __all__ = [
 # status_for_classification instead is the one line that keeps it true, and the
 # other four are the import that makes asking possible. Bought with a
 # tree-wide gate so the next spelled pair is reported at its line.
-_APP_TREE_CODE_LINE_BUDGET = 14_440
+# RAISED to 14,458 from 14,440: eighteen lines so a failing close() cannot skip
+# the pools below it. The lifespan teardown ran its five steps bare, so a
+# close() that raised cost every pool after it its teardown -- and the
+# document-extraction workers are the one pool nothing ever touches again, so
+# that skip leaks a markitdown subprocess, its memory and its pipes past the
+# process's own shutdown, which is the exact thing the comment beside that
+# call says the step is there to prevent. Every step is now attempted and the
+# failures are raised together afterwards, so the blast radius widens without
+# the bug going quiet. The regression test drives the real lifespan and the
+# real resource gate; a first draft replaced the gate with a stand-in and broke
+# on startup's start_lag_probe, which is the fake-imitates-the-chokepoint trap
+# the suite already has a standing rule about.
+_APP_TREE_CODE_LINE_BUDGET = 14_458
 
 
 def test_app_tree_code_line_count_does_not_grow():
