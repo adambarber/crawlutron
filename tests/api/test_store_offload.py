@@ -26,13 +26,19 @@ import functools
 import inspect
 
 import pytest
-from _job_harnesses import _fake_execute, _make_app, _seed_job
+from _job_harnesses import (
+    _fake_execute,
+    _make_app,
+    _seed_job,
+    make_crawled_job_store,
+    make_job_store,
+)
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _result_builders import _canned_result
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.crawl.job_store import JobStore
+from app.crawl.job_store import JobAccumulators, JobStore
 from app.crawl.result_store import CrawlResultStore
 from app.settings import CrawlerSettings
 
@@ -79,6 +85,14 @@ class LoopGuardJobStore(JobStore):
     def list_jobs(self):
         _refuse_on_loop("JobStore.list_jobs")
         return super().list_jobs()
+
+    def status_row(self, job_id):
+        _refuse_on_loop("JobStore.status_row")
+        return super().status_row(job_id)
+
+    def exists(self, job_id):
+        _refuse_on_loop("JobStore.exists")
+        return super().exists(job_id)
 
     def close(self):
         _refuse_on_loop("JobStore.close")
@@ -178,6 +192,89 @@ class TestJobEndpointsStayOffTheLoop:
             # background task outlives the loop and writes to a closed DB.
             hang.set()
             job_runner.reset_job_runner()
+
+
+class TestStatusReadNeverMaterializesTheCrawl:
+    """A status read must not read the pages it is only going to count.
+
+    ``GET /v1/jobs/{id}`` returns counts -- frontier/visited/results sizes, a
+    few scalars. The page history lives in two append-only tables, so those
+    counts are an index probe. But ``load`` deserializes every result payload
+    and every visited URL to build a ``CrawlJobState``, and the response then
+    throws all of it away after calling ``len()`` on it. On a long job that is
+    the entire crawl, read and JSON-decoded, per call, on the endpoint a client
+    polls while its own crawl is running.
+
+    The spy is a wrapper on the production accumulator methods, not a
+    replacement: the real reads still execute, so a pass is evidence about the
+    status path rather than about a double. It sits on the accumulator rather
+    than on ``load`` because that also catches a status read that reaches for
+    the history directly and skips ``load`` entirely.
+    """
+
+    _PAGES = 200
+
+    @pytest.fixture
+    def seeded_store(self, tmp_path):
+        return make_crawled_job_store(tmp_path, self._PAGES)
+
+    @staticmethod
+    def _spy_on_history_reads(monkeypatch, store):
+        reached: list[str] = []
+        for name in ("read_results", "read_visited"):
+            real = getattr(JobAccumulators, name)
+
+            def wrapper(self, job_id, *, _name=name, _real=real):
+                reached.append(_name)
+                return _real(self, job_id)
+
+            monkeypatch.setattr(JobAccumulators, name, wrapper)
+        return reached
+
+    def test_counts_come_without_reading_the_page_history(
+        self, seeded_store, monkeypatch
+    ):
+        store, job = seeded_store
+        reached = self._spy_on_history_reads(monkeypatch, store)
+
+        row = store.status_row(job.job_id)
+
+        assert reached == [], f"the status read materialized the crawl: {reached}"
+        assert row is not None
+        assert row["visited_size"] == self._PAGES
+        assert row["results_count"] == self._PAGES
+        assert row["frontier_size"] == len(job.frontier)  # create seeds the root
+        assert row["status"] == job.status.value
+        assert row["stats"] == job.stats  # the row is the source of truth
+        assert row["cap_truncated"] is False
+        assert row["error"] is None
+
+    def test_a_full_load_still_reads_the_history(self, seeded_store, monkeypatch):
+        """The guard above is only meaningful if the full read still does.
+
+        Without this the spy could be a no-op wrapper and the first test would
+        pass for the wrong reason -- a spy that never fires proves nothing
+        about the path it claims to watch.
+        """
+        store, job = seeded_store
+        reached = self._spy_on_history_reads(monkeypatch, store)
+
+        loaded = store.load(job.job_id)
+
+        assert sorted(reached) == ["read_results", "read_visited"]
+        assert len(loaded.visited) == self._PAGES
+
+    def test_status_row_of_an_absent_job_is_none(self, tmp_path):
+        store = make_job_store(tmp_path)
+        assert store.status_row("no-such-job") is None
+
+    def test_exists_probes_without_reading_the_row(self, seeded_store, monkeypatch):
+        store, job = seeded_store
+        reached = self._spy_on_history_reads(monkeypatch, store)
+
+        assert store.exists(job.job_id) is True
+        assert store.exists("no-such-job") is False
+        assert reached == []
 
 
 class TestStartupRecoveryStaysOffTheLoop:

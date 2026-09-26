@@ -14,6 +14,7 @@ from app.crawl.coordination_counters import CoordinationCounters
 from app.crawl.job_store import JobStatus, JobStore
 from app.crawl.migrations import (
     CURRENT_SCHEMAS,
+    LEGACY_COLUMNS,
     MIGRATION_IDS,
     ColumnSchema,
     StoreSchema,
@@ -59,6 +60,13 @@ def _assert_migration_recorded(conn: sqlite3.Connection, schema: StoreSchema) ->
 def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
     table = CURRENT_SCHEMAS[schema]
     conn = sqlite3.connect(db_path)
+    if schema is StoreSchema.CRAWL_JOBS:
+        # A genuine pre-0003 database carries the columns the current manifest
+        # dropped. Building it from CURRENT_SCHEMAS alone would produce a table
+        # no version of this service has ever written, so the stamping path
+        # would be exercised against a fiction. Order is irrelevant: every
+        # write below names its columns.
+        table = replace(table, columns=(*table.columns, *LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]))
     conn.execute(create_table_sql(table))
     if schema is StoreSchema.CRAWL_JOBS:
         conn.execute(
@@ -79,7 +87,7 @@ def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
                 '["https://legacy.example"]',
                 '[]',
                 '{"https://legacy.example": 1}',
-                '[]',
+                '[{"url": "https://legacy.example/page", "status": "success"}]',
                 10.0,
                 20.0,
                 None,
@@ -119,7 +127,7 @@ def test_fresh_database_is_empty_and_current_after_migrations(tmp_path, schema):
 
     conn = sqlite3.connect(db_path)
     assert CURRENT_SCHEMAS[schema].table_name in _table_names(conn)
-    assert schema_drift(conn, CURRENT_SCHEMAS[schema]) == ()
+    assert schema_drift(conn, CURRENT_SCHEMAS[schema], schema) == ()
     assert conn.execute(f"SELECT COUNT(*) FROM {CURRENT_SCHEMAS[schema].table_name}").fetchone()[0] == 0
     assert _BOOKKEEPING_TABLES <= _table_names(conn)
     _assert_migration_recorded(conn, schema)
@@ -140,6 +148,7 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     assert loaded.root_url == "https://legacy.example"
     assert loaded.status is JobStatus.PAUSED
     assert loaded.visited == {"https://legacy.example"}
+    assert loaded.results == [{"url": "https://legacy.example/page", "status": "success"}]
     assert loaded.transient_retries == {"https://legacy.example": 1}
     conn = sqlite3.connect(db_path)
     assert schema_drift(conn, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]) == ()
@@ -153,13 +162,9 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
 
 def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_path):
     db_path = tmp_path / "historical-jobs.db"
+    # The fixture's legacy shape already carries `canonicalized`: it is a
+    # LEGACY_COLUMN, and a database from before 0002/0003 had all three.
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-    before = sqlite3.connect(db_path)
-    before.execute(
-        "ALTER TABLE crawl_jobs ADD COLUMN canonicalized INTEGER NOT NULL DEFAULT 0"
-    )
-    before.commit()
-    before.close()
 
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     loaded = store.load("legacy-job")
@@ -177,10 +182,6 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
 def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
     db_path = tmp_path / "stamped-historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-    before = sqlite3.connect(db_path)
-    before.execute("ALTER TABLE crawl_jobs ADD COLUMN canonicalized INTEGER NOT NULL DEFAULT 0")
-    before.commit()
-    before.close()
 
     stamp_store(db_path, StoreSchema.CRAWL_JOBS)
 
@@ -197,10 +198,6 @@ def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
 def test_explicit_legacy_stamp_reports_only_the_marked_migration(tmp_path, capsys):
     db_path = tmp_path / "cli-stamped-historical-jobs.db"
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-    conn = sqlite3.connect(db_path)
-    conn.execute("ALTER TABLE crawl_jobs ADD COLUMN canonicalized INTEGER NOT NULL DEFAULT 0")
-    conn.commit()
-    conn.close()
 
     from app.crawl.migrations.runner import main
 

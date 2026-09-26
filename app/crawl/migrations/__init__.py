@@ -1,7 +1,9 @@
 """Ordered, reversible SQLite schema migrations."""
 
 from app.crawl.migrations.manifest import (
+    COMPANION_SCHEMAS,
     CURRENT_SCHEMAS,
+    LEGACY_COLUMNS,
     MIGRATION_IDS,
     MIGRATION_SEQUENCES,
     ColumnSchema,
@@ -9,6 +11,7 @@ from app.crawl.migrations.manifest import (
     StoreSchema,
     TableSchema,
     create_table_sql,
+    legacy_stamp_drift,
     schema_drift,
 )
 from app.crawl.migrations.runner import (
@@ -19,7 +22,9 @@ from app.crawl.migrations.runner import (
 )
 
 __all__ = [
+    "COMPANION_SCHEMAS",
     "CURRENT_SCHEMAS",
+    "LEGACY_COLUMNS",
     "MIGRATION_IDS",
     "MIGRATION_SEQUENCES",
     "ColumnSchema",
@@ -28,6 +33,7 @@ __all__ = [
     "StoreSchema",
     "TableSchema",
     "create_table_sql",
+    "legacy_stamp_drift",
     "migrate_store",
     "rollback_store",
     "schema_drift",

@@ -73,25 +73,30 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
     assert callers == {"webhooks.py::post_webhook"}, callers
 
 
-def test_build_job_status_handles_single_shot_jobs():
-    """SINGLE_SHOT jobs have empty frontier/visited (dataclass defaults).
+def test_build_job_status_handles_single_shot_jobs(tmp_path):
+    """SINGLE_SHOT jobs report zero counts, through the real store.
 
-    The reviewer was concerned that ``len(job.frontier)`` would raise
-    AttributeError for SINGLE_SHOT jobs. Verified: ``frontier`` and
-    ``visited`` are dataclass fields with default_factory, so they are
-    always present even for jobs that never use them.
+    A reviewer worried that counting ``frontier``/``visited`` on a SINGLE_SHOT
+    job would raise AttributeError, since a single-shot job never populates
+    them. Those counts are the store's projection now, not ``len()`` over
+    dataclass fields, so the concern cannot be expressed any more -- but the
+    invariant behind it is real, so the test stays and is pinned against
+    production code instead of a hand-built dataclass. That also covers the
+    case the dataclass could not: a job whose accumulators were genuinely
+    never written to.
     """
+    from _job_harnesses import make_job_store
+
     from app.api.main_helpers import _build_job_status
     from app.api_models import JobStatusResponse
-    from app.crawl.job_store import CrawlJobState, JobKind
 
-    job = CrawlJobState(
-        job_id="single_test",
-        kind=JobKind.SINGLE_SHOT,
-        root_url="http://example.com/",
-        policy={},
-    )
-    status = _build_job_status(job)
+    store = make_job_store(tmp_path)
+    job = store.create_single_shot("single_test", "http://example.com/", {})
+
+    row = store.status_row(job.job_id)
+    assert row is not None
+    status = _build_job_status(row)
+
     assert isinstance(status, JobStatusResponse)
     assert status.frontier_size == 0
     assert status.visited_size == 0

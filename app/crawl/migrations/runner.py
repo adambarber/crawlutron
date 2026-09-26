@@ -95,7 +95,7 @@ def _require_stampable_schema(conn: sqlite3.Connection, schema: StoreSchema) -> 
 
 def _require_current_schema(conn: sqlite3.Connection, schema: StoreSchema) -> None:
     table = CURRENT_SCHEMAS[schema]
-    drift = schema_drift(conn, table)
+    drift = schema_drift(conn, table, schema)
     if drift:
         raise LegacySchemaMismatch(
             f"{table.name} does not match the declared schema: {'; '.join(drift)}"

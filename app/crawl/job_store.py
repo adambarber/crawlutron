@@ -437,6 +437,218 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     return job
 
 
+_UPSERT_JOB_ROW_SQL = """
+      INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier,
+                              created_at, updated_at, error, stats, in_flight, transient_retries)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(job_id) DO UPDATE SET
+    kind=excluded.kind,
+    root_url=excluded.root_url,
+    policy=excluded.policy,
+    frontier=excluded.frontier,
+    updated_at=excluded.updated_at,
+    error=excluded.error,
+          stats=excluded.stats,
+          in_flight=excluded.in_flight,
+          transient_retries=excluded.transient_retries
+"""
+
+
+# The status view: every field the job response exposes, and nothing that would
+# make reading it cost what reading the job costs. Shared by the single and the
+# list read so the two cannot drift -- a field added to one and not the other
+# would let the list quietly describe a different job than the detail view.
+_JOB_STATUS_PROJECTION = """
+    SELECT job_id, root_url, status, created_at, updated_at, stats, error,
+           json_array_length(frontier) AS frontier_size,
+           COALESCE(json_extract(stats, '$.cap_truncated'), 0) AS cap_truncated
+      FROM crawl_jobs
+"""
+
+
+def _status_row(row: sqlite3.Row, visited: int, results: int) -> dict[str, Any]:
+    """Shape one projected row into the status view the API returns.
+
+    ``frontier_size`` and ``cap_truncated`` are NULL when the row has no
+    frontier or no stats object, which is the normal state of a fresh job.
+    """
+    return {
+        "job_id": row["job_id"],
+        "root_url": row["root_url"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "frontier_size": row["frontier_size"] or 0,
+        "visited_size": visited,
+        "results_count": results,
+        "cap_truncated": bool(row["cap_truncated"]),
+        "stats": json.loads(row["stats"]) if row["stats"] else {},
+        "error": row["error"],
+    }
+
+
+def _json(value) -> str:
+    return json.dumps(value, separators=(",", ":"), default=_json_default)
+
+
+def _job_row_params(job: CrawlJobState) -> tuple:
+    """The live-state columns of the job row, in ``_UPSERT_JOB_ROW_SQL`` order.
+
+    Separate from the statement so the two cannot drift: a column added to the
+    SQL without a matching entry here is a TypeError at the first persist
+    rather than a silently unwritten column.
+    """
+    return (
+        job.job_id,
+        job.kind.value,
+        job.root_url,
+        _json(job.policy),
+        job.status.value,
+        _json([_entry_payload(entry) for entry in job.frontier]),
+        job.created_at,
+        job.updated_at,
+        job.error,
+        _json(job.stats),
+        _json([_entry_payload(entry) for entry in job.in_flight]),
+        _json(job.transient_retries),
+    )
+
+
+class JobAccumulators:
+    """The growing part of a job: its page history and its visited set.
+
+    These two collections used to be JSON columns on the job row, so a batch
+    persist re-serialized every page crawled so far and total write volume over
+    a crawl grew as the square of the page count. They are append-only, so they
+    live in their own tables and a batch costs one INSERT per new page.
+
+    They are also everything about a job that is NOT live state, which is what
+    makes them separable: the row holds what the runner is doing right now
+    (frontier, status, retries) and can be rewritten wholesale each batch
+    because it is bounded; this holds what has already happened, and is only
+    ever appended to.
+
+    Caller holds the store's lock: these share the store's single connection.
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def read_results(self, job_id: str) -> list[Any]:
+        """The page history, in the order it was crawled.
+
+        ``seq`` is the crawl order and the insert key at once, so reading the
+        history back is one ordered index scan rather than a sort.
+        """
+        rows = self._conn.execute(
+            'SELECT payload FROM "crawl_job_results" WHERE job_id = ? ORDER BY seq', (job_id,)
+        ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
+    def read_visited(self, job_id: str) -> list[str]:
+        rows = self._conn.execute(
+            'SELECT url FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+        ).fetchall()
+        return [row["url"] for row in rows]
+
+    def append(self, job: CrawlJobState) -> None:
+        self._append_results(job)
+        self._append_visited(job)
+
+    def delete(self, job_id: str) -> None:
+        """Drop a job's history.
+
+        Without this the tables would keep a deleted job's entire crawl with
+        nothing pointing at it, which is worse than the leak the old column
+        layout could not have: there, deleting the row deleted the history by
+        construction.
+        """
+        self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+        self._conn.execute('DELETE FROM "crawl_job_visited" WHERE job_id = ?', (job_id,))
+
+    def counts_by_job(self) -> dict[str, tuple[int, int]]:
+        """``{job_id: (visited, results)}`` for the job list, in one query.
+
+        Two correlated subqueries per job would make the list view cost a round
+        trip per job per counter; the primary keys make both counts a single
+        grouped scan of the two tables.
+        """
+        rows = self._conn.execute(
+            """
+            SELECT job_id,
+                   (SELECT count(*) FROM crawl_job_visited v WHERE v.job_id = j.job_id) AS visited_count,
+                   (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = j.job_id) AS results_count
+              FROM crawl_jobs j
+            """
+        ).fetchall()
+        return {row["job_id"]: (row["visited_count"], row["results_count"]) for row in rows}
+
+    def counts_for(self, job_id: str) -> tuple[int, int]:
+        """``(visited, results)`` for one job, without reading either list.
+
+        ``count(*)`` over the primary key is an index probe, so this gives the
+        same answer ``len()`` gives after a full load for none of the load. It
+        exists so a status read can report a size without materializing the
+        page history to measure it.
+        """
+        row = self._conn.execute(
+            "SELECT (SELECT count(*) FROM crawl_job_visited WHERE job_id = ?) AS visited,"
+            " (SELECT count(*) FROM crawl_job_results WHERE job_id = ?) AS results",
+            (job_id, job_id),
+        ).fetchone()
+        return row["visited"], row["results"]
+
+    def _append_results(self, job: CrawlJobState) -> None:
+        """Insert only the pages this batch added.
+
+        The high-water mark is read from the table rather than remembered, so a
+        resumed process that never persisted a count in memory still appends
+        exactly the pages it has not written. If the history is shorter than
+        what is already stored -- normalization dropped pages a previous save
+        had written -- the accumulator was not monotone after all, and the
+        cheap path would silently skip pages; resync instead.
+        """
+        job_id = job.job_id
+        results = job.results
+        row = self._conn.execute(
+            'SELECT max(seq) FROM "crawl_job_results" WHERE job_id = ?', (job_id,)
+        ).fetchone()
+        persisted = 0 if row["max(seq)"] is None else row["max(seq)"] + 1
+        if persisted > len(results):
+            self._conn.execute('DELETE FROM "crawl_job_results" WHERE job_id = ?', (job_id,))
+            persisted = 0
+        if persisted == len(results):
+            return
+        self._conn.executemany(
+            'INSERT OR IGNORE INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
+            (
+                (job_id, seq, _json(result))
+                for seq, result in enumerate(results)
+                if seq >= persisted
+            ),
+        )
+
+    def _append_visited(self, job: CrawlJobState) -> None:
+        """Insert newly visited pages.
+
+        The count check keeps a batch that discovered nothing from re-probing
+        every page seen so far; when there is growth the insert is OR IGNORE, so
+        a page visited by two branches collapses to one row and the set
+        semantics of the accumulator are the table's primary key.
+        """
+        job_id = job.job_id
+        visited = job.visited
+        stored = self._conn.execute(
+            'SELECT count(*) AS n FROM "crawl_job_visited" WHERE job_id = ?', (job_id,)
+        ).fetchone()["n"]
+        if len(visited) <= stored:
+            return
+        self._conn.executemany(
+            'INSERT OR IGNORE INTO "crawl_job_visited" (job_id, url) VALUES (?, ?)',
+            ((job_id, url) for url in visited),
+        )
+
+
 class JobStore:
     """SQLite-backed store for crawl job states.
 
@@ -460,24 +672,30 @@ class JobStore:
         # indexing for a later-added column would couple the read path to ALTER
         # ordering. sqlite3.Row still supports row[n].
         self._conn.row_factory = sqlite3.Row
+        # The append-only side of a job lives behind its own owner so the row
+        # stays a row: live state is rewritten wholesale each batch, history is
+        # only ever appended to, and conflating them is what made both cost
+        # the same thing.
+        self._accumulators = JobAccumulators(self._conn)
 
     def _row_to_job(self, row) -> CrawlJobState:
+        job_id = row["job_id"]
         return CrawlJobState.from_json(
             {
-                "job_id": row[0],
-                "kind": row[1],
-                "root_url": row[2],
-                "policy": json.loads(row[3]),
-                "status": row[4],
-                "frontier": json.loads(row[5]),
-                "visited": json.loads(row[6]),
-                "results": json.loads(row[7]),
-                "created_at": row[8],
-                "updated_at": row[9],
-                "error": row[10],
-                "stats": json.loads(row[11]),
-                "in_flight": json.loads(row[12]),
-                "transient_retries": json.loads(row[13]),
+                "job_id": job_id,
+                "kind": row["kind"],
+                "root_url": row["root_url"],
+                "policy": json.loads(row["policy"]),
+                "status": row["status"],
+                "frontier": json.loads(row["frontier"]),
+                "visited": self._accumulators.read_visited(job_id),
+                "results": self._accumulators.read_results(job_id),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "error": row["error"],
+                "stats": json.loads(row["stats"]),
+                "in_flight": json.loads(row["in_flight"]),
+                "transient_retries": json.loads(row["transient_retries"]),
             },
             host_policy=self._host_policy,
         )
@@ -548,6 +766,12 @@ class JobStore:
     async def alist_jobs(self) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.list_jobs)
 
+    async def astatus(self, job_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.status_row, job_id)
+
+    async def aexists(self, job_id: str) -> bool:
+        return await asyncio.to_thread(self.exists, job_id)
+
     def _persist(self, job: CrawlJobState) -> None:
         """Write job state to SQLite. Caller must hold ``self._lock``.
 
@@ -555,58 +779,15 @@ class JobStore:
         boundary in :meth:`from_json` re-derives it once per load. Re-deriving
         every URL here instead would multiply the job loop's cost by the whole
         page history on every batch persist.
+
+        The row carries live state only. ``results`` and ``visited`` are
+        append-only accumulators in their own tables, so a batch costs one
+        INSERT per new page instead of re-serializing every page crawled so
+        far -- the difference between O(pages) and O(1) per batch.
         """
         job.updated_at = time.time()
-        root_url = job.root_url
-        policy = job.policy
-        frontier = job.frontier
-        in_flight = job.in_flight
-        visited = job.visited
-        stats = job.stats
-        transient_retries = job.transient_retries
-        self._conn.execute(
-            """
-                  INSERT INTO crawl_jobs (job_id, kind, root_url, policy, status, frontier, visited, results,
-                                          created_at, updated_at, error, stats, in_flight, transient_retries)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(job_id) DO UPDATE SET
-                kind=excluded.kind,
-                root_url=excluded.root_url,
-                policy=excluded.policy,
-                frontier=excluded.frontier,
-                visited=excluded.visited,
-                results=excluded.results,
-                updated_at=excluded.updated_at,
-                error=excluded.error,
-                      stats=excluded.stats,
-                      in_flight=excluded.in_flight,
-                      transient_retries=excluded.transient_retries
-              """,
-            (
-                job.job_id,
-                job.kind.value,
-                root_url,
-                json.dumps(policy, separators=(",", ":"), default=_json_default),
-                job.status.value,
-                json.dumps(
-                    [_entry_payload(entry) for entry in frontier],
-                    separators=(",", ":"),
-                    default=_json_default,
-                ),
-                json.dumps(list(visited), separators=(",", ":"), default=_json_default),
-                json.dumps(job.results, separators=(",", ":"), default=_json_default),
-                job.created_at,
-                job.updated_at,
-                job.error,
-                json.dumps(stats, separators=(",", ":"), default=_json_default),
-                json.dumps(
-                    [_entry_payload(entry) for entry in in_flight],
-                    separators=(",", ":"),
-                    default=_json_default,
-                ),
-                json.dumps(transient_retries, separators=(",", ":"), default=_json_default),
-            ),
-        )
+        self._conn.execute(_UPSERT_JOB_ROW_SQL, _job_row_params(job))
+        self._accumulators.append(job)
         self._conn.commit()
 
     def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
@@ -630,58 +811,88 @@ class JobStore:
         return cur.rowcount == 1
 
     def load(self, job_id: str) -> CrawlJobState | None:
-        """Load job state from SQLite. Returns None if not found."""
+        """Load job state from SQLite. Returns None if not found.
+
+        The whole read -- row, page history, visited set -- happens under one
+        hold of the lock, and it has to. Deserializing the state is no longer
+        free: the history and the visited set live in their own tables, so it is
+        two more queries on the shared connection. Releasing the lock between
+        them would let a writer interleave, and two things would break at once:
+        the connection would be driven from two threads (an
+        ``InterfaceError``, which surfaces as a live job reading as missing and
+        the runner dying on it), and the row's ``seq`` keys would be read
+        against a visited set from a different point in time, so a load could
+        return a state that never existed.
+        """
         with self._lock:
             row = self._conn.execute(
-                "SELECT job_id, kind, root_url, policy, status, frontier, visited, results, "
+                "SELECT job_id, kind, root_url, policy, status, frontier, "
                 "created_at, updated_at, error, stats, in_flight, transient_retries "
                 "FROM crawl_jobs WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
-        if row is None:
-            return None
-        try:
-            return self._row_to_job(row)
-        except (json.JSONDecodeError, ValueError, TypeError) as exc:
-            # Surface corruption instead of silently returning None so a
-            # broken row is observable in logs rather than masked.
-            logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
-            return None
+            if row is None:
+                return None
+            try:
+                return self._row_to_job(row)
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                # Surface corruption instead of silently returning None so a
+                # broken row is observable in logs rather than masked.
+                logger.warning("job_store_load_corrupt", extra={"job_id": job_id, "error": str(exc)})
+                return None
 
     def delete(self, job_id: str) -> bool:
-        """Delete job from SQLite. Returns True if existed."""
+        """Delete job from SQLite. Returns True if existed.
+
+        The page history and the visited set go with it. They are child tables
+        rather than columns, so a delete that only removed the row would leave
+        a job's entire crawl behind with nothing pointing at it.
+        """
         with self._lock:
+            self._accumulators.delete(job_id)
             cur = self._conn.execute("DELETE FROM crawl_jobs WHERE job_id = ?", (job_id,))
             self._conn.commit()
         return cur.rowcount > 0
 
     def list_jobs(self) -> list[dict[str, Any]]:
-        """List all jobs with basic info (no frontier/visited/results)."""
+        """Every job's status view, newest first."""
         with self._lock:
-            rows = self._conn.execute("""
-                SELECT job_id, root_url, status, kind, created_at, updated_at,
-                       json_array_length(frontier) as frontier_size,
-                       json_array_length(visited) as visited_size,
-                       json_array_length(results) as results_count,
-                       COALESCE(json_extract(stats, '$.cap_truncated'), 0) as cap_truncated
-                FROM crawl_jobs
-                ORDER BY created_at DESC
-            """).fetchall()
-        return [
-            {
-                "job_id": r[0],
-                "root_url": r[1],
-                "status": r[2],
-                "kind": r[3],
-                "created_at": r[4],
-                "updated_at": r[5],
-                "frontier_size": r[6] or 0,
-                "visited_size": r[7] or 0,
-                "results_count": r[8] or 0,
-                "cap_truncated": bool(r[9]),
-            }
-            for r in rows
-        ]
+            counts = self._accumulators.counts_by_job()
+            rows = self._conn.execute(
+                _JOB_STATUS_PROJECTION + " ORDER BY created_at DESC"
+            ).fetchall()
+        return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
+
+    def status_row(self, job_id: str) -> dict[str, Any] | None:
+        """The status view for one job, or None if there is no such job.
+
+        Deliberately not :meth:`load`. The response exposes counts, and loading
+        the state in order to count it deserializes every result payload and
+        every visited URL only for the caller to throw them away after ``len()``.
+        On a long job that is the whole crawl, per call, on the endpoint a
+        client polls while its crawl runs.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                _JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            visited, results = self._accumulators.counts_for(job_id)
+        return _status_row(row, visited, results)
+
+    def exists(self, job_id: str) -> bool:
+        """Whether a job row exists, without reading it.
+
+        For the control plane's existence check, which is a gate rather than a
+        question about the job: the answer it needs is whether the row is there,
+        so anything that reads the row to answer it is doing more than asked.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return row is not None
 
     def close(self) -> None:
         """Close the database connection (thread-safe)."""

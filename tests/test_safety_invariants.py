@@ -37,6 +37,7 @@ from chokepoint_walks import (
 )
 from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
+from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from app.settings import ENVIRONMENT_FIELD_ALIASES
 
 __all__ = [
@@ -392,7 +393,35 @@ __all__ = [
 # the functions that divide the budget live here, and importing the number from
 # the module that refuses N>1 would be circular. The guard now reads it from
 # here too, so the workers env has exactly one reader in the tree.
-_APP_TREE_CODE_LINE_BUDGET = 14_815
+# 14_815 -> 14_972, for the job-row accumulator split (migration 0003). The
+# +157 is 63 lines of migration that moves the page history off the job row and
+# carries existing rows across, ~94 for JobAccumulators, which owns the two
+# append-only tables, and the manifest declaration that makes them part of the
+# job store's schema rather than a second thing to remember.
+#
+# Bought: a batch persist went from re-serializing every page crawled so far to
+# inserting the pages it added. Measured on the shape that caused it, the job
+# row was 104 KB at 50 pages and 1,045 KB at 500 -- linear in pages, rewritten
+# every batch, so a 3000-page crawl spent the square of the page count in writes
+# for no new information. That is a permanent per-crawl cost traded for a
+# one-time line count, which is the trade this ceiling exists to make
+# deliberately rather than by accident.
+#
+# 14_972 -> 14_992, for the read side of the same split. The write above was
+# never the whole cost: the page history also sat inside every READ, because
+# `load` deserialized it and the status response then called `len()` on the
+# lists to report three integers. `GET /v1/jobs/{id}` therefore read and
+# JSON-decoded the whole crawl per call, and the control plane read it twice
+# more per control action just to ask whether the row existed. The +20 is one
+# shared status projection, one row shaper used by both the detail and the list
+# read, a per-job count probe, an existence probe, and their off-loop twins.
+#
+# Bought: a status poll is O(1) in the pages crawled, on the endpoint a client
+# polls while its own crawl runs, and the detail view can no longer disagree
+# with the list view about the same job -- they are one projection now. The
+# list read already avoided this and the detail read did not, which is the
+# shape of a missing funnel rather than a missing feature.
+_APP_TREE_CODE_LINE_BUDGET = 14_992
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1239,6 +1268,77 @@ def test_crawl_response_chokepoint_detector_bites():
     assert len(offenders) == 1, offenders
     stored = ast.parse("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n")
     assert not _crawl_response_construction_offenders(stored, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# Job-row accumulator chokepoint (write amplification)
+# ---------------------------------------------------------------------------
+
+
+def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag SQL that reads or writes a dropped ``crawl_jobs`` column.
+
+    ``crawl_jobs`` used to carry ``results`` and ``visited`` as JSON columns, so
+    every batch persist re-serialized the job's entire page history and total
+    write volume grew as the square of the page count (migration 0003). Both are
+    append-only accumulators and now live in their own tables.
+
+    The banned set is read from the manifest rather than written out here, so
+    the detector cannot drift from the schema: the columns in LEGACY_COLUMNS are
+    by definition the ones a current store no longer has. Migrations are exempt
+    because dropping a column is the one operation that must name it.
+    """
+    if "migrations" in path.parts:
+        return []
+    banned = {column.name for column in LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]}
+    # Word boundaries, because the dropped names are substrings of the live
+    # ones: `results_count` and `visited_size` are output ALIASES of the
+    # accumulator subqueries, and `crawl_job_results` is the table itself.
+    # Underscore is a word character, so none of those can match -- only a
+    # column named exactly the banned word does.
+    pattern = re.compile(r"\b(" + "|".join(sorted(banned)) + r")\b")
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Constant):
+            continue
+        if not isinstance(node.value, str) or "crawl_jobs" not in node.value:
+            continue
+        named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
+        if named:
+            offenders.append(offender(path, node.lineno, f"SQL names crawl_jobs accumulator column(s) {named}"))
+    return offenders
+
+
+def test_crawl_jobs_accumulators_are_never_row_columns():
+    """No SQL outside the migrations may name a column the row no longer has."""
+    offenders = app_offenders(_job_row_accumulator_offenders)
+    assert not offenders, (
+        "Append-only accumulators belong in crawl_job_results / crawl_job_visited, "
+        "not on the job row: " + ", ".join(offenders)
+    )
+
+
+def test_job_row_accumulator_detector_bites():
+    """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
+    wide = ast.parse(
+        "def f(conn, job):\n"
+        '    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n'
+    )
+    offenders = _job_row_accumulator_offenders(wide, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "visited" in offenders[0], offenders
+
+    # The live shape: subqueries over the accumulator tables aliased back to
+    # names that CONTAIN the dropped columns. A substring match would reject
+    # this, which is why the detector matches whole words.
+    clean = ast.parse(
+        "def f(conn, job):\n"
+        '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
+        "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
+        "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
+        '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
+        "as results_count FROM crawl_jobs job\")\n"
+    )
+    assert not _job_row_accumulator_offenders(clean, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------

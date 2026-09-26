@@ -52,17 +52,51 @@ CRAWL_JOBS_SCHEMA = TableSchema(
         ColumnSchema("root_url", "TEXT", True, "''"),
         ColumnSchema("policy", "TEXT", True, "'{}'"),
         ColumnSchema("status", "TEXT", True, None),
+        # The outstanding work queue, and only that. `visited` and `results`
+        # used to sit here as JSON columns holding the job's whole history,
+        # which made every batch persist re-serialize it; they are companion
+        # tables now (see COMPANION_SCHEMAS). `frontier` stays a column
+        # because it mutates as a queue rather than accumulating.
         ColumnSchema("frontier", "TEXT", True, "'[]'"),
-        ColumnSchema("visited", "TEXT", True, "'[]'"),
         ColumnSchema("in_flight", "TEXT", True, "'[]'"),
         ColumnSchema("transient_retries", "TEXT", True, "'{}'"),
-        ColumnSchema("results", "TEXT", True, "'[]'"),
         ColumnSchema("created_at", "REAL", True, None),
         ColumnSchema("updated_at", "REAL", True, None),
         ColumnSchema("error", "TEXT", False, None),
         ColumnSchema("stats", "TEXT", True, "'{}'"),
     ),
 )
+
+# The two accumulators, split out of the job row. `seq` is the page's position
+# in the crawl, which is also its identity here: results are appended and never
+# rewritten, so the ordinal is both the insert key and the read order, and a
+# batch persist costs one INSERT per new page instead of a full rewrite.
+CRAWL_JOB_RESULTS_SCHEMA = TableSchema(
+    name="crawl_job_results",
+    columns=(
+        ColumnSchema("job_id", "TEXT", False, None, 1),
+        ColumnSchema("seq", "INTEGER", False, None, 2),
+        ColumnSchema("payload", "TEXT", True, None),
+    ),
+)
+
+# `visited` is a set, so the URL is the whole key and an insert of a page that
+# was already seen is a no-op rather than a duplicate row.
+CRAWL_JOB_VISITED_SCHEMA = TableSchema(
+    name="crawl_job_visited",
+    columns=(
+        ColumnSchema("job_id", "TEXT", False, None, 1),
+        ColumnSchema("url", "TEXT", False, None, 2),
+    ),
+)
+
+# Tables that belong to a store schema's lifecycle but are not that schema's
+# single primary table. They are created by the same migration chain, checked by
+# the same drift check, and dropped with the same rollback, so a store cannot be
+# half-migrated: there is one declaration of what a job store must contain.
+COMPANION_SCHEMAS: dict[StoreSchema, tuple[TableSchema, ...]] = {
+    StoreSchema.CRAWL_JOBS: (CRAWL_JOB_RESULTS_SCHEMA, CRAWL_JOB_VISITED_SCHEMA),
+}
 
 RESULTS_SCHEMA = TableSchema(
     name="results",
@@ -110,6 +144,11 @@ CURRENT_SCHEMAS = {
 LEGACY_COLUMNS = {
     StoreSchema.CRAWL_JOBS: (
         ColumnSchema("canonicalized", "INTEGER", True, "0"),
+        # Present only on a database that has not run 0003 yet. They are
+        # accepted rather than ignored so the stamping path can bring such a
+        # database forward to the current schema instead of refusing to start.
+        ColumnSchema("visited", "TEXT", True, "'[]'"),
+        ColumnSchema("results", "TEXT", True, "'[]'"),
     ),
     StoreSchema.RESULTS: (),
     StoreSchema.COORDINATION_COUNTERS: (),
@@ -117,7 +156,11 @@ LEGACY_COLUMNS = {
 }
 
 MIGRATION_SEQUENCES = {
-    StoreSchema.CRAWL_JOBS: ("0001_crawl_jobs_initial", "0002_crawl_jobs_drop_canonicalized"),
+    StoreSchema.CRAWL_JOBS: (
+        "0001_crawl_jobs_initial",
+        "0002_crawl_jobs_drop_canonicalized",
+        "0003_crawl_jobs_split_accumulators",
+    ),
     StoreSchema.RESULTS: ("0001_results_initial",),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
@@ -230,8 +273,48 @@ def _column_drift(
     return tuple(drift)
 
 
-def schema_drift(conn: sqlite3.Connection, schema: TableSchema) -> tuple[str, ...]:
-    return _column_drift(conn, schema, allowed={})
+def schema_drift(
+    conn: sqlite3.Connection, schema: TableSchema, store_schema: StoreSchema | None = None
+) -> tuple[str, ...]:
+    """How a live table differs from the declaration, plus its companions' drift.
+
+    ``store_schema`` is what lets a check cover the tables a store owns beyond
+    its own: pass the owning schema and the companion tables are held to their
+    declared shape too, so a store cannot be half-migrated. Omit it when only
+    one table is under inspection.
+    """
+    drift = _column_drift(conn, schema, allowed={})
+    if store_schema is not None:
+        drift += _companion_drift(conn, store_schema)
+    return drift
+
+
+def _companion_drift(
+    conn: sqlite3.Connection, store_schema: StoreSchema
+) -> tuple[str, ...]:
+    """Check the tables a store schema owns beyond its own primary table.
+
+    Absent companions are not drift at that point in the chain: before
+    0003 runs, `crawl_job_results` and `crawl_job_visited` correctly do not
+    exist. Once they do, they are held to the declared shape exactly like the
+    primary table, so a table that drifted is rejected rather than accepted
+    because the store that owns it also owns another one.
+    """
+    drift: list[str] = []
+    for companion in COMPANION_SCHEMAS.get(store_schema, ()):
+        if not _table_named(conn, companion.name):
+            continue
+        drift.extend(
+            f"companion {companion.name}: {item}" for item in _column_drift(conn, companion, allowed={})
+        )
+    return tuple(drift)
+
+
+def _table_named(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+    ).fetchone()
+    return row is not None
 
 
 def legacy_stamp_drift(

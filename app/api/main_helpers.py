@@ -8,24 +8,17 @@ import time
 from typing import Any
 
 from app.api_models import JobStatusResponse
-from app.crawl.job_store import CrawlJobState
 from app.metrics import get_metrics
 
 
-def _build_job_status(job: CrawlJobState) -> JobStatusResponse:
-    """Build a JobStatusResponse from a CrawlJobState."""
-    return JobStatusResponse(
-        job_id=job.job_id,
-        root_url=job.root_url,
-        status=job.status.value,
-        created_at=job.created_at,
-        updated_at=job.updated_at,
-        frontier_size=len(job.frontier),
-        visited_size=len(job.visited),
-        results_count=len(job.results),
-        stats=job.stats,
-        error=job.error,
-    )
+def _build_job_status(row: dict[str, Any]) -> JobStatusResponse:
+    """Build a JobStatusResponse from a store status view.
+
+    Takes the view rather than a ``CrawlJobState`` so the counts come from the
+    store's projection instead of ``len()`` over the page history: that was
+    what made polling a job's status cost as much as reading its whole crawl.
+    """
+    return JobStatusResponse(**row)
 
 
 def record_crawl_completion(

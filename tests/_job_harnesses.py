@@ -37,7 +37,7 @@ from typing import Any
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _result_builders import _canned_result
 
-from app.crawl.job_store import JobStatus, JobStore
+from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
 #: one guards waits for a task the SAME loop has already scheduled, and such a
@@ -153,6 +153,22 @@ def _instrument_status_bus(store: JobStore) -> JobStore:
 def make_job_store(tmpdir: str) -> JobStore:
     db_path = pathlib.Path(tmpdir) / "jobs.db"
     return _instrument_status_bus(JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY))
+
+
+def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobState]:
+    """A store holding one job that has already crawled ``pages`` pages.
+
+    The companion to :func:`make_job_store` for the tests whose subject is a job
+    with history behind it -- what a status read costs, and what a batch persist
+    costs. Both need a non-empty accumulator, and building one the same way
+    twice is a clone rather than a coincidence.
+    """
+    store = make_job_store(tmpdir)
+    job = store.create("http://example.test/a", {})
+    job.visited = [f"http://example.test/p/{i}" for i in range(pages)]
+    job.results = [{"url": url, "status": "success"} for url in job.visited]
+    store.save(job)
+    return store, job
 
 
 async def run_job_control_test(

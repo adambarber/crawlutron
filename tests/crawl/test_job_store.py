@@ -227,13 +227,16 @@ def test_load_missing_returns_none_no_warning(tmp_path, caplog):
 
 def test_load_logs_warning_on_corruption(tmp_path, caplog):
     store = _store_test_job_store_serialization(tmp_path)
-    # Insert a row whose results column is not valid JSON.
+    # A job whose stored page history is not valid JSON. The history moved out
+    # of the job row into its own table (migration 0003); what is under test is
+    # unchanged, namely that a corrupt record surfaces a warning instead of
+    # being silently swallowed into a missing job.
     store._conn.execute(
         """
         INSERT INTO crawl_jobs
-        (job_id, root_url, policy, status, frontier, visited, results,
+        (job_id, root_url, policy, status, frontier,
          created_at, updated_at, error, stats)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "corrupt-id",
@@ -241,13 +244,15 @@ def test_load_logs_warning_on_corruption(tmp_path, caplog):
             "{}",
             "pending",
             "[]",
-            "[]",
-            "{not valid json",
             0.0,
             0.0,
             None,
             "{}",
         ),
+    )
+    store._conn.execute(
+        'INSERT INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
+        ("corrupt-id", 0, "{not valid json"),
     )
     store._conn.commit()
     with caplog.at_level(logging.WARNING):

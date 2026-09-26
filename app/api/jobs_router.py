@@ -22,7 +22,6 @@ from app.api_models import (
     JobListResponse,
     JobStatusResponse,
 )
-from app.crawl.job_store import CrawlJobState
 from app.crawl.payload_helpers import checked_payload_urls
 from app.validation import HostPolicy
 
@@ -35,12 +34,6 @@ def _raise_not_found(job_id: str) -> None:
 
 def _raise_conflict(message: str) -> None:
     raise http_error(409, "invalid_state", message)
-
-
-def _job_status(job: CrawlJobState) -> JobStatusResponse:
-    return _build_job_status(job).model_copy(
-        update={"cap_truncated": bool(job.stats.get("cap_truncated", 0))}
-    )
 
 
 @router.post(
@@ -63,8 +56,6 @@ async def create_job(
     settings=Depends(get_settings),
     shutdown_event=Depends(get_shutdown_event),
 ) -> JobCreateResponse:
-    from app.crawl.job_store import JobStatus
-
     try:
         host_policy = HostPolicy.from_settings(settings)
         checked = checked_payload_urls(
@@ -76,12 +67,13 @@ async def create_job(
     except ValueError as error:
         raise http_error(422, "validation_error", "Request validation failed", {"errors": [{"msg": str(error)}]}) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
-    job = await job_store.aload(job.job_id)
+    row = await job_store.astatus(job.job_id)
+    assert row is not None  # written moments ago by acreate
     return JobCreateResponse(
-        job_id=job.job_id,
-        status=job.status.value if job is not None else JobStatus.PENDING.value,
-        root_url=job.root_url if job is not None else str(payload.root_url),
-        created_at=job.created_at if job is not None else 0.0,
+        job_id=row["job_id"],
+        status=row["status"],
+        root_url=row["root_url"],
+        created_at=row["created_at"],
     )
 
 
@@ -92,7 +84,7 @@ async def create_job(
 )
 async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
     jobs = await job_store.alist_jobs()
-    return JobListResponse(jobs=[JobStatusResponse(**j) for j in jobs])
+    return JobListResponse(jobs=[_build_job_status(row) for row in jobs])
 
 
 @router.get(
@@ -105,11 +97,11 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
-    job = await job_store.aload(job_id)
-    if job is None:
+    row = await job_store.astatus(job_id)
+    if row is None:
         _raise_not_found(job_id)
-    assert job is not None
-    return _job_status(job)
+    assert row is not None
+    return _build_job_status(row)
 
 
 @router.post(
@@ -137,7 +129,7 @@ async def control_job(
     action = payload.action.lower()
     if action not in {"pause", "resume", "cancel"}:
         raise http_error(422, "invalid_action", f"Unknown action: {action}")
-    if await job_store.aload(job_id) is None:
+    if not await job_store.aexists(job_id):
         _raise_not_found(job_id)
 
     if action == "pause":
@@ -151,9 +143,9 @@ async def control_job(
         _raise_not_found(job_id)
     if outcome == "conflict":
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
-    job = await job_store.aload(job_id)
-    assert job is not None
-    return _job_status(job)
+    row = await job_store.astatus(job_id)
+    assert row is not None
+    return _build_job_status(row)
 
 
 @router.delete(
