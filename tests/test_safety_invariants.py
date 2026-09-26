@@ -270,7 +270,28 @@ __all__ = [
 # reproduces the cross-process case deterministically by holding the lock on a
 # second open file description -- the kernel state another process creates --
 # and it was red before the change.
-_APP_TREE_CODE_LINE_BUDGET = 14_476
+# RAISED to 14,488 from 14,476: twelve lines to make the process count an
+# enforced invariant instead of an unguarded passthrough. BROWSER_CRAWLER_WORKERS
+# is read by the container entrypoint and handed to `uvicorn --workers`, so a
+# value above 1 forks the service into N copies of the browser pool, the httpx
+# and cffi pools, the DNS and extraction executors, the HTTP and robots caches,
+# the cookie jar, the admission gate and the metrics store. Most of that is only
+# wasteful, but the cookie jar loads at startup and rewrites the whole file at
+# shutdown, so with N workers a cookie set in one is invisible in the others and
+# the last shutdown discards what the rest collected -- silent data loss, and
+# the deployment still reports healthy. /metrics compounds it: one worker's
+# counters make the gauges the admission gate tunes from look like a fraction of
+# real load. The audit that produced this counted every module-level singleton
+# in app/ and the cookie jar and metrics store were the two that were wrong
+# rather than merely redundant. Fixing each at its own site would mean a shared
+# metrics backend, a cross-process cookie jar and a coordinated admission
+# controller -- three design decisions, each a program rather than a patch. One
+# startup guard makes the whole class unreachable and names the consequences in
+# the refusal, so an operator reads the failure instead of discovering the data
+# loss. It runs before the browser pool is touched, reads through the never-raise
+# env chokepoint so a typo cannot deny boot, and is inert in both shipped
+# deployments, which pin the value to 1.
+_APP_TREE_CODE_LINE_BUDGET = 14_488
 
 
 def test_app_tree_code_line_count_does_not_grow():

@@ -57,6 +57,54 @@ settings = CrawlerSettings.from_mapping()
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
 
+_WORKERS_ENV = "BROWSER_CRAWLER_WORKERS"
+
+
+def assert_single_process_deployment() -> None:
+    """Refuse to boot when the process count breaks the service's own invariants.
+
+    `BROWSER_CRAWLER_WORKERS` is read by the container entrypoint and handed to
+    `uvicorn --workers`, so setting it above 1 forks the service into N
+    processes that each get their own copy of the browser pool, the httpx and
+    cffi connection pools, the DNS and extraction executors, the HTTP cache,
+    the robots pattern cache, the cookie jar, the admission gate and the
+    metrics store. Most of that is merely wasteful. Three parts are wrong:
+
+      * the cookie jar loads at startup and rewrites the entire file at
+        shutdown, so with N workers a cookie set in one is invisible in the
+        others and the last shutdown discards every cookie the other workers
+        collected -- silent data loss, not a slowdown;
+      * `/metrics` serves one worker's counters, so the gauges the admission
+        gate is tuned from report a fraction of the real load;
+      * the admission gate reads genuinely shared cgroup pressure but grants
+        capacity per process, so N uncoordinated controllers each admit a full
+        batch at the same observed ratio.
+
+    Refusing to boot is the honest outcome. The alternative is a deployment
+    that reports healthy, serves coherent single-worker telemetry, and quietly
+    drops cookies -- and the operator has no signal that any of it is wrong.
+
+    Reads through the never-raise env chokepoint, so a typo'd value warns and
+    falls back to one worker instead of denying boot. This guard must not
+    become a second, stricter parser than the rest of the config.
+
+    Escape hatch: run one process and scale with the existing horizontal
+    levers (`BROWSER_CRAWLER_GLOBAL_CONCURRENCY`,
+    `BROWSER_CRAWLER_BROWSER_POOL_SIZE`). Making N workers correct is a
+    separate program -- shared metrics backend, cross-process cookie jar,
+    a coordinated admission controller -- and each of those is a design
+    decision, not a patch.
+    """
+    workers = get_env_int(_WORKERS_ENV, 1, lo=1)
+    if workers > 1:
+        raise RuntimeError(
+            f"{_WORKERS_ENV}={workers} is not supported: this service keeps its pools, "
+            "caches, cookie jar, admission gate and metrics as process-local singletons, "
+            "and with more than one process the cookie jar loses data on shutdown and "
+            f"/metrics reports a fraction of real load. Run {_WORKERS_ENV}=1 and scale "
+            "with BROWSER_CRAWLER_GLOBAL_CONCURRENCY or BROWSER_CRAWLER_BROWSER_POOL_SIZE."
+        )
+
 
 async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
     """Run every teardown step, then report the ones that failed.
@@ -125,7 +173,9 @@ if FastAPI is not None:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        # Startup: initialize browser pool, load cookie jar.
+        # Startup: refuse an unsupported process count BEFORE anything is
+        # allocated, then initialize browser pool, load cookie jar.
+        assert_single_process_deployment()
         from .crawl.engine import _resource_gate
         from .health.readiness import READINESS_STATE
 
