@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import shutil
 import sys
+import tempfile
+from collections.abc import Iterator
 from functools import partial
 
 import httpx
@@ -26,6 +29,31 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
+
+
+@contextlib.contextmanager
+def scoped_cache(**settings) -> Iterator[ContentCache]:
+    """A ContentCache over a throwaway directory, removed when the block ends.
+
+    ``with tempfile.TemporaryDirectory() as d: cache = ContentCache(d, ...)``
+    was the arrange at a dozen sites in this file, differing only in the
+    settings; owning it here means a test cannot leave a cache writing into a
+    directory it meant to clean up. The directory itself is ``cache.cache_dir``
+    for the two sites that need to inspect the on-disk files.
+
+    Two kinds of site sit outside it on purpose, because the block is not
+    really this shape: one opens a *second* cache over the same directory (a
+    warm restart), which needs the directory rather than a cache; the other
+    seeds its entry through ``make_content_cache_with_entry``, which returns
+    the clock handle the test then advances.
+
+    Settings are passed through, never restated. The byte caps in particular
+    used to be written out here as literal numbers, and one of those literals
+    had drifted to a value eight times smaller than the production default --
+    a test that kept passing while testing a cap nothing shipped with.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield ContentCache(tmpdir, **settings)
 
 
 def _make_etag_test_setup(tmp_path, etag_server):
@@ -246,7 +274,7 @@ async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
     """Shallow sys.getsizeof on a dict sees only the container (~200 B), so a
     multi-MB serialized entry passed the old mirror gate and landed in RAM
     (final-review #1: worst case _MEMORY_CACHE_MAX x full-size entries)."""
-    cache = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    cache = ContentCache(tmp_path)
     fat = {"body": "x" * (cache._MEMORY_CACHE_MAX_SIZE + 1024)}
     assert sys.getsizeof(fat) < cache._MEMORY_CACHE_MAX_SIZE  # shallow size: tiny
 
@@ -256,7 +284,7 @@ async def test_mirror_gate_uses_serialized_size_not_shallow_getsizeof(tmp_path):
 
 
 async def test_mirror_gate_small_value_still_mirrors(tmp_path):
-    cache = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    cache = ContentCache(tmp_path)
     await cache.aset("small-key", {"body": "tiny"})
     assert "small-key" in cache._memory_cache
 
@@ -268,12 +296,12 @@ async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
     cold read into the small-value mirror (the RAM exhaustion path the
     serialized-size gate was built to close)."""
     fat = {"body": "x" * (1024 * 1024 + 1024)}  # > _MEMORY_CACHE_MAX_SIZE
-    writer = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    writer = ContentCache(tmp_path)
     await writer.aset("fat-key", fat)
     assert "fat-key" not in writer._memory_cache  # write gate already refuses
 
     # Fresh instance over the same dir: cold index, pre-existing disk file.
-    reader = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    reader = ContentCache(tmp_path)
     assert reader._index_sizes.get("fat-key") is None  # truly cold
     got = await reader.aget("fat-key")
     assert got is not None  # served from disk
@@ -282,9 +310,9 @@ async def test_cold_aget_does_not_mirror_oversized_envelope(tmp_path):
 
 async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
     """Parity: a genuinely small cold read keeps the RAM-mirror benefit."""
-    writer = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    writer = ContentCache(tmp_path)
     await writer.aset("small-key", {"body": "tiny"})
-    reader = ContentCache(tmp_path, max_entry_bytes=4 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024)
+    reader = ContentCache(tmp_path)
     assert reader._index_sizes.get("small-key") is None
     got = await reader.aget("small-key")
     assert got == {"body": "tiny"}
@@ -301,12 +329,9 @@ class TestContentCacheOverwrite:
 
 class TestContentCacheCorruptEntry:
     def test_content_cache_get_corrupt_json(self):
-        import tempfile
 
-        from app.crawl.content_cache import ContentCache
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = ContentCache(tmpdir, default_ttl=60)
+        with scoped_cache(default_ttl=60) as cache:
             cache_path = cache._path_for("testkey")
             cache_path.write_text("{broken json")
             result = cache.get("testkey")
@@ -341,12 +366,9 @@ class TestContentCacheCorruptEntry:
             cache_path.rmdir()
 
     def test_content_cache_clear_os_error(self):
-        import tempfile
 
-        from app.crawl.content_cache import ContentCache
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = ContentCache(tmpdir, default_ttl=60)
+        with scoped_cache(default_ttl=60) as cache:
             cache.set("key1", {"data": "1"})
             cache_path = cache._path_for("key1")
             cache_path.unlink()
@@ -366,10 +388,8 @@ class TestSharedContentCache:
 
 def test_default_max_entries_is_bounded_not_none():
     """ContentCache has a bounded default max_entries (F6)."""
-    import tempfile
 
-    with tempfile.TemporaryDirectory() as d:
-        c = ContentCache(cache_dir=d, default_ttl=3600)
+    with scoped_cache(default_ttl=3600) as c:
         # The default should be a positive integer, not None (which meant unbounded).
         assert c.max_entries is not None
         assert isinstance(c.max_entries, int)
@@ -402,10 +422,8 @@ def test_max_entries_enforces_bound(tmp_path):
 
 def test_explicit_max_entries_zero_disables_limit():
     """max_entries=0 means no limit (opt-out)."""
-    import tempfile
 
-    with tempfile.TemporaryDirectory() as d:
-        c = ContentCache(cache_dir=d, default_ttl=3600, max_entries=0)
+    with scoped_cache(default_ttl=3600, max_entries=0) as c:
         # Should not enforce
         for i in range(15000):
             c.set(f"k{i}", i)
@@ -416,10 +434,8 @@ def test_explicit_max_entries_zero_disables_limit():
 
 def test_lru_keeps_recently_used_entries():
     """Accessing an entry protects it from next eviction (#5)."""
-    import tempfile
 
-    with tempfile.TemporaryDirectory() as d:
-        c = ContentCache(cache_dir=d, default_ttl=3600, max_entries=3)
+    with scoped_cache(default_ttl=3600, max_entries=3) as c:
         c.set("a", 1)
         c.set("b", 2)
         c.set("c", 3)
@@ -777,14 +793,10 @@ class TestContentCacheEntryLifecycle:
     """Corrupted entries, expiry, prune/clear and async disk writes"""
 
     def test_content_cache_get_invalid_json(self):
-        import pathlib
-        import tempfile
 
-        from app.crawl.content_cache import ContentCache
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = ContentCache(tmpdir)
-            cache_path = pathlib.Path(tmpdir) / "content.testkey.json"
+        with scoped_cache() as cache:
+            cache_path = cache.cache_dir / "content.testkey.json"
             cache_path.write_text("not valid json")
             result = cache.get("testkey")
             assert (result) is None
@@ -812,12 +824,9 @@ class TestContentCacheEntryLifecycle:
             assert (cache.get("key2")) is None
 
     def test_content_cache_clear(self):
-        import tempfile
 
-        from app.crawl.content_cache import ContentCache
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = ContentCache(tmpdir)
+        with scoped_cache() as cache:
             cache.set("key1", {"data": "1"})
             cache.set("key2", {"data": "2"})
             removed = cache.clear()
@@ -944,13 +953,9 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
         assert "k" not in cache._index
 
     def test_evicted_entry_is_not_answered_from_stale_metadata(self):
-        import tempfile
 
-        from app.crawl.content_cache import ContentCache
 
-        clock = [1000.0]
-        with tempfile.TemporaryDirectory() as tmpdir:
-            cache = ContentCache(tmpdir, default_ttl=60, clock=lambda: clock[0], max_entries=1)
+        with scoped_cache(default_ttl=60, clock=lambda: 1000.0, max_entries=1) as cache:
             cache.set("k1", {"data": "one"})
             assert cache.cached_at_of("k1") is not None
             # Evict k1 via the LRU cap.
