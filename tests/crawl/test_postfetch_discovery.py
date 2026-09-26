@@ -9,7 +9,7 @@ strategy result builders. The post-fetch block must move to
 import asyncio
 
 from _assertions import install_to_thread_spy
-from _fetcher_factories import invoke_browser_strategy, invoke_http_strategy
+from _fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
 from _policy_factories import http_strategy_policy
 
 from app.crawl.extraction import extract_post_fetch_discovery
@@ -29,51 +29,73 @@ HTML = (
 
 
 def _page_resp(url):
-    class Resp:
-        status_code = 200
-        headers = {"content-type": "text/html"}
-        body = HTML.encode()
-        final_url = url
-        elapsed_ms = 2
+    """The 200 the HTTP strategy will read, as a real ``HttpFetchResult``.
 
-    return Resp()
+    The strategy is handed the production model rather than a local object with
+    the same handful of attributes, so a field the builder starts reading
+    cannot be missing here without this failing.
+    """
+    return make_fetch(url=url, final_url=url, body=HTML.encode(), ctype="text/html")
+
+
+#: What the post-fetch block finds in ``HTML``, stated once. Both strategy
+#: builders run that block and hand back the same discoveries, so the
+#: expectation belongs with the page rather than with either path through it.
+EXPECTED_LINKS = frozenset({"http://example.com/p1", "http://example.com/p2", "http://example.com/next"})
+EXPECTED_JS_ENDPOINTS = [{"url": "http://example.com/api/data"}]
+NEXT_PAGE_URL = "http://example.com/next"
+
+#: The visible text the browser worker reports for ``HTML``: enough words for
+#: the extractor to classify the page, and enough of them to be an extraction
+#: rather than a title.
+BROWSER_TEXT = "page one page two next page body copy"
+
+
+def _full_discovery_policy() -> dict:
+    """Full extraction with discovery on: the policy that makes the post-fetch
+    block have something to find, for whichever strategy is under test."""
+    return http_strategy_policy(extraction="full", discovery=True)
+
+
+async def _render(monkeypatch, html: str, *, text: str = BROWSER_TEXT):
+    """The browser strategy's result for `html`, built by the production builder."""
+    return await invoke_browser_strategy(monkeypatch, policy=_full_discovery_policy(), html=html, text=text)
+
+
+def assert_extracted_discovery(result) -> None:
+    """Assert the shared post-fetch discoveries, whichever builder produced them.
+
+    The count is asserted next to the set because the set deduplicates: three
+    distinct URLs is not the same claim as exactly three links found, and a
+    duplicated discovery is exactly the kind of drift a flat row would hide.
+    """
+    assert result.discovered_link_count == len(EXPECTED_LINKS)
+    assert {link.normalized_url for link in result.discovered_links} == EXPECTED_LINKS
+    assert result.diagnostics["js_endpoints"] == EXPECTED_JS_ENDPOINTS
+    assert result.next_page_url == NEXT_PAGE_URL
 
 
 async def test_http_post_fetch_block_runs_off_loop(monkeypatch):
     seen = install_to_thread_spy(monkeypatch)
     result = await invoke_http_strategy(
         monkeypatch,
-        policy=http_strategy_policy(extraction="full", discovery=True),
+        policy=_full_discovery_policy(),
         resp=_page_resp,
     )
     assert result.status == "success"
     assert "extract_post_fetch_discovery" in seen
-    assert result.discovered_link_count == 3
-    assert {link.normalized_url for link in result.discovered_links} == {
-        "http://example.com/p1",
-        "http://example.com/p2",
-        "http://example.com/next",
-    }
+    assert_extracted_discovery(result)
     assert result.diagnostics["forms"][0]["normalized_action"] == "http://example.com/submit"
     assert result.diagnostics["frames"][0]["normalized_url"] == "http://example.com/frame"
-    assert result.diagnostics["js_endpoints"] == [{"url": "http://example.com/api/data"}]
-    assert result.next_page_url == "http://example.com/next"
 
 
 async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
     seen = install_to_thread_spy(monkeypatch)
-    result = await invoke_browser_strategy(
-        monkeypatch,
-        policy=http_strategy_policy(extraction="full", discovery=True),
-        html=HTML,
-        text="page one page two next page body copy",
-    )
+    result = await _render(monkeypatch, HTML)
     assert result.status == "success"
     assert "extract_post_fetch_discovery" in seen
-    assert result.discovered_link_count == 3
+    assert_extracted_discovery(result)
     assert "forms" in result.diagnostics and "frames" in result.diagnostics
-    assert result.diagnostics["js_endpoints"] == [{"url": "http://example.com/api/data"}]
-    assert result.next_page_url == "http://example.com/next"
 
 
 async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
@@ -151,12 +173,7 @@ async def test_browser_path_filters_malicious_next_page_url(monkeypatch):
     the producer, so every consumer is covered.
     """
     malicious = '<html><body><a rel="next" href="javascript:alert(1)">next</a></body></html>'
-    result = await invoke_browser_strategy(
-        monkeypatch,
-        policy=http_strategy_policy(extraction="full", discovery=True),
-        html=malicious,
-        text="body copy",
-    )
+    result = await _render(monkeypatch, malicious, text="body copy")
     assert result.status == "success"
     assert result.next_page_url is None
     assert "next_page_url" not in result.diagnostics
@@ -171,12 +188,7 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     produced for this page so routing through the shared builder is provably
     behavior-preserving -- and a field that silently changes is caught here.
     """
-    result = await invoke_browser_strategy(
-        monkeypatch,
-        policy=http_strategy_policy(extraction="full", discovery=True),
-        html=HTML,
-        text="page one page two next page body copy",
-    )
+    result = await _render(monkeypatch, HTML)
     assert result.status == "success"
     assert result.classification == "rendered"
     assert result.selected_strategy == "BROWSER_HEADLESS"
@@ -194,15 +206,8 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     assert isinstance(result.markdown, str)
     assert isinstance(result.extraction_method, str)
     assert result.classification_evidence == []
-    assert result.discovered_link_count == 3
-    assert {link.normalized_url for link in result.discovered_links} == {
-        "http://example.com/p1",
-        "http://example.com/p2",
-        "http://example.com/next",
-    }
-    assert result.next_page_url == "http://example.com/next"
-    assert result.diagnostics["js_endpoints"] == [{"url": "http://example.com/api/data"}]
-    assert result.diagnostics["next_page_url"] == "http://example.com/next"
+    assert_extracted_discovery(result)
+    assert result.diagnostics["next_page_url"] == NEXT_PAGE_URL
     # One attempt, matching the HTTP path's single-attempt shape.
     (attempt,) = result.attempted_strategies
     assert attempt.strategy == "BROWSER_HEADLESS"

@@ -3,38 +3,27 @@
 import asyncio
 import random
 import time
-from typing import Any
 
 import pytest
 from _result_builders import make_job, make_result
+from _scheduler_doubles import (
+    FailingSink,
+    engine_envelope,
+    make_scheduler,
+    ok_worker,
+    run_through,
+    trip_circuit,
+)
 from _timing_harnesses import recorder
 
-from app.crawl.result_helpers import TerminalResult, _failed_result_for
+from app.crawl.result_helpers import TerminalResult
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
-from app.scheduler import DomainScheduler
-
-
-async def ok_worker(job: CrawlJob) -> Any:
-    return make_result(job.url, job.domain)
-
-
-def _engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
-    """The crawl pipeline's real failure envelope.
-
-    Routes through the production ``_failed_result_for`` chokepoint rather than
-    re-building an envelope here: the classification, redaction and
-    ``normalized_url`` fallback are that function's contract, and a test-local
-    copy would silently drift from it (it already did twice). The URL accessor
-    is supplied here for the same reason production supplies one -- the two job
-    shapes carry it under different names.
-    """
-    return _failed_result_for(job, error, url_of=lambda j: getattr(j, "original_url", None) or j.url)
+from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler
 
 
 def _adaptive_scheduler() -> DomainScheduler:
-    return DomainScheduler(
+    return make_scheduler(
         global_limit=2,
-        per_domain_limit=1,
         delay_seconds=1.0,
         adaptive=True,
         adaptive_min_delay=0.5,
@@ -45,12 +34,12 @@ def _adaptive_scheduler() -> DomainScheduler:
 
 class TestScheduler:
     def test_jitter_in_range(self):
-        scheduler = DomainScheduler(global_limit=5, per_domain_limit=3, delay_seconds=1.0)
+        scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=1.0)
         delays = [scheduler._delay_seconds * random.uniform(0.8, 1.2) for _ in range(50)]
         assert all(0.7 <= d <= 1.3 for d in delays)
 
     def test_set_domain_cooldown_is_in_future(self):
-        scheduler = DomainScheduler(global_limit=5, per_domain_limit=3, delay_seconds=0.1)
+        scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=0.1)
         scheduler.set_domain_cooldown("example.com", 5.0)
         assert "example.com" in scheduler._domain_cooldowns
         expiry = scheduler._domain_cooldowns["example.com"]
@@ -67,7 +56,7 @@ class TestScheduler:
         branch is skipped, or if the cooldown is ever moved behind the worker.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.05)
+        scheduler = make_scheduler(delay_seconds=0.05)
         scheduler.set_domain_cooldown("example.com", 0.3)
         job = make_job(0, "http://example.com/")
 
@@ -78,16 +67,16 @@ class TestScheduler:
             )
             return make_result(ran_job.url, ran_job.domain)
 
-        results = await scheduler.run([job], worker, failed_result=_engine_envelope)
+        results = await scheduler.run([job], worker, failed_result=engine_envelope)
         assert results[0].status == "success"
         assert sleeps.requests_over(0.29), (
             f"no cooldown sleep was requested at all (requests: {sleeps.delays})"
         )
 
     async def test_run_returns_results_keyed_by_job_index(self):
-        scheduler = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler(global_limit=2)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
-        results = await scheduler.run(jobs, ok_worker, failed_result=_engine_envelope)
+        results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         # run reports a job.index -> result mapping so callers align each result
         # with its own job regardless of completion order (B1).
         assert sorted(results) == [0, 1, 2]
@@ -104,9 +93,9 @@ class TestScheduler:
         from whatever the machine happened to do.
         """
         sleeps = recorder(monkeypatch)
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.1, adaptive=False)
+        scheduler = make_scheduler(delay_seconds=0.1, adaptive=False)
         jobs = [make_job(0, "http://example.com/a"), make_job(1, "http://example.com/b")]
-        await scheduler.run(jobs, ok_worker, failed_result=_engine_envelope)
+        await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert len(sleeps.in_range(0.08, 0.12)) == 2, (
             f"expected one per-domain delay request per job, saw {sleeps.delays}"
         )
@@ -114,7 +103,7 @@ class TestScheduler:
 
 class TestAdaptiveThrottling:
     def test_delay_starts_at_configured_value_without_latency(self):
-        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=True)
+        s = make_scheduler(global_limit=2, delay_seconds=1.0, adaptive=True)
         # No latency observed yet -> adaptive delay equals the configured fixed delay.
         assert s.current_delay("example.com") == 1.0
 
@@ -131,14 +120,13 @@ class TestAdaptiveThrottling:
         assert s.current_delay("example.com") == 0.5
 
     def test_disabled_adaptive_ignores_latency(self):
-        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=1.0, adaptive=False)
+        s = make_scheduler(global_limit=2, delay_seconds=1.0, adaptive=False)
         s.record_latency("example.com", 5000)
         assert s.current_delay("example.com") == 1.0
 
     def test_latency_ema_smooths(self):
-        s = DomainScheduler(
+        s = make_scheduler(
             global_limit=2,
-            per_domain_limit=1,
             delay_seconds=0.0,
             adaptive=True,
             adaptive_min_delay=0.0,
@@ -234,18 +222,13 @@ class TestCircuitBreakerSpillsOnResult:
     """
 
     async def test_open_circuit_spills_via_on_result(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(
+        scheduler = make_scheduler(
             global_limit=2,
-            per_domain_limit=1,
-            delay_seconds=0.0,
             circuit_threshold=3,
             circuit_cooldown_base=60.0,
         )
         # Trip the breaker by hitting the consecutive-failure threshold.
-        for _ in range(3):
-            scheduler.record_failure("example.com")
+        trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
 
         spilled: list[tuple[int, object]] = []
@@ -264,7 +247,7 @@ class TestCircuitBreakerSpillsOnResult:
         )
         # The bug raises TypeError inside gather with return_exceptions=True,
         # so run() returns normally but delivers nothing.
-        returned = await scheduler.run([job], worker, on_result=on_result, failed_result=_engine_envelope)
+        returned = await scheduler.run([job], worker, on_result=on_result, failed_result=engine_envelope)
 
         assert returned is None, "on_result mode must return None"
         assert len(spilled) == 1, f"expected 1 spilled result, got {len(spilled)}"
@@ -283,9 +266,7 @@ class TestCircuitBreakerSpillsOnResult:
 
 class TestSchedulerDomainState:
     def test_scheduler_domain_cooldowns(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         scheduler.set_domain_cooldown("example.com", 10)
         cooldowns = scheduler.domain_cooldowns
         assert isinstance(cooldowns, dict)
@@ -294,38 +275,26 @@ class TestSchedulerDomainState:
 
 class TestSchedulerCircuitBreaker:
     def test_scheduler_circuit_breaker_reset(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
-        )
-        # Trip the circuit breaker (threshold=5 by default)
-        for _ in range(5):
-            scheduler.record_failure("example.com")
+        scheduler = make_scheduler(circuit_cooldown=0.0)
+        trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
         # record_success resets failure counter; with cooldown=0, circuit is not open
         scheduler.record_success("example.com")
         assert scheduler._domain_failures.get("example.com", 0) == 0
 
     def test_scheduler_record_success(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         scheduler.record_success("example.com")
         assert scheduler._domain_failures.get("example.com", 0) == 0
 
     def test_scheduler_is_circuit_open_false(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         assert not (scheduler.is_circuit_open("example.com"))
 
 
 class TestSchedulerLatencyEma:
     def test_scheduler_record_latency_invalid(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         # None latency should be ignored (line 114: return)
         scheduler.record_latency("example.com", None)
         # Negative latency should be ignored
@@ -334,19 +303,13 @@ class TestSchedulerLatencyEma:
         assert "example.com" not in scheduler._domain_latency_ema
 
     def test_scheduler_record_latency_valid(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         scheduler.record_latency("example.com", 100.0)
         assert "example.com" in scheduler._domain_latency_ema
         assert abs(scheduler._domain_latency_ema["example.com"] - (100.0)) < 1e-07
 
     def test_scheduler_record_latency_ema(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive_smoothing=0.5
-        )
+        scheduler = make_scheduler(adaptive_smoothing=0.5)
         scheduler.record_latency("example.com", 100.0)
         scheduler.record_latency("example.com", 200.0)
         assert abs(scheduler._domain_latency_ema["example.com"] - (150.0)) < 0.1
@@ -377,47 +340,29 @@ class TestSchedulerPolicies:
         assert wait == 0.0
 
     def test_circuit_breaker_opens(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
-        for _ in range(5):
-            scheduler.record_failure("example.com")
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
+        trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
 
     def test_circuit_breaker_cooldown_expired(self):
-        import time
-
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler._circuit_open_until["example.com"] = time.monotonic() - 1
         assert not (scheduler.is_circuit_open("example.com"))
 
     def test_scheduler_record_latency(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0, adaptive=True)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10, adaptive=True)
         scheduler.record_latency("example.com", 1.0)
         scheduler.record_latency("example.com", 2.0)
         assert "example.com" in scheduler._domain_latency_ema
 
     def test_scheduler_max_rps_token_bucket(self):
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0, max_rps=5.0)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10, max_rps=5.0)
         assert scheduler._max_rps > 0
 
     def test_circuit_breaker_exponential_backoff(self):
         """Adversarial perf #2.1: consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
-        import time
-
-        from app.scheduler import DomainScheduler
-
-        s = DomainScheduler(
-            global_limit=1,
-            per_domain_limit=1,
-            delay_seconds=0.0,
+        s = make_scheduler(
             circuit_threshold=5,
             circuit_cooldown_base=30.0,
             circuit_cooldown=600.0,
@@ -427,8 +372,7 @@ class TestSchedulerPolicies:
             s._domain_failures.clear()
             s._circuit_trip_count.clear()
             s._circuit_open_until.clear()
-            for _ in range(failures):
-                s.record_failure("x")
+            trip_circuit(s, "x", failures=failures)
             return s._circuit_open_until["x"] - time.monotonic()
 
         assert 29 <= open_after(5) <= 31
@@ -441,9 +385,7 @@ class TestSchedulerPolicies:
     def test_scheduler_set_domain_min_delay(self):
         """Adversarial perf #2.6: a robots Crawl-delay is enforced as a floor
         on top of the global/adaptive delay."""
-        from app.scheduler import DomainScheduler
-
-        s = DomainScheduler(global_limit=2, per_domain_limit=1, delay_seconds=0.0)
+        s = make_scheduler(global_limit=2)
         assert s.current_delay("a.com") == 0.0
         s.set_domain_min_delay("a.com", 2.0)
         assert s.current_delay("a.com") == 2.0
@@ -471,17 +413,15 @@ class TestSchedulerPolicies:
     def test_set_domain_min_delay_is_capped_at_the_politeness_ceiling(self):
         """M1: a huge (finite) robots Crawl-delay must not install an
         unbounded politeness floor — the scheduler clamps it at the write."""
-        from app.scheduler import _MAX_COOLDOWN_WAIT, DomainScheduler
+        from app.scheduler import _MAX_COOLDOWN_WAIT
 
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", 1e12)
         assert scheduler.current_delay("example.com") == _MAX_COOLDOWN_WAIT
 
     def test_set_domain_min_delay_ignores_non_finite(self):
         """M1: inf/nan must never become a stored politeness floor."""
-        from app.scheduler import DomainScheduler
-
-        scheduler = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        scheduler = make_scheduler(global_limit=10, per_domain_limit=10)
         scheduler.set_domain_min_delay("example.com", float("inf"))
         assert "example.com" not in scheduler._domain_min_delay
 
@@ -493,13 +433,9 @@ class TestSchedulerPolicies:
         Uses an ``asyncio.Event`` (not ``asyncio.sleep``) to force ordering,
         because the test environment patches ``sleep`` to be instant.
         """
-        from _result_builders import make_job, make_result
-
-        from app.scheduler import DomainScheduler
-
         on_result_order: list[int] = []
         release_slow = asyncio.Event()
-        sched = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
         async def worker(job: CrawlJob):
             # Make index 0 wait until job 1 has been delivered, so streaming
@@ -514,7 +450,7 @@ class TestSchedulerPolicies:
                 release_slow.set()
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(6)]
-        ret = await sched.run(jobs, worker, on_result=_on_result, failed_result=_engine_envelope)
+        ret = await sched.run(jobs, worker, on_result=_on_result, failed_result=engine_envelope)
         # Streaming mode returns None; the caller owns persistence (spill).
         assert ret is None
         # Every job was delivered exactly once.
@@ -525,17 +461,13 @@ class TestSchedulerPolicies:
 
     async def test_run_returns_results_keyed_by_index_without_on_result(self):
         """Backward-compatible path (recursive frontier) still returns results."""
-        from _result_builders import make_job, make_result
-
-        from app.scheduler import DomainScheduler
-
-        sched = DomainScheduler(global_limit=10, per_domain_limit=10, delay_seconds=0.0)
+        sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
         async def worker(job: CrawlJob):
             return make_result(job.url, job.domain)
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
-        ret = await sched.run(jobs, worker, failed_result=_engine_envelope)
+        ret = await sched.run(jobs, worker, failed_result=engine_envelope)
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
@@ -552,11 +484,13 @@ class TestCooldownPurgeCadence:
             real_purge(self)
 
         monkeypatch.setattr(DomainScheduler, "_purge_expired", counting_purge)
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         for i in range(250):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
         # 250 sets on a 100-set interval: the cadence is amortized, not 1:1.
-        assert calls["n"] <= 3
+        # The interval is production's, so the bound is derived rather than
+        # repeated: 250 sets over 100-set intervals is three purges.
+        assert calls["n"] == 250 // _COOLDOWN_PURGE_INTERVAL
 
     def test_expired_cooldowns_are_still_reclaimed(self, monkeypatch):
         """Amortizing must not let expired entries accumulate indefinitely:
@@ -564,11 +498,11 @@ class TestCooldownPurgeCadence:
         cooldown for the setting domain survives."""
         fake_now = [1000.0]
         monkeypatch.setattr("app.scheduler.time.time", lambda: fake_now[0])
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         scheduler.set_domain_cooldown("old.test", 10.0)
         fake_now[0] = 1100.0  # the first cooldown has elapsed
         # Burn past the interval so the amortized purge fires.
-        for i in range(101):
+        for i in range(_COOLDOWN_PURGE_INTERVAL + 1):
             scheduler.set_domain_cooldown(f"d{i}.test", 5.0)
         assert "old.test" not in scheduler._domain_cooldowns
         assert scheduler._domain_cooldowns, "fresh cooldowns were dropped"
@@ -577,17 +511,16 @@ class TestCooldownPurgeCadence:
         """The domain that just earned a cooldown is never removed by the purge
         that follows its own set."""
         monkeypatch.setattr("app.scheduler.time.time", lambda: 1000.0)
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+        scheduler = make_scheduler()
         scheduler.set_domain_cooldown("rate-limited.test", 30.0)
         assert "rate-limited.test" in scheduler._domain_cooldowns
         assert scheduler._domain_cooldowns["rate-limited.test"] > 1000.0
 
 
-@pytest.mark.parametrize("method", ["run"])
-def test_run_still_purges_up_front(method):
+def test_run_still_purges_up_front():
     """The batch entry point keeps its up-front purge so a long run cannot grow
     the dicts without bound even when no 429 fires."""
-    scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+    scheduler = make_scheduler()
     scheduler._domain_cooldowns["stale.test"] = 0.0  # already expired
     assert "stale.test" in scheduler._domain_cooldowns
     # The up-front purge fires before any job runs.
@@ -599,7 +532,7 @@ class TestSchedulerResilience:
     async def test_scheduler_continues_other_jobs_on_single_failure(self):
         """One failing job must not cancel the others; results for the
         successful jobs are still returned."""
-        scheduler = DomainScheduler(global_limit=5, per_domain_limit=5, delay_seconds=0.0)
+        scheduler = make_scheduler(global_limit=5, per_domain_limit=5)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
 
         async def failing_worker(job: CrawlJob) -> EngineCrawlResult:
@@ -607,7 +540,7 @@ class TestSchedulerResilience:
                 raise RuntimeError("transient failure")
             return make_result(job.url, job.domain)
 
-        results = await scheduler.run(jobs, failing_worker, failed_result=_engine_envelope)
+        results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
         # The failing job is not dropped: the chokepoint builds it a classified
         # terminal envelope (reading the URL pair off whichever shape the job
         # carries -- CrawlJob has only ``url``), so the caller never observes a
@@ -622,12 +555,6 @@ class TestSchedulerResilience:
             "http://example.com/0",
             "http://example.com/2",
         }
-
-
-class _Job:
-    def __init__(self, index: int, domain: str):
-        self.index = index
-        self.domain = domain
 
 
 class _PerDomainDelayScheduler(DomainScheduler):
@@ -649,12 +576,7 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
     the delay held the only global slot the fast worker could never start, the
     handshake could never be satisfied, and the wait fails naming exactly that.
     """
-    scheduler = _PerDomainDelayScheduler(
-        global_limit=1,
-        per_domain_limit=1,
-        delay_seconds=0.0,
-        adaptive=False,
-    )
+    scheduler = make_scheduler(_PerDomainDelayScheduler, adaptive=False)
     fast_started = asyncio.Event()
     starved: list[str] = []
     yield_to_loop = asyncio.sleep
@@ -680,20 +602,16 @@ async def test_domain_delay_does_not_block_other_domains(monkeypatch):
         if job.domain == "fast.example.com":
             fast_started.set()
         await yield_to_loop(0)
-        return "ok"
+        return make_result(job.url, job.domain)
 
-    jobs = [_Job(0, "slow.example.com"), _Job(1, "fast.example.com")]
-    await scheduler.run(jobs, worker, failed_result=_engine_envelope)
+    jobs = [make_job(0, "http://slow.example.com/"), make_job(1, "http://fast.example.com/")]
+    await scheduler.run(jobs, worker, failed_result=engine_envelope)
     assert not starved, (
         "fast.example.com could not run until slow.example.com's per-domain delay "
         "finished: the delay is being awaited while holding a GLOBAL concurrency "
         "slot, so it burns that slot on pure waiting and starves every other domain"
     )
     assert fast_started.is_set(), "the fast domain was never served"
-
-
-async def _ok(job: CrawlJob):
-    return make_result(job.url, job.domain)
 
 
 async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
@@ -706,14 +624,9 @@ async def test_zero_delay_requests_no_sleep_at_all(monkeypatch):
     the operator never asked for, and paying it on every single job.
     """
     sleeps = recorder(monkeypatch)
-    scheduler = DomainScheduler(
-        global_limit=1,
-        per_domain_limit=1,
-        delay_seconds=0.0,
-        adaptive=False,
-    )
+    scheduler = make_scheduler(adaptive=False)
     jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
-    await scheduler.run(jobs, _ok, failed_result=_engine_envelope)
+    await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
     assert sleeps.delays == [0, 0], (
         f"a zero-delay scheduler must request only zero-second yields, saw {sleeps.delays}"
     )
@@ -733,14 +646,11 @@ class TestDeliveryFailuresAreNotWorkerFailures:
     """
 
     async def test_a_raising_sink_does_not_trip_the_circuit_breaker(self, caplog):
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
+        scheduler = make_scheduler(adaptive=False)
         jobs = [make_job(0, "https://example.com/a")]
+        sink = FailingSink(message="spill failed: disk full")
 
-        async def exploding_sink(index, result):
-            raise OSError("spill failed: disk full")
-
-        with caplog.at_level("ERROR"):
-            await scheduler.run(jobs, _ok, on_result=exploding_sink, failed_result=_engine_envelope)
+        await run_through(sink, scheduler, jobs, caplog)
 
         assert scheduler.domain_cooldowns == {}, (
             "a failed RESULT SPILL was charged to the domain's circuit breaker; the page "
@@ -759,36 +669,27 @@ class TestDeliveryFailuresAreNotWorkerFailures:
         ``failed_result`` envelope -- which a spill-based sink would have
         written to disk as though the crawl had failed.
         """
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
+        scheduler = make_scheduler(adaptive=False)
         jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
-        seen: list[tuple[int, str]] = []
+        sink = FailingSink()
 
-        async def exploding_sink(index, result):
-            seen.append((index, result.status))
-            raise OSError("spill failed")
+        await run_through(sink, scheduler, jobs, caplog)
 
-        with caplog.at_level("ERROR"):
-            await scheduler.run(jobs, _ok, on_result=exploding_sink, failed_result=_engine_envelope)
-
-        assert sorted(seen) == [(0, "success"), (1, "success")], (
-            f"the sink must see one real result per job and no fabricated envelope: {seen}"
+        assert sorted(sink.calls) == [(0, "success"), (1, "success")], (
+            f"the sink must see one real result per job and no fabricated envelope: {sink.calls}"
         )
+        assert sink.delivered == [], f"every delivery was supposed to fail: {sink.delivered}"
 
-    async def test_one_job_sink_failure_does_not_cost_a_healthy_job_its_result(self):
+    async def test_one_job_sink_failure_does_not_cost_a_healthy_job_its_result(self, caplog):
         """The healthy job's result still reaches a working sink on the next call."""
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
+        scheduler = make_scheduler(adaptive=False)
         jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
-        delivered: list[tuple[int, str]] = []
+        sink = FailingSink(fails={0})
 
-        async def flaky_sink(index, result):
-            if index == 0:
-                raise OSError("spill failed")
-            delivered.append((index, result.status))
+        await run_through(sink, scheduler, jobs, caplog)
 
-        await scheduler.run(jobs, _ok, on_result=flaky_sink, failed_result=_engine_envelope)
-
-        assert delivered == [(1, "success")], (
-            f"one job's failed spill must not swallow another job's result: {delivered}"
+        assert sink.delivered == [(1, "success")], (
+            f"one job's failed spill must not swallow another job's result: {sink.delivered}"
         )
 
 
@@ -832,15 +733,13 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         """The reported case, through the real failure envelope, not a copy."""
         import socket
 
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
-        )
+        scheduler = make_scheduler(circuit_cooldown=0.0)
         job = make_job(0, "https://example.com/p")
 
         async def failing_worker(job):
-            return _failed_result_for(job, socket.gaierror("name resolution failed"), url_of=lambda j: j.url)
+            return engine_envelope(job, socket.gaierror("name resolution failed"))
 
-        results = await scheduler.run([job], failing_worker, failed_result=_engine_envelope)
+        results = await scheduler.run([job], failing_worker, failed_result=engine_envelope)
         result = results[job.index]
         # Different axes: the status is the verdict, the classification the reason.
         # Comparing one against the other is why the old tuple could not work.
@@ -860,15 +759,13 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     async def test_each_status_reaches_the_verdict_its_meaning_implies(
         self, classification, expected_failures, why
     ):
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, circuit_cooldown=0.0
-        )
+        scheduler = make_scheduler(circuit_cooldown=0.0)
         job = make_job(0, "https://example.com/p")
 
         async def worker(job):
             return self._terminal(job, classification)
 
-        await scheduler.run([job], worker, failed_result=_engine_envelope)
+        await scheduler.run([job], worker, failed_result=engine_envelope)
         assert scheduler._domain_failures.get("example.com", 0) == expected_failures, why
 
     def test_status_accounting_is_total(self):

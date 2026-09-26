@@ -11,6 +11,7 @@ import concurrent.futures
 import functools
 import socket
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -303,3 +304,41 @@ class _RedirectChain:
         self.url, self.headers = target
         self.hops += 1
         return True
+
+
+async def apinned_hops(
+    url: str,
+    headers: dict[str, str],
+    *,
+    policy: HostPolicy,
+) -> AsyncIterator[tuple[_RedirectChain, str, dict[str, str]]]:
+    """Yield each hop of the manual redirect walk, already SSRF-checked.
+
+    This is the loop both transports used to spell for themselves: pin, send,
+    decide, repeat. Only the *send* differs between them -- httpx streams
+    through its pooled client's ``stream()``, curl_cffi through a session
+    ``get()`` -- so it stays at the call site, while the parts that must not
+    differ are here. Every iteration re-pins through :meth:`_RedirectChain.pin`,
+    so each redirect target is re-validated against the SSRF blocklist and
+    re-resolved to a fresh IP (F1); :meth:`_RedirectChain.advance` applies the
+    shared hop budget and the cross-host credential strip. A transport that
+    re-spelled the loop could drop either one and nothing would notice.
+
+    The body drives the walk: it receives ``(chain, pinned_url, hop_headers)``,
+    sends it, and leaves the block. ``continue`` after
+    ``chain.advance(response)`` asked for another hop; every other exit is the
+    end of the walk -- the terminal body finished reading, an early 413
+    returned, a transport error raised. The hop count is what tells the two
+    apart, and it is the count only ``advance`` increments, so a body that
+    forgets to advance cannot silently keep the walk going: it ends here.
+    """
+    chain = _RedirectChain(url, headers, policy=policy)
+    while True:
+        pinned_url, hop_headers = await chain.pin()
+        served_hops = chain.hops
+        yield chain, pinned_url, hop_headers
+        if chain.hops == served_hops:
+            raise AssertionError(
+                "the walk body ended without returning a result and without "
+                "chain.advance(response) asking for another hop"
+            )

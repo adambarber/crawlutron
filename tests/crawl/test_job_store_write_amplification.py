@@ -17,14 +17,27 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 
 import pytest
-from _job_harnesses import make_crawled_job_store
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _job_harnesses import make_crawled_job_store, make_job_store
 
 from app.crawl.job_store import CrawlJobState, JobStore
 
 _BODY = "x" * 2000
+
+
+@pytest.fixture
+def job_db(tmp_path):
+    """The store under test and the file it lives in.
+
+    Both come from ``make_job_store``, so this file measures the same store
+    every other job test builds, and ``db_path`` is read back off the store
+    rather than re-assembled from ``tmp_path`` -- a measurement of a file the
+    store is not using would report zeros and pass.
+    """
+    store = make_job_store(str(tmp_path))
+    return store, store.db_path
 
 
 class TestConcurrentAccessHoldsTheConnectionLock:
@@ -81,36 +94,51 @@ class TestConcurrentAccessHoldsTheConnectionLock:
         assert not errors, f"the shared connection was used from two threads at once: {errors[0]!r}"
 
 
-def _accumulated_bytes(db_path: str, job_id: str) -> int:
-    """Bytes the job row itself spends, across every column it declares.
+@contextmanager
+def _on_disk(db_path):
+    """A second connection to the store's file, for measuring what it wrote.
 
-    Read from a separate connection so the measurement is the real on-disk
-    state rather than whatever the store happens to be holding. The column
-    list is taken from the live table rather than hardcoded, so this keeps
-    measuring the row after the schema changes and cannot quietly go on
-    measuring a column that is no longer there.
+    Both measurements below must read the real on-disk state rather than
+    whatever the store happens to be holding, and neither may borrow the
+    store's own connection: the test above is about what happens when two
+    threads reach that one. The open/close pair is owned here so every reader
+    gets the same separation instead of restating it.
     """
     conn = sqlite3.connect(db_path)
     try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _accumulated_bytes(db_path, job_id: str) -> int:
+    """Bytes the job row itself spends, across every column it declares.
+
+    The column list is taken from the live table rather than hardcoded, so this
+    keeps measuring the row after the schema changes and cannot quietly go on
+    measuring a column that is no longer there.
+    """
+    with _on_disk(db_path) as conn:
         columns = [row[1] for row in conn.execute("PRAGMA table_info(crawl_jobs)")]
         total = " + ".join(f"length(COALESCE(\"{column}\", ''))" for column in columns)
         row = conn.execute(f"SELECT {total} FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
-    finally:
-        conn.close()
-    return row[0] or 0
+        return row[0] or 0
 
 
-def _result_rows(db_path: str, job_id: str) -> int:
-    conn = sqlite3.connect(db_path)
-    try:
-        return conn.execute("SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)).fetchone()[
-            0
-        ]
-    finally:
-        conn.close()
+def _result_rows(db_path, job_id: str) -> int:
+    with _on_disk(db_path) as conn:
+        return conn.execute("SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)).fetchone()[0]
 
 
 def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
+    """A job whose every page carries a body big enough to weigh.
+
+    The shared ``make_crawled_job_store`` seeds history without bodies, which
+    is the right seed for a test about how many pages a read returns. The byte
+    measurement below is the opposite case: it is only meaningful if each page
+    *would* have cost something to re-serialize, so the body is what the seed
+    exists to carry.
+    """
     job = store.create("https://example.com/", {"limits": {}})
     for i in range(count):
         url = f"https://example.com/p{i}"
@@ -120,15 +148,14 @@ def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
     return job
 
 
-def test_the_job_row_does_not_grow_with_the_page_count(tmp_path):
+def test_the_job_row_does_not_grow_with_the_page_count(job_db):
     """Ten times the pages must not mean ten times the bytes per batch persist.
 
     This is the whole defect. Before the fix the row carried the history, so
     the second measurement here was ~5x the first; after it the row carries only
     live state and the two numbers are the same.
     """
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, db_path = job_db
 
     small_job = _job_with_pages(store, 50)
     at_fifty = _accumulated_bytes(db_path, small_job.job_id)
@@ -142,30 +169,28 @@ def test_the_job_row_does_not_grow_with_the_page_count(tmp_path):
     )
 
 
-def test_each_page_becomes_exactly_one_append_only_row(tmp_path):
+def test_each_page_becomes_exactly_one_append_only_row(job_db):
     """The cost of a batch is one INSERT per new page, not a rewrite.
 
     A row count that tracks the page count exactly is what makes the previous
     test mean something: if the history were also being mirrored somewhere else,
     the row would be flat for the wrong reason.
     """
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, db_path = job_db
 
     job = _job_with_pages(store, 120)
 
     assert _result_rows(db_path, job.job_id) == 120
 
 
-def test_a_second_save_of_an_unchanged_job_adds_no_rows(tmp_path):
+def test_a_second_save_of_an_unchanged_job_adds_no_rows(job_db):
     """Re-persisting without new pages must not duplicate the history.
 
     The batch loop saves on every iteration, including iterations that discover
     nothing. If save were a blind re-insert the table would grow without bound
     and a resumed job would replay pages it had already committed.
     """
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, db_path = job_db
     job = _job_with_pages(store, 30)
 
     store.save(job)
@@ -174,14 +199,13 @@ def test_a_second_save_of_an_unchanged_job_adds_no_rows(tmp_path):
     assert _result_rows(db_path, job.job_id) == 30
 
 
-def test_reading_a_job_back_reproduces_every_result_in_order(tmp_path):
+def test_reading_a_job_back_reproduces_every_result_in_order(job_db):
     """Splitting the row across tables must not change what a read returns.
 
     The accumulated collections are joined in insertion order, so a resumed or
     listed job sees the same history in the same sequence it was crawled in.
     """
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, _db_path = job_db
     job = _job_with_pages(store, 40)
 
     loaded = store.load(job.job_id)
@@ -192,14 +216,13 @@ def test_reading_a_job_back_reproduces_every_result_in_order(tmp_path):
     assert loaded.visited == job.visited
 
 
-def test_deleting_a_job_takes_its_pages_with_it(tmp_path):
+def test_deleting_a_job_takes_its_pages_with_it(job_db):
     """The new tables are not an orphan store.
 
     `delete` returning True for a missing job is asserted elsewhere; what
     matters here is that no page rows survive the row they belong to.
     """
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, db_path = job_db
     job = _job_with_pages(store, 25)
 
     assert store.delete(job.job_id) is True
@@ -209,10 +232,9 @@ def test_deleting_a_job_takes_its_pages_with_it(tmp_path):
 
 
 @pytest.mark.parametrize("count", [0, 1, 2])
-def test_a_job_with_few_pages_round_trips(tmp_path, count):
+def test_a_job_with_few_pages_round_trips(job_db, count):
     """The degenerate shapes, where a bulk-insert fast path would be wrong."""
-    db_path = str(tmp_path / "jobs.db")
-    store = JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY)
+    store, _db_path = job_db
     job = _job_with_pages(store, count)
 
     loaded = store.load(job.job_id)

@@ -2,46 +2,48 @@
 
 import asyncio
 
-import pytest
 from _assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
+from _async_harnesses import crawl_api as _crawl_api
 from _fetcher_factories import make_crawl_payload
 from _job_harnesses import single_shot_job
 from helpers.server import WEBHOOK_RECEIVED
+
+# The client + origin + cleared webhook sink come from the shared fixture, so
+# this module does not re-declare the arrangement in a `setup` method. The
+# alias-then-rebind is what lets the fixture keep its own name in this
+# namespace: a test asks for a fixture by the name it was defined under.
+crawl_api = _crawl_api
 
 
 class TestAsyncCrawlApi:
     """Tests for async_mode on /v1/crawl endpoint."""
 
-    @pytest.fixture(autouse=True)
-    def setup(self, async_client, base_url):
-        self.client = async_client
-        self.base = base_url
-        WEBHOOK_RECEIVED.clear()
-
-    async def test_v1_crawl_async_mode_returns_202(self):
+    async def test_v1_crawl_async_mode_returns_202(self, crawl_api):
         """async_mode=true returns 202 with request_id and status_url."""
-        body = await accepted_crawl(self.client, make_crawl_payload(f"{self.base}/", async_mode=True))
+        body = await accepted_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
         assert "request_id" in body
         assert body["request_id"].startswith("crawl_")
         assert "status_url" in body
         assert body["status_url"] == f"/v1/crawl/{body['request_id']}"
         assert body["webhook_url"] is None
 
-    async def test_v1_crawl_async_mode_over_batch_size_returns_422(self):
+    async def test_v1_crawl_async_mode_over_batch_size_returns_422(self, crawl_api):
         """L4: an oversized batch is rejected at accept-time, never 202'd then failed async."""
         from app.settings import CrawlerSettings
 
-        urls = [f"{self.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
-        resp = await self.client.post("/v1/crawl", json={"urls": urls, "async_mode": True})
+        urls = [f"{crawl_api.base}/{i}" for i in range(CrawlerSettings.from_mapping().max_batch_size + 1)]
+        resp = await crawl_api.client.post("/v1/crawl", json={"urls": urls, "async_mode": True})
         assert resp.status_code == 422, resp.text
         assert "batch_size_exceeded" in resp.text
 
-    async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(self, override_settings):
+    async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(self, crawl_api, override_settings):
         from app.main import job_store
 
         override_settings(denied_hosts="blocked.test")
-        response = await self.client.post(
+        response = await crawl_api.client.post(
             "/v1/crawl",
+            # Not the helper server's root: the subject here is a host the
+            # policy denies, so the payload names it directly.
             json=make_crawl_payload("https://blocked.test/secret", async_mode=True),
         )
 
@@ -57,7 +59,7 @@ class TestAsyncCrawlApi:
             job for job in job_store.list_jobs() if job["root_url"].startswith("https://blocked.test")
         ], "a policy-blocked target created a job"
 
-    async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
+    async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self, crawl_api):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
 
         def check_pending(response):
@@ -67,8 +69,8 @@ class TestAsyncCrawlApi:
             assert "status" in data["details"]
 
         request_id, response = await submit_async_crawl(
-            self.client,
-            make_crawl_payload(f"{self.base}/", async_mode=True),
+            crawl_api.client,
+            crawl_api.payload(async_mode=True),
             message="Timed out waiting for async crawl to complete",
             on_pending=check_pending,
         )
@@ -77,7 +79,7 @@ class TestAsyncCrawlApi:
         assert len(body["results"]) == 1
         assert body["results"][0]["status"] == "success"
 
-    async def test_single_shot_stats_do_not_fabricate_discovered(self):
+    async def test_single_shot_stats_do_not_fabricate_discovered(self, crawl_api):
         """Single-shot jobs never enqueue a frontier, so "discovered" is
         undefined for them -- stats must report what actually happened
         (submitted pages crawled/failed), never invent a discovered count
@@ -87,9 +89,7 @@ class TestAsyncCrawlApi:
         """
         from app.main import job_store
 
-        request_id, _ = await submit_async_crawl(
-            self.client, make_crawl_payload(f"{self.base}/", async_mode=True)
-        )
+        request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
         row = job_store.load(request_id)
         assert row is not None
@@ -97,14 +97,12 @@ class TestAsyncCrawlApi:
         assert row.stats["total_crawled"] == 1
         assert row.stats["total_failed"] == 0
 
-    async def test_v1_crawl_async_mode_with_webhook_delivers(self):
+    async def test_v1_crawl_async_mode_with_webhook_delivers(self, crawl_api):
         """async_mode with webhook_url delivers result to webhook on completion."""
-        payload = make_crawl_payload(
-            f"{self.base}/",
-            async_mode=True,
-            webhook_url=f"{self.base}/webhook_sink",
+        resp = await crawl_api.client.post(
+            "/v1/crawl",
+            json=crawl_api.payload(async_mode=True, webhook_url=f"{crawl_api.base}/webhook_sink"),
         )
-        resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 202, resp.text
         request_id = resp.json()["request_id"]
 
@@ -114,16 +112,14 @@ class TestAsyncCrawlApi:
         assert len(delivered["results"]) == 1
 
         # Verify status_url also works after webhook delivery
-        status_resp = await self.client.get(f"/v1/crawl/{request_id}")
+        status_resp = await crawl_api.client.get(f"/v1/crawl/{request_id}")
         assert status_resp.status_code == 200
         body = status_resp.json()
         assert body["success"] is True
 
-    async def test_v1_crawl_async_mode_results_persisted_in_job_store(self):
+    async def test_v1_crawl_async_mode_results_persisted_in_job_store(self, crawl_api):
         """Async crawl results are persisted in job_store (single source of truth)."""
-        request_id, _ = await submit_async_crawl(
-            self.client, make_crawl_payload(f"{self.base}/", async_mode=True)
-        )
+        request_id, _ = await submit_async_crawl(crawl_api.client, crawl_api.payload(async_mode=True))
 
         # Verify job exists in job_store with SINGLE_SHOT kind
         from app.main import job_store
@@ -135,81 +131,69 @@ class TestAsyncCrawlApi:
         assert len(job.results) == 1
         assert job.results[0]["request_id"] == request_id
 
-    async def test_v1_crawl_async_mode_404_for_unknown_request_id(self):
+    async def test_v1_crawl_async_mode_404_for_unknown_request_id(self, crawl_api):
         """status_url returns 404 for unknown request_id."""
-        resp = await self.client.get("/v1/crawl/crawl_unknown123")
+        resp = await crawl_api.client.get("/v1/crawl/crawl_unknown123")
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
-    async def test_v1_crawl_sync_mode_still_works(self):
+    async def test_v1_crawl_sync_mode_still_works(self, crawl_api):
         """Default sync mode (async_mode=false) still returns results directly."""
-        body = await completed_crawl(self.client, make_crawl_payload(f"{self.base}/", async_mode=False))
+        body = await completed_crawl(crawl_api.client, crawl_api.payload(async_mode=False))
         assert body["success"] is True
         assert len(body["results"]) == 1
         assert "request_id" in body
 
-    async def test_v1_crawl_async_mode_counts_failed_results(self):
+    async def test_v1_crawl_async_mode_counts_failed_results(self, crawl_api):
         """L5d: job stats must count failed results, not hardcode zero."""
         from app.main import job_store
 
         # One page fetches fine, one 404s (failed). A dead host would not
         # work here: post-M7, robots fetch errors fail closed to
         # robots_disallowed/skipped instead of reaching the fetch.
-        payload = make_crawl_payload(
-            f"{self.base}/",
-            urls=[f"{self.base}/", f"{self.base}/no-such-page-xyz"],
-            async_mode=True,
+        request_id, _ = await submit_async_crawl(
+            crawl_api.client,
+            crawl_api.batch_payload(["/", "/no-such-page-xyz"], async_mode=True),
         )
-        payload.pop("url")
-        request_id, _ = await submit_async_crawl(self.client, payload)
         job = job_store.load(request_id)
         assert job.stats["total_failed"] == 1
         assert job.stats["total_crawled"] == 2
 
-    async def test_v1_crawl_async_mode_batch_urls(self):
+    async def test_v1_crawl_async_mode_batch_urls(self, crawl_api):
         """async_mode works with batch urls."""
-        payload = make_crawl_payload(
-            f"{self.base}/",
-            urls=[f"{self.base}/", f"{self.base}/page2"],
-            async_mode=True,
-        )
-        payload.pop("url")
         request_id, response = await submit_async_crawl(
-            self.client,
-            payload,
+            crawl_api.client,
+            crawl_api.batch_payload(["/", "/page2"], async_mode=True),
             message="Timed out waiting for async batch crawl to complete",
         )
         body = response.json()
         assert body["submitted_count"] == 2
         assert len(body["results"]) == 2
 
-    async def test_v1_crawl_webhook_backward_compat(self):
+    async def test_v1_crawl_webhook_backward_compat(self, crawl_api):
         """webhook_url without async_mode still works (backward compat)."""
-        payload = make_crawl_payload(
-            f"{self.base}/",
-            webhook_url=f"{self.base}/webhook_sink",
-        )
-        body = await accepted_crawl(self.client, payload)
+        payload = crawl_api.payload(webhook_url=f"{crawl_api.base}/webhook_sink")
+        body = await accepted_crawl(crawl_api.client, payload)
         assert "request_id" in body
 
         delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
         assert delivered["success"] is True
 
-    async def test_v1_crawl_async_mode_invalid_webhook_rejected(self):
+    async def test_v1_crawl_async_mode_invalid_webhook_rejected(self, crawl_api):
         """Invalid webhook_url is rejected at accept time."""
-        payload = make_crawl_payload(
-            f"{self.base}/",
-            async_mode=True,
-            webhook_url="not-a-valid-url",
+        resp = await crawl_api.client.post(
+            "/v1/crawl",
+            json=crawl_api.payload(async_mode=True, webhook_url="not-a-valid-url"),
         )
-        resp = await self.client.post("/v1/crawl", json=payload)
         assert resp.status_code == 422
         assert resp.json()["code"] == "validation_error"
 
-    async def test_v1_crawl_async_mode_concurrent_limit(self):
+    async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api):
         """Concurrent async crawls are bounded by semaphore."""
-        payload = make_crawl_payload(f"{self.base}/", async_mode=True)
-        completed = await asyncio.gather(*(submit_async_crawl(self.client, payload) for _ in range(3)))
+        payload = crawl_api.payload(async_mode=True)
+        completed = await asyncio.gather(
+            *(submit_async_crawl(crawl_api.client, payload) for _ in range(3))
+        )
         for request_id, response in completed:
             assert response.status_code == 200
             assert response.json()["success"] is True
@@ -217,11 +201,6 @@ class TestAsyncCrawlApi:
 
 class TestAsyncCrawlJobStoreIntegration:
     """Tests verifying job_store integration for async crawls."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, async_client, base_url):
-        self.client = async_client
-        self.base = base_url
 
     async def test_job_store_single_shot_kind(self):
         """job_store.create_single_shot creates job with SINGLE_SHOT kind."""

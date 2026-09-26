@@ -1,23 +1,39 @@
 """Crawl engine: strategy dispatch, chain edges and scope resolution."""
 
+import time
 import urllib.error
 
 import pytest
 from _assertions import browser_available
 from _browser_doubles import _fake_browser
 from _fetcher_factories import (
+    cache_with_etag,
+    crawled_result,
     hanging_fetcher,
     routed_fetcher,
+    run_chain,
     scripted_fetcher,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _policy_factories import http_strategy_policy
 
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
-from app.crawl.cache import HttpCache
-from app.crawl.engine import _payload_policy, crawl_request
+from app.crawl.engine import _payload_policy
 from app.crawl.strategies.browser import BrowserRenderer
-from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import CrawlResult, to_dict
+from app.scheduler import DomainScheduler
+
+
+def http_policy(*strategies: str, extraction: str = "full", **extra) -> dict:
+    """The HTTP strategy's policy with a different strategy list or one more key.
+
+    Derived from the shared policy factory rather than re-spelled: the limits and
+    the empty header mappings are that factory's to state, and a test says only
+    the part it is changing.
+    """
+    policy = http_strategy_policy(extraction=extraction)
+    if strategies:
+        policy["strategies"] = list(strategies)
+    return {**policy, **extra}
 
 
 class TestEngineCrawlRequest:
@@ -28,35 +44,15 @@ class TestEngineCrawlRequest:
         assert "Example Org" in response["results"][0]["markdown"]
 
     async def test_crawl_request_conditional_cache_304(self, base_url):
-        from _fetcher_factories import run_crawl_async
-
         url = f"{base_url}/with_etag"
-        cache = HttpCache()
-        cache.store(url, {"etag": "v1"})
-        payload = {
-            "url": url,
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        response = await run_crawl_async(payload, cache=cache)
-        result = response["results"][0]
+        result = await crawled_result(url, max_discovered_links=10, cache=cache_with_etag(url))
         assert result["classification"] == "not_modified"
         assert result["http_status"] == 304
 
     async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
-        from _fetcher_factories import run_crawl_async
-
-        payload = {
-            "url": f"{base_url}/",
-            "policy": {
-                "strategies": [BROWSER_HEADLESS],
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
-        }
-        response = await run_crawl_async(payload)
-        result = response["results"][0]
+        result = await crawled_result(
+            f"{base_url}/", strategies=[BROWSER_HEADLESS], max_discovered_links=10
+        )
         assert result["status"] == "failed"
         assert result["classification"] == "browser_crash"
 
@@ -82,17 +78,14 @@ class TestEngineCrawlRequest:
                 policy=job.host_policy,
             )
 
-        payload = {
-            "url": f"{base_url}/",
-            "policy": {
-                "strategies": [HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
-                "limits": {"timeout_seconds": 20, "max_retries": 0, "max_discovered_links": 50},
-            },
-        }
-        response = await crawl_request(
-            payload, browser_worker=browser_worker, http_fetcher=failing_fetcher, cache=HttpCache()
+        result = await crawled_result(
+            f"{base_url}/",
+            strategies=[HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS],
+            timeout_seconds=20,
+            max_discovered_links=50,
+            http_fetcher=failing_fetcher,
+            browser_worker=browser_worker,
         )
-        result = response["results"][0]
         assert result["status"] == "success"
         assert result["classification"] == "rendered"
         assert "Example Org" in result["markdown"]
@@ -134,23 +127,11 @@ class TestCrawlRequestWebhook:
         from app.crawl.engine import crawl_request
         from app.settings import CrawlerSettings
 
-        payload = {
-            "url": "http://127.0.0.1:1/",
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 5},
-                "request_profile": {},
-            },
-            "webhook_url": "http://webhook.invalid",
-        }
-
         async def browser_worker(job):
             return None
 
         result = await crawl_request(
-            payload,
+            {"url": "http://127.0.0.1:1/", "policy": http_policy(extraction="full")},
             settings=CrawlerSettings.from_mapping(),
             browser_worker=browser_worker,
             shutdown_event=asyncio.Event(),
@@ -186,44 +167,40 @@ class TestEngineChainEdges:
     async def test_browser_strategy_document_extraction(self, base_url):
         # Live origin: M7's robots gate fail-closes connection-refused origins
         # (127.0.0.1:1), so the subject here needs a server that 404s robots.
-        policy = {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT}
-        result = await crawl_request(
-            {"url": f"{base_url}/doc", "policy": policy},
+        result = await crawled_result(
+            f"{base_url}/doc",
+            policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_DOCUMENT},
             browser_worker=_fake_browser(html="<html><body>doc table</body></html>"),
-            cache=HttpCache(),
         )
-        assert result["results"][0]["status"] == "success"
-        assert "doc table" in result["results"][0]["markdown"] or ""
+        assert result["status"] == "success"
+        assert "doc table" in result["markdown"] or ""
 
     async def test_browser_strategy_trafilatura_extraction(self, base_url):
-        policy = {"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA}
-        result = await crawl_request(
-            {"url": f"{base_url}/doc2", "policy": policy},
+        result = await crawled_result(
+            f"{base_url}/doc2",
+            policy={"strategies": [BROWSER_HEADLESS], "extraction": EXTRACTION_TRAFILATURA},
             browser_worker=_fake_browser(html="<html><body>trafilatura body</body></html>"),
-            cache=HttpCache(),
         )
-        assert "trafilatura body" in result["results"][0]["markdown"] or ""
+        assert "trafilatura body" in result["markdown"] or ""
 
     async def test_browser_strategy_no_content(self, base_url):
-        policy = {"strategies": [BROWSER_HEADLESS]}
-        result = await crawl_request(
-            {"url": f"{base_url}/doc3", "policy": policy},
+        result = await crawled_result(
+            f"{base_url}/doc3",
+            policy={"strategies": [BROWSER_HEADLESS]},
             browser_worker=_fake_browser(html=None, text=None),
-            cache=HttpCache(),
         )
-        assert (result["results"][0]["markdown"]) is None
+        assert (result["markdown"]) is None
 
     async def test_browser_strategy_surfaces_xhr_and_screenshot(self, base_url):
-        policy = {"strategies": [BROWSER_HEADLESS]}
-        result = await crawl_request(
-            {"url": f"{base_url}/doc4", "policy": policy},
+        result = await crawled_result(
+            f"{base_url}/doc4",
+            policy={"strategies": [BROWSER_HEADLESS]},
             browser_worker=_fake_browser(
                 html="<html><body>x</body></html>",
                 metadata={"intercepted_xhr": [{"url": "u", "payload": {}}], "screenshot": "BASE64IMG"},
             ),
-            cache=HttpCache(),
         )
-        diag = result["results"][0]["diagnostics"]
+        diag = result["diagnostics"]
         assert "intercepted_xhr" in diag
         assert "screenshot" in diag
 
@@ -233,29 +210,25 @@ class TestEngineChainEdges:
 
         # True tarpit: never returns until the caller's deadline cancels us.
         # (A time-based sleep is monkeypatched to return instantly in this
-        # suite's fast mode, so model the poisoned-URL hang with an
-        # ever-pending future instead -- which is what the harness does.)
-        slow_fetcher = hanging_fetcher()
-
-        policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "extraction": "dom",
-            "limits": {
-                "timeout_seconds": 30,
-                "max_retries": 0,
-                "max_discovered_links": 10,
-                "respect_robots": False,
-                "total_url_budget_seconds": 0.1,
+        # suite's fast mode, so model the poisoned-URL hang with the harness's
+        # ever-pending future instead -- which is what hanging_fetcher is.)
+        result = await crawled_result(
+            "http://example.com/slow",
+            policy={
+                "strategies": [HTTP_DECLARED_CRAWLER],
+                "extraction": "dom",
+                "limits": {
+                    "timeout_seconds": 30,
+                    "max_retries": 0,
+                    "max_discovered_links": 10,
+                    "respect_robots": False,
+                    "total_url_budget_seconds": 0.1,
+                },
+                "headers": {},
+                "request_profile": {},
             },
-            "headers": {},
-            "request_profile": {},
-        }
-        response = await crawl_request(
-            {"url": "http://example.com/slow", "policy": policy},
-            http_fetcher=slow_fetcher,
-            cache=HttpCache(),
+            http_fetcher=hanging_fetcher(),
         )
-        result = response["results"][0]
         assert result["status"] == "failed"
         # The budget's classification is precise (url_budget_exceeded), not the
         # generic network_error tail the old hand-built result hard-coded.
@@ -263,8 +236,6 @@ class TestEngineChainEdges:
         assert result["error"] == "url_budget_exceeded"
 
     async def test_rate_limited_sets_domain_cooldown(self):
-        from app.scheduler import DomainScheduler
-
         fetcher = scripted_fetcher(
             status=429,
             headers={"retry-after": "30", "content-type": "text/plain"},
@@ -272,37 +243,16 @@ class TestEngineChainEdges:
         )
 
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
-        policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "extraction": "dom",
-            "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            "headers": {},
-            "request_profile": {},
-        }
-        result = await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            policy=policy,
-            http_fetcher=fetcher,
-            cffi_fetcher=fetcher,
-            browser_worker=None,
-            scheduler=scheduler,
-            domain="example.com",
-            host_policy=UNRESTRICTED_HOST_POLICY,
+        result = await run_chain(
+            "http://example.com/", fetcher, policy=http_policy(extraction="dom"), scheduler=scheduler
         )
         assert result.classification == "rate_limited"
         assert "example.com" in scheduler._domain_cooldowns
-        import time as _time
-
-        assert abs(scheduler._domain_cooldowns["example.com"] - (_time.time() + 30)) <= 5
+        assert abs(scheduler._domain_cooldowns["example.com"] - (time.time() + 30)) <= 5
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
         """Adversarial perf #2.6: a host's robots Crawl-delay is honored as a
         per-domain minimum delay during the crawl."""
-        from app.crawl import engine as engine_mod
-        from app.crawl.cache import HttpCache
-        from app.scheduler import DomainScheduler
-
         calls = []
         orig = DomainScheduler.set_domain_min_delay
 
@@ -312,20 +262,13 @@ class TestEngineChainEdges:
 
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", spy)
 
-        fetcher = routed_fetcher(
-            {"/robots.txt": (200, "User-agent: *\nCrawl-delay: 2\n", "text/html")},
-            default=(200, b"<html><body>ok</body></html>", "text/html"),
-        )
-
-        policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "extraction": "dom",
-            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-        }
-        await engine_mod.crawl_request(
-            {"url": "http://example.com/", "policy": policy},
-            http_fetcher=fetcher,
-            cache=HttpCache(),
+        await crawled_result(
+            "http://example.com/",
+            policy=http_policy(extraction="dom"),
+            http_fetcher=routed_fetcher(
+                {"/robots.txt": (200, "User-agent: *\nCrawl-delay: 2\n", "text/html")},
+                default=(200, b"<html><body>ok</body></html>", "text/html"),
+            ),
         )
         assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
 
@@ -346,29 +289,17 @@ class TestEngineChainEdges:
         assert small >= 256 * 1024
         assert _effective_max_content_length({}, global_concurrency=100000) == 256 * 1024
 
-    async def test_include_html_false_drops_html(self, monkeypatch):
+    async def test_include_html_false_drops_html(self):
         """When include_html is False the raw HTML is not retained in the result."""
-        from app.crawl import engine as engine_mod
-        from app.crawl.cache import HttpCache
-
-        fetcher = scripted_fetcher(
-            status=200, ctype="text/html", body=b"<html><body>some page content</body></html>"
+        result = await crawled_result(
+            "http://example.com/",
+            policy=http_policy(extraction="dom", browser_profile={"include_html": False}),
+            http_fetcher=scripted_fetcher(
+                status=200, ctype="text/html", body=b"<html><body>some page content</body></html>"
+            ),
         )
-
-        policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER"],
-            "extraction": "dom",
-            "browser_profile": {"include_html": False},
-            "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-        }
-        out = await engine_mod.crawl_request(
-            {"url": "http://example.com/", "policy": policy},
-            http_fetcher=fetcher,
-            cache=HttpCache(),
-        )
-        res = out["results"][0]
-        assert res["html"] is None
-        assert res["markdown"]
+        assert result["html"] is None
+        assert result["markdown"]
 
 
 class TestEngineScopeEdges:
@@ -379,7 +310,7 @@ class TestEngineScopeEdges:
         from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
 
         result = _skipped_engine_result(
-    TerminalResult(
+            TerminalResult(
                 original_url="http://example.com/page",
                 normalized_url="http://example.com/page",
                 # A disallow precedes any strategy attempt, so the recorded strategy
@@ -387,7 +318,8 @@ class TestEngineScopeEdges:
                 strategy=None,
                 classification="robots_disallowed",
                 error="robots_txt_disallowed",
-))
+            )
+        )
         assert result.classification == "robots_disallowed"
         assert result.status == "skipped"
         assert result.attempted_strategies[0].strategy is None
@@ -395,33 +327,14 @@ class TestEngineScopeEdges:
         assert result.status == status_for_classification("robots_disallowed")
 
     async def test_crawl_chain_continue_on_skip(self):
-        from app.crawl.strategy_chain import execute_crawl_chain
-        from app.scheduler import DomainScheduler
-
-        fetcher = scripted_fetcher(
-            status=200,
-            ctype="text/html",
-            body=b"<html><title>Access Denied</title>bot challenge</html>",
-        )
-
-        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
-        policy = {
-            "strategies": ["HTTP_DECLARED_CRAWLER", "BROWSER_HEADLESS"],
-            "extraction": "full",
-            "headers": {},
-            "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            "request_profile": {},
-        }
         # HTTP returns access_denied (blocked), browser_worker is None -> browser_crash
-        result = await execute_crawl_chain(
-            original_url="http://example.com/page",
-            normalized_url="http://example.com/page",
-            policy=policy,
-            http_fetcher=fetcher,
-            cffi_fetcher=fetcher,
-            browser_worker=None,
-            scheduler=scheduler,
-            domain="example.com",
-            host_policy=UNRESTRICTED_HOST_POLICY,
+        result = await run_chain(
+            "http://example.com/page",
+            scripted_fetcher(
+                status=200,
+                ctype="text/html",
+                body=b"<html><title>Access Denied</title>bot challenge</html>",
+            ),
+            policy=http_policy(HTTP_DECLARED_CRAWLER, BROWSER_HEADLESS),
         )
         assert result.classification == "browser_crash"

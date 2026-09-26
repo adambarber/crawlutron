@@ -27,7 +27,7 @@ import inspect
 
 import pytest
 from _job_harnesses import (
-    _fake_execute,
+    ScriptedExecute,
     _make_app,
     _seed_job,
     make_crawled_job_store,
@@ -159,7 +159,7 @@ class TestJobEndpointsStayOffTheLoop:
         # on the off-the-loop behaviour it is named for.
         hang = asyncio.Event()
         job_runner.reset_job_runner()
-        job_runner.install_execute_crawl(_fake_execute([_canned_result(_ROOT)], hang=hang))
+        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)], hang=hang))
         try:
             created = await jobs_client.post(
                 "/v1/jobs",
@@ -281,7 +281,7 @@ class TestStartupRecoveryStaysOffTheLoop:
         from app.api.job_runner import recover_and_start_pending_jobs
 
         job_runner.reset_job_runner()
-        job_runner.install_execute_crawl(_fake_execute([_canned_result(_ROOT)]))
+        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(_ROOT)]))
         try:
             job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}})
             await recover_and_start_pending_jobs(

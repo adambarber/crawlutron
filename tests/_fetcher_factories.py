@@ -3,11 +3,14 @@ import inspect
 from typing import Any
 from urllib.parse import urlparse
 
-from app.constants import HTTP_DECLARED_CRAWLER
+from _browser_doubles import _fake_browser
+from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
-from app.models import CrawlResult, HttpFetchResult
+from app.models import HttpFetchResult
 
 SCOPE_KEEP_DROP_PAGES = {
     "/": (
@@ -18,39 +21,6 @@ SCOPE_KEEP_DROP_PAGES = {
     "/keep/x": (200, "<html>k</html>", "text/html"),
     "/drop/y": (200, "<html>d</html>", "text/html"),
 }
-
-
-def site_fetcher(pages: dict[str, Any]):
-    def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        path = urlparse(url).path or "/"
-        entry = pages.get(path)
-        if entry is None:
-            return make_fetch(
-                status=404,
-                body=b"<html></html>",
-                ctype="text/html",
-                url=url,
-                final_url=url,
-            )
-        status, body, ctype = entry
-        if isinstance(body, str):
-            body = body.encode("utf-8")
-        return make_fetch(status=status, body=body, ctype=ctype, url=url, final_url=url)
-
-    return fetcher
-
-
-async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
-    from app.crawl.cache import HttpCache
-    from app.crawl.engine import crawl_request
-
-    pages = pages if pages is not None else SCOPE_KEEP_DROP_PAGES
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    return {r["normalized_url"] for r in out["results"]}
 
 
 def make_fetch(
@@ -73,71 +43,6 @@ def make_fetch(
     )
 
 
-def ok_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    return make_fetch(url=url)
-
-
-def raise_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    raise ConnectionError("network down")
-
-
-def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; charset=utf-8"):
-    """A fetcher that serves one fixed response for whatever URL it is handed.
-
-    Most fetcher doubles in this tree answer every URL the same way, and
-    spelling that out meant re-declaring the production fetcher's signature --
-    including its real 50 MiB ``max_content_length`` default -- at each site.
-    That is the copy the ``scripted-fetcher`` funnel bans: the signature is
-    owned by the factory, so a change to the real fetcher lands here once.
-
-    ``headers`` replaces the response headers wholesale (``content-type``
-    included), which is what a test about a header or a content-encoding needs;
-    otherwise ``ctype`` supplies the content type and nothing else is sent.
-    """
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(url=url, final_url=url, status=status, body=body, headers=headers, ctype=ctype)
-
-    return fetcher
-
-
-def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list | None = None):
-    """A fetcher that raises instead of responding, optionally recording URLs.
-
-    ``calls`` turns this into a recorder, so a test that asserts the engine
-    retried the same URL three times does not need its own closure for it.
-
-    A class is instantiated per call, so each raise is a distinct exception
-    with its own traceback; pass an instance only when the exception carries
-    state a test needs to inspect (``httpx.HTTPStatusError`` and its response).
-    """
-    spec = error if error is not None else ConnectionError
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        if calls is not None:
-            calls.append(url)
-        raise spec() if isinstance(spec, type) else spec
-
-    return fetcher
-
-
-def hanging_fetcher(calls: list | None = None):
-    """A fetcher that never returns, so only the caller's deadline ends it.
-
-    The tarpit, for a poisoned URL whose fetch has to time out. It awaits a
-    never-resolved future rather than sleeping: the suite monkeypatches
-    ``asyncio.sleep`` to return instantly, which would turn the tarpit into a
-    fast success and assert nothing.
-    """
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        if calls is not None:
-            calls.append(url)
-        await asyncio.Future()
-
-    return fetcher
-
-
 #: What a route may answer with. An exception is raised, an ``HttpFetchResult``
 #: is returned verbatim, a ``(status, body, ctype)`` triple or a kwargs dict is
 #: turned into a real ``HttpFetchResult`` by :func:`make_fetch`.
@@ -155,6 +60,133 @@ def _answer(spec: Route, url: str):
     if isinstance(body, str):
         body = body.encode("utf-8")
     return make_fetch(url=url, final_url=url, status=status, body=body, ctype=ctype)
+
+
+def fetcher_double(
+    answer,
+    calls: list | None = None,
+    *,
+    record_headers: list | None = None,
+    record_cap: list | None = None,
+    answer_is_response: bool = False,
+):
+    """A fetcher double: the production contract, the request seam, the answer.
+
+    Every double in this module used to re-state the fetcher signature, cap
+    default included -- and the cap they stated (50 MiB) is not the one
+    production declares (``DEFAULT_MAX_CONTENT_LENGTH_BYTES``, 10 MiB), so each
+    copy asserted a contract the crawler does not have. One signature, against
+    production's own constant, is what makes a double a double instead of a
+    transcription.
+
+    ``answer(url, sent_headers, timeout, max_content_length)`` receives the whole
+    request, so a double that delegates (see :func:`tap_fetcher`) forwards it
+    untouched, and its return is read as a :data:`Route` unless
+    ``answer_is_response`` says the answer already *is* the response. The three
+    ``record_*`` lists are the observations a crawler test makes -- which URLs
+    were fetched, which headers were sent, which body cap the strategy applied
+    -- so none of them needs a second fetcher or a hand-rolled wrapper.
+    """
+
+    async def fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
+        if calls is not None:
+            calls.append(url)
+        if record_headers is not None:
+            record_headers.append(dict(sent_headers))
+        if record_cap is not None:
+            record_cap.append(max_content_length)
+        result = answer(url, sent_headers, timeout, max_content_length)
+        if inspect.isawaitable(result):
+            result = await result
+        return result if answer_is_response else _answer(result, url)
+
+    fetcher.calls = [] if calls is None else calls
+    return fetcher
+
+
+def site_fetcher(pages: dict[str, Any]):
+    """A fetcher serving a scripted page table by path, 404 for anything else.
+
+    A crawler test that reads a body it did not arrange passes for the wrong
+    reason, so an unscripted path is a 404 rather than a default page.
+    """
+
+    def answer(url, *_):
+        entry = pages.get(urlparse(url).path or "/")
+        if entry is None:
+            return {"status": 404, "body": b"<html></html>", "ctype": "text/html"}
+        status, body, ctype = entry
+        return {"status": status, "body": body.encode("utf-8") if isinstance(body, str) else body, "ctype": ctype}
+
+    return fetcher_double(answer)
+
+
+async def run_scoped_crawl(scope_regex=None, *, max_depth=1, max_pages=10, pages=None):
+    pages = pages if pages is not None else SCOPE_KEEP_DROP_PAGES
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": max_depth, "max_pages": max_pages}, "scope_regex": scope_regex},
+    }
+    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    return {r["normalized_url"] for r in out["results"]}
+
+
+def ok_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
+    """The 200-for-everything fetcher, passed around as a value.
+
+    Callers hand this function itself to the engine, so it is a fetcher rather
+    than a factory; the cap still comes from production's constant.
+    """
+    return make_fetch(url=url)
+
+
+def raise_fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
+    """The network-is-down fetcher, passed around as a value like ``ok_fetcher``."""
+    raise ConnectionError("network down")
+
+
+def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; charset=utf-8"):
+    """A fetcher that serves one fixed response for whatever URL it is handed.
+
+    Most fetcher doubles in this tree answer every URL the same way, and
+    spelling that out meant re-stating the production fetcher's signature at
+    each site. That is the copy the ``scripted-fetcher`` funnel bans: the
+    signature, and the cap's default, are owned by :func:`fetcher_double`, so
+    a change to the real fetcher lands here once.
+
+    ``headers`` replaces the response headers wholesale (``content-type``
+    included), which is what a test about a header or a content-encoding needs;
+    otherwise ``ctype`` supplies the content type and nothing else is sent.
+    """
+    return fetcher_double(lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype})
+
+
+def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list | None = None):
+    """A fetcher that raises instead of responding, optionally recording URLs.
+
+    ``calls`` turns this into a recorder, so a test that asserts the engine
+    retried the same URL three times does not need its own closure for it.
+
+    A class is instantiated per call, so each raise is a distinct exception
+    with its own traceback; pass an instance only when the exception carries
+    state a test needs to inspect (``httpx.HTTPStatusError`` and its response).
+    """
+    return fetcher_double(lambda url, *_: error if error is not None else ConnectionError, calls)
+
+
+def hanging_fetcher(calls: list | None = None):
+    """A fetcher that never returns, so only the caller's deadline ends it.
+
+    The tarpit, for a poisoned URL whose fetch has to time out. It awaits a
+    never-resolved future rather than sleeping: the suite monkeypatches
+    ``asyncio.sleep`` to return instantly, which would turn the tarpit into a
+    fast success and assert nothing.
+    """
+
+    async def never(url, *_):
+        await asyncio.Future()
+
+    return fetcher_double(never, calls)
 
 
 def routed_fetcher(
@@ -188,19 +220,17 @@ def routed_fetcher(
     body it did not arrange is a test that passes for the wrong reason.
     """
 
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        if calls is not None:
-            calls.append(url)
+    def answer(url, sent_headers, *_):
         for fragment, spec in (routes or {}).items():
             if fragment in url:
                 if on_route is not None:
                     on_route(url, sent_headers)
-                return _answer(spec, url)
+                return spec
         if missing == "raise":
             raise AssertionError(f"unscripted fetch: {url} (routes: {sorted(routes or {})})")
-        return _answer(default, url)
+        return default
 
-    return fetcher
+    return fetcher_double(answer, calls)
 
 
 def sequenced_fetcher(
@@ -223,9 +253,7 @@ def sequenced_fetcher(
         raise ValueError("sequenced_fetcher needs at least one step")
     state = {"n": 0}
 
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        if calls is not None:
-            calls.append(url)
+    def answer(url, *_):
         # The harness owns the position, not the caller's list: a test that
         # never asks for the call log still gets a sequence that advances.
         index = state["n"]
@@ -234,8 +262,9 @@ def sequenced_fetcher(
             if not repeat_last:
                 raise AssertionError(f"unscripted fetch #{index + 1}: {url}")
             index = len(steps) - 1
-        return _answer(steps[index], url)
+        return steps[index]
 
+    fetcher = fetcher_double(answer, calls)
     fetcher.served = lambda: state["n"]
     return fetcher
 
@@ -245,23 +274,18 @@ def request_fetcher(respond, calls: list | None = None):
 
     The conditional-request seam: what a sitemap or page fetch returns depends
     on the ``If-None-Match`` / ``If-Modified-Since`` header the crawler sent, so
-    the branch cannot be keyed on the URL. ``respond(url, headers)`` returns
-    whatever :func:`routed_fetcher`'s routes may.
+    the branch cannot be keyed on the URL. ``respond(url, headers)`` -- the
+    request, not the whole contract -- returns whatever :func:`routed_fetcher`'s
+    routes may, or a finished response when ``answer_is_response`` is set.
 
     Distinct from :func:`tap_fetcher` (which delegates to a real fetcher) and
     from :func:`concurrent_fetcher` (which also counts overlap): this one adds
     no scheduling point, so a test about headers does not acquire a
-    concurrency behaviour it did not ask for.
+    concurrency behaviour it did not ask for. ``fetcher.calls`` is the header
+    log, which is what this seam is for.
     """
     seen = [] if calls is None else calls
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        seen.append(dict(sent_headers))
-        spec = respond(url, sent_headers)
-        if asyncio.iscoroutine(spec):
-            spec = await spec
-        return _answer(spec, url)
-
+    fetcher = fetcher_double(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
     fetcher.calls = seen
     return fetcher
 
@@ -272,24 +296,10 @@ def tap_fetcher(inner, calls: list | None = None):
     For a test whose subject is a *real* fetcher (the default HTTP fetcher, a
     site fetcher) and whose only extra requirement is to see what was asked
     for. Recording and delegating are separate concerns, so they are separate
-    functions: this one owns the list, the wrapped one owns the response.
+    functions: this one owns the list, the wrapped one owns the response --
+    which may be sync or async, since :func:`fetcher_double` awaits either.
     """
-    if calls is None:
-        calls = []
-    recorded = calls
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        recorded.append(url)
-        result = inner(url, sent_headers, timeout, max_content_length)
-        # The inner fetcher may be sync (site_fetcher) or async (the real
-        # default fetcher); the tap is async either way, because that is the
-        # shape the engine awaits.
-        if inspect.isawaitable(result):
-            result = await result
-        return result
-
-    fetcher.calls = recorded
-    return fetcher
+    return fetcher_double(lambda url, sent_headers, timeout, cap: inner(url, sent_headers, timeout, cap), calls)
 
 
 def concurrent_fetcher(
@@ -313,26 +323,19 @@ def concurrent_fetcher(
 
     ``peak`` on the returned fetcher is what a concurrency test should assert.
     """
-    import asyncio
-
     state = {"inflight": 0, "peak": 0}
-    seen = [] if calls is None else calls
 
-    async def fetcher(url, sent_headers, timeout, max_content_length=50 * 1024 * 1024):
-        seen.append(url)
+    async def answer(url, sent_headers, *_):
         state["inflight"] += 1
         state["peak"] = max(state["peak"], state["inflight"])
         try:
             for _ in range(yield_times):
                 await asyncio.sleep(0)
-            spec = respond(url, sent_headers)
-            if asyncio.iscoroutine(spec):
-                spec = await spec
-            return _answer(spec, url)
+            return respond(url, sent_headers)
         finally:
             state["inflight"] -= 1
 
-    fetcher.calls = seen
+    fetcher = fetcher_double(answer, calls)
     fetcher.peak = lambda: state["peak"]
     fetcher.inflight = lambda: state["inflight"]
     return fetcher
@@ -437,6 +440,59 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     return [r["normalized_url"] for r in out["results"]]
 
 
+def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
+    """An HTTP cache that already holds a validator for ``url``.
+
+    A conditional request is only conditional if something was stored, so the
+    304 path is unreachable until a test says what was cached. Stating that as
+    "the cache holds an etag for this URL" keeps the validator, the URL it is
+    keyed by and the cache object one decision instead of three.
+    """
+    cache = HttpCache()
+    cache.store(url, {"etag": etag})
+    return cache
+
+
+async def crawled_result(
+    url: str,
+    *,
+    policy: dict[str, Any] | None = None,
+    strategies: list[str] | None = None,
+    http_fetcher: Any = None,
+    browser_worker: Any = None,
+    cache: Any = None,
+    content_cache: Any = None,
+    **payload_kwargs: Any,
+) -> dict[str, Any]:
+    """The one result a real ``crawl_request`` returns for ``url``.
+
+    The single-URL sibling of :func:`crawled_results`, and the same argument:
+    "what came back for this URL?" is a payload, a fetcher and cache wiring, and
+    a ``results[0]`` projection, and every site that asked used to spell all
+    three. A hand-rolled call can differ from a routed one in a way nothing
+    notices -- a dropped cache, a payload key the engine never read -- and the
+    copy is the one the test actually ran.
+
+    ``policy`` is the whole policy when the test has a reason to state one;
+    otherwise ``strategies`` plus ``payload_kwargs`` go through
+    :func:`make_crawl_payload`, whose ``**extra`` lands at the top level, which
+    is why a policy sub-mapping is not one of them.
+    """
+    payload = (
+        {"url": url, "policy": policy}
+        if policy is not None
+        else make_crawl_payload(url, strategies=strategies, **payload_kwargs)
+    )
+    kwargs: dict[str, Any] = {"cache": HttpCache() if cache is None else cache}
+    if http_fetcher is not None:
+        kwargs["http_fetcher"] = http_fetcher
+    if browser_worker is not None:
+        kwargs["browser_worker"] = browser_worker
+    if content_cache is not None:
+        kwargs["content_cache"] = content_cache
+    return (await crawl_request(payload, **kwargs))["results"][0]
+
+
 async def run_crawl_async(payload: dict, *, cache=None, browser_worker=None) -> dict:
     if cache is None:
         cache = HttpCache()
@@ -461,31 +517,89 @@ async def crawl_homepage_async(
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
 
 
-def make_content_cache(tmpdir: str, *, default_ttl: float = 1, clock=None) -> ContentCache:
-    if clock is None:
-        import time
+async def run_chain(
+    url: str,
+    fetcher: Any,
+    *,
+    policy: dict[str, Any],
+    scheduler: Any = None,
+    browser_worker: Any = None,
+) -> Any:
+    """What the strategy chain decides for one URL, with the real wiring.
 
-        clock = time.monotonic
-    return ContentCache(tmpdir, default_ttl=default_ttl, clock=clock)
+    Both fetcher slots, the domain derived from the URL, the unrestricted host
+    policy and an admitting scheduler are the arrangement every chain test
+    needed, and a copy that dropped a slot would quietly exercise a different
+    chain than the test describes. ``scheduler`` is a parameter so a test can
+    inspect the cooldown or delay the chain set on it.
+    """
+    from app.crawl.strategy_chain import execute_crawl_chain
+    from app.scheduler import DomainScheduler
+
+    if scheduler is None:
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
+    return await execute_crawl_chain(
+        original_url=url,
+        normalized_url=url,
+        policy=policy,
+        http_fetcher=fetcher,
+        cffi_fetcher=fetcher,
+        browser_worker=browser_worker,
+        scheduler=scheduler,
+        domain=urlparse(url).netloc,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
 
 
-def make_content_cache_with_entry(
-    tmpdir: str, key: str = "key1", value: dict = None, *, default_ttl: float = 1, clock=None
-) -> ContentCache:
-    if value is None:
-        value = {"data": "1"}
-    cache = make_content_cache(tmpdir, default_ttl=default_ttl, clock=clock)
-    cache.set(key, value)
-    return cache
+async def run_cached_twice(url: str, policy: dict[str, Any], fetcher: Any, cache: Any, content_cache: Any):
+    """The same URL through the HTTP strategy twice, on the same two caches.
+
+    The content cache is a claim about the *second* run, so the tests that make
+    it each ran the strategy twice through an arrangement of their own; the
+    second result is the interesting one and the arrangement is not.
+    """
+    results = [
+        await run_http_strategy(
+            url=url,
+            policy=policy,
+            http_fetcher=fetcher,
+            cache=cache,
+            content_cache=content_cache,
+        )
+        for _ in range(2)
+    ]
+    return results[0], results[1]
 
 
-def _temp_cache(ttl=1, clock_start=1000.0):
-    import tempfile
+def clocked_cache(
+    directory: str,
+    *,
+    default_ttl: float = 1,
+    clock_start: float = 1000.0,
+    **settings: Any,
+) -> tuple[ContentCache, list[float]]:
+    """A cache over ``directory`` reading time from a handle the caller advances.
 
-    from app.crawl.content_cache import ContentCache
+    Expiry is the subject of most of these tests, so the clock is the thing a
+    test has to move, and a handle is what makes moving it possible without
+    re-deciding how the cache reads time. Returning it beside the cache is why
+    no site has to declare a one-element list and a lambda over it.
+    """
+    clock = [clock_start]
+    return ContentCache(directory, default_ttl=default_ttl, clock=lambda: clock[0], **settings), clock
 
-    clock_vals = [clock_start]
-    return ContentCache(tempfile.mkdtemp(), default_ttl=ttl, clock=lambda: clock_vals[0]), clock_vals
+
+def make_seeded_cache(directory: str, *keys: str, value: Any = None, **settings: Any):
+    """:func:`clocked_cache` holding one entry per key.
+
+    Seeding and the clock are the two halves of "an entry that expires", and a
+    test that needs both was writing down the directory, the TTL, the clock list
+    and the entry -- four things to keep in agreement.
+    """
+    cache, clock = clocked_cache(directory, **settings)
+    for key in keys:
+        cache.set(key, {"data": "1"} if value is None else value)
+    return cache, clock
 
 
 def _spawn_fetch(fn):
@@ -541,9 +655,7 @@ async def invoke_http_strategy(
 
         monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
 
-    async def fetcher(url, headers, timeout, max_content_length=0):
-        if cap_capture is not None:
-            cap_capture.append(max_content_length)
+    def answer(url, _sent_headers, *_):
         return resp(url)
 
     kwargs: dict[str, Any] = {}
@@ -552,7 +664,7 @@ async def invoke_http_strategy(
     return await run_http_strategy(
         url="http://example.com/",
         policy=policy,
-        http_fetcher=fetcher,
+        http_fetcher=fetcher_double(answer, record_cap=cap_capture, answer_is_response=True),
         **kwargs,
     )
 
@@ -563,36 +675,19 @@ async def invoke_browser_strategy(
     from app.crawl.strategies.browser_result import browser_strategy_result
     from app.validation import HostPolicy
 
-    async def browser_worker(job):
-        return CrawlResult(
-            url=job.url,
-            status="success",
-            classification="rendered",
-            final_url=job.url,
-            html=html,
-            text=text,
-            attempts=1,
-            elapsed_ms=5,
-            domain="example.com",
-            metadata={},
-        )
-
     return await browser_strategy_result(
         original_url="http://example.com/",
         normalized_url="http://example.com/",
         strategy="BROWSER_HEADLESS",
         policy=policy,
-        browser_worker=browser_worker,
+        browser_worker=_fake_browser(html=html, text=text),
         host_policy=HostPolicy.unrestricted(),
     )
 
 
 def make_html_fetcher(calls: list[str], body: bytes = b"<html><body>page content</body></html>"):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(url)
-        return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
-
-    return fetcher
+    """A fetcher serving one HTML body for any URL, recording what it was asked for."""
+    return fetcher_double(lambda url, *_: {"status": 200, "ctype": "text/html", "body": body}, calls)
 
 
 async def run_default_http_fetcher(url: str, headers=None):
@@ -605,34 +700,39 @@ async def run_default_http_fetcher(url: str, headers=None):
 
 
 def make_expiring_cache(tmpdir, *, max_total_bytes: int = 10_000):
-    now = [1000.0]
-    cache = ContentCache(
+    """Two entries that expire at the same instant, and the clock to expire them.
+
+    A test about TTL and byte accounting needs a budget it can overrun and two
+    entries it can age out, which is the pair of values the loop below seeds.
+    """
+    return make_seeded_cache(
         tmpdir,
+        "a",
+        "b",
+        value="x" * 100,
         default_ttl=10,
-        clock=lambda: now[0],
         max_entries=100,
         max_total_bytes=max_total_bytes,
     )
-    cache.set("a", "x" * 100)
-    cache.set("b", "x" * 100)
-    return cache, now
 
 
 __all__ = [
     "LLM_FORMAT_TEST_HTML",
     "SCOPE_KEEP_DROP_PAGES",
     "_spawn_fetch",
-    "_temp_cache",
     "build_payload",
+    "cache_with_etag",
     "crawl_homepage_async",
+    "crawled_result",
+    "clocked_cache",
+    "fetcher_double",
     "invoke_browser_strategy",
     "invoke_http_strategy",
-    "make_content_cache",
-    "make_content_cache_with_entry",
     "make_crawl_payload",
     "make_expiring_cache",
     "make_fetch",
     "make_html_fetcher",
+    "make_seeded_cache",
     "failing_fetcher",
     "concurrent_fetcher",
     "hanging_fetcher",
@@ -641,6 +741,8 @@ __all__ = [
     "Route",
     "request_fetcher",
     "routed_fetcher",
+    "run_cached_twice",
+    "run_chain",
     "scripted_fetcher",
     "sequenced_fetcher",
     "tap_fetcher",

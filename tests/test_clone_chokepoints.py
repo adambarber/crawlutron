@@ -33,9 +33,11 @@ FUNNELS = [
         'async def f(client):\n await client.post("/v1/jobs", json={"root_url": "x", "policy": _execution_policy(None)})',
     ),
     (
-        "seeded-scripted-job",
+        "seeded-job",
         "run_seeded_scripted_job",
-        "async def f():\n job = _seed_job(store, url, policy)\n return await _run_scripted_persisted_job(job, store, results)",
+        "async def f():\n"
+        " job = _seed_job(store, url, policy)\n"
+        " return await run_seeded_job(job, store, results)",
     ),
     (
         "blocking-route",
@@ -171,8 +173,17 @@ def _job_post(node):
     return _has_call(node, "post", "/v1/jobs") and _has_call(node, "_execution_policy")
 
 
-def _seeded_scripted_job(node):
-    return _has_call(node, "_seed_job") and _has_call(node, "_run_scripted_persisted_job")
+def _seeded_job(node):
+    """A seeded-job run assembled by hand instead of through the funnel.
+
+    The two halves are the row seeder and the seeded runner. Reaching for both
+    in one scope is how the shape was written before ``run_seeded_scripted_job``
+    existed, and a reader copying it gets the persistence and recovery wiring
+    inlined again. A call to the funnel itself is the sanctioned state and must
+    not be reported -- the owner is skipped by name further up, but naming it
+    here as well would flag every legitimate caller.
+    """
+    return _has_call(node, "_seed_job") and _has_call(node, "run_seeded_job")
 
 
 def _blocking_route(node):
@@ -430,7 +441,7 @@ DETECTORS = {
     "async-submit": _async_submit,
     "render-pool": _render_pool,
     "job-post": _job_post,
-    "seeded-scripted-job": _seeded_scripted_job,
+    "seeded-job": _seeded_job,
     "blocking-route": _blocking_route,
     "response-handler": _response_handler,
     "http-strategy": _http_strategy,

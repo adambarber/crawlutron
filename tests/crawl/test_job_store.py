@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from _job_harnesses import make_job_store
+from _job_harnesses import make_job_store, raw_job_row
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
@@ -283,13 +283,11 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
     root = "https://example.test/root"
     child = "https://example.test/child"
     job = store.create(root, {"limits": {"max_depth": 2}})
-    connection = sqlite3.connect(store.db_path)
-    connection.execute(
-        "UPDATE crawl_jobs SET frontier = ?, in_flight = ? WHERE job_id = ?",
-        (json.dumps([root, child]), json.dumps([root, child]), job.job_id),
-    )
-    connection.commit()
-    connection.close()
+    with raw_job_row(store) as connection:
+        connection.execute(
+            "UPDATE crawl_jobs SET frontier = ?, in_flight = ? WHERE job_id = ?",
+            (json.dumps([root, child]), json.dumps([root, child]), job.job_id),
+        )
 
     loaded = store.load(job.job_id)
 
@@ -316,13 +314,11 @@ def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
         ('{"limits":"corrupt","scope_regex":null}', {"limits": {}, "scope_regex": None}),
     ):
         job = store.create("https://example.test/root", {})
-        connection = sqlite3.connect(store.db_path)
-        connection.execute(
-            "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
-            (policy_json, job.job_id),
-        )
-        connection.commit()
-        connection.close()
+        with raw_job_row(store) as connection:
+            connection.execute(
+                "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
+                (policy_json, job.job_id),
+            )
 
         loaded = store.load(job.job_id)
 

@@ -476,7 +476,21 @@ __all__ = [
 # point in the other direction: a `status=` keyword on a constructor was
 # invisible to mypy, which runs over app/ only, and only the runtime assertion
 # caught a migrated call site that folded it into the value.
-_APP_TREE_CODE_LINE_BUDGET = 14_896
+#
+# One more spent, argued in the same terms: the two transports each spelled the
+# manual redirect walk themselves -- construct the chain, pin, send, decide,
+# repeat -- and jscpd reported the pair. The consolidation is `apinned_hops`
+# (pinned_transport.py), an async generator that owns pin/decide/advance and
+# yields each already-SSRF-checked hop; the body only sends, which is the part
+# that genuinely differs (httpx streams through its pooled client, curl_cffi
+# through a session get). The 19 lines are the generator plus the two
+# `async for` headers and their two reachability markers, and they buy the
+# property that a transport cannot now drop the per-hop re-pin (F1) or the
+# shared hop budget without anything noticing -- `advance` is the only thing
+# that increments `chain.hops`, so a re-spelled loop that forgot it terminates
+# the walk instead of looping, and a re-spelled loop that dropped the re-pin
+# simply had no chokepoint to drift from.
+_APP_TREE_CODE_LINE_BUDGET = 14_915
 
 
 def assert_trees_clean(

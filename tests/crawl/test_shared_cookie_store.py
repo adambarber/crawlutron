@@ -28,10 +28,22 @@ def store_path(tmp_path):
     return tmp_path / "coordination.db"
 
 
+def _worker_jar(store_path) -> CookieJar:
+    """One worker's jar over the shared store.
+
+    Every test in this file is about what a *sibling* can see, so the unit
+    under test is a pair of independently-constructed jars over one file -- the
+    same shape a second process would have. Handing out the pair is therefore
+    the arrangement, and a test states only what the first worker did and what
+    the second one sees.
+    """
+    return CookieJar(SharedCookieStore(store_path))
+
+
 def test_a_sibling_worker_s_cookie_is_visible(store_path):
     """The property a per-process jar cannot provide."""
-    first = CookieJar(SharedCookieStore(store_path))
-    second = CookieJar(SharedCookieStore(store_path))
+    first = _worker_jar(store_path)
+    second = _worker_jar(store_path)
 
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
 
@@ -44,8 +56,8 @@ def test_concurrent_writes_to_one_host_merge_rather_than_clobber(store_path):
     A last-writer-wins write would leave only the second cookie, so this fails
     for the same reason the real shutdown did.
     """
-    first = CookieJar(SharedCookieStore(store_path))
-    second = CookieJar(SharedCookieStore(store_path))
+    first = _worker_jar(store_path)
+    second = _worker_jar(store_path)
 
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
     second.add_cookie_header("http://example.com/", "pref=dark; Path=/")
@@ -61,7 +73,7 @@ def test_namespaces_stay_isolated_in_shared_storage(store_path):
     The jar's namespace is what keeps concurrent tenants from reading each
     other's cookies, so a store-wide table must key on it, not on host alone.
     """
-    jar = CookieJar(SharedCookieStore(store_path))
+    jar = _worker_jar(store_path)
 
     jar.add_cookie_header("http://example.com/", "a=1; Path=/", namespace="tenant-a")
     jar.add_cookie_header("http://example.com/", "b=2; Path=/", namespace="tenant-b")
@@ -74,8 +86,8 @@ def test_namespaces_stay_isolated_in_shared_storage(store_path):
 
 def test_clear_in_one_worker_is_seen_by_another(store_path):
     """A clear that only reached its own process would replay revoked cookies."""
-    first = CookieJar(SharedCookieStore(store_path))
-    second = CookieJar(SharedCookieStore(store_path))
+    first = _worker_jar(store_path)
+    second = _worker_jar(store_path)
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
 
     first.clear()
@@ -89,8 +101,8 @@ def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
     This is the exact shape of the original data loss: one process exits with
     the whole file to itself and drops everything the others held.
     """
-    first = CookieJar(SharedCookieStore(store_path))
-    second = CookieJar(SharedCookieStore(store_path))
+    first = _worker_jar(store_path)
+    second = _worker_jar(store_path)
     first.add_cookie_header("http://example.com/", "a=1; Path=/")
     second.add_cookie_header("http://other.com/", "b=2; Path=/")
 

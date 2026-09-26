@@ -2,29 +2,29 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import contextlib
 import json
 import shutil
 import sys
 import tempfile
+import threading
 from collections.abc import Iterator
 from functools import partial
+from typing import Any
 
-import httpx
 import pytest
 from _fetcher_factories import (
-    _temp_cache,
+    clocked_cache,
     crawled_results,
-    make_content_cache_with_entry,
     make_expiring_cache,
+    make_seeded_cache,
     run_http_strategy,
     tap_fetcher,
 )
 from helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc
+from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.strategies.fetchers import _default_http_fetcher
@@ -56,69 +56,174 @@ def scoped_cache(**settings) -> Iterator[ContentCache]:
         yield ContentCache(tmpdir, **settings)
 
 
-def _make_etag_test_setup(tmp_path, etag_server):
-    """Common setup for etag-based content cache tests."""
-    host, port = etag_server.server_address
-    url = f"http://127.0.0.1:{port}/"
-    policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
+def etag_case(tmp_path, etag_server):
+    """``(url, policy, fetcher, cache, content_cache)`` for the etag server's URL.
 
-    # The real fetcher against the real local server, with the unrestricted
-    # policy pinned. Only the wiring is test-owned; nothing here answers HTTP.
-    fetcher = tap_fetcher(partial(_default_http_fetcher, policy=HostPolicy.unrestricted()))
-
-    cache = HttpCache()
-    content_cache = ContentCache(tmp_path)
-    return url, policy, fetcher, cache, content_cache
-
-
-async def _run_cached_strategy(url, policy, fetcher, cache=None, content_cache=None):
-    return await run_http_strategy(
-        url=url,
-        policy=policy,
-        http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
+    The real fetcher against the real local server, with the unrestricted policy
+    pinned and a tap over it. Only the wiring is test-owned; nothing here
+    answers HTTP.
+    """
+    port = etag_server.server_address[1]
+    return (
+        f"http://127.0.0.1:{port}/",
+        {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
+        tap_fetcher(partial(_default_http_fetcher, policy=HostPolicy.unrestricted())),
+        HttpCache(),
+        ContentCache(tmp_path),
     )
 
 
-def test_set_get_roundtrip(tmp_path):
-    c = ContentCache(cache_dir=tmp_path / "u", default_ttl=3600)
-    assert c.get("missing") is None
-    c.set("k", {"a": 1, "b": "x"})
-    assert c.get("k") == {"a": 1, "b": "x"}
+def cached_strategy_runner(url, policy, fetcher, cache=None, content_cache=None):
+    """The HTTP strategy over one URL and the two caches, handed back unrun.
+
+    "What the *second* crawl did" is the subject of these tests, and one of them
+    changes the origin's answer in between, so the arrangement is owned here and
+    the moment of each run is the test's. ``run_http_strategy`` drops a cache
+    that was not given, so passing neither is a strategy run with no caching.
+    """
+
+    async def run():
+        return await run_http_strategy(
+            url=url, policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache
+        )
+
+    return run
+
+
+@contextlib.contextmanager
+def watching_entry_unlinks(monkeypatch, cache) -> Iterator[list[bool]]:
+    """Record, per cache-entry unlink, whether the cache lock was held.
+
+    Scoped to the cache directory's own entry files on purpose:
+    ``atomic_write_text`` unlinks its own ``.tmp`` file *under* the lock, so an
+    unfiltered watch reports the writer's temp-file cleanup as an eviction. The
+    teardown is the ``monkeypatch`` fixture's, which restores the real unlink.
+    """
+    real_unlink = cc.Path.unlink
+    held: list[bool] = []
+
+    def watched(self, *args, **kwargs):
+        if self.parent == cache.cache_dir and not self.name.startswith("."):
+            held.append(cache._lock.locked())
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(cc.Path, "unlink", watched)
+    yield held
+
+
+@contextlib.contextmanager
+def entry_replaced_by_directory(cache, key) -> Iterator[Any]:
+    """Swap an entry's file for a directory, so reading it raises OSError.
+
+    A file swapped for a directory is the only way to make a read fail without
+    patching the reader itself, and the swap has to be undone -- otherwise the
+    directory the cache is writing into is left dirty for the next test.
+    """
+    path = cache._path_for(key)
+    path.unlink()
+    path.mkdir()
+    try:
+        yield path
+    finally:
+        path.rmdir()
+
+
+@contextlib.contextmanager
+def watching_envelope_reads(cache) -> Iterator[list[str]]:
+    """Record the keys that reach the full-envelope read, then restore the seam.
+
+    ``cached_at_of`` is contractually a metadata question; this is what proves a
+    test proved it, and the patch/restore pair was re-spelled at each site.
+    """
+    calls: list[str] = []
+    original = cache._read_envelope
+
+    def counting(key):
+        calls.append(key)
+        return original(key)
+
+    cache._read_envelope = counting
+    try:
+        yield calls
+    finally:
+        cache._read_envelope = original
+
+
+@contextlib.contextmanager
+def etag_serving(etag: str, body: bytes) -> Iterator[None]:
+    """Make the etag server answer with a new validator and body, then restore.
+
+    The restore values are read back off the handler rather than re-spelled: a
+    copy of them drifts the moment the fixture's default body changes, and the
+    drift is invisible -- the next test just talks to a server nobody else is
+    talking to.
+    """
+    original = (EtagHandler.etag, EtagHandler.body)
+    EtagHandler.etag, EtagHandler.body = etag, body
+    try:
+        yield
+    finally:
+        EtagHandler.etag, EtagHandler.body = original
+
+
+def watch_writes(cache, monkeypatch, *, calls=None, on_write=None, fail=None):
+    """Patch ``_write_data`` so a test can watch, or fail, the cache's disk writes.
+
+    One seam, three questions: ``calls`` records the paths that reached disk (an
+    oversized entry must never transiently be one), ``on_write`` observes each
+    write -- which is how the off-loop test sees which thread ran it -- and
+    ``fail`` makes the write raise, either always (``True``) or only for data
+    carrying a substring, so a prior entry survives to be read back. Each of
+    those was its own inline closure over the same private method.
+    """
+    real_write = cache._write_data
+
+    def seam(path, data):
+        if calls is not None:
+            calls.append(str(path))
+        if on_write is not None:
+            on_write(path, data)
+        if fail is not None and (fail is True or fail in data):
+            raise OSError("disk full")
+        real_write(path, data)
+
+    monkeypatch.setattr(cache, "_write_data", seam)
+
+
+def test_set_get_roundtrip():
+    with scoped_cache(default_ttl=3600) as c:
+        assert c.get("missing") is None
+        c.set("k", {"a": 1, "b": "x"})
+        assert c.get("k") == {"a": 1, "b": "x"}
 
 
 def test_disk_persistence_across_instances(tmp_path):
-    c1 = ContentCache(cache_dir=tmp_path / "d", default_ttl=3600)
-    c1.set("k", {"x": 1})
-    # New instance, same directory -> must read from disk (no sidecar/redis).
-    c2 = ContentCache(cache_dir=tmp_path / "d", default_ttl=3600)
-    assert c2.get("k") == {"x": 1}
+    first = _make_cache(tmp_path, default_ttl=3600)
+    first.set("k", {"x": 1})
+    # A new instance over the same directory -> must read from disk (no sidecar/redis).
+    assert reopen_cache(tmp_path, default_ttl=3600).get("k") == {"x": 1}
 
 
 def test_ttl_expiry_via_injected_clock(tmp_path):
-    clock = {"t": 1000.0}
-    c = ContentCache(cache_dir=tmp_path / "t", default_ttl=100, clock=lambda: clock["t"])
+    c, clock = clocked_cache(tmp_path / "t", default_ttl=100)
     c.set("k", "v")
     assert c.get("k") == "v"
-    clock["t"] = 1000.0 + 101  # past TTL
+    clock[0] = 1000.0 + 101  # past TTL
     assert c.get("k") is None
 
 
 def test_zero_ttl_means_no_expiry(tmp_path):
-    clock = {"t": 0.0}
-    c = ContentCache(cache_dir=tmp_path / "z", default_ttl=0, clock=lambda: clock["t"])
+    c, clock = clocked_cache(tmp_path / "z", default_ttl=0, clock_start=0.0)
     c.set("k", "v")
-    clock["t"] = 10**9
+    clock[0] = 10**9
     assert c.get("k") == "v"
 
 
 def test_prune_removes_only_expired(tmp_path):
-    clock = {"t": 0.0}
-    c = ContentCache(cache_dir=tmp_path / "p", default_ttl=10, clock=lambda: clock["t"])
+    c, clock = clocked_cache(tmp_path / "p", default_ttl=10, clock_start=0.0)
     c.set("a", 1)
     c.set("b", 2)
-    clock["t"] = 20.0  # a,b expired (expire at 10)
+    clock[0] = 20.0  # a,b expired (expire at 10)
     c.set("c", 3)  # expires at 30, still fresh at t=20
     assert c.prune() == 2
     assert c.get("c") == 3
@@ -150,87 +255,65 @@ def test_get_holds_lock_while_updating_memory_mirror(tmp_path, monkeypatch):
 # --------------------------- integration: real server, no mocks ---------------------------
 
 
-async def _fetch_via_cache(url: str, cache: ContentCache):
-    key = cache.make_key(url)
-    hit = cache.get(key)
-    if hit is not None:
-        return hit
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
-    val = {
-        "status_code": r.status_code,
-        "headers": dict(r.headers),
-        "body_b64": base64.b64encode(r.content).decode("ascii"),
-        "final_url": str(r.url),
-        "elapsed_ms": 0,
-    }
-    cache.set(key, val)
-    return val
+def real_fetcher(calls: list[str] | None = None):
+    """The production HTTP fetcher, optionally under a tap that records URLs.
+
+    Every integration below is about what the *real* transport did, so the
+    fetcher is production's own; only the observation is test-owned.
+    """
+    fetcher = partial(_default_http_fetcher, policy=HostPolicy.unrestricted())
+    return fetcher if calls is None else tap_fetcher(fetcher, calls)
 
 
-def test_cache_short_circuits_real_fetch(counting_server, tmp_path):
+async def test_cache_short_circuits_real_fetch(counting_server, tmp_path):
     url = f"http://127.0.0.1:{counting_server.server_address[1]}/page"
-    cache = ContentCache(cache_dir=tmp_path / "int", default_ttl=3600)
-    asyncio.run(_fetch_via_cache(url, cache))
-    asyncio.run(_fetch_via_cache(url, cache))
-    assert counting_server.hits == 1  # second call served from disk cache
+    run = cached_strategy_runner(
+        url,
+        {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
+        real_fetcher(),
+        content_cache=ContentCache(tmp_path),
+    )
+    await run()
+    await run()
+    assert counting_server.hits == 1  # the second call was served from disk cache
 
 
 async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
-    from app.crawl.strategies.fetchers import _default_http_fetcher
-
-    cache = ContentCache(cache_dir=tmp_path / "hs", default_ttl=3600)
-    url = base_url + "/"
-    policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
-
-    calls = {"n": 0}
-
-    async def counting_fetcher(u, headers, timeout, max_content):
-        calls["n"] += 1
-        return await _default_http_fetcher(
-            u,
-            headers,
-            timeout,
-            max_content,
-            policy=HostPolicy.unrestricted(),
-        )
-
-    r1 = await _run_cached_strategy(url, policy, counting_fetcher, content_cache=cache)
-    r2 = await _run_cached_strategy(url, policy, counting_fetcher, content_cache=cache)
-    assert r1.status == "success" and r2.status == "success"
-    assert calls["n"] == 1  # cache prevented the second real fetch
+    fetched: list[str] = []
+    run = cached_strategy_runner(
+        f"{base_url}/",
+        {"strategies": [HTTP_DECLARED_CRAWLER], "extraction": "full", "headers": {}},
+        real_fetcher(fetched),
+        content_cache=ContentCache(cache_dir=tmp_path / "hs", default_ttl=3600),
+    )
+    first = await run()
+    second = await run()
+    assert first.status == "success" and second.status == "success"
+    assert fetched == [f"{base_url}/"]  # the cache prevented the second real fetch
 
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
     """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
-
-    url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
-    # First crawl: stores 200 + etag.
-    r1 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
-    assert r1.status == "success"
+    run = cached_strategy_runner(*etag_case(tmp_path, etag_server))
+    first = await run()
+    assert first.status == "success"
     assert etag_server.hits == 1
-    # Second crawl: content HIT + validator present -> conditional revalidation (304) -> cache served.
-    r2 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
-    assert r2.status == "success"
-    # Server was re-hit once for the conditional GET (304, no body re-download).
+    # Content HIT + validator present -> conditional revalidation (304) -> cache served.
+    second = await run()
+    assert second.status == "success"
+    # Re-hit once for the conditional GET (304, no body re-download).
     assert etag_server.hits == 2
-    assert "etagged content" in (r2.markdown or "")
+    assert "etagged content" in (second.markdown or "")
 
 
 async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
     """If the etag changed, revalidation returns 200 and fresh content is served (#5)."""
-    url, policy, fetcher, cache, content_cache = _make_etag_test_setup(tmp_path, etag_server)
-    await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
-    # Simulate the upstream page changing its etag + body.
-    try:
-        EtagHandler.etag = "v2"
-        EtagHandler.body = b"<html><body>changed content</body></html>"
-        r2 = await _run_cached_strategy(url, policy, fetcher, cache, content_cache)
-        assert r2.status == "success"
-        assert "changed content" in (r2.markdown or "")
-    finally:
-        EtagHandler.etag = "v1"
-        EtagHandler.body = b"<html><body>etagged content</body></html>"
+    run = cached_strategy_runner(*etag_case(tmp_path, etag_server))
+    await run()
+    with etag_serving("v2", b"<html><body>changed content</body></html>"):
+        second = await run()
+    assert second.status == "success"
+    assert "changed content" in (second.markdown or "")
 
 
 async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path):
@@ -321,60 +404,37 @@ async def test_cold_aget_still_mirrors_small_envelope(tmp_path):
 
 class TestContentCacheOverwrite:
     def test_content_cache_set_overwrite(self):
-        cache, _ = _temp_cache(ttl=60)
-        cache.set("key", {"data": "first"})
-        cache.set("key", {"data": "second"})
-        assert cache.get("key") == {"data": "second"}
+        with scoped_cache(default_ttl=60) as cache:
+            cache.set("key", {"data": "first"})
+            cache.set("key", {"data": "second"})
+            assert cache.get("key") == {"data": "second"}
 
 
 class TestContentCacheCorruptEntry:
     def test_content_cache_get_corrupt_json(self):
-
-
         with scoped_cache(default_ttl=60) as cache:
-            cache_path = cache._path_for("testkey")
-            cache_path.write_text("{broken json")
-            result = cache.get("testkey")
-            assert (result) is None
+            cache._path_for("testkey").write_text("{broken json")
+            assert cache.get("testkey") is None
 
-    def test_content_cache_prune_corrupt_entry(self):
-        import tempfile
+    def test_content_cache_prune_corrupt_entry(self, tmp_path):
+        cache, clock = make_seeded_cache(tmp_path, "key1")
+        # The corrupt file carries the name prune would compute, so a prune that
+        # cannot read it must skip it rather than count it as removed.
+        cache._path_for("badkey").write_text("not valid json")
+        clock[0] = 1002.0  # advance past the TTL
+        assert cache.prune() == 1  # only key1 is expired and removable
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            clock_vals = [1000.0]
-            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
-            # Write a corrupt file with the correct hash-based name - prune should skip it
-            bad_path = cache._path_for("badkey")
-            bad_path.write_text("not valid json")
-            clock_vals[0] = 1002.0  # advance past TTL
-            removed = cache.prune()
-            # Only key1 is expired and removable; corrupt file is skipped
-            assert removed == 1
-
-    def test_content_cache_prune_os_error(self):
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            clock_vals = [1000.0]
-            cache = make_content_cache_with_entry(tmpdir, clock=lambda: clock_vals[0])
-            clock_vals[0] = 1002.0
-            # Replace file with directory to cause OSError on read
-            cache_path = cache._path_for("key1")
-            cache_path.unlink()
-            cache_path.mkdir()
+    def test_content_cache_prune_os_error(self, tmp_path):
+        cache, clock = make_seeded_cache(tmp_path, "key1")
+        clock[0] = 1002.0
+        with entry_replaced_by_directory(cache, "key1"):
             cache.prune()
-            cache_path.rmdir()
 
     def test_content_cache_clear_os_error(self):
-
-
         with scoped_cache(default_ttl=60) as cache:
             cache.set("key1", {"data": "1"})
-            cache_path = cache._path_for("key1")
-            cache_path.unlink()
-            cache_path.mkdir()
-            cache.clear()
-            cache_path.rmdir()
+            with entry_replaced_by_directory(cache, "key1"):
+                cache.clear()
 
 
 class TestSharedContentCache:
@@ -398,25 +458,24 @@ def test_default_max_entries_is_bounded_not_none():
 
 def test_max_entries_enforces_bound(tmp_path):
     """Cache never exceeds max_entries (F6)."""
-    c = ContentCache(cache_dir=tmp_path / "bound", default_ttl=3600, max_entries=3)
-    c.set("a", 1)
-    c.set("b", 2)
-    c.set("c", 3)
+    cache = _make_cache(tmp_path, max_entries=3)
+    cache.set("a", 1)
+    cache.set("b", 2)
+    cache.set("c", 3)
     # 3 entries
-    assert c.get("a") == 1
-    assert c.get("b") == 2
-    assert c.get("c") == 3
+    assert cache.get("a") == 1
+    assert cache.get("b") == 2
+    assert cache.get("c") == 3
 
     # Add 'd' -> one must be evicted to stay at 3
-    c.set("d", 4)
+    cache.set("d", 4)
     # Total cached entries should be 3
-    entries = list((tmp_path / "bound").glob("content.*.json"))
-    assert len(entries) == 3
+    assert len(list(cache.cache_dir.iterdir())) == 3
     # All remaining gets should work or return None (evicted)
     # At least one of a,b,c was evicted; d is present
-    assert c.get("d") == 4
+    assert cache.get("d") == 4
     # Verify we didn't lose all old entries (at least 2 of a,b,c remain)
-    remaining = sum(1 for k in ("a", "b", "c") if c.get(k) is not None)
+    remaining = sum(1 for k in ("a", "b", "c") if cache.get(k) is not None)
     assert remaining >= 2
 
 
@@ -449,9 +508,34 @@ def test_lru_keeps_recently_used_entries():
         assert c.get("e") == 5
 
 
+def reopen_cache(directory, **settings) -> ContentCache:
+    """A fresh instance over a directory a previous instance wrote.
+
+    It deliberately seeds nothing: what the sites that use it are after is the
+    state a cold process finds on disk, and writing an entry first would warm
+    the very mirror they are testing.
+    """
+    return ContentCache(directory, **settings)
+
+
 def _make_cache(tmp_path, **kwargs):
     kwargs.setdefault("default_ttl", 60)
     return ContentCache(str(tmp_path), **kwargs)
+
+
+def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> ContentCache:
+    """A cache whose total byte budget is the only limit in play.
+
+    The entry cap and the count cap are lifted out of the way, so a test about
+    byte accounting cannot pass because the count cap evicted first.
+    """
+    return _make_cache(
+        tmp_path,
+        max_entries=10_000,
+        max_entry_bytes=10_000,
+        max_total_bytes=max_total_bytes,
+        **settings,
+    )
 
 
 def _at_cap_budget() -> tuple[float, dict, int]:
@@ -469,30 +553,12 @@ def _at_cap_budget() -> tuple[float, dict, int]:
     return now, value, cap
 
 
-def _fail_writes(cache, monkeypatch, *, only_when=None):
-    """Patch ``_write_data`` to raise OSError.
-
-    With ``only_when`` set, writes whose serialized data lacks that substring
-    still hit the real writer, so a prior entry persists and only the targeted
-    write fails. Shared by the write-failure/rollback tests (one seam, not a
-    ``boom`` fake cloned per test).
-    """
-    real_write = cache._write_data
-
-    def boom(path, data):
-        if only_when is None or only_when in data:
-            raise OSError("disk full")
-        real_write(path, data)
-
-    monkeypatch.setattr(cache, "_write_data", boom)
-
-
 class TestContentCacheByteBudget:
     def test_oversized_entry_is_refused(self, tmp_path):
         cache = _make_cache(tmp_path, max_entry_bytes=200)
         cache.set("big", {"body": "x" * 10_000}, ttl=60)
         assert cache.get("big") is None
-        assert list(tmp_path.glob("*.json")) == []
+        assert list(cache.cache_dir.iterdir()) == []
 
     def test_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
         now, value, cap = _at_cap_budget()
@@ -500,8 +566,7 @@ class TestContentCacheByteBudget:
         cache.set("at-cap", value, ttl=60)
 
         assert cache.get("at-cap") == value
-        path = next(tmp_path.glob("*.json"))
-        assert path.stat().st_size == cap
+        assert cache._path_for("at-cap").stat().st_size == cap
 
     async def test_async_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
         now, value, cap = _at_cap_budget()
@@ -510,16 +575,10 @@ class TestContentCacheByteBudget:
         await cache.aset("at-cap", value, ttl=60)
 
         assert await cache.aget("at-cap") == value
-        path = next((tmp_path / "async").glob("*.json"))
-        assert path.stat().st_size == cap
+        assert cache._path_for("at-cap").stat().st_size == cap
 
     def test_total_budget_evicts_lru_first(self, tmp_path):
-        cache = _make_cache(
-            tmp_path,
-            max_entries=10_000,
-            max_entry_bytes=10_000,
-            max_total_bytes=400,
-        )
+        cache = budgeted_cache(tmp_path)
         cache.set("k1", {"body": "a" * 100}, ttl=60)
         cache.set("k2", {"body": "b" * 100}, ttl=60)
         assert cache.get("k1") is not None
@@ -529,16 +588,11 @@ class TestContentCacheByteBudget:
         assert cache.get("k1") is None
         assert cache.get("k2") is not None
         assert cache.get("k3") is not None
-        on_disk = sum(p.stat().st_size for p in tmp_path.glob("*.json"))
+        on_disk = sum(p.stat().st_size for p in cache.cache_dir.iterdir())
         assert on_disk <= 400
 
     async def test_aset_enforces_budget(self, tmp_path):
-        cache = _make_cache(
-            tmp_path,
-            max_entries=10_000,
-            max_entry_bytes=10_000,
-            max_total_bytes=400,
-        )
+        cache = budgeted_cache(tmp_path)
         await cache.aset("k1", {"body": "a" * 100}, ttl=60)
         await cache.aset("k2", {"body": "b" * 100}, ttl=60)
         await cache.aset("k3", {"body": "c" * 100}, ttl=60)
@@ -551,18 +605,12 @@ class TestContentCacheByteBudget:
         Mirrors set(): pre-serialize, size-check under the lock, then write.
         The spy sits on ``_write_data``, the seam the real code uses."""
         cache = _make_cache(tmp_path, max_entry_bytes=200)
-        calls: list[str] = []
+        written: list[str] = []
 
-        real_write = cache._write_data
-
-        def spy_write(path, data):
-            calls.append(str(path))
-            real_write(path, data)
-
-        monkeypatch.setattr(cache, "_write_data", spy_write)
+        watch_writes(cache, monkeypatch, calls=written)
         await cache.aset("big", {"body": "x" * 10_000}, ttl=60)
-        assert calls == []
-        assert list(tmp_path.glob("*.json")) == []
+        assert written == []
+        assert list(cache.cache_dir.iterdir()) == []
         assert await cache.aget("big") is None
         # A small write in the same cache still works.
         await cache.aset("ok", {"body": "y"}, ttl=60)
@@ -582,11 +630,7 @@ class TestContentCacheByteBudget:
         """N1: a failed disk write must roll the index entry back so aget()
         does not keep consulting a path that does not exist."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
-
-        def boom(path, envelope):
-            raise OSError("disk full")
-
-        monkeypatch.setattr(cache, "_write_data", boom)
+        watch_writes(cache, monkeypatch, fail=True)
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "v"}, ttl=60)
         assert "k" not in cache._index
@@ -597,31 +641,24 @@ class TestContentCacheByteBudget:
         """N1: prune() must reconcile byte accounting for index entries whose
         recorded size is missing (e.g. crash between index insert and
         accounting update) by stat'ing the surviving file."""
-        import json as _json
-
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         cache.set("k", {"body": "v" * 300}, ttl=60)
         # Simulate crash residue: index entry survives, its recorded size
         # and the total were lost.
         cache._index_sizes.clear()
         cache._index_total_bytes = 0
-        removed = cache.prune()
-        assert removed == 0
+        assert cache.prune() == 0
         path = cache._index["k"]
         assert cache._index_sizes["k"] == path.stat().st_size
         assert cache._index_total_bytes == path.stat().st_size
-        assert _json.loads(path.read_text())["value"] == {"body": "v" * 300}
+        assert json.loads(path.read_text())["value"] == {"body": "v" * 300}
 
     def test_set_routes_through_write_seam(self, tmp_path, monkeypatch):
         """#1733 twins: the sync write must go through _write_data like aset, so
         a failure is observable/testable at the same seam (a spy on an inline
         atomic_write_text call site is silently vacuous)."""
         cache = _make_cache(tmp_path)
-
-        def boom(path, data):
-            raise OSError("disk full")
-
-        monkeypatch.setattr(cache, "_write_data", boom)
+        watch_writes(cache, monkeypatch, fail=True)
         with pytest.raises(OSError):
             cache.set("k", {"body": "v"}, ttl=60)
         assert "k" not in cache._index
@@ -657,7 +694,7 @@ class TestContentCacheByteBudget:
         never persisted — rollback covers RAM, not just the index."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
         await cache.aset("k", {"body": "old"}, ttl=60)
-        _fail_writes(cache, monkeypatch, only_when="new")
+        watch_writes(cache, monkeypatch, fail="new")
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new"}, ttl=60)
         assert await cache.aget("k") == {"body": "old"}
@@ -675,7 +712,7 @@ class TestContentCacheByteBudget:
         total_before = cache._index_total_bytes
         assert total_before == sum(cache._index_sizes.values()) > 0
 
-        _fail_writes(cache, monkeypatch)
+        watch_writes(cache, monkeypatch, fail=True)
         with pytest.raises(OSError):
             await cache.aset("ghost", {"body": "g" * 300}, ttl=60)
         assert "ghost" not in cache._index
@@ -689,7 +726,7 @@ class TestContentCacheByteBudget:
         await cache.aset("k", {"body": "old"}, ttl=60)
         total_before = cache._index_total_bytes
         assert cache._index_sizes["k"] > 0
-        _fail_writes(cache, monkeypatch, only_when="new")
+        watch_writes(cache, monkeypatch, fail="new")
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new" * 100}, ttl=60)
         assert cache._index_total_bytes == total_before
@@ -792,83 +829,39 @@ def test_clear_clears_memory(tmp_path):
 class TestContentCacheEntryLifecycle:
     """Corrupted entries, expiry, prune/clear and async disk writes"""
 
-    def test_content_cache_get_invalid_json(self):
+    def test_content_cache_get_expired(self, tmp_path):
+        cache, clock = make_seeded_cache(tmp_path, "key", default_ttl=1)
+        clock[0] = 1002.0
+        assert cache.get("key") is None
 
+    def test_content_cache_prune(self, tmp_path):
+        cache, clock = make_seeded_cache(tmp_path, "key1", "key2", default_ttl=1)
+        clock[0] = 1002.0
+        assert cache.prune() == 2
+        assert cache.get("key1") is None
+        assert cache.get("key2") is None
 
-        with scoped_cache() as cache:
-            cache_path = cache.cache_dir / "content.testkey.json"
-            cache_path.write_text("not valid json")
-            result = cache.get("testkey")
-            assert (result) is None
-
-    def test_content_cache_get_expired(self):
-        cache, clock_vals = _temp_cache(ttl=1)
-        cache.set("key", {"data": "value"})
-        clock_vals[0] = 1002.0
-        assert (cache.get("key")) is None
-
-    def test_content_cache_prune(self):
-        import tempfile
-
-        from app.crawl.content_cache import ContentCache
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            clock_vals = [1000.0]
-            cache = ContentCache(tmpdir, default_ttl=1, clock=lambda: clock_vals[0])
-            cache.set("key1", {"data": "1"})
-            cache.set("key2", {"data": "2"})
-            clock_vals[0] = 1002.0
-            removed = cache.prune()
-            assert removed == 2
-            assert (cache.get("key1")) is None
-            assert (cache.get("key2")) is None
-
-    def test_content_cache_clear(self):
-
-
-        with scoped_cache() as cache:
-            cache.set("key1", {"data": "1"})
-            cache.set("key2", {"data": "2"})
-            removed = cache.clear()
-            assert removed == 2
-            assert (cache.get("key1")) is None
-            assert (cache.get("key2")) is None
+    def test_content_cache_clear(self, tmp_path):
+        cache, _ = make_seeded_cache(tmp_path, "key1", "key2")
+        assert cache.clear() == 2
+        assert cache.get("key1") is None
+        assert cache.get("key2") is None
 
     async def test_aset_aget_roundtrip(self):
         """Async disk cache stores and retrieves, including a large (HTML-sized)
         value that hits the on-disk path."""
-        import pathlib
-        import tempfile
+        with scoped_cache(default_ttl=60) as cache:
+            big = "<html>" + ("x" * 2_000_000) + "</html>"
+            await cache.aset("k1", big)
+            # RAM mirror only keeps <1MiB, so this exercises the disk read path.
+            assert await cache.aget("k1") == big
 
-        from app.crawl.content_cache import ContentCache
-
-        d = tempfile.mkdtemp()
-        cache = ContentCache(cache_dir=pathlib.Path(d), default_ttl=60)
-        big = "<html>" + ("x" * 2_000_000) + "</html>"
-        await cache.aset("k1", big)
-        # RAM mirror only keeps <1MiB, so this exercises the disk read path.
-        got = await cache.aget("k1")
-        assert got == big
-
-    async def test_aset_writes_off_event_loop(self):
+    async def test_aset_writes_off_event_loop(self, monkeypatch):
         """The disk write (json.dumps of a large value) runs in a worker thread."""
-        import pathlib
-        import tempfile
-        import threading
-
-        from app.crawl.content_cache import ContentCache
-
-        d = tempfile.mkdtemp()
-        cache = ContentCache(cache_dir=pathlib.Path(d), default_ttl=60)
-        seen = {}
-
-        def spy_write(path, data):
-            seen["thread"] = threading.current_thread()
-            path.write_text(data)
-
-        cache._write_data = spy_write
-        big = "y" * 2_000_000
-        await cache.aset("k2", big)
+        with scoped_cache(default_ttl=60) as cache:
+            seen: dict[str, Any] = {}
+            watch_writes(cache, monkeypatch, on_write=lambda path, data: seen.update(thread=threading.current_thread()))
+            await cache.aset("k2", "y" * 2_000_000)
         assert seen, "write never happened"
         assert seen["thread"] is not threading.current_thread()
 
@@ -884,77 +877,46 @@ class TestCachedAtReadsMetadataWithoutDeserializingTheValue:
     the single chokepoint for full reads and for every state mutation.
     """
 
-    def test_cached_at_after_set_reads_no_envelope(self):
-        cache, _ = _temp_cache(ttl=60)
-        cache.set("k", {"big": "x" * 100})
+    def test_cached_at_after_set_reads_no_envelope(self, tmp_path):
+        cache, _ = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"big": "x" * 100})
         cache.set("k", {"big": "y" * 100})  # ensure the mirror is refreshed
 
-        calls = []
-        original = cache._read_envelope
-
-        def counting(key):
-            calls.append(key)
-            return original(key)
-
-        cache._read_envelope = counting
-        try:
+        with watching_envelope_reads(cache) as reads:
             assert cache.cached_at_of("k") is not None
             assert cache.cached_at_of("k") is not None
-        finally:
-            cache._read_envelope = original
-        assert calls == [], f"freshness check deserialized the envelope: {calls}"
+        assert reads == [], f"freshness check deserialized the envelope: {reads}"
 
-    def test_cached_at_value_matches_the_envelope(self):
-        cache, clock_vals = _temp_cache(ttl=60)
-        cache.set("k", {"data": "value"})
-        expected = clock_vals[0]
-        assert cache.cached_at_of("k") == expected
+    def test_cached_at_value_matches_the_envelope(self, tmp_path):
+        cache, clock = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"data": "value"})
+        assert cache.cached_at_of("k") == clock[0]
 
-    def test_cached_at_of_a_cold_on_disk_entry_answers_and_then_warms(self):
+    def test_cached_at_of_a_cold_on_disk_entry_answers_and_then_warms(self, tmp_path):
         """A warm restart (fresh instance, same directory) still answers
         correctly from disk, and the read pays for itself on later calls."""
-        import tempfile
+        cache, clock = make_seeded_cache(tmp_path, "k", default_ttl=60, value={"data": "value"})
+        cached_at = cache.cached_at_of("k")
 
-        from app.crawl.content_cache import ContentCache
+        # The restarted instance reads the same time base, or the entry it finds
+        # is expired before it is ever looked at.
+        reopened = reopen_cache(tmp_path, default_ttl=60, clock=lambda: clock[0])
+        with watching_envelope_reads(reopened) as reads:
+            # Cold mirror: one full read is unavoidable and correct.
+            assert reopened.cached_at_of("k") == cached_at
+            # Now warm: later freshness checks never touch the envelope.
+            assert reopened.cached_at_of("k") == cached_at
+        assert len(reads) == 1, f"expected one cold read, got {reads}"
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            clock = [1000.0]
-            cache = ContentCache(tmpdir, default_ttl=60, clock=lambda: clock[0])
-            cache.set("k", {"data": "value"})
-            cached_at = cache.cached_at_of("k")
-
-            reopened = ContentCache(tmpdir, default_ttl=60, clock=lambda: clock[0])
-            calls = []
-            original = reopened._read_envelope
-
-            def counting(key):
-                calls.append(key)
-                return original(key)
-
-            reopened._read_envelope = counting
-            try:
-                # Cold mirror: one full read is unavoidable and correct.
-                assert reopened.cached_at_of("k") == cached_at
-                # Now warm: later freshness checks never touch the envelope.
-                assert reopened.cached_at_of("k") == cached_at
-            finally:
-                reopened._read_envelope = original
-        assert len(calls) == 1, f"expected one cold read, got {calls}"
-
-    def test_expired_entry_reports_none_through_the_chokepoint(self):
+    def test_expired_entry_reports_none_through_the_chokepoint(self, tmp_path):
         """An expired mirror entry must still be expired and dropped by the
         shared chokepoint, not silently answered from stale metadata."""
-        cache, clock_vals = _temp_cache(ttl=10)
-        cache.set("k", {"data": "value"})
+        cache, clock = make_seeded_cache(tmp_path, "k", default_ttl=10, value={"data": "value"})
         assert cache.cached_at_of("k") is not None
-        clock_vals[0] += 1000.0
+        clock[0] += 1000.0
         assert cache.cached_at_of("k") is None
         # The expired entry is gone from the index, not just unanswered.
         assert "k" not in cache._index
 
-    def test_evicted_entry_is_not_answered_from_stale_metadata(self):
-
-
+    def test_evicted_entry_is_not_answered_from_stale_metadata(self, tmp_path):
         with scoped_cache(default_ttl=60, clock=lambda: 1000.0, max_entries=1) as cache:
             cache.set("k1", {"data": "one"})
             assert cache.cached_at_of("k1") is not None
@@ -970,46 +932,26 @@ class TestContentCacheUnlinkDiscipline:
         """Eviction mutates the index/byte accounting under the lock and unlinks
         the doomed files only after releasing it: the event-loop thread
         contends on this lock, so disk I/O must never hold it."""
-        import app.crawl.content_cache as cc_mod
+        cache = cc.ContentCache(tmp_path, max_entries=2, max_total_bytes=None, default_ttl=0)
+        with watching_entry_unlinks(monkeypatch, cache) as held:
+            # Over-cap by one: the oldest entry is evicted and its file unlinked.
+            cache.set(cache.make_key("a"), {"v": 1})
+            cache.set(cache.make_key("b"), {"v": 2})
+            cache.set(cache.make_key("c"), {"v": 3})
 
-        cache = cc_mod.ContentCache(tmp_path, max_entries=2, max_total_bytes=None, default_ttl=0)
-        real_unlink = cc_mod.Path.unlink
-
-        def _unlink_unlocked(self, *args, **kwargs):
-            # Only cache-entry files matter; atomic_write_text unlinks its own
-            # .tmp file under the lock and that is not disk eviction I/O.
-            if self.parent == cache.cache_dir and not self.name.startswith("."):
-                assert not cache._lock.locked(), "unlink ran while holding the cache lock"
-            return real_unlink(self, *args, **kwargs)
-
-        monkeypatch.setattr(cc_mod.Path, "unlink", _unlink_unlocked)
-        # Over-cap by one: the oldest entry is evicted and its file unlinked.
-        cache.set(cache.make_key("a"), {"v": 1})
-        cache.set(cache.make_key("b"), {"v": 2})
-        cache.set(cache.make_key("c"), {"v": 3})
-
+        assert held, "the eviction unlinked nothing"
+        assert not any(held), "unlink ran while holding the cache lock"
         assert cache.get(cache.make_key("a")) is None
         assert cache.get(cache.make_key("c")) == {"v": 3}
 
     def test_expiry_unlinks_outside_the_lock(self, monkeypatch, tmp_path):
         """The TTL-expiry path in _read_envelope unlinks outside the lock too."""
-        import app.crawl.content_cache as cc_mod
-
-        cache, clock_vals = _temp_cache(ttl=1)
-        real_unlink = cc_mod.Path.unlink
-        seen = {"locked": False}
-
-        def _unlink_unlocked(self, *args, **kwargs):
-            if self.parent == cache.cache_dir and not self.name.startswith("."):
-                if cache._lock.locked():
-                    seen["locked"] = True
-            return real_unlink(self, *args, **kwargs)
-
-        monkeypatch.setattr(cc_mod.Path, "unlink", _unlink_unlocked)
-        cache.set("key", {"data": "value"})
-        clock_vals[0] = 1002.0
-        assert cache.get("key") is None
-        assert not seen["locked"], "expiry unlink ran while holding the cache lock"
+        cache, clock = make_seeded_cache(tmp_path, "key", default_ttl=1, value={"data": "value"})
+        with watching_entry_unlinks(monkeypatch, cache) as held:
+            clock[0] = 1002.0
+            assert cache.get("key") is None
+        assert held, "the expiry unlinked nothing"
+        assert not any(held), "expiry unlink ran while holding the cache lock"
 
     def test_re_set_key_survives_its_stale_eviction_unlink(self, tmp_path):
         """A key re-set after its eviction reuses the same deterministic path.
@@ -1018,15 +960,13 @@ class TestContentCacheUnlinkDiscipline:
         otherwise the fresh write is destroyed and only a self-healing cache
         miss hides the loss.
         """
-        import app.crawl.content_cache as cc_mod
-
-        cache = cc_mod.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=0)
+        cache = cc.ContentCache(tmp_path, max_entries=1, max_total_bytes=None, default_ttl=0)
         key = cache.make_key("hot")
         cache.set(key, {"v": 1})
 
         # Evict exactly as _enforce_limits does, but leave the unlink pending
         # so the re-registration can land inside the deferral window.
-        doomed: list[tuple[str, cc_mod.Path]] = []
+        doomed: list[tuple[str, Any]] = []
         with cache._lock:
             cache._drop_locked(key, doomed)
 

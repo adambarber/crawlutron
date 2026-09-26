@@ -12,6 +12,7 @@ from _extraction_helpers import (
     _detect_pagination,
     _extract_discovered_links,
     _html_diagnostics,
+    doc_worker_acquisitions,
     extract_content,
     extract_js_endpoints,
 )
@@ -26,8 +27,10 @@ from app.crawl.extraction import (
     _extract_document,
     _extract_html,
     _extract_selected,
+    _html_to_markdown,
     _is_html,
     _looks_like_document,
+    _parse_html_tree,
     _text_from_html,
 )
 
@@ -198,40 +201,16 @@ class TestKatanaDiscovery:
         )
 
 
-def _non_spawning_process():
-    """A multiprocessing.Process double that records construction, never spawns."""
-    spawned = []
-
-    class _FakeProcess:
-        def __init__(self, *a, **k):
-            spawned.append(True)
-
-        def start(self):
-            pass
-
-        def is_alive(self):
-            return False
-
-        def join(self, *a, **k):
-            pass
-
-        def terminate(self):
-            pass
-
-    return _FakeProcess, spawned
-
-
 async def test_extract_document_skips_oversized_input(monkeypatch):
     """#mem-guard: markitdown workers must never receive unbounded input."""
     import app.crawl.extraction as ex
 
-    _FakeProcess, spawned = _non_spawning_process()
-    monkeypatch.setattr(ex.multiprocessing, "Process", _FakeProcess)
+    acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setattr(ex, "_EXTRACTION_DOC_MAX_INPUT_BYTES", 100)
 
     out = await asyncio.to_thread(ex._extract_document, b"x" * 101, "http://x.test/big.pdf")
     assert out.text is None and out.markdown is None
-    assert not spawned
+    assert acquisitions == [], "a refused document still asked for a markitdown worker"
 
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
@@ -261,13 +240,12 @@ async def test_extract_document_kill_switch(monkeypatch):
     """Env kill-switch lets deployments disable subprocess doc extraction."""
     import app.crawl.extraction as ex
 
-    _FakeProcess, spawned = _non_spawning_process()
-    monkeypatch.setattr(ex.multiprocessing, "Process", _FakeProcess)
+    acquisitions = doc_worker_acquisitions(monkeypatch)
     monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", "0")
 
     out = await asyncio.to_thread(ex._extract_document, b"tiny", None)
     assert out.text is None and out.markdown is None
-    assert not spawned
+    assert acquisitions == [], "a disabled extractor still asked for a markitdown worker"
 
 
 class TestExtractionMethods:
@@ -302,16 +280,11 @@ class TestExtractionMethods:
 
 class TestHtmlTreeParsing:
     def test_extraction_parse_html_tree_error(self):
-        from app.crawl.extraction import _parse_html_tree
-
-        result = _parse_html_tree("{{invalid html")
-        assert result.tag == "html"
+        assert _parse_html_tree("{{invalid html").tag == "html"
 
 
 class TestSelectedExtraction:
     def test_extraction_selected_with_xpath(self):
-        from app.crawl.extraction import _extract_selected
-
         html = "<html><body><div>Hello</div></body></html>"
         result = _extract_selected(html, "http://x/", css_selector=None, xpath="//div/text()")
         assert result.text == "Hello"
@@ -320,8 +293,6 @@ class TestSelectedExtraction:
 
 class TestLinkExtraction:
     def test_engine_parse_robots_blank_line(self):
-        from _extraction_helpers import _extract_discovered_links
-
         # Test link extraction with mixed quote styles (covers edge cases)
         html = "<html><body><a href=https://example.com/test>link</a><a href='https://example.com/page2'>link2</a></body></html>"
         links = _extract_discovered_links(html, None)
@@ -623,106 +594,69 @@ def test_shared_tree_parses_once_across_passes(monkeypatch):
 class TestExtractionEdges:
     """Cover remaining branches in extraction.py"""
 
-    def test_extract_content_with_css_selector(self):
-        from app.crawl.extraction import extract_content
-
+    @pytest.mark.parametrize(
+        "selector",
+        [{"css_selector": ".target"}, {"xpath": '//div[@class="target"]'}],
+        ids=["css", "xpath"],
+    )
+    def test_extract_content_selects_the_targeted_subtree(self, selector):
         html = '<div class="target">selected</div><div>ignored</div>'
-        result = extract_content(html.encode(), "text/html", "http://e.com/", css_selector=".target")
-        assert result.text == "selected"
-
-    def test_extract_content_with_xpath(self):
-        from app.crawl.extraction import extract_content
-
-        html = '<div class="target">selected</div><div>ignored</div>'
-        result = extract_content(html.encode(), "text/html", "http://e.com/", xpath='//div[@class="target"]')
+        result = extract_content(html.encode(), "text/html", "http://e.com/", **selector)
         assert result.text == "selected"
 
     def test_html_to_markdown_markdownify_success(self):
-        from app.crawl.extraction import _html_to_markdown
-
         text, md = _html_to_markdown("<p>hello <strong>world</strong></p>")
-        assert (text) is not None
-        assert (md) is not None
+        assert text is not None
+        assert md is not None
         assert "world" in md
 
     def test_html_to_markdown_markdownify_exception(self):
-        from app.crawl.extraction import _html_to_markdown
-
         text, md = _html_to_markdown("<p>test</p>")
-        assert (text) is not None
+        assert text is not None
 
-    def test_extract_selected_no_html(self):
-        from app.crawl.extraction import _extract_selected
-
-        result = _extract_selected("", "http://e.com/", css_selector=".x")
-        assert result.text is None or isinstance(result.text, str)
-        assert (result.markdown) is None
-
-    def test_extract_selected_css_selector_no_match(self):
-        from app.crawl.extraction import _extract_selected
-
-        result = _extract_selected("<div>content</div>", "http://e.com/", css_selector=".missing")
-        assert result.text is None or isinstance(result.text, str)
-        assert (result.markdown) is None
-
-    def test_extract_selected_xpath_no_match(self):
-        from app.crawl.extraction import _extract_selected
-
-        result = _extract_selected("<div>content</div>", "http://e.com/", xpath="//span")
-        assert result.text is None or isinstance(result.text, str)
-        assert (result.markdown) is None
-
-    def test_extract_selected_xpath_invalid(self):
-        from app.crawl.extraction import _extract_selected
-
-        result = _extract_selected("<div>content</div>", "http://e.com/", xpath="//[")
-        assert result.text is None or isinstance(result.text, str)
+    @pytest.mark.parametrize(
+        ("html", "selector"),
+        [
+            ("", {"css_selector": ".x"}),
+            ("<div>content</div>", {"css_selector": ".missing"}),
+            ("<div>content</div>", {"xpath": "//span"}),
+            ("<div>content</div>", {"xpath": "//["}),
+        ],
+        ids=["no_html", "css_no_match", "xpath_no_match", "xpath_invalid"],
+    )
+    def test_extract_selected_yields_nothing_when_it_matches_nothing(self, html, selector):
+        assert _extract_selected(html, "http://e.com/", **selector) == ExtractedContent(None, None)
 
     def test_extract_selected_xpath_string_node(self):
-        from app.crawl.extraction import _extract_selected
-
         result = _extract_selected(
             "<div><span>text1</span><span>text2</span></div>", "http://e.com/", xpath="//span/text()"
         )
-        assert (result.text) is not None
+        assert result.text is not None
 
-    def test_extract_html_trafilatura_exception(self):
-        from app.crawl.extraction import _extract_html
-
-        html = "<html><body><p>test content</p></body></html>"
-        result = _extract_html(html, "http://e.com/")
-        assert (result.text) is not None
-
-    def test_extract_html_markdownify_exception(self):
-        from app.crawl.extraction import _extract_html
-
-        html = "<html><body><p>plain text fallback</p></body></html>"
-        result = _extract_html(html, "http://e.com/")
-        assert (result.text) is not None
+    @pytest.mark.parametrize(
+        "html",
+        [
+            "<html><body><p>test content</p></body></html>",
+            "<html><body><p>plain text fallback</p></body></html>",
+        ],
+        ids=["trafilatura", "markdownify_fallback"],
+    )
+    def test_extract_html_always_yields_text(self, html):
+        assert _extract_html(html, "http://e.com/").text is not None
 
     def test_extract_document_markitdown_import_error(self):
-        from app.crawl.extraction import _extract_document
-
-        result = _extract_document(b"fake pdf content", "http://e.com/doc.pdf")
-        assert (result.text) is not None
+        assert _extract_document(b"fake pdf content", "http://e.com/doc.pdf").text is not None
 
     def test_extract_document_markitdown_exception(self):
-        from app.crawl.extraction import _extract_document
-
         result = _extract_document(b"not a pdf", "http://e.com/doc.pdf")
         assert result.text is None or isinstance(result.text, str)
 
     def test_parse_html_tree_empty(self):
-        from app.crawl.extraction import _parse_html_tree
-
-        assert (_parse_html_tree("")) is None
-        assert (_parse_html_tree(None)) is None
+        assert _parse_html_tree("") is None
+        assert _parse_html_tree(None) is None
 
     def test_parse_html_tree_parser_error(self):
-        from app.crawl.extraction import _parse_html_tree
-
-        result = _parse_html_tree("<")
-        assert result.tag == "html"
+        assert _parse_html_tree("<").tag == "html"
 
 
 class TestExtractionGaps:

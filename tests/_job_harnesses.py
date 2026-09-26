@@ -31,8 +31,10 @@ suite is no longer raced. ``save`` is published on too, because
 
 import asyncio
 import pathlib
+import sqlite3
 import tempfile
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
 
@@ -213,65 +215,51 @@ def _execution_payload(results: list[dict], submitted_count: int) -> dict:
     }
 
 
-async def run_canned_graph(
-    client,
-    job_store,
-    root: str,
-    scripts: dict[str, list[dict]],
-    policy: dict | None = None,
-) -> tuple[dict[str, int], Any]:
-    """Run a canned page graph to completion; return ``(attempts, job)``.
+class ScriptedExecute:
+    """The engine seam, faked, owning the per-URL attempt count.
 
-    The admission-contract tests all state the same thing in different shapes:
-    a scripted graph, the per-URL attempt count, and the finished job. The
-    attempt count is what separates "fetched once" from "fetched twice and still
-    produced a result", so it is part of what this hands back rather than
-    something each test wires up for itself.
+    Four runner wrappers used to hand back ``(job, attempts)`` because the
+    counter was declared by the test and threaded down through each of them. But
+    the count is what separates "fetched once" from "fetched twice and still
+    produced a result", so it belongs to the thing that does the fetching, not to
+    the caller that asks -- and once it lived here, the four wrappers turned out
+    to be the same wrapper.
+
+    Construct from exactly one of:
+
+    ``scripts``  per-URL response sequences. A URL with more than one entry is
+                 served from the front and popped, which is how transient-failure
+                 requeue is driven. An unscripted URL renders successfully.
+    ``results``  a flat list of responses, keyed by ``original_url``. An unscripted
+                 URL fails, because a fixed answer set means the runner asked for
+                 something the fixture never described.
     """
-    attempts: dict[str, int] = {}
-    job = await _run_job_to_completed(
-        client,
-        job_store,
-        root,
-        _fake_execute_scripted(scripts, attempts=attempts),
-        policy,
-    )
-    return attempts, job
 
+    def __init__(
+        self,
+        scripts: dict[str, list[dict]] | None = None,
+        *,
+        results: list[dict] | None = None,
+        hang: asyncio.Event | None = None,
+    ):
+        if (scripts is None) == (results is None):
+            raise AssertionError("ScriptedExecute takes exactly one of scripts= or results=")
+        self._scripts = dict(scripts) if scripts is not None else {r["original_url"]: [r] for r in results or []}
+        self._default = "rendered" if scripts is not None else "failed"
+        self._hang = hang
+        self.attempts: dict[str, int] = {}
 
-def _fake_execute_scripted(
-    scripts: dict[str, list[dict]],
-    *,
-    attempts: dict[str, int] | None = None,
-    hang: asyncio.Event | None = None,
-):
-    async def _execute(payload_dict, *, settings, shutdown_event):
-        urls = await _execution_urls(payload_dict, hang)
-        results = []
+    def _entry(self, url: str) -> dict:
+        sequence = self._scripts.get(url)
+        if sequence is None:
+            return _canned_result(url, status=self._default)
+        return sequence.pop(0) if len(sequence) > 1 else sequence[0]
+
+    async def __call__(self, payload_dict, *, settings, shutdown_event):
+        urls = await _execution_urls(payload_dict, self._hang)
         for url in urls:
-            sequence = scripts.get(url)
-            if sequence is None:
-                entry = _canned_result(url)
-            elif len(sequence) > 1:
-                entry = sequence.pop(0)
-            else:
-                entry = sequence[0]
-            if attempts is not None:
-                attempts[url] = attempts.get(url, 0) + 1
-            results.append(entry)
-        return _execution_payload(results, len(urls))
-
-    return _execute
-
-
-def _fake_execute(results: list[dict], *, hang: asyncio.Event | None = None):
-    async def _execute(payload_dict, *, settings, shutdown_event):
-        urls = await _execution_urls(payload_dict, hang)
-        by_url = {result["original_url"]: result for result in results}
-        selected = [by_url.get(url, _canned_result(url, status="failed")) for url in urls]
-        return _execution_payload(selected, len(urls))
-
-    return _execute
+            self.attempts[url] = self.attempts.get(url, 0) + 1
+        return _execution_payload([self._entry(url) for url in urls], len(urls))
 
 
 def _make_app(job_store):
@@ -343,19 +331,16 @@ async def _next_store_edge(store: JobStore, job_id: str, listener: _StoreListene
         ) from exc
 
 
-async def _wait_status(job_store, job_id: str, statuses: set[str]) -> str:
-    """Block until ``job_id`` holds one of ``statuses``; return the status name.
+async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
+    """Block until ``satisfied(job)`` holds; return that job.
 
     Subscribe first, then read, then wait -- in that order, and the read comes
     before the wait because the state can already be what the caller asked for
-    (``_run_persisted_job`` drives ``_run_job`` to completion in-line before it
-    ever calls this). Clearing the event after the read is what makes the wait
+    (a caller that drove ``_run_job`` in-line reaches this only once the job is
+    finished). Clearing the event after the read is what makes the wait
     lossless: a write that lands after the clear has its ``call_soon_threadsafe``
     callback queued, so the very next suspension runs it and the wait returns; a
     write that landed before the clear is visible to a read that follows it.
-
-    When the caller is waiting for a terminal status there is a live runner task
-    to join, and that is the preferred path: it carries no deadline at all.
     """
     bus = getattr(job_store, "status_bus", None)
     if bus is None:
@@ -363,44 +348,43 @@ async def _wait_status(job_store, job_id: str, statuses: set[str]) -> str:
             "this job store has no status bus: build it with make_job_store() so "
             "job-state waits are edge-triggered instead of polling a deadline"
         )
-    terminal = bool(statuses) and statuses <= _TERMINAL_STATUSES
     listener = bus.subscribe(job_id)
     try:
         while True:
             job = job_store.load(job_id)
-            if job is not None and job.status.value in statuses:
-                return job.status.value
-            if terminal and await _join_runner_task(job_id):
+            if job is not None and satisfied(job):
+                return job
+            if join_task and await _join_runner_task(job_id):
                 continue  # the row may have moved; re-read before waiting again
             await _next_store_edge(job_store, job_id, listener)
     finally:
         listener.close()
 
 
+async def _wait_status(job_store, job_id: str, statuses: set[str]) -> str:
+    """Block until ``job_id`` holds one of ``statuses``; return the status name.
+
+    When the caller is waiting for a terminal status there is a live runner task
+    to join, and that is the preferred path: it carries no deadline at all. A
+    predicate over an intermediate state has no such task, so
+    :func:`_wait_until` falls back to the store-level hang guard alone.
+    """
+    job = await _wait_for(
+        job_store,
+        job_id,
+        lambda row: row.status.value in statuses,
+        join_task=bool(statuses) and statuses <= _TERMINAL_STATUSES,
+    )
+    return job.status.value
+
+
 async def _wait_until(job_store, job_id: str, predicate):
     """Block until ``predicate(job)`` holds; return that job.
 
-    Same edge-driven shape as :func:`_wait_status`, but the predicate ranges
-    over the whole row (frontier length, stat counters), so ``save`` is the edge
-    source rather than the status CAS alone. There is no runner task to join
-    here -- the predicate is about an intermediate state -- so the store-level
-    hang guard is the only bound.
+    The predicate ranges over the whole row (frontier length, stat counters), so
+    ``save`` is the edge source rather than the status CAS alone.
     """
-    bus = getattr(job_store, "status_bus", None)
-    if bus is None:
-        raise AssertionError(
-            "this job store has no status bus: build it with make_job_store() so "
-            "job-state waits are edge-triggered instead of polling a deadline"
-        )
-    listener = bus.subscribe(job_id)
-    try:
-        while True:
-            job = job_store.load(job_id)
-            if job is not None and predicate(job):
-                return job
-            await _next_store_edge(job_store, job_id, listener)
-    finally:
-        listener.close()
+    return await _wait_for(job_store, job_id, predicate, join_task=False)
 
 
 def _execution_policy(policy: dict | None) -> dict:
@@ -433,6 +417,7 @@ def _seed_job(
     frontier: list[str] | None = None,
     in_flight: list[str] | None = None,
     running: bool = False,
+    on_seeded: Callable[[Any, Any], None] | None = None,
 ):
     job = job_store.create(root_url, policy if policy is not None else {})
     if frontier is not None:
@@ -442,10 +427,37 @@ def _seed_job(
     job_store.save(job)
     if running:
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+    if on_seeded is not None:
+        on_seeded(job, job_store)
     return job
 
 
-async def _run_persisted_job(job, job_store, execute):
+async def run_to_terminal(job_store, job_id: str) -> Any:
+    """Block until ``job_id`` settles; return the finished row.
+
+    This is the one place that knows what "done" means, so the wait and the load
+    are stated once. The row is re-read after the wait rather than taken from the
+    wait itself: a status CAS and the body that records the batch are separate
+    writes, and handing back a row that disagrees with the state the wait
+    confirmed would be a lie the caller cannot detect.
+    """
+    status = await _wait_status(job_store, job_id, _TERMINAL_STATUSES)
+    finished = job_store.load(job_id)
+    assert finished is not None, f"job {job_id} reported {status} with no row"
+    assert finished.status.value == status, (
+        f"job {job_id} settled {status} but the row it handed back reads "
+        f"{finished.status.value}: the terminal CAS landed before the batch did"
+    )
+    return finished
+
+
+async def run_api_job(client, job_store, root_url: str, execute, policy: dict | None = None):
+    """Create a job through the API and drive it to terminal; return the row."""
+    return await run_to_terminal(job_store, await _create_api_job(client, root_url, execute, policy))
+
+
+async def run_seeded_job(job, job_store, execute):
+    """Drive an already-persisted job in-line to terminal; return the row."""
     from app.api import job_runner
     from app.settings import CrawlerSettings
 
@@ -456,79 +468,122 @@ async def _run_persisted_job(job, job_store, execute):
         CrawlerSettings.from_mapping({}),
         asyncio.Event(),
     )
-    status = await _wait_status(job_store, job.job_id, {"completed", "failed"})
-    assert status in {"completed", "failed"}
-    finished = job_store.load(job.job_id)
-    assert finished is not None
-    return finished
-
-
-async def _run_scripted_persisted_job(job, job_store, result_map):
-    attempts: dict[str, int] = {}
-    finished = await _run_persisted_job(
-        job,
-        job_store,
-        _fake_execute_scripted(result_map, attempts=attempts),
-    )
-    return finished, attempts
-
-
-async def _run_job_to_completed(client, job_store, root_url: str, execute, policy: dict | None = None):
-    job_id = await _create_api_job(client, root_url, execute, policy)
-    status = await _wait_status(job_store, job_id, {"completed", "failed"})
-    assert status == "completed"
-    return job_store.load(job_id)
-
-
-async def _run_scripted_job(
-    client, job_store, root_url: str, sequence: list[dict]
-) -> tuple[Any, dict[str, int]]:
-    attempts: dict[str, int] = {}
-    job = await _run_job_to_completed(
-        client,
-        job_store,
-        root_url,
-        _fake_execute_scripted({root_url: sequence}, attempts=attempts),
-    )
-    return job, attempts
-
-
-__all__ = [
-    "_create_api_job",
-    "_execution_payload",
-    "_execution_policy",
-    "_execution_urls",
-    "_fake_execute",
-    "_fake_execute_scripted",
-    "_make_app",
-    "post_api_job",
-    "post_render_with_pool",
-    "run_seeded_scripted_job",
-    "_run_job_to_completed",
-    "_run_persisted_job",
-    "_run_scripted_job",
-    "_run_scripted_persisted_job",
-    "_seed_job",
-    "_wait_status",
-    "_wait_until",
-    "make_job_store",
-    "run_job_control_test",
-]
-
-
-async def post_api_job(client, root_url: str, policy: dict | None = None):
-    return await client.post("/v1/jobs", json={"root_url": root_url, "policy": _execution_policy(policy)})
+    return await run_to_terminal(job_store, job.job_id)
 
 
 async def run_seeded_scripted_job(
     job_store,
     root_url: str,
     policy: dict,
-    result_map: dict[str, list[dict]],
+    execute,
+    on_seeded: Callable[[Any, Any], None] | None = None,
     **seed: Any,
 ):
-    job = _seed_job(job_store, root_url, policy, **seed)
-    return await _run_scripted_persisted_job(job, job_store, result_map)
+    """Seed a row the way a crash left it, then drive it to terminal.
+
+    Recovery tests vary three things -- what the engine answers, what the row
+    already held, and how it ends -- and the seed/run/load trio spelling them
+    out was one of the widest repeated lines in the tree. The engine stays a
+    caller-owned name so the attempt count remains reachable after the run.
+
+    ``on_seeded`` gets ``(job, job_store)`` after the row is persisted and
+    before the first engine call, for a row shape the write path refuses to
+    produce -- a corrupt policy column, a legacy envelope. It belongs here
+    rather than at the call site because a test that has to mutate the row
+    between the seed and the run otherwise has to hold the two halves of this
+    funnel itself, and then the seeding contract is theirs to keep in sync.
+    """
+    return await run_seeded_job(
+        _seed_job(job_store, root_url, policy, on_seeded=on_seeded, **seed), job_store, execute
+    )
+
+
+def recording_execute(execute, captured: list[dict]):
+    """Wrap a scripted engine, recording every payload dict it was handed.
+
+    The engine call is the only place the runner's assembled batch is visible
+    before results come back, so the request profile and the admitted URLs are
+    read off the payloads rather than off the request the test sent.
+    """
+
+    async def _execute(payload_dict, *, settings, shutdown_event):
+        captured.append(payload_dict)
+        return await execute(payload_dict, settings=settings, shutdown_event=shutdown_event)
+
+    return _execute
+
+
+def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> dict:
+    """A whole-site job policy carrying nothing but its limits.
+
+    The runner tests all state the same shape -- a policy that is a ``limits``
+    block and nothing else -- and restating it inline is how two of them ended
+    up capping pages at different depths while reading identically. Unset limits
+    are filled in by :func:`_execution_policy` on the way to the API.
+    """
+    limits: dict[str, Any] = {"max_depth": max_depth, "max_pages": max_pages}
+    limits.update(extra)
+    return {"limits": limits}
+
+
+@contextmanager
+def raw_job_row(job_store):
+    """Direct SQL against a job's own row, for shapes the write path refuses.
+
+    A row that only a crash or a legacy migration could leave behind cannot be
+    written through the validated API, so these tests go to the table. The
+    transaction lives here rather than at each call site because a raw write
+    that forgets to commit is a test that passes without the row ever changing.
+    """
+    connection = sqlite3.connect(job_store.db_path)
+    try:
+        yield connection
+        connection.commit()
+    finally:
+        connection.close()
+
+
+async def submit_blocked_job(client, job_store, root_url: str, results, policy=None):
+    """Submit a job whose engine blocks; return ``(job_id, release)``.
+
+    A control-plane test has to flip a control bit while the runner is in
+    flight, and without a block the job may already be terminal by the time the
+    test looks. ``release`` is the event to set at the moment the test means the
+    in-flight batch to be answered.
+    """
+    hang = asyncio.Event()
+    job_id = await _create_api_job(client, root_url, ScriptedExecute(results=results, hang=hang), policy)
+    await _wait_status(job_store, job_id, {"running"})
+    return job_id, hang
+
+
+__all__ = [
+    "ScriptedExecute",
+    "_create_api_job",
+    "_execution_payload",
+    "_execution_policy",
+    "_execution_urls",
+    "_make_app",
+    "_seed_job",
+    "_wait_status",
+    "_wait_until",
+    "job_limits",
+    "make_job_store",
+    "post_api_job",
+    "post_render_with_pool",
+    "raw_job_row",
+    "recording_execute",
+    "run_api_job",
+    "run_job_control_test",
+    "run_seeded_job",
+    "run_seeded_scripted_job",
+    "run_to_terminal",
+    "submit_blocked_job",
+]
+
+
+async def post_api_job(client, root_url: str, policy: dict | None = None):
+    return await client.post("/v1/jobs", json={"root_url": root_url, "policy": _execution_policy(policy)})
 
 
 async def post_render_with_pool(client, pool, url: str):

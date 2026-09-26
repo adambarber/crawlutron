@@ -49,9 +49,9 @@ async def _default_http_fetcher(
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    chain = pinned_transport._RedirectChain(url, headers, policy=policy)
-    while True:
-        pinned_url, hop_headers = await chain.pin()
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+        url, headers, policy=policy
+    ):
         # follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -88,6 +88,7 @@ async def _default_http_fetcher(
             elapsed_ms=elapsed_ms,
             too_large=functools.partial(pinned_transport._http_413, url, chain.url, started),
         )
+    raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
 
 
 def _finish_fetch(
@@ -186,9 +187,9 @@ async def _cffi_fetch(
         return None
     try:
         started = time.monotonic()
-        chain = pinned_transport._RedirectChain(url, headers, policy=policy)
-        while True:
-            pinned_url, hop_headers = await chain.pin()
+        async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
+            url, headers, policy=policy
+        ):
             try:
                 response = await client.get(
                     pinned_url,
@@ -293,6 +294,7 @@ async def _cffi_fetch(
                     _cffi_too_large_result, url, chain.url, response, elapsed_ms
                 ),
             )
+        raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
     except DecompressionError:
         raise
     except Exception:  # any cffi failure falls back to plain httpx

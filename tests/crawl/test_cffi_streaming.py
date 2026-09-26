@@ -1,19 +1,20 @@
 """curl_cffi impersonation and streaming: shared session, handle release, timeout and byte caps."""
 
 import asyncio
-import multiprocessing
-import os
-import time
+import threading
 
 import pytest
-from _fetcher_factories import scripted_fetcher
+from _fetcher_factories import make_fetch, scripted_fetcher
+from _policy_factories import make_base_policy
 from _timing_harnesses import await_until
+from _transport_doubles import real_cffi_fetch_outcome
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
 from helpers.server import spawn_threaded_server
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as http_mod
+from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import _default_cffi_fetcher as _default_cffi_fetcher_with_policy
 from app.validation import HostPolicy
 
@@ -33,17 +34,14 @@ class TestCffiImpersonateStrategy:
         cffi_fetcher = scripted_fetcher(
             status=200, ctype="text/html", body=b"<html><body>content</body></html>"
         )
+        policy = make_base_policy(strategies=[HTTP_CFFI_IMPERSONATE])
+        policy["extraction"] = "full"
 
         result = await _http_strategy_result(
             original_url="http://x/",
             normalized_url="http://x/",
-            strategy="HTTP_CFFI_IMPERSONATE",
-            policy={
-                "strategies": ["HTTP_CFFI_IMPERSONATE"],
-                "extraction": "full",
-                "headers": {},
-                "limits": {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links": 10},
-            },
+            strategy=HTTP_CFFI_IMPERSONATE,
+            policy=policy,
             http_fetcher=cffi_fetcher,
             cache=HttpCache(),
             host_policy=HostPolicy.unrestricted(),
@@ -61,7 +59,7 @@ class TestCffiFetcherLiveFetch:
 
         server = spawn_server()
         try:
-            result = await _default_cffi_fetcher(server.base_url + "/", {}, 10, 50 * 1024 * 1024)
+            result = await _default_cffi_fetcher(server.base_url + "/", {}, 10)
             assert result.status_code == 200
         finally:
             server.stop()
@@ -125,20 +123,41 @@ def _patch_session(monkeypatch, response: _Response) -> _Session:
     return session
 
 
-async def _fall_back_to_httpx(
-    url,
-    headers,
-    timeout_seconds,
-    max_content_length=0,
-    *,
-    policy,
-):
-    return "httpx-fallback"
+@pytest.fixture
+def fallback_calls() -> list[str]:
+    """The URLs the fetcher's httpx fallback was asked for."""
+    return []
+
+
+def _in_process_fallback(calls: list[str]):
+    """The fetcher's documented httpx fallback, answered without a socket.
+
+    The cffi fetcher calls the module-level ``_default_http_fetcher`` with the
+    keyword-only ``policy`` that the strategy chain's own injection seam never
+    passes, so a double for this seam carries the production signature -- and
+    imports the production byte cap rather than re-spelling it, because a test
+    that copies a cap is asserting a number production owns. The answer is a
+    real ``HttpFetchResult``: what a caller receives when curl_cffi is gone is
+    the thing these tests are about, and a sentinel string could not say it.
+    """
+
+    async def _fallback(
+        url,
+        headers,
+        timeout_seconds,
+        max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+        *,
+        policy,
+    ):
+        calls.append(url)
+        return make_fetch(url=url, final_url=url)
+
+    return _fallback
 
 
 @pytest.fixture(autouse=True)
-def _no_real_fallback(monkeypatch):
-    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", _fall_back_to_httpx)
+def _no_real_fallback(monkeypatch, fallback_calls):
+    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", _in_process_fallback(fallback_calls))
     # Pooled-client bookkeeping is irrelevant here and other suites leave
     # entries behind; start clean so the drain cannot close our fake.
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
@@ -152,15 +171,28 @@ def _scheduled_closes(monkeypatch):
     return released
 
 
+def _scripted_stream(monkeypatch, items, *, headers=None) -> tuple[_Response, _Session, list[object]]:
+    """A cffi session whose queue replays `items`; return it and the release log.
+
+    Every test here is about what one streaming fetch did with its response
+    handle, so the arrangement is the same each time: one scripted queue, one
+    session, one log of the releases the fetcher scheduled. ``items`` is the
+    only thing that varies -- an exception part-way through, a body past the
+    cap, a stream that ends -- and a queue that runs dry wedges rather than
+    ending, so a script that does not say what happens next cannot pass
+    silently.
+    """
+    response = _Response(items, headers=headers)
+    return response, _patch_session(monkeypatch, response), _scheduled_closes(monkeypatch)
+
+
 async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch):
     """The error exit: a queued RequestException must not orphan the handle."""
-    response = _Response([b"partial", RequestException("boom")])
-    _patch_session(monkeypatch, response)
-    released = _scheduled_closes(monkeypatch)
+    response, _session, released = _scripted_stream(monkeypatch, [b"partial", RequestException("boom")])
 
     result = await _default_cffi_fetcher(URL, {}, 5, 4096)
 
-    assert result == "httpx-fallback", "the documented httpx fallback must still serve"
+    assert result.status_code == 200, "the documented httpx fallback must still serve"
     assert released == [response], "the error path left the streamed response handle unreleased"
     assert response.awaited is False, "abandoning must not await a live producer"
 
@@ -174,9 +206,7 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
     no-op that never yielded, so the fetch task could never be scheduled at
     all; the zero-second patch yields now, so the poll works without wall time.
     """
-    response = _Response([b"first"])  # then the producer wedges forever
-    session = _patch_session(monkeypatch, response)
-    released = _scheduled_closes(monkeypatch)
+    response, session, released = _scripted_stream(monkeypatch, [b"first"])  # then the producer wedges
 
     fetch = asyncio.create_task(_default_cffi_fetcher(URL, {}, 5, 4096))
     await await_until(
@@ -199,9 +229,7 @@ async def test_cap_exceeded_and_still_releases_exactly_once(monkeypatch):
     producer gets two scheduled closes. One release per fetch, whichever exit
     was taken.
     """
-    response = _Response([b"x" * 100] * 5)
-    _patch_session(monkeypatch, response)
-    released = _scheduled_closes(monkeypatch)
+    response, _session, released = _scripted_stream(monkeypatch, [b"x" * 100] * 5)
 
     result = await _default_cffi_fetcher(URL, {}, 5, 50)
 
@@ -216,9 +244,7 @@ async def test_clean_stream_end_awaits_the_close_and_never_abandons(monkeypatch)
     the completed fetch closed it, so the success path must NOT downgrade to the
     non-blocking release.
     """
-    response = _Response([b"<html>ok</html>", STREAM_END])
-    _patch_session(monkeypatch, response)
-    released = _scheduled_closes(monkeypatch)
+    response, _session, released = _scripted_stream(monkeypatch, [b"<html>ok</html>", STREAM_END])
 
     result = await _default_cffi_fetcher(URL, {}, 5, 4096)
 
@@ -228,7 +254,14 @@ async def test_clean_stream_end_awaits_the_close_and_never_abandons(monkeypatch)
 
 
 class _StalledBodyHandler:
-    """200 + headers, then never a body byte."""
+    """200 + headers, then not one body byte until ``_STALL_RELEASE`` is set.
+
+    The stall is an ``Event`` rather than a sleep because the suite patches
+    ``time.sleep`` to a no-op: a handler that waits by sleeping returns at once,
+    the response ends, and the fetch fails for a reason that has nothing to do
+    with the timeout under test. ``_STALL_RELEASE`` is set by the test's
+    teardown, so the wedged handler thread does not outlive it.
+    """
 
     protocol_version = "HTTP/1.1"
 
@@ -238,68 +271,50 @@ class _StalledBodyHandler:
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         self.wfile.flush()
-        time.sleep(3600)
+        _STALL_RELEASE.wait()
 
     def log_message(self, *args):
         pass
 
 
-def _fetch_worker(url: str, timeout: float, out_queue: multiprocessing.Queue) -> None:
-    import asyncio
-
-    os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
-
-    from app.crawl.strategies.fetchers import _default_cffi_fetcher
-    from app.validation import HostPolicy
-
-    async def _run():
-        return await _default_cffi_fetcher(
-            url,
-            {},
-            int(timeout),
-            max_content_length=10 * 1024 * 1024,
-            policy=HostPolicy.unrestricted(),
-        )
-
-    try:
-        result = asyncio.run(_run())
-        out_queue.put(("ok", result.status_code, len(result.body)))
-    except Exception as error:
-        out_queue.put(("err", type(error).__name__, str(error)[:120]))
+_STALL_RELEASE = threading.Event()
 
 
 @pytest.mark.real_cffi
-def test_cffi_stream_timeout_honored_on_stalled_body() -> None:
-    """real_cffi: drives the genuine fetcher inside an isolated interpreter."""
+def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
+    """real_cffi: drives the genuine fetcher inside an isolated interpreter.
+
+    The server answers 200 and its headers and then never sends a body byte,
+    so the only two acceptable outcomes are a bounded failure or a rejection of
+    the body. The harness owns the isolation and the join bound; what is
+    asserted here is that neither of those two became a success.
+
+    The target is loopback, so the child interpreter is allowed to reach one
+    here rather than relying on the suite-wide default, which a strict-SSRF run
+    does not set. The child inherits this process's environment.
+    """
+    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
+    _STALL_RELEASE.clear()
     server = spawn_threaded_server(_StalledBodyHandler)
-    url = f"http://127.0.0.1:{server.server_port}/"
-    out_queue: multiprocessing.Queue = multiprocessing.Queue()
-    worker = multiprocessing.Process(target=_fetch_worker, args=(url, 1, out_queue))
-    started = time.monotonic()
     try:
-        worker.start()
-        worker.join(timeout=8.0)
-        if worker.is_alive():
-            worker.terminate()
-            worker.join()
-            pytest.fail("cffi fetcher hung past 8s on a stalled stream (timeout contract broken)")
+        outcome = real_cffi_fetch_outcome(
+            f"http://127.0.0.1:{server.server_port}/",
+            timeout_seconds=1,
+            join_timeout=8.0,
+        )
     finally:
+        _STALL_RELEASE.set()
         server.shutdown()
         server.server_close()
 
-    assert worker.exitcode == 0, f"worker crashed: exitcode={worker.exitcode}"
-    assert not out_queue.empty(), "worker produced no result"
-    outcome, status_or_exc, _detail = out_queue.get()
-    elapsed = time.monotonic() - started
-    assert elapsed < 8.0, f"fetch took {elapsed:.1f}s; timeout contract broken"
-    if outcome == "ok":
+    if outcome.ok:
         # cffi returned; it must NOT be a 200-with-body (the stalled body
         # must surface as 413/timeout mapping, not a successful fetch).
-        assert status_or_exc != 200, "stalled body reported as a 200 success"
+        assert outcome.status != 200, "stalled body reported as a 200 success"
     else:
         # Any transport-error class is contract-fine (ReadError, Timeout,
         # ConnectionError...): the point is a bounded failure, not a hang.
-        assert status_or_exc
+        assert outcome.error, outcome
 
 
 class _FeedOnDemandQueue:
@@ -455,7 +470,7 @@ def test_cffi_session_rebuilt_on_loop_change(monkeypatch):
         asyncio.run(_close())
 
 
-async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
+async def test_cffi_missing_falls_back_to_httpx(monkeypatch, fallback_calls):
     """Without curl_cffi the fetcher still delegates to the plain httpx path."""
     import sys
 
@@ -463,24 +478,9 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
-    seen: list[str] = []
-
-    async def fake_http(url, headers, timeout_seconds, max_content_length=0, *, policy):
-        seen.append(url)
-
-        class Resp:
-            status_code = 200
-            headers = {"content-type": "text/html"}
-            body = b"<html><body>fallback</body></html>"
-            final_url = url
-            elapsed_ms = 1
-
-        return Resp()
-
-    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", fake_http)
     try:
         resp = await _default_cffi_fetcher("http://example.com/", {}, 5, 1024)
     finally:
         await http_mod.close_cffi_session()
     assert resp.status_code == 200
-    assert seen == ["http://example.com/"]
+    assert fallback_calls == ["http://example.com/"]

@@ -115,32 +115,87 @@ def _canned_result(
     }
 
 
+def _failed_result(url: str, classification: str) -> dict:
+    """A page that failed for a named reason.
+
+    The status/classification pair is the shape every requeue test drives with,
+    and restating it as two keywords is what let the classification and the
+    status drift apart in one of them.
+    """
+    return _canned_result(url, status="failed", classification=classification)
+
+
+def _flaky(url: str, *classifications: str, lands_on: dict | None = None) -> dict[str, list[dict]]:
+    """A page that fails with each of these classifications in turn.
+
+    ``lands_on`` is what the final attempt returns; without it the engine keeps
+    answering failure, which is how the bounded-retry test reaches its cap.
+    Stating the whole sequence in one call is what stopped the two retry tests
+    from each inventing a way of spelling the same run.
+    """
+    entries = [_failed_result(url, classification) for classification in classifications]
+    if lands_on is not None:
+        entries.append(lands_on)
+    return {url: entries}
+
+
 def _scripted_result_map(urls, *, links: dict[str, list[str]] | None = None) -> dict[str, list[dict]]:
     link_map = links or {}
     return {url: [_canned_result(url, links=link_map.get(url, []))] for url in urls}
 
 
+GRAPH_ROOT = "http://example.test/a"
+GRAPH_CHILD = "http://example.test/b"
+
+
+def _root_child_results(root: str = GRAPH_ROOT, child: str = GRAPH_CHILD) -> list[dict]:
+    """The two-page graph: root discovers child, child is a leaf.
+
+    The smallest graph that still exercises discovery, and the one most of the
+    runner tests want -- one expansion, one frontier drain, nothing to cap.
+    """
+    return [_canned_result(root, links=[child]), _canned_result(child)]
+
+
+def _root_fans_out(root: str, *children: str) -> list[dict]:
+    """A root that discovers every one of ``children``, each of them a leaf.
+
+    The three-page shape most discovery tests want: one expansion, N leaves, a
+    frontier that drains, and nothing else to configure. When a leaf has to
+    discover something back, that is a different graph and gets written out.
+    """
+    return [_canned_result(root, links=list(children)), *(_canned_result(c) for c in children)]
+
+
 def _small_link_graph_results() -> list[dict]:
-    root = "http://example.test/a"
+    """The four-page fixture graph, and the URLs it is made of.
+
+    The URLs are named here rather than inlined at each test because the graph
+    and the root a job is submitted against have to be the same page: a test
+    that crawls a different ``/a`` than the fixture describes gets an unscripted
+    URL back, and the scripted engine answers it as a success by default.
+    """
     return [
         _canned_result(
-            root,
-            links=[
-                "http://example.test/b",
-                "http://example.test/c",
-                "http://example.test/d",
-            ],
+            GRAPH_ROOT,
+            links=[GRAPH_CHILD, "http://example.test/c", "http://example.test/d"],
         ),
-        _canned_result("http://example.test/b", links=["http://example.test/d"]),
+        _canned_result(GRAPH_CHILD, links=["http://example.test/d"]),
         _canned_result("http://example.test/c"),
         _canned_result("http://example.test/d"),
     ]
 
 
 __all__ = [
+    "GRAPH_CHILD",
+    "GRAPH_ROOT",
     "Spill",
     "_canned_result",
+    "_failed_result",
+    "_flaky",
     "_link",
+    "_root_child_results",
+    "_root_fans_out",
     "_scripted_result_map",
     "_small_link_graph_results",
     "make_engine_result",
