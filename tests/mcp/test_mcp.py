@@ -55,24 +55,74 @@ async def _mcp(client, body: dict, headers: dict | None = None):
     return await client.post("/mcp", json=body, headers=_headers(body, **(headers or {})))
 
 
-async def _tool_call(client, name: str, arguments: dict) -> dict:
-    """Invoke one MCP tool; return its structuredContent on success."""
-    resp = await _mcp(
-        client,
-        _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
-    )
-    assert resp.status_code == 200
+async def _assert_complete(client, body: dict, headers: dict | None = None) -> dict:
+    """Post one request, assert it succeeded, and return its result.
+
+    The 2026-07-28 spec requires every result to carry ``resultType:
+    "complete"``, so that is one assertion rather than a shape each test
+    re-derived. The envelope is a response_model (a new top-level key is
+    silently dropped by a model that does not declare it), so this reads the
+    real wire shape.
+    """
+    resp = await _mcp(client, body, headers)
+    assert resp.status_code == 200, resp.text
     result = resp.json()["result"]
     assert result["resultType"] == "complete"
-    assert result["isError"] is False
-    return result["structuredContent"]
+    return result
+
+
+async def _assert_complete_tool(client, body: dict, headers: dict | None = None) -> dict:
+    """Assert a completed *tool* result, and return it.
+
+    ``isError`` is a tool result's field, not a discover result's -- a discover
+    payload has no such key, so folding the check into the general helper made
+    it assert something the spec does not promise there.
+    """
+    result = await _assert_complete(client, body, headers)
+    assert result["isError"] is False, result
+    return result
+
+
+async def _assert_header_mismatch(
+    client, *, body: dict, headers: dict | None = None, code: int = -32020
+) -> None:
+    """Assert the endpoint rejected headers that are missing or contradict the body.
+
+    Five of the protocol's rejections are this single spec rule reached from
+    different angles: a required header absent, a protocol-version header that
+    disagrees with ``_meta``, an ``Mcp-Method``/``Mcp-Name`` header that names
+    a different call than the body does. Each of the five was asserting the 400
+    and the code by hand, so a change to the code would have left four of them
+    still passing against the old number while only the one whose literal had
+    been updated caught it.
+
+    ``code`` is a parameter because one of the five is a different error:
+    an *absent* ``_meta`` block is InvalidParams (-32602), not a header
+    mismatch, and conflating the two is the mistake this helper exists to stop.
+    """
+    resp = await _mcp(client, body, headers)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"]["code"] == code, resp.text
+
+
+async def _tool_call(client, name: str, arguments: dict) -> dict:
+    """Invoke one MCP tool; return its structuredContent on success."""
+    return (await _assert_complete_tool(
+        client,
+        _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
+    ))["structuredContent"]
+
+
+def _search_tool_body(query: str = "x") -> dict:
+    """A tools/call body naming the search tool; the Mcp-Name rules turn on the name."""
+    return _body("tools/call", params={"name": "search", "arguments": {"query": query}, "_meta": _META})
 
 
 class TestRequestMetadataValidation:
     async def test_missing_protocol_version_header_rejected(self, async_client):
-        resp = await _mcp(async_client, _body("server/discover"), {"MCP-Protocol-Version": None})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=_body("server/discover"), headers={"MCP-Protocol-Version": None}
+        )
 
     async def test_unsupported_protocol_version_reports_supported(self, async_client):
         body = _body("server/discover")
@@ -87,38 +137,38 @@ class TestRequestMetadataValidation:
     async def test_header_body_protocol_version_mismatch_rejected(self, async_client):
         body = _body("server/discover")
         body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
-        resp = await _mcp(async_client, body)  # header stays 2026-07-28
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=body
+        )  # header stays 2026-07-28
 
     async def test_missing_meta_rejected(self, async_client):
-        resp = await _mcp(
-            async_client, {"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}}
+        # An absent _meta block is InvalidParams, not a header mismatch: the
+        # headers agree with each other, they just have nothing to agree about.
+        await _assert_header_mismatch(
+            async_client,
+            body={"jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {}},
+            code=-32602,
         )
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32602
 
     async def test_missing_mcp_method_header_rejected(self, async_client):
-        resp = await _mcp(async_client, _body("server/discover"), {"Mcp-Method": None})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=_body("server/discover"), headers={"Mcp-Method": None}
+        )
 
     async def test_mcp_method_header_body_mismatch_rejected(self, async_client):
-        resp = await _mcp(async_client, _body("server/discover"), {"Mcp-Method": "tools/list"})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=_body("server/discover"), headers={"Mcp-Method": "tools/list"}
+        )
 
     async def test_missing_mcp_name_header_on_tools_call_rejected(self, async_client):
-        body = _body("tools/call", params={"name": "search", "arguments": {"query": "x"}, "_meta": _META})
-        resp = await _mcp(async_client, body, {"Mcp-Name": None})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=_search_tool_body(), headers={"Mcp-Name": None}
+        )
 
     async def test_mcp_name_header_body_mismatch_rejected(self, async_client):
-        body = _body("tools/call", params={"name": "search", "arguments": {"query": "x"}, "_meta": _META})
-        resp = await _mcp(async_client, body, {"Mcp-Name": "crawl"})
-        assert resp.status_code == 400
-        assert resp.json()["error"]["code"] == -32020
+        await _assert_header_mismatch(
+            async_client, body=_search_tool_body(), headers={"Mcp-Name": "crawl"}
+        )
 
     async def test_unknown_method_returns_404(self, async_client):
         resp = await _mcp(async_client, _body("resources/list"))
@@ -149,10 +199,7 @@ class TestRequestMetadataValidation:
 
 class TestDiscover:
     async def test_server_discover_advertises_supported_versions(self, async_client):
-        resp = await _mcp(async_client, _body("server/discover"))
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert result["resultType"] == "complete"
+        result = await _assert_complete(async_client, _body("server/discover"))
         assert _PROTOCOL_VERSION in result["supportedVersions"]
         assert "tools" in result["capabilities"]
         assert result["ttlMs"] > 0
@@ -163,10 +210,7 @@ class TestDiscover:
 
 class TestToolsList:
     async def test_tools_list_exposes_the_four_primitives(self, async_client):
-        resp = await _mcp(async_client, _body("tools/list"))
-        assert resp.status_code == 200, resp.text
-        result = resp.json()["result"]
-        assert result["resultType"] == "complete"
+        result = await _assert_complete(async_client, _body("tools/list"))
         names = [tool["name"] for tool in result["tools"]]
         assert names == ["search", "crawl", "map", "render"]
         for tool in result["tools"]:
@@ -203,15 +247,13 @@ def browser_pool_stub():
 class TestToolsCall:
     async def test_search_tool_returns_results(self, async_client, override_settings, fake_provider_http):
         one_search_result(override_settings, fake_provider_http)
-        body = _body(
-            "tools/call",
-            params={"name": "search", "arguments": {"query": "worcester", "limit": 3}, "_meta": _META},
+        result = await _assert_complete_tool(
+            async_client,
+            _body(
+                "tools/call",
+                params={"name": "search", "arguments": {"query": "worcester", "limit": 3}, "_meta": _META},
+            ),
         )
-        resp = await _mcp(async_client, body)
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert result["resultType"] == "complete"
-        assert result["isError"] is False
         assert result["content"][0]["type"] == "text"
         payload = json.loads(result["content"][0]["text"])
         assert payload["data"][0]["url"] == "https://example.gov/a"
