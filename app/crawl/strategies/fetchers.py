@@ -7,7 +7,9 @@ This module owns bounded transport reads, decompression, redirects, and cookie p
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
+from collections.abc import Callable
 from typing import Any
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
@@ -89,25 +91,76 @@ async def _default_http_fetcher(
                 raw.extend(chunk)
                 if len(raw) > max_content_length:
                     return pinned_transport._http_413(url, current_url, started)
-            encoding = response.headers.get("content-encoding", "")
-            try:
-                body = _decompress_body(raw, encoding, max_output_bytes=max_content_length)
-            except DecompressionTooLargeError:
-                return pinned_transport._http_413(url, current_url, started)
-            resp_headers = {key.lower(): value for key, value in response.headers.items()}
-            # Already decompressed above; drop header to avoid a second pass.
-            resp_headers.pop("content-encoding", None)
             final_url = current_url
+            response_headers = response.headers
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        _store_set_cookies(final_url or url, resp_headers)
-        return HttpFetchResult(
+        return _finish_fetch(
             url=url,
             final_url=final_url,
             status_code=status_code,
-            headers=resp_headers,
-            body=body,
+            raw=raw,
+            response_headers=response_headers,
+            max_content_length=max_content_length,
             elapsed_ms=elapsed_ms,
+            too_large=functools.partial(pinned_transport._http_413, url, current_url, started),
         )
+
+
+def _finish_fetch(
+    *,
+    url: str,
+    final_url: str,
+    status_code: int,
+    raw: bytes | bytearray,
+    response_headers: Any,
+    max_content_length: int,
+    elapsed_ms: int,
+    too_large: Callable[[], HttpFetchResult],
+) -> HttpFetchResult:
+    """Decompress, persist cookies and build the terminal result of a fetch.
+
+    Both transports share this tail. The three things in it must not diverge:
+    the decompression bomb cap, which is a safety bound, cookie persistence,
+    and the header normalisation the shaping layer reads. The parts that
+    genuinely differ per transport stay at the call site and arrive as the
+    ``too_large`` *factory* -- httpx returns from inside its pooled client's
+    ``async with``, while curl_cffi has to name a busy handle it already
+    released. A factory rather than a value so the 413 is only built when a
+    decompression bomb actually trips, not on every successful fetch.
+
+    Cookies are stored from ``response_headers`` -- the transport's own
+    multidict -- rather than from the normalised dict below. httpx's
+    ``Headers.items()`` comma-joins duplicate keys, so normalising first
+    collapses a multi-cookie response into one ``"a=1; Path=/, b=2; Path=/"``
+    entry and forces ``_store_set_cookies`` off its documented ``get_list``
+    path. The jar re-splits such a value today, but only when the first cookie
+    carries its own attributes, and a comma-joined cookie value is a
+    documented corruption risk in its own right.
+
+    The content encoding is read here rather than passed in: both transports
+    took it from the same header with the same expression, so a third reading
+    of it was pure opportunity to disagree.
+    """
+    try:
+        body = _decompress_body(
+            raw,
+            response_headers.get("content-encoding", ""),
+            max_output_bytes=max_content_length,
+        )
+    except DecompressionTooLargeError:
+        return too_large()
+    _store_set_cookies(final_url or url, response_headers)
+    headers = {key.lower(): value for key, value in response_headers.items()}
+    # Already decompressed above; drop the header to avoid a second pass.
+    headers.pop("content-encoding", None)
+    return HttpFetchResult(
+        url=url,
+        final_url=final_url,
+        status_code=status_code,
+        headers=headers,
+        body=body,
+        elapsed_ms=elapsed_ms,
+    )
 
 
 async def _fallback_to_httpx(
@@ -242,7 +295,6 @@ async def _default_cffi_fetcher(
             # can omit content-length and stream gigabytes (chunked).
             # Abort with a 413 as soon as the cap is exceeded instead of
             # buffering the whole body into memory first.
-            encoding = response.headers.get("content-encoding", "")
             raw = bytearray()
             # Consume the curl queue directly rather than
             # response.aiter_content(): on curl_cffi 0.16 the wrapper's
@@ -303,22 +355,19 @@ async def _default_cffi_fetcher(
             # to release the handle implicitly. Without this the next streamed
             # request on the shared session stalls on the busy handle (#4).
             await response.aclose()
-            raw_bytes = bytes(raw)
-            # Decompress with a size cap (decompression-bomb guard).
-            try:
-                body = _decompress_body(raw_bytes, encoding, max_output_bytes=max_content_length)
-            except DecompressionTooLargeError:
-                return _cffi_too_large_result(url, current_url, response, elapsed_ms)
-            resp_headers = {key.lower(): value for key, value in response.headers.items()}
-            resp_headers.pop("content-encoding", None)
-            _store_set_cookies(current_url, response.headers)
-            return HttpFetchResult(
+            # Decompress with a size cap (decompression-bomb guard), normalise
+            # headers and persist cookies via the shared tail.
+            return _finish_fetch(
                 url=url,
                 final_url=current_url,
                 status_code=status_code,
-                headers=resp_headers,
-                body=body,
+                raw=bytes(raw),
+                response_headers=response.headers,
+                max_content_length=max_content_length,
                 elapsed_ms=elapsed_ms,
+                too_large=functools.partial(
+                    _cffi_too_large_result, url, current_url, response, elapsed_ms
+                ),
             )
     except DecompressionError:
         raise

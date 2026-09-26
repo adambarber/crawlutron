@@ -21,15 +21,15 @@
       "id": "fetcher-security-contract-mirror",
       "first": {
         "path": "app/crawl/strategies/fetchers.py",
-        "start": 23,
-        "end": 31
+        "start": 25,
+        "end": 33
       },
       "second": {
         "path": "app/crawl/strategies/fetchers.py",
-        "start": 154,
-        "end": 162
+        "start": 207,
+        "end": 215
       },
-      "reason": "_default_http_fetcher and _default_cffi_fetcher are two implementations of one security contract, and both docstrings say so: SSRF-safe manual redirect handling (F1) and sensitive-header stripping on cross-domain redirects (Fix 3). The mirroring is deliberate, so this is sanctioned rather than collapsed -- but it is also the most expensive duplication in the tree, because two bodies have to stay in step for a redirect rule to hold on both transports, and the only thing keeping them in step is a comment. Fold the redirect loop into one helper the two fetchers call; until then the guard is the shared signature every concrete fetcher must keep, which is what a fold would have to preserve.",
+      "reason": "The two docstrings declaring one security contract -- SSRF-safe manual redirect handling (F1) and sensitive-header stripping on cross-domain redirects (Fix 3) -- still mirror each other, and that mirror is now the whole of the clone. The executable tails the fetchers used to duplicate (decompress under a size cap, persist Set-Cookie, lowercase headers, build the result) were folded into fetchers._finish_fetch, which both call, and the content encoding is read there rather than at each call site. The docstring mirror stays on purpose: a reader arriving at either fetcher should find the contract stated where they are, and the two bodies no longer back it separately. What is still duplicated in executable code is the redirect loop, deliberately: the curl_cffi copy must release a busy curl handle on four distinct abandon paths (H1/N5/N8) and awaiting that release is the hang being escaped, so the loops are not yet interchangeable and folding them would move the incident knowledge behind a seam rather than remove it. The guard stays the shared fetcher arity, which is the property a further fold of the redirect loop would have to preserve; the folded tail is guarded separately by tests/test_safety_invariants.py::test_response_cookies_enter_the_jar_only_through_the_fetch_tail.",
       "guard": "tests/test_type_contracts.py::test_http_fetcher_alias_matches_the_concrete_fetcher_arity",
       "fragment_sha256": "2872669eefe1f401dfd353518a74ad1f98c7cd753452f12a589dbc3e75064c58"
     },

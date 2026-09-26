@@ -203,7 +203,23 @@ __all__ = [
 # the test that appeared to need it, and the one genuine consumer (a cache
 # eviction bound in test_robots.py) now imports from the module that defines
 # it. The names are gone, not relocated -- robots.py was always the only home.
-_APP_TREE_CODE_LINE_BUDGET = 14_413
+# RAISED to 14,435 from 14,413: the httpx/curl_cffi fetch tails merged into one
+# chokepoint. The two transports each ended a fetch with the same four steps --
+# decompress under a size cap, persist Set-Cookie, lowercase the headers, build
+# the result -- and the copies had already diverged. The httpx path normalised
+# the headers into a dict and handed that to the cookie helper, collapsing a
+# multi-cookie response into one comma-joined entry and knocking the helper off
+# its documented get_list path; the curl_cffi path passed the transport's own
+# multidict and was correct. Both happened to survive only because the jar
+# re-splits a comma-joined value, which this suite separately documents as a
+# corruption risk. fetchers._finish_fetch now owns the tail, both transports
+# call it, and the content encoding is read there rather than by each of them
+# separately. The raise is not deduplication arithmetic -- merging two copies
+# saved fewer lines than a nine-parameter keyword-only signature costs. It is
+# bought deliberately: a safety cap, cookie persistence and header normalisation
+# can no longer be changed in one transport and forgotten in the other, and the
+# two rules at the end of this file stop a third fetch path reopening the door.
+_APP_TREE_CODE_LINE_BUDGET = 14_435
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -7461,3 +7477,112 @@ def test_a_narrowed_walk_is_shared_too():
         f"only {checked} narrowed walks were checked across the tree; the assertion "
         "has to span the snapshot to be evidence about the snapshot"
     )
+
+
+# --- Response cookies enter the jar only through the fetch-completion tail -----
+#
+# The httpx and curl_cffi fetchers each carried their own copy of the tail that
+# decompresses, normalises headers and persists cookies, and the copies had
+# already drifted: httpx normalised the response headers into a dict and handed
+# *that* to the cookie helper, which is what knocked it off its documented
+# get_list path, while curl_cffi handed over the transport's own multidict.
+# Collapsing both into fetchers._finish_fetch is what removed the drift. These
+# two rules are the enforcement half: the jar has exactly one write door, and
+# that door is the shared tail. A third fetch path growing its own cookie
+# handling trips them at the line, not after a session is silently missing a
+# cookie.
+
+_COOKIE_TAIL = "app/crawl/strategies/fetchers.py"
+_COOKIE_HELPER = "app/crawl/strategies/request_profile.py"
+_COOKIE_TAIL_FN = "_finish_fetch"
+_COOKIE_HELPER_FN = "_store_set_cookies"
+
+
+def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
+    """``(call, innermost enclosing function name)`` for calls to ``target``.
+
+    ``nodes_of`` yields a flat breadth-first sequence with no parent links, so a
+    detector that needs to know *where* a call sits cannot be built on it. This
+    descends instead, which is affordable: two rules, once per module.
+    """
+    found: list[tuple[ast.Call, str]] = []
+
+    def visit(node: ast.AST, enclosing: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if (
+                isinstance(child, ast.Call)
+                and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target
+            ):
+                found.append((child, enclosing))
+            name = (
+                child.name
+                if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+                else enclosing
+            )
+            visit(child, name)
+
+    visit(tree, "<module>")
+    return found
+
+
+def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a cookie write that does not run through the shared fetch tail."""
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    offenders: list[str] = []
+    for call, enclosing in _enclosing_calls(tree, "_store_set_cookies"):
+        if relative == _COOKIE_TAIL and enclosing == _COOKIE_TAIL_FN:
+            continue
+        offenders.append(
+            offender(path, call.lineno, f"_store_set_cookies() outside {_COOKIE_TAIL_FN}()")
+        )
+    for call, enclosing in _enclosing_calls(tree, "add_cookie_header"):
+        if relative == _COOKIE_HELPER and enclosing == _COOKIE_HELPER_FN:
+            continue
+        offenders.append(
+            offender(path, call.lineno, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()")
+        )
+    return offenders
+
+
+def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
+    """Cookie persistence has one door, and that door is the shared fetch tail."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_cookie_writes_off_the_fetch_tail(tree, path))
+    assert not offenders, (
+        f"Persist response cookies via {_COOKIE_TAIL}::{_COOKIE_TAIL_FN}, which calls "
+        f"{_COOKIE_HELPER_FN} for you, instead of reaching for the jar where you are: "
+        + ", ".join(offenders)
+    )
+
+
+def test_cookie_tail_detector_bites():
+    """Every bypass shape fires; the sanctioned two-hop chain stays clean."""
+    synthetic = REPO_ROOT / "app" / "_synthetic.py"
+    fires = {
+        "import x\nx._store_set_cookies(url, headers)\n": "_store_set_cookies()",
+        "import jar\njar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
+        "def nested():\n    jar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
+    }
+    for src, expected in fires.items():
+        offenders = _cookie_writes_off_the_fetch_tail(ast.parse(src), synthetic)
+        assert len(offenders) == 1, (src, offenders)
+        assert expected in offenders[0], (src, offenders)
+
+    tail_call = (
+        "from app.crawl.strategies.request_profile import _store_set_cookies\n"
+        "def _finish_fetch(**kwargs):\n"
+        "    return _store_set_cookies(kwargs)\n"
+    )
+    # The sanctioned chain is silent at its own path...
+    assert not _cookie_writes_off_the_fetch_tail(
+        ast.parse(tail_call), REPO_ROOT / _COOKIE_TAIL
+    )
+    assert not _cookie_writes_off_the_fetch_tail(
+        ast.parse("def _store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n"),
+        REPO_ROOT / _COOKIE_HELPER,
+    )
+    # ...and the very same source still fires anywhere else. A detector keyed on
+    # the function name alone would wave this tree through, which is the whole
+    # reason the rule is keyed on the path.
+    assert _cookie_writes_off_the_fetch_tail(ast.parse(tail_call), synthetic)
