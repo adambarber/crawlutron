@@ -219,7 +219,16 @@ __all__ = [
 # bought deliberately: a safety cap, cookie persistence and header normalisation
 # can no longer be changed in one transport and forgotten in the other, and the
 # two rules at the end of this file stop a third fetch path reopening the door.
-_APP_TREE_CODE_LINE_BUDGET = 14_435
+# RAISED to 14,440 from 14,435: five lines to stop job_runner hand-writing a
+# taxonomy pair. Its pace_result built the one CrawlResult in the tree that
+# carries no payload, and wrote status and classification as two literals
+# beside each other. The pair is legal today, which is precisely why nothing
+# reported it: the day the taxonomy moves "rendered" off "success" this result
+# becomes silently wrong and no assertion anywhere is looking at it. Asking
+# status_for_classification instead is the one line that keeps it true, and the
+# other four are the import that makes asking possible. Bought with a
+# tree-wide gate so the next spelled pair is reported at its line.
+_APP_TREE_CODE_LINE_BUDGET = 14_440
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -7704,4 +7713,94 @@ def test_wire_mirror_detector_bites():
     assert not _wire_mirror_drift(
         ast.parse("@dataclass\nclass Link:\n    url: str\n"),
         ast.parse("class Other(BaseModel):\n    url: str\n    host: str\n"),
+    )
+
+
+# --- A result may not spell its own (status, classification) pair -------------
+#
+# app/crawl/result_helpers.py is the chokepoint for building results, and both
+# of its terminal primitives call _enforce_status_classification first. That
+# check is the whole point: it makes a result that asserts a status the taxonomy
+# would re-derive differently for the same label unrepresentable, because the
+# two axes are free parameters and nothing else holds them together.
+#
+# A caller that builds a result itself can sidestep all of it by naming both
+# axes as literals. The pair it writes is legal on the day it is written, which
+# is exactly why nothing reports it, and the day the taxonomy moves a default
+# the result is quietly wrong with no failure anywhere. Deriving one axis from
+# status_for_classification, or copying both off an existing result, keeps the
+# property -- which is what the browser strategy does. Naming both is how the
+# property gets lost.
+
+_RESULT_CONSTRUCTORS = frozenset({"CrawlResult", "EngineCrawlResult"})
+_RESULT_CHOKEPOINT_MODULE = "app/crawl/result_helpers.py"
+
+
+def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a result built from a hand-written (status, classification) pair."""
+    if path.relative_to(REPO_ROOT).as_posix() == _RESULT_CHOKEPOINT_MODULE:
+        return []
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if resolved_call_name(tree, node).rsplit(".", 1)[-1] not in _RESULT_CONSTRUCTORS:
+            continue
+        spelled = {
+            kw.arg: kw.value
+            for kw in node.keywords
+            if kw.arg in ("status", "classification") and isinstance(kw.value, ast.Constant)
+        }
+        if len(spelled) == 2:
+            offenders.append(
+                offender(path, node.lineno, "hand-written (status, classification) pair")
+            )
+    return offenders
+
+
+def test_results_derive_their_status_from_the_taxonomy():
+    """No result outside the chokepoint spells both taxonomy axes as literals."""
+    offenders = app_offenders(_literal_status_classification_pairs)
+    assert not offenders, (
+        f"Build results through {_RESULT_CHOKEPOINT_MODULE}, or derive one axis with "
+        f"constants.status_for_classification, so _enforce_status_classification can see "
+        f"the pair: " + ", ".join(offenders)
+    )
+
+
+def test_result_status_pair_detector_bites():
+    """A spelled pair fires; deriving either axis stays clean."""
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    fires = {
+        'CrawlResult(url=u, status="success", classification="rendered")\n': "hand-written",
+        'EngineCrawlResult(url=u, status="failed", classification="dns_error")\n': "hand-written",
+        # A qualified call is the same construction.
+        'models.CrawlResult(url=u, status="failed", classification="blocked")\n': "hand-written",
+    }
+    for src, expected in fires.items():
+        offenders = _literal_status_classification_pairs(ast.parse(src), path)
+        assert len(offenders) == 1, (src, offenders)
+        assert expected in offenders[0], (src, offenders)
+
+    clean = (
+        # Derived, not spelled -- what the browser strategy does.
+        "CrawlResult(url=u, status=status, classification=classification)\n",
+        "CrawlResult(url=u, status=status_for_classification(label), classification=label)\n",
+        # One axis spelled and one derived still cannot disagree silently.
+        'CrawlResult(url=u, status="failed", classification=label)\n',
+        # The same spelled pair inside the chokepoint module is the definition.
+        'CrawlResult(url=u, status="failed", classification=label)\n',
+    )
+    for src in clean:
+        offenders = _literal_status_classification_pairs(
+            ast.parse(src), REPO_ROOT / _RESULT_CHOKEPOINT_MODULE
+        )
+        assert not offenders, src
+    for src in clean[:3]:
+        assert not _literal_status_classification_pairs(ast.parse(src), path), src
+    # And the chokepoint exemption is keyed on the module, not on a name: a
+    # spelled pair anywhere else still fires even under the same function name.
+    assert _literal_status_classification_pairs(
+        ast.parse('def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n'),
+        path,
     )

@@ -32,7 +32,11 @@ from urllib.parse import urlparse
 
 from app.api.crawl_executor import execute_crawl as _real_execute_crawl
 from app.api.response_shaping import _failed_unified_result, abuild_unified_result
-from app.constants import MAX_URL_TRANSIENT_ATTEMPTS, is_transient_classification
+from app.constants import (
+    MAX_URL_TRANSIENT_ATTEMPTS,
+    is_transient_classification,
+    status_for_classification,
+)
 from app.crawl.admission import (
     JobAdmissionContext,
     admit_job_links,
@@ -47,7 +51,7 @@ from app.crawl.admission import (
     requeue_admitted_pages,
 )
 from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore, normalize_job_state
-from app.models import CrawlResult, CrawlTask
+from app.models import Classification, CrawlResult, CrawlTask
 
 logger = logging.getLogger(__name__)
 
@@ -211,10 +215,17 @@ async def _pace_delayed_batch(
         return
 
     def pace_result(job: CrawlTask) -> CrawlResult:
+        # The status is derived from the label rather than spelled beside it.
+        # A paced task never carries a payload, so this is the one result whose
+        # (classification, status) pair could sit here forever as two literals
+        # -- correct today, and silently wrong the day the taxonomy moves a
+        # default, with nothing in the suite able to see it. Asking the table is
+        # the same one-line change that keeps it true.
+        classification: Classification = "rendered"
         return CrawlResult(
             url=job.original_url,
-            status="success",
-            classification="rendered",
+            status=status_for_classification(classification),
+            classification=classification,
             final_url=job.original_url,
             html=None,
             text=None,
