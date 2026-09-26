@@ -29,11 +29,6 @@ from app.resource_pressure import ResourceGate
 
 logger = logging.getLogger(__name__)
 
-ROBOTS_CACHE_MAX_ENTRIES = _robots_policy.ROBOTS_CACHE_MAX_ENTRIES
-ROBOTS_CACHE_TTL_SECONDS = _robots_policy.ROBOTS_CACHE_TTL_SECONDS
-ROBOTS_FAILURE_TTL_SECONDS = _robots_policy.ROBOTS_FAILURE_TTL_SECONDS
-_ROBOTS_PATTERN_CACHE_PER_HOST = _robots_policy.ROBOTS_PATTERN_CACHE_PER_HOST
-_ROBOTS_PATTERN_CACHE_MAX_HOSTS = _robots_policy.ROBOTS_PATTERN_CACHE_MAX_HOSTS
 robots_cache = _robots_policy.robots_cache
 _RobotsPathMatcher = _robots_policy._RobotsPathMatcher
 _MatchAll = _robots_policy._MatchAll

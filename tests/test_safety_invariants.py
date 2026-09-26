@@ -193,7 +193,17 @@ __all__ = [
 # in the module whose stated job is being the single audited place input gets
 # capped. Nine lines buy the guarantee that the two policies cannot disagree,
 # and the tree-wide gate in this file keeps the second copy from reappearing.
-_APP_TREE_CODE_LINE_BUDGET = 14_418
+# RAISED to 14,413 from 14,418: five re-export aliases deleted from
+# app/crawl/engine.py. ROBOTS_CACHE_MAX_ENTRIES, ROBOTS_CACHE_TTL_SECONDS,
+# ROBOTS_FAILURE_TTL_SECONDS, _ROBOTS_PATTERN_CACHE_PER_HOST and
+# _ROBOTS_PATTERN_CACHE_MAX_HOSTS each rebound a name from app.crawl.robots,
+# so the engine module appeared to own the robots cache configuration and a
+# reader changing a TTL would reasonably have looked there first. Two of the
+# five had no consumer anywhere; a third was imported from robots directly by
+# the test that appeared to need it, and the one genuine consumer (a cache
+# eviction bound in test_robots.py) now imports from the module that defines
+# it. The names are gone, not relocated -- robots.py was always the only home.
+_APP_TREE_CODE_LINE_BUDGET = 14_413
 
 
 def test_app_tree_code_line_count_does_not_grow():

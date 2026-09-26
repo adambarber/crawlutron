@@ -339,7 +339,8 @@ async def test_purge_handles_production_shaped_entries():
     crashed with ValueError instead of evicting."""
 
     import app.crawl.engine as em
-    from app.crawl.engine import ROBOTS_CACHE_MAX_ENTRIES, crawl_request
+    from app.crawl.engine import crawl_request
+    from app.crawl.robots import ROBOTS_CACHE_MAX_ENTRIES
     from app.settings import CrawlerSettings
 
     em.robots_cache.clear()
