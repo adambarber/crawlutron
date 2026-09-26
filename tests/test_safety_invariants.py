@@ -184,7 +184,16 @@ __all__ = [
 # was not calling it, so a URL the engine never answered for was counted as
 # failed and then vanished, leaving a job whose results could not account for
 # its own total_crawled.
-_APP_TREE_CODE_LINE_BUDGET = 14_409
+#
+# RAISED to 14,418 for the bounded-HTML-input chokepoint: nine lines. Two
+# modules independently declared the same 4 MB cap under two unrelated names
+# (_MAX_HTML_NOISE_INPUT_BYTES, _MAX_LLM_FORMAT_HTML_INPUT_BYTES) and each
+# truncated inline, so raising one cap left the other and the bound no reviewer
+# read was the bound being enforced. The cap and its truncation now live once,
+# in the module whose stated job is being the single audited place input gets
+# capped. Nine lines buy the guarantee that the two policies cannot disagree,
+# and the tree-wide gate in this file keeps the second copy from reappearing.
+_APP_TREE_CODE_LINE_BUDGET = 14_418
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -222,6 +231,12 @@ def test_code_line_count_charges_code_and_not_prose():
 # Values are (declared public symbols, executable entry points). Public data
 # classes, exceptions, type aliases, and constants remain part of the contract,
 # but only functions and classes with their own methods are alternate ways in.
+#
+# app/bounded_io.py RAISED to (5, 3) for the same reason the whole-tree ceiling
+# moved: it now owns the shared HTML input cap and its truncation helper. A
+# chokepoint's public surface is the contract, not sprawl -- two symbols that
+# only exist to be the one place input gets capped is the module doing its job,
+# and a narrower budget would have pushed the cap back out to a second home.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
     "app/validation.py": (16, 12),
@@ -229,7 +244,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/sqlite_store.py": (7, 5),
     "app/safe_regex.py": (8, 3),
     "app/crawl/robots.py": (13, 4),
-    "app/bounded_io.py": (3, 2),
+    "app/bounded_io.py": (5, 3),
     "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
@@ -678,6 +693,100 @@ def test_no_bare_body_reads():
     for path, tree in app_trees(exclude=SANCTIONED | {"bounded_io.py"}):
         offenders.extend(_bare_body_reads(tree, path))
     assert not offenders, "Use app.bounded_io.read_capped_sync/read_capped_async: " + ", ".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# A bounded HTML input has exactly one cap
+# ---------------------------------------------------------------------------
+
+# Two modules independently declared a 4 MB cap on the HTML they would scan --
+# `_MAX_HTML_NOISE_INPUT_BYTES` in classify.py and
+# `_MAX_LLM_FORMAT_HTML_INPUT_BYTES` in llm_format.py -- with the same value and
+# the same rationale ("a hostile origin will hand you gigabytes"), reached by two
+# names that no reader could see were the same policy. Raising one cap silently
+# left the other, so the guarantee a reviewer believed was enforced per-consumer
+# was actually enforced for whichever module happened to be edited. The shape is
+# the same as every other drift-prone twin here: a resource bound is a policy, and
+# a policy with two declarations is a policy that will disagree with itself. The
+# cap now lives once in app/bounded_io.py next to the stream caps that share its
+# purpose, and this gate keeps the second copy from reappearing.
+
+
+def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a module that declares its own HTML input byte cap.
+
+    Keyed on the *intent* (an HTML byte budget) rather than the two names it used
+    to have, so a third spelling is caught too. Reads a numeric expression only:
+    a cap that delegates elsewhere is not a second declaration.
+    """
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        targets: list[ast.expr] = []
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            targets, value = list(node.targets), node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        if value is None or not _is_numeric_expr(value):
+            continue
+        for target in targets:
+            name = target.id if isinstance(target, ast.Name) else ""
+            head = name.upper()
+            if "HTML" in head and head.endswith("BYTES"):
+                offenders.append(offender(path, node.lineno, name))
+    return offenders
+
+
+def _is_numeric_expr(node: ast.expr) -> bool:
+    """True for a literal/computed number, e.g. ``4 * 1024 * 1024``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+        return True
+    return isinstance(node, ast.BinOp) and _is_numeric_expr(node.left) and _is_numeric_expr(node.right)
+
+
+def test_html_input_cap_is_declared_once():
+    """The bounded-HTML-input cap has one declaration, in app/bounded_io.py.
+
+    app/bounded_io.py is exempt because it IS the chokepoint that owns the cap
+    alongside the stream caps.
+    """
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | {"bounded_io.py"}):
+        offenders.extend(_local_html_input_caps(tree, path))
+    assert not offenders, (
+        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input "
+        "instead of declaring a second HTML input cap: " + ", ".join(offenders)
+    )
+
+
+def test_local_html_input_cap_detector_bites():
+    """Every twin shape fires; delegating and unrelated names stay clean."""
+    path = TESTS_DIR.parent / "app" / "_synthetic.py"
+    fires = {
+        # The two historical spellings, verbatim.
+        "_MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024\n": "_MAX_HTML_NOISE_INPUT_BYTES",
+        "_MAX_LLM_FORMAT_HTML_INPUT_BYTES = 4 * 1024 * 1024\n": "_MAX_LLM_FORMAT_HTML_INPUT_BYTES",
+        # Annotated, and a plain literal.
+        "HTML_INPUT_BYTES: int = 4194304\n": "HTML_INPUT_BYTES",
+        # A third name for the same policy must not slip past the intent keying.
+        "MAX_DOC_HTML_BYTES = 5_000_000\n": "MAX_DOC_HTML_BYTES",
+    }
+    for src, expected in fires.items():
+        offenders = _local_html_input_caps(ast.parse(src), path)
+        assert len(offenders) == 1, (src, offenders)
+        assert expected in offenders[0], (src, offenders)
+
+    clean = (
+        # The sanctioned import-and-delegate shape.
+        "from app.bounded_io import MAX_HTML_INPUT_BYTES, truncate_html_input\n",
+        "body = truncate_html_input(html)\n",
+        # Unrelated byte budgets: the sink has its own, and it is not HTML input.
+        "MAX_WEBHOOK_RESPONSE_BYTES = 10_485_760\n",
+        "MAX_CACHE_ENTRIES = 100_000\n",
+        "HTML_FIELDS = ('title', 'description')\n",
+    )
+    for src in clean:
+        assert not _local_html_input_caps(ast.parse(src), path), src
 
 
 def _scope_matcher_definitions() -> list[str]:

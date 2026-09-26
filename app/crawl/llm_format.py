@@ -5,6 +5,8 @@ import re
 from html import unescape
 from typing import Any
 
+from app.bounded_io import truncate_html_input
+
 _META_MAP = {
     "description": "description",
     "og:title": "og_title",
@@ -23,8 +25,8 @@ _META_MAP = {
 # Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
 # full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
 # Anything above a few MB is almost certainly above the practical meta-tag
-# density and is rejected (adversarial review F-llm-format-size-guard).
-_MAX_LLM_FORMAT_HTML_INPUT_BYTES = 4 * 1024 * 1024
+# density and is rejected (adversarial review F-llm-format-size-guard). The
+# value lives in app.bounded_io; this site keeps the reason THIS parse needs one.
 
 
 def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
@@ -33,7 +35,7 @@ def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     #15: parse the HTML once with lxml and read every field (title, meta
     og/twitter tags, JSON-LD, canonical, favicon, language) from the single
     tree instead of running 8+ independent regex scans over the raw string.
-    Inputs above ``_MAX_LLM_FORMAT_HTML_INPUT_BYTES`` are truncated before
+    Inputs above ``MAX_HTML_INPUT_BYTES`` are truncated before
     lxml parses them so a malicious oversized payload cannot exhaust RAM
     building the DOM tree (adversarial F-llm-format-size-guard).
 
@@ -45,8 +47,7 @@ def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     reader of a parsed tree.
     """
     metadata: dict[str, Any] = {"source_url": url}
-    if len(html) > _MAX_LLM_FORMAT_HTML_INPUT_BYTES:
-        html = html[:_MAX_LLM_FORMAT_HTML_INPUT_BYTES]
+    html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
     # at module level, so this direction must stay lazy (H2 constraint).
     from app.crawl.extraction import _parse_html_tree

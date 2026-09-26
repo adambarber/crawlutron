@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
+from app.bounded_io import truncate_html_input
 from app.models import Classification, as_classification
 
 # Declared as Final[Classification] rather than returned as bare literals. A
@@ -263,9 +264,10 @@ _TAGS_RE = re.compile(r"<[^>]+>")
 
 
 # Cap the input size for the noise-stripping scan. The scanner is linear, so
-# this is a resource bound (scan + output size), not a correctness one:
-# anything above a few MB is overwhelmingly likely to be a hostile payload.
-_MAX_HTML_NOISE_INPUT_BYTES = 4 * 1024 * 1024
+# the bound is on resources (scan + output size), not correctness: anything
+# above a few MB is overwhelmingly likely to be a hostile payload. The value
+# itself lives in app.bounded_io next to the stream caps it shares a purpose
+# with; this site keeps only the reason THIS scan needs one.
 
 
 def _strip_html_noise(html: str | None) -> str:
@@ -282,9 +284,7 @@ def _strip_html_noise(html: str | None) -> str:
     the unterminated body visible to classification — script code counted
     as page text).
     """
-    body = html or ""
-    if len(body) > _MAX_HTML_NOISE_INPUT_BYTES:
-        body = body[:_MAX_HTML_NOISE_INPUT_BYTES]
+    body = truncate_html_input(html)
 
     out: list[str] = []
     pos = 0
