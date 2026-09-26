@@ -533,12 +533,17 @@ def max_http_concurrency_for(
     the httpx pool can be bound to it with zero drift as RAM scales.
 
     The remainder is this worker's share: the limit is the container's and
-    ``pool_size`` and ``doc_workers`` are already per-process, so dividing by
-    the worker count is what keeps the fleet inside the RAM the gate measures.
+    ``pool_size`` and ``doc_workers`` are per-process, so the reserve is a
+    *fleet* quantity and is multiplied before the subtraction. Subtracting it
+    once and then dividing overstates the fleet's free memory -- with 4 workers
+    on a 16 GiB limit that is 320 concurrent HTTP tasks where a single worker
+    would have run 283, which is the over-admission the division exists to
+    remove.
     """
+    workers = worker_count()
     limit = max(limit_bytes, 256 * 1024 * 1024)
-    reserve = pool_size * browser_task_bytes + doc_workers * doc_task_bytes
-    free = max(0, limit - reserve) // worker_count()
+    per_worker_reserve = pool_size * browser_task_bytes + doc_workers * doc_task_bytes
+    free = max(0, limit - workers * per_worker_reserve) // workers
     return max(1, min(_MAX_HTTP_CONCURRENCY, free // max(1, http_task_bytes)))
 
 

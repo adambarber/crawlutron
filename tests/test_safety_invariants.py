@@ -360,6 +360,21 @@ __all__ = [
 # off the oversized-class list the metrics budget gate reports -- the budget
 # stays at 3 because fixing one offender does not clear the other three.
 #
+# LOWERED to 14,815 from 14,828: the single-process guard is gone, and its
+# refusal message was more code than the fleet's shared state turned out to
+# need. It is not replaced by nothing -- the three invariants that made N
+# workers wrong are now asserted directly, in TestMultiWorkerInvariants for the
+# wiring and in tests/crawl/test_fleet_budget_split.py for the arithmetic, and
+# both fail if a shared store is pointed away from the one database or if a
+# ceiling stops being divided.
+#
+# The reserve in `max_http_concurrency_for` is a fleet quantity and is
+# multiplied before the subtraction. Subtracting it once and then dividing
+# overstated the fleet's free memory: 320 concurrent HTTP tasks at 4 workers on
+# a 16 GiB limit where a single worker would have run 283, which is the
+# over-admission the division exists to remove. The fleet total is now 283 at 1,
+# 2 and 4 workers.
+#
 # RAISED to 14,828 from 14,821: the per-process budgets are now divided by the
 # worker count. `derive_browser_pool_size` and `max_http_concurrency_for` sized
 # themselves from the cgroup memory limit, which belongs to the container and is
@@ -377,7 +392,7 @@ __all__ = [
 # the functions that divide the budget live here, and importing the number from
 # the module that refuses N>1 would be circular. The guard now reads it from
 # here too, so the workers env has exactly one reader in the tree.
-_APP_TREE_CODE_LINE_BUDGET = 14_828
+_APP_TREE_CODE_LINE_BUDGET = 14_815
 
 
 def test_app_tree_code_line_count_does_not_grow():

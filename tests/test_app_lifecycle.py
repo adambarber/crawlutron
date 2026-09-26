@@ -14,69 +14,81 @@ def _read_main_source() -> str:
     return inspect.getsource(main_mod)
 
 
-class TestSingleProcessInvariant:
-    """`BROWSER_CRAWLER_WORKERS > 1` must fail loudly, not corrupt state.
+class TestMultiWorkerInvariants:
+    """`BROWSER_CRAWLER_WORKERS > 1` is supported; these are the properties that make it so.
 
-    The service keeps its browser pool, httpx/cffi pools, DNS and extraction
-    executors, HTTP cache, robots pattern cache, cookie jar, admission gate and
-    metrics store as process-local singletons. Several of them also WRITE to a
-    shared path, so N workers do not merely under-report -- they lose data:
+    The service used to refuse a second process, because three of its
+    process-local singletons were wrong rather than merely wasteful:
 
-      * the cookie jar loads at startup and rewrites the whole file at
-        shutdown, so N workers make continuity per-process and shutdown
-        last-writer-wins;
-      * `/metrics` serves one worker's counters, so the gauges that make the
-        self-tuning guard observable report a fraction of the truth;
-      * the admission gate reads shared cgroup pressure but grants its
-        capacity per process, uncoordinated;
-      * content-cache spill GC was process-local until it took a flock.
+      * the cookie jar loaded at startup and rewrote the whole file at
+        shutdown, so N workers made continuity per-process and shutdown
+        last-writer-wins. It is now backed by a table in the shared database;
+      * `/metrics` served one worker's counters, so the numbers the admission
+        gate is tuned from reported a fraction of real load. The counters are
+        now in the same shared database, and the two resource gauges stay
+        per-process because they read a cgroup every worker shares;
+      * the admission gate reads shared cgroup pressure but granted capacity
+        per process. Its ceilings are now divided by the worker count where
+        they are derived, so the fleet's grants sum to one worker's worth.
 
-    One guard at startup closes the class. Refusing to boot is the honest
-    outcome: the alternative is a deployment that looks healthy and quietly
-    drops cookies.
+    The refusal is gone, so these assert the invariants hold rather than that
+    boot is denied. The arithmetic behind the division is proven in
+    `tests/crawl/test_fleet_budget_split.py`; what is untested there is that
+    the running service is actually wired to it, which is what this covers.
     """
 
-    def test_refuses_more_than_one_worker(self, monkeypatch):
-        from app.main import assert_single_process_deployment
+    def test_lifespan_does_not_refuse_more_than_one_worker(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+        source = _read_main_source()
+        assert "assert_single_process_deployment" not in source
+        assert "is not supported" not in source
+
+    def test_no_refusal_survives_anywhere_in_the_tree(self):
+        """A refusal left behind in one module denies boot just as hard.
+
+        The guard was a chokepoint once; now the class it protected is closed,
+        and a second copy of the same check elsewhere would be a deployment
+        that refuses for a reason no longer true.
+        """
+        from chokepoint_walks import app_python_files
+
+        for path in app_python_files():
+            if "assert_single_process_deployment" in path.read_text():
+                pytest.fail(f"{path} still refuses multiple workers")
+
+    def test_the_worker_count_reaches_the_production_budget_wiring(self, monkeypatch):
+        """The division has to be where the pools are built, not only in the helpers.
+
+        A correct `derive_browser_pool_size` that production never calls is an
+        unused function and an over-subscribed fleet.
+        """
+        from app.crawl import request_pipeline
+        from app.resource_pressure import derive_browser_pool_size
 
         monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
-        with pytest.raises(RuntimeError) as excinfo:
-            assert_single_process_deployment()
-        message = str(excinfo.value)
-        # The refusal must name WHY, or an operator reads it as a crash and
-        # retries with workers=1 having learned nothing.
-        assert "BROWSER_CRAWLER_WORKERS" in message
-        assert "cookie" in message.lower()
+        monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "")
+        assert derive_browser_pool_size(16 * 1024**3) == 1
 
-    def test_accepts_single_worker(self, monkeypatch):
-        from app.main import assert_single_process_deployment
+        source = inspect.getsource(request_pipeline)
+        assert "derive_browser_pool_size()" in source
 
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
-        assert_single_process_deployment()  # must not raise
+    def test_every_store_shares_the_one_database_path(self):
+        """The stores must share one file, or the sharing is only nominal.
 
-    def test_unset_or_absurd_value_does_not_refuse_boot(self, monkeypatch):
-        """The env chokepoint's contract: a typo falls back, it never denies boot.
-
-        `get_mapping_int` exists precisely so a malformed value warns and uses
-        the default. This guard must not become a second, stricter parser that
-        turns a typo into an outage.
+        The cookie jar and the metrics counters each hold a connection. If
+        either were pointed at its own path -- which is what the
+        single-database decision exists to prevent -- both would pass their own
+        tests and the fleet would still not see shared state.
         """
-        from app.main import assert_single_process_deployment
+        from app.main import DATABASE_PATH
 
-        monkeypatch.delenv("BROWSER_CRAWLER_WORKERS", raising=False)
-        assert_single_process_deployment()
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "not-a-number")
-        assert_single_process_deployment()
-
-    def test_lifespan_enforces_the_guard_before_allocating_anything(self):
-        """The check must run before the pools exist, not after.
-
-        A guard placed after `initialize_browser_pool` has already spun up N
-        copies of the scarcest resource in the service before complaining.
-        """
+        assert DATABASE_PATH.endswith("/crawler.db")
         source = _read_main_source()
-        guard_at = source.index("assert_single_process_deployment()")
-        assert guard_at < source.index("initialize_browser_pool(settings)")
+        for ctor in ("JobStore(", "CrawlResultStore(", "CoordinationCounters(", "SharedCookieStore("):
+            assert ctor in source, ctor
+            line = next(ln for ln in source.splitlines() if ctor in ln)
+            assert "DATABASE_PATH" in line or ctor not in source.split(line)[1][:40], ctor
+        assert "coordination_db_path" not in source
 
 
 

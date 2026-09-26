@@ -52,69 +52,10 @@ from .discovery.agent_hints import create_agent_hints_router
 from .discovery.capabilities import create_capabilities_router
 from .discovery.well_known import create_well_known_router
 from .health.readiness import create_health_router
-from .resource_pressure import worker_count
 
 settings = CrawlerSettings.from_mapping()
 
 _TeardownStep = tuple[str, Callable[[], Awaitable[None]]]
-
-
-def assert_single_process_deployment() -> None:
-    """Refuse to boot when the process count breaks the service's own invariants.
-
-    `BROWSER_CRAWLER_WORKERS` is read by the container entrypoint and handed to
-    `uvicorn --workers`, so setting it above 1 forks the service into N
-    processes that each get their own copy of the browser pool, the httpx and
-    cffi connection pools, the DNS and extraction executors, the HTTP cache,
-    the robots pattern cache, the admission gate and the metrics store. Most of
-    that is merely wasteful. One part is still wrong:
-
-      * the admission gate reads genuinely shared cgroup pressure but grants
-        capacity per process, so N uncoordinated controllers each admit a full
-        batch at the same observed ratio.
-
-    The other two defects this guard was written for are fixed, and the refusal
-    is kept until the last one is:
-
-      * the cookie jar loaded at startup and rewrote the whole file at
-        shutdown, so with N workers a cookie set in one was invisible in the
-        others and the last shutdown discarded every cookie the other workers
-        collected. It is now backed by a table in the shared database, merging
-        in a transaction rather than replacing the file;
-      * `/metrics` served one worker's counters, so the numbers the admission
-        gate is tuned from reported a fraction of real load. Counters are now
-        in the same shared database. The two resource gauges stay per-process
-        deliberately, because they read a cgroup every worker shares.
-
-    Per-process budgets -- the browser pool, the HTTP concurrency ceiling and
-    the markitdown pool -- are now divided by the worker count where they are
-    derived, so N workers do not each spend the whole container's RAM.
-
-    Refusing to boot is the honest outcome while the gate is uncoordinated. The
-    alternative is a deployment that reports healthy, serves coherent
-    single-worker telemetry, and over-admits N times over.
-
-    Reads through the never-raise env chokepoint (`resource_pressure.worker_count`),
-    so a typo'd value warns and falls back to one worker instead of denying
-    boot. This guard must not become a second, stricter parser than the rest of
-    the config -- which is why the value is read there and not here.
-
-    Escape hatch: run one process and scale with the existing horizontal
-    levers (`BROWSER_CRAWLER_GLOBAL_CONCURRENCY`,
-    `BROWSER_CRAWLER_BROWSER_POOL_SIZE`). Making N workers correct is a
-    program, and this guard is the last step of it.
-    """
-    workers = worker_count()
-    if workers > 1:
-        raise RuntimeError(
-            f"BROWSER_CRAWLER_WORKERS={workers} is not supported: the admission gate "
-            "reads genuinely shared cgroup pressure but grants capacity per process, "
-            "so N uncoordinated controllers each admit a full batch at the same "
-            "observed ratio and the service over-admits by the worker count. "
-            "The cookie jar and /metrics are already shared; this is the last "
-            "uncoordinated subsystem. Run BROWSER_CRAWLER_WORKERS=1 and scale "
-            "with BROWSER_CRAWLER_GLOBAL_CONCURRENCY or BROWSER_CRAWLER_BROWSER_POOL_SIZE."
-        )
 
 
 async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
@@ -194,9 +135,7 @@ if FastAPI is not None:
 
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
-        # Startup: refuse an unsupported process count BEFORE anything is
-        # allocated, then initialize browser pool, load cookie jar.
-        assert_single_process_deployment()
+        # Startup: initialize the browser pool, then load the cookie jar.
         from .crawl.engine import _resource_gate
         from .health.readiness import READINESS_STATE
 

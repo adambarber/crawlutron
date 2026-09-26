@@ -125,3 +125,70 @@ def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
     assert rp.derive_browser_pool_size(64 * 1024 * 1024) >= 1
     assert rp.max_http_concurrency_for(64 * 1024 * 1024, pool_size=1) >= 1
     assert rp.doc_worker_count() >= 1
+
+
+def _policy(limit: int) -> rp.AdmissionPolicy:
+    return rp._build_admission_policy(
+        limit,
+        pool_size=rp.derive_browser_pool_size(limit),
+        max_concurrent_pages=3,
+        doc_workers=rp.doc_worker_count(),
+    )
+
+
+def test_the_admission_gate_grants_the_fleet_no_more_than_one_worker_would(monkeypatch):
+    """The third defect, and the reason no distributed semaphore is needed.
+
+    The gate reads cgroup pressure, which every worker shares, and grants
+    capacity per process. N uncoordinated controllers therefore admit N times
+    what the measured pressure supports. The obvious fix is a shared semaphore,
+    but a semaphore has to lease and expire slots or a dead worker's share is
+    lost forever, and it has to be contended on every batch.
+
+    Dividing the ceiling is strictly better here: the resource is a shared,
+    slow-moving budget rather than a contended instantaneous semaphore, so a
+    static split needs no coordination, cannot leak, and cannot over-admit. The
+    price is that an idle worker's share goes unused -- under-utilisation,
+    which is the safe direction to be wrong in.
+    """
+    limit = 16 * 1024 * 1024 * 1024
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    single = _policy(limit)
+
+    for workers in (2, 4, 8):
+        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        each = _policy(limit)
+        assert each.max_http_concurrency * workers <= single.max_http_concurrency, (
+            f"http fleet at {workers} workers"
+        )
+
+
+def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
+    """The bound the floor of one browser per worker puts on the worker count.
+
+    Every budget is floored at one so a worker is never useless, and one
+    browser is 700 MiB reserved. That is the right trade -- under-utilisation
+    beats a worker that cannot render anything -- but it is only free while N
+    browsers fit the budget the pool sizing assumed. Past that point the fleet
+    is over-committed by exactly the overflow, and the operator's remedy is
+    fewer workers or more RAM, not a different setting.
+
+    Naming the crossing point is the point: it is the number a deployment has
+    to stay under, and an undocumented floor is how a container gets OOM-killed
+    by a config that looks conservative everywhere.
+    """
+    limit = 16 * 1024 * 1024 * 1024
+    budget = int(limit * rp._BROWSER_RAM_FRACTION)
+    browser_bytes = rp._BROWSER_TASK_RAM_BYTES
+
+    affordable = budget // browser_bytes
+    for workers in range(1, affordable + 1):
+        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        assert rp.derive_browser_pool_size(limit) * workers * browser_bytes <= budget, (
+            f"over-committed at {workers} workers"
+        )
+
+    # One past the ceiling is over-committed, and that is the documented limit.
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(affordable + 1))
+    over = rp.derive_browser_pool_size(limit) * (affordable + 1) * browser_bytes
+    assert over > budget
