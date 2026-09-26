@@ -12,7 +12,7 @@ from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_STRATEGIES,
 )
-from app.crawl.result_helpers import _engine_result_from_exception, _failed_engine_result
+from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _failed_engine_result
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import (
@@ -102,16 +102,17 @@ async def _run_browser_strategy(
 ) -> EngineCrawlResult:
     if context.browser_worker is None:
         return _failed_engine_result(
-            original_url=context.original_url,
-            normalized_url=context.normalized_url,
-            strategy=strategy,
-            classification="browser_crash",
-            error="browser_worker_unavailable",
-            diagnostics={
-                "browser_profile": context.policy.get("browser_profile") or {},
-                "runtime": {"error": "browser_worker_unavailable"},
-            },
-        )
+    TerminalResult(
+                original_url=context.original_url,
+                normalized_url=context.normalized_url,
+                strategy=strategy,
+                classification="browser_crash",
+                error="browser_worker_unavailable",
+                diagnostics={
+                    "browser_profile": context.policy.get("browser_profile") or {},
+                    "runtime": {"error": "browser_worker_unavailable"},
+                },
+))
     return await browser_strategy_result(
         original_url=context.original_url,
         normalized_url=context.normalized_url,
@@ -208,12 +209,13 @@ async def _execute_strategy(
             strategy=strategy,
         )
     return _failed_engine_result(
-        original_url=context.original_url,
-        normalized_url=context.normalized_url,
-        strategy=strategy,
-        classification="unknown_error",
-        error="unsupported_strategy",
-    )
+    TerminalResult(
+            original_url=context.original_url,
+            normalized_url=context.normalized_url,
+            strategy=strategy,
+            classification="unknown_error",
+            error="unsupported_strategy",
+))
 
 
 async def execute_crawl_chain(

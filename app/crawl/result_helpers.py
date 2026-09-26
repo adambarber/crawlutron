@@ -5,6 +5,7 @@ import logging
 import socket
 import ssl
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import httpx
@@ -196,15 +197,16 @@ def _engine_result_from_exception(
     if extra_diagnostics:
         diagnostics.update(extra_diagnostics)
     return _failed_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
-        classification=classification,
-        error=classification,
-        diagnostics=diagnostics,
-        http_status=None,
-        attempt_elapsed_ms=elapsed,
-    )
+    TerminalResult(
+            original_url=original_url,
+            normalized_url=normalized_url,
+            strategy=strategy,
+            classification=classification,
+            error=classification,
+            diagnostics=diagnostics,
+            http_status=None,
+            attempt_elapsed_ms=elapsed,
+))
 
 
 def _failed_result_for(
@@ -433,19 +435,30 @@ def _make_engine_result(
     )
 
 
-def _terminal_engine_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName | None,
-    status: ResultStatus,
-    classification: Classification,
-    error: CrawlError | None = None,
-    diagnostics: dict | None = None,
-    http_status: int | None = None,
-    final_url: str | None = None,
-    attempt_elapsed_ms: int = 0,
-) -> EngineCrawlResult:
+@dataclass(frozen=True)
+class TerminalResult:
+    """The per-attempt fields every terminal result carries, bound as one value.
+
+    Four constructors each spelled this same list of keyword-only parameters.
+    That is four signatures to widen when a field is added, and the two pairs
+    jscpd reported were exactly those signatures -- the duplication was never
+    the logic, it was the argument list. Binding them into a value the
+    constructors take positionally means the field list exists once, and a call
+    site passes one object instead of nine keywords to say one thing.
+    """
+
+    original_url: str
+    normalized_url: str
+    strategy: CrawlStrategyName | None
+    classification: Classification
+    error: CrawlError
+    diagnostics: dict | None = None
+    http_status: int | None = None
+    final_url: str | None = None
+    attempt_elapsed_ms: int = 0
+
+
+def _terminal_engine_result(result: TerminalResult, *, status: ResultStatus) -> EngineCrawlResult:
     """Construct a terminal (no payload) EngineCrawlResult with one attempt.
 
     The three terminal outcomes -- failed, blocked, skipped -- differ only in
@@ -454,42 +467,30 @@ def _terminal_engine_result(
     final URL or status. The thin wrappers below pin those per-status defaults
     so no call site has to spell them out.
     """
-    if error is None:
-        error = classification
+    error = result.error or result.classification
     attempt = CrawlStrategyAttempt(
-        strategy=strategy,
+        strategy=result.strategy,
         status=status,
-        classification=classification,
-        http_status=http_status,
+        classification=result.classification,
+        http_status=result.http_status,
         content_type=None,
-        elapsed_ms=attempt_elapsed_ms,
+        elapsed_ms=result.attempt_elapsed_ms,
         error=error,
     )
     return _make_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        final_url=final_url,
+        original_url=result.original_url,
+        normalized_url=result.normalized_url,
+        final_url=result.final_url,
         status=status,
-        classification=classification,
+        classification=result.classification,
         attempt=attempt,
-        http_status=http_status,
+        http_status=result.http_status,
         error=error,
-        diagnostics=diagnostics or {},
+        diagnostics=result.diagnostics or {},
     )
 
 
-def _failed_engine_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName | None,
-    classification: Classification,
-    error: CrawlError,
-    diagnostics: dict | None = None,
-    http_status: int | None = None,
-    final_url: str | None = None,
-    attempt_elapsed_ms: int = 0,
-) -> EngineCrawlResult:
+def _failed_engine_result(result: TerminalResult) -> EngineCrawlResult:
     """Construct a failed EngineCrawlResult with a single attempt.
 
     One of two per-status names over :func:`_terminal_engine_result`, and the
@@ -509,43 +510,18 @@ def _failed_engine_result(
     checked -- and it is why a third copy of this forwarding call, inlined in
     :func:`_classify_and_build`, was the one that actually needed removing.
     """
-    return _terminal_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
-        status="failed",
-        classification=classification,
-        error=error,
-        diagnostics=diagnostics,
-        http_status=http_status,
-        final_url=final_url,
-        attempt_elapsed_ms=attempt_elapsed_ms,
-    )
+    return _terminal_engine_result(result, status="failed")
 
 
-def _skipped_engine_result(
-    *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName | None,
-    classification: Classification,
-    error: CrawlError,
-    diagnostics: dict | None = None,
-) -> EngineCrawlResult:
+def _skipped_engine_result(result: TerminalResult) -> EngineCrawlResult:
     """Construct a skipped EngineCrawlResult (e.g., robots_disallowed).
 
     The sibling of :func:`_failed_engine_result`; see that one for why these
     two are two functions rather than one bound status.
     """
-    return _terminal_engine_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
-        status="skipped",
-        classification=classification,
-        error=error,
-        diagnostics=diagnostics,
-    )
+    # A skipped page never carries a final URL or an HTTP status, and the
+    # shared value defaults both to None, so the forward is total.
+    return _terminal_engine_result(result, status="skipped")
 
 
 def _binary_no_text_result(
@@ -585,4 +561,4 @@ def _binary_no_text_result(
     )
 
 
-__all__ = []
+__all__ = ["TerminalResult"]

@@ -20,6 +20,7 @@ from app.constants import (
     HTTP_BLOCKED_CLASSIFICATIONS,
     status_for_classification,
 )
+from app.crawl.result_helpers import TerminalResult
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies import http as http_mod
 from app.crawl.strategies.browser import BrowserRenderer
@@ -370,12 +371,13 @@ class TestStatusAgreesWithClassification:
         from app.crawl.result_helpers import _skipped_engine_result
 
         result = _skipped_engine_result(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            strategy="HTTP_DECLARED_CRAWLER",
-            classification="robots_disallowed",
-            error="robots_txt_disallowed",
-        )
+    TerminalResult(
+                original_url="http://example.com/",
+                normalized_url="http://example.com/",
+                strategy="HTTP_DECLARED_CRAWLER",
+                classification="robots_disallowed",
+                error="robots_txt_disallowed",
+))
         assert result.status == status_for_classification("robots_disallowed") == "skipped"
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
@@ -410,18 +412,19 @@ class TestStatusAgreesWithClassification:
 
         with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
             _failed_engine_result(
-                original_url="http://example.com/",
-                normalized_url="http://example.com/",
-                strategy=None,
-                # robots_disallowed's taxonomy status is "skipped", so a builder
-                # asserting "failed" for it is exactly the disagreement the guard
-                # exists to reject.
-                classification="robots_disallowed",
-                # A real taxonomy member (the construction gate rejects a
-                # non-member before the agreement guard is reached); the
-                # disagreement under test is status-vs-classification.
-                error="robots_disallowed",
-            )
+    TerminalResult(
+                    original_url="http://example.com/",
+                    normalized_url="http://example.com/",
+                    strategy=None,
+                    # robots_disallowed's taxonomy status is "skipped", so a builder
+                    # asserting "failed" for it is exactly the disagreement the guard
+                    # exists to reject.
+                    classification="robots_disallowed",
+                    # A real taxonomy member (the construction gate rejects a
+                    # non-member before the agreement guard is reached); the
+                    # disagreement under test is status-vs-classification.
+                    error="robots_disallowed",
+))
 
 
 def test_capabilities_advertises_exactly_the_taxonomy():

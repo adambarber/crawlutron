@@ -376,17 +376,18 @@ class TestEngineScopeEdges:
 
     def test_crawl_chain_robots_disallowed(self):
         from app.constants import status_for_classification
-        from app.crawl.result_helpers import _skipped_engine_result
+        from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
 
         result = _skipped_engine_result(
-            original_url="http://example.com/page",
-            normalized_url="http://example.com/page",
-            # A disallow precedes any strategy attempt, so the recorded strategy
-            # is None, never a label that implies an HTTP fetch happened.
-            strategy=None,
-            classification="robots_disallowed",
-            error="robots_txt_disallowed",
-        )
+    TerminalResult(
+                original_url="http://example.com/page",
+                normalized_url="http://example.com/page",
+                # A disallow precedes any strategy attempt, so the recorded strategy
+                # is None, never a label that implies an HTTP fetch happened.
+                strategy=None,
+                classification="robots_disallowed",
+                error="robots_txt_disallowed",
+))
         assert result.classification == "robots_disallowed"
         assert result.status == "skipped"
         assert result.attempted_strategies[0].strategy is None

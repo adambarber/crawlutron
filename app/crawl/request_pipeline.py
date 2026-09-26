@@ -23,7 +23,7 @@ from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.ids import new_request_id
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
-from app.crawl.result_helpers import _engine_result_from_exception, _skipped_engine_result
+from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _skipped_engine_result
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.memory_pressure import read_memory_stats
 from app.models import CrawlTask, CrawlWorker, EngineCrawlResult, NormalizedUrl
@@ -212,13 +212,14 @@ async def _robots_delay(state: _PipelineState, target_url: str) -> float | None:
 
 def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResult:
     return _skipped_engine_result(
-        original_url=job.original_url,
-        normalized_url=job.normalized_url,
-        strategy=None,
-        classification="robots_disallowed",
-        error="robots_txt_disallowed",
-        diagnostics={"robots": {"allowed": False}},
-    )
+    TerminalResult(
+            original_url=job.original_url,
+            normalized_url=job.normalized_url,
+            strategy=None,
+            classification="robots_disallowed",
+            error="robots_txt_disallowed",
+            diagnostics={"robots": {"allowed": False}},
+))
 
 
 async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[NormalizedUrl]:

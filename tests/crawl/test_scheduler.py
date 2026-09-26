@@ -9,7 +9,7 @@ import pytest
 from _result_builders import make_job, make_result
 from _timing_harnesses import recorder
 
-from app.crawl.result_helpers import _failed_result_for
+from app.crawl.result_helpers import TerminalResult, _failed_result_for
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
 from app.scheduler import DomainScheduler
 
@@ -813,13 +813,19 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         from app.constants import status_for_classification
         from app.crawl.result_helpers import _terminal_engine_result
 
+        # status is the outer function's own keyword, not a field of the shared
+        # value: it is what the per-status constructors pin, and a
+        # CONTEXT_VARYING_STATUS classification needs one the table cannot
+        # derive. See _terminal_engine_result.
         return _terminal_engine_result(
-            original_url=job.url,
-            normalized_url=job.url,
-            strategy=None,
+            TerminalResult(
+                original_url=job.url,
+                normalized_url=job.url,
+                strategy=None,
+                classification=classification,
+                error=None,
+            ),
             status=status_for_classification(classification),
-            classification=classification,
-            error=None,
         )
 
     async def test_a_network_fault_records_a_domain_failure(self):

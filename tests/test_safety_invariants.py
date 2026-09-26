@@ -475,7 +475,7 @@ __all__ = [
 # owning them, so `_failed_engine_result(status="skipped", ...)` would return
 # a skipped result, and mypy does not close that. The guard under both names
 # is the enforcement.
-_APP_TREE_CODE_LINE_BUDGET = 14_931
+_APP_TREE_CODE_LINE_BUDGET = 14_896
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -531,7 +531,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/render_options.py": (2, 2),
     "app/safe_url.py": (1, 1),
     "app/crawl/payload_helpers.py": (3, 1),
-    "app/crawl/result_helpers.py": (0, 0),
+    "app/crawl/result_helpers.py": (1, 0),
     "app/crawl/strategies/fetch_policy.py": (0, 0),
 }
 _PUBLIC_SURFACE_PROPERTY = Property(
