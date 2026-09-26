@@ -43,7 +43,6 @@ class TestAsyncCrawlApi:
         from app.main import job_store
 
         override_settings(denied_hosts="blocked.test")
-        before = len(job_store.list_jobs())
         response = await self.client.post(
             "/v1/crawl",
             json=make_crawl_payload("https://blocked.test/secret", async_mode=True),
@@ -52,7 +51,16 @@ class TestAsyncCrawlApi:
         assert response.status_code == 422
         assert response.json()["code"] == "validation_error"
         assert response.json()["details"]["errors"][0]["msg"] == "host_denied"
-        assert len(job_store.list_jobs()) == before
+        # Scoped to the blocked host rather than to a count of every job in the
+        # store: job_store is a process-global, and a background job submitted
+        # by another test can register between two reads of it, which made this
+        # assertion fail only under some xdist distributions. The claim under
+        # test is "this blocked target created no job", so ask exactly that.
+        assert not [
+            job
+            for job in job_store.list_jobs()
+            if job["root_url"].startswith("https://blocked.test")
+        ], "a policy-blocked target created a job"
 
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
