@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from _fetcher_factories import make_fetch, make_html_fetcher
+from _fetcher_factories import make_html_fetcher, routed_fetcher
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as pool_mod
@@ -61,20 +61,18 @@ async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allo
 async def test_sitemap_blocked_host_is_refused_before_page_fetch():
     calls: list[str] = []
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(url)
-        if url.endswith("/sitemap.xml"):
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="application/xml",
-                body=(
-                    b"<urlset><url><loc>https://allowed.test/keep</loc></url>"
-                    b"<url><loc>https://blocked.test/secret</loc></url></urlset>"
-                ),
-            )
-        return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=b"<html>ok</html>")
+    fetcher = routed_fetcher(
+        {
+            "/sitemap.xml": (
+                200,
+                b"<urlset><url><loc>https://allowed.test/keep</loc></url>"
+                b"<url><loc>https://blocked.test/secret</loc></url></urlset>",
+                "application/xml",
+            ),
+        },
+        calls=calls,
+        default=(200, b"<html>ok</html>", "text/html"),
+    )
 
     response = await crawl_request(
         {
@@ -181,9 +179,7 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
 def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     policy = HostPolicy.from_strings("", "")
-    html = (
-        "<script>fetch('/api/public'); fetch('http://127.0.0.1/private');</script>"
-    )
+    html = "<script>fetch('/api/public'); fetch('http://127.0.0.1/private');</script>"
 
     discovered = extract_post_fetch_discovery(
         html,

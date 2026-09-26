@@ -89,12 +89,8 @@ def _status_assignment_offenders() -> list[str]:
         if path.name == "job_store.py":
             continue
         for node in nodes_of(tree):
-            if (
-                isinstance(node, ast.Assign)
-                and any(
-                isinstance(t, ast.Attribute) and t.attr == "status"
-                for t in node.targets
-                )
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Attribute) and t.attr == "status" for t in node.targets
             ):
                 found.append(offender(path, node.lineno, "assigns .status"))
     return found

@@ -1,10 +1,9 @@
 """SSRF protection: blocked IP ranges, unresolved hosts, DNS pinning, local mode and fixture enforcement."""
 
 import socket
-from unittest.mock import patch
 
 import pytest
-from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets
+from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
@@ -121,18 +120,12 @@ class TestSSRFProtection:
                 _check_ssrf_protection(target)
 
     def test_check_ssrf_protection_allows_public_ip(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
-        ):
-            # Should not raise for a public IP.
+        # Should not raise for a public IP.
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
             _check_ssrf_protection("http://8.8.8.8:8080/")
 
     def test_resolve_and_pin_host_pins_first_public_ip(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 80))]
-        ):
+        with host_resolves_to(monkeypatch, "1.2.3.4"):
             hostname, ip = _resolve_and_pin_host("http://example.com:8080/")
         assert hostname == "example.com"
         assert ip == "1.2.3.4"
@@ -152,45 +145,26 @@ class TestSSRFProtection:
         """
         from app.crawl.strategies.pinned_transport import _DNS_CACHE
 
-        block_private_targets(monkeypatch)
         _DNS_CACHE.clear()
-        calls = {"n": 0}
-
-        def mock_getaddrinfo(*args, **kwargs):
-            calls["n"] += 1
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
-
-        with patch("socket.getaddrinfo", side_effect=mock_getaddrinfo):
+        with host_resolves_to(monkeypatch, "8.8.8.8") as resolved:
             _check_ssrf_protection("http://example.com:8080/")
-        assert calls["n"] == 1
+        assert resolved == ["example.com"]
 
 
 class TestSsrfDnsPinning:
     def test_resolves_once_and_pins_ip(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        calls = []
-
-        def fake_getaddrinfo(host, *a, **k):
-            calls.append(host)
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
-
-        with patch("socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        with host_resolves_to(monkeypatch, "93.184.216.34") as resolved:
             hostname, ip = _resolve_and_pin_host("http://example.com/")
         assert hostname == "example.com"
         assert ip == "93.184.216.34"
-        assert calls == ["example.com"], "hostname should be resolved exactly once"
+        assert resolved == ["example.com"], "hostname should be resolved exactly once"
 
     def test_rebinding_second_resolution_returns_private_but_pinning_uses_first(self, monkeypatch):
         assert_dns_pinning_uses_first_resolution(monkeypatch, "127.0.0.1")
 
     def test_private_resolution_raises(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
-        ):
-            with pytest.raises(ValueError):
-                _resolve_and_pin_host("http://example.com/")
+        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
+            _resolve_and_pin_host("http://example.com/")
 
     def test_localhost_blocked_by_default(self, monkeypatch):
         block_private_targets(monkeypatch)

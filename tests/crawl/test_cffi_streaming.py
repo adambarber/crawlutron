@@ -6,6 +6,7 @@ import os
 import time
 
 import pytest
+from _fetcher_factories import scripted_fetcher
 from _timing_harnesses import await_until
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
@@ -26,15 +27,12 @@ class TestCffiImpersonateStrategy:
         from app.crawl.cache import HttpCache
         from app.crawl.strategies.http import _http_strategy_result
 
-        def cffi_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            class Resp:
-                status_code = 200
-                headers = {"content-type": "text/html"}
-                body = b"<html><body>content</body></html>"
-                final_url = url
-                elapsed_ms = 10
-
-            return Resp()
+        # A real HttpFetchResult, not a local class that has the same five
+        # attributes: the strategy reads a production model, so a stand-in with
+        # a matching shape can pass while the model drifts.
+        cffi_fetcher = scripted_fetcher(
+            status=200, ctype="text/html", body=b"<html><body>content</body></html>"
+        )
 
         result = await _http_strategy_result(
             original_url="http://x/",
@@ -150,9 +148,7 @@ def _no_real_fallback(monkeypatch):
 def _scheduled_closes(monkeypatch):
     """Capture ``_release_stream_noblock`` calls instead of the real scheduling."""
     released: list[object] = []
-    monkeypatch.setattr(
-        fetchers_mod, "_release_stream_noblock", lambda response: released.append(response)
-    )
+    monkeypatch.setattr(fetchers_mod, "_release_stream_noblock", lambda response: released.append(response))
     return released
 
 
@@ -165,9 +161,7 @@ async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch)
     result = await _default_cffi_fetcher(URL, {}, 5, 4096)
 
     assert result == "httpx-fallback", "the documented httpx fallback must still serve"
-    assert released == [response], (
-        "the error path left the streamed response handle unreleased"
-    )
+    assert released == [response], "the error path left the streamed response handle unreleased"
     assert response.awaited is False, "abandoning must not await a live producer"
 
 
@@ -193,9 +187,7 @@ async def test_cancellation_of_the_queue_wait_releases_the_handle(monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await fetch
 
-    assert released == [response], (
-        "a cancelled cffi fetch abandoned its response handle on a shared session"
-    )
+    assert released == [response], "a cancelled cffi fetch abandoned its response handle on a shared session"
     assert response.awaited is False
 
 

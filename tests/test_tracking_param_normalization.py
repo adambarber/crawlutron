@@ -10,6 +10,7 @@ normalize_public_http_url = partial(
     policy=HostPolicy.unrestricted(),
 )
 
+
 def test_utm_params_stripped():
     a = normalize_public_http_url("https://example.gov/page?utm_source=twitter&utm_medium=social")
     b = normalize_public_http_url("https://example.gov/page?utm_source=facebook&utm_medium=email")

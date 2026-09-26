@@ -16,15 +16,14 @@ import threading
 from pathlib import Path
 
 import pytest
-from _fetcher_factories import site_fetcher
+from _fetcher_factories import crawled_results
 from _job_harnesses import make_job_store
 from _timing_harnesses import HANG_GUARD_SECONDS
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
-from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.engine import _ResultSpill, crawl_request
+from app.crawl.engine import _ResultSpill
 from app.crawl.job_store import JobStatus
 
 
@@ -115,6 +114,18 @@ def _serve_stale_envelope(monkeypatch, cache: ContentCache, stale: bytes) -> lis
     return serve
 
 
+def _clocked_cache(tmp_path) -> tuple[list[float], ContentCache]:
+    """A cache whose clock the test advances; return ``(now, cache)``.
+
+    The tests here are about a verdict computed at one instant from bytes read
+    at another, so the clock has to be a value they move. One builder keeps the
+    ttl/byte-cap pair they share from being restated as two literals.
+    """
+    now = [1000.0]
+    cache = ContentCache(str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000)
+    return now, cache
+
+
 class TestContentCacheDiskIOOffTheLock:
     """``ContentCache`` advertises that disk I/O never holds ``self._lock``;
     the event-loop thread contends on that lock (``aget``/``aset``), so a
@@ -147,9 +158,7 @@ class TestContentCacheDiskIOOffTheLock:
         monkeypatch.setattr(cc.Path, "glob", guard("glob", cc.Path.glob))
         return offenders
 
-    async def test_envelope_read_does_not_hold_the_lock(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    async def test_envelope_read_does_not_hold_the_lock(self, monkeypatch, tmp_path) -> None:
         cache = ContentCache(
             str(tmp_path),
             default_ttl=0,
@@ -164,17 +173,19 @@ class TestContentCacheDiskIOOffTheLock:
         real_read_text = Path.read_text
         real_read_bytes = Path.read_bytes
 
-        def slow_read(self, *args, **kwargs):
-            if self.parent == cache.cache_dir and not self.name.startswith("."):
-                read_started.set()
-                release.wait(timeout=10)
-            return real_read_text(self, *args, **kwargs)
+        def blocking_read(real):
+            """One wrapper for both read paths: the block is about the file, not the call."""
 
-        def slow_read_bytes(self, *args, **kwargs):
-            if self.parent == cache.cache_dir and not self.name.startswith("."):
-                read_started.set()
-                release.wait(timeout=10)
-            return real_read_bytes(self, *args, **kwargs)
+            def read(self, *args, **kwargs):
+                if self.parent == cache.cache_dir and not self.name.startswith("."):
+                    read_started.set()
+                    release.wait(timeout=10)
+                return real(self, *args, **kwargs)
+
+            return read
+
+        slow_read = blocking_read(real_read_text)
+        slow_read_bytes = blocking_read(real_read_bytes)
 
         monkeypatch.setattr(cc.Path, "read_text", slow_read)
         monkeypatch.setattr(cc.Path, "read_bytes", slow_read_bytes)
@@ -205,9 +216,7 @@ class TestContentCacheDiskIOOffTheLock:
 
     def test_prune_does_no_disk_io_under_the_lock(self, monkeypatch, tmp_path) -> None:
         now = [1000.0]
-        cache = ContentCache(
-            str(tmp_path), default_ttl=10, clock=lambda: now[0], max_entry_bytes=10_000
-        )
+        cache = ContentCache(str(tmp_path), default_ttl=10, clock=lambda: now[0], max_entry_bytes=10_000)
         cache.set("a", {"body": "a" * 200})
         cache.set("b", {"body": "b" * 200})
         now[0] = 2000.0  # both entries are past their TTL
@@ -227,9 +236,7 @@ class TestContentCacheDiskIOOffTheLock:
         path = cache._index["k"]
         assert cache._index_sizes["k"] == path.stat().st_size
 
-    def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    def test_prune_does_not_destroy_an_entry_refreshed_during_the_scan(self, monkeypatch, tmp_path) -> None:
         """The expiry verdict was computed from bytes read off the lock, so a
         re-set that landed during the scan (same deterministic path, a new TTL)
         must not be applied: the entry is live, and unlinking it destroys data.
@@ -239,10 +246,7 @@ class TestContentCacheDiskIOOffTheLock:
         prune verdict: the mirror guard there and the verdict guard here are the
         same currency check against the recorded index entry.
         """
-        now = [1000.0]
-        cache = ContentCache(
-            str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000
-        )
+        now, cache = _clocked_cache(tmp_path)
         cache.set("k", {"body": "a" * 100}, ttl=10)  # expires 1010
         # The refresh a concurrent writer landed during the scan: a longer
         # payload so the recorded byte size differs, and a TTL still live.
@@ -252,9 +256,7 @@ class TestContentCacheDiskIOOffTheLock:
 
         # prune's glob reads the bytes as they were just before the refresh:
         # an expired verdict computed from superseded bytes.
-        stale = json.dumps(
-            {"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}
-        ).encode()
+        stale = json.dumps({"expires": 1010.0, "value": {"body": "a" * 100}, "cached_at": 1000.0}).encode()
         assert len(stale) != cache._index_sizes["k"], "the refresh must change the byte size"
         serve_stale = _serve_stale_envelope(monkeypatch, cache, stale)
         assert cache.prune() == 0, "a live entry refreshed during the scan was unlinked"
@@ -275,10 +277,7 @@ class TestContentCacheDiskIOOffTheLock:
         The sibling value-mirror write in the same method is already guarded;
         this is the same guard for the metadata mirror.
         """
-        now = [1000.0]
-        cache = ContentCache(
-            str(tmp_path), default_ttl=30, clock=lambda: now[0], max_entry_bytes=10_000
-        )
+        now, cache = _clocked_cache(tmp_path)
         cache.set("k", {"v": "old"})  # (expires, cached_at) = (1030.0, 1000.0)
         real = cache._index_cached_at["k"]
         assert real == (1030.0, 1000.0)
@@ -319,9 +318,7 @@ class TestJobRunnerSavesOffTheEventLoop:
     serialization of the whole row and the SQLite commit are blocking work and
     must not run on the event loop."""
 
-    async def test_save_does_not_block_the_event_loop(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    async def test_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         store = make_job_store(str(tmp_path))
         job = store.create("http://example.com/", {})
 
@@ -371,9 +368,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     again.
     """
 
-    async def test_run_async_crawl_save_does_not_block_the_event_loop(
-        self, monkeypatch, tmp_path
-    ) -> None:
+    async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         from _job_harnesses import make_job_store
 
         from app.api.async_crawl_runner import run_async_crawl
@@ -424,8 +419,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
 
         progress = await liveness.run_with_heartbeat(scenario, timeout=30)
         assert progress >= liveness.needed, (
-            "the event loop made "
-            f"{progress} heartbeat ticks while the async crawl runner saved a job row"
+            f"the event loop made {progress} heartbeat ticks while the async crawl runner saved a job row"
         )
         # The job reached COMPLETED through the offloaded save, so the store is
         # not just skipping the work.
@@ -437,9 +431,7 @@ class TestSpillAssemblyOffTheEventLoop:
     ``load_ordered``: a full file scan plus a ``json.loads`` per line. That is
     blocking work and must not run on the event loop."""
 
-    async def test_load_ordered_does_not_block_the_event_loop(
-        self, monkeypatch
-    ) -> None:
+    async def test_load_ordered_does_not_block_the_event_loop(self, monkeypatch) -> None:
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking read-back
         real_load = _ResultSpill.load_ordered
@@ -451,18 +443,16 @@ class TestSpillAssemblyOffTheEventLoop:
         monkeypatch.setattr(_ResultSpill, "load_ordered", slow_load)
 
         pages = {"/": (200, "<html><body>hello</body></html>", "text/html")}
-        payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 5}}}
 
         async def scenario() -> dict:
-            crawl = asyncio.ensure_future(
-                crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-            )
+            # The crawl is scheduled, not awaited inline: the point is what the
+            # event loop does while the spilled results are read back.
+            crawl = asyncio.ensure_future(crawled_results(pages, limits={"max_depth": 1, "max_pages": 5}))
             return await asyncio.wait_for(crawl, timeout=15)
 
         out = await liveness.run_with_heartbeat(scenario, timeout=20)
         assert observed[0] >= liveness.needed, (
-            f"the event loop made {observed[0]} heartbeat ticks "
-            "while the spilled results were read back"
+            f"the event loop made {observed[0]} heartbeat ticks while the spilled results were read back"
         )
         assert len(out["results"]) == 1
         assert out["results"][0]["original_url"] == "http://example.com/"

@@ -4,7 +4,6 @@ Each render opens a browser tab; without a cap a burst of N requests opens N
 tabs and crashes/OOMs the shared Camoufox process.
 """
 
-
 import asyncio
 
 from _policy_factories import UNRESTRICTED_HOST_POLICY
@@ -86,11 +85,16 @@ async def test_concurrent_page_renders_capped(monkeypatch):
     renderer = BrowserRenderer(browser_factory=lambda **kw: _FakeBrowserCM(tracker))
     try:
         opts = RenderOptions(browser_profile={})
-        await asyncio.gather(*[renderer.render(
-            "http://example.com/",
-            opts,
-            policy=UNRESTRICTED_HOST_POLICY,
-        ) for _ in range(6)])
+        await asyncio.gather(
+            *[
+                renderer.render(
+                    "http://example.com/",
+                    opts,
+                    policy=UNRESTRICTED_HOST_POLICY,
+                )
+                for _ in range(6)
+            ]
+        )
     finally:
         await renderer.close()
     assert tracker["max"] <= 2, f"page cap ignored: {tracker}"

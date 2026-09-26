@@ -25,9 +25,7 @@ EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 # service becomes its own repository. `relative_to` is not a no-op assertion: if
 # the config ever moved off the service root, this would say so.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
-ENFORCEMENT_COMMAND = (
-    f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
-)
+ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
 REPORTING_JOBS = {"enforcement", "test-fast"}
 # GitHub's template form for an errexit shell. The required aggregate is a chain
 # of `test` lines, so its exit code is its last line's without errexit.
@@ -143,7 +141,11 @@ def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subproces
     subprocess.run(["git", "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True)
     return subprocess.run(
         [str(PRE_COMMIT_PATH), "run", "--all-files", "--config", str(config_path)],
-        cwd=temp_dir, capture_output=True, text=True, check=False, timeout=30,
+        cwd=temp_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
     )
 
 
@@ -161,9 +163,7 @@ def _assert_no_config_exclude(config: str) -> None:
     exclude = document.get("exclude")
     if exclude is None:
         return
-    assert isinstance(exclude, str), (
-        "the pre-commit config exclude must be a string pattern"
-    )
+    assert isinstance(exclude, str), "the pre-commit config exclude must be a string pattern"
     # `.*` matches every file — total disable.
     # `*.py` matches every Python file — disables every Python-scoped hook.
     if exclude in (".*", "*.py", ".*.py$"):
@@ -237,12 +237,9 @@ def test_config_without_exclude_runs_the_hook_and_fails(tmp_path) -> None:
     """The harness is real pre-commit: without exclude the hook fails."""
     completed = _run_precommit_on_temp_config(tmp_path, _synthetic_config(None))
     assert completed.returncode != 0, (
-        "the synthetic hook must fail when it actually runs:\n"
-        f"stdout:\n{completed.stdout}"
+        f"the synthetic hook must fail when it actually runs:\nstdout:\n{completed.stdout}"
     )
-    assert "exit code: 1" in completed.stdout, (
-        f"the hook did not run as expected:\n{completed.stdout}"
-    )
+    assert "exit code: 1" in completed.stdout, f"the hook did not run as expected:\n{completed.stdout}"
 
 
 def test_the_gate_rejects_a_config_exclude_that_disables_every_hook() -> None:
@@ -361,13 +358,14 @@ def _assert_failure_propagation(workflow: str) -> None:
     needs = _required_needs(workflow)
     assert "enforcement" in needs, "the required aggregate must depend on enforcement"
     assert REPORTING_JOBS <= needs, (
-        f"the required aggregate must depend on every reporting job, "
-        f"missing {REPORTING_JOBS - needs}"
+        f"the required aggregate must depend on every reporting job, missing {REPORTING_JOBS - needs}"
     )
     _required_gate_shell(workflow)
     script = _required_gate_script(workflow)
     for job in sorted(needs):
-        assert _result_assertion(job) in script, f"the required aggregate never asserts needs.{job}.result succeeded"
+        assert _result_assertion(job) in script, (
+            f"the required aggregate never asserts needs.{job}.result succeeded"
+        )
 
     results = {job: "success" for job in needs}
     assert _run_script(_render_results(script, results)).returncode == 0, "all-green must pass"
@@ -398,19 +396,19 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
 
     entry = _entry(jscpd)
     assert ".venv/bin/python tests/_jscpd_gate.py all" in entry
-    assert "--min-lines 8" in entry
-    assert "--min-tokens 40" in entry
-    # The production tree carries its own, tighter floor, and it is on the
-    # command line rather than in the gate so the command stays the one place a
-    # reviewer looks to see what duplication costs.
-    assert "--app-min-lines 7" in entry
-    assert "--app-min-tokens 35" in entry
+    # The floor is on the command line rather than inside the gate so the
+    # command stays the one place a reviewer looks to see what duplication costs.
+    # One floor for every root: the split it replaced existed only while a
+    # loose test floor was hiding production duplication, and a second number
+    # would be a second thing to ratchet.
+    assert "--min-lines 4" in entry
+    assert "--min-tokens 39" in entry
     assert "--threshold 0" in entry
-    production = re.search(r"--app-min-lines (\d+) --app-min-tokens (\d+)", entry)
-    assert production is not None
-    support = re.search(r"--min-lines (\d+) --min-tokens (\d+)", entry)
-    assert support is not None
-    assert int(production.group(1)) < int(support.group(1)), "the production floor must be the tighter one"
+    assert "--app-min-lines" not in entry, (
+        "the per-tree floor split is gone; one number must serve both trees"
+    )
+    floor = re.search(r"--min-lines (\d+) --min-tokens (\d+)", entry)
+    assert floor is not None
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
     expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
@@ -442,7 +440,27 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
         "tests/test_pyright_budget.py",
         "tests/test_safety_invariants.py",
     }
+    assert_no_hook_command_rerun(WORKFLOW_PATH.read_text(encoding="utf-8"), hook_tools)
+
+
+def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
+    """Bites: adding a job that re-runs a hook command fails the check."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    broken = workflow.replace(
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml",
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests scripts",
+    )
+    with pytest.raises(AssertionError):
+        assert_no_hook_command_rerun(broken, {"python -m ruff check"})
+
+
+def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
+    """No CI job re-runs a command the pre-commit enforcement job already runs.
+
+    The duplicate and the gate are two copies of the same check, and only the
+    copy that is edited drifts. The error names the job so the offending step is
+    findable from the failure alone.
+    """
     for name, job in _jobs(workflow).items():
         for step in job.get("steps") or []:
             run = step.get("run")
@@ -454,24 +472,6 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
                     "enforcement already runs it; a duplicate is a second copy "
                     "that can drift from the gate"
                 )
-
-
-def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
-    """Bites: adding a job that re-runs a hook command fails the check."""
-    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
-    broken = workflow.replace(
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml",
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests scripts",
-    )
-    hook_tools = {"python -m ruff check"}
-    with pytest.raises(AssertionError):
-        for name, job in _jobs(broken).items():
-            for step in job.get("steps") or []:
-                run = step.get("run")
-                if not isinstance(run, str):
-                    continue
-                for tool in hook_tools:
-                    assert tool not in run, f"job {name} re-runs a hook command"
 
 
 def _evasive_workflow(evasion: str) -> str:
@@ -499,16 +499,20 @@ def _evasive_workflow(evasion: str) -> str:
             1,
         )
     elif evasion == "dropped-assertion":
-        mutated = workflow.replace('          ' + _result_assertion("enforcement") + "\n", "", 1)
+        mutated = workflow.replace("          " + _result_assertion("enforcement") + "\n", "", 1)
     elif evasion == "dropped-aggregate-need":
-        mutated = workflow.replace("needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1)
+        mutated = workflow.replace(
+            "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, typecheck, test-fast]", 1
+        )
     elif evasion == "dropped-reporting-job":
         # Drop a REPORTING job (not the aggregate) from `needs:` and its
         # result assertion. This is the narrower-shape lie: the required
         # aggregate still depends on enforcement, and every remaining need
         # is asserted, but one reporting job is now invisible to it.
-        mutated = workflow.replace("needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, enforcement, test-fast]", 1)
-        mutated = mutated.replace('          ' + _result_assertion("typecheck") + "\n", "", 1)
+        mutated = workflow.replace(
+            "needs: [lint, typecheck, enforcement, test-fast]", "needs: [lint, enforcement, test-fast]", 1
+        )
+        mutated = mutated.replace("          " + _result_assertion("typecheck") + "\n", "", 1)
     elif evasion == "no-always":
         mutated = workflow.replace("    if: ${{ always() }}\n", "", 1)
     elif evasion == "no-errexit":
@@ -552,7 +556,9 @@ def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
     script = _required_gate_script(workflow)
     assert _required_gate_shell(workflow) == ERREXIT_SHELL
     assert _run_script(_render_results(script, {job: "success" for job in needs})).returncode == 0
-    failed = _run_script(_render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"}))
+    failed = _run_script(
+        _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"})
+    )
     assert failed.returncode != 0, "a failed enforcement job must fail the required aggregate"
     # The same script under a shell without errexit reports success, which is why
     # the declared shell above is a gate and not a style preference.
@@ -594,8 +600,7 @@ def test_all_hooks_share_one_trigger() -> None:
     hooks = _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))
     triggers = {_field(block, "files") for _, block in hooks}
     assert triggers == {ENFORCEMENT_TRIGGER_PATTERN}, (
-        f"hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; "
-        f"got {sorted(triggers)}"
+        f"hooks must all share the one trigger {ENFORCEMENT_TRIGGER_PATTERN!r}; got {sorted(triggers)}"
     )
 
 
@@ -769,9 +774,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
     subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
     (service_root / "scripts").mkdir(parents=True)
-    (service_root / "scripts" / "gate").write_text(
-        GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8"
-    )
+    (service_root / "scripts" / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
     (service_root / "scripts" / "gate").chmod(0o755)
     # The helper execs the command it is handed; the synthetic service has no
     # venv of its own, so the command names the stub interpreter directly.

@@ -9,10 +9,7 @@ pathological patterns) and uses the compiled pattern's .search() in the loop.
 
 import re
 
-from _fetcher_factories import run_scoped_crawl, site_fetcher
-
-from app.crawl.cache import HttpCache
-from app.crawl.engine import crawl_request
+from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl
 
 CATASTROPHIC = "(a+)+$"
 
@@ -37,16 +34,15 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
         "/a": (200, "<html>a</html>", "text/html"),
         "/b": (200, "<html>b</html>", "text/html"),
     }
-    payload = {
-        "url": "http://example.com/",
-        # Catastrophic-but-valid pattern: bounded matching (N-1) runs it with
-        # a wall-clock budget instead of rejecting it at compile. It genuinely
-        # matches /a (ends in "a") and not /b, so scope filtering now WORKS
-        # where the old reject-on-shape guard silently dropped the filter.
-        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": CATASTROPHIC},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    urls = {r["normalized_url"] for r in out["results"]}
+    # Catastrophic-but-valid pattern: bounded matching (N-1) runs it with
+    # a wall-clock budget instead of rejecting it at compile. It genuinely
+    # matches /a (ends in "a") and not /b, so scope filtering now WORKS
+    # where the old reject-on-shape guard silently dropped the filter.
+    urls = set(
+        await crawled_urls(
+            pages, limits={"max_depth": 1, "max_pages": 10}, policy={"scope_regex": CATASTROPHIC}
+        )
+    )
     assert "http://example.com/a" in urls
     assert "http://example.com/b" not in urls
 
@@ -72,11 +68,9 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
         "/a": (200, "<html>a</html>", "text/html"),
         "/b": (200, "<html>b</html>", "text/html"),
     }
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "scope_regex": r"^/keep/"},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+    out = await crawled_results(
+        pages, limits={"max_depth": 1, "max_pages": 10}, policy={"scope_regex": r"^/keep/"}
+    )
     assert calls["n"] > 0, "bounded match never invoked"
     urls = {r["normalized_url"] for r in out["results"]}
     assert "http://example.com" in urls

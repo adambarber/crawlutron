@@ -49,9 +49,7 @@ class _PeerHoldingTheFile:
     def __init__(self, db_path: str) -> None:
         self._holding = threading.Event()
         self._release = threading.Event()
-        self._thread = threading.Thread(
-            target=self._hold, args=(db_path,), daemon=True
-        )
+        self._thread = threading.Thread(target=self._hold, args=(db_path,), daemon=True)
         self._thread.start()
         assert self._holding.wait(10), "peer never acquired the lock"
 

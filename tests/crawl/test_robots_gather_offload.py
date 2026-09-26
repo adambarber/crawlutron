@@ -9,27 +9,13 @@ contract: overlapping checks must be observable via an in-flight counter.
 import asyncio
 
 from _policy_factories import UNRESTRICTED_HOST_POLICY
-from _result_builders import Spill, make_engine_result
-from _scheduler_doubles import FakeScheduler as _Scheduler
+from _recursive_harnesses import drive_recursive_crawl
+from _recursive_harnesses import make_crawl_task as _make_job
+from _result_builders import make_engine_result
 
 from app.crawl.admission import RobotsGate
-from app.crawl.recursive import run_recursive_crawl
-from app.models import CrawlTask, DiscoveredLink
+from app.models import DiscoveredLink
 from app.settings import CrawlerSettings
-
-
-def _make_job(index: int, host: str) -> CrawlTask:
-    url = f"http://{host}/page{index}"
-    return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
-class _Gate:
-    def batch_scale_factor(self):
-        return 1.0
-
-    def memory_ratio(self):
-        return 0.0
-
-    def cpu_ratio(self):
-        return 0.0
 
 
 def _tracker():
@@ -78,30 +64,8 @@ def _tracker():
 
 
 async def _drive(jobs, worker, allows, crawl_delay, **kwargs):
-    spill = Spill()
-    await run_recursive_crawl(
-        jobs=jobs,
-        scheduler=_Scheduler(),
-        worker=worker,
-        robots_allows=allows,
-        robots_crawl_delay=crawl_delay,
-        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
-        spill=spill,
-        shutdown_event=asyncio.Event(),
-        max_depth=kwargs.get("max_depth", 0),
-        max_pages=kwargs.get("max_pages", 50),
-        respect_robots=True,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
-        global_concurrency=kwargs.get("global_concurrency", 4),
-        seed_sitemaps=False,
-        resource_gate=_Gate(),
-        admission=None,
-        host_policy=UNRESTRICTED_HOST_POLICY,
-    )
-    return spill
+    run = await drive_recursive_crawl(jobs, worker, allows=allows, crawl_delay=crawl_delay, **kwargs)
+    return run.spill
 
 
 async def test_recursive_batch_robots_checks_run_concurrently():
@@ -233,29 +197,9 @@ async def test_recursive_screen_no_robots_calls_when_disrespected():
     async def worker(job):
         return make_engine_result(job.normalized_url)
 
-    spill = Spill()
-    await run_recursive_crawl(
-        jobs=jobs,
-        scheduler=_Scheduler(),
-        worker=worker,
-        robots_allows=allows,
-        robots_crawl_delay=None,
-        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
-        spill=spill,
-        shutdown_event=asyncio.Event(),
-        max_depth=0,
-        max_pages=50,
-        respect_robots=False,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
-        global_concurrency=4,
-        seed_sitemaps=False,
-        resource_gate=_Gate(),
-        admission=None,
-        host_policy=UNRESTRICTED_HOST_POLICY,
-    )
+    spill = (
+        await drive_recursive_crawl(jobs, worker, allows=allows, crawl_delay=None, respect_robots=False)
+    ).spill
     assert calls == []
     assert len(spill.writes) == 3
 

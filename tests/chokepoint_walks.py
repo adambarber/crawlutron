@@ -48,7 +48,7 @@ import io
 import pathlib
 import tokenize
 import weakref
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from functools import cache, lru_cache
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
@@ -70,9 +70,7 @@ SANCTIONED = frozenset({"safe_regex.py"})
 # right key -- a re-parse of an unchanged file compares equal everywhere a
 # detector looks, so only identity distinguishes "I already walked this" from
 # "this is a different tree that happens to look the same".
-_NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = (
-    weakref.WeakKeyDictionary()
-)
+_NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakref.WeakKeyDictionary()
 
 
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
@@ -135,9 +133,7 @@ def code_line_count(source: str) -> int:
     """
     docstring_lines: set[int] = set()
     for node in ast.walk(ast.parse(source)):
-        if not isinstance(
-            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        ):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         body = getattr(node, "body", None)
         first = body[0] if body else None
@@ -146,9 +142,7 @@ def code_line_count(source: str) -> int:
             and isinstance(first.value, ast.Constant)
             and isinstance(first.value.value, str)
         ):
-            docstring_lines.update(
-                range(first.lineno, (first.end_lineno or first.lineno) + 1)
-            )
+            docstring_lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
 
     code_lines = {
         tok.start[0]
@@ -200,23 +194,216 @@ def _app_trees(exclude: frozenset[str]) -> tuple[tuple[pathlib.Path, ast.Module]
     return tuple((path, ast.parse(path.read_text(encoding="utf-8"))) for path in _app_files(exclude))
 
 
-def app_offenders(detector, *, exclude: frozenset[str] = SANCTIONED) -> list[str]:
-    """Run one app-tree detector and collect its formatted offenders."""
+def relative_posix(path: pathlib.Path) -> str:
+    """``app/crawl/admission.py`` -- the label a detector exempts a path by."""
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+def app_offenders(
+    detector,
+    *,
+    exclude: frozenset[str] = SANCTIONED,
+    skip: tuple[str, ...] = (),
+    kwargs_for: Callable[[str], dict[str, object]] | None = None,
+    **detector_kwargs,
+) -> list[str]:
+    """Run one app-tree detector over every module and collect its offenders.
+
+    ``skip`` holds repo-relative paths the detector's own contract exempts -- the
+    chokepoint module that legitimately owns the pattern it bans. Constant
+    ``detector_kwargs`` are forwarded, and ``kwargs_for`` supplies the per-module
+    ones (a detector that allows a named function in one specific module), so a
+    parameterized detector is swept through here like one taking nothing instead
+    of each such test hand-rolling the loop and re-deciding which path holds the
+    definition.
+    """
+    exempt = {str(item) for item in skip}
     offenders: list[str] = []
     for path, tree in app_trees(exclude=exclude):
-        offenders.extend(detector(tree, path))
+        relative = relative_posix(path)
+        if relative in exempt:
+            continue
+        per_path = kwargs_for(relative) if kwargs_for is not None else {}
+        offenders.extend(detector(tree, path, **detector_kwargs, **per_path))
     return offenders
+
+
+def attribute_calls(tree: ast.AST) -> Iterator[tuple[ast.Call, ast.Attribute]]:
+    """Yield ``(call, callee)`` for every call whose callee is an attribute.
+
+    The callee comes back narrowed alongside the call so a caller reads
+    ``func.attr`` without re-asserting the type it just paid this walk to learn.
+    """
+    for node in nodes_of(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            yield node, node.func
+
+
+def single_target_name_assignments(
+    nodes: Iterable[ast.AST],
+    value_predicate: Callable[[ast.expr], bool],
+) -> Iterator[tuple[ast.Assign, str]]:
+    """Yield ``(node, name)`` for single-target Name assignments whose value matches.
+
+    ``a, b = ...`` and ``obj.x = ...`` are deliberately not yielded: both callers
+    are asking "which plain local names hold this kind of value", and a
+    multi-target or attribute target is a different question.
+    """
+    for node in nodes:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and value_predicate(node.value):
+            yield node, target.id
+
+
+def local_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield ``node`` and its descendants, stopping at a nested definition.
+
+    A detector asking "does THIS expression call strip()" must not be answered by
+    a ``strip`` in a function defined inside it, so the walk does not descend
+    into a nested ``def``/``async def``/``class`` body. Distinct from
+    :func:`nodes_of`, which is whole-subtree and cached.
+    """
+    yield node
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield from local_nodes(child)
+
+
+def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, ast.Call]]:
+    """Yield ``(lowercased_leaf_name, call)`` for every call inside ``node``.
+
+    ``resolved_call_name(tree, call).rsplit(".", 1)[-1].lower()`` is how a detector
+    asks "is this a call to strip/lower/format/parse" without caring which module
+    imported it. Spelled out it is four lines, and it was written out separately
+    by every detector that asked.
+    """
+    for child in local_nodes(node):
+        if isinstance(child, ast.Call):
+            yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower(), child
+
+
+def getattr_literal_name(call: ast.Call) -> str | None:
+    """The attribute name of ``getattr(obj, "name")`` when it is a literal string.
+
+    ``getattr(x, "strip")`` and ``x.strip()`` name the same method, and a detector
+    that recognizes only the second is blind to the first. Returned lowercased so
+    the caller compares against a lowercase name set.
+    """
+    if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant):
+        value = call.args[1].value
+        if isinstance(value, str):
+            return value.lower()
+    return None
+
+
+def calls_naming_method(
+    tree: ast.AST,
+    node: ast.AST,
+    method_names: frozenset[str],
+) -> Iterator[ast.Call]:
+    """Yield calls inside ``node`` that reach one of ``method_names``.
+
+    Reaches a method two ways on purpose: a direct call (``s.strip()``) and a
+    literal-named ``getattr`` (``getattr(s, "strip")()``). Aliasing a method
+    through a variable is out of reach for any AST-only check and is not claimed
+    to be.
+    """
+    for name, call in local_call_leaf_names(tree, node):
+        if name in method_names:
+            yield call
+        elif name == "getattr" and getattr_literal_name(call) in method_names:
+            yield call
+
+
+def has_method_call(tree: ast.AST, node: ast.AST, method_names: frozenset[str]) -> bool:
+    """Does ``node`` reach any of ``method_names``? The boolean form."""
+    return next(calls_naming_method(tree, node, method_names), None) is not None
+
+
+def literal_keyword_membership_offenders(
+    tree: ast.AST,
+    path: pathlib.Path,
+    *,
+    members,
+    function_names: str | frozenset[str],
+    keyword_names: str | tuple[str, ...],
+    label: str,
+    type_name: str,
+    advice: str,
+) -> list[str]:
+    """A literal passed to ``function_names(**keyword_names)`` that is not a member.
+
+    The shared body of the "a spelled value must be a real enum member" detectors
+    (result status, crawl strategy, ...). Each of those was the same seven lines
+    over :func:`call_keyword_values` with a different message, and a hand-rolled
+    copy is exactly where a member could be added to one axis and forgotten on
+    the other. ``members`` is read from the live type at test time, never from a
+    hand-kept exemption list.
+
+    A non-string literal is never reported, which is what admits ``None`` for
+    "no strategy was attempted" without a special case: the member set is a set
+    of strings, and the honest non-member is the one that is spelled.
+    """
+    offenders: list[str] = []
+    for node, value in call_keyword_values(
+        tree,
+        function_names=function_names,
+        keyword_names=keyword_names,
+    ):
+        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+            continue
+        if value.value in members:
+            continue
+        offenders.append(
+            offender(
+                path,
+                node.lineno,
+                f"{label}={value.value!r} is not a {type_name} member; {advice}",
+            )
+        )
+    return offenders
+
+
+def assert_fires_once(detector, fires: dict[str, str], path: pathlib.Path) -> None:
+    """A ``*_bites`` proof: each source fires the detector exactly once, saying why.
+
+    The red-proof half of a detector test, written once because it is the same
+    three assertions in every bites test, and a hand-rolled copy can quietly
+    assert less than the real thing.
+    """
+    for src, expected in fires.items():
+        offenders = detector(ast.parse(src), path)
+        assert len(offenders) == 1, (src, offenders)
+        assert expected in offenders[0], (src, offenders)
+
+
+def assert_stays_clean(detector, clean: tuple[str, ...], path: pathlib.Path) -> None:
+    """The clean half of a ``*_bites`` proof: sanctioned shapes must not fire."""
+    for src in clean:
+        offenders = detector(ast.parse(src), path)
+        assert not offenders, (src, offenders)
+
+
+def calls_to_any(tree: ast.AST, function_names) -> Iterator[ast.Call]:
+    """Yield direct calls whose callee is any of ``function_names``.
+
+    The set-valued sibling of :func:`calls_named`. Several detectors track a set
+    of names they *discovered* -- aliases, a builder propagated through
+    assignments -- rather than one literal, and restating the
+    ``isinstance(node.func, ast.Name) and node.func.id in names`` filter inline
+    is how two detectors end up carrying the same scan shape twice.
+    """
+    for node in nodes_of(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in function_names:
+            yield node
 
 
 def calls_named(tree: ast.AST, function_name: str) -> Iterator[ast.Call]:
     """Yield direct calls to one named function in an AST tree."""
-    for node in nodes_of(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == function_name
-        ):
-            yield node
+    return calls_to_any(tree, {function_name})
 
 
 def call_keyword_values(
@@ -228,13 +415,7 @@ def call_keyword_values(
     """Yield selected keyword values from direct calls to named functions."""
     names = {function_names} if isinstance(function_names, str) else function_names
     keywords = {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
-    for node in nodes_of(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in names
-        ):
-            continue
+    for node in calls_to_any(tree, names):
         # One pair per DISTINCT keyword name: Python itself rejects a repeated
         # keyword, so a call carrying two is un-compilable source, and emitting
         # an offender per occurrence would over-report against the one-per-call

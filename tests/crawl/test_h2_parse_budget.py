@@ -23,7 +23,7 @@ duplicated parse inside a stage fails here rather than in a perf profile.
 """
 
 import pytest
-from _fetcher_factories import make_fetch, run_http_strategy
+from _fetcher_factories import run_http_strategy, scripted_fetcher
 
 from app.crawl import extraction
 
@@ -34,7 +34,7 @@ HTML = (
 )
 
 META_HTML = (
-    "<html lang=\"en\"><head><title>Meta T</title>"
+    '<html lang="en"><head><title>Meta T</title>'
     '<meta name="description" content="the description">'
     '<meta property="og:image" content="https://cdn.example/i.png">'
     '<link rel="canonical" href="https://example.com/canon">'
@@ -58,14 +58,7 @@ def parse_counter(monkeypatch):
 
 
 async def _run(policy_extra: dict, *, html: str = HTML):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            headers={"content-type": "text/html"},
-            body=html.encode(),
-        )
+    fetcher = scripted_fetcher(status=200, headers={"content-type": "text/html"}, body=html.encode())
 
     return await run_http_strategy(
         url="http://example.com/",

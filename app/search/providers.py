@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -178,8 +179,17 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
 class _ApiKeyProvider:
     """Shared credential slot for the keyed providers (Tavily/Brave/Serper).
 
-    The three providers differ only in endpoint, shape, and key names; the
-    constructor contract is one place so a fourth provider cannot drift it.
+    The three providers differ only in endpoint, shape, and key names. The
+    constructor contract and the *whole* response contract -- parse, refuse a
+    non-200 with the provider-specific message, normalize the result list --
+    are one place each, so a fourth provider cannot reach a result by
+    forgetting the non-200 check, which is the one step of the flow that
+    silently turns an error page into an empty result set.
+
+    ``items_of`` is passed the parsed payload and returns the raw result list,
+    because that is the only part the three disagree on beyond key names:
+    Tavily nests under ``results``, Brave under ``web.results``, Serper under
+    ``organic``.
     """
 
     name: str
@@ -187,6 +197,28 @@ class _ApiKeyProvider:
     def __init__(self, api_key: str, host_policy: HostPolicy) -> None:
         self._api_key = api_key
         self._host_policy = host_policy
+
+    def _results(
+        self,
+        status: int,
+        body: str,
+        items_of: Callable[[dict[str, Any]], object],
+        *,
+        url_key: str,
+        title_key: str,
+        description_key: str,
+    ) -> list[SearchResult]:
+        """The keyed-provider response contract, in one place."""
+        payload = _parse_json(body)
+        if status != 200:
+            raise SearchProviderError(_provider_message(self.name, status, payload))
+        return _collect_results(
+            items_of(payload),
+            url_key=url_key,
+            title_key=title_key,
+            description_key=description_key,
+            policy=self._host_policy,
+        )
 
 
 class TavilyProvider(_ApiKeyProvider):
@@ -209,15 +241,13 @@ class TavilyProvider(_ApiKeyProvider):
             headers={"Content-Type": "application/json"},
             timeout_seconds=timeout_seconds,
         )
-        payload = _parse_json(body)
-        if status != 200:
-            raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(
-            payload.get("results"),
+        return self._results(
+            status,
+            body,
+            lambda payload: payload.get("results"),
             url_key="url",
             title_key="title",
             description_key="content",
-            policy=self._host_policy,
         )
 
 
@@ -234,15 +264,13 @@ class BraveProvider(_ApiKeyProvider):
             headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
             timeout_seconds=timeout_seconds,
         )
-        payload = _parse_json(body)
-        if status != 200:
-            raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(
-            (payload.get("web") or {}).get("results"),
+        return self._results(
+            status,
+            body,
+            lambda payload: (payload.get("web") or {}).get("results"),
             url_key="url",
             title_key="title",
             description_key="description",
-            policy=self._host_policy,
         )
 
 
@@ -259,15 +287,13 @@ class SerperProvider(_ApiKeyProvider):
             headers={"X-API-KEY": self._api_key, "Content-Type": "application/json"},
             timeout_seconds=timeout_seconds,
         )
-        payload = _parse_json(body)
-        if status != 200:
-            raise SearchProviderError(_provider_message(self.name, status, payload))
-        return _collect_results(
-            payload.get("organic"),
+        return self._results(
+            status,
+            body,
+            lambda payload: payload.get("organic"),
             url_key="link",
             title_key="title",
             description_key="snippet",
-            policy=self._host_policy,
         )
 
 

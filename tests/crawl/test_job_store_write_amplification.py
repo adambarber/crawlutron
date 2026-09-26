@@ -78,10 +78,7 @@ class TestConcurrentAccessHoldsTheConnectionLock:
             for future in futures:
                 future.result()
 
-        assert not errors, (
-            "the shared connection was used from two threads at once: "
-            f"{errors[0]!r}"
-        )
+        assert not errors, f"the shared connection was used from two threads at once: {errors[0]!r}"
 
 
 def _accumulated_bytes(db_path: str, job_id: str) -> int:
@@ -96,10 +93,8 @@ def _accumulated_bytes(db_path: str, job_id: str) -> int:
     conn = sqlite3.connect(db_path)
     try:
         columns = [row[1] for row in conn.execute("PRAGMA table_info(crawl_jobs)")]
-        total = " + ".join(f'length(COALESCE("{column}", \'\'))' for column in columns)
-        row = conn.execute(
-            f"SELECT {total} FROM crawl_jobs WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        total = " + ".join(f"length(COALESCE(\"{column}\", ''))" for column in columns)
+        row = conn.execute(f"SELECT {total} FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
     finally:
         conn.close()
     return row[0] or 0
@@ -108,9 +103,9 @@ def _accumulated_bytes(db_path: str, job_id: str) -> int:
 def _result_rows(db_path: str, job_id: str) -> int:
     conn = sqlite3.connect(db_path)
     try:
-        return conn.execute(
-            "SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)
-        ).fetchone()[0]
+        return conn.execute("SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)).fetchone()[
+            0
+        ]
     finally:
         conn.close()
 

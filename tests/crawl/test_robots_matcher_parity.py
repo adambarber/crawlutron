@@ -111,8 +111,7 @@ def test_matcher_matches_the_regex_dialect_on_generated_inputs(seed: int):
     cases = 0
     while cases < 50:
         pattern = "/" + "".join(
-            rng.choice(["a", "b", "*", ".", "$", "ab", "*a", "b*", "$"])
-            for _ in range(rng.randint(0, 4))
+            rng.choice(["a", "b", "*", ".", "$", "ab", "*a", "b*", "$"]) for _ in range(rng.randint(0, 4))
         )
         if pattern.endswith("$") and len(pattern) > 1:
             pass  # valid anchor

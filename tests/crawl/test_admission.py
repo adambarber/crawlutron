@@ -3,7 +3,7 @@
 import asyncio
 
 import pytest
-from _fetcher_factories import site_fetcher
+from _fetcher_factories import crawled_results
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _scheduler_doubles import FakeScheduler as _Scheduler
 
@@ -12,8 +12,6 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from app.crawl.admission import admit_discovered_links
-from app.crawl.cache import HttpCache
-from app.crawl.engine import crawl_request
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.recursive import run_recursive_crawl
 from app.crawl.recursive_admission import _batch_is_http_heavy
@@ -433,10 +431,8 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
     Returns the (envelope, waits) pair: the combined ResourceGate is
     exercised with only the pinned resource driving the throttle.
     """
-    from _fetcher_factories import site_fetcher
 
     import app.crawl.engine as engine_mod
-    from app.crawl.cache import HttpCache
     from app.resource_pressure import ResourceGate
 
     gate = ResourceGate()
@@ -456,12 +452,7 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
         "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
         "/a": (200, "<html>a</html>", "text/html"),
     }
-    out = await engine_mod.crawl_request(
-        {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}},
-        http_fetcher=site_fetcher(pages),
-        cache=HttpCache(),
-    )
-    return out, waits
+    return await crawled_results(pages, limits={"max_depth": 1, "max_pages": 10}), waits
 
 
 async def test_engine_throttles_batches_under_memory_pressure(tmp_path, monkeypatch):
@@ -515,7 +506,6 @@ def test_direct_reads_do_not_perturb_slope(monkeypatch):
 # ---------------------------------------------------------------------------
 # Pure helper: does the upcoming batch look HTTP-heavy?
 # ---------------------------------------------------------------------------
-
 
 
 def _task(domain):
@@ -677,28 +667,23 @@ class TestDispatcherStrategyAwareScaling:
         assert "http" in gate.calls
         assert sched.runs == 1  # http scale 1.0 => both admitted at once
 
-    async def test_browser_bound_batch_uses_combined_scale(self):
-        # Browser-pinned domains -> dispatcher stays on the combined gate
-        sched = _Scheduler(
-            {
-                "a.gov": BROWSER_HEADLESS,
-                "b.gov": BROWSER_HEADLESS,
-            }
-        )
+    @pytest.mark.parametrize(
+        ("case", "pins"),
+        [
+            # Browser-pinned domains -> dispatcher stays on the combined gate.
+            (
+                "browser_bound",
+                {"a.gov": BROWSER_HEADLESS, "b.gov": BROWSER_HEADLESS},
+            ),
+            # No pins yet (cold start) -> conservative combined gate (safety):
+            # unpinned tasks may escalate to browser, so do not ignore memory.
+            ("cold_unpinned", {}),
+        ],
+    )
+    async def test_batch_uses_the_combined_scale(self, case, pins):
         jobs = [_task("a.gov"), _task("b.gov")]
         gate = _RecordingGate(batch=1.0, http=1.0)
-        await _run_with_gate(sched, gate, jobs)
-
-        assert "batch" in gate.calls
-        assert "http" not in gate.calls
-
-    async def test_cold_unpinned_batch_stays_on_combined_scale(self):
-        # No pins yet (cold start) -> conservative combined gate (safety):
-        # unpinned tasks may escalate to browser, so do not ignore memory.
-        sched = _Scheduler({})  # cold start
-        jobs = [_task("a.gov"), _task("b.gov")]
-        gate = _RecordingGate(batch=1.0, http=1.0)
-        await _run_with_gate(sched, gate, jobs)
+        await _run_with_gate(_Scheduler(pins), gate, jobs)
 
         assert "batch" in gate.calls
         assert "http" not in gate.calls
@@ -784,9 +769,7 @@ async def test_max_pages_zero_bounded_at_engine():
     }
     for i in range(150):
         pages[f"/c{i}"] = (200, f"<html>child {i}</html>", "text/html")
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 0}}}
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    results = out["results"]
+    results = (await crawled_results(pages, limits={"max_depth": 1, "max_pages": 0}))["results"]
     assert 1 < len(results) <= 100
     # Without the bound it would have crawled root + 150 children = 151.
     assert len(results) < 151
@@ -813,6 +796,17 @@ def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, d
     )
 
 
+def _unreserved_bytes(policy) -> int:
+    """The 3 GiB limit minus the reserves that are already spent.
+
+    Both reserves are RAM a consumer holds for the life of the process rather
+    than RAM a request borrows, so the HTTP ceiling is sized from what is left.
+    One function because two tests assert the same subtraction and a third
+    that got it wrong would be invisible: the arithmetic IS the contract.
+    """
+    return (3 * 1024 * 1024 * 1024) - policy.browser_pool_reserve_bytes - policy.doc_pool_reserve_bytes
+
+
 class TestPolicyDerivation:
     def test_browser_pool_reserve_subtracted_from_limit(self):
         # 3 GiB limit, 2 browsers * 700 MiB reserve and the default doc pool,
@@ -820,12 +814,7 @@ class TestPolicyDerivation:
         p = _policy()
         assert p.browser_pool_reserve_bytes == 2 * _BROWSER_TASK_RAM_BYTES
         assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
-        free = (
-            (3 * 1024 * 1024 * 1024)
-            - p.browser_pool_reserve_bytes
-            - p.doc_pool_reserve_bytes
-        )
-        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
         # browser tier is capped at pool_size * max_concurrent_pages
         assert p.max_browser_concurrency == 2 * 3
 
@@ -846,12 +835,7 @@ class TestPolicyDerivation:
         # path under a hard 3 GiB ceiling.
         p = _policy(doc_workers=2)
         assert p.doc_pool_reserve_bytes == 2 * _DOC_TASK_RAM_BYTES
-        free = (
-            (3 * 1024 * 1024 * 1024)
-            - p.browser_pool_reserve_bytes
-            - p.doc_pool_reserve_bytes
-        )
-        assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
+        assert p.max_http_concurrency == max(1, _unreserved_bytes(p) // _HTTP_TASK_RAM_BYTES)
 
     def test_doc_pool_reserve_lowers_the_http_ceiling(self):
         # The reserve must actually bite: admitting with doc workers must
@@ -955,11 +939,7 @@ class TestHTTPTaskRamEstimate:
         # Zero drift: the pool ceiling and the admission policy divide by the
         # same per-task estimate, whatever the default is.
         p = _policy()
-        free = (
-            (3 * 1024 * 1024 * 1024)
-            - p.browser_pool_reserve_bytes
-            - p.doc_pool_reserve_bytes
-        )
+        free = (3 * 1024 * 1024 * 1024) - p.browser_pool_reserve_bytes - p.doc_pool_reserve_bytes
         assert p.max_http_concurrency == max(1, free // _HTTP_TASK_RAM_BYTES)
 
     def test_the_3gib_default_still_admits_a_working_floor(self):

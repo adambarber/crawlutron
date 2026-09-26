@@ -13,10 +13,7 @@ import json
 import os
 import tempfile
 
-from _fetcher_factories import site_fetcher
-
-from app.crawl.cache import HttpCache
-from app.crawl.engine import crawl_request
+from _fetcher_factories import crawled_results
 
 
 def _pages():
@@ -30,19 +27,27 @@ def _pages():
     }
 
 
-def _payload(scope=True):
-    policy = {"limits": {"max_depth": 1, "max_pages": 10}}
+def _policy(scope=True):
+    """The policy half of the crawl, as (limits, policy) for crawled_results.
+
+    Split so the spill-path variants below are a chokepoint call with one more
+    argument rather than a second hand-built payload.
+    """
+    policy: dict = {}
     if scope:
         # keep the crawl on the seed host so instagram stays recorded-but-unfetched
         policy["scope_regex"] = r"^https?://example\.com(/|$)"
-    return {"url": "http://example.com/", "policy": policy}
+    return {"max_depth": 1, "max_pages": 10}, policy
+
+
+async def _crawl(*, scope=True, **kwargs):
+    limits, policy = _policy(scope)
+    return await crawled_results(_pages(), limits=limits, policy=policy, **kwargs)
 
 
 async def test_spill_file_gets_one_json_line_per_page(tmp_path):
     sp = tmp_path / "spill.ndjson"
-    out = await crawl_request(
-        _payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache(), spill_path=str(sp)
-    )
+    out = await _crawl(spill_path=str(sp))
     lines = [json.loads(line) for line in sp.read_text().splitlines() if line.strip()]
     assert len(lines) == len(out["results"]) == 2
     assert sorted(entry["i"] for entry in lines) == [0, 1]
@@ -52,13 +57,8 @@ async def test_spill_file_gets_one_json_line_per_page(tmp_path):
 
 
 async def test_response_equivalent_with_and_without_spill(tmp_path):
-    straight = await crawl_request(_payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache())
-    spilled = await crawl_request(
-        _payload(),
-        http_fetcher=site_fetcher(_pages()),
-        cache=HttpCache(),
-        spill_path=str(tmp_path / "s.ndjson"),
-    )
+    straight = await _crawl()
+    spilled = await _crawl(spill_path=str(tmp_path / "s.ndjson"))
     assert straight["results"] == spilled["results"]
     assert straight["submitted_count"] == spilled["submitted_count"]
 
@@ -76,7 +76,7 @@ async def test_auto_spill_deleted_after_successful_request(monkeypatch):
         return fd, path
 
     monkeypatch.setattr(engine.tempfile, "mkstemp", spy_mkstemp)
-    out = await crawl_request(_payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache())
+    out = await _crawl()
     assert out["results"], "sanity: crawl produced results"
     assert created, "engine did not create an auto spill file"
     assert all(not os.path.exists(p) for p in created)
@@ -99,7 +99,7 @@ async def test_stale_spills_garbage_collected_on_next_crawl(monkeypatch):
     os.utime(stale, (old, old))
 
     try:
-        await crawl_request(_payload(), http_fetcher=site_fetcher(_pages()), cache=HttpCache())
+        await _crawl()
         assert not os.path.exists(stale), "stale spill survived GC"
         assert os.path.exists(fresh), "GC ate a fresh spill from another live request"
     finally:

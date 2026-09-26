@@ -9,6 +9,7 @@ import asyncio
 import gzip
 import http.server
 import threading
+from contextlib import contextmanager
 
 from _fetcher_factories import _spawn_fetch
 
@@ -22,21 +23,21 @@ def _make_server():
     ok_compressed = gzip.compress(b"hello world")
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        def _send_gzip(self, body: bytes) -> None:
+            """One gzipped response. The bomb and the ordinary body differ only
+            in what they carry -- a per-path copy of these five lines is a place
+            for the two to stop being the same response."""
+            self.send_response(200)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
             if self.path == "/bomb":
-                body = bomb_compressed
-                self.send_response(200)
-                self.send_header("Content-Encoding", "gzip")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_gzip(bomb_compressed)
             elif self.path == "/ok":
-                body = ok_compressed
-                self.send_response(200)
-                self.send_header("Content-Encoding", "gzip")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                self._send_gzip(ok_compressed)
             elif self.path == "/chunked_huge":
                 # No Content-Length -> chunked; stream a large raw body.
                 self.send_response(200)
@@ -58,12 +59,28 @@ def _make_server():
     return http.server.HTTPServer(("127.0.0.1", 0), Handler)
 
 
-async def test_gzip_bomb_rejected_with_413():
-    srv = _make_server()
-    port = srv.server_address[1]
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+@contextmanager
+def _running_server():
+    """Serve the fixture site on a background thread; yield its port.
+
+    The teardown is the part worth stating once: a leaked server or a joined
+    thread outlives the test that forgot it, and the next test in the file
+    inherits the port.
+    """
+    server = _make_server()
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        yield port
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1.0)
+
+
+async def test_gzip_bomb_rejected_with_413():
+    with _running_server() as port:
         # Cap well below the bomb's expanded size.
         res = await _default_http_fetcher(
             f"http://127.0.0.1:{port}/bomb",
@@ -87,18 +104,10 @@ async def test_gzip_bomb_rejected_with_413():
         assert res2.status_code == 200
         assert res2.body == b"hello world"
         assert "content-encoding" not in res2.headers
-    finally:
-        srv.shutdown()
-        srv.server_close()
-        thread.join(timeout=1.0)
 
 
 async def test_chunked_response_without_content_length_is_capped():
-    srv = _make_server()
-    port = srv.server_address[1]
-    thread = threading.Thread(target=srv.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with _running_server() as port:
         # ~2 MB streamed with no Content-Length; cap at 100 KB -> rejected.
         res = await _default_http_fetcher(
             f"http://127.0.0.1:{port}/chunked_huge",
@@ -109,21 +118,21 @@ async def test_chunked_response_without_content_length_is_capped():
         )
         assert res.status_code == 413, res.status_code
         assert res.body == b""
-    finally:
-        srv.shutdown()
-        srv.server_close()
-        thread.join(timeout=1.0)
 
 
 class TestFetchContentLengthLimit:
     def test_http_large_content(self):
         from app.crawl.strategies.fetchers import _default_http_fetcher
 
-        result = _spawn_fetch(lambda s: asyncio.run(_default_http_fetcher(
-            s.base_url + "/",
-            {},
-            10,
-            1,
-            policy=HostPolicy.unrestricted(),
-        )))
+        result = _spawn_fetch(
+            lambda s: asyncio.run(
+                _default_http_fetcher(
+                    s.base_url + "/",
+                    {},
+                    10,
+                    1,
+                    policy=HostPolicy.unrestricted(),
+                )
+            )
+        )
         assert result.status_code == 413

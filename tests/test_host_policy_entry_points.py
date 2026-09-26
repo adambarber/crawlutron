@@ -4,8 +4,8 @@ import ast
 import pathlib
 
 import pytest
-from chokepoint_walks import REPO_ROOT, app_trees, nodes_of, resolved_call_name
-from test_safety_invariants import _local_nodes, _module_definition_index
+from chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
+from test_safety_invariants import _module_definition_index
 
 from app.validation import HOST_POLICY_ENTRY_POINTS
 
@@ -42,7 +42,7 @@ def _call_edges(
         if len(candidates) != 1:
             continue
         _path, tree, node = candidates[0]
-        for child in _local_nodes(node):
+        for child in local_nodes(node):
             if not isinstance(child, ast.Call):
                 continue
             resolved = resolved_call_name(tree, child)
@@ -84,7 +84,10 @@ def _has_policy_reference(tree: ast.Module, node: ast.AST) -> bool:
             return True
         if isinstance(child, ast.Attribute) and child.attr == "HostPolicy":
             return True
-        if isinstance(child, ast.Call) and resolved_call_name(tree, child).rsplit(".", 1)[-1] in _DECISION_NAMES:
+        if (
+            isinstance(child, ast.Call)
+            and resolved_call_name(tree, child).rsplit(".", 1)[-1] in _DECISION_NAMES
+        ):
             return True
     return False
 
@@ -116,7 +119,11 @@ def discover_host_policy_entry_points(
             continue
         path, tree, node = candidates[0]
         module = _module_name(path)
-        if not module.startswith(_MODULE_PREFIXES) or name in reachable and name.rsplit(".", 1)[-1] in _DECISION_NAMES:
+        if (
+            not module.startswith(_MODULE_PREFIXES)
+            or name in reachable
+            and name.rsplit(".", 1)[-1] in _DECISION_NAMES
+        ):
             continue
         leaf = name.rsplit(".", 1)[-1]
         handler_names = _mcp_handlers(tree)
@@ -209,7 +216,9 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
 
     background_tasks = BackgroundTasks()
     effects = {"persisted": [], "queued": background_tasks.tasks}
-    job_store = type("Store", (), {"create_single_shot": lambda self, *args: effects["persisted"].append(args)})()
+    job_store = type(
+        "Store", (), {"create_single_shot": lambda self, *args: effects["persisted"].append(args)}
+    )()
     await _assert_refused(
         crawl(
             CrawlRequest(url=_BLOCKED_URL),

@@ -6,11 +6,10 @@ the fix, ``_resolve_and_pin_host`` resolves once and the fetcher connects to the
 pinned IP with the original ``Host`` header preserved.
 """
 
-import socket
 from unittest.mock import patch
 from urllib.parse import urlparse
 
-from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets
+from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
@@ -26,7 +25,7 @@ class TestDNSRebindingProtection:
         """The HTTP fetcher must connect to the pinned IP and forward the
         original Host header (so virtual-host routing is preserved)."""
         block_private_targets(monkeypatch)
-        captured = {}
+        captured = {}  # pinned IP + forwarded Host, captured from the connection
 
         class _Resp:
             status_code = 200
@@ -62,20 +61,17 @@ class TestDNSRebindingProtection:
                 captured["host_header"] = kwargs.get("headers", {}).get("Host")
                 return _Stream(_Resp())
 
-        def fake_getaddrinfo(host, *a, **k):
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 80))]
-
         with (
-            patch("socket.getaddrinfo", side_effect=fake_getaddrinfo),
+            host_resolves_to(monkeypatch, "1.2.3.4"),
             patch("app.crawl.strategies.http_client_pool.get_async_http_client", return_value=_Client()),
         ):
             result = await _default_http_fetcher(
-            "http://example.com/page",
-            {},
-            10,
-            50 * 1024 * 1024,
-            policy=HostPolicy.unrestricted(),
-        )
+                "http://example.com/page",
+                {},
+                10,
+                50 * 1024 * 1024,
+                policy=HostPolicy.unrestricted(),
+            )
 
         parsed = urlparse(captured["url"])
         assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", captured

@@ -6,7 +6,7 @@ import gzip
 import pytest
 from _assertions import assert_result_failed, assert_result_success
 from _extraction_helpers import _extract_discovered_links
-from _fetcher_factories import make_fetch, ok_fetcher, raise_fetcher
+from _fetcher_factories import ok_fetcher, raise_fetcher, routed_fetcher, scripted_fetcher
 from _http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
     _decode_body,
@@ -59,11 +59,15 @@ from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
-
-def discovery_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
-        raise ConnectionError("discovery failed")
-    return make_fetch()
+# Discovery probes fail; the page fetch does not. The point of the tests below
+# is that a failed probe is recorded as diagnostics and does not fail the crawl.
+discovery_fetcher = routed_fetcher(
+    {
+        "/robots.txt": ConnectionError("discovery failed"),
+        "/sitemap.xml": ConnectionError("discovery failed"),
+    },
+    default={},
+)
 
 
 class TestValidationHelpers:
@@ -83,9 +87,9 @@ class TestValidationHelpers:
 
     def test_payload_urls_dedupes_exact_duplicates(self) -> None:
         assert _payload_urls(
-                {"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]},
-                host_policy=HostPolicy.unrestricted(),
-            ) == [
+            {"urls": ["http://x/", "http://x/", "http://y/", "http://x/"]},
+            host_policy=HostPolicy.unrestricted(),
+        ) == [
             "http://x/",
             "http://y/",
         ]
@@ -269,9 +273,7 @@ class TestHttpStrategyResult:
         policy=None,
     ):
         if fetcher is None:
-
-            def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-                return make_fetch(status=status, ctype=ctype, body=body, final_url=final_url, url=url)
+            fetcher = scripted_fetcher(status=status, ctype=ctype, body=body)
 
         pol = make_base_policy()
         if policy:
@@ -329,12 +331,17 @@ class TestHttpStrategyResult:
         assert non_html.text == ""
 
     async def test_discovery_diagnostics_records_exceptions_and_feeds(self) -> None:
-        def feed_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            if url.endswith("/robots.txt") or url.endswith("/sitemap.xml"):
-                raise ConnectionError("discovery failed")
-            return make_fetch(
-                body=b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>'
-            )
+        feed_fetcher = routed_fetcher(
+            {
+                "/robots.txt": ConnectionError("discovery failed"),
+                "/sitemap.xml": ConnectionError("discovery failed"),
+            },
+            default=(
+                200,
+                b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>',
+                "text/html",
+            ),
+        )
 
         result = await self._run(
             fetcher=feed_fetcher,
@@ -410,12 +417,15 @@ class TestCrawlRequest:
 
         forwarded = ["http://example.com/a", "http://example.com/b"]
         oversized_payload = {"urls": [f"http://example.com/{i}" for i in range(11)]}
-        assert checked_payload_urls(
-            oversized_payload,
-            10,
-            urls=forwarded,
-            host_policy=HostPolicy.unrestricted(),
-        ) == forwarded
+        assert (
+            checked_payload_urls(
+                oversized_payload,
+                10,
+                urls=forwarded,
+                host_policy=HostPolicy.unrestricted(),
+            )
+            == forwarded
+        )
 
     def test_forwarded_batch_still_faces_the_cap(self) -> None:
         """...but the cap still applies to a forwarded batch (invariant: the
@@ -436,9 +446,7 @@ class TestCrawlRequest:
         the engine does not re-run _payload_urls over the payload."""
         fetched: list[str] = []
 
-        async def spy_fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
-            fetched.append(url)
-            return make_fetch(url=url, final_url=url)
+        spy_fetcher = routed_fetcher({}, calls=fetched, default={})
 
         policy = make_base_policy()
         policy["limits"] = {**policy.get("limits", {}), "respect_robots": False}
@@ -506,14 +514,17 @@ class TestFetchHelperUtilities:
         assert _looks_like_binary_body(b"PK\x03\x04data", "application/octet-stream", "http://x/file") is True
 
     async def test_discovery_robots_success_and_malformed_crawl_delay(self) -> None:
-        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            if url.endswith("/robots.txt"):
-                return make_fetch(body=b"User-agent: *\nCrawl-delay: notanumber\n")
-            if "sitemap" in url:
-                raise ConnectionError("no sitemap")
-            return make_fetch(
-                body=b'<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>hi</body></html>'
-            )
+        fetcher = routed_fetcher(
+            {
+                "/robots.txt": (200, b"User-agent: *\nCrawl-delay: notanumber\n", "text/plain"),
+                "sitemap": ConnectionError("no sitemap"),
+            },
+            default=(
+                200,
+                b'<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>hi</body></html>',
+                "text/html",
+            ),
+        )
 
         result = await TestHttpStrategyResult()._run(
             fetcher=fetcher,
@@ -646,7 +657,9 @@ class TestFetchHelpersEdges:
         score = _quality_score("success", "rendered", "tiny", "<frameset></frameset>", 200)
         assert score <= 0.4
 
-    @pytest.mark.parametrize("text,html", [(None, None), ("", None), ("hi", "<p>x</p>"), ("a" * 30, "<html><body>x</body></html>")])
+    @pytest.mark.parametrize(
+        "text,html", [(None, None), ("", None), ("hi", "<p>x</p>"), ("a" * 30, "<html><body>x</body></html>")]
+    )
     def test_quality_score_reuses_precomputed_metrics(self, text, html):
         """Dup8: threading the diagnostics metrics in must not change the score."""
         from app.crawl.strategies.body_decode import _content_metrics

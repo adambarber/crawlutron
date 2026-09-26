@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.constants import (
     BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
+from app.crawl.strategy_chain import _starting_strategies
 from app.scheduler import DomainScheduler
+
+LADDER = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
+
+
+def _scheduler() -> DomainScheduler:
+    return DomainScheduler(global_limit=10, per_domain_limit=2, delay_seconds=0.1)
 
 
 class TestStrategyPinning:
@@ -17,11 +22,7 @@ class TestStrategyPinning:
 
     def test_pinned_strategy_get_set(self) -> None:
         """Test getting and setting pinned strategy."""
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
+        scheduler = _scheduler()
         # Initially no pin
         assert scheduler.get_pinned_strategy("example.com") is None
         # Set a pin
@@ -32,11 +33,7 @@ class TestStrategyPinning:
 
     def test_pin_overwrites(self) -> None:
         """Test that setting a pin overwrites the previous one."""
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
+        scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", HTTP_CFFI_IMPERSONATE)
         assert scheduler.get_pinned_strategy("example.com") == HTTP_CFFI_IMPERSONATE
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
@@ -44,96 +41,44 @@ class TestStrategyPinning:
 
 
 class TestExecuteCrawlChainPinning:
-    """Tests for _execute_crawl_chain strategy pinning integration."""
+    """Where ``_starting_strategies`` puts the ladder start.
 
-    @pytest.mark.asyncio
-    async def test_chain_starts_at_pinned_strategy(self) -> None:
+    These call the production slice rather than restating it. A restatement is
+    a tautology: it keeps passing when production's pinning is deleted, which is
+    exactly the regression this class exists to catch.
+    """
+
+    def test_chain_starts_at_pinned_strategy(self) -> None:
         """When a domain is pinned, the chain should start at that strategy."""
-
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
-        # Pin the domain to browser
+        scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
+        assert _starting_strategies(LADDER, scheduler, "example.com") == [BROWSER_HEADLESS]
 
-        policy = {
-            "strategies": [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS],
-            "timeout_ms": 5000,
-        }
-
-        # Since we can't easily mock the browser worker here without complex setup,
-        # this test verifies the pinning logic by checking that HTTP strategies
-        # are SKIPPED when pinned to browser. We can't fully test the browser path
-        # without the browser, but we can verify the loop starts at the right place.
-
-        # The pinning is handled by slicing strategies before the loop.
-        # Let's verify the slicing behavior directly.
-        strategies = policy["strategies"]
-        pinned = scheduler.get_pinned_strategy("example.com")
-        if pinned is not None and pinned in strategies:
-            start_idx = strategies.index(pinned)
-            strategies = strategies[start_idx:]
-
-        # Should start at BROWSER_HEADLESS (index 2), so only that remains
-        assert strategies == [BROWSER_HEADLESS]
-
-    @pytest.mark.asyncio
-    async def test_chain_starts_at_cffi_when_pinned(self) -> None:
+    def test_chain_starts_at_cffi_when_pinned(self) -> None:
         """When pinned to CFFI, chain should start at CFFI (skip HTTP_DECLARED_CRAWLER)."""
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
+        scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", HTTP_CFFI_IMPERSONATE)
+        assert _starting_strategies(LADDER, scheduler, "example.com") == [
+            HTTP_CFFI_IMPERSONATE,
+            BROWSER_HEADLESS,
+        ]
 
-        strategies = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
-        pinned = scheduler.get_pinned_strategy("example.com")
-        if pinned is not None and pinned in strategies:
-            start_idx = strategies.index(pinned)
-            strategies = strategies[start_idx:]
-
-        assert strategies == [HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
-
-    @pytest.mark.asyncio
-    async def test_no_pin_starts_at_beginning(self) -> None:
+    def test_no_pin_starts_at_beginning(self) -> None:
         """When no pin, chain starts at the beginning."""
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
-        # No pin set
+        scheduler = _scheduler()
+        assert _starting_strategies(LADDER, scheduler, "example.com") == LADDER
 
-        strategies = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
-        pinned = scheduler.get_pinned_strategy("example.com")
-        if pinned is not None and pinned in strategies:
-            start_idx = strategies.index(pinned)
-            strategies = strategies[start_idx:]
-
-        assert strategies == [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
-
-    @pytest.mark.asyncio
-    async def test_pin_not_in_policy_starts_at_beginning(self) -> None:
+    def test_pin_not_in_policy_starts_at_beginning(self) -> None:
         """When pinned strategy is not in policy, chain starts at beginning."""
-        scheduler = DomainScheduler(
-            global_limit=10,
-            per_domain_limit=2,
-            delay_seconds=0.1,
-        )
+        scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
-
         # Policy without browser (e.g., HTTP-only job)
-        strategies = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]
-        pinned = scheduler.get_pinned_strategy("example.com")
-        if pinned is not None and pinned in strategies:
-            start_idx = strategies.index(pinned)
-            strategies = strategies[start_idx:]
+        http_only = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]
+        assert _starting_strategies(http_only, scheduler, "example.com") == http_only
 
-        # Pin not in policy -> start at beginning
-        assert strategies == [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]
+    def test_no_scheduler_starts_at_beginning(self) -> None:
+        """With no scheduler there is no pin to honour."""
+        assert _starting_strategies(LADDER, None, "example.com") == LADDER
 
 
 class TestSchedulerPinningIsolation:

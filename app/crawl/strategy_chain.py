@@ -54,14 +54,26 @@ class _ChainState:
     cffi_retry_done: bool = False
 
 
-def _starting_strategies(context: _ChainContext) -> list[CrawlStrategyName]:
-    strategies = list(context.policy["strategies"])
-    if context.scheduler is None:
-        return strategies
-    pinned = context.scheduler.get_pinned_strategy(context.domain)
-    if pinned is not None and pinned in strategies:
-        return strategies[strategies.index(pinned) :]
-    return strategies
+def _starting_strategies(
+    strategies: list[CrawlStrategyName],
+    scheduler: DomainScheduler | None,
+    domain: str,
+) -> list[CrawlStrategyName]:
+    """The escalation ladder from the domain's pin onward, or the whole ladder.
+
+    Takes the three inputs the slice reads rather than the whole
+    ``_ChainContext``. A pin test that has to fabricate thirteen unrelated
+    fields to reach this line is a test that will not be written here -- and the
+    copy of the slice that gets written instead stops being what production
+    does, which is how a pinning regression ships with pinning tests green.
+    """
+    ladder = list(strategies)
+    if scheduler is None:
+        return ladder
+    pinned = scheduler.get_pinned_strategy(domain)
+    if pinned is not None and pinned in ladder:
+        return ladder[ladder.index(pinned) :]
+    return ladder
 
 
 async def _run_http_strategy(
@@ -238,7 +250,7 @@ async def execute_crawl_chain(
         global_concurrency=global_concurrency,
     )
     state = _ChainState(attempts=[])
-    for strategy in _starting_strategies(context):
+    for strategy in _starting_strategies(context.policy["strategies"], context.scheduler, context.domain):
         result = await _execute_strategy(context, strategy)
         _record_result(context, state, strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:

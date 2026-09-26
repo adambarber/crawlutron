@@ -7,7 +7,7 @@ import threading
 from unittest.mock import patch
 
 import pytest
-from _fetcher_factories import make_fetch
+from _fetcher_factories import make_fetch, routed_fetcher
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER
@@ -351,16 +351,12 @@ async def test_purge_handles_production_shaped_entries():
             # full cache must not crash purging during a real crawl.
             em.robots_cache.put(f"http://purge-{i}.test", ([], [], None), ttl=-1.0)
 
-        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            is_robots = url.endswith("/robots.txt")
-            body = b"User-agent: *\nAllow: /\n" if is_robots else b"<html><body>hi</body></html>"
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="text/plain" if is_robots else "text/html",
-                body=body,
-            )
+        fetcher = routed_fetcher(
+            {
+                "/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain"),
+            },
+            default=(200, b"<html><body>hi</body></html>", "text/html"),
+        )
 
         result = await crawl_request(
             {
@@ -420,25 +416,18 @@ async def test_robots_cache_shared_across_requests():
     calls = {"robots": 0}
 
     def make_fetcher():
-        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        # A fresh fetcher per request is the point of this test -- the sharing
+        # under test lives in the robots cache, not in the fetcher -- so what
+        # each call gets is the same routing with a shared counter behind it.
+        def count_robots(url, headers):
             if url.endswith("/robots.txt"):
                 calls["robots"] += 1
-                return make_fetch(
-                    url=url,
-                    final_url=url,
-                    status=200,
-                    ctype="text/plain",
-                    body=b"User-agent: *\nDisallow: /secret\n",
-                )
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="text/html",
-                body=b"<html><body>hi</body></html>",
-            )
 
-        return fetcher
+        return routed_fetcher(
+            {"/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain")},
+            default=(200, b"<html><body>hi</body></html>", "text/html"),
+            on_route=count_robots,
+        )
 
     payload = {
         "url": "http://x.test/",
@@ -456,20 +445,10 @@ async def test_robots_cache_shared_across_requests():
 
 
 def _make_fetcher(robots_status: int, robots_body: str = ""):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        if url.endswith("/robots.txt"):
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=robots_status,
-                ctype="text/plain",
-                body=robots_body.encode("utf-8"),
-            )
-        return make_fetch(
-            url=url, final_url=url, status=200, ctype="text/html", body=b"<html><body>hi</body></html>"
-        )
-
-    return fetcher
+    return routed_fetcher(
+        {"/robots.txt": (robots_status, robots_body, "text/plain")},
+        default=(200, b"<html><body>hi</body></html>", "text/html"),
+    )
 
 
 def _policy():
@@ -529,21 +508,19 @@ def test_robots_allows_does_not_recompile_per_call():
     assert spy.call_count <= len(unique_patterns), spy.call_count
 
 
-def _resp(url, body, ctype):
-    return make_fetch(url=url, final_url=url, status=200, ctype=ctype, body=body.encode("utf-8"))
-
-
-async def _fake_fetcher(calls, url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    calls.append(url)
-    if url.endswith("/robots.txt"):
-        return _resp(url, "User-agent: *\nDisallow: /secret\n", "text/plain")
-    if "sitemap" in url:
-        return _resp(
-            url,
-            "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
-            "application/xml",
-        )
-    return _resp(url, "<html></html>", "text/html")
+def _fake_fetcher(calls):
+    return routed_fetcher(
+        {
+            "/robots.txt": (200, "User-agent: *\nDisallow: /secret\n", "text/plain"),
+            "sitemap": (
+                200,
+                "<urlset><loc>https://x.test/p1</loc><lastmod>2024-05-05</lastmod></urlset>",
+                "application/xml",
+            ),
+        },
+        calls=calls,
+        default=(200, b"<html></html>", "text/html"),
+    )
 
 
 async def _run_diag(calls, *, engine_robots_sitemaps):
@@ -552,11 +529,11 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
         html="<html></html>",
         policy={"discovery": {"robots": True, "sitemaps": True}, "limits": {"timeout_seconds": 10}},
         headers={},
-        http_fetcher=lambda *a, **k: _fake_fetcher(calls, *a, **k),
+        http_fetcher=_fake_fetcher(calls),
         engine_robots_sitemaps=engine_robots_sitemaps,
-            robots_evaluated=True,
-            host_policy=HostPolicy.unrestricted(),
-        )
+        robots_evaluated=True,
+        host_policy=HostPolicy.unrestricted(),
+    )
 
 
 async def test_discovery_skips_robots_fetch_when_sitemaps_passed():

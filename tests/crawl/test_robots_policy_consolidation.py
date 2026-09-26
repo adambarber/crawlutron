@@ -32,16 +32,19 @@ def _policy(*, respect_robots: bool = True) -> dict:
 async def test_job_fetch_populates_cache_seen_by_engine():
     robots_cache.clear()
     gate = RobotsGate(
-            {},
-            CrawlerSettings.from_mapping({}),
-            HostPolicy.unrestricted(),
-        )
+        {},
+        CrawlerSettings.from_mapping({}),
+        HostPolicy.unrestricted(),
+    )
     fetch_calls = 0
 
     async def decode(fetcher, url, headers, timeout_seconds):
         nonlocal fetch_calls
         fetch_calls += 1
-        return "User-agent: *\nDisallow: /private\nCrawl-delay: 2\nSitemap: https://shared.test/sitemap.xml\n", 200
+        return (
+            "User-agent: *\nDisallow: /private\nCrawl-delay: 2\nSitemap: https://shared.test/sitemap.xml\n",
+            200,
+        )
 
     import app.crawl.admission as admission
 
@@ -78,10 +81,10 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
 
     gate = RobotsGate(
-            {},
-            CrawlerSettings.from_mapping({}),
-            HostPolicy.unrestricted(),
-        )
+        {},
+        CrawlerSettings.from_mapping({}),
+        HostPolicy.unrestricted(),
+    )
 
     async def unexpected_decode(*args):
         raise AssertionError("job path fetched a cached robots policy")
@@ -123,14 +126,17 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
     robots_cache.clear()
     calls = 0
     gate = RobotsGate(
-            {},
-            CrawlerSettings.from_mapping({}),
-            HostPolicy.unrestricted(),
-        )
+        {},
+        CrawlerSettings.from_mapping({}),
+        HostPolicy.unrestricted(),
+    )
     import app.crawl.admission as admission
 
     monkeypatch.setattr(admission, "_fetch_and_decode", decode)
-    assert await asyncio.gather(*(gate.allows(f"https://flight.test/job-{index}") for index in range(5))) == [True] * 5
+    assert (
+        await asyncio.gather(*(gate.allows(f"https://flight.test/job-{index}") for index in range(5)))
+        == [True] * 5
+    )
     assert calls == 1
 
 

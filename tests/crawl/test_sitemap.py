@@ -4,7 +4,13 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from _assertions import install_to_thread_spy
-from _fetcher_factories import make_fetch
+from _fetcher_factories import (
+    concurrent_fetcher,
+    make_fetch,
+    request_fetcher,
+    routed_fetcher,
+    scripted_fetcher,
+)
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.content_cache import ContentCache
@@ -41,24 +47,27 @@ async def test_304_reuses_cached_urls_without_reparsing():
     )
     calls = []
 
-    async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(headers)
+    def respond(u, headers):
         if headers.get("If-None-Match") == "v1":
             return _resp(304, etag="v1")  # not modified
         return _resp(200, "<x></x>", etag="v1")
 
+    fetcher = request_fetcher(respond, calls=calls)
+
     out = await fetch_sitemap_urls(
-            fetcher,
-            url,
-            10,
-            conditional={"If-None-Match": "v1"},
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
+        fetcher,
+        url,
+        10,
+        conditional={"If-None-Match": "v1"},
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
     assert out == {("http://x.test/p1", None)}
     # Conditional header was sent.
     assert any(c.get("If-None-Match") == "v1" for c in calls)
     # Cache TTL was refreshed (entry still present, not re-parsed).
-    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY)) is not None  # TTL refreshed, entry fresh again
+    assert (
+        _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY)) is not None
+    )  # TTL refreshed, entry fresh again
 
 
 async def test_etag_captured_and_stored_on_200():
@@ -69,8 +78,15 @@ async def test_etag_captured_and_stored_on_200():
       <url><loc>http://x.test/p1</loc><lastmod>2024-01-01</lastmod></url>
     </urlset>"""
 
-    async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return _resp(200, xml, etag="v2", last_modified="Wed, 01 Jan 2024 00:00:00 GMT")
+    fetcher = scripted_fetcher(
+        status=200,
+        headers={
+            "content-type": "application/xml",
+            "etag": "v2",
+            "last-modified": "Wed, 01 Jan 2024 00:00:00 GMT",
+        },
+        body=xml.encode("utf-8"),
+    )
 
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
     assert ("http://x.test/p1", "2024-01-01") in out
@@ -111,8 +127,6 @@ class TestSitemapFanoutBound:
         url = "http://fanout.test/sitemap.xml"
         _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
         index_body = _index_xml(200)
-        in_flight = 0
-        max_in_flight = 0
         child_fetches = 0
         tasks_created = 0
         real_create_task = asyncio.create_task
@@ -124,55 +138,40 @@ class TestSitemapFanoutBound:
 
         monkeypatch.setattr(asyncio, "create_task", counting_create_task)
 
-        async def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-            nonlocal in_flight, max_in_flight, child_fetches
-            if u != url:
-                child_fetches += 1
-                in_flight += 1
-                max_in_flight = max(max_in_flight, in_flight)
-                try:
-                    # A scheduling point, not a duration: what the test
-                    # measures is how many child fetches the fan-out is willing
-                    # to have in flight at once, and one loop yield is enough
-                    # for every admitted child to be inside that window.
-                    await asyncio.sleep(0)
-                    idx = int(u.split("child")[1].split(".")[0])
-                    return _resp_test_sitemap_fanout(_child_xml(idx))
-                finally:
-                    in_flight -= 1
-            return _resp_test_sitemap_fanout(index_body)
+        # A scheduling point, not a duration: what this test measures is how
+        # many child fetches the fan-out is willing to have in flight at once,
+        # and one loop yield is enough for every admitted child to be inside
+        # that window. The counter is the harness's; the routing is the test's.
+        def respond(u, headers):
+            nonlocal child_fetches
+            if u == url:
+                return _resp_test_sitemap_fanout(index_body)
+            child_fetches += 1
+            return _resp_test_sitemap_fanout(_child_xml(int(u.split("child")[1].split(".")[0])))
+
+        fetcher = concurrent_fetcher(respond)
 
         try:
             out = await fetch_sitemap_urls(
-            fetcher,
-            url,
-            10,
-            max_urls=20,
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
+                fetcher,
+                url,
+                10,
+                max_urls=20,
+                host_policy=UNRESTRICTED_HOST_POLICY,
+            )
         finally:
             _SITEMAP_CACHE.discard((url, UNRESTRICTED_HOST_POLICY))
         assert len(out) == 20
         # Enqueue-time cap: never schedule more children than still needed.
         assert child_fetches <= 20
         assert tasks_created <= 20
-        # Bounded concurrency: chunks, not one task per child.
-        assert max_in_flight <= 16
+        # Bounded concurrency: chunks, not one task per child, as the
+        # harness counted the overlap rather than this test restating it.
+        assert fetcher.peak() <= 16
 
 
 def _sitemap_fetcher(xml: str):
-    resp = make_fetch(
-        url="http://x.test/sitemap.xml",
-        final_url="http://x.test/sitemap.xml",
-        status=200,
-        ctype="application/xml",
-        body=xml.encode("utf-8"),
-    )
-
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return resp
-
-    return fetcher
+    return scripted_fetcher(status=200, ctype="application/xml", body=xml.encode("utf-8"))
 
 
 async def test_extracts_lastmod_per_loc():
@@ -183,11 +182,11 @@ async def test_extracts_lastmod_per_loc():
       <url><loc>http://x.test/c</loc><lastmod>2023-06-01T00:00:00Z</lastmod></url>
     </urlset>"""
     urls = await fetch_sitemap_urls(
-            _sitemap_fetcher(xml),
-            "http://x.test/sitemap.xml",
-            10,
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
+        _sitemap_fetcher(xml),
+        "http://x.test/sitemap.xml",
+        10,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
     # returns (loc, lastmod) tuples
     by_loc = {loc: lastmod for loc, lastmod in urls}
     assert by_loc["http://x.test/a"] == "2024-01-15"
@@ -205,18 +204,17 @@ async def test_index_children_recurse_without_lastmod():
       <url><loc>http://x.test/p</loc><lastmod>2024-03-03</lastmod></url>
     </urlset>"""
 
-    def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        xml = index if url.endswith("/sitemap.xml") else sub
-        return make_fetch(
-            url=url, final_url=url, status=200, ctype="application/xml", body=xml.encode("utf-8")
-        )
+    fetcher = routed_fetcher(
+        {"/sitemap.xml": (200, index, "application/xml"), "sub.xml": (200, sub, "application/xml")},
+        missing="raise",
+    )
 
     urls = await fetch_sitemap_urls(
-            fetcher,
-            "http://x.test/sitemap.xml",
-            10,
-            host_policy=UNRESTRICTED_HOST_POLICY,
-        )
+        fetcher,
+        "http://x.test/sitemap.xml",
+        10,
+        host_policy=UNRESTRICTED_HOST_POLICY,
+    )
     assert ("http://x.test/p", "2024-03-03") in urls
 
 
@@ -316,7 +314,9 @@ class TestStaleSeedBatch:
         """A cache read error must never cause a seed to be skipped: an
         unreadable/expired entry is treated as NOT fresh so the URL is still
         crawled."""
-        cache = _cache_with_fresh(tmp_path, "http://seed-batch.test/ok", "2020-01-01", _policy_test_sitemap_seed_batch())
+        cache = _cache_with_fresh(
+            tmp_path, "http://seed-batch.test/ok", "2020-01-01", _policy_test_sitemap_seed_batch()
+        )
         policy = _policy_test_sitemap_seed_batch()
 
         stale_set = _stale_seeds(
@@ -356,36 +356,21 @@ class TestSeedingIsOffLoop:
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)
         fetched: list[str] = []
 
-        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            fetched.append(url)
-            if url.endswith("/robots.txt"):
-                return make_fetch(
-                    url=url,
-                    final_url=url,
-                    status=200,
-                    ctype="text/plain",
-                    body=b"User-agent: *\nAllow: /\n",
-                )
-            if "sitemap" in url:
-                body = (
-                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-                    f"<url><loc>{fresh_url}</loc><lastmod>2020-01-01T00:00:00Z</lastmod></url>"
-                    "</urlset>"
-                ).encode()
-                return make_fetch(
-                    url=url,
-                    final_url=url,
-                    status=200,
-                    ctype="application/xml",
-                    body=body,
-                )
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="text/html",
-                body=b"<html><body>page</body></html>",
-            )
+        # The fresh-seed sitemap body is named, not inlined in a three-branch
+        # fetcher: what this test is about is which URLs get fetched at all.
+        fresh_sitemap = (
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f"<url><loc>{fresh_url}</loc><lastmod>2020-01-01T00:00:00Z</lastmod></url>"
+            "</urlset>"
+        )
+        fetcher = routed_fetcher(
+            {
+                "/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain"),
+                "sitemap": (200, fresh_sitemap, "application/xml"),
+            },
+            calls=fetched,
+            default=(200, b"<html><body>page</body></html>", "text/html"),
+        )
 
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 

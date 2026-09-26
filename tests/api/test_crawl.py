@@ -5,7 +5,7 @@ import json
 import time
 
 import pytest
-from _assertions import browser_available
+from _assertions import accepted_crawl, browser_available, completed_crawl
 from _fetcher_factories import make_crawl_payload
 from _job_harnesses import post_render_with_pool
 from helpers.server import WEBHOOK_RECEIVED
@@ -24,9 +24,7 @@ class TestCrawlApi:
         WEBHOOK_RECEIVED.clear()
 
     async def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self):
-        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/"))
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
+        body = await completed_crawl(self.client, make_crawl_payload(f"{self.base}/"))
         assert "request_id" in body
         assert body["submitted_count"] == 1
         assert "policy_schema_version" in body
@@ -50,9 +48,7 @@ class TestCrawlApi:
     async def test_v1_crawl_batch_returns_one_result_per_url(self):
         payload = make_crawl_payload(f"{self.base}/", urls=[f"{self.base}/", f"{self.base}/page2"])
         payload.pop("url")
-        resp = await self.client.post("/v1/crawl", json=payload)
-        assert resp.status_code == 200
-        body = resp.json()
+        body = await completed_crawl(self.client, payload)
         assert body["submitted_count"] == 2
         assert len(body["results"]) == 2
         assert "Example Org" in body["results"][0]["markdown"]
@@ -66,9 +62,7 @@ class TestCrawlApi:
                 "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
             },
         )
-        resp = await self.client.post("/v1/crawl", json=payload)
-        assert resp.status_code == 200
-        result = resp.json()["results"][0]
+        result = (await completed_crawl(self.client, payload))["results"][0]
         diagnostics = result["diagnostics"]
         assert "robots" in diagnostics
         assert diagnostics["robots"]["allowed"] is True
@@ -78,9 +72,9 @@ class TestCrawlApi:
         assert f"{self.base}/page2" in diagnostics["discovery"]["sitemap_urls"]
 
     async def test_v1_crawl_404_is_classified_not_found(self):
-        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/missing"))
-        assert resp.status_code == 200
-        result = resp.json()["results"][0]
+        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][
+            0
+        ]
         assert result["status"] == "failed"
         assert result["classification"] == "not_found"
 
@@ -111,9 +105,7 @@ class TestCrawlApi:
                 },
             },
         )
-        resp = await self.client.post("/v1/crawl", json=payload)
-        assert resp.status_code == 200
-        result = resp.json()["results"][0]
+        result = (await completed_crawl(self.client, payload))["results"][0]
         assert result["discovered_link_count"] >= 1
         for link in result["discovered_links"]:
             normalized = link["normalized_url"] if isinstance(link, dict) else link
@@ -130,10 +122,7 @@ class TestCrawlApi:
             },
             "webhook_url": f"{self.base}/webhook_sink",
         }
-        resp = await self.client.post("/v1/crawl", json=payload)
-        assert resp.status_code == 202, resp.text
-        body = resp.json()
-        assert body["status"] == "accepted"
+        body = await accepted_crawl(self.client, payload)
         assert "status_url" in body
         # The background task crawls + POSTs the result to the webhook sink.
         assert len(WEBHOOK_RECEIVED) == 1
@@ -478,9 +467,9 @@ class TestShadowDomApi:
 
         await initialize_browser_pool()
         try:
-            resp = await self.client.post(
-                "/v1/crawl",
-                json={
+            body = await completed_crawl(
+                self.client,
+                {
                     "url": f"{self.base}/shadow",
                     "policy": {
                         "strategies": ["BROWSER_HEADLESS"],
@@ -488,8 +477,6 @@ class TestShadowDomApi:
                     },
                 },
             )
-            assert resp.status_code == 200, resp.text
-            body = resp.json()
             result = body["results"][0]
             assert result["status"] == "success"
             # After flattening, the shadow-root anchor is in the HTML and extracted.
@@ -518,31 +505,28 @@ class TestCookiePersistenceApi:
 
     async def test_cookie_persistence_across_requests(self):
         # First request: sets a cookie
-        resp1 = await self.client.post(
-            "/v1/crawl", json=make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
+        await completed_crawl(
+            self.client, make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
         )
-        assert resp1.status_code == 200, resp1.text
         # Second request: should send the cookie back
-        resp2 = await self.client.post(
-            "/v1/crawl", json=make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
+        body2 = await completed_crawl(
+            self.client, make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
         )
-        assert resp2.status_code == 200, resp2.text
-        body2 = resp2.json()
         result = body2["results"][0]
         # The response body of /check-cookie is the Cookie header it received
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
 
     async def test_cookie_persistence_survives_restart(self):
         # First crawl sets cookie
-        await self.client.post(
-            "/v1/crawl", json=make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
+        await completed_crawl(
+            self.client, make_crawl_payload(f"{self.base}/set-cookie", max_discovered_links=10)
         )
         # Second crawl verifies cookie is sent
-        resp = await self.client.post(
-            "/v1/crawl", json=make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
-        )
-        assert resp.status_code == 200
-        result = resp.json()["results"][0]
+        result = (
+            await completed_crawl(
+                self.client, make_crawl_payload(f"{self.base}/check-cookie", max_discovered_links=10)
+            )
+        )["results"][0]
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
 
 

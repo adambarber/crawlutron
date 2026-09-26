@@ -10,7 +10,7 @@ from dataclasses import asdict
 
 import httpx
 import pytest
-from _fetcher_factories import raise_fetcher
+from _fetcher_factories import failing_fetcher, raise_fetcher
 
 from app.constants import (
     BROWSER_HEADED_WARMED,
@@ -25,6 +25,7 @@ from app.validation import HostPolicy
 # ---------------------------------------------------------------------------
 # Classification: the taxonomy is the single source of "what went wrong"
 # ---------------------------------------------------------------------------
+
 
 def test_classifier_lives_in_result_helpers_not_a_strategy_module():
     """The classifier is strategy-neutral; browser.py must import it from result_helpers."""
@@ -63,6 +64,7 @@ def test_pool_exhausted_is_a_taxonomy_member():
 # ---------------------------------------------------------------------------
 # The primitive: one exception -> one terminal result
 # ---------------------------------------------------------------------------
+
 
 def test_primitive_builds_classified_failed_result():
     result = _engine_result_from_exception(
@@ -268,9 +270,7 @@ class TestShapeAllGuardsPerItem:
         except Exception:
             pass
 
-        response = await abuild_unified_crawl_response(
-            [good, bad], request_id="r", submitted_count=2
-        )
+        response = await abuild_unified_crawl_response([good, bad], request_id="r", submitted_count=2)
         assert len(response.results) == 2
         assert response.results[0].classification == "url_budget_exceeded"
         assert response.results[1].status == "failed"
@@ -323,8 +323,7 @@ def _chain_policy(*strategies: str) -> dict:
     }
 
 
-async def _unreachable_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-    raise AssertionError(f"an HTTP strategy ran but should not have: {url}")
+_unreachable_fetcher = failing_fetcher(AssertionError("an HTTP strategy ran but should not have"))
 
 
 class TestStrategyChainGuardsRaisingStrategies:

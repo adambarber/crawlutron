@@ -18,9 +18,6 @@ def _read_main_source() -> str:
     return inspect.getsource(main_mod)
 
 
-
-
-
 def test_chunked_request_under_cap_is_not_rejected_pre_emptively():
     """The Content-Length pre-check must reject only when CL > cap.
     A small CL body is allowed through to the wrapped receive() path

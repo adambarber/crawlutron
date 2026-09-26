@@ -78,7 +78,9 @@ class TestFetchDecodeDiscovery:
 
     async def test_gzip_body_is_decompressed(self):
         body = gzip.compress(b"<urlset></urlset>")
-        fetcher = _fetcher(_FakeResp(200, {"content-type": "application/xml", "content-encoding": "gzip"}, body))
+        fetcher = _fetcher(
+            _FakeResp(200, {"content-type": "application/xml", "content-encoding": "gzip"}, body)
+        )
         text, status, _ = await _fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
         assert text == "<urlset></urlset>"
         assert status == 200

@@ -89,7 +89,9 @@ async def test_redirect_to_safe_target_is_followed(monkeypatch):
     fake = _FakeClient(responses)
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
     # Treat every host as safe so the loop can follow.
-    monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
+    monkeypatch.setattr(
+        pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers))
+    )
 
     result = await run_default_http_fetcher("http://public.example/")
 
@@ -105,7 +107,9 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
     responses = [_Resp(302, {"location": "http://a.example/"}, "http://public.example/") for _ in range(10)]
     fake = _FakeClient(responses)
     monkeypatch.setattr(pool_mod, "get_async_http_client", lambda *a, **k: fake)
-    monkeypatch.setattr(pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers)))
+    monkeypatch.setattr(
+        pinned_mod, "_build_pinned_request", lambda url, headers, *, policy: (url, dict(headers))
+    )
 
     result = await run_default_http_fetcher("http://public.example/")
 

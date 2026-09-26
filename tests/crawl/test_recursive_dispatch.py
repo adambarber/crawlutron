@@ -5,34 +5,12 @@ the batch-sizing and admission-gate logic is covered without standing up the
 full engine (the reason the dispatch was extracted from ``crawl_request``).
 """
 
-import asyncio
-
-from _policy_factories import UNRESTRICTED_HOST_POLICY
-from _result_builders import Spill, make_engine_result
-from _scheduler_doubles import FakeScheduler as _Scheduler
+from _recursive_harnesses import ContentionFreeGate, drive_recursive_crawl
+from _result_builders import make_engine_result
 
 from app.constants import BROWSER_HEADLESS
-from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask, DiscoveredLink
 from app.scheduler import DomainScheduler
-
-
-class _Gate:
-    def __init__(self, scale=1.0):
-        self.waits = 0
-        self.scale = scale
-
-    async def wait_while_saturated(self):
-        self.waits += 1
-
-    def batch_scale_factor(self):
-        return self.scale
-
-    def memory_ratio(self):
-        return 0.0
-
-    def cpu_ratio(self):
-        return 0.0
 
 
 def _link(url: str) -> DiscoveredLink:
@@ -45,6 +23,10 @@ def _link(url: str) -> DiscoveredLink:
         host="a",
         is_same_host=True,
     )
+
+
+async def _allows(url):
+    return True
 
 
 async def _run(
@@ -60,38 +42,24 @@ async def _run(
     robots_allows=None,
     scheduler=None,
 ):
-    if gate is None:
-        gate = _Gate()
-    spill = Spill()
-    if scheduler is None:
-        scheduler = _Scheduler()
+    """These tests default to ``max_depth=2``; the harness default is 0.
 
-    if robots_allows is None:
-
-        async def robots_allows(url):
-            return True
-
-    await run_recursive_crawl(
-        jobs=jobs,
+    A dispatch test wants the frontier to actually expand, and the bound under
+    test is passed explicitly, so the depth default is the only reason this
+    wrapper exists at all.
+    """
+    return await drive_recursive_crawl(
+        jobs,
+        worker,
+        allows=robots_allows if robots_allows is not None else _allows,
+        gate=gate,
         scheduler=scheduler,
-        worker=worker,
-        robots_allows=robots_allows,
-        robots_disallowed=lambda job: make_engine_result(job.normalized_url),
-        sitemap_seeds=lambda: asyncio.sleep(0, result=[]),
-        spill=spill,
-        shutdown_event=asyncio.Event(),
+        respect_robots=respect_robots,
         max_depth=max_depth,
         max_pages=max_pages,
-        respect_robots=respect_robots,
-        include_html=True,
-        want_document_bodies=False,
-        scope_pattern=None,
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
-        resource_gate=gate,
-        host_policy=UNRESTRICTED_HOST_POLICY,
     )
-    return spill, scheduler, gate
 
 
 async def test_dispatches_single_page_and_consults_gate():
@@ -102,7 +70,12 @@ async def test_dispatches_single_page_and_consults_gate():
     spill, scheduler, gate = await _run(jobs, worker)
     assert len(spill.writes) == 1
     assert scheduler.runs == 1
-    assert gate.waits == 0  # stop-the-world pause removed; admission is now per-batch weighted
+    # Admission is per-batch weighted, not a stop-the-world pause: the gate is
+    # consulted for a scale and the batch is dispatched anyway. Asserting the
+    # consultation (rather than the absence of a wait that production never
+    # performs) is the part that can actually fail.
+    assert gate.consultations >= 1
+    assert gate.scale == 1.0
 
 
 async def test_expands_frontier_from_discovered_links():
@@ -131,7 +104,7 @@ async def test_gate_scale_shrinks_batch_but_still_crawls_all():
         return make_engine_result(job.normalized_url, links)
 
     jobs = [CrawlTask(index=0, original_url="http://a/", normalized_url="http://a/", domain="a")]
-    spill, scheduler, _ = await _run(jobs, worker, gate=_Gate(scale=0.0))
+    spill, scheduler, _ = await _run(jobs, worker, gate=ContentionFreeGate(0.0))
     assert len(spill.writes) == 3
     assert scheduler.runs >= 2  # shrunk batches => multiple scheduler runs
 
@@ -177,6 +150,21 @@ async def test_robots_disallows_initial_job_as_skip():
 # Result alignment (B1): the spill index must match the job that produced the
 # result, even when tiers interleave or a job fails.
 # ---------------------------------------------------------------------------
+def assert_spill_keeps_job_pairing(spill, jobs) -> None:
+    """Every job's result is in its own spill slot, under its own URL.
+
+    The invariant the whole dispatch tier exists to protect: a shift by one (or
+    a drop) still hands back a full set of well-formed results, so only the
+    per-index pairing catches it.
+    """
+    assert set(spill.writes) == set(range(len(jobs)))
+    for index, result in spill.writes.items():
+        expected = jobs[index].normalized_url
+        assert result.normalized_url == expected, (
+            f"spill[{index}] holds {result.normalized_url!r}, expected {expected!r}"
+        )
+
+
 def _tiered_job(index: int, host: str) -> CrawlTask:
     url = f"http://{host}/"
     return CrawlTask(index=index, original_url=url, normalized_url=url, domain=host)
@@ -184,6 +172,7 @@ def _tiered_job(index: int, host: str) -> CrawlTask:
 
 def _tiered_worker(fail_index: int | None = None):
     """Build an aligned result worker with an optional single failure index."""
+
     async def worker(job):
         if fail_index is not None and job.index == fail_index:
             raise RuntimeError("transient failure")
@@ -215,12 +204,7 @@ async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
     worker = _tiered_worker()
     spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
 
-    assert set(spill.writes) == {0, 1, 2, 3}
-    for index, result in spill.writes.items():
-        expected = jobs[index].normalized_url
-        assert result.normalized_url == expected, (
-            f"spill[{index}] holds {result.normalized_url!r}, expected {expected!r}"
-        )
+    assert_spill_keeps_job_pairing(spill, jobs)
 
 
 async def test_failed_job_does_not_shift_other_results():
@@ -232,12 +216,7 @@ async def test_failed_job_does_not_shift_other_results():
     worker = _tiered_worker(fail_index=1)
     spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
 
-    assert set(spill.writes) == {0, 1, 2, 3}
-    for index, result in spill.writes.items():
-        assert result.normalized_url == jobs[index].normalized_url, (
-            f"spill[{index}] holds {result.normalized_url!r}, "
-            f"expected {jobs[index].normalized_url!r}"
-        )
+    assert_spill_keeps_job_pairing(spill, jobs)
     assert spill.writes[1].status == "failed"
 
 

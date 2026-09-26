@@ -13,7 +13,12 @@ import ast
 from _job_harnesses import make_job_store
 
 from app.crawl.result_store import CrawlResultStore
-from tests.chokepoint_walks import app_trees, nodes_of
+from tests.chokepoint_walks import (
+    app_trees,
+    attribute_calls,
+    nodes_of,
+    single_target_name_assignments,
+)
 
 
 def _pragma_exec_offenders() -> list[str]:
@@ -22,11 +27,9 @@ def _pragma_exec_offenders() -> list[str]:
     for path, tree in app_trees():
         if path.name == "sqlite_store.py":
             continue
-        for node in nodes_of(tree):
+        for node, func in attribute_calls(tree):
             if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "execute"
+                func.attr == "execute"
                 and node.args
                 and isinstance(node.args[0], ast.Constant)
                 and isinstance(node.args[0].value, str)
@@ -57,10 +60,8 @@ def _dynamic_pragma_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
     opposite directions, so the shape worth gating is the one neither test saw.
     """
     found: list[tuple[ast.Call, str]] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr not in {"execute", "executemany"} or not node.args:
+    for node, func in attribute_calls(tree):
+        if func.attr not in {"execute", "executemany"} or not node.args:
             continue
         sql = node.args[0]
         if isinstance(sql, ast.Constant):
@@ -79,9 +80,7 @@ def _mentions_pragma(sql: ast.AST) -> bool:
     that hides the keyword behind concatenation is still recognised.
     """
     text = "".join(
-        part.value
-        for part in ast.walk(sql)
-        if isinstance(part, ast.Constant) and isinstance(part.value, str)
+        part.value for part in ast.walk(sql) if isinstance(part, ast.Constant) and isinstance(part.value, str)
     ).lower()
     return "pragma" in text
 
@@ -105,14 +104,12 @@ def _module_constants(tree: ast.AST) -> set[str]:
     module is not reachable from a request, so this is not an injection surface
     and forcing it through the identifier allowlist would be theatre.
     """
-    constants: set[str] = set()
-    for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
-            constants.add(target.id)
-    return constants
+    return {
+        name
+        for _node, name in single_target_name_assignments(
+            tree.body, lambda value: isinstance(value, ast.Constant)
+        )
+    }
 
 
 def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
@@ -125,14 +122,9 @@ def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
     prevent. Reaching one hop back is what makes the sanctioned shape and the
     banned shape distinguishable.
     """
-    bound: set[str] = set()
-    for node in ast.walk(function):
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
-            continue
-        target = node.targets[0]
-        if isinstance(target, ast.Name) and _is_identifier_chokepoint(node.value):
-            bound.add(target.id)
-    return bound
+    return {
+        name for _node, name in single_target_name_assignments(nodes_of(function), _is_identifier_chokepoint)
+    }
 
 
 def _enclosing_function(tree: ast.AST, target: ast.AST) -> ast.AST | None:
@@ -244,8 +236,7 @@ def test_dynamic_pragma_detector_bites():
 
     # Live shape 1: allowlisted inline.
     inline = ast.parse(
-        "def f(conn, table):\n"
-        "    return conn.execute(f'PRAGMA table_info({_validated_identifier(table)})')\n"
+        "def f(conn, table):\n    return conn.execute(f'PRAGMA table_info({_validated_identifier(table)})')\n"
     )
     inline_call = inline.body[0].body[0].value
     assert _mentions_pragma(inline_call.args[0])
@@ -266,9 +257,7 @@ def test_dynamic_pragma_detector_bites():
 
     # A module constant is a pragma *value*, not an identifier (busy_timeout=5000).
     constant = ast.parse(
-        "_TIMEOUT = 5000\n"
-        "def f(conn):\n"
-        '    return conn.execute(f"PRAGMA busy_timeout={_TIMEOUT}")\n'
+        '_TIMEOUT = 5000\ndef f(conn):\n    return conn.execute(f"PRAGMA busy_timeout={_TIMEOUT}")\n'
     )
     constant_call = constant.body[1].body[0].value
     assert not _unvalidated_interpolations(constant, constant_call.args[0], constant_call)

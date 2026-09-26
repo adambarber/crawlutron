@@ -6,7 +6,7 @@ unchanged page yields a not_modified result without a full body fetch.
 """
 
 import pytest
-from _fetcher_factories import make_fetch, run_http_strategy
+from _fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
 from _policy_factories import http_strategy_policy
 
 from app.crawl.engine import crawl_request
@@ -27,17 +27,18 @@ async def _run_http(fetcher, validators=None):
 
 
 def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        headers_out.update(headers)
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            headers={"content-type": "text/html", **(extra_headers or {})},
-            body=_html(body).encode(),
-        )
+    """Serves ``body`` as HTML and hands back the headers it was called with."""
+    spec = {
+        "status": 200,
+        "headers": {"content-type": "text/html", **(extra_headers or {})},
+        "body": _html(body).encode(),
+    }
 
-    return fetcher
+    def respond(url, headers):
+        headers_out.update(headers)
+        return spec
+
+    return request_fetcher(respond)
 
 
 async def test_caller_validators_sent_as_conditional_headers():
@@ -64,8 +65,7 @@ async def test_no_validators_means_no_conditional_headers():
 async def test_caller_validator_304_yields_not_modified():
     """A 304 against caller-owned validators is not_modified: no body exists."""
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(url=url, final_url=url, status=304, headers={}, body=b"")
+    fetcher = scripted_fetcher(status=304, headers={}, body=b"")
 
     result = await _run_http(fetcher, validators={"if_none_match": '"v1"'})
     assert result.status == "success"
@@ -78,18 +78,15 @@ async def test_caller_validator_304_yields_not_modified():
 
 
 async def test_success_result_surfaces_origin_validators():
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            headers={
-                "content-type": "text/html",
-                "etag": '"abc123"',
-                "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
-            },
-            body=_html("fresh").encode(),
-        )
+    fetcher = scripted_fetcher(
+        status=200,
+        headers={
+            "content-type": "text/html",
+            "etag": '"abc123"',
+            "last-modified": "Wed, 01 Jan 2025 00:00:00 GMT",
+        },
+        body=_html("fresh").encode(),
+    )
 
     result = await _run_http(fetcher)
     assert result.validators == {"etag": '"abc123"', "last_modified": "Wed, 01 Jan 2025 00:00:00 GMT"}
@@ -99,17 +96,18 @@ async def test_engine_routes_validators_by_url():
     """Batch request: validators apply only to the matching URL."""
     seen_headers: dict[str, dict] = {}
 
-    def make_fetcher():
-        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            from urllib.parse import urlparse
+    from urllib.parse import urlparse
 
+    def make_fetcher():
+        def respond(url, headers):
             path = urlparse(url).path or "/"
             seen_headers[path] = dict(headers)
-            status = 304 if (path == "/etagged" and headers.get("If-None-Match") == '"v9"') else 200
-            body = _html(f"page {path}").encode() if status == 200 else b""
-            return make_fetch(url=url, final_url=url, status=status, ctype="text/html", body=body)
+            revalidated = path == "/etagged" and headers.get("If-None-Match") == '"v9"'
+            if revalidated:
+                return (304, b"", "text/html")
+            return (200, _html(f"page {path}"), "text/html")
 
-        return fetcher
+        return request_fetcher(respond)
 
     # Two URLs; only the second carries validators.
     payload2 = {
@@ -211,14 +209,11 @@ async def test_malformed_gzip_is_rejected_by_strategy():
     for i in range(2, 12):
         compressed[i] ^= 0xFF
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            headers={"content-type": "text/html", "content-encoding": "gzip"},
-            body=bytes(compressed),
-        )
+    fetcher = scripted_fetcher(
+        status=200,
+        headers={"content-type": "text/html", "content-encoding": "gzip"},
+        body=bytes(compressed),
+    )
 
     result = await _run_http(fetcher)
     assert result.status == "failed"
@@ -243,15 +238,9 @@ class TestNotModifiedResponse:
     async def test_http_strategy_not_modified(self):
         from app.crawl.cache import HttpCache
 
-        def not_mod_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            class Resp:
-                status_code = 304
-                headers = {"etag": "v1", "content-type": "text/html"}
-                body = b"not modified"
-                final_url = url
-                elapsed_ms = 10
-
-            return Resp()
+        not_mod_fetcher = scripted_fetcher(
+            status=304, headers={"etag": "v1", "content-type": "text/html"}, body=b"not modified"
+        )
 
         cache = HttpCache()
         cache.store("http://example.com/", {"etag": "v1"})

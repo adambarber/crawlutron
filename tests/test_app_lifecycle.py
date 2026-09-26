@@ -91,10 +91,6 @@ class TestMultiWorkerInvariants:
         assert "coordination_db_path" not in source
 
 
-
-
-
-
 class TestAppLifecycleEdges:
     """Cover remaining branches in main.py"""
 

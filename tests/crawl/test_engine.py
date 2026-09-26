@@ -5,7 +5,11 @@ import urllib.error
 import pytest
 from _assertions import browser_available
 from _browser_doubles import _fake_browser
-from _fetcher_factories import make_fetch
+from _fetcher_factories import (
+    hanging_fetcher,
+    routed_fetcher,
+    scripted_fetcher,
+)
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
@@ -60,19 +64,14 @@ class TestEngineCrawlRequest:
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
     async def test_crawl_request_http_failure_falls_back_to_browser(self, base_url):
 
-        class _FakeRobotsOk:
-            status_code = 200
-            headers = {}
-            body = b"User-agent: *\nAllow: /\n"
-
-        def failing_fetcher(target_url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            # Fail page fetches but serve robots.txt: robots is per-origin
-            # (M7 fail-closed), so a fake that also breaks robots would
-            # skip the crawl before the browser fallback is ever reached.
-            # The intent here is page-fetch failure -> browser fallback.
-            if target_url.endswith("/robots.txt"):
-                return _FakeRobotsOk()
-            raise urllib.error.URLError("connection refused")
+        # Fail page fetches but serve robots.txt: robots is per-origin
+        # (M7 fail-closed), so a fake that also breaks robots would
+        # skip the crawl before the browser fallback is ever reached.
+        # The intent here is page-fetch failure -> browser fallback.
+        failing_fetcher = routed_fetcher(
+            {"/robots.txt": (200, "User-agent: *\nAllow: /\n", "text/plain")},
+            default=urllib.error.URLError("connection refused"),
+        )
 
         renderer = BrowserRenderer()
 
@@ -231,14 +230,12 @@ class TestEngineChainEdges:
     async def test_per_url_budget_fails_slow_chain(self):
         """Adversarial perf #2.2: a URL that blows its total_url_budget_seconds
         must be failed as network_error instead of holding a slot."""
-        import asyncio
 
-        async def slow_fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
-            # True tarpit: never returns until the caller's deadline cancels us.
-            # (A time-based sleep is monkeypatched to return instantly in this
-            # suite's fast mode, so model the poisoned-URL hang with an
-            # ever-pending future instead.)
-            await asyncio.Future()
+        # True tarpit: never returns until the caller's deadline cancels us.
+        # (A time-based sleep is monkeypatched to return instantly in this
+        # suite's fast mode, so model the poisoned-URL hang with an
+        # ever-pending future instead -- which is what the harness does.)
+        slow_fetcher = hanging_fetcher()
 
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -268,15 +265,11 @@ class TestEngineChainEdges:
     async def test_rate_limited_sets_domain_cooldown(self):
         from app.scheduler import DomainScheduler
 
-        class _Resp:
-            status_code = 429
-            final_url = "http://example.com/"
-            elapsed_ms = 1
-            headers = {"retry-after": "30", "content-type": "text/plain"}
-            body = b"rate limited"
-
-        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            return _Resp()
+        fetcher = scripted_fetcher(
+            status=429,
+            headers={"retry-after": "30", "content-type": "text/plain"},
+            body=b"rate limited",
+        )
 
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
         policy = {
@@ -319,13 +312,10 @@ class TestEngineChainEdges:
 
         monkeypatch.setattr(DomainScheduler, "set_domain_min_delay", spy)
 
-        def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
-
-            if url.endswith("/robots.txt"):
-                body = b"User-agent: *\nCrawl-delay: 2\n"
-            else:
-                body = b"<html><body>ok</body></html>"
-            return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
+        fetcher = routed_fetcher(
+            {"/robots.txt": (200, "User-agent: *\nCrawl-delay: 2\n", "text/html")},
+            default=(200, b"<html><body>ok</body></html>", "text/html"),
+        )
 
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -361,9 +351,9 @@ class TestEngineChainEdges:
         from app.crawl import engine as engine_mod
         from app.crawl.cache import HttpCache
 
-        def fetcher(url, headers, timeout_seconds, max_content_length=50 * 1024 * 1024):
-            body = b"<html><body>some page content</body></html>"
-            return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)
+        fetcher = scripted_fetcher(
+            status=200, ctype="text/html", body=b"<html><body>some page content</body></html>"
+        )
 
         policy = {
             "strategies": ["HTTP_DECLARED_CRAWLER"],
@@ -407,15 +397,11 @@ class TestEngineScopeEdges:
         from app.crawl.strategy_chain import execute_crawl_chain
         from app.scheduler import DomainScheduler
 
-        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            class Resp:
-                status_code = 200
-                headers = {"content-type": "text/html"}
-                body = b"<html><title>Access Denied</title>bot challenge</html>"
-                final_url = url
-                elapsed_ms = 10
-
-            return Resp()
+        fetcher = scripted_fetcher(
+            status=200,
+            ctype="text/html",
+            body=b"<html><title>Access Denied</title>bot challenge</html>",
+        )
 
         scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0)
         policy = {

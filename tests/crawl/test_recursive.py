@@ -4,10 +4,7 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-from _fetcher_factories import run_scoped_crawl, site_fetcher
-
-from app.crawl.cache import HttpCache
-from app.crawl.engine import crawl_request
+from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl
 
 
 class TestRecursiveCrawl:
@@ -17,8 +14,7 @@ class TestRecursiveCrawl:
             "/a": (200, "<html><body>a</body></html>", "text/html"),
             "/b": (200, "<html><body>b</body></html>", "text/html"),
         }
-        payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 10}}}
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+        out = await crawled_results(pages, limits={"max_depth": 1, "max_pages": 10})
         assert out["submitted_count"] == 1
         urls = {r["normalized_url"] for r in out["results"]}
         assert "http://example.com" in urls
@@ -36,8 +32,7 @@ class TestRecursiveCrawl:
             "/b": (200, "<html>b</html>", "text/html"),
             "/c": (200, "<html>c</html>", "text/html"),
         }
-        payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 2}}}
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+        out = await crawled_results(pages, limits={"max_depth": 2, "max_pages": 2})
         assert len(out["results"]) <= 2
 
     async def test_scope_regex_limits_discovered_links(self):
@@ -56,12 +51,9 @@ class TestRecursiveCrawl:
             "/public": (200, "<html>pub</html>", "text/html"),
             "/private": (200, "<html>priv</html>", "text/html"),
         }
-        payload = {
-            "url": "http://example.com/",
-            "policy": {"limits": {"max_depth": 1, "max_pages": 10, "respect_robots": True}},
-        }
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-        urls = {r["normalized_url"] for r in out["results"]}
+        urls = set(
+            await crawled_urls(pages, limits={"max_depth": 1, "max_pages": 10, "respect_robots": True})
+        )
         assert "http://example.com/public" in urls
         assert "http://example.com/private" not in urls
 
@@ -71,11 +63,9 @@ class TestRecursiveCrawl:
             "/": (200, "<html>home</html>", "text/html"),
             "/seed": (200, "<html>seed</html>", "text/html"),
         }
-        payload = {
-            "url": "http://example.com/seed",
-            "policy": {"limits": {"max_depth": 0, "respect_robots": True}},
-        }
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+        out = await crawled_results(
+            pages, url="http://example.com/seed", limits={"max_depth": 0, "respect_robots": True}
+        )
         result = out["results"][0]
         assert result["classification"] == "robots_disallowed"
         assert result["status"] == "skipped"
@@ -91,12 +81,11 @@ class TestRecursiveCrawl:
             "/s1": (200, "<html>s1</html>", "text/html"),
             "/s2": (200, "<html>s2</html>", "text/html"),
         }
-        payload = {
-            "url": "http://example.com/",
-            "policy": {"limits": {"max_depth": 1, "max_pages": 10}, "discovery": {"sitemaps": True}},
-        }
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-        urls = {r["normalized_url"] for r in out["results"]}
+        urls = set(
+            await crawled_urls(
+                pages, limits={"max_depth": 1, "max_pages": 10}, policy={"discovery": {"sitemaps": True}}
+            )
+        )
         assert "http://example.com/s1" in urls
         assert "http://example.com/s2" in urls
 
@@ -105,14 +94,11 @@ class TestRecursiveCrawl:
             "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
             "/a": (200, "<html><body>hello</body></html>", "text/html"),
         }
-        payload = {
-            "url": "http://example.com/",
-            "policy": {
-                "limits": {"max_depth": 1, "max_pages": 10},
-                "browser_profile": {"include_html": False},
-            },
-        }
-        out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+        out = await crawled_results(
+            pages,
+            limits={"max_depth": 1, "max_pages": 10},
+            policy={"browser_profile": {"include_html": False}},
+        )
         for result in out["results"]:
             assert result["html"] is None
             assert result["text"] is None
@@ -144,14 +130,11 @@ class TestRecursiveCrawlServer:
         }
 
         async def run(max_depth):
-            payload = {
-                "url": "http://example.com/",
-                "policy": {
-                    "limits": {"max_depth": max_depth, "max_pages": 10},
-                    "browser_profile": {"include_html": False},
-                },
-            }
-            return await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
+            return await crawled_results(
+                pages,
+                limits={"max_depth": max_depth, "max_pages": 10},
+                policy={"browser_profile": {"include_html": False}},
+            )
 
         for max_depth in (0, 1):
             out = await run(max_depth)
@@ -181,17 +164,12 @@ async def test_real_sitemap_parser_feeds_scope_filtered_recursive_crawl():
         "/keep": (200, "<html>keep</html>", "text/html"),
         "/drop": (200, "<html>drop</html>", "text/html"),
     }
-    payload = {
-        "url": "https://example.com/",
-        "policy": {
-            "limits": {"max_depth": 1, "max_pages": 10},
-            "discovery": {"sitemaps": True},
-            "scope_regex": r"^https://example\.com/keep/?$",
-        },
-    }
-
-    output = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    normalized = [result["normalized_url"] for result in output["results"]]
+    normalized = await crawled_urls(
+        pages,
+        url="https://example.com/",
+        limits={"max_depth": 1, "max_pages": 10},
+        policy={"discovery": {"sitemaps": True}, "scope_regex": r"^https://example\.com/keep/?$"},
+    )
 
     assert normalized.count("https://example.com/keep") == 1
     assert "https://example.com/drop" not in normalized

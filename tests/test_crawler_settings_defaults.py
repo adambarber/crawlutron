@@ -39,9 +39,7 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
     with patch.object(settings_mod, "read_memory_stats", lambda: _Memory(limit)):
         expected = max(
             100,
-            settings_mod.max_http_concurrency_for(
-                limit, settings_mod.derive_browser_pool_size(limit)
-            ),
+            settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
         )
         built = CrawlerSettings()
         assert built.http_max_connections == expected

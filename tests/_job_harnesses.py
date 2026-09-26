@@ -31,7 +31,9 @@ suite is no longer raced. ``save`` is published on too, because
 
 import asyncio
 import pathlib
+import tempfile
 import threading
+from contextlib import contextmanager
 from typing import Any
 
 from _policy_factories import UNRESTRICTED_HOST_POLICY
@@ -102,9 +104,7 @@ class _StoreListener:
 
     __slots__ = ("_bus", "event", "job_id", "loop")
 
-    def __init__(
-        self, bus: _StatusBus, job_id: str, loop: asyncio.AbstractEventLoop
-    ) -> None:
+    def __init__(self, bus: _StatusBus, job_id: str, loop: asyncio.AbstractEventLoop) -> None:
         self._bus = bus
         self.job_id = job_id
         self.loop = loop
@@ -155,6 +155,19 @@ def make_job_store(tmpdir: str) -> JobStore:
     return _instrument_status_bus(JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY))
 
 
+@contextmanager
+def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
+    """A throwaway store holding one fresh SINGLE_SHOT job; yield ``(store, job)``.
+
+    The store, the temporary directory and the seed job are one fixture: a test
+    about SINGLE_SHOT semantics should not have to re-derive them, and a second
+    copy of the seed line is a second thing to forget to update.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        store = make_job_store(tmpdir)
+        yield store, store.create_single_shot(job_id, root, {"test": "policy"})
+
+
 def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobState]:
     """A store holding one job that has already crawled ``pages`` pages.
 
@@ -198,6 +211,32 @@ def _execution_payload(results: list[dict], submitted_count: int) -> dict:
         "submitted_count": submitted_count,
         "policy_schema_version": "test",
     }
+
+
+async def run_canned_graph(
+    client,
+    job_store,
+    root: str,
+    scripts: dict[str, list[dict]],
+    policy: dict | None = None,
+) -> tuple[dict[str, int], Any]:
+    """Run a canned page graph to completion; return ``(attempts, job)``.
+
+    The admission-contract tests all state the same thing in different shapes:
+    a scripted graph, the per-URL attempt count, and the finished job. The
+    attempt count is what separates "fetched once" from "fetched twice and still
+    produced a result", so it is part of what this hands back rather than
+    something each test wires up for itself.
+    """
+    attempts: dict[str, int] = {}
+    job = await _run_job_to_completed(
+        client,
+        job_store,
+        root,
+        _fake_execute_scripted(scripts, attempts=attempts),
+        policy,
+    )
+    return attempts, job
 
 
 def _fake_execute_scripted(

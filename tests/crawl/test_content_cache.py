@@ -7,22 +7,23 @@ import base64
 import json
 import shutil
 import sys
+from functools import partial
 
 import httpx
 import pytest
 from _fetcher_factories import (
     _temp_cache,
+    crawled_results,
     make_content_cache_with_entry,
     make_expiring_cache,
-    make_fetch,
     run_http_strategy,
+    tap_fetcher,
 )
 from helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
-from app.crawl.engine import crawl_request
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
@@ -33,14 +34,9 @@ def _make_etag_test_setup(tmp_path, etag_server):
     url = f"http://127.0.0.1:{port}/"
     policy = {"strategies": ["HTTP_DECLARED_CRAWLER"], "extraction": "full", "headers": {}}
 
-    def fetcher(u, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return _default_http_fetcher(
-            u,
-            headers,
-            timeout,
-            max_content_length,
-            policy=HostPolicy.unrestricted(),
-        )
+    # The real fetcher against the real local server, with the unrestricted
+    # policy pinned. Only the wiring is test-owned; nothing here answers HTTP.
+    fetcher = tap_fetcher(partial(_default_http_fetcher, policy=HostPolicy.unrestricted()))
 
     cache = HttpCache()
     content_cache = ContentCache(tmp_path)
@@ -213,31 +209,34 @@ async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path)
     """Recursive crawl_request reuses the content cache for seed AND discovered pages (#5)."""
     from urllib.parse import urlparse
 
-    fetched_pages: list[str] = []
-
-    def site_fetcher(pages):
-        def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            p = urlparse(url).path or "/"
-            if p in ("/", "/a"):
-                fetched_pages.append(p)
-            status, body, ctype = pages.get(p, (404, b"<html></html>", "text/html"))
-            if isinstance(body, str):
-                body = body.encode()
-            return make_fetch(url=url, final_url=url, status=status, ctype=ctype, body=body)
-
-        return fetcher
+    # ``calls`` is the chokepoint's own URL log: this test is about what the
+    # content cache serves, so it needs to see which fetches reached the
+    # network, not to build a second site_fetcher to ask.
+    fetched_urls: list[str] = []
 
     pages = {
         "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
         "/a": (200, "<html>a</html>", "text/html"),
     }
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1, "max_pages": 5}}}
-    cache = HttpCache()
+    limits = {"max_depth": 1, "max_pages": 5}
     content_cache = ContentCache(tmp_path)
-    await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=cache, content_cache=content_cache)
-    first = list(fetched_pages)
-    await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=cache, content_cache=content_cache)
-    second = list(fetched_pages)[len(first) :]  # only the 2nd crawl's page fetches
+
+    def page_fetches():
+        """Declared pages that reached the network, in order.
+
+        Discovery probes (robots.txt) are answered by the scripted site too,
+        and they are not pages -- this is about the content cache serving
+        pages, so the filter is "is a declared page", not a literal path list.
+        """
+        return [p for u in fetched_urls if (p := urlparse(u).path or "/") in pages]
+
+    async def crawl_twice_over():
+        await crawled_results(pages, limits=limits, content_cache=content_cache, calls=fetched_urls)
+
+    await crawl_twice_over()
+    first = page_fetches()
+    await crawl_twice_over()
+    second = page_fetches()[len(first) :]  # only the 2nd crawl's page fetches
     assert first == ["/", "/a"], first
     # Both the seed and the discovered child must be served from the content cache.
     assert second == [], f"recursive pages should be served from content cache, re-fetched: {second}"
@@ -439,6 +438,21 @@ def _make_cache(tmp_path, **kwargs):
     return ContentCache(str(tmp_path), **kwargs)
 
 
+def _at_cap_budget() -> tuple[float, dict, int]:
+    """``(now, value, cap)`` where ``cap`` is exactly the on-disk envelope size.
+
+    The budget is the *envelope's* byte count, not the value's -- the cap that
+    admits an entry has to be derived from what actually lands on disk, so the
+    two are computed together here and a change to either moves both.
+    """
+    now = 1000.0
+    value = {"body": "x" * 150}
+    envelope = {"expires": now + 60, "value": value, "cached_at": now}
+    cap = len(json.dumps(envelope))
+    assert cap > len(json.dumps(value))
+    return now, value, cap
+
+
 def _fail_writes(cache, monkeypatch, *, only_when=None):
     """Patch ``_write_data`` to raise OSError.
 
@@ -465,12 +479,7 @@ class TestContentCacheByteBudget:
         assert list(tmp_path.glob("*.json")) == []
 
     def test_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
-        now = 1000.0
-        value = {"body": "x" * 150}
-        envelope = {"expires": now + 60, "value": value, "cached_at": now}
-        cap = len(json.dumps(envelope))
-        assert cap > len(json.dumps(value))
-
+        now, value, cap = _at_cap_budget()
         cache = _make_cache(tmp_path, max_entry_bytes=cap, clock=lambda: now)
         cache.set("at-cap", value, ttl=60)
 
@@ -479,10 +488,7 @@ class TestContentCacheByteBudget:
         assert path.stat().st_size == cap
 
     async def test_async_entry_at_cap_is_accepted_with_envelope_accounting(self, tmp_path):
-        now = 1000.0
-        value = {"body": "x" * 150}
-        envelope = {"expires": now + 60, "value": value, "cached_at": now}
-        cap = len(json.dumps(envelope))
+        now, value, cap = _at_cap_budget()
         cache = _make_cache(tmp_path / "async", max_entry_bytes=cap, clock=lambda: now)
 
         await cache.aset("at-cap", value, ttl=60)

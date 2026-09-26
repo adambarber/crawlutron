@@ -39,7 +39,7 @@ def test_counters_are_summed_across_workers(tmp_path):
     second.observe_crawl(results=[{"status": "success", "classification": "html"}])
 
     # Each worker alone saw one result; the endpoint must report two.
-    assert 'crawler_crawl_results_total 2.0' in first.as_prometheus()
+    assert "crawler_crawl_results_total 2.0" in first.as_prometheus()
 
 
 def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
@@ -52,7 +52,7 @@ def test_a_worker_reports_totals_it_did_not_produce(tmp_path):
     first, second = _two_workers(tmp_path / "coordination.db")
     second.observe_search(provider="tavily", results=7)
 
-    assert 'crawler_search_results_total 7.0' in first.as_prometheus()
+    assert "crawler_search_results_total 7.0" in first.as_prometheus()
 
 
 def test_labelled_series_are_summed_not_overwritten(tmp_path):

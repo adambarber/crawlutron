@@ -83,9 +83,9 @@ def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
                 "https://legacy.example",
                 '{"limits": {"max_depth": 2}}',
                 "paused",
-                '[]',
+                "[]",
                 '["https://legacy.example"]',
-                '[]',
+                "[]",
                 '{"https://legacy.example": 1}',
                 '[{"url": "https://legacy.example/page", "status": "success"}]',
                 10.0,
@@ -345,8 +345,6 @@ def test_migration_rollback_is_reversible_and_updates_the_ledger(tmp_path, schem
 
     conn = sqlite3.connect(db_path)
     assert CURRENT_SCHEMAS[schema].table_name not in _table_names(conn)
-    applied = {
-        str(row[0]) for row in conn.execute("SELECT migration_id FROM _yoyo_migration")
-    }
+    applied = {str(row[0]) for row in conn.execute("SELECT migration_id FROM _yoyo_migration")}
     assert MIGRATION_IDS[schema] not in applied
     conn.close()

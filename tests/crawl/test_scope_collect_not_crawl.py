@@ -7,21 +7,17 @@
   regardless of strategy.
 """
 
-from _fetcher_factories import site_fetcher
+from _fetcher_factories import site_fetcher, tap_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 
 
 def _recording_fetcher(pages):
-    base = site_fetcher(pages)
-    fetched: list[str] = []
-
-    def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        fetched.append(url)
-        return base(url, headers, timeout, max_content_length)
-
-    return fetcher, fetched
+    # The real site fetcher answers; the tap only records. The subject of every
+    # test in this file is which URLs get enqueued, so the fetcher must not be a
+    # second implementation of the site.
+    return tap_fetcher(site_fetcher(pages))
 
 
 def _doc_pages():
@@ -38,10 +34,10 @@ def _doc_pages():
 
 async def _crawl_example_site(pages):
     """Crawl the example fixture site; return the (envelope, fetched urls) pair."""
-    fetcher, fetched = _recording_fetcher(pages)
+    fetcher = _recording_fetcher(pages)
     payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
     out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
-    return out, fetched
+    return out, fetcher.calls
 
 
 async def test_scope_records_out_of_scope_links_but_never_fetches_them():
@@ -54,7 +50,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
         ),
         "/keep/x": (200, "<html>x</html>", "text/html"),
     }
-    fetcher, fetched = _recording_fetcher(pages)
+    fetcher = _recording_fetcher(pages)
     payload = {
         "url": "http://example.com/",
         "policy": {
@@ -67,7 +63,7 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
     # expansion stayed in scope...
     assert crawled == {"http://example.com", "http://example.com/keep/x"}
     # ...and instagram was never fetched
-    assert not any("instagram.com" in u for u in fetched)
+    assert not any("instagram.com" in u for u in fetcher.calls)
     # ...but the advertised profile is still recorded on the seed result
     root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
     recorded = {d["normalized_url"] for d in root["discovered_links"]}
@@ -109,7 +105,7 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
 
 async def test_document_urls_fetched_when_extraction_document_requested():
     """Callers who explicitly want document contents still get them."""
-    fetcher, fetched = _recording_fetcher(
+    fetcher = _recording_fetcher(
         {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")}
     )
     payload = {

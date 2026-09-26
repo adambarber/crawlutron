@@ -4,66 +4,19 @@ import threading
 import time
 
 import pytest
+from _lifespan_doubles import stub_heavy_teardown
+from _process_doubles import (
+    StubConn,
+    StubProc,
+    install_unkillable_doc_worker,
+    stub_proc,
+)
 
 import app.crawl.extraction as ext_mod
 
 
-class _StubProc:
-    """``multiprocessing.Process`` stand-in with signal semantics.
-
-    ``responds_to_sigterm=False`` models the runaway worker: SIGTERM is
-    absorbed, only SIGKILL ends it. ``join`` records whether the child was
-    already dead when it was called, so a test can tell "reaped" from "told to
-    die and still running".
-    """
-
-    def __init__(self, pid: int = 4242, responds_to_sigterm: bool = True) -> None:
-        self.pid = pid
-        self.signals: list[str] = []
-        self.join_calls: list[float | None] = []
-        self.joined_after_kill = False
-        self.closed_pipes = 0
-        self._alive = True
-        self._responds_to_sigterm = responds_to_sigterm
-
-    def is_alive(self) -> bool:
-        return self._alive
-
-    def terminate(self) -> None:
-        self.signals.append("SIGTERM")
-        if self._responds_to_sigterm:
-            self._alive = False
-
-    def kill(self) -> None:
-        self.signals.append("SIGKILL")
-        self._alive = False
-
-    def join(self, timeout=None) -> None:
-        self.join_calls.append(timeout)
-        if "SIGKILL" in self.signals:
-            self.joined_after_kill = True
-
-    @property
-    def exitcode(self) -> int | None:
-        return None if self._alive else -9
-
-
-class _StubConn:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
-
-    def send(self, payload) -> None:  # pragma: no cover - pool never used live
-        raise AssertionError("stub worker must not serve a task")
-
-    def poll(self, timeout) -> bool:  # pragma: no cover
-        return False
-
-
 def _stub_worker(pid: int, responds_to_sigterm: bool = True) -> ext_mod._DocWorker:
-    worker = ext_mod._DocWorker(_StubProc(pid, responds_to_sigterm), _StubConn())
+    worker = ext_mod._DocWorker(StubProc(pid, responds_to_sigterm), StubConn())
     worker.busy = False
     return worker
 
@@ -112,7 +65,7 @@ def _acquire_with_bound(monkeypatch, bound: float = 0.25):
 
 def test_terminate_doc_process_escalates_to_sigkill_for_a_stubborn_worker():
     """A worker that absorbs SIGTERM must still be killed, then reaped."""
-    proc = _StubProc(responds_to_sigterm=False)
+    proc = stub_proc(responds_to_sigterm=False)
     ext_mod._terminate_doc_process(proc)
 
     assert proc.signals[:1] == ["SIGTERM"], "graceful shutdown must be attempted first"
@@ -123,7 +76,7 @@ def test_terminate_doc_process_escalates_to_sigkill_for_a_stubborn_worker():
 
 def test_terminate_doc_process_does_not_kill_a_worker_that_exits_cleanly():
     """Inverse case: escalation is for survivors, not the normal path."""
-    proc = _StubProc(responds_to_sigterm=True)
+    proc = stub_proc(responds_to_sigterm=True)
     ext_mod._terminate_doc_process(proc)
 
     assert proc.signals == ["SIGTERM"]
@@ -275,7 +228,7 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
 # --- 4/5/6: D5 acquire refinements ---------------------------------------
 
 
-class _LockWatcherProc(_StubProc):
+class _LockWatcherProc(StubProc):
     """A dead worker whose termination reports whether ``_POOL_LOCK`` was held.
 
     The kill-escalation in ``_terminate_doc_process`` can take up to ~10s
@@ -301,117 +254,117 @@ class _LockWatcherProc(_StubProc):
 
 
 def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
-        """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
-        A caller blocked behind a slow in-lock operation must not find its whole
-        budget already spent when it finally enters -- it would then report "no
-        worker" for a pool that had a usable slot freed the entire time it waited.
-        The deadline is therefore computed after the lock is acquired.
+    """D5(a): time spent queued on ``_POOL_LOCK`` is not acquire budget.
+    A caller blocked behind a slow in-lock operation must not find its whole
+    budget already spent when it finally enters -- it would then report "no
+    worker" for a pool that had a usable slot freed the entire time it waited.
+    The deadline is therefore computed after the lock is acquired.
 
-        The holder waits a real, bounded span under the lock -- the adverse
-        condition, and the only reason a wall clock appears here at all. The
-        assertion is on what the acquirer returned, and the test proves its own
-        precondition first: the acquirer is observed INSIDE the lock, with the
-        slot still busy, at the moment the budget is computed. The D5(a) mutant
-        (budget computed before the lock) then leaves it with an elapsed budget,
-        it gives up, and ``box["worker"]`` is ``None`` -- deterministically, not
-        by a race over which thread wins the lock.
-        """
-        bound = 0.5
-        fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
-        worker = _stub_worker(6060)
-        worker.busy = True
+    The holder waits a real, bounded span under the lock -- the adverse
+    condition, and the only reason a wall clock appears here at all. The
+    assertion is on what the acquirer returned, and the test proves its own
+    precondition first: the acquirer is observed INSIDE the lock, with the
+    slot still busy, at the moment the budget is computed. The D5(a) mutant
+    (budget computed before the lock) then leaves it with an elapsed budget,
+    it gives up, and ``box["worker"]`` is ``None`` -- deterministically, not
+    by a race over which thread wins the lock.
+    """
+    bound = 0.5
+    fake_pool.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
+    worker = _stub_worker(6060)
+    worker.busy = True
+    with ext_mod._POOL_LOCK:
+        ext_mod._DOC_POOL = [worker]
+
+    # The pool lock is instrumented so the test can PROVE the precondition
+    # it is asserting about: the acquirer has to be inside the lock, with
+    # the slot still busy, at the moment its budget is computed. Without
+    # that, an acquirer that happened to enter after the holder freed the
+    # slot would collect the worker with a budget it never spent and the
+    # test would pass against the D5(a) regression it exists to catch.
+    acquirer_thread: dict[str, int] = {}
+    acquirer_inside = threading.Event()
+
+    class _RecordingLock:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def acquire(self, *args, **kwargs):
+            got = self._inner.acquire(*args, **kwargs)
+            if threading.get_ident() == acquirer_thread.get("id"):
+                acquirer_inside.set()
+            return got
+
+        def release(self):
+            return self._inner.release()
+
+        def locked(self):
+            return self._inner.locked()
+
+        def wait(self, *args, **kwargs):
+            return self._inner.wait(*args, **kwargs)
+
+        def notify(self, *args):
+            return self._inner.notify(*args)
+
+        def notify_all(self):
+            return self._inner.notify_all()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *exc):
+            self.release()
+            return False
+
+    real_lock = ext_mod._POOL_LOCK
+    fake_pool.setattr(ext_mod, "_POOL_LOCK", _RecordingLock(real_lock), raising=False)
+
+    box: dict[str, object] = {}
+
+    def _acquire() -> None:
+        acquirer_thread["id"] = threading.get_ident()
+        box["worker"] = ext_mod._acquire_doc_worker()
+
+    holder_ready = threading.Event()
+    holder_done = threading.Event()
+
+    def _hold_then_free() -> None:
+        # Hold the pool lock past the acquirer's budget: this is the
+        # blocked-behind-a-slow-retirement window. The slot is deliberately
+        # STILL busy at release, so an acquirer that enters must wait.
+        # ``Event.wait`` rather than ``time.sleep``: the suite patches the
+        # latter to a no-op, and the lock has to be held for real seconds or
+        # the budget is never actually exceeded.
         with ext_mod._POOL_LOCK:
-            ext_mod._DOC_POOL = [worker]
+            holder_ready.set()
+            threading.Event().wait(bound * 2)
+        # The acquirer is now inside the lock with the slot still busy and
+        # its budget already elapsed -- exactly the D5(a) failure point. Only
+        # now is the slot freed and the waiter notified, like a real release.
+        assert acquirer_inside.wait(timeout=10), "the acquirer never entered the pool lock"
+        with ext_mod._POOL_LOCK:
+            worker.busy = False
+            ext_mod._POOL_LOCK.notify_all()
+        holder_done.set()
 
-        # The pool lock is instrumented so the test can PROVE the precondition
-        # it is asserting about: the acquirer has to be inside the lock, with
-        # the slot still busy, at the moment its budget is computed. Without
-        # that, an acquirer that happened to enter after the holder freed the
-        # slot would collect the worker with a budget it never spent and the
-        # test would pass against the D5(a) regression it exists to catch.
-        acquirer_thread: dict[str, int] = {}
-        acquirer_inside = threading.Event()
+    acquirer = threading.Thread(target=_acquire, daemon=True)
+    holder = threading.Thread(target=_hold_then_free, daemon=True)
+    holder.start()
+    assert holder_ready.wait(timeout=5), "the lock holder never started"
+    acquirer.start()
+    try:
+        acquirer.join(timeout=10)
+    finally:
+        holder_done.wait(timeout=10)
+        holder.join(timeout=10)
 
-        class _RecordingLock:
-            def __init__(self, inner):
-                self._inner = inner
-
-            def acquire(self, *args, **kwargs):
-                got = self._inner.acquire(*args, **kwargs)
-                if threading.get_ident() == acquirer_thread.get("id"):
-                    acquirer_inside.set()
-                return got
-
-            def release(self):
-                return self._inner.release()
-
-            def locked(self):
-                return self._inner.locked()
-
-            def wait(self, *args, **kwargs):
-                return self._inner.wait(*args, **kwargs)
-
-            def notify(self, *args):
-                return self._inner.notify(*args)
-
-            def notify_all(self):
-                return self._inner.notify_all()
-
-            def __enter__(self):
-                self.acquire()
-                return self
-
-            def __exit__(self, *exc):
-                self.release()
-                return False
-
-        real_lock = ext_mod._POOL_LOCK
-        fake_pool.setattr(ext_mod, "_POOL_LOCK", _RecordingLock(real_lock), raising=False)
-
-        box: dict[str, object] = {}
-
-        def _acquire() -> None:
-            acquirer_thread["id"] = threading.get_ident()
-            box["worker"] = ext_mod._acquire_doc_worker()
-
-        holder_ready = threading.Event()
-        holder_done = threading.Event()
-
-        def _hold_then_free() -> None:
-            # Hold the pool lock past the acquirer's budget: this is the
-            # blocked-behind-a-slow-retirement window. The slot is deliberately
-            # STILL busy at release, so an acquirer that enters must wait.
-            # ``Event.wait`` rather than ``time.sleep``: the suite patches the
-            # latter to a no-op, and the lock has to be held for real seconds or
-            # the budget is never actually exceeded.
-            with ext_mod._POOL_LOCK:
-                holder_ready.set()
-                threading.Event().wait(bound * 2)
-            # The acquirer is now inside the lock with the slot still busy and
-            # its budget already elapsed -- exactly the D5(a) failure point. Only
-            # now is the slot freed and the waiter notified, like a real release.
-            assert acquirer_inside.wait(timeout=10), "the acquirer never entered the pool lock"
-            with ext_mod._POOL_LOCK:
-                worker.busy = False
-                ext_mod._POOL_LOCK.notify_all()
-            holder_done.set()
-
-        acquirer = threading.Thread(target=_acquire, daemon=True)
-        holder = threading.Thread(target=_hold_then_free, daemon=True)
-        holder.start()
-        assert holder_ready.wait(timeout=5), "the lock holder never started"
-        acquirer.start()
-        try:
-            acquirer.join(timeout=10)
-        finally:
-            holder_done.wait(timeout=10)
-            holder.join(timeout=10)
-
-        assert not acquirer.is_alive(), "_acquire_doc_worker wedged behind the lock holder"
-        assert box.get("worker") is worker, (
-            "acquire burned its whole budget waiting for the pool lock and then gave "
-            "up, even though a usable slot was freed while it waited"
-        )
+    assert not acquirer.is_alive(), "_acquire_doc_worker wedged behind the lock holder"
+    assert box.get("worker") is worker, (
+        "acquire burned its whole budget waiting for the pool lock and then gave "
+        "up, even though a usable slot was freed while it waited"
+    )
 
 
 def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
@@ -421,7 +374,7 @@ def test_respawn_terminates_the_replaced_worker_off_the_pool_lock(fake_pool):
     pool lock only needs to cover the swap, so the termination is deferred until
     after it. A probe in ``terminate`` proves the lock was free at that moment.
     """
-    dead = ext_mod._DocWorker(_LockWatcherProc(alive=False), _StubConn())
+    dead = ext_mod._DocWorker(_LockWatcherProc(alive=False), StubConn())
     dead.busy = False
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [dead]
@@ -453,13 +406,7 @@ def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch
     budget, the pool is one worker short forever and every later acquire
     degrades to "no worker" instead of growing past the zombie slot.
     """
-    # responds_to_sigterm=False models a worker nothing can kill: is_alive()
-    # stays True for the life of the process, and nothing here terminates it.
-    zombie = ext_mod._DocWorker(_StubProc(1111, responds_to_sigterm=False), _StubConn())
-    zombie.retired = True
-    zombie.busy = False
-    with ext_mod._POOL_LOCK:
-        ext_mod._DOC_POOL = [zombie]
+    install_unkillable_doc_worker()
 
     replacement = _stub_worker(31337)
     spawned = []
@@ -475,49 +422,8 @@ def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch
 
     assert spawned, "the pool did not grow past the unkillable slot"
     assert worker is replacement, (
-        "acquire gave up instead of growing: an unkillable slot permanently "
-        "consumed a pool-size budget"
+        "acquire gave up instead of growing: an unkillable slot permanently consumed a pool-size budget"
     )
-
-
-class _LifespanStubProc:
-    """``multiprocessing.Process`` stand-in that records its shutdown."""
-
-    def __init__(self) -> None:
-        self._alive = True
-        self.signals: list[str] = []
-
-    def is_alive(self) -> bool:
-        return self._alive
-
-    def terminate(self) -> None:
-        self.signals.append("SIGTERM")
-        self._alive = False
-
-    def kill(self) -> None:
-        self.signals.append("SIGKILL")
-        self._alive = False
-
-    def join(self, timeout=None) -> None:
-        # The real worker join accepts an optional timeout; the stand-in ignores it.
-        _ = timeout
-        return None
-
-    @property
-    def exitcode(self) -> int | None:
-        return None if self._alive else -15
-
-    @property
-    def terminated(self) -> bool:
-        return bool(self.signals)
-
-
-class _LifespanStubConn:
-    def __init__(self) -> None:
-        self.closed = False
-
-    def close(self) -> None:
-        self.closed = True
 
 
 async def _noop() -> None:
@@ -529,7 +435,7 @@ def seeded_doc_pool(monkeypatch):
     """A live document worker in the pool, restored afterwards."""
     from app.crawl import extraction as ext_mod
 
-    worker = ext_mod._DocWorker(_LifespanStubProc(), _LifespanStubConn())
+    worker = ext_mod._DocWorker(StubProc(), StubConn())
     saved_pool = ext_mod._DOC_POOL
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [worker]
@@ -551,16 +457,8 @@ class TestLifespanDocPoolTeardown:
         """
         from app import main as main_mod
         from app.crawl import extraction as ext_mod
-        from app.crawl.strategies import http_client_pool as http_mod
-        from app.health import readiness as readiness_mod
-        from app.health.readiness import ReadinessState
 
-        fresh = ReadinessState()
-        monkeypatch.setattr(readiness_mod, "READINESS_STATE", fresh)
-        monkeypatch.setattr(http_mod, "close_async_http_client", _noop)
-        monkeypatch.setattr(http_mod, "close_cffi_session", _noop)
-        monkeypatch.setattr(main_mod, "close_browser_pool", _noop)
-
+        stub_heavy_teardown(monkeypatch)
         worker = seeded_doc_pool
 
         async with main_mod.app.router.lifespan_context(main_mod.app):
@@ -687,13 +585,7 @@ def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
     budget grows around it. It must be reaped on the normal path, exactly like
     full teardown does, so the pool and the budget stay consistent.
     """
-    # responds_to_sigterm=False models a worker nothing can kill: is_alive()
-    # stays True for the life of the process.
-    zombie = ext_mod._DocWorker(_StubProc(1111, responds_to_sigterm=False), _StubConn())
-    zombie.retired = True
-    zombie.busy = False
-    with ext_mod._POOL_LOCK:
-        ext_mod._DOC_POOL = [zombie]
+    zombie = install_unkillable_doc_worker()
 
     replacement = _stub_worker(31337)
 

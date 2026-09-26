@@ -1,6 +1,5 @@
 """Real tests for browser.py logic (no browser; inject failing factories)."""
 
-
 import os
 import tempfile
 from pathlib import Path
@@ -23,28 +22,32 @@ def _raise_generic(**kwargs: object):
     raise RuntimeError("boom")
 
 
+async def _retry_exhausted(browser_factory, *, max_retries: int = 1):
+    """Render through a browser factory that always raises, retries off the clock.
+
+    Asserts the budget was actually spent -- ``attempts == max_retries + 1`` --
+    so a test claiming "exhausted" cannot pass because the first attempt already
+    failed. Returns the result for the caller to classify.
+    """
+    renderer = BrowserRenderer(browser_factory=browser_factory, sleep=lambda _s: None)
+    result = await renderer.render(
+        "http://example.com/",
+        RenderOptions(max_retries=max_retries),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
+    assert result.status == "retry_exhausted", result.status
+    assert result.attempts == max_retries + 1, result.attempts
+    return result
+
+
 class TestBrowserRenderRetry:
     async def test_render_exhausts_retries_on_timeout_error(self):
-        renderer = BrowserRenderer(browser_factory=_raise_timeout, sleep=lambda _s: None)
-        result = await renderer.render(
-            "http://example.com/",
-            RenderOptions(max_retries=1),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
-        assert result.status == "retry_exhausted"
+        result = await _retry_exhausted(_raise_timeout)
         assert result.classification == "navigation_timeout"
-        assert result.attempts == 2
 
     async def test_render_exhausts_retries_on_generic_error(self):
-        renderer = BrowserRenderer(browser_factory=_raise_generic, sleep=lambda _s: None)
-        result = await renderer.render(
-            "http://example.com/",
-            RenderOptions(max_retries=1),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
-        assert result.status == "retry_exhausted"
+        result = await _retry_exhausted(_raise_generic)
         assert result.classification == "unknown_error"
-        assert result.attempts == 2
 
 
 class TestBrowserKwargs:

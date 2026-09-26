@@ -14,7 +14,7 @@ from _extraction_helpers import (
     _next_non_empty_document_line,
     _should_join_document_paragraph,
 )
-from _fetcher_factories import make_fetch, run_http_strategy
+from _fetcher_factories import run_http_strategy, scripted_fetcher
 
 from app.crawl.strategies.document import (
     _extract_pdf_bytes_to_markdown,
@@ -219,16 +219,9 @@ class TestDocumentRedirectSsrf:
 
 async def test_document_extraction_with_uncompressed_bytearray_body(base_url):
     """Simulate fetcher delivering CSV body as bytearray (no content-encoding)."""
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        # csv served WITHOUT compression -> decompress_body returns the raw
-        # buffer unchanged, which is a bytearray
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            ctype="text/csv",
-            body=bytearray(b"name,age\nAlice,30\nBob,25"),
-        )
+    # csv served WITHOUT compression -> decompress_body returns the raw
+    # buffer unchanged, which is a bytearray
+    fetcher = scripted_fetcher(status=200, ctype="text/csv", body=bytearray(b"name,age\nAlice,30\nBob,25"))
 
     result = await run_http_strategy(
         url="https://sudbury.ma.us/x.csv",

@@ -1,7 +1,7 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
-from _fetcher_factories import make_fetch
+from _fetcher_factories import request_fetcher
 
 from app.crawl.strategy_chain import execute_crawl_chain
 from app.models import CrawlResult
@@ -30,21 +30,24 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
 
     calls = []
 
-    async def http_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        calls.append(("http", dict(headers)))
-        return make_fetch(url=url, final_url=url, status=403, headers={}, body=b"denied")
+    # The plain HTTP strategy always denies; the cffi one only succeeds once
+    # the browser cookies are replayed. Both answers are functions of the
+    # Cookie header, so both are request_fetcher responses -- and the tag each
+    # call is recorded under is what the test reads back.
+    denied = (403, b"denied", "text/plain")
 
-    async def cffi_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    def respond_http(url, headers):
+        calls.append(("http", dict(headers)))
+        return denied
+
+    def respond_cffi(url, headers):
         calls.append(("cffi", dict(headers)))
         if "incap_ses" in headers.get("Cookie", ""):
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="text/html",
-                body=b"<html><body>cffi success</body></html>",
-            )
-        return make_fetch(url=url, final_url=url, status=403, headers={}, body=b"denied")
+            return (200, b"<html><body>cffi success</body></html>", "text/html")
+        return denied
+
+    http_fetcher = request_fetcher(respond_http)
+    cffi_fetcher = request_fetcher(respond_cffi)
 
     async def browser_worker(job):
         return _crawl_result(job.url)

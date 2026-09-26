@@ -87,6 +87,4 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
     assert route.continued_url == "http://1.2.3.4/x"
     assert route.continued_headers == {"Host": "1.2.3.4"}
     # The pin governs the connection, so its resolve is still uncached.
-    assert resolves and not all(resolves), (
-        f"pin resolve went through the cache: {resolves}"
-    )
+    assert resolves and not all(resolves), f"pin resolve went through the cache: {resolves}"

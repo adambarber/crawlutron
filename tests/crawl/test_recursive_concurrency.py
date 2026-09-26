@@ -5,10 +5,9 @@ time, bypassing DomainScheduler entirely (no global/per-domain concurrency,
 no rate limiting).
 """
 
-import asyncio
 from urllib.parse import urlparse
 
-from _fetcher_factories import make_fetch
+from _fetcher_factories import concurrent_fetcher
 
 from app.crawl.engine import crawl_request
 from app.settings import CrawlerSettings
@@ -28,22 +27,18 @@ async def test_recursive_crawl_fetches_links_concurrently():
     The overlap window is a scheduling point, not a duration: the fake fetcher
     yields once to the event loop mid-fetch, so every link the engine is willing
     to have in flight is in flight at the same time. A crawl that awaited the
-    links one at a time would hold ``max_inflight`` at 1 and fail the lower
+    links one at a time would hold the harness's overlap peak at 1 and fail the lower
     bound, so the assertion is not weakened by removing the simulated network
     latency -- it is measuring the same thing with a cheaper instrument.
     """
-    inflight = {"n": 0}
-    max_inflight = {"n": 0}
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    def respond(url, headers):
         path = urlparse(url).path or "/"
-        inflight["n"] += 1
-        max_inflight["n"] = max(max_inflight["n"], inflight["n"])
-        await asyncio.sleep(0)  # the scheduling point that makes overlap observable
-        inflight["n"] -= 1
-        return make_fetch(
-            url=url, final_url=url, status=200, ctype="text/html", body=_page_html(path).encode()
-        )
+        return (200, _page_html(path), "text/html")
+
+    # The harness owns the overlap counter and the scheduling point that makes
+    # overlap observable; this test owns what each path answers.
+    fetcher = concurrent_fetcher(respond)
 
     payload = {
         "url": "http://example.com/",
@@ -65,6 +60,6 @@ async def test_recursive_crawl_fetches_links_concurrently():
     # 1 seed + 5 discovered leaf pages all crawled.
     assert len(response["results"]) == 6
     # Concurrency actually happened (sequential fetching yields max 1) ...
-    assert max_inflight["n"] >= 2, f"recursive crawl was sequential: {max_inflight}"
+    assert fetcher.peak() >= 2, f"recursive crawl was sequential: {fetcher.peak()}"
     # ... but stayed within the configured per-domain gate.
-    assert max_inflight["n"] <= 4, f"exceeded per-domain limit: {max_inflight}"
+    assert fetcher.peak() <= 4, f"exceeded per-domain limit: {fetcher.peak()}"

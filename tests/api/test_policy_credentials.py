@@ -104,7 +104,6 @@ class TestApplyCredentials:
         assert "Authorization" not in plain
 
 
-
 class TestPayloadPolicy:
     def test_keys_canonicalize_to_origin_form(self):
         policy = _payload_policy(
@@ -115,4 +114,6 @@ class TestPayloadPolicy:
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
-            _payload_policy({"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, _settings())
+            _payload_policy(
+                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, _settings()
+            )

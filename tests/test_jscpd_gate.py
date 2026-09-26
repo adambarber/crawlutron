@@ -19,17 +19,13 @@ def _args(threshold: float = 0) -> argparse.Namespace:
 def _args_for(
     threshold: float = 0,
     *,
-    min_lines: int = 8,
-    min_tokens: int = 40,
-    app_min_lines: int = 7,
-    app_min_tokens: int = 35,
+    min_lines: int = 4,
+    min_tokens: int = 39,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         profile="all",
         min_lines=min_lines,
         min_tokens=min_tokens,
-        app_min_lines=app_min_lines,
-        app_min_tokens=app_min_tokens,
         threshold=threshold,
         fail_on_empty=True,
     )
@@ -64,7 +60,8 @@ def _stub_report(
                 "secondFile": _root_relative(root, duplicate["secondFile"]),
             }
             for duplicate in duplicates
-            if _inside(root, duplicate["firstFile"]["name"]) and _inside(root, duplicate["secondFile"]["name"])
+            if _inside(root, duplicate["firstFile"]["name"])
+            and _inside(root, duplicate["secondFile"]["name"])
         ]
         found = sources[root] if isinstance(sources, dict) else sources
         report = {
@@ -84,6 +81,21 @@ def _stub_report(
 
 def _command_for(commands: list[list[str]], root: str) -> list[str]:
     return next(command for command in commands if command[-1] == root)
+
+
+def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
+    """Run the gate over a tree with no duplicates; return the commands issued.
+
+    The clean run is the precondition for most of what this file asserts (a
+    threshold is honoured, a root is scanned once, a floor is per-root), so the
+    empty expectations file and the report stub are set up here once rather than
+    re-spelled per test.
+    """
+    _write_expectations(tmp_path / "expectations.json", [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
+    commands = _stub_report(monkeypatch, [], **kwargs)
+    assert gate._run(_args()) == 0
+    return commands
 
 
 def _root_relative(root: str, location: dict) -> dict:
@@ -111,7 +123,7 @@ def _valid_pair() -> dict:
         "first": {"path": "app/new.py", "start": 10, "end": 20},
         "second": {"path": "app/other.py", "start": 30, "end": 40},
         "reason": "intentional",
-        "guard": "tests/test_safety_invariants.py::test_crawl_error_members_derive_from_classification",
+        "guard": "tests/test_safety_invariants.py::test_classification_literal_covers_the_enum_exactly",
         "fragment_sha256": hashlib.sha256(b"duplicate").hexdigest(),
     }
 
@@ -160,13 +172,9 @@ _GATE_ARGV = [
     "gate",
     "all",
     "--min-lines",
-    "8",
+    "4",
     "--min-tokens",
-    "40",
-    "--app-min-lines",
-    "7",
-    "--app-min-tokens",
-    "35",
+    "39",
     "--threshold",
     "0",
     "--fail-on-empty",
@@ -188,25 +196,14 @@ def test_uniform_profile_shape() -> None:
 
 
 def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    commands = _stub_report(monkeypatch, [])
-
-    assert gate._run(_args()) == 0
+    commands = _run_against_empty_tree(monkeypatch, tmp_path)
     assert commands
     for command in commands:
         assert command[0] == str(gate.SERVICE_ROOT / ".venv" / "bin" / "jscpd")
         assert "--fail-on-empty" in command
         assert command[command.index("--threshold") + 1] == "0"
-    # Each tree is scanned at its own floor, so the floor a command carries is
-    # the one for the root it scans.
-    production = _command_for(commands, "app")
-    assert production[production.index("--min-lines") + 1] == "7"
-    assert production[production.index("--min-tokens") + 1] == "35"
-    support = _command_for(commands, "tests")
-    assert support[support.index("--min-lines") + 1] == "8"
-    assert support[support.index("--min-tokens") + 1] == "40"
-    assert _command_for(commands, "scripts")[_command_for(commands, "scripts").index("--min-lines") + 1] == "8"
+    # The floor each command carries is checked across all roots by
+    # test_one_floor_is_applied_to_every_root; per-root floors no longer exist.
 
 
 @pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
@@ -419,29 +416,28 @@ def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
 
 
 def test_each_root_gets_exactly_one_invocation(monkeypatch, tmp_path) -> None:
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    commands = _stub_report(monkeypatch, [])
-
-    assert gate._run(_args()) == 0
+    commands = _run_against_empty_tree(monkeypatch, tmp_path)
     scanned = [command[-1] for command in commands]
     assert scanned == list(gate.PROFILE_PATHS["all"]), f"one invocation per root, got {scanned}"
 
 
-def test_the_production_floor_is_tighter_than_the_test_floor() -> None:
-    """One flat floor cannot serve both trees.
+def test_one_floor_is_applied_to_every_root(monkeypatch, tmp_path) -> None:
+    """No root is scored at a looser bound than another.
 
-    Measured on this tree at 8 lines / 40 tokens the whole service reported
-    exactly one pair, both sides in `app/`: production duplication was hidden
-    behind a floor chosen for test scaffolding. At 5 / 25 the same tree reports
-    169 pairs, 46 of them production. The floors are separate numbers so the
-    production tree can be scored on its own evidence.
+    Separate floors were the fix for a flat floor hiding production duplication
+    behind a number picked for test scaffolding. They became unnecessary once
+    this tree reported zero pairs in every tree at one number, and a second
+    number is a second thing to ratchet -- so there is one floor now, and the
+    check is that every invocation carries it. A root added later, or a floor
+    edited in one place only, is what this catches.
     """
-    production = _args_for(min_lines=8, min_tokens=40, app_min_lines=7, app_min_tokens=35)
-    floors = gate._floors(production)
-    assert floors["production"] == (7, 35)
-    assert floors["test"] == (8, 40)
-    assert floors["production"] < floors["test"], "the production floor must be the tighter one"
+    commands = _run_against_empty_tree(monkeypatch, tmp_path)
+    assert len(commands) > 1, "expected more than one root, so the check has something to compare"
+    carried = {
+        (command[command.index("--min-lines") + 1], command[command.index("--min-tokens") + 1])
+        for command in commands
+    }
+    assert carried == {("4", "39")}, f"roots scored at differing floors: {sorted(carried)}"
 
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_path, capsys) -> None:
@@ -466,7 +462,9 @@ def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_
 
     assert gate.main() == 1
     reported = capsys.readouterr().err
-    assert reported.count("unsanctioned clone") == 2, f"one pair per tree, not one collapsed pair:\n{reported}"
+    assert reported.count("unsanctioned clone") == 2, (
+        f"one pair per tree, not one collapsed pair:\n{reported}"
+    )
     assert "[production]" in reported and "[test]" in reported, f"each pair must name its tree:\n{reported}"
 
 
@@ -549,13 +547,9 @@ def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
 def test_jscpd_json_rejects_unknown_keys(tmp_path) -> None:
     """Bites: only `ignore` is allowed in .jscpd.json.
 
-    Keys like `maxLines`, `skipLocal`, `minLines`, `minTokens` pass straight
-    through to jscpd via `--config` and are live. Measured: `maxLines: 500`
-    shrinks production coverage from 94 sources/21506 lines to 83/13560
-    (37% of production unscanned) while the gate still exits 0 because the
-    expectations file is satisfied by the reduced pair set. `skipLocal: true`
-    fails closed (exit 1) because it changes the expectations file match.
-    Only `ignore` is a sanctioned key; everything else must be rejected.
+    The measured masking, and the reason the check runs before any scan, are
+    recorded on ``gate._validate_scan_config`` -- restating them here is a
+    second copy to go stale. This test only pins the rejection.
     """
     config = tmp_path / "jscpd.json"
     config.write_text(

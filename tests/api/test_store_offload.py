@@ -50,9 +50,7 @@ def _refuse_on_loop(name: str) -> None:
         asyncio.get_running_loop()
     except RuntimeError:
         return
-    raise AssertionError(
-        f"sync store method {name} ran on the event loop; the async twin owns that call"
-    )
+    raise AssertionError(f"sync store method {name} ran on the event loop; the async twin owns that call")
 
 
 class LoopGuardJobStore(JobStore):
@@ -151,9 +149,7 @@ class TestJobEndpointsStayOffTheLoop:
     that was supposed to be answering liveness probes.
     """
 
-    async def test_the_whole_job_endpoint_surface_stays_off_the_loop(
-        self, jobs_client, loop_guard_store
-    ):
+    async def test_the_whole_job_endpoint_surface_stays_off_the_loop(self, jobs_client, loop_guard_store):
         # The crawl is held open across every assertion. Without it this test
         # raced its own background task: POST /v1/jobs starts the runner, the
         # fake engine returned instantly, and the job reached COMPLETED before
@@ -179,9 +175,7 @@ class TestJobEndpointsStayOffTheLoop:
             fetched = await jobs_client.get(f"/v1/jobs/{job_id}")
             assert fetched.status_code == 200, fetched.text
 
-            controlled = await jobs_client.post(
-                f"/v1/jobs/{job_id}/control", json={"action": "cancel"}
-            )
+            controlled = await jobs_client.post(f"/v1/jobs/{job_id}/control", json={"action": "cancel"})
             assert controlled.status_code == 200, controlled.text
 
             deleted = await jobs_client.delete(f"/v1/jobs/{job_id}")
@@ -231,9 +225,7 @@ class TestStatusReadNeverMaterializesTheCrawl:
             monkeypatch.setattr(JobAccumulators, name, wrapper)
         return reached
 
-    def test_counts_come_without_reading_the_page_history(
-        self, seeded_store, monkeypatch
-    ):
+    def test_counts_come_without_reading_the_page_history(self, seeded_store, monkeypatch):
         store, job = seeded_store
         reached = self._spy_on_history_reads(monkeypatch, store)
 
@@ -285,17 +277,13 @@ class TestStartupRecoveryStaysOffTheLoop:
     all synchronously, on the loop that had just finished booting the service.
     """
 
-    async def test_recovery_rewinds_and_starts_without_touching_the_loop(
-        self, loop_guard_store
-    ):
+    async def test_recovery_rewinds_and_starts_without_touching_the_loop(self, loop_guard_store):
         from app.api.job_runner import recover_and_start_pending_jobs
 
         job_runner.reset_job_runner()
         job_runner.install_execute_crawl(_fake_execute([_canned_result(_ROOT)]))
         try:
-            job = await _off_loop(
-                _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}
-            )
+            job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}})
             await recover_and_start_pending_jobs(
                 loop_guard_store, CrawlerSettings.from_mapping({}), asyncio.Event()
             )
@@ -307,9 +295,7 @@ class TestStartupRecoveryStaysOffTheLoop:
     async def test_rewinding_a_crash_orphan_never_touches_the_loop(self, loop_guard_store):
         from app.api.job_runner import recover_orphaned_running_jobs
 
-        job = await _off_loop(
-            _seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True
-        )
+        job = await _off_loop(_seed_job, loop_guard_store, _ROOT, {"limits": {"max_depth": 1}}, running=True)
         rewound = await recover_orphaned_running_jobs(loop_guard_store)
         assert rewound == 1
         reloaded = await _off_loop(loop_guard_store.load, job.job_id)
@@ -328,9 +314,7 @@ class TestSingleShotResultStoreStaysOffTheLoop:
     ):
         from app.api.crawl_endpoint import get_crawl_result
 
-        await _off_loop(
-            loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []}
-        )
+        await _off_loop(loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []})
         stored = {
             "request_id": "req-1",
             "results": [],
@@ -343,16 +327,12 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         response = await get_crawl_result("req-1", loop_guard_store, result_store)
         assert response.request_id == "req-1"
 
-    async def test_a_pending_single_shot_read_stays_off_the_loop(
-        self, loop_guard_store, result_store
-    ):
+    async def test_a_pending_single_shot_read_stays_off_the_loop(self, loop_guard_store, result_store):
         from fastapi import HTTPException
 
         from app.api.crawl_endpoint import get_crawl_result
 
-        await _off_loop(
-            loop_guard_store.create_single_shot, "req-2", _ROOT, {"strategies": []}
-        )
+        await _off_loop(loop_guard_store.create_single_shot, "req-2", _ROOT, {"strategies": []})
         with pytest.raises(HTTPException) as raised:
             await get_crawl_result("req-2", loop_guard_store, result_store)
         assert raised.value.status_code == 202

@@ -70,33 +70,16 @@ SANCTIONED_IGNORE_GLOBS = (
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("profile", choices=tuple(PROFILE_PATHS))
-    # The looser floor, for the test and support trees. These flag names and
-    # their values are unchanged; the tighter production floor is the pair
-    # below them.
+    # One floor, applied to every root. The split it replaced (app 7/35, tests
+    # 8/40) existed because a single loose floor hid production duplication
+    # behind a number picked for test scaffolding. At 4/39 both trees report
+    # zero, so there is nothing left to hide and a second number is a second
+    # thing to ratchet.
     parser.add_argument("--min-lines", type=int, required=True)
     parser.add_argument("--min-tokens", type=int, required=True)
-    parser.add_argument("--app-min-lines", type=int, required=True)
-    parser.add_argument("--app-min-tokens", type=int, required=True)
     parser.add_argument("--threshold", type=float, required=True)
     parser.add_argument("--fail-on-empty", action="store_true", required=True)
     return parser.parse_args()
-
-
-def _floors(args: argparse.Namespace) -> dict[str, tuple[int, int]]:
-    """The floor each tree is scored at, as (min_lines, min_tokens).
-
-    Separate numbers because one flat floor cannot serve both trees. At 8 lines
-    and 40 tokens this whole service reported exactly one pair, and both sides
-    of it were in `app/`: production duplication was invisible behind a floor
-    picked for test scaffolding. At 5 and 25 the same tree reports 169 pairs,
-    46 of them production. Neither end is the right answer -- the flat number
-    hid the tree that matters -- so each tree is scored on its own evidence and
-    both ratchet towards zero.
-    """
-    return {
-        "production": (args.app_min_lines, args.app_min_tokens),
-        "test": (args.min_lines, args.min_tokens),
-    }
 
 
 def _tree_of(path: str) -> str:
@@ -230,7 +213,10 @@ def _validate_expectation(pair: Any) -> None:
         path = Path(location["path"])
         if path.is_absolute() or ".." in path.parts or not location["path"]:
             raise ValueError(f"jscpd expectation {pair_id!r} has an unsafe {side} path")
-        if not all(isinstance(location.get(field), int) and not isinstance(location.get(field), bool) for field in ("start", "end")):
+        if not all(
+            isinstance(location.get(field), int) and not isinstance(location.get(field), bool)
+            for field in ("start", "end")
+        ):
             raise ValueError(f"jscpd expectation {pair_id!r} has invalid {side} bounds")
         if location["start"] < 1 or location["end"] < location["start"]:
             raise ValueError(f"jscpd expectation {pair_id!r} has invalid {side} bounds")
@@ -283,7 +269,9 @@ def _pair_id(duplicate: dict[str, Any], root: str) -> LocationPair:
     `tests/` are the same string, and a single whole-tree scan cannot say which
     tree a pair belongs to.
     """
-    return _location_pair([_scoped(root, _location(duplicate, side, "name")) for side in ("firstFile", "secondFile")])
+    return _location_pair(
+        [_scoped(root, _location(duplicate, side, "name")) for side in ("firstFile", "secondFile")]
+    )
 
 
 def _scoped(root: str, key: LocationKey) -> LocationKey:
@@ -335,18 +323,18 @@ def _footprint(duplicate: dict[str, Any]) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     _validate_scan_config(CONFIG_PATH)
-    floors = _floors(args)
+    floor = (args.min_lines, args.min_tokens)
     # Keyed by (tree, content). The tree is part of the identity because the
-    # same fragment in `app/` and in `tests/` is two separate findings at two
-    # different floors, and a single whole-tree scan keyed on content alone
-    # cannot tell them apart.
+    # same fragment in `app/` and in `tests/` is two separate findings against
+    # two separate scan roots, and jscpd reports root-relative names, so a
+    # single whole-tree scan keyed on content alone cannot tell them apart.
     observed: dict[tuple[str, str], set[LocationPair]] = {}
     spans: dict[tuple[str, str], int] = {}
     totals: dict[str, dict[str, int]] = {}
     sources = 0
     for tree, roots in TREE_ROOTS.items():
         for root in roots:
-            report = _scan(root, floors[tree], args)
+            report = _scan(root, floor, args)
             statistics = report["statistics"]["total"]
             found_sources = int(statistics["sources"])
             sources += found_sources
@@ -390,7 +378,7 @@ def _run(args: argparse.Namespace) -> int:
         if key in expected:
             raise ValueError(
                 f"two jscpd expectations ({expected[key]['id']!r} and {pair['id']!r}) "
-                f"claim the same fragment { _short(fragment_hash) }"
+                f"claim the same fragment {_short(fragment_hash)}"
             )
         expected[key] = pair
 
@@ -436,8 +424,7 @@ def _run(args: argparse.Namespace) -> int:
             )
         for pair, extra in undeclared:
             print(
-                f"jscpd {args.profile}: sanctioned clone also appears undeclared: "
-                f"id={pair['id']} at {extra}",
+                f"jscpd {args.profile}: sanctioned clone also appears undeclared: id={pair['id']} at {extra}",
                 file=sys.stderr,
             )
         return 1
@@ -456,7 +443,7 @@ def _run(args: argparse.Namespace) -> int:
             return 1
         print(
             f"jscpd {args.profile}: [{tree}] {tree_totals['pairs']} pairs at "
-            f"{floors[tree][0]} lines/{floors[tree][1]} tokens, "
+            f"{floor[0]} lines/{floor[1]} tokens, "
             f"{sum(1 for key in expected if key[0] == tree)} sanctioned, "
             f"{tree_totals['duplicatedLines']} duplicated lines of {total_lines} "
             f"({tree_totals['sources']} sources)"

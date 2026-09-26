@@ -66,7 +66,12 @@ class TestTransientRequeue:
         from app.crawl.recursive import MAX_TRANSIENT_REQUEUES, requeue_transient
         from app.models import CrawlTask
 
-        task = CrawlTask(index=0, original_url="http://a.example/x", normalized_url="http://a.example/x", domain="a.example")
+        task = CrawlTask(
+            index=0,
+            original_url="http://a.example/x",
+            normalized_url="http://a.example/x",
+            domain="a.example",
+        )
         frontier = deque()
 
         # A first exhaustion is re-queued to the tail.
@@ -137,4 +142,3 @@ class TestTransientRequeue:
         # One initial attempt plus the cap of frontier re-queues: the URL was
         # retried at least once rather than recorded as a permanent failure.
         assert len(invocations) == 1 + MAX_TRANSIENT_REQUEUES, invocations
-

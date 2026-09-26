@@ -97,9 +97,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     for thread in race_threads:
         assert thread.join(timeout=10) is None, "the scheduled race wedged"
 
-    assert len(old_error) == 1, (
-        f"the unsynchronized read was expected to raise exactly once, got {old_error}"
-    )
+    assert len(old_error) == 1, f"the unsynchronized read was expected to raise exactly once, got {old_error}"
     assert isinstance(old_error[0], KeyError), (
         f"the unsynchronized read raised {old_error[0]!r}, not the expected KeyError"
     )
@@ -115,8 +113,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     # that a slow box could break for no reason at all.
     store = clean_cookie_store
     assert hasattr(store, "_lock"), (
-        "the cookie store has no lock; reads are unsynchronized and the "
-        "eviction race is wide open"
+        "the cookie store has no lock; reads are unsynchronized and the eviction race is wide open"
     )
 
     class _RecordingLock:
@@ -189,12 +186,9 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
 
     assert not probe.is_alive() and not reader.is_alive(), "the guarded read wedged"
     assert recording.acquisitions.get(reader.ident, 0) > 0, (
-        "the read path never took the store lock: reads are unsynchronized and "
-        "the eviction race is wide open"
+        "the read path never took the store lock: reads are unsynchronized and the eviction race is wide open"
     )
-    assert box.get("value") is not None, (
-        "the read did not return the value once the lock was released"
-    )
+    assert box.get("value") is not None, "the read did not return the value once the lock was released"
 
 
 def test_read_touches_lru_so_a_read_key_survives_eviction(clean_cookie_store):
@@ -222,8 +216,6 @@ def test_missing_domain_read_is_none_not_keyerror(clean_cookie_store):
 
 
 # The cache-cap tests spawn a real browser-context store, so they are gated.
-
-
 
 
 def _with_clean_cache(fn):

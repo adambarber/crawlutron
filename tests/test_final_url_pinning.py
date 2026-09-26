@@ -47,12 +47,14 @@ def test_final_url_uses_hostname_not_pinned_ip():
         patch.object(pool_mod, "get_async_http_client") as gc,
     ):
         gc.return_value.stream.return_value = fake
-        result = asyncio.run(_default_http_fetcher(
-            "http://example.com/page",
-            {},
-            5.0,
-            1_000_000,
-            policy=HostPolicy.unrestricted(),
-        ))
+        result = asyncio.run(
+            _default_http_fetcher(
+                "http://example.com/page",
+                {},
+                5.0,
+                1_000_000,
+                policy=HostPolicy.unrestricted(),
+            )
+        )
     assert result.final_url == "http://example.com/page"
     assert "93.184.216.34" not in result.final_url

@@ -2,7 +2,7 @@ import multiprocessing
 import os
 
 import pytest
-from _fetcher_factories import run_http_strategy
+from _fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from _policy_factories import http_strategy_policy
 from helpers.server import _Handler as _BaseHandler
 from helpers.server import spawn_threaded_server
@@ -104,15 +104,14 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        def failing_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            import httpx
+        import httpx
 
-            raise httpx.RequestError("connection failed", request=None)
+        unreachable_fetcher = failing_fetcher(httpx.RequestError("connection failed", request=None))
 
         result = await run_http_strategy(
             url="http://fail.example.com/",
             policy=http_strategy_policy(),
-            http_fetcher=failing_fetcher,
+            http_fetcher=unreachable_fetcher,
             cache=cache,
         )
         # A bare httpx.RequestError is the generic httpx-level tail of the
@@ -127,21 +126,22 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        def error_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            import httpx
+        import httpx
 
-            class MockResponse:
-                content = b"error"
-                status_code = 500
-                headers = {"content-type": "text/plain"}
-                url = "http://error.example.com/"
+        class MockResponse:
+            content = b"error"
+            status_code = 500
+            headers = {"content-type": "text/plain"}
+            url = "http://error.example.com/"
 
-            raise httpx.HTTPStatusError("server error", request=None, response=MockResponse())
+        unreachable_fetcher = failing_fetcher(
+            httpx.HTTPStatusError("server error", request=None, response=MockResponse())
+        )
 
         result = await run_http_strategy(
             url="http://error.example.com/",
             policy=http_strategy_policy(),
-            http_fetcher=error_fetcher,
+            http_fetcher=unreachable_fetcher,
             cache=cache,
         )
         assert result.classification == "http_status_error"
@@ -159,15 +159,9 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        def binary_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            class Resp:
-                status_code = 200
-                headers = {"content-type": "application/octet-stream"}
-                body = b"binary"
-                final_url = url
-                elapsed_ms = 10
-
-            return Resp()
+        binary_fetcher = scripted_fetcher(
+            status=200, headers={"content-type": "application/octet-stream"}, body=b"binary"
+        )
 
         result = await run_http_strategy(
             url="http://binary.example.com/file.bin",
@@ -227,20 +221,11 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
     profile = StatefulProfile()
     captured_headers: dict[str, str] = {}
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+    def respond(url, headers):
         captured_headers.update(headers)
-        return type(
-            "Response",
-            (),
-            {
-                "url": url,
-                "final_url": url,
-                "status_code": 200,
-                "headers": {"content-type": "text/html"},
-                "body": b"<html><body>profile content</body></html>",
-                "elapsed_ms": 1,
-            },
-        )()
+        return (200, b"<html><body>profile content</body></html>", "text/html")
+
+    fetcher = request_fetcher(respond)
 
     policy = http_strategy_policy()
     policy["request_profile"] = profile

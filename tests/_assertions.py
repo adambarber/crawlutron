@@ -4,6 +4,7 @@ import functools
 import inspect
 import json
 import os
+from contextlib import contextmanager
 
 import pytest
 
@@ -17,6 +18,34 @@ def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
 
 def block_private_targets(monkeypatch) -> None:
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+
+
+@contextmanager
+def host_resolves_to(monkeypatch, ip: str):
+    """The precondition for a resolution-dependent SSRF verdict: the name resolves to ``ip``.
+
+    Opt out of the allow-private escape hatch *and* pin the resolver in one
+    step, so a rejection under test is the policy's answer and not an accident
+    of whatever the machine's resolver returned. ``ip="127.0.0.1"`` is the
+    private case; a public address is the accept case, and both go through here
+    so a test cannot assert one without the other half of the setup.
+
+    Yields the list of hostnames resolved inside the block. Counting belongs
+    here rather than in each test: "this name is resolved exactly once" is the
+    other half of the DNS contract, and a fixed return value cannot observe it.
+    """
+    import socket
+    from unittest.mock import patch
+
+    block_private_targets(monkeypatch)
+    resolved: list[str] = []
+
+    def _getaddrinfo(host, *args, **kwargs):
+        resolved.append(host)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 80))]
+
+    with patch("socket.getaddrinfo", side_effect=_getaddrinfo):
+        yield resolved
 
 
 def assert_dns_pinning_uses_first_resolution(monkeypatch, rebound_ip, public_ip="93.184.216.34") -> None:
@@ -104,6 +133,23 @@ def provider_results(*items) -> str:
     return json.dumps({"results": list(items)})
 
 
+def one_search_result(override_settings, fake_provider_http, **overrides):
+    """Pin the provider to Tavily and serve exactly one search result.
+
+    The pairing is the fixture: a provider choice, a key, and a body in the
+    provider's own wire shape. Two files were each writing it out, so a change to
+    the provider envelope (or the key name) landed in one test and not the other.
+    ``overrides`` tweaks a result field; pass ``items`` for a different count.
+    """
+    override_settings(search_provider="tavily", tavily_api_key="test-key")
+    result = {"title": "A", "url": "https://example.gov/a", "content": "desc"}
+    items = overrides.pop("items", None)
+    if items is None:
+        result.update(overrides)
+        items = (result,)
+    fake_provider_http(200, provider_results(*items))
+
+
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
     try:
@@ -174,6 +220,32 @@ async def poll_crawl_completion(
     return response
 
 
+async def accepted_crawl(client, payload: dict) -> dict:
+    """POST a crawl that must be accepted for background execution.
+
+    Asserts the 202/``accepted`` contract once so a test that is about the
+    webhook or the status URL is not also the place that re-spells the accept
+    envelope; returns that envelope.
+    """
+    response = await client.post("/v1/crawl", json=payload)
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["status"] == "accepted"
+    return body
+
+
+async def completed_crawl(client, payload: dict) -> dict:
+    """POST a crawl that must run synchronously and return its response body.
+
+    The mirror of :func:`accepted_crawl`: 200 with the results inline. A test
+    that wants a single result says ``(await completed_crawl(...))["results"][0]``
+    rather than re-deriving which status code means "ran".
+    """
+    response = await client.post("/v1/crawl", json=payload)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 async def submit_async_crawl(
     client,
     payload: dict,
@@ -184,7 +256,5 @@ async def submit_async_crawl(
     response = await client.post("/v1/crawl", json=payload)
     assert response.status_code == 202, response.text
     request_id = response.json()["request_id"]
-    completed = await poll_crawl_completion(
-        client, request_id, message=message, on_pending=on_pending
-    )
+    completed = await poll_crawl_completion(client, request_id, message=message, on_pending=on_pending)
     return request_id, completed

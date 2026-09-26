@@ -221,8 +221,7 @@ def test_metric_budget_is_not_exceeded(metric: str) -> None:
         f"{metric}: {len(found)} offenders exceeds the budget of {budget}.\n"
         f"Each of these is work that was already on the list; a wave that fixes one "
         f"lowers the budget in `_BUDGETS` in the same commit. The target is 0, at which "
-        f"point this assertion enforces the rule on its own.\n"
-        + "\n".join(f"  {item}" for item in found)
+        f"point this assertion enforces the rule on its own.\n" + "\n".join(f"  {item}" for item in found)
     )
 
 
@@ -351,9 +350,7 @@ def test_metric_budgets_have_never_risen() -> None:
         # look like four regressions.
         for (newer, newer_value), (_, older) in zip(entries, entries[1:], strict=False):
             if newer_value > older:
-                regressions.append(
-                    f"  {name}: rose from {older} to {newer_value} in {newer}"
-                )
+                regressions.append(f"  {name}: rose from {older} to {newer_value} in {newer}")
     assert not regressions, (
         "a complexity budget rose in this repository's history. The rule is that "
         "these only fall; each wave lowers the number it reduced. Fix the offenders "

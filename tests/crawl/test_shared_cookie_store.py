@@ -97,9 +97,7 @@ def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
     target = tmp_path / "export.json"
     first.export_to_file(str(target))
 
-    assert CookieJar.import_from_file(str(target)).cookie_header_for(
-        "http://other.com/"
-    ) == "b=2"
+    assert CookieJar.import_from_file(str(target)).cookie_header_for("http://other.com/") == "b=2"
 
 
 def test_a_worker_holding_no_store_keeps_the_in_memory_behavior():

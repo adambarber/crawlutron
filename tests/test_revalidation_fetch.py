@@ -71,9 +71,7 @@ class TestRevalidationFetchesOnce:
         # The bug re-fetched unconditionally here, giving 3 fetches total.
         second = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
         assert second.status == "success"
-        assert fetcher.calls == 2, (
-            f"expected one fetch for the revalidation, got {fetcher.calls - 1}"
-        )
+        assert fetcher.calls == 2, f"expected one fetch for the revalidation, got {fetcher.calls - 1}"
         # The second fetch must be the conditional one, not an unconditional repeat.
         assert fetcher.header_sets[1].get("If-None-Match") == "v1"
 
@@ -89,6 +87,7 @@ class TestRevalidationFetchesOnce:
         in-hand is dataflow (response is not None); served-from-cache is the
         flag's only meaning.
         """
+
         class _ScriptedFetcher(_CountingFetcher):
             def __init__(self) -> None:
                 super().__init__()
@@ -128,7 +127,6 @@ class TestRevalidationFetchesOnce:
         third = await _crawl()  # crawl 3: conditional 304 -> serves the STORED body
         body = third.text or third.markdown or ""
         assert "FRESH-BODY" in body, (
-            "a later 304 served the stale pre-revalidation body: the "
-            "revalidated 200 was never stored"
+            "a later 304 served the stale pre-revalidation body: the revalidated 200 was never stored"
         )
         assert fetcher.calls == 2  # one conditional GET per crawl, as designed

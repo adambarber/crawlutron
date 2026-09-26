@@ -10,7 +10,7 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _assertions import block_private_targets
+from _assertions import block_private_targets, host_resolves_to
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore
@@ -186,13 +186,8 @@ class TestWebhookValidationRunsOffLoop:
     async def test_validate_webhook_url_async_rejects_private(self, monkeypatch):
         from app.api.webhooks import validate_webhook_url_async
 
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
-        ):
-            with pytest.raises(ValueError):
-                await validate_webhook_url_async(
-                    "http://evil.example.com/callback",
-                    host_policy=HostPolicy.unrestricted(),
-                )
+        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
+            await validate_webhook_url_async(
+                "http://evil.example.com/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )

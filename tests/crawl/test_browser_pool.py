@@ -157,32 +157,40 @@ def test_explicit_pool_size_arg_wins(monkeypatch):
     assert pool._pool_size == 1
 
 
+def _renderer_with_exploding_cm():
+    """A renderer holding a browser whose context manager raises on exit.
+
+    Both slots cleared and the CM exited exactly once is the contract under
+    test, so the fixture asserts it and the caller only has to say *which* call
+    was made.
+    """
+    from app.crawl.strategies.browser import BrowserRenderer
+
+    renderer = BrowserRenderer()
+    context_manager = _ExplodingContextManager()
+    renderer._browser = object()
+    renderer._browser_cm = context_manager
+
+    def assert_cleanly_released() -> None:
+        assert renderer._browser is None
+        assert renderer._browser_cm is None
+        assert context_manager.exits == 1
+
+    return renderer, context_manager, assert_cleanly_released
+
+
 class TestWorkerExtractorErrorDegrades:
     """Cover remaining branches in browser.py"""
 
     async def test_browser_renderer_reset_browser_error(self):
-        from app.crawl.strategies.browser import BrowserRenderer
-
-        renderer = BrowserRenderer()
-        context_manager = _ExplodingContextManager()
-        renderer._browser = object()
-        renderer._browser_cm = context_manager
+        renderer, _cm, assert_released = _renderer_with_exploding_cm()
         await renderer._reset_browser()
-        assert renderer._browser is None
-        assert renderer._browser_cm is None
-        assert context_manager.exits == 1
+        assert_released()
 
     async def test_browser_renderer_close_error(self):
-        from app.crawl.strategies.browser import BrowserRenderer
-
-        renderer = BrowserRenderer()
-        context_manager = _ExplodingContextManager()
-        renderer._browser = object()
-        renderer._browser_cm = context_manager
+        renderer, _cm, assert_released = _renderer_with_exploding_cm()
         await renderer.close()
-        assert renderer._browser is None
-        assert renderer._browser_cm is None
-        assert context_manager.exits == 1
+        assert_released()
 
     def test_browser_renderer_pdf_text_extractor_error(self):
         from app.crawl.strategies.browser import BrowserRenderer

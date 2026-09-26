@@ -47,41 +47,39 @@ class TestMatchBounded:
         assert match_bounded(compiled, "123", op="fullmatch")
         assert match_bounded(compiled, "a123b", op="search")
 
+    def _assert_bounded_timeout(self, pattern: str, text: str) -> None:
+        """A pattern that must hit the bound, and must hit it without a leftover thread.
+
+        Both halves are the point. A thread-abandonment implementation would
+        pass the wall-time half alone while leaving a wedged worker burning
+        behind (G1) -- so pin the wall time AND that no thread survived, and
+        assert them in one place so a new catastrophic shape cannot pin one and
+        forget the other.
+        """
+        compiled = compile_untrusted(pattern)
+        threads_before = threading.active_count()
+        start = time.perf_counter()
+        with pytest.raises(RegexTimeout):
+            match_bounded(compiled, text, timeout=0.05)
+        elapsed = time.perf_counter() - start
+        # Tight bound: the native C-loop timeout fires at ~the budget.
+        assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
+        time.sleep(0.2)  # let any abandoned worker reveal itself
+        assert threading.active_count() <= threads_before, "match left a thread behind"
+
     def test_pathological_pattern_times_out_instead_of_hanging(self):
         # The N-1 class: nested quantifiers meeting a non-matching tail.
         # Under stdlib re the depth-3 shape .*(((a|aa)))*b is catastrophic
         # (0.136s measured at just 24 chars, doubling per character); the
         # regex engine optimizes that exact shape, so this test pins the
         # bound with an optimizer-resistant variant of the same class.
-        compiled = compile_untrusted(r"^(a|aa)+((a|aa)+)*x")
-        text = "a" * 60 + "!"
-        threads_before = threading.active_count()
-        start = time.perf_counter()
-        with pytest.raises(RegexTimeout):
-            match_bounded(compiled, text, timeout=0.05)
-        elapsed = time.perf_counter() - start
-        # Tight bound: the native C-loop timeout fires at ~the budget. A
-        # thread-abandonment implementation would also pass a loose bound
-        # while leaving a wedged worker burning behind (G1) -- so pin both
-        # the wall time AND that no thread was left running.
-        assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
-        time.sleep(0.2)  # let any abandoned worker reveal itself
-        assert threading.active_count() <= threads_before, "match left a thread behind"
+        self._assert_bounded_timeout(r"^(a|aa)+((a|aa)+)*x", "a" * 60 + "!")
 
     def test_timeout_bounds_exponential_backtracking(self):
         # A shape the regex engine cannot optimize away: (a|aa)+b against a
         # non-matching run of a's backtracks exponentially. Bounded, it must
         # raise RegexTimeout at ~the budget instead of hanging.
-        compiled = compile_untrusted(r"(a|aa)+b")
-        text = "a" * 80 + "c"
-        threads_before = threading.active_count()
-        start = time.perf_counter()
-        with pytest.raises(RegexTimeout):
-            match_bounded(compiled, text, timeout=0.05)
-        elapsed = time.perf_counter() - start
-        assert elapsed < 0.5, f"timeout did not bound the match: {elapsed:.2f}s"
-        time.sleep(0.2)  # let any abandoned worker reveal itself
-        assert threading.active_count() <= threads_before, "match left a thread behind"
+        self._assert_bounded_timeout(r"(a|aa)+b", "a" * 80 + "c")
 
     def test_matching_input_unaffected_by_timeout(self):
         # Same pattern, matching input: completes immediately (the bound

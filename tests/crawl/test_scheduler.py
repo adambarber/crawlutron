@@ -28,9 +28,7 @@ def _engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
     is supplied here for the same reason production supplies one -- the two job
     shapes carry it under different names.
     """
-    return _failed_result_for(
-        job, error, url_of=lambda j: getattr(j, "original_url", None) or j.url
-    )
+    return _failed_result_for(job, error, url_of=lambda j: getattr(j, "original_url", None) or j.url)
 
 
 def _adaptive_scheduler() -> DomainScheduler:
@@ -213,17 +211,13 @@ class TestObservedLatencyCrossesPipelines:
             diagnostics={"runtime": {"elapsed_ms": elapsed_ms}},
         )
 
-    @pytest.mark.parametrize(
-        "build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"]
-    )
+    @pytest.mark.parametrize("build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"])
     def test_latency_reaches_the_estimator_from_either_pipeline(self, build_result):
         s = _adaptive_scheduler()
         s._record_result_health("example.com", build_result(1000))
         assert abs(s.current_delay("example.com") - 1.0) < 1e-6
 
-    @pytest.mark.parametrize(
-        "build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"]
-    )
+    @pytest.mark.parametrize("build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"])
     def test_a_result_with_no_observation_leaves_the_delay_alone(self, build_result):
         s = _adaptive_scheduler()
         s._record_result_health("example.com", build_result(0))
@@ -545,9 +539,7 @@ class TestSchedulerPolicies:
         assert ret is not None
         # Results are keyed by job index so callers align them with their own job.
         assert sorted(ret) == [0, 1, 2, 3]
-        assert [ret[i].normalized_url for i in sorted(ret)] == [
-            f"http://h{i}.example.com/" for i in range(4)
-        ]
+        assert [ret[i].normalized_url for i in sorted(ret)] == [f"http://h{i}.example.com/" for i in range(4)]
 
 
 class TestCooldownPurgeCadence:
@@ -741,9 +733,7 @@ class TestDeliveryFailuresAreNotWorkerFailures:
     """
 
     async def test_a_raising_sink_does_not_trip_the_circuit_breaker(self, caplog):
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
-        )
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
         jobs = [make_job(0, "https://example.com/a")]
 
         async def exploding_sink(index, result):
@@ -769,9 +759,7 @@ class TestDeliveryFailuresAreNotWorkerFailures:
         ``failed_result`` envelope -- which a spill-based sink would have
         written to disk as though the crawl had failed.
         """
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
-        )
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
         jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
         seen: list[tuple[int, str]] = []
 
@@ -788,9 +776,7 @@ class TestDeliveryFailuresAreNotWorkerFailures:
 
     async def test_one_job_sink_failure_does_not_cost_a_healthy_job_its_result(self):
         """The healthy job's result still reaches a working sink on the next call."""
-        scheduler = DomainScheduler(
-            global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False
-        )
+        scheduler = DomainScheduler(global_limit=1, per_domain_limit=1, delay_seconds=0.0, adaptive=False)
         jobs = [make_job(0, "https://example.com/a"), make_job(1, "https://example.com/b")]
         delivered: list[tuple[int, str]] = []
 
@@ -846,9 +832,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         job = make_job(0, "https://example.com/p")
 
         async def failing_worker(job):
-            return _failed_result_for(
-                job, socket.gaierror("name resolution failed"), url_of=lambda j: j.url
-            )
+            return _failed_result_for(job, socket.gaierror("name resolution failed"), url_of=lambda j: j.url)
 
         results = await scheduler.run([job], failing_worker, failed_result=_engine_envelope)
         result = results[job.index]
@@ -897,8 +881,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
         members = set(typing.get_args(ResultStatus))
         assert members, "ResultStatus must be a Literal to be checkable"
         assert not members - set(_STATUS_ACCOUNTING), (
-            "a ResultStatus member has no domain-health verdict: "
-            f"{sorted(members - set(_STATUS_ACCOUNTING))}"
+            f"a ResultStatus member has no domain-health verdict: {sorted(members - set(_STATUS_ACCOUNTING))}"
         )
         assert not set(_STATUS_ACCOUNTING) - members, (
             "the accounting table names a status the taxonomy does not define: "

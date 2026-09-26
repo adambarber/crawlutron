@@ -18,6 +18,7 @@ class TestPageMetadata:
     def test_handles_empty(self):
         assert _extract_llm_metadata("", "https://example.com") == {"source_url": "https://example.com"}
 
+
 class TestJsonLdExtraction:
     def test_json_ld_populated_from_script_tag(self):
         html = (

@@ -27,6 +27,7 @@ from _job_harnesses import (
     _wait_until,
     make_job_store,
     post_api_job,
+    run_canned_graph,
     run_job_control_test,
     run_seeded_scripted_job,
 )
@@ -133,7 +134,6 @@ class TestCrashRecovery:
         assert job.visited == {"http://example.test/a", "http://example.test/b"}
         assert job.in_flight == []
 
-
     @pytest.mark.parametrize(
         ("url", "settings_values"),
         [
@@ -142,7 +142,9 @@ class TestCrashRecovery:
             ("http://127.0.0.1/secret", {"allowed_hosts": "127.0.0.1"}),
         ],
     )
-    async def test_rejected_job_is_not_persisted_or_started(self, job_store, monkeypatch, url, settings_values):
+    async def test_rejected_job_is_not_persisted_or_started(
+        self, job_store, monkeypatch, url, settings_values
+    ):
         from httpx import ASGITransport, AsyncClient
 
         from app.api.dependencies import get_settings
@@ -760,14 +762,10 @@ class TestJobStateWaitContract:
         assert job_store.status_bus is not None
 
         runner = asyncio.ensure_future(
-            job_runner._run_job(
-                job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event()
-            )
+            job_runner._run_job(job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event())
         )
         try:
-            waiter = asyncio.ensure_future(
-                _wait_status(job_store, job_id, {"completed", "failed"})
-            )
+            waiter = asyncio.ensure_future(_wait_status(job_store, job_id, {"completed", "failed"}))
             # One turn is enough and not a guess: the waiter task cannot run at
             # all until the loop is handed back, and once it runs it reads a
             # `pending` row whose claim is still gated.
@@ -828,6 +826,19 @@ class TestJobControlTransitions:
         job_store.delete(job.job_id)
 
 
+def assert_pair_crawled_once(finished, attempts, root: str, child: str) -> None:
+    """Both pages fetched exactly once, both recorded, both results present.
+
+    A dropped or duplicated URL still leaves two results, so neither the result
+    count nor the visited set alone catches it -- the per-URL attempt count is
+    the edge that does. Stated once because every recovery test in this file
+    asserts the same triple.
+    """
+    assert attempts == {root: 1, child: 1}
+    assert finished.visited == {root, child}
+    assert len(finished.results) == 2
+
+
 class TestWholeSiteAdmissionContract:
     @staticmethod
     def _policy(max_depth: int, max_pages: int, scope_regex: str | None = None) -> dict[str, Any]:
@@ -846,15 +857,11 @@ class TestWholeSiteAdmissionContract:
     async def test_depth_zero_does_not_expand(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        attempts: dict[str, int] = {}
-        job = await _run_job_to_completed(
+        attempts, job = await run_canned_graph(
             client,
             job_store,
             root,
-            _fake_execute_scripted(
-                {root: [_canned_result(root, links=[child])]},
-                attempts=attempts,
-            ),
+            {root: [_canned_result(root, links=[child])]},
             self._policy(0, 10),
         )
 
@@ -867,18 +874,14 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         child = "https://example.test/child"
         grandchild = "https://example.test/grandchild"
-        attempts: dict[str, int] = {}
-        job = await _run_job_to_completed(
+        attempts, job = await run_canned_graph(
             client,
             job_store,
             root,
-            _fake_execute_scripted(
-                {
-                    root: [_canned_result(root, links=[child])],
-                    child: [_canned_result(child, links=[grandchild])],
-                },
-                attempts=attempts,
-            ),
+            {
+                root: [_canned_result(root, links=[child])],
+                child: [_canned_result(child, links=[grandchild])],
+            },
             self._policy(1, 10),
         )
 
@@ -887,9 +890,7 @@ class TestWholeSiteAdmissionContract:
         assert job.frontier == []
         assert job.stats["total_discovered"] == 1
 
-    async def test_scope_regex_excludes_link_before_page_slot(
-        self, client, job_store
-    ):
+    async def test_scope_regex_excludes_link_before_page_slot(self, client, job_store):
         root = "https://example.test/root"
         excluded = "https://example.test/excluded"
         included = "https://example.test/included"
@@ -909,9 +910,7 @@ class TestWholeSiteAdmissionContract:
         assert job.visited == {"https://example.test/root", "https://example.test/included"}
         assert job.stats["total_discovered"] == 1
 
-    async def test_robots_disallowed_link_does_not_consume_page_slot(
-        self, client, job_store, monkeypatch
-    ):
+    async def test_robots_disallowed_link_does_not_consume_page_slot(self, client, job_store, monkeypatch):
         root = "https://example.test/root"
         blocked = "https://example.test/blocked"
         included = "https://example.test/included"
@@ -1001,9 +1000,7 @@ class TestWholeSiteAdmissionContract:
         assert len(job.results) == 1
         assert job.stats["total_discovered"] == 0
 
-    async def test_cap_truncation_is_exposed_by_job_api(
-        self, client, job_store
-    ):
+    async def test_cap_truncation_is_exposed_by_job_api(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         job_id = await _create_api_job(
@@ -1020,9 +1017,7 @@ class TestWholeSiteAdmissionContract:
         assert response.json()["stats"]["cap_truncated"] == 1
 
     @pytest.mark.parametrize("policy_json", ['["corrupt"]', '{"limits":"corrupt"}'])
-    async def test_non_dict_policy_shapes_do_not_raise_mid_crawl(
-        self, job_store, policy_json
-    ):
+    async def test_non_dict_policy_shapes_do_not_raise_mid_crawl(self, job_store, policy_json):
         import sqlite3
 
         root = "https://example.test/root"
@@ -1042,10 +1037,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.status == JobStatus.COMPLETED
         assert finished.visited == {"https://example.test/root"}
 
-
-    async def test_job_seeds_sitemap_pages_through_shared_admission(
-        self, client, job_store, monkeypatch
-    ):
+    async def test_job_seeds_sitemap_pages_through_shared_admission(self, client, job_store, monkeypatch):
         root = "https://example.test/root"
         seed = "https://example.test/from-sitemap"
         policy = self._policy(1, 10)
@@ -1073,9 +1065,7 @@ class TestWholeSiteAdmissionContract:
         assert job.frontier == []
         assert job.stats["total_discovered"] == 1
 
-    async def test_analytics_and_document_links_do_not_consume_slots(
-        self, client, job_store
-    ):
+    async def test_analytics_and_document_links_do_not_consume_slots(self, client, job_store):
         root = "https://example.test/root"
         analytics = "https://www.google-analytics.com/analytics.js"
         document = "https://example.test/report.pdf"
@@ -1096,9 +1086,7 @@ class TestWholeSiteAdmissionContract:
         assert job.visited == {root, included}
         assert job.stats["total_discovered"] == 1
 
-    async def test_robots_crawl_delay_is_committed_before_admission(
-        self, client, job_store, monkeypatch
-    ):
+    async def test_robots_crawl_delay_is_committed_before_admission(self, client, job_store, monkeypatch):
         from app.scheduler import DomainScheduler
 
         root = "https://example.test/root"
@@ -1130,10 +1118,7 @@ class TestWholeSiteAdmissionContract:
         assert committed == [("example.test", 3.0)]
         assert job.visited == {root, child}
 
-
-    async def test_in_flight_batch_discovering_each_other_does_not_double_crawl(
-        self, job_store
-    ):
+    async def test_in_flight_batch_discovering_each_other_does_not_double_crawl(self, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         finished, attempts = await run_seeded_scripted_job(
@@ -1143,15 +1128,10 @@ class TestWholeSiteAdmissionContract:
             _scripted_result_map((root, child), links={root: [child]}),
             frontier=[root, child],
         )
-        assert attempts == {root: 1, child: 1}
-        assert finished.visited == {root, child}
-        assert len(finished.results) == 2
+        assert_pair_crawled_once(finished, attempts, root, child)
         assert finished.stats["total_discovered"] == 0
 
-
-    async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(
-        self, job_store
-    ):
+    async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(self, job_store):
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=test"
         child = "https://example.test/child"
@@ -1166,10 +1146,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.visited == {root, child}
         assert finished.stats["cap_truncated"] == 0
 
-
-    async def test_chunked_in_flight_recovery_never_loses_admitted_urls(
-        self, job_store
-    ):
+    async def test_chunked_in_flight_recovery_never_loses_admitted_urls(self, job_store):
         urls = [f"https://example.test/page-{index}" for index in range(10)]
         finished, attempts = await run_seeded_scripted_job(
             job_store,
@@ -1185,7 +1162,6 @@ class TestWholeSiteAdmissionContract:
         assert finished.in_flight == []
         assert finished.stats["cap_overcommitted"] == 1
 
-
     async def test_cross_list_alias_identity_is_single_work_item(self, job_store):
         root = "https://example.test/root"
         root_alias = "https://example.test/root?utm_source=legacy"
@@ -1199,25 +1175,18 @@ class TestWholeSiteAdmissionContract:
             in_flight=[root],
             running=True,
         )
-        assert attempts == {root: 1, child: 1}
-        assert finished.visited == {root, child}
-        assert len(finished.results) == 2
+        assert_pair_crawled_once(finished, attempts, root, child)
         assert finished.in_flight == []
         assert finished.frontier == []
 
-    async def test_unbounded_batch_chunking_does_not_report_truncation(
-        self, client, job_store
-    ):
+    async def test_unbounded_batch_chunking_does_not_report_truncation(self, client, job_store):
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
         job = await _run_job_to_completed(
             client,
             job_store,
             root,
-            _fake_execute(
-                [_canned_result(root, links=leaves)]
-                + [_canned_result(leaf) for leaf in leaves]
-            ),
+            _fake_execute([_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves]),
             {"limits": {"max_depth": 1, "max_pages": 0}},
         )
 
@@ -1225,9 +1194,7 @@ class TestWholeSiteAdmissionContract:
         assert job.stats["total_crawled"] == 13
         assert len(job.results) == 13
 
-    async def test_cap_truncated_is_exposed_by_list_and_control_responses(
-        self, client, job_store
-    ):
+    async def test_cap_truncated_is_exposed_by_list_and_control_responses(self, client, job_store):
         job = job_store.create("https://example.test/root", self._policy(1, 1))
         job.stats["cap_truncated"] = 1
         job_store.save(job)
@@ -1245,10 +1212,7 @@ class TestWholeSiteAdmissionContract:
         assert controlled.status_code == 200
         assert controlled.json()["cap_truncated"] is True
 
-
-    async def test_duplicate_discovered_aliases_count_once_in_stats(
-        self, client, job_store
-    ):
+    async def test_duplicate_discovered_aliases_count_once_in_stats(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
         other = "https://example.test/other"
@@ -1291,9 +1255,7 @@ class TestEveryVisitedUrlHasAnEnvelope:
     runner drift from it.
     """
 
-    async def test_a_url_the_engine_never_answered_still_gets_an_envelope(
-        self, client, job_store
-    ):
+    async def test_a_url_the_engine_never_answered_still_gets_an_envelope(self, client, job_store):
         from _job_harnesses import _execution_payload, _execution_urls
 
         async def _execute(payload_dict, *, settings, shutdown_event):
@@ -1302,9 +1264,7 @@ class TestEveryVisitedUrlHasAnEnvelope:
             # used to produce an unnameable gap in the job's results.
             urls = await _execution_urls(payload_dict, None)
             answered = [u for u in urls if not u.endswith("/gone")]
-            results = [
-                _canned_result(u, links=["http://example.test/gone"]) for u in answered
-            ]
+            results = [_canned_result(u, links=["http://example.test/gone"]) for u in answered]
             return _execution_payload(results, len(urls))
 
         job = await _run_job_to_completed(
@@ -1328,8 +1288,6 @@ class TestEveryVisitedUrlHasAnEnvelope:
             client,
             job_store,
             "http://example.test/a",
-            _fake_execute(
-                [_canned_result("http://example.test/a", links=["http://example.test/b"])]
-            ),
+            _fake_execute([_canned_result("http://example.test/a", links=["http://example.test/b"])]),
         )
         assert len(job.results) == job.stats["total_crawled"]

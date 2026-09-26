@@ -1,7 +1,6 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
 
-
 class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
 

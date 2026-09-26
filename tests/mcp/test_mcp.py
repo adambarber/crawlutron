@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from _assertions import provider_results
+from _assertions import one_search_result
 
 _PROTOCOL_VERSION = "2026-07-28"
 
@@ -202,11 +202,7 @@ def browser_pool_stub():
 
 class TestToolsCall:
     async def test_search_tool_returns_results(self, async_client, override_settings, fake_provider_http):
-        override_settings(search_provider="tavily", tavily_api_key="test-key")
-        fake_provider_http(
-            200,
-            provider_results({"title": "A", "url": "https://example.gov/a", "content": "desc"}),
-        )
+        one_search_result(override_settings, fake_provider_http)
         body = _body(
             "tools/call",
             params={"name": "search", "arguments": {"query": "worcester", "limit": 3}, "_meta": _META},

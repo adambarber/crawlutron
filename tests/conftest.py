@@ -114,7 +114,9 @@ def ssrf_guard_required(monkeypatch):
         return wrapper
 
     monkeypatch.setattr(
-        pinned_mod, "_check_ssrf_protection", _track("check_ssrf_protection", pinned_mod._check_ssrf_protection)
+        pinned_mod,
+        "_check_ssrf_protection",
+        _track("check_ssrf_protection", pinned_mod._check_ssrf_protection),
     )
     monkeypatch.setattr(
         pinned_mod, "_resolve_and_pin_host", _track("resolve_and_pin_host", pinned_mod._resolve_and_pin_host)

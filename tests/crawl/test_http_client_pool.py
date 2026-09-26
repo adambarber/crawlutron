@@ -212,7 +212,9 @@ def _supersede_without_loop(monkeypatch, builder: str, getter: str, fake) -> tup
 
 
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_superseded_client_is_queued_for_close_when_no_loop_is_running(builder, getter, slot, fake, monkeypatch):
+def test_superseded_client_is_queued_for_close_when_no_loop_is_running(
+    builder, getter, slot, fake, monkeypatch
+):
     """The missing half: the superseded client must be *tracked*, not dropped."""
     first, _second = _supersede_without_loop(monkeypatch, builder, getter, fake)
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
@@ -300,9 +302,7 @@ def test_pending_close_queue_dedupes_and_stays_bounded(builder, getter, slot, fa
 
 
 @pytest.mark.parametrize("builder,getter,slot,fake", SINGLETONS)
-def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(
-    builder, getter, slot, fake, monkeypatch
-):
+def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter, slot, fake, monkeypatch):
     """Inverse case: the queue must not have replaced the immediate close.
 
     When the handover happens on a loop that is still live -- the normal
@@ -415,22 +415,6 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
     assert drains_from_fetch_path == 1, (
         f"expected exactly the cffi path's own drain, got {drains_from_fetch_path}"
     )
-
-
-SLOTS = ("_DEFAULT_HTTP_CLIENT", "_DEFAULT_CFFI_SESSION")
-
-
-@pytest.fixture(autouse=True)
-def _clean_pooled_state_release_checks(monkeypatch):
-    for slot in SLOTS:
-        monkeypatch.setattr(http_mod, slot, None, raising=False)
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.clear()
-    yield
-    with http_mod._PENDING_CLIENT_CLOSE_LOCK:
-        http_mod._PENDING_CLIENT_CLOSE.clear()
-    for slot in SLOTS:
-        monkeypatch.setattr(http_mod, slot, None, raising=False)
 
 
 class _RealShapedSession:

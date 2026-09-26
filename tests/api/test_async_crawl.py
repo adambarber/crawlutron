@@ -3,9 +3,9 @@
 import asyncio
 
 import pytest
-from _assertions import poll_webhook_delivery, submit_async_crawl
+from _assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
 from _fetcher_factories import make_crawl_payload
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _job_harnesses import single_shot_job
 from helpers.server import WEBHOOK_RECEIVED
 
 
@@ -20,10 +20,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_async_mode_returns_202(self):
         """async_mode=true returns 202 with request_id and status_url."""
-        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=True))
-        assert resp.status_code == 202, resp.text
-        body = resp.json()
-        assert body["status"] == "accepted"
+        body = await accepted_crawl(self.client, make_crawl_payload(f"{self.base}/", async_mode=True))
         assert "request_id" in body
         assert body["request_id"].startswith("crawl_")
         assert "status_url" in body
@@ -57,13 +54,12 @@ class TestAsyncCrawlApi:
         # assertion fail only under some xdist distributions. The claim under
         # test is "this blocked target created no job", so ask exactly that.
         assert not [
-            job
-            for job in job_store.list_jobs()
-            if job["root_url"].startswith("https://blocked.test")
+            job for job in job_store.list_jobs() if job["root_url"].startswith("https://blocked.test")
         ], "a policy-blocked target created a job"
 
     async def test_v1_crawl_async_mode_status_url_returns_202_then_200(self):
         """Polling status_url returns 202 (pending) then 200 (completed)."""
+
         def check_pending(response):
             assert response.status_code == 202, response.text
             data = response.json()
@@ -147,9 +143,7 @@ class TestAsyncCrawlApi:
 
     async def test_v1_crawl_sync_mode_still_works(self):
         """Default sync mode (async_mode=false) still returns results directly."""
-        resp = await self.client.post("/v1/crawl", json=make_crawl_payload(f"{self.base}/", async_mode=False))
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
+        body = await completed_crawl(self.client, make_crawl_payload(f"{self.base}/", async_mode=False))
         assert body["success"] is True
         assert len(body["results"]) == 1
         assert "request_id" in body
@@ -195,10 +189,7 @@ class TestAsyncCrawlApi:
             f"{self.base}/",
             webhook_url=f"{self.base}/webhook_sink",
         )
-        resp = await self.client.post("/v1/crawl", json=payload)
-        assert resp.status_code == 202, resp.text
-        body = resp.json()
-        assert body["status"] == "accepted"
+        body = await accepted_crawl(self.client, payload)
         assert "request_id" in body
 
         delivered = await poll_webhook_delivery(WEBHOOK_RECEIVED)
@@ -234,13 +225,9 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_kind(self):
         """job_store.create_single_shot creates job with SINGLE_SHOT kind."""
-        import tempfile
+        from app.crawl.job_store import JobKind, JobStatus
 
-        from app.crawl.job_store import JobKind, JobStatus, JobStore
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = JobStore(f"{tmpdir}/test.db", policy=UNRESTRICTED_HOST_POLICY)
-            job = store.create_single_shot("test-id", "http://example.com/", {"test": "policy"})
+        with single_shot_job() as (_store, job):
             assert job.job_id == "test-id"
             assert job.kind == JobKind.SINGLE_SHOT
             # Roots are stored in canonical page-identity form:
@@ -256,15 +243,10 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_persists_results(self):
         """Results are stored in job.results for SINGLE_SHOT jobs."""
-        import tempfile
-
         from app.api_models import CrawlClassification, CrawlStatus, UnifiedCrawlResponse, UnifiedCrawlResult
-        from app.crawl.job_store import JobKind, JobStatus, JobStore
+        from app.crawl.job_store import JobKind, JobStatus
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store = JobStore(f"{tmpdir}/test.db", policy=UNRESTRICTED_HOST_POLICY)
-            job = store.create_single_shot("test-id", "http://example.com/", {"test": "policy"})
-
+        with single_shot_job() as (store, job):
             # Simulate completion
             result = UnifiedCrawlResult(
                 original_url="http://example.com/",

@@ -122,7 +122,10 @@ async def test_ssrf_route_handler_concurrent_pinning_dont_block(monkeypatch):
 
     routes = [FakeRoute() for _ in range(5)]
     await asyncio.gather(
-        *(handler(route, FakeRequest(f"http://example.com/{i}", "document")) for i, route in enumerate(routes))
+        *(
+            handler(route, FakeRequest(f"http://example.com/{i}", "document"))
+            for i, route in enumerate(routes)
+        )
     )
 
     assert not resolver.broken, (

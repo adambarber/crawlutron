@@ -73,6 +73,7 @@ class TestBrowserRenderer:
                 "limits": {"timeout_seconds": 20, "max_retries": 1, "max_discovered_links": 50},
             },
         }
+
         # An ``async def`` worker, not a sync lambda returning a coroutine: that
         # shape is neither of the two ``call_worker`` accepts, so it reached the
         # strategy as an un-awaited coroutine and surfaced as the confusing

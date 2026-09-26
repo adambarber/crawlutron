@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import typing
 from collections.abc import Collection
 
-from chokepoint_walks import nodes_of, offender
+from chokepoint_walks import attribute_calls, nodes_of, offender
 
 # The result dataclasses whose Literal-typed fields are the membership
 # contract. Direct construction of one anywhere in app/ is checked by the
@@ -57,19 +58,22 @@ RESULT_DATACLASS_NAMES = frozenset({"CrawlResult", "EngineCrawlResult", "CrawlSt
 # primitive in a new module is a name nobody has to register here for the
 # field-derived sweep to cover it. Unioned with the dataclasses themselves so
 # a direct build is checked by the same sweep as a primitive call.
-RESULT_PRIMITIVES = frozenset(
-    {
-        "_failed_engine_result",
-        "_make_engine_result",
-        "_engine_result_from_exception",
-        "_skipped_engine_result",
-        "_terminal_engine_result",
-        "_binary_no_text_result",
-        "_crawl_result_from_exception",
-        "_crawl_result_from_engine_result",
-        "_terminal_crawl_result",
-    }
-) | RESULT_DATACLASS_NAMES
+RESULT_PRIMITIVES = (
+    frozenset(
+        {
+            "_failed_engine_result",
+            "_make_engine_result",
+            "_engine_result_from_exception",
+            "_skipped_engine_result",
+            "_terminal_engine_result",
+            "_binary_no_text_result",
+            "_crawl_result_from_exception",
+            "_crawl_result_from_engine_result",
+            "_terminal_crawl_result",
+        }
+    )
+    | RESULT_DATACLASS_NAMES
+)
 
 # Fields whose declared annotation is ``X | None``. ``None`` is the honest "no
 # value" label for these (strategy: "no strategy was attempted"; error/
@@ -87,9 +91,16 @@ def literal_typed_field_members() -> dict[str, set[str]]:
     three. Nothing in this module or its tests transcribes a field list -- the
     list *is* the models, which is what keeps a new field covered instead of
     remembered.
-    """
-    import typing
 
+    Membership comes from ``models._literal_members`` rather than
+    ``typing.get_args``, and the filter is "has members" rather than "origin is
+    ``Literal``", because a taxonomy alias is allowed to be composed. ``error``
+    is ``Classification | PIPELINE_ONLY_CRAWL_ERRORS`` and ``strategy`` is
+    ``CrawlStrategyName | None``; under the old filter both have a Union origin,
+    so both were skipped -- not reported, just absent, which is the shape of
+    defect this module exists to prevent. ``_literal_members`` is total over
+    compositions, so a field is covered by virtue of declaring members at all.
+    """
     from app import models
 
     out: dict[str, set[str]] = {}
@@ -97,10 +108,10 @@ def literal_typed_field_members() -> dict[str, set[str]]:
         cls = getattr(models, class_name)
         hints = typing.get_type_hints(cls)
         for field_name in cls.__dataclass_fields__:
-            annotation = hints.get(field_name)
-            if typing.get_origin(annotation) is not typing.Literal:
+            members = models._literal_members(hints.get(field_name))
+            if not members:
                 continue
-            out.setdefault(field_name, set()).update(typing.get_args(annotation))
+            out.setdefault(field_name, set()).update(members)
     return out
 
 
@@ -338,7 +349,9 @@ def field_member_sets() -> dict[str, frozenset[str]]:
     return {name: frozenset(members) for name, members in literal_typed_field_members().items()}
 
 
-def assert_result_fields(payload: dict[str, object], *, where: str, members: dict[str, frozenset[str]]) -> None:
+def assert_result_fields(
+    payload: dict[str, object], *, where: str, members: dict[str, frozenset[str]]
+) -> None:
     """Check every Literal-typed key of a primitive's keyword payload.
 
     ``payload`` is the kwargs the primitive was called with. Only fields the
@@ -542,14 +555,12 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
     if not aliases:
         return []
     out: list[str] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+    for node, func in attribute_calls(tree):
+        if not isinstance(func.value, ast.Name):
             continue
-        if not isinstance(node.func.value, ast.Name):
+        if func.value.id not in aliases:
             continue
-        if node.func.value.id not in aliases:
-            continue
-        if node.func.attr not in _DYNAMIC_RE_METHODS:
+        if func.attr not in _DYNAMIC_RE_METHODS:
             continue
         if not node.args:
             continue
@@ -559,7 +570,7 @@ def aliased_dynamic_pattern_re_offenders(tree: ast.AST, path: pathlib.Path) -> l
             offender(
                 path,
                 node.lineno,
-                f"{node.func.value.id}.{node.func.attr}(<dynamic pattern>) -- alias of re;"
+                f"{func.value.id}.{func.attr}(<dynamic pattern>) -- alias of re;"
                 " route through app.safe_regex",
             )
         )

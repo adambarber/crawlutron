@@ -145,9 +145,7 @@ def _check_shaped(shaped: list[Any], expected: list[tuple[str, str] | None]) -> 
         if expectation is None:
             continue
         status, classification = expectation
-        assert result.status == status, (
-            f"healthy item status drifted: {result.status!r} != {status!r}"
-        )
+        assert result.status == status, f"healthy item status drifted: {result.status!r} != {status!r}"
         assert result.classification == classification, (
             f"healthy item silently reclassified: {result.classification!r} != {classification!r}"
         )

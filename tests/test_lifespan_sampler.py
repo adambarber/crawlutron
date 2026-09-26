@@ -5,6 +5,8 @@ Also the shutdown sequence's own contract: every teardown step is attempted,
 so one pool whose close() raises cannot cost the others theirs.
 """
 
+from _lifespan_doubles import stub_heavy_teardown
+
 
 def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     """Record the order the lifespan teardown reaches each pool in.
@@ -14,7 +16,6 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
     only knows the one method under test fails on whatever the next one is.
     """
     from app import main as main_mod
-    from app.api import job_runner as job_runner_mod
     from app.crawl import engine as engine_mod
     from app.crawl import extraction as extraction_mod
     from app.crawl.strategies import http_client_pool as http_mod
@@ -27,10 +28,9 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
 
         return _close
 
-    async def _noop_job_shutdown():
-        return None
-
-    monkeypatch.setattr(job_runner_mod, "shutdown_job_runner", _noop_job_shutdown)
+    # Start from the neutraliser: the set of closers the lifespan reaches is
+    # production's list, and this test only over-runs the four it is counting.
+    stub_heavy_teardown(monkeypatch)
     monkeypatch.setattr(http_mod, "close_async_http_client", http_closer)
     monkeypatch.setattr(http_mod, "close_cffi_session", _record("cffi"))
     monkeypatch.setattr(main_mod, "close_browser_pool", _record("browser"))
@@ -42,21 +42,8 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
 class TestLifespanSamplerSymmetry:
     async def test_shutdown_uninstalls_utilization_sampler(self, monkeypatch):
         from app import main as main_mod
-        from app.crawl.strategies import http_client_pool as http_mod
-        from app.health import readiness as readiness_mod
-        from app.health.readiness import ReadinessState
 
-        fresh = ReadinessState()
-        monkeypatch.setattr(readiness_mod, "READINESS_STATE", fresh)
-
-        async def _noop_client_close():
-            return None
-
-        async def _noop_pool_close():
-            return None
-
-        monkeypatch.setattr(http_mod, "close_async_http_client", _noop_client_close)
-        monkeypatch.setattr(main_mod, "close_browser_pool", _noop_pool_close)
+        fresh = stub_heavy_teardown(monkeypatch)
 
         async with main_mod.app.router.lifespan_context(main_mod.app):
             assert fresh._utilization_sampler is not None, "startup must install the sampler"

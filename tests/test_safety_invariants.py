@@ -25,12 +25,21 @@ from chokepoint_walks import (
     app_offenders,
     app_python_files,
     app_trees,
+    assert_fires_once,
+    assert_stays_clean,
+    attribute_calls,
     call_keyword_values,
     calls_named,
+    calls_to_any,
     code_line_count,
     file_tree,
+    has_method_call,
+    literal_keyword_membership_offenders,
+    local_call_leaf_names,
+    local_nodes,
     nodes_of,
     offender,
+    relative_posix,
     resolved_call_name,
     resolved_expr_name,
     trees_under,
@@ -421,13 +430,20 @@ __all__ = [
 # with the list view about the same job -- they are one projection now. The
 # list read already avoided this and the detail read did not, which is the
 # shape of a missing funnel rather than a missing feature.
-_APP_TREE_CODE_LINE_BUDGET = 14_992
+#
+# 14_992 -> 14_988: `_starting_strategies` was narrowed from the whole 13-field
+# `_ChainContext` to the three inputs the pin slice actually reads. The test
+# class that covers pinning had been restating that function's body five times
+# rather than calling it -- tautologies that keep passing if production's pinning
+# is deleted -- because reaching the function required fabricating thirteen
+# unrelated fields. Four lines cheaper in app/, and the pinning tests now
+# exercise the code they are named after.
+_APP_TREE_CODE_LINE_BUDGET = 14_988
 
 
 def test_app_tree_code_line_count_does_not_grow():
     actual = sum(
-        code_line_count(path.read_text(encoding="utf-8"))
-        for path in app_python_files(exclude=frozenset())
+        code_line_count(path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
     )
     assert actual == _APP_TREE_CODE_LINE_BUDGET, (
         f"app/ contains exactly {actual} code lines (comments, blanks and "
@@ -545,7 +561,7 @@ def _declared_public_symbols(tree: ast.AST) -> set[str] | None:
 
 
 def _public_surface_offenders(tree, path, _prop, *, modules=None) -> list[str]:
-    relative = path.relative_to(REPO_ROOT).as_posix()
+    relative = relative_posix(path)
     actual = _owned_public_symbols(tree)
     declared = _declared_public_symbols(tree)
     if declared is None:
@@ -570,27 +586,34 @@ def test_property_owner_public_surfaces_equal_all():
     assert not offenders, "property owner public surface drifted: " + ", ".join(offenders)
 
 
-def test_property_owner_public_surface_counts_do_not_grow():
+def _surface_budget_offenders(*, grown: bool) -> list[str]:
+    """Ratchet offenders for the public-surface budgets, by direction.
+
+    Both directions read the same counts against the same budgets, so they share
+    this walk: a budget that is too loose is as much a defect as one that is too
+    tight, and two hand-rolled loops over the ratchet is one more place for the
+    two to disagree about what the budget is.
+    """
     offenders: list[str] = []
     for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
         path = REPO_ROOT / relative
         surface_count, entry_count = _owner_surface_counts(ast.parse(path.read_text(encoding="utf-8")))
-        if surface_count > surface_budget or entry_count > entry_budget:
+        over = surface_count > surface_budget or entry_count > entry_budget
+        under = surface_count < surface_budget or entry_count < entry_budget
+        if over if grown else under:
             offenders.append(
                 f"{relative}: surface {surface_count}/{surface_budget}, entry points {entry_count}/{entry_budget}"
             )
+    return offenders
+
+
+def test_property_owner_public_surface_counts_do_not_grow():
+    offenders = _surface_budget_offenders(grown=True)
     assert not offenders, "property owner public surface grew: " + ", ".join(offenders)
 
 
 def test_property_owner_public_surface_budgets_are_tight():
-    stale: list[str] = []
-    for relative, (surface_budget, entry_budget) in _OWNER_PUBLIC_SURFACE_RATCHET.items():
-        path = REPO_ROOT / relative
-        surface_count, entry_count = _owner_surface_counts(ast.parse(path.read_text(encoding="utf-8")))
-        if surface_count < surface_budget or entry_count < entry_budget:
-            stale.append(
-                f"{relative}: surface {surface_count}/{surface_budget}, entry points {entry_count}/{entry_budget}"
-            )
+    stale = _surface_budget_offenders(grown=False)
     assert not stale, "property owner budgets are stale; lower them to: " + ", ".join(stale)
 
 
@@ -999,10 +1022,7 @@ def test_local_html_input_cap_detector_bites():
         # A third name for the same policy must not slip past the intent keying.
         "MAX_DOC_HTML_BYTES = 5_000_000\n": "MAX_DOC_HTML_BYTES",
     }
-    for src, expected in fires.items():
-        offenders = _local_html_input_caps(ast.parse(src), path)
-        assert len(offenders) == 1, (src, offenders)
-        assert expected in offenders[0], (src, offenders)
+    assert_fires_once(_local_html_input_caps, fires, path)
 
     clean = (
         # The sanctioned import-and-delegate shape.
@@ -1013,8 +1033,7 @@ def test_local_html_input_cap_detector_bites():
         "MAX_CACHE_ENTRIES = 100_000\n",
         "HTML_FIELDS = ('title', 'description')\n",
     )
-    for src in clean:
-        assert not _local_html_input_caps(ast.parse(src), path), src
+    assert_stays_clean(_local_html_input_caps, clean, path)
 
 
 def _scope_matcher_definitions() -> list[str]:
@@ -1305,7 +1324,9 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
             continue
         named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
         if named:
-            offenders.append(offender(path, node.lineno, f"SQL names crawl_jobs accumulator column(s) {named}"))
+            offenders.append(
+                offender(path, node.lineno, f"SQL names crawl_jobs accumulator column(s) {named}")
+            )
     return offenders
 
 
@@ -1321,8 +1342,7 @@ def test_crawl_jobs_accumulators_are_never_row_columns():
 def test_job_row_accumulator_detector_bites():
     """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
     wide = ast.parse(
-        "def f(conn, job):\n"
-        '    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n'
+        'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n'
     )
     offenders = _job_row_accumulator_offenders(wide, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     assert len(offenders) == 1 and "visited" in offenders[0], offenders
@@ -1336,7 +1356,7 @@ def test_job_row_accumulator_detector_bites():
         "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
         "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
         '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
-        "as results_count FROM crawl_jobs job\")\n"
+        'as results_count FROM crawl_jobs job")\n'
     )
     assert not _job_row_accumulator_offenders(clean, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
@@ -1376,7 +1396,9 @@ def test_render_options_built_only_by_resolver():
 
 def test_render_options_chokepoint_detector_bites():
     """Synthetic bypass fires; the resolver's own construction stays clean."""
-    bypass = ast.parse("def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n")
+    bypass = ast.parse(
+        "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n"
+    )
     offenders = _render_options_construction_offenders(bypass, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     assert len(offenders) == 1 and "resolve_render_options" in offenders[0], offenders
     resolver = ast.parse("def f(request, defaults):\n    return RenderOptions(**kwargs)\n")
@@ -1732,7 +1754,9 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     for node in nodes_of(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
-                offender(path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
+                offender(
+                    path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)"
+                )
             )
     return offenders
 
@@ -2294,13 +2318,9 @@ def test_whole_site_visited_gate_detector_bites():
         "if outcome in TRANSIENT_CLASSIFICATIONS:\n            continue",
     ):
         good = ast.parse(
-            "def run(job, outcome):\n    for url in batch:\n"
-            f"        {gate}\n"
-            "        job.visited.add(url)\n"
+            f"def run(job, outcome):\n    for url in batch:\n        {gate}\n        job.visited.add(url)\n"
         )
-        assert not _ungated_job_visited_offenders(
-            good, REPO_ROOT / "app" / "_synthetic.py"
-        ), gate
+        assert not _ungated_job_visited_offenders(good, REPO_ROOT / "app" / "_synthetic.py"), gate
 
 
 # ---------------------------------------------------------------------------
@@ -2327,7 +2347,9 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             legal_owners.add(id(node))
         elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-            legal_owners.update(id(m) for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
+            legal_owners.update(
+                id(m) for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+            )
 
     offenders: list[str] = []
     for node in ast.walk(tree):
@@ -2338,9 +2360,13 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
         owners = [
             parent.name
             for parent in ast.walk(tree)
-            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)) and node in ast.walk(parent) and parent is not node
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node in ast.walk(parent)
+            and parent is not node
         ]
-        where = f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
+        where = (
+            f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
+        )
         offenders.append(offender(path, node.lineno, f"test_{node.name} is uncollectible -- {where}"))
     return offenders
 
@@ -2366,10 +2392,7 @@ def test_uncollectible_test_detector_bites():
         # Two levels deep inside a class, still invisible.
         "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n": "nested inside helper()",
     }
-    for src, expected in fires.items():
-        offenders = _uncollectible_tests(ast.parse(src), path)
-        assert len(offenders) == 1, (src, offenders)
-        assert expected in offenders[0], (src, offenders)
+    assert_fires_once(_uncollectible_tests, fires, path)
 
     clean = (
         "def test_module_level():\n    pass\n",
@@ -2380,8 +2403,7 @@ def test_uncollectible_test_detector_bites():
         "class TestThings:\n    def helper_fixture(self):\n        pass\n",
         "def not_a_test_helper():\n    pass\n",
     )
-    for src in clean:
-        assert not _uncollectible_tests(ast.parse(src), path), src
+    assert_stays_clean(_uncollectible_tests, clean, path)
 
 
 # ---------------------------------------------------------------------------
@@ -2418,9 +2440,7 @@ def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
         }
         if _CONTAINMENT_CALL not in body_calls:
             continue
-        parameters = {
-            arg.arg for arg in (*func.args.args, *func.args.posonlyargs, *func.args.kwonlyargs)
-        }
+        parameters = {arg.arg for arg in (*func.args.args, *func.args.posonlyargs, *func.args.kwonlyargs)}
         for node in ast.walk(func):
             if (
                 isinstance(node, ast.Return)
@@ -2508,8 +2528,16 @@ _ENCODING_TOKEN = re.compile(r"^[a-z0-9\-_+.]+$")
 # like "dom_text, etc., http_html" are comma-joined, lowercase and token-shaped,
 # and a gate that cries wolf on those gets ignored on the day it matters.
 _KNOWN_ENCODINGS = {
-    "gzip", "x-gzip", "deflate", "x-deflate", "br", "zstd", "compress",
-    "x-compress", "identity", "*",
+    "gzip",
+    "x-gzip",
+    "deflate",
+    "x-deflate",
+    "br",
+    "zstd",
+    "compress",
+    "x-compress",
+    "identity",
+    "*",
 }
 
 
@@ -2652,9 +2680,7 @@ def _unowned_age_deletions(tree, path) -> list[str]:
         if not unlinks:
             continue
         body_names = {node.id for node in ast.walk(func) if isinstance(node, ast.Name)}
-        body_names |= {
-            node.attr for node in ast.walk(func) if isinstance(node, ast.Attribute)
-        }
+        body_names |= {node.attr for node in ast.walk(func) if isinstance(node, ast.Attribute)}
         if any(guard in candidate.lower() for candidate in body_names for guard in _OWNERSHIP_GUARDS):
             continue
         offenders.append(
@@ -2761,6 +2787,7 @@ def test_the_classification_table_has_no_shadowed_or_mid_table_catch_all_rows():
 
 def test_table_shadowing_detector_bites():
     """A subclass row below its superclass, and a mid-table catch-all, both fire."""
+
     class Sub(ValueError):
         pass
 
@@ -2795,9 +2822,12 @@ def test_table_shadowing_detector_bites():
     # The live shape this was written for.
     import httpx
 
-    assert _table_shadowing_offenders(
-        [((httpx.ConnectError,), "connection_error"), ((httpx.HTTPError,), "http_error")]
-    ) == []
+    assert (
+        _table_shadowing_offenders(
+            [((httpx.ConnectError,), "connection_error"), ((httpx.HTTPError,), "http_error")]
+        )
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2827,12 +2857,9 @@ def _is_asdict_call(node: ast.AST) -> bool:
     use in this tree, so a detector keyed on one spelling silently stops
     detecting the moment a module picks the other.
     """
-    return (
-        isinstance(node, ast.Call)
-        and (
-            (isinstance(node.func, ast.Name) and node.func.id == "asdict")
-            or (isinstance(node.func, ast.Attribute) and node.func.attr == "asdict")
-        )
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Name) and node.func.id == "asdict")
+        or (isinstance(node.func, ast.Attribute) and node.func.attr == "asdict")
     )
 
 
@@ -2865,8 +2892,8 @@ def test_asdict_is_never_unpacked_into_a_constructor():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED):
         offenders.extend(_asdict_rebuild_offenders(tree, path))
-    assert not offenders, (
-        "copy dataclasses with dataclasses.replace(), not asdict(**...): " + ", ".join(offenders)
+    assert not offenders, "copy dataclasses with dataclasses.replace(), not asdict(**...): " + ", ".join(
+        offenders
     )
 
 
@@ -2908,7 +2935,9 @@ def test_asdict_rebuild_detector_bites():
 _TRANSIENCE_HOME_SANCTIONED = frozenset({"constants.py"})
 _TRANSIENCE_VERDICT_SUFFIXES = ("CLASSIFICATIONS", "CODES", "SET", "LABELS", "STATUSES")
 _TRANSIENCE_SET_NAME = re.compile(
-    r"^(?:[A-Z_]+_)?(?:TRANSIENT|RETRYABLE|REQUEUE)[A-Z_]*(?:" + "|".join(_TRANSIENCE_VERDICT_SUFFIXES) + r")$"
+    r"^(?:[A-Z_]+_)?(?:TRANSIENT|RETRYABLE|REQUEUE)[A-Z_]*(?:"
+    + "|".join(_TRANSIENCE_VERDICT_SUFFIXES)
+    + r")$"
 )
 _TRANSIENCE_COLLECTIONS = (
     ast.Set,
@@ -2982,10 +3011,12 @@ def test_transience_home_detector_bites():
     assert len(offenders) == 1 and "TRANSIENT_CLASSIFICATIONS" in offenders[0], offenders
 
     assert (
-        len(_ad_hoc_transience_offenders(
-            ast.parse("RETRYABLE_CLASSIFICATIONS = frozenset()\n"),
-            REPO_ROOT / "app" / "_synthetic.py",
-        ))
+        len(
+            _ad_hoc_transience_offenders(
+                ast.parse("RETRYABLE_CLASSIFICATIONS = frozenset()\n"),
+                REPO_ROOT / "app" / "_synthetic.py",
+            )
+        )
         == 0
     ), "a set-shaped verdict name must fire whether it is a literal or a call"
 
@@ -2996,9 +3027,7 @@ def test_transience_home_detector_bites():
         "MAX_TRANSIENT_REQUEUES = 3\n",
         "RETRYABLE_ERROR_TYPES = frozenset()\n",
     ):
-        assert not _ad_hoc_transience_offenders(
-            ast.parse(clean), REPO_ROOT / "app" / "_synthetic.py"
-        ), clean
+        assert not _ad_hoc_transience_offenders(ast.parse(clean), REPO_ROOT / "app" / "_synthetic.py"), clean
 
 
 # ---------------------------------------------------------------------------
@@ -3048,7 +3077,11 @@ def _hand_rolled_failed_result_offenders(tree, path):
     chokepoint and the engine's two config guards (no browser worker / unknown
     strategy -- those have no exception to classify)."""
     for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("_failed_engine_result", "_make_engine_result")):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("_failed_engine_result", "_make_engine_result")
+        ):
             continue
         status = None
         for kw in node.keywords:
@@ -3063,7 +3096,11 @@ def _hand_rolled_failed_result_offenders(tree, path):
             continue
         if status == "network_error" and _has_error_field(node, "circuit_breaker_open"):
             continue
-        yield offender(path, node.lineno, f"hand-rolled classification={status!r}; route through _engine_result_from_exception")
+        yield offender(
+            path,
+            node.lineno,
+            f"hand-rolled classification={status!r}; route through _engine_result_from_exception",
+        )
 
 
 def test_no_hand_rolled_failed_results_outside_the_chokepoint():
@@ -3072,8 +3109,7 @@ def test_no_hand_rolled_failed_results_outside_the_chokepoint():
         offenders.extend(_hand_rolled_failed_result_offenders(tree, path))
     assert not offenders, (
         "failed results with a hardcoded classification must go through "
-        "_engine_result_from_exception (the single exception->result chokepoint): "
-        + ", ".join(offenders)
+        "_engine_result_from_exception (the single exception->result chokepoint): " + ", ".join(offenders)
     )
 
 
@@ -3087,10 +3123,7 @@ def test_hand_rolled_failed_result_detector_bites():
     offenders = list(_hand_rolled_failed_result_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
     assert len(offenders) == 1 and "_engine_result_from_exception" in offenders[0], offenders
     good = ast.parse(
-        "def f():\n"
-        "    return _failed_engine_result(\n"
-        '        classification="browser_crash",\n'
-        "    )\n"
+        'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n'
     )
     assert not list(_hand_rolled_failed_result_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
 
@@ -3112,7 +3145,9 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
             names.extend(e.id for e in t.elts if isinstance(e, ast.Name))
         if not any("BrowserPoolExhaustedError" in n for n in names):
             continue
-        yield offender(path, node.lineno, "catching BrowserPoolExhaustedError; read the classification instead")
+        yield offender(
+            path, node.lineno, "catching BrowserPoolExhaustedError; read the classification instead"
+        )
 
 
 def test_pool_exhaustion_catch_sites_are_sanctioned():
@@ -3204,6 +3239,8 @@ def _result_primitive_names() -> frozenset[str]:
     from membership_gate import RESULT_PRIMITIVES
 
     return RESULT_PRIMITIVES
+
+
 def _non_member_classification_offenders(tree, path, *, members):
     """A literal classification passed to a result primitive must be a member.
 
@@ -3223,7 +3260,8 @@ def _non_member_classification_offenders(tree, path, *, members):
             continue
         if value.value not in members:
             yield offender(
-                path, node.lineno,
+                path,
+                node.lineno,
                 f"classification={value.value!r} is not a CrawlClassification member; "
                 f"add it to the enum (app/constants.py) or route through the classifier",
             )
@@ -3245,19 +3283,37 @@ def test_engine_emitted_classifications_are_enum_members():
 
 def test_non_member_classification_detector_bites():
     bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
-    offenders = list(_non_member_classification_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    offenders = list(
+        _non_member_classification_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"})
+    )
     assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
-    good = ast.parse('def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n')
-    assert not list(_non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    good = ast.parse(
+        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n"
+    )
+    assert not list(
+        _non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"})
+    )
 
     # The terminal-CrawlResult chokepoint is covered too: the render path builds
     # terminal results through it, so an unknown literal there reaches the wire
     # through the same lenient dataclass that let url_budget_exceeded ship.
-    bad_terminal = ast.parse('def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n')
-    offenders = list(_non_member_classification_offenders(bad_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    bad_terminal = ast.parse(
+        'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n'
+    )
+    offenders = list(
+        _non_member_classification_offenders(
+            bad_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}
+        )
+    )
     assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
-    good_terminal = ast.parse('def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n')
-    assert not list(_non_member_classification_offenders(good_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}))
+    good_terminal = ast.parse(
+        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n"
+    )
+    assert not list(
+        _non_member_classification_offenders(
+            good_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3416,7 +3472,7 @@ def _host_policy_scope_names(tree: ast.AST, function: ast.AST) -> set[str]:
 
 def _host_policy_empty_guards(function: ast.AST) -> set[int]:
     guarded: set[int] = set()
-    for node in _local_nodes(function):
+    for node in local_nodes(function):
         if not isinstance(node, ast.If):
             continue
         test = node.test
@@ -3428,7 +3484,10 @@ def _host_policy_empty_guards(function: ast.AST) -> set[int]:
             isinstance(test, ast.Compare)
             and isinstance(test.left, ast.Name)
             and any(isinstance(op, (ast.Is, ast.Eq)) for op in test.ops)
-            and any(isinstance(comparator, ast.Constant) and comparator.value in {None, ""} for comparator in test.comparators)
+            and any(
+                isinstance(comparator, ast.Constant) and comparator.value in {None, ""}
+                for comparator in test.comparators
+            )
         )
         if empty:
             guarded.update(id(child) for child in node.body if isinstance(child, ast.Return))
@@ -3516,12 +3575,16 @@ def _host_policy_expression_state(
         return any(is_url for is_url, _ in states), any(is_valid for _, is_valid in states)
     if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
         state = _host_policy_expression_state(tree, node.elt, url_names, validated_names, policy_names)
-        generator_url = any(_url_parameter_name(generator.iter.id) for generator in node.generators if isinstance(generator.iter, ast.Name))
+        generator_url = any(
+            _url_parameter_name(generator.iter.id)
+            for generator in node.generators
+            if isinstance(generator.iter, ast.Name)
+        )
         condition_validated = any(
             _host_policy_call_is_validated(tree, child, policy_names)
             for generator in node.generators
             for condition in generator.ifs
-            for child in _local_nodes(condition)
+            for child in local_nodes(condition)
             if isinstance(child, ast.Call)
         )
         return state[0] or generator_url, state[1] or condition_validated
@@ -3549,18 +3612,22 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
     url_names = {argument.arg for argument in arguments if _url_parameter_name(argument.arg)}
     policy_names = _host_policy_scope_names(tree, function)
     validated_names: set[str] = set()
-    nodes = list(_local_nodes(function))
+    nodes = list(local_nodes(function))
     changed = True
     while changed:
         changed = False
         for loop in (node for node in nodes if isinstance(node, ast.For)):
             if not isinstance(loop.iter, ast.Name) or loop.iter.id not in url_names:
                 continue
-            target_names = {target.id for target in loop.target.elts if isinstance(target, ast.Name)} if isinstance(loop.target, (ast.Tuple, ast.List)) else ({loop.target.id} if isinstance(loop.target, ast.Name) else set())
+            target_names = (
+                {target.id for target in loop.target.elts if isinstance(target, ast.Name)}
+                if isinstance(loop.target, (ast.Tuple, ast.List))
+                else ({loop.target.id} if isinstance(loop.target, ast.Name) else set())
+            )
             url_names.update(target_names)
             if any(
                 _host_policy_call_is_validated(tree, child, policy_names)
-                for child in _local_nodes(loop)
+                for child in local_nodes(loop)
                 if isinstance(child, ast.Call)
             ):
                 validated = {loop.iter.id, *target_names}
@@ -3618,15 +3685,14 @@ def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if _url_return_shapes(node, tree):
-            found.append(offender(path, node.lineno, f"{node.name}() returns URLs without required HostPolicy"))
+            found.append(
+                offender(path, node.lineno, f"{node.name}() returns URLs without required HostPolicy")
+            )
     return found
 
 
 def test_required_host_policy_detector_bites():
-    bad = ast.parse(
-        "def normalize_public_http_url(url, *, policy=None):\n"
-        "    return url\n"
-    )
+    bad = ast.parse("def normalize_public_http_url(url, *, policy=None):\n    return url\n")
     offenders = _required_host_policy_offenders(
         bad,
         REPO_ROOT / "app" / "_synthetic.py",
@@ -3642,17 +3708,16 @@ def test_required_host_policy_detector_bites():
         good,
         REPO_ROOT / "app" / "_synthetic.py",
     )
-    safe_bad = ast.parse(
-        "class SafeUrl:\n"
-        "    def parse(self, url, *, policy=None):\n"
-        "        return url\n"
-    )
-    assert len(
-        _required_host_policy_offenders(
-            safe_bad,
-            REPO_ROOT / "app" / "_synthetic.py",
+    safe_bad = ast.parse("class SafeUrl:\n    def parse(self, url, *, policy=None):\n        return url\n")
+    assert (
+        len(
+            _required_host_policy_offenders(
+                safe_bad,
+                REPO_ROOT / "app" / "_synthetic.py",
+            )
         )
-    ) == 1
+        == 1
+    )
 
 
 _HOST_POLICY_PROPERTY = Property(
@@ -3671,14 +3736,11 @@ def test_host_policy_detector_property_bites():
         lambda tree, path, _prop: _required_host_policy_offenders(tree, path),
         caught={
             "dotted urljoin import": (
-                "from urllib.parse import urljoin\n"
-                "def f(root, path):\n"
-                "    return urljoin(root, path)\n",
+                "from urllib.parse import urljoin\ndef f(root, path):\n    return urljoin(root, path)\n",
                 1,
             ),
             "annotation without policy use": (
-                "def f(url, *, policy: HostPolicy):\n"
-                "    return url\n",
+                "def f(url, *, policy: HostPolicy):\n    return url\n",
                 1,
             ),
             "callable indirection without policy": (
@@ -3689,9 +3751,7 @@ def test_host_policy_detector_property_bites():
                 1,
             ),
             "dotted urlunsplit import": (
-                "from urllib.parse import urlunsplit\n"
-                "def f(parts):\n"
-                "    return urlunsplit(parts)\n",
+                "from urllib.parse import urlunsplit\ndef f(parts):\n    return urlunsplit(parts)\n",
                 1,
             ),
         },
@@ -3812,16 +3872,24 @@ def _normalize_or_none_offenders(tree, path):
                 continue
             stmt = body[0]
             is_discard = (
-                (isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Constant) and stmt.value.value is None)
+                (
+                    isinstance(stmt, ast.Return)
+                    and isinstance(stmt.value, ast.Constant)
+                    and stmt.value.value is None
+                )
                 or isinstance(stmt, ast.Pass)
-                or (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                or (
+                    isinstance(stmt, ast.Assign)
+                    and len(stmt.targets) == 1
                     and isinstance(stmt.targets[0], ast.Name)
                     and isinstance(stmt.value, ast.Name)
-                    and stmt.value.id != stmt.targets[0].id)
+                    and stmt.value.id != stmt.targets[0].id
+                )
             )
             if is_discard:
                 yield offender(
-                    path, node.lineno,
+                    path,
+                    node.lineno,
                     "normalize_public_http_url + except ValueError re-inlined; "
                     "use app.validation.safe_public_url_or_none",
                 )
@@ -3930,7 +3998,9 @@ def test_unfiltered_urljoin_detector_bites():
     )
     assert not _unfiltered_urljoin_return_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     # safe_url.py composes urljoin inside SafeUrl.parse / redirect_hop.
-    hop = ast.parse("def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n")
+    hop = ast.parse(
+        "def hop(self, location):\n    return SafeUrl.parse(urljoin(self.raw, location), pin=True)\n"
+    )
     assert not _unfiltered_urljoin_return_offenders(hop, REPO_ROOT / "app" / "safe_url.py")
 
 
@@ -3967,11 +4037,7 @@ def _is_raw_exception_text(value: ast.expr) -> bool:
 def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a wire-visible result built with the raw text of an exception."""
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not (
-            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _RESULT_ERROR_SINKS
-        ):
-            continue
+    for node in calls_to_any(tree, _RESULT_ERROR_SINKS):
         for kw in node.keywords:
             if kw.arg == "error" and _is_raw_exception_text(kw.value):
                 offenders.append(offender(path, node.lineno, f"{node.func.id}(error=<raw exception text>)"))
@@ -3983,7 +4049,9 @@ def test_no_raw_exception_text_in_result_error_field():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=_TERMINAL_RESULT_SANCTIONED):
         offenders.extend(_raw_exception_error_offenders(tree, path))
-    assert not offenders, "classify via _classify_error_code, never raw exception text: " + ", ".join(offenders)
+    assert not offenders, "classify via _classify_error_code, never raw exception text: " + ", ".join(
+        offenders
+    )
 
 
 def test_raw_exception_error_detector_bites():
@@ -4057,7 +4125,9 @@ def test_reinline_js_endpoints_detector_bites():
     )
     offenders = _reinline_js_endpoints_filter_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     assert len(offenders) == 1 and "filter_js_endpoints" in offenders[0], offenders
-    good = ast.parse("def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n")
+    good = ast.parse(
+        "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n"
+    )
     assert not _reinline_js_endpoints_filter_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
     # The chokepoint's own comprehension really is the matched shape: the file
     # exemption is what keeps the real tree clean, not a predicate that misses it.
@@ -4065,7 +4135,9 @@ def test_reinline_js_endpoints_detector_bites():
     assert validation is not None
     validation_path, validation_tree = validation
     assert _reinline_js_endpoints_filter_offenders(validation_tree, validation_path) == []
-    hits = _reinline_js_endpoints_filter_offenders(validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    hits = _reinline_js_endpoints_filter_offenders(
+        validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py"
+    )
     assert len(hits) == 1 and "filter_js_endpoints" in hits[0], hits
 
 
@@ -4167,9 +4239,7 @@ def test_robots_pattern_compile_detector_bites():
     assert not _robots_compile_call_offenders(nested, REPO_ROOT / "app" / "_synthetic.py")
     # A same-named method on any OTHER class is not the home.
     impostor = ast.parse(
-        "class OtherCache:\n"
-        "    def get(self, pattern):\n"
-        "        return _compile_robots_pattern(pattern)\n"
+        "class OtherCache:\n    def get(self, pattern):\n        return _compile_robots_pattern(pattern)\n"
     )
     assert len(_robots_compile_call_offenders(impostor, REPO_ROOT / "app" / "_synthetic.py")) == 1
 
@@ -4188,24 +4258,16 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) 
     ``ResultStatus`` argument set, read at test time -- a hand-maintained
     exemption list is precisely how an invented status would ship.
     """
-    offenders: list[str] = []
-    for node, value in call_keyword_values(
+    return literal_keyword_membership_offenders(
         tree,
+        path,
+        members=members,
         function_names=_result_primitive_names(),
         keyword_names=_STATUS_VALUE_SOURCES,
-    ):
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value not in members:
-            offenders.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"status={value.value!r} is not a ResultStatus member; add it to the"
-                    " Literal (app/models.py) or derive it from an existing member",
-                )
-            )
-    return offenders
+        label="status",
+        type_name="ResultStatus",
+        advice=("add it to the Literal (app/models.py) or derive it from an existing member"),
+    )
 
 
 def test_result_primitives_emit_real_status_members():
@@ -4424,26 +4486,16 @@ def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *,
     strategy was attempted". ``members`` is the live ``CrawlStrategyName``
     argument set, read at test time.
     """
-    offenders: list[str] = []
-    for node, value in call_keyword_values(
+    return literal_keyword_membership_offenders(
         tree,
+        path,
+        members=members,
         function_names=_ATTEMPT_CLASS,
         keyword_names=_ATTEMPT_STRATEGY_KWARG,
-    ):
-        if isinstance(value, ast.Constant) and value.value is None:
-            continue
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value not in members:
-            offenders.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"strategy={value.value!r} is not a CrawlStrategyName member; pass a real"
-                    " member, or None when no strategy was attempted",
-                )
-            )
-    return offenders
+        label="strategy",
+        type_name="CrawlStrategyName",
+        advice="pass a real member, or None when no strategy was attempted",
+    )
 
 
 def test_crawl_strategy_attempt_sites_use_real_members():
@@ -4471,19 +4523,29 @@ def test_crawl_strategy_attempt_detector_bites():
         "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_DECLARED_CRAWLER', status='failed',"
         " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
     )
-    offenders = list(_non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members))
+    offenders = list(
+        _non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    )
     assert len(offenders) == 1 and "CrawlStrategyName member" in offenders[0], offenders
     # None is admitted -- the honest "no strategy attempted" label.
     good_none = ast.parse(
         "def f():\n    return CrawlStrategyAttempt(strategy=None, status='failed',"
         " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
     )
-    assert not _non_member_attempt_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not _non_member_attempt_strategy_offenders(
+        good_none, REPO_ROOT / "app" / "_synthetic.py", members=members
+    )
     # A real member literal and a non-literal both pass.
     good_member = ast.parse("def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_HEADLESS')\n")
-    assert not _non_member_attempt_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not _non_member_attempt_strategy_offenders(
+        good_member, REPO_ROOT / "app" / "_synthetic.py", members=members
+    )
     good_var = ast.parse("def f(s):\n    return CrawlStrategyAttempt(strategy=s)\n")
-    assert not _non_member_attempt_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not _non_member_attempt_strategy_offenders(
+        good_var, REPO_ROOT / "app" / "_synthetic.py", members=members
+    )
+
+
 def test_crawl_strategy_name_members_match_constants():
     """The ``CrawlStrategyName`` Literal must not drift from ``app.constants``.
 
@@ -4506,37 +4568,66 @@ def test_crawl_strategy_name_members_match_constants():
     assert set(get_args(CrawlStrategyName)) == declared
 
 
-def test_crawl_error_members_derive_from_classification():
-    """Every Classification member is a ``CrawlError`` member, and vice versa
-    only for the documented pipeline additions.
+def test_classification_literal_covers_the_enum_exactly():
+    """``Classification`` and ``CrawlClassification`` name the same taxonomy.
 
-    ``CrawlError`` cannot build itself from ``Classification`` with
-    ``*get_args()`` inside ``Literal[...]`` (mypy cannot evaluate that), so its
-    members are spelled as string literals. models.py remains the single source
-    of truth for the page-outcome half; this pins the two together so a
-    Classification member added upstream cannot be forgotten here -- the exact
-    drift the derivation was written to prevent.
+    Neither can be derived from the other: mypy will not evaluate
+    ``*get_args()`` inside ``Literal[...]`` and will not read an enum, so
+    ``Classification`` is spelled out and ``CrawlClassification`` is spelled out,
+    and this is the only thing that says they are the same set. It was missing,
+    which is the gap this whole taxonomy chain is built to close: a member added
+    to the enum and emitted by a classifier passes every membership sweep (they
+    check the enum direction), and then
+    ``_check_literal_fields`` rejects the whole batch at construction because the
+    Literal never heard of it. The reverse -- a Literal member with no enum
+    member -- reaches the strict enum at response shaping and takes the batch
+    down there instead.
+
+    Both directions are asserted, so neither half of the drift can be the one
+    that slips through.
     """
     from typing import get_args
 
-    from app.models import Classification, CrawlError
+    from app.constants import CrawlClassification
+    from app.models import Classification
 
-    error_members = set(get_args(CrawlError))
-    classification_members = set(get_args(Classification))
-    assert classification_members <= error_members, (
-        "every Classification member must be a CrawlError member (the builders"
-        f" route error=classification): missing {sorted(classification_members - error_members)}"
+    declared = set(get_args(Classification))
+    enum = {member.value for member in CrawlClassification}
+    assert enum - declared == set(), (
+        "every CrawlClassification member needs a Classification Literal member:"
+        f" missing {sorted(enum - declared)} (app/models.py)"
     )
-    # The only codes beyond Classification are the documented pipeline
-    # conditions with no page-classification analogue. A stray addition here is
-    # a code callers cannot rely on, and a removal silently narrows the field.
-    extras = error_members - classification_members
-    assert extras == {
+    assert declared - enum == set(), (
+        "a Classification member with no CrawlClassification member is downgraded"
+        f" to site_error at response shaping: unknown {sorted(declared - enum)}"
+    )
+
+
+def test_crawl_error_is_the_pipeline_additions_over_classification():
+    """The pipeline-only codes are a real split, not a second copy of the taxonomy.
+
+    ``CrawlError`` is defined as the union of ``Classification`` and
+    ``PIPELINE_ONLY_CRAWL_ERRORS`` (app/models.py), so its membership is derived
+    and cannot drift. What a union cannot check is whether the split is still
+    meaningful: a code listed as a pipeline condition while also being a
+    classification says a page outcome is a pipeline condition, and a pipeline
+    condition deleted silently narrows the ``error`` field for callers who key on
+    it as a stable code.
+    """
+    from app.models import PIPELINE_ONLY_CRAWL_ERRORS, Classification, _literal_members
+
+    pipeline_only = _literal_members(PIPELINE_ONLY_CRAWL_ERRORS)
+    classification = _literal_members(Classification)
+    assert pipeline_only == {
         "robots_txt_disallowed",
         "browser_worker_unavailable",
         "unsupported_strategy",
         "retries_exhausted",
-    }, sorted(extras)
+    }, sorted(pipeline_only)
+    assert not pipeline_only & classification, (
+        "a code in both halves is a page outcome misfiled as a pipeline"
+        f" condition: {sorted(pipeline_only & classification)}"
+    )
 
 
 # ===========================================================================
@@ -4587,10 +4678,14 @@ def test_generic_membership_detector_bites():
     assert len(hits) == 1 and "totally_made_up" in hits[0], hits
     # A real member literal passes.
     good = ast.parse('def f():\n    return _failed_engine_result(classification="network_error")\n')
-    assert not generic_literal_field_offenders(good, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    assert not generic_literal_field_offenders(
+        good, REPO_ROOT / "app" / "_synthetic.py", field_members=members
+    )
     # A non-literal (the shape a correct caller writes) passes without comment.
     var = ast.parse("def f(c):\n    return _failed_engine_result(classification=c)\n")
-    assert not generic_literal_field_offenders(var, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    assert not generic_literal_field_offenders(
+        var, REPO_ROOT / "app" / "_synthetic.py", field_members=members
+    )
 
 
 def test_generic_membership_subsumes_the_per_field_detectors():
@@ -4624,11 +4719,15 @@ def test_generic_membership_subsumes_the_per_field_detectors():
         "_terminal_crawl_result",
     }
     missed = RESULT_PRIMITIVES - transcribed
-    assert missed == {
-        "_binary_no_text_result",
-        "_crawl_result_from_engine_result",
-        "_terminal_engine_result",
-    } | RESULT_DATACLASS_NAMES, (
+    assert (
+        missed
+        == {
+            "_binary_no_text_result",
+            "_crawl_result_from_engine_result",
+            "_terminal_engine_result",
+        }
+        | RESULT_DATACLASS_NAMES
+    ), (
         "the derived registry must cover the primitives and dataclasses the"
         f" transcribed list omitted: {sorted(missed)}"
     )
@@ -4760,7 +4859,9 @@ def test_wrong_namespace_detector_bites():
         "def f(m):\n"
         "    return _make_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
     )
-    assert not wrong_namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    assert not wrong_namespace_constant_offenders(
+        ok, REPO_ROOT / "app" / "_synthetic.py", field_members=members
+    )
     # A parameter (what a correct caller writes) is not a constant: passes.
     param = ast.parse("def f(cls):\n    return _failed_engine_result(classification=cls.site_error)\n")
     assert not wrong_namespace_constant_offenders(
@@ -4787,7 +4888,9 @@ def test_the_membership_gate_rejects_a_non_member_value():
     # None is admitted for the optional Literal fields.
     assert_optional_member(None, field="strategy", members=frozenset({"BROWSER_HEADLESS"}), where="_test")
     with pytest.raises(NonMemberValue):
-        assert_optional_member("BROWSER_DECLARED_CRAWLER", field="strategy", members=frozenset({}), where="_test")
+        assert_optional_member(
+            "BROWSER_DECLARED_CRAWLER", field="strategy", members=frozenset({}), where="_test"
+        )
 
 
 def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot():
@@ -4937,8 +5040,7 @@ def test_doubles_do_not_accept_and_drop_kwargs():
         offenders.extend(swallowing_test_double_offenders(tree, path))
     assert not offenders, (
         "bind the production kwarg by name or forward **kwargs to the real callable; a"
-        " double that drops it implements a contract that no longer exists: "
-        + "; ".join(offenders)
+        " double that drops it implements a contract that no longer exists: " + "; ".join(offenders)
     )
 
 
@@ -4981,7 +5083,9 @@ def test_no_existing_double_swallows_failed_result():
         for node in nodes_of(tree):
             if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run"):
                 continue
-            positional = [a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}]
+            positional = [
+                a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}
+            ]
             if len(positional) < 2:
                 continue
             names = {a.arg for a in node.args.args + node.args.kwonlyargs}
@@ -5009,13 +5113,11 @@ def test_error_field_values_are_classification_members():
     is a contract leak; this reports it so the missing chokepoint is visible
     rather than latent.
     """
-    import typing
-
     from membership_gate import error_field_taxonomy_offenders
 
-    from app.models import CrawlError
+    from app.models import CrawlError, _literal_members
 
-    members = frozenset(typing.get_args(CrawlError))
+    members = _literal_members(CrawlError)
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED):
         offenders.extend(error_field_taxonomy_offenders(tree, path, members=members))
@@ -5027,13 +5129,11 @@ def test_error_field_values_are_classification_members():
 
 def test_error_field_taxonomy_detector_bites():
     """The hunt detector fires on the shipped shape and admits the classified one."""
-    import typing
-
     from membership_gate import error_field_taxonomy_offenders
 
-    from app.models import CrawlError
+    from app.models import CrawlError, _literal_members
 
-    members = frozenset(typing.get_args(CrawlError))
+    members = _literal_members(CrawlError)
     bad = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="worker_failed")\n')
     hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
     assert len(hits) == 1 and "worker_failed" in hits[0], hits
@@ -5046,10 +5146,9 @@ def test_error_field_taxonomy_detector_bites():
 
 
 def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    relative = path.relative_to(REPO_ROOT).as_posix()
+    relative = relative_posix(path)
     has_builder = any(
-        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name == "_job_engine_payload"
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == "_job_engine_payload"
         for node in nodes_of(tree)
     )
     if relative != "app/api/job_runner.py" and not has_builder:
@@ -5070,11 +5169,13 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
         ):
             builder_names.update(target.id for target in targets if isinstance(target, ast.Name))
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in execute_names):
-            continue
-        payload = node.args[0] if node.args else next(
-            (keyword.value for keyword in node.keywords if keyword.arg in {"payload", "data"}), None
+    for node in calls_to_any(tree, execute_names):
+        payload = (
+            node.args[0]
+            if node.args
+            else next(
+                (keyword.value for keyword in node.keywords if keyword.arg in {"payload", "data"}), None
+            )
         )
         if isinstance(payload, ast.Name) and payload.id in builder_names:
             continue
@@ -5092,7 +5193,9 @@ def test_job_engine_payload_uses_single_builder():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED):
         offenders.extend(_job_engine_payload_chokepoint_offenders(tree, path))
-    assert not offenders, "Build whole-site engine payloads only with _job_engine_payload: " + ", ".join(offenders)
+    assert not offenders, "Build whole-site engine payloads only with _job_engine_payload: " + ", ".join(
+        offenders
+    )
 
 
 def test_job_engine_payload_chokepoint_detector_bites():
@@ -5303,8 +5406,8 @@ def test_no_sync_store_method_is_called_from_an_async_frame():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED):
         offenders.extend(_sync_store_call_offenders(tree, path))
-    assert not offenders, (
-        "A store call on the event loop stalls every in-flight request: " + ", ".join(offenders)
+    assert not offenders, "A store call on the event loop stalls every in-flight request: " + ", ".join(
+        offenders
     )
 
 
@@ -5318,10 +5421,8 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     this sweep carries the invariant: production always passes the budget.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr != "_run_action_chain":
+    for node, func in attribute_calls(tree):
+        if func.attr != "_run_action_chain":
             continue
         if any(keyword.arg == "budget_seconds" for keyword in node.keywords):
             continue
@@ -5346,8 +5447,7 @@ def test_the_action_chain_is_always_invoked_with_a_budget():
 def test_action_chain_budget_detector_bites():
     path = REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"
     unbudgeted = ast.parse(
-        "async def render(self, page, actions):\n"
-        "    await self._run_action_chain(page, actions)\n"
+        "async def render(self, page, actions):\n    await self._run_action_chain(page, actions)\n"
     )
     assert len(_action_chain_offenders(unbudgeted, path)) == 1
     budgeted = ast.parse(
@@ -5369,14 +5469,10 @@ def test_sync_store_call_detector_bites():
         "    job = job_store.load(request_id)\n"
     )
     assert len(_sync_store_call_offenders(on_the_loop, path)) == 2
-    annotated = ast.parse(
-        "async def runner(store: JobStore):\n    return store.list_jobs()\n"
-    )
+    annotated = ast.parse("async def runner(store: JobStore):\n    return store.list_jobs()\n")
     assert len(_sync_store_call_offenders(annotated, path)) == 1
     constructed = ast.parse(
-        "async def lifespan():\n"
-        "    store = JobStore(path, policy=policy)\n"
-        "    return store.delete(job_id)\n"
+        "async def lifespan():\n    store = JobStore(path, policy=policy)\n    return store.delete(job_id)\n"
     )
     assert len(_sync_store_call_offenders(constructed, path)) == 1
     compliant = ast.parse(
@@ -5406,8 +5502,7 @@ def _is_result_sink_owner(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
         or (isinstance(arg, ast.Name) and arg.id == _SINK_CLOSURE_NAME)
         for arg in list(node.args.args) + list(node.args.kwonlyargs) + list(node.args.posonlyargs)
     ) or any(
-        isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef)
-        and inner.name == _SINK_CLOSURE_NAME
+        isinstance(inner, ast.FunctionDef | ast.AsyncFunctionDef) and inner.name == _SINK_CLOSURE_NAME
         for inner in node.body
     )
 
@@ -5548,6 +5643,12 @@ def _frontier_expression(node: ast.AST) -> bool:
     return isinstance(node, ast.Attribute) and node.attr == "frontier"
 
 
+# The admission chokepoint owns the pattern it bans: admit_job_links is the one
+# function allowed to grow a frontier, so the sweep that bans direct growth
+# everywhere else has to skip the module that defines it.
+_ADMISSION_CHOKEPOINT = "app/crawl/admission.py"
+
+
 def _direct_frontier_growth_offenders(
     tree: ast.AST,
     path: pathlib.Path,
@@ -5564,7 +5665,10 @@ def _direct_frontier_growth_offenders(
         owner = parents.get(node)
         while owner is not None and not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
             owner = parents.get(owner)
-        if not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef) or owner.name not in allowed_functions:
+        if (
+            not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef)
+            or owner.name not in allowed_functions
+        ):
             return False
         if owner.name == "normalize_job_state":
             return (
@@ -5591,14 +5695,10 @@ def _direct_frontier_growth_offenders(
         elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if any(_frontier_expression(target) for target in targets):
-                offenders.append(
-                    offender(path, node.lineno, "frontier replacement bypasses admit_job_links")
-                )
+                offenders.append(offender(path, node.lineno, "frontier replacement bypasses admit_job_links"))
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute):
                 if _frontier_expression(node.value):
-                    offenders.append(
-                        offender(path, node.lineno, "frontier alias bypasses admit_job_links")
-                    )
+                    offenders.append(offender(path, node.lineno, "frontier alias bypasses admit_job_links"))
                 if node.value.attr == "append" and _frontier_expression(node.value.value):
                     offenders.append(
                         offender(path, node.lineno, "frontier method alias bypasses admit_job_links")
@@ -5613,16 +5713,15 @@ def _direct_frontier_growth_offenders(
 
 
 def test_job_frontier_growth_only_uses_funnel():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/admission.py":
-            continue
-        allowed = (
-            frozenset({"normalize_job_state", "_persist"})
-            if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/job_store.py"
-            else frozenset()
-        )
-        offenders.extend(_direct_frontier_growth_offenders(tree, path, allowed_functions=allowed))
+    offenders = app_offenders(
+        _direct_frontier_growth_offenders,
+        skip=(_ADMISSION_CHOKEPOINT,),
+        kwargs_for=lambda relative: (
+            {"allowed_functions": frozenset({"normalize_job_state", "_persist"})}
+            if relative == "app/crawl/job_store.py"
+            else {}
+        ),
+    )
     assert not offenders, "Grow whole-site frontiers only through admit_job_links: " + ", ".join(offenders)
 
 
@@ -5636,11 +5735,7 @@ def test_job_frontier_growth_detector_bites():
     )
     for source in pre_fix_owners:
         assert _direct_frontier_growth_offenders(ast.parse(source), path), source
-    alias = ast.parse(
-        "def run(job, url):\n"
-        "    frontier = job.frontier\n"
-        "    frontier.append(url)\n"
-    )
+    alias = ast.parse("def run(job, url):\n    frontier = job.frontier\n    frontier.append(url)\n")
     assert _direct_frontier_growth_offenders(alias, path)
     good = ast.parse("async def run(job, links):\n    await admit_job_links(job, links)\n")
     assert not _direct_frontier_growth_offenders(good, path)
@@ -5694,18 +5789,12 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
     offenders: list[str] = []
     for function, names in function_calls.items():
         if len(names) >= 2:
-            offenders.append(
-                offender(path, function.lineno, "recursive admission filter list is re-inlined")
-            )
+            offenders.append(offender(path, function.lineno, "recursive admission filter list is re-inlined"))
     return offenders
 
 
 def test_shared_admission_filter_set_has_no_twin_list():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        if path.relative_to(REPO_ROOT).as_posix() == "app/crawl/admission.py":
-            continue
-        offenders.extend(_shared_admission_filter_offenders(tree, path))
+    offenders = app_offenders(_shared_admission_filter_offenders, skip=(_ADMISSION_CHOKEPOINT,))
     assert not offenders, "Use the shared admission filter chokepoint: " + ", ".join(offenders)
 
 
@@ -5723,10 +5812,7 @@ def test_shared_admission_filter_detector_bites():
     )
     path = REPO_ROOT / "app" / "_synthetic.py"
     assert _shared_admission_filter_offenders(pre_fix, path)
-    good = ast.parse(
-        "async def expand(links):\n"
-        "    return await admit_discovered_links(links)\n"
-    )
+    good = ast.parse("async def expand(links):\n    return await admit_discovered_links(links)\n")
     assert not _shared_admission_filter_offenders(good, path)
 
 
@@ -5755,18 +5841,12 @@ def _property(name: str) -> Property:
 
 def _property_contexts(tree: ast.AST) -> list[ast.AST]:
     symbol_types = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
-    contexts: list[ast.AST] = [node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    contexts: list[ast.AST] = [
+        node for node in nodes_of(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
     for scope in (tree, *(node for node in nodes_of(tree) if isinstance(node, ast.ClassDef))):
         contexts.extend(node for node in getattr(scope, "body", []) if not isinstance(node, symbol_types))
     return contexts
-
-
-def _local_nodes(node: ast.AST):
-    yield node
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        yield from _local_nodes(child)
 
 
 def _module_name(path: pathlib.Path) -> str:
@@ -5811,7 +5891,7 @@ def _module_definition_index(
     return index
 
 
-def _resolved_local_nodes(
+def _resolvedlocal_nodes(
     tree: ast.AST,
     node: ast.AST,
     excluded_ids: set[int] | frozenset[int] = frozenset(),
@@ -5834,7 +5914,7 @@ def _resolved_local_nodes(
             continue
         seen.add(current_key)
         resolved.append((current_tree, current))
-        for child in _local_nodes(current):
+        for child in local_nodes(current):
             if not isinstance(child, ast.Call):
                 continue
             if isinstance(child.func, ast.Name):
@@ -5859,7 +5939,7 @@ def _resolved_local_nodes(
 
 def _relative_app_path(path: pathlib.Path) -> str:
     try:
-        return path.relative_to(REPO_ROOT).as_posix()
+        return relative_posix(path)
     except ValueError:
         return path.as_posix()
 
@@ -5915,7 +5995,7 @@ _PUBLIC_RANGE_ATTRIBUTES = frozenset(
 def _public_range_accesses(nodes: list[tuple[ast.AST, ast.AST]]) -> int:
     count = 0
     for owner_tree, node in nodes:
-        for child in _local_nodes(node):
+        for child in local_nodes(node):
             if isinstance(child, ast.Attribute) and child.attr in _PUBLIC_RANGE_ATTRIBUTES:
                 count += 1
             elif isinstance(child, ast.Call):
@@ -5934,7 +6014,7 @@ def _public_target_counts(nodes: list[tuple[ast.AST, ast.AST]]) -> tuple[int, in
     parses = sum(
         resolved_call_name(owner_tree, call) == "ipaddress.ip_address"
         for owner_tree, node in nodes
-        for call in _local_nodes(node)
+        for call in local_nodes(node)
         if isinstance(call, ast.Call)
     )
     return parses, _public_range_accesses(nodes)
@@ -5957,7 +6037,7 @@ def _public_target_observations(tree: ast.AST, path: pathlib.Path, prop: Propert
     excluded = _owner_definition_ids(tree, path, prop)
     for _name, node in _property_nodes(tree, path, prop):
         parses, ranges = _public_target_counts(
-            _resolved_local_nodes(tree, node, excluded, modules=None, prop=prop)
+            _resolvedlocal_nodes(tree, node, excluded, modules=None, prop=prop)
         )
         count = min(parses, ranges) if parses and ranges else 0
         if count:
@@ -5972,16 +6052,22 @@ def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
     for name, node in _property_nodes(tree, path, prop):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
-        nodes = _resolved_local_nodes(
-            tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop
-        )
+        nodes = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
         parses, ranges = _public_target_counts(nodes)
         if parses and ranges:
-            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements public-address policy"))
+            offenders.append(
+                offender(path, getattr(node, "lineno", 1), f"{name} reimplements public-address policy")
+            )
     return offenders
 
 
 _BOOL_ENV_SPELLINGS = frozenset({"0", "1", "false", "true", "no", "yes", "off", "on"})
+
+# A bool env read is only guarded when the value was normalized first, so these
+# are the calls that make one normalized. `getattr(raw, "strip")` counts too:
+# it reaches the same method, and recognizing only the attribute form would
+# leave a one-token rewrite able to hide the comparison.
+_BOOL_ENV_NORMALIZATION_METHODS = frozenset({"strip", "lower", "casefold"})
 
 
 def _bool_literal_values(node: ast.AST) -> set[str]:
@@ -6014,13 +6100,14 @@ def _bool_env_literal_sets(
     nodes: list[tuple[ast.AST, ast.AST]],
 ) -> tuple[dict[int, set[str]], dict[str, set[str]]]:
     direct: dict[int, set[str]] = {}
-    local_nodes = [child for _owner_tree, node in nodes for child in _local_nodes(node)]
-    for child in local_nodes:
-        if isinstance(child, (ast.Set, ast.List, ast.Tuple, ast.Dict)) and _bool_literal_values(
-            child
-        ) & _BOOL_ENV_SPELLINGS:
+    descendants = [child for _owner_tree, node in nodes for child in local_nodes(node)]
+    for child in descendants:
+        if (
+            isinstance(child, (ast.Set, ast.List, ast.Tuple, ast.Dict))
+            and _bool_literal_values(child) & _BOOL_ENV_SPELLINGS
+        ):
             direct[id(child)] = _bool_literal_values(child)
-    return direct, _bool_named_sets(local_nodes)
+    return direct, _bool_named_sets(descendants)
 
 
 def _bool_env_tree_sets(
@@ -6035,37 +6122,23 @@ def _bool_env_tree_sets(
 
 
 def _bool_env_node_observation(
-    tree: ast.AST,
     nodes: list[tuple[ast.AST, ast.AST]],
     tree_sets: dict[str, set[str]] | None = None,
 ) -> tuple[bool, int]:
     direct, named = _bool_env_literal_sets(nodes)
     named = {**tree_sets, **named} if tree_sets else named
-    local_nodes_with_tree = [
-        (owner_tree, child)
-        for owner_tree, node in nodes
-        for child in _local_nodes(node)
-    ]
+    local_nodes_with_tree = [(owner_tree, child) for owner_tree, node in nodes for child in local_nodes(node)]
     has_normalization = any(
-        (
-            isinstance(child, ast.Call)
-            and isinstance(child.func, ast.Attribute)
-            and child.func.attr in {"strip", "lower", "casefold"}
-        )
-        or (
-            isinstance(child, ast.Call)
-            and resolved_call_name(owner_tree, child) == "getattr"
-            and len(child.args) >= 2
-            and isinstance(child.args[1], ast.Constant)
-            and child.args[1].value in {"strip", "lower", "casefold"}
-        )
+        has_method_call(owner_tree, child, _BOOL_ENV_NORMALIZATION_METHODS)
         for owner_tree, child in local_nodes_with_tree
     )
     if not has_normalization:
         return False, 0
     count = 0
     for _owner_tree, child in local_nodes_with_tree:
-        if not isinstance(child, ast.Compare) or not any(isinstance(op, (ast.In, ast.NotIn)) for op in child.ops):
+        if not isinstance(child, ast.Compare) or not any(
+            isinstance(op, (ast.In, ast.NotIn)) for op in child.ops
+        ):
             continue
         if any(
             id(part) in direct
@@ -6076,18 +6149,10 @@ def _bool_env_node_observation(
                 and isinstance(part.value, ast.Name)
                 and part.value.id in named
             )
-            for part in _local_nodes(child)
+            for part in local_nodes(child)
         ):
             count += 1
     return True, count
-
-
-def _bool_env_node_count(
-    tree: ast.AST,
-    nodes: list[tuple[ast.AST, ast.AST]],
-    tree_sets: dict[str, set[str]] | None = None,
-) -> int:
-    return _bool_env_node_observation(tree, nodes, tree_sets)[1]
 
 
 def _bool_env_contexts(
@@ -6104,7 +6169,7 @@ def _bool_env_contexts(
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in excluded
         ]
     return [
-        _resolved_local_nodes(tree, node, excluded, modules=modules, prop=prop)
+        _resolvedlocal_nodes(tree, node, excluded, modules=modules, prop=prop)
         for _name, node in _property_nodes(tree, path, prop)
     ]
 
@@ -6112,9 +6177,7 @@ def _bool_env_contexts(
 def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
     tree_sets = _bool_env_tree_sets(tree, None)
     contexts = _bool_env_contexts(tree, path, prop, None)
-    observations_for_contexts = [
-        _bool_env_node_observation(tree, context, tree_sets) for context in contexts
-    ]
+    observations_for_contexts = [_bool_env_node_observation(context, tree_sets) for context in contexts]
     if not any(observed for observed, _count in observations_for_contexts):
         return {}
     return {"bool_literal_set": sum(count for _observed, count in observations_for_contexts)}
@@ -6126,38 +6189,48 @@ def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> li
     tree_sets = _bool_env_tree_sets(tree, _PROPERTY_MODULES.get())
     excluded = _owner_definition_ids(tree, path, prop)
     for name, node in _property_nodes(tree, path, prop):
-        context = _resolved_local_nodes(
-            tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop
-        )
-        if _bool_env_node_count(tree, context, tree_sets):
-            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing"))
+        context = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
+        if _bool_env_node_observation(context, tree_sets)[1]:
+            offenders.append(
+                offender(path, getattr(node, "lineno", 1), f"{name} reimplements boolean environment parsing")
+            )
     return offenders
 
 
-
-
 def _source_and_literals(node: ast.AST) -> tuple[str, str]:
-    nodes = list(_local_nodes(node))
-    source = " ".join(ast.unparse(child) for child in nodes[1:]).lower() if isinstance(
-        node, (ast.FunctionDef, ast.AsyncFunctionDef)
-    ) else ast.unparse(node).lower()
+    nodes = list(local_nodes(node))
+    source = (
+        " ".join(ast.unparse(child) for child in nodes[1:]).lower()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        else ast.unparse(node).lower()
+    )
     literals = "".join(
-        child.value
-        for child in nodes
-        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+        child.value for child in nodes if isinstance(child, ast.Constant) and isinstance(child.value, str)
     ).lower()
     return source, literals
 
 
 def _robot_signal(node: ast.AST) -> bool:
     source, literals = _source_and_literals(node)
-    return any(token in source or token in literals for token in ("robot", "crawl-delay", "disallow", "user-agent"))
+    return any(
+        token in source or token in literals for token in ("robot", "crawl-delay", "disallow", "user-agent")
+    )
 
 
 def _call_leaf_names(tree: ast.AST, node: ast.AST):
-    for child in _local_nodes(node):
+    for child in local_nodes(node):
         if isinstance(child, ast.Call):
             yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
+
+
+# `"{}/robots.txt".format(base)` and `"/robots.txt".join(...)` build a URL the
+# same way a BinOp or f-string does, so the URL literal detector must see them.
+# `getattr(x, "format")` reaches the same method through a token.
+_STRING_CONSTRUCTOR_METHODS = frozenset({"format", "join"})
+_URL_CONSTRUCTOR_METHODS = frozenset({"urljoin", "urlunsplit"})
+# How a line-oriented robots file gets torn into lines. A hand-rolled scanner
+# built on anything else is the duplicated robots parser this detector bans.
+_ROBOTS_LINE_SPLIT_METHODS = frozenset({"splitlines", "partition"})
 
 
 def _fetch_like(tree: ast.AST, node: ast.AST) -> bool:
@@ -6168,34 +6241,19 @@ def _fetch_like(tree: ast.AST, node: ast.AST) -> bool:
 
 
 def _string_constructor(tree: ast.AST, node: ast.AST) -> bool:
-    for child in _local_nodes(node):
-        if not isinstance(child, ast.Call):
-            continue
-        name = resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
-        if name in {"format", "join"}:
-            return True
-        if (
-            name == "getattr"
-            and len(child.args) >= 2
-            and isinstance(child.args[1], ast.Constant)
-            and child.args[1].value in {"format", "join"}
-        ):
-            return True
-    return False
+    return has_method_call(tree, node, _STRING_CONSTRUCTOR_METHODS)
 
 
 def _url_literal_capability(tree: ast.AST, node: ast.AST) -> bool:
     if not isinstance(node, (ast.BinOp, ast.JoinedStr, ast.Call)):
         return False
-    nodes = list(_local_nodes(node))
+    nodes = list(local_nodes(node))
     if not any(isinstance(child, (ast.BinOp, ast.JoinedStr)) for child in nodes) and not _string_constructor(
         tree, node
     ):
         return False
     parts = [
-        child.value
-        for child in nodes
-        if isinstance(child, ast.Constant) and isinstance(child.value, str)
+        child.value for child in nodes if isinstance(child, ast.Constant) and isinstance(child.value, str)
     ]
     return any("robot" in part or ".txt" in part for part in parts) and any(
         part.lstrip("{}").startswith("/") or "http" in part for part in parts
@@ -6203,12 +6261,10 @@ def _url_literal_capability(tree: ast.AST, node: ast.AST) -> bool:
 
 
 def _url_constructor(tree: ast.AST, node: ast.AST) -> bool:
-    nodes = list(_local_nodes(node))
-    return any(
-        isinstance(child, ast.Call)
-        and resolved_call_name(tree, child).rsplit(".", 1)[-1].lower() in {"urljoin", "urlunsplit"}
-        for child in nodes
-    ) or any(_url_literal_capability(tree, child) for child in nodes)
+    nodes = list(local_nodes(node))
+    return has_method_call(tree, node, _URL_CONSTRUCTOR_METHODS) or any(
+        _url_literal_capability(tree, child) for child in nodes
+    )
 
 
 def _robots_fetch_like(tree: ast.AST, node: ast.AST) -> bool:
@@ -6222,18 +6278,13 @@ def _robots_fetch_like(tree: ast.AST, node: ast.AST) -> bool:
 
 
 def _parser_call_count(tree: ast.AST, node: ast.AST) -> int:
-    count = 0
-    for child in _local_nodes(node):
-        if not isinstance(child, ast.Call):
-            continue
-        name = resolved_call_name(tree, child).rsplit(".", 1)[-1].lower()
-        if (
-            ("parse" in name and any(token in name for token in ("robot", "rule", "directive", "crawl")))
-            or ("decode" in name and "rule" in name)
-            or ("read" in name and "robot" in name)
-        ):
-            count += 1
-    return count
+    return sum(
+        1
+        for name, _call in local_call_leaf_names(tree, node)
+        if ("parse" in name and any(token in name for token in ("robot", "rule", "directive", "crawl")))
+        or ("decode" in name and "rule" in name)
+        or ("read" in name and "robot" in name)
+    )
 
 
 def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool:
@@ -6245,13 +6296,8 @@ def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool
         return True
     if "robot" in name and any(token in name for token in ("parse", "rule", "directive")):
         return True
-    nodes = list(_local_nodes(node))
-    line_scan = any(
-        isinstance(child, ast.Call)
-        and isinstance(child.func, ast.Attribute)
-        and child.func.attr in {"splitlines", "partition"}
-        for child in nodes
-    )
+    nodes = list(local_nodes(node))
+    line_scan = has_method_call(tree, node, _ROBOTS_LINE_SPLIT_METHODS)
     collection_return = any(
         isinstance(child, ast.Return)
         and isinstance(child.value, (ast.ListComp, ast.List, ast.Tuple, ast.Dict, ast.DictComp))
@@ -6264,7 +6310,7 @@ def _cache_call_count(tree: ast.AST, node: ast.AST) -> int:
     return sum(
         isinstance(child, ast.Call)
         and resolved_call_name(tree, child).rsplit(".", 1)[-1].lower().endswith("boundedttlcache")
-        for child in _local_nodes(node)
+        for child in local_nodes(node)
     )
 
 
@@ -6308,8 +6354,10 @@ def _robot_capabilities_from_nodes(
     for owner_tree, resolved in nodes:
         owner_path = module_paths.get(id(owner_tree), path)
         for capability, count in _robots_observations_for_node(owner_tree, owner_path, resolved).items():
-            if suppress_shared and resolved is not nodes[0][1] and _robots_shared_parser(
-                prop, owner_path, resolved, owner_tree, capability
+            if (
+                suppress_shared
+                and resolved is not nodes[0][1]
+                and _robots_shared_parser(prop, owner_path, resolved, owner_tree, capability)
             ):
                 continue
             capabilities[capability] = capabilities.get(capability, 0) + count
@@ -6325,7 +6373,7 @@ def _robots_policy_observations(tree: ast.AST, path: pathlib.Path, prop: Propert
     )
     module_paths = _robot_module_paths(tree, path, None)
     for node in contexts:
-        resolved = _resolved_local_nodes(tree, node, modules=None, prop=prop)
+        resolved = _resolvedlocal_nodes(tree, node, modules=None, prop=prop)
         for fingerprint, count in _robot_capabilities_from_nodes(
             tree, path, prop, resolved, module_paths, suppress_shared=False
         ).items():
@@ -6356,9 +6404,7 @@ def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
     excluded = _owner_definition_ids(tree, path, prop)
     module_paths = _robot_module_paths(tree, path, _PROPERTY_MODULES.get())
     for name, node in _property_nodes(tree, path, prop):
-        nodes = _resolved_local_nodes(
-            tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop
-        )
+        nodes = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
         capabilities = _robot_capabilities_from_nodes(
             tree, path, prop, nodes, module_paths, suppress_shared=True
         )
@@ -6375,7 +6421,7 @@ def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
                 child.func.id
                 if isinstance(child.func, ast.Name)
                 else resolved_call_name(tree, child).rsplit(".", 1)[-1]
-                for child in _local_nodes(node)
+                for child in local_nodes(node)
                 if isinstance(child, ast.Call)
             }
             if builders & local_calls and _robots_fetch_like(tree, node):
@@ -6383,7 +6429,9 @@ def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
         for capability in sorted(capabilities):
             if _property_suppressed(prop, path, name, capability):
                 continue
-            offenders.append(offender(path, getattr(node, "lineno", 1), f"{name} has robots capability {capability}"))
+            offenders.append(
+                offender(path, getattr(node, "lineno", 1), f"{name} has robots capability {capability}")
+            )
     return offenders
 
 
@@ -6424,7 +6472,9 @@ def _property_registry_failures(
                 failures.append(f"{prop.name} is missing required fingerprints: {sorted(missing)}")
         unobserved = set(prop.fingerprints) - set(observed[prop.name])
         if unobserved:
-            failures.append(f"{prop.name} has unobserved fingerprints (dead configuration): {sorted(unobserved)}")
+            failures.append(
+                f"{prop.name} has unobserved fingerprints (dead configuration): {sorted(unobserved)}"
+            )
         zero_observations = {
             fingerprint
             for fingerprint in prop.fingerprints
@@ -6494,7 +6544,9 @@ def test_property_registry_detector_bites():
     tree = ast.parse("def normalize(value):\n    return value.strip().lower()\n")
     assert _bool_env_observations(tree, path, prop) == {"bool_literal_set": 0}
     failures = _property_registry_failures((prop,), trees=((path, tree),))
-    assert any("zero observations" in failure and "bool_literal_set" in failure for failure in failures), failures
+    assert any("zero observations" in failure and "bool_literal_set" in failure for failure in failures), (
+        failures
+    )
 
 
 def test_property_registry_rejects_duplicate_owner_count():
@@ -6540,7 +6592,11 @@ def test_property_owner_duplicate_is_not_sanctioned():
     )
     path = REPO_ROOT / "app" / "validation.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
-    duplicate = [node for node in nodes_of(tree) if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"][1]
+    duplicate = [
+        node
+        for node in nodes_of(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
+    ][1]
     assert len(owner_ids) == 1
     assert not _property_owner(path, prop, tree=tree, node=duplicate)
     assert _bool_env_offenders(tree, path, prop)
@@ -6593,8 +6649,7 @@ def assert_property_detector_bites(
         if isinstance(source, str):
             return list(detector(_synthetic_app_tree(source), default_path, prop))
         modules = [
-            (REPO_ROOT / relative, ast.parse(module_source))
-            for relative, module_source in source.items()
+            (REPO_ROOT / relative, ast.parse(module_source)) for relative, module_source in source.items()
         ]
         primary_path, primary_tree = modules[-1]
         return list(detector(primary_tree, primary_path, prop, modules=modules))
@@ -6714,13 +6769,11 @@ def test_bool_env_detector_bites():
         _bool_env_offenders,
         caught={
             "truthy set": (
-                "def parse(value):\n"
-                "    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n",
+                "def parse(value):\n    return value.strip().lower() in {'1', 'true', 'yes', 'on'}\n",
                 1,
             ),
             "inverted set": (
-                "def parse(value):\n"
-                "    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n",
+                "def parse(value):\n    return value.strip().lower() not in {'0', 'false', 'no', 'off'}\n",
                 1,
             ),
             "module-level set": (
@@ -6796,18 +6849,15 @@ def test_robots_policy_detector_bites():
                 1,
             ),
             "inline joined url": (
-                "def load(origin):\n"
-                "    return http_fetcher(''.join((origin, '/robots.txt')))\n",
+                "def load(origin):\n    return http_fetcher(''.join((origin, '/robots.txt')))\n",
                 1,
             ),
             "inline f-string url": (
-                "def load(origin):\n"
-                "    return http_fetcher(f'{origin}/robots.txt')\n",
+                "def load(origin):\n    return http_fetcher(f'{origin}/robots.txt')\n",
                 1,
             ),
             "inline absolute formatted url": (
-                "def load(origin):\n"
-                "    return http_fetcher('https://{}/robots.txt'.format(origin))\n",
+                "def load(origin):\n    return http_fetcher('https://{}/robots.txt'.format(origin))\n",
                 1,
             ),
             "helper split with arbitrary dict parser": (
@@ -6852,9 +6902,7 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
             "imported owner": {
                 "app/_public_owner.py": "def verdict(value):\n    return value\n",
                 "app/_public_consumer.py": (
-                    "from app._public_owner import verdict\n"
-                    "def check(value):\n"
-                    "    return verdict(value)\n"
+                    "from app._public_owner import verdict\ndef check(value):\n    return verdict(value)\n"
                 ),
             },
         },
@@ -6865,10 +6913,7 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
         caught={
             "imported normalization helper": (
                 {
-                    "app/_bool_helper.py": (
-                        "def normalize(value):\n"
-                        "    return value.strip().lower()\n"
-                    ),
+                    "app/_bool_helper.py": ("def normalize(value):\n    return value.strip().lower()\n"),
                     "app/_bool_consumer.py": (
                         "from app._bool_helper import normalize\n"
                         "FALSE_WORDS = {'0', 'false', 'no', 'off'}\n"
@@ -6883,9 +6928,7 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
             "imported owner": {
                 "app/_bool_owner.py": "def parse(value):\n    return value\n",
                 "app/_bool_consumer.py": (
-                    "from app._bool_owner import parse\n"
-                    "def check(value):\n"
-                    "    return parse(value)\n"
+                    "from app._bool_owner import parse\ndef check(value):\n    return parse(value)\n"
                 ),
             },
         },
@@ -6914,8 +6957,7 @@ def test_property_detectors_resolve_imported_helpers_across_modules():
         quiet={
             "shared field parser": {
                 "app/_robots_primitive.py": (
-                    "def parse_fields(text):\n"
-                    "    return [(True, line) for line in text.splitlines()]\n"
+                    "def parse_fields(text):\n    return [(True, line) for line in text.splitlines()]\n"
                 ),
                 "app/_robots_consumer.py": (
                     "from app._robots_primitive import parse_fields\n"
@@ -7129,7 +7171,9 @@ def test_documented_knob_detector_bites():
     current = _documented_browser_knobs()
     assert current is not None
     assert "BROWSER_CRAWLER_ALLOWED_HOSTS" in current
-    assert not _documented_knob_offenders({"BROWSER_CRAWLER_ALLOWED_HOSTS"}, {"BROWSER_CRAWLER_ALLOWED_HOSTS"})
+    assert not _documented_knob_offenders(
+        {"BROWSER_CRAWLER_ALLOWED_HOSTS"}, {"BROWSER_CRAWLER_ALLOWED_HOSTS"}
+    )
     assert _documented_knob_offenders({"BROWSER_CRAWLER_LOG_FILE"}, set())
     assert _settings_alias_failures({"missing_field": "BROWSER_CRAWLER_FAKE"}, {"real_field"})
     assert _settings_alias_failures(
@@ -7220,9 +7264,9 @@ def test_ddl_detector_bites():
                 3,
             )
         },
-    quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
-    quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
-)
+        quiet="def apply(conn):\n    conn.execute('CREATE TABLE x (id TEXT)')\n",
+        quiet_path=REPO_ROOT / "app" / "crawl" / "migrations" / "0001_crawl_jobs_initial.py",
+    )
 
 
 # ===========================================================================
@@ -7430,8 +7474,10 @@ def _opens_for_writing(node: ast.Call) -> bool:
     if len(node.args) < 2:
         return False
     mode = node.args[1]
-    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(
-        char in mode.value for char in _WRITE_MODE_CHARS
+    return (
+        isinstance(mode, ast.Constant)
+        and isinstance(mode.value, str)
+        and any(char in mode.value for char in _WRITE_MODE_CHARS)
     )
 
 
@@ -7736,9 +7782,7 @@ def test_a_narrowed_walk_is_shared_too():
     checked = 0
     for path, tree in app_trees():
         narrowed = [
-            node
-            for node in nodes_of(tree)
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            node for node in nodes_of(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         ][:2]
         for node in narrowed:
             shared = nodes_of(node)
@@ -7783,10 +7827,7 @@ def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
 
     def visit(node: ast.AST, enclosing: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if (
-                isinstance(child, ast.Call)
-                and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target
-            ):
+            if isinstance(child, ast.Call) and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target:
                 found.append((child, enclosing))
             name = (
                 child.name
@@ -7801,20 +7842,16 @@ def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
 
 def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a cookie write that does not run through the shared fetch tail."""
-    relative = path.relative_to(REPO_ROOT).as_posix()
+    relative = relative_posix(path)
     offenders: list[str] = []
     for call, enclosing in _enclosing_calls(tree, "_store_set_cookies"):
         if relative == _COOKIE_TAIL and enclosing == _COOKIE_TAIL_FN:
             continue
-        offenders.append(
-            offender(path, call.lineno, f"_store_set_cookies() outside {_COOKIE_TAIL_FN}()")
-        )
+        offenders.append(offender(path, call.lineno, f"_store_set_cookies() outside {_COOKIE_TAIL_FN}()"))
     for call, enclosing in _enclosing_calls(tree, "add_cookie_header"):
         if relative == _COOKIE_HELPER and enclosing == _COOKIE_HELPER_FN:
             continue
-        offenders.append(
-            offender(path, call.lineno, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()")
-        )
+        offenders.append(offender(path, call.lineno, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()"))
     return offenders
 
 
@@ -7825,8 +7862,7 @@ def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
         offenders.extend(_cookie_writes_off_the_fetch_tail(tree, path))
     assert not offenders, (
         f"Persist response cookies via {_COOKIE_TAIL}::{_COOKIE_TAIL_FN}, which calls "
-        f"{_COOKIE_HELPER_FN} for you, instead of reaching for the jar where you are: "
-        + ", ".join(offenders)
+        f"{_COOKIE_HELPER_FN} for you, instead of reaching for the jar where you are: " + ", ".join(offenders)
     )
 
 
@@ -7849,9 +7885,7 @@ def test_cookie_tail_detector_bites():
         "    return _store_set_cookies(kwargs)\n"
     )
     # The sanctioned chain is silent at its own path...
-    assert not _cookie_writes_off_the_fetch_tail(
-        ast.parse(tail_call), REPO_ROOT / _COOKIE_TAIL
-    )
+    assert not _cookie_writes_off_the_fetch_tail(ast.parse(tail_call), REPO_ROOT / _COOKIE_TAIL)
     assert not _cookie_writes_off_the_fetch_tail(
         ast.parse("def _store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n"),
         REPO_ROOT / _COOKIE_HELPER,
@@ -7910,12 +7944,8 @@ def _declared_fields(node: ast.ClassDef) -> list[str]:
 
 def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[str]:
     """Field names that differ between a domain dataclass and its wire model."""
-    domain = {
-        n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_dataclass(n)
-    }
-    wire = {
-        n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)
-    }
+    domain = {n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_dataclass(n)}
+    wire = {n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
     drifted: list[str] = []
     for name in sorted(domain.keys() & wire.keys()):
         internal = set(_declared_fields(domain[name]))
@@ -7946,23 +7976,20 @@ def test_wire_models_mirror_every_domain_field():
 
 def test_wire_mirror_detector_bites():
     """A dropped field and a wire-only field both fire; an exact pair stays clean."""
-    domain = ast.parse(
-        "@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n"
-    )
+    domain = ast.parse("@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n")
     matching = ast.parse(
         "from pydantic import BaseModel\nclass Link(BaseModel):\n"
         "    url: str\n    host: str\n    depth: int\n"
     )
     assert not _wire_mirror_drift(domain, matching)
 
-    drifted = _wire_mirror_drift(
-        domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n")
-    )
+    drifted = _wire_mirror_drift(domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n"))
     assert len(drifted) == 1, drifted
     assert "Link.depth" in drifted[0] and "dropped on the wire" in drifted[0], drifted
 
     drifted = _wire_mirror_drift(
-        domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n")
+        domain,
+        ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n"),
     )
     assert len(drifted) == 1, drifted
     assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
@@ -8036,9 +8063,7 @@ def _undeclared_advertised_keys(
     payload_tree: ast.Module, wire_tree: ast.Module, function_name: str, model_name: str
 ) -> list[str]:
     """Advertised payload keys the response model does not declare."""
-    model = next(
-        (n for n in wire_tree.body if isinstance(n, ast.ClassDef) and n.name == model_name), None
-    )
+    model = next((n for n in wire_tree.body if isinstance(n, ast.ClassDef) and n.name == model_name), None)
     assert model is not None, f"{model_name} not found in {_WIRE_MODEL_MODULE}"
     declared = set(_declared_fields(model))
     return [
@@ -8058,8 +8083,7 @@ def test_every_advertised_payload_key_is_declared_on_its_response_model(
     assert not dropped, (
         f"{function_name} advertises keys that {model_name} does not declare, and "
         f"response_model={model_name} silently filters every undeclared key -- so they reach "
-        f"the dict-returning tests and never the wire. Add the field to {model_name}: "
-        + "; ".join(dropped)
+        f"the dict-returning tests and never the wire. Add the field to {model_name}: " + "; ".join(dropped)
     )
 
 
@@ -8112,7 +8136,7 @@ _RESULT_CHOKEPOINT_MODULE = "app/crawl/result_helpers.py"
 
 def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a result built from a hand-written (status, classification) pair."""
-    if path.relative_to(REPO_ROOT).as_posix() == _RESULT_CHOKEPOINT_MODULE:
+    if relative_posix(path) == _RESULT_CHOKEPOINT_MODULE:
         return []
     offenders: list[str] = []
     for node in nodes_of(tree):
@@ -8126,9 +8150,7 @@ def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> l
             if kw.arg in ("status", "classification") and isinstance(kw.value, ast.Constant)
         }
         if len(spelled) == 2:
-            offenders.append(
-                offender(path, node.lineno, "hand-written (status, classification) pair")
-            )
+            offenders.append(offender(path, node.lineno, "hand-written (status, classification) pair"))
     return offenders
 
 
@@ -8151,10 +8173,7 @@ def test_result_status_pair_detector_bites():
         # A qualified call is the same construction.
         'models.CrawlResult(url=u, status="failed", classification="blocked")\n': "hand-written",
     }
-    for src, expected in fires.items():
-        offenders = _literal_status_classification_pairs(ast.parse(src), path)
-        assert len(offenders) == 1, (src, offenders)
-        assert expected in offenders[0], (src, offenders)
+    assert_fires_once(_literal_status_classification_pairs, fires, path)
 
     clean = (
         # Derived, not spelled -- what the browser strategy does.
@@ -8165,13 +8184,8 @@ def test_result_status_pair_detector_bites():
         # The same spelled pair inside the chokepoint module is the definition.
         'CrawlResult(url=u, status="failed", classification=label)\n',
     )
-    for src in clean:
-        offenders = _literal_status_classification_pairs(
-            ast.parse(src), REPO_ROOT / _RESULT_CHOKEPOINT_MODULE
-        )
-        assert not offenders, src
-    for src in clean[:3]:
-        assert not _literal_status_classification_pairs(ast.parse(src), path), src
+    assert_stays_clean(_literal_status_classification_pairs, clean, REPO_ROOT / _RESULT_CHOKEPOINT_MODULE)
+    assert_stays_clean(_literal_status_classification_pairs, clean[:3], path)
     # And the chokepoint exemption is keyed on the module, not on a name: a
     # spelled pair anywhere else still fires even under the same function name.
     assert _literal_status_classification_pairs(

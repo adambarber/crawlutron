@@ -24,9 +24,7 @@ async def test_document_extractor_blocks_internal_url(monkeypatch):
     # F2: the unprotected urllib urlopen must not be pointed at loopback.
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        doc_mod._default_document_text_extractor(
-            "http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY
-        )
+        doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY)
 
 
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
@@ -66,9 +64,7 @@ async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
         "_build_pinned_request",
         lambda url, headers, *, policy: ("http://1.2.3.4:80/path", {"Host": "example.com"}),
     )
-    pinned_url, headers = _resolve_browser_target(
-        "http://example.com/path", policy=UNRESTRICTED_HOST_POLICY
-    )
+    pinned_url, headers = _resolve_browser_target("http://example.com/path", policy=UNRESTRICTED_HOST_POLICY)
     assert pinned_url == "http://1.2.3.4:80/path"
     assert headers == {"Host": "example.com"}
 
@@ -90,10 +86,10 @@ async def test_assert_safe_final_url_blocks_internal(monkeypatch):
 async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     page, renderer = pinned_renderer(monkeypatch)
     result = await renderer._render_with_browser(
-            "http://example.com/",
-            RenderOptions(browser_profile={}),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        "http://example.com/",
+        RenderOptions(browser_profile={}),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
     # Should use set_extra_http_headers, NOT extra_http_headers param;
@@ -128,9 +124,7 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     assert _is_ssrf_blocked("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY) is True
-    assert _is_ssrf_blocked(
-        "http://169.254.169.254/latest/", policy=UNRESTRICTED_HOST_POLICY
-    ) is True
+    assert _is_ssrf_blocked("http://169.254.169.254/latest/", policy=UNRESTRICTED_HOST_POLICY) is True
     assert _is_ssrf_blocked("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY) is False
 
 
@@ -156,9 +150,9 @@ async def test_render_registers_ssrf_route_guard(monkeypatch):
         lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
     )
     await renderer._render_with_browser(
-            "http://example.com/",
-            RenderOptions(browser_profile={}),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        "http://example.com/",
+        RenderOptions(browser_profile={}),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
     # The SSRF route guard must be registered on the page.
     assert any(pattern == "**/*" for pattern, _ in page.route_calls)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import types
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import TYPE_CHECKING, Any, Literal, NewType, get_args
+from typing import TYPE_CHECKING, Any, Literal, NewType, Union, get_args, get_origin
 
 from app.constants import ResultStatus
 
@@ -62,12 +63,46 @@ Classification = Literal[
     "circuit_breaker_open",
 ]
 
+# ``X | Y`` and ``Union[X, Y]`` are the same type with two spellings and two
+# origins; a taxonomy alias written either way has to read the same here.
+_UNION_ORIGINS = (Union, types.UnionType)
+
+
+def _literal_members(alias: Any) -> frozenset[str]:
+    """The string members of a declared type, whatever shape it composes in.
+
+    The one place a declared type crosses into a runtime membership check, and
+    the reason it is total rather than a ``get_args`` call: ``get_args`` answers
+    different questions for different annotations. For a bare ``Literal`` it
+    returns the members; for a union it returns the union's arguments
+    UNflattened, so the members arrive as nested alias objects; and for
+    ``dict[str, str]`` it returns ``(str, str)``, which a naive recursive walk
+    reads as two members named "str".
+
+    So the origin decides. A ``Literal`` contributes its string args, a union
+    contributes the union of what it holds (which is what lets ``CrawlError``
+    below be *defined* as a union of the two taxonomies instead of restating one
+    of them), and anything else is not a taxonomy and contributes nothing. That
+    last clause is the load-bearing one: it is what makes this safe to point at
+    an arbitrary field annotation, which is what a field sweep does.
+    """
+    origin = get_origin(alias)
+    if origin is Literal:
+        return frozenset(arg for arg in get_args(alias) if isinstance(arg, str))
+    if origin in _UNION_ORIGINS:
+        members: set[str] = set()
+        for arg in get_args(alias):
+            members |= _literal_members(arg)
+        return frozenset(members)
+    return frozenset()
+
+
 # The literal members as a runtime set. ``Classification`` crosses a string
 # boundary in a few places (an exception message carrying a taxonomy code, a
 # cached dict value), and narrowing one back to the Literal needs a membership
 # check against exactly these values -- derived from the alias so the set and
 # the enum cannot drift.
-CLASSIFICATION_MEMBERS: frozenset[str] = frozenset(get_args(Classification))
+CLASSIFICATION_MEMBERS: frozenset[str] = _literal_members(Classification)
 
 
 _CLASSIFICATION_TABLE: dict[str, Classification] = {name: name for name in get_args(Classification)}
@@ -86,6 +121,16 @@ def as_classification(value: str, *, default: Classification = "unknown_error") 
     return _CLASSIFICATION_TABLE.get(value, default)
 
 
+# Pipeline conditions with no page-classification analogue: a capacity decision
+# and a config one. They are not page outcomes, so forcing them into
+# Classification would distort that taxonomy.
+PIPELINE_ONLY_CRAWL_ERRORS = Literal[
+    "robots_txt_disallowed",
+    "browser_worker_unavailable",
+    "unsupported_strategy",
+    "retries_exhausted",
+]
+
 # The stable machine-readable failure code carried alongside ``classification``.
 # Documented at app/api/render.py:202 as a stable code callers can key on, so it
 # is a declared taxonomy rather than a free-form str: a code that is not listed
@@ -97,56 +142,16 @@ def as_classification(value: str, *, default: Classification = "unknown_error") 
 #   (``browser_worker_unavailable`` is a capacity decision, ``unsupported_strategy``
 #   a config one): they are not page outcomes and forcing them into Classification
 #   would distort that taxonomy.
-CrawlError = Literal[
-    # Every Classification member: the builders route ``error=classification``
-    # (result_helpers), so the two fields agree and the code is a stable key for
-    # callers. Listed explicitly because mypy cannot evaluate ``*get_args()`` in
-    # a Literal alias; test_crawl_error_members_derive_from_classification pins
-    # this list to Classification's args so it cannot drift from the source.
-    "rendered",
-    "captcha_detected",
-    "bot_challenge_detected",
-    "access_denied",
-    "login_required",
-    "paywall_detected",
-    "rate_limited",
-    "cookie_consent_required",
-    "javascript_required",
-    "unsupported_browser",
-    "geolocation_blocked",
-    "waf_challenge_detected",
-    "not_found",
-    "site_error",
-    "gone",
-    "binary_no_text",
-    "robots_disallowed",
-    "navigation_timeout",
-    "browser_crash",
-    "network_error",
-    "connection_error",
-    "http_status_error",
-    "url_budget_exceeded",
-    "payload_too_large",
-    "too_many_redirects",
-    "http_error",
-    "value_error",
-    "tls_error",
-    "dns_error",
-    "invalid_url",
-    "unsupported_scheme",
-    "private_network_target",
-    "unknown_error",
-    "not_modified",
-    "browser_pool_exhausted",
-    "circuit_breaker_open",
-    # Pipeline conditions with no page-classification analogue: a capacity
-    # decision and a config one. They are not page outcomes, so forcing them into
-    # Classification would distort that taxonomy.
-    "robots_txt_disallowed",
-    "browser_worker_unavailable",
-    "unsupported_strategy",
-    "retries_exhausted",
-]
+#
+# It is the UNION of the two, not a restatement of the first. mypy cannot
+# evaluate ``*get_args()`` inside ``Literal[...]``, so this used to spell every
+# Classification member out again and pin the copy with a test -- a hand-kept
+# mirror of the alias three lines above it, held in agreement by a guard that had
+# to be re-derived every time a code was added. A union of two aliases is
+# something mypy can evaluate and get_args cannot flatten on its own, which is
+# what _literal_members above is for: the static type, the runtime member set, and
+# the taxonomy are now the same declaration read three ways.
+CrawlError = Classification | PIPELINE_ONLY_CRAWL_ERRORS
 
 CrawlStrategyName = Literal[
     "HTTP_DECLARED_CRAWLER",
@@ -160,11 +165,11 @@ CrawlStrategyName = Literal[
 # shape lie, so the dataclasses validate them at construction. Kept here next to
 # the Literal definitions because the check and the types must move together.
 _LITERAL_FIELDS = {
-    "status": set(get_args(ResultStatus)),
-    "classification": set(get_args(Classification)),
-    "selected_strategy": set(get_args(CrawlStrategyName)),
-    "strategy": set(get_args(CrawlStrategyName)),
-    "error": set(get_args(CrawlError)),
+    "status": set(_literal_members(ResultStatus)),
+    "classification": set(_literal_members(Classification)),
+    "selected_strategy": set(_literal_members(CrawlStrategyName)),
+    "strategy": set(_literal_members(CrawlStrategyName)),
+    "error": set(_literal_members(CrawlError)),
 }
 
 

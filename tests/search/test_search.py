@@ -12,7 +12,7 @@ import os
 from unittest import mock
 
 import pytest
-from _assertions import provider_results
+from _assertions import one_search_result
 
 from app.search.providers import (
     BraveProvider,
@@ -237,13 +237,16 @@ class TestCollectResults:
     def test_none_items_iterable_is_empty(self):
         from app.search.providers import _collect_results
 
-        assert _collect_results(
-            None,
-            url_key="url",
-            title_key="title",
-            description_key="content",
-            policy=HostPolicy.unrestricted(),
-        ) == []
+        assert (
+            _collect_results(
+                None,
+                url_key="url",
+                title_key="title",
+                description_key="content",
+                policy=HostPolicy.unrestricted(),
+            )
+            == []
+        )
 
 
 # --- Provider selection -----------------------------------------------------
@@ -285,11 +288,7 @@ class TestProviderSelection:
 
 class TestSearchEndpoint:
     async def test_search_returns_shaped_results(self, async_client, override_settings, fake_provider_http):
-        override_settings(search_provider="tavily", tavily_api_key="test-key")
-        fake_provider_http(
-            200,
-            provider_results({"title": "A", "url": "https://example.gov/a", "content": "desc"}),
-        )
+        one_search_result(override_settings, fake_provider_http)
         resp = await async_client.post("/v1/search", json={"query": "worcester", "limit": 3})
         assert resp.status_code == 200
         body = resp.json()
@@ -447,29 +446,29 @@ class _FakeStreamClient:
         return _Ctx()
 
 
-async def test_provider_http_decodes_via_httpx_encoding(monkeypatch):
-    """Real _provider_http decode path: httpx exposes ``encoding``, not ``charset``."""
+async def _provider_decode(monkeypatch, body: bytes, encoding):
+    """Drive the real ``_provider_http`` decode path over a faked response.
+
+    The provider, the request and the return pair are fixed here so a decode
+    test states only the encoding it is about; the decode itself is production's.
+    """
     import app.search.providers as providers_module
 
-    body = b'{"data": []}'
-    fake = _FakeStreamClient(_FakeStreamResponse(body, encoding="utf-8"))
+    fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=encoding))
     monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
-    status, text = await providers_module._provider_http(
-        "GET", "http://provider.test/search", timeout_seconds=2.0
-    )
+    return await providers_module._provider_http("GET", "http://provider.test/search", timeout_seconds=2.0)
+
+
+async def test_provider_http_decodes_via_httpx_encoding(monkeypatch):
+    """Real _provider_http decode path: httpx exposes ``encoding``, not ``charset``."""
+    status, text = await _provider_decode(monkeypatch, b'{"data": []}', "utf-8")
     assert status == 200
     assert text == '{"data": []}'
 
 
 async def test_provider_http_decodes_utf8_when_encoding_unknown(monkeypatch):
     """No declared/detectable charset must fall back to UTF-8, not crash."""
-    import app.search.providers as providers_module
 
-    body = b"<html>ok</html>"
-    fake = _FakeStreamClient(_FakeStreamResponse(body, encoding=None))
-    monkeypatch.setattr(providers_module, "get_async_http_client", lambda: fake)
-    status, text = await providers_module._provider_http(
-        "GET", "http://provider.test/search", timeout_seconds=2.0
-    )
+    status, text = await _provider_decode(monkeypatch, b"<html>ok</html>", None)
     assert status == 200
     assert text == "<html>ok</html>"

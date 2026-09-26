@@ -16,6 +16,7 @@ from _extraction_helpers import (
     extract_js_endpoints,
 )
 from _policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
+from _process_doubles import StubConn, StubProc
 
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
@@ -239,30 +240,11 @@ def test_document_worker_decision_uses_shared_bool_parser(monkeypatch, caplog, r
 
     set_optional_env(monkeypatch, "BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", raw)
 
-    class _Process:
-        pid = 1
-
-        def is_alive(self):
-            return True
-
-        def terminate(self):
-            return None
-
-        def join(self, timeout=None):
-            return None
-
-        def kill(self):
-            return None
-
-    class _Connection:
-        def close(self):
-            return None
-
     spawned = []
 
     def spawn():
         spawned.append(True)
-        return ex._DocWorker(_Process(), _Connection())
+        return ex._DocWorker(StubProc(pid=1), StubConn())
 
     monkeypatch.setattr(ex, "_spawn_doc_worker", spawn)
     monkeypatch.setattr(ex, "_doc_extraction_worker_count", lambda: 1)
@@ -817,7 +799,6 @@ class TestTrafilaturaChatterIsSuppressed:
         )
         assert out.text and "Real body text" in out.text
         errors = [
-            r for r in caplog.records
-            if r.name.startswith("trafilatura") and r.levelno >= logging.ERROR
+            r for r in caplog.records if r.name.startswith("trafilatura") and r.levelno >= logging.ERROR
         ]
         assert not errors

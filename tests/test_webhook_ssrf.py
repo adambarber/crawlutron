@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from _assertions import block_private_targets
+from _assertions import block_private_targets, host_resolves_to
 
 from app.api.webhooks import (
     post_webhook as _post_webhook,
@@ -86,23 +86,15 @@ def _pinned_webhook_client(capture=None, body=b""):
 class TestWebhookUrlValidation:
     def test_blocks_private_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a private IP must be rejected."""
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo",
-            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
-        ):
-            with pytest.raises(ValueError):
-                _validate_webhook_url(
-                    "http://evil.example.com/callback",
-                    host_policy=HostPolicy.unrestricted(),
-                )
+        with host_resolves_to(monkeypatch, "127.0.0.1"), pytest.raises(ValueError):
+            _validate_webhook_url(
+                "http://evil.example.com/callback",
+                host_policy=HostPolicy.unrestricted(),
+            )
 
     def test_allows_public_dns_hostname(self, monkeypatch):
         """A DNS name that resolves to a public IP is accepted."""
-        block_private_targets(monkeypatch)
-        with patch(
-            "socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]
-        ):
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
             _validate_webhook_url(
                 "http://public.example.com/callback",
                 host_policy=HostPolicy.unrestricted(),

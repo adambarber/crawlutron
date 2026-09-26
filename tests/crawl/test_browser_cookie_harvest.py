@@ -189,9 +189,7 @@ class TestActionChainIsOneBoundedHold:
         # loop-time-based wait_for, which the suite's sleep patch cannot fake.
         with caplog.at_level("WARNING"):
             await asyncio.wait_for(
-                renderer._run_action_chain(
-                    page, actions, url="http://example.com/page", budget_seconds=0.05
-                ),
+                renderer._run_action_chain(page, actions, url="http://example.com/page", budget_seconds=0.05),
                 timeout=10.0,
             )
 
@@ -200,11 +198,7 @@ class TestActionChainIsOneBoundedHold:
             f"per-action clamps multiplied into a {len(observed)}x10s hold of a pooled "
             "renderer, which is how a pool drains with no log line pointing here"
         )
-        exhausted = [
-            r
-            for r in caplog.records
-            if r.__dict__.get("budget_seconds") is not None
-        ]
+        exhausted = [r for r in caplog.records if r.__dict__.get("budget_seconds") is not None]
         assert exhausted, (
             "the chain ran out of budget on a pooled slot and said nothing: "
             f"{[r.getMessage() for r in caplog.records]!r}"

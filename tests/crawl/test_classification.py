@@ -288,8 +288,7 @@ def test_every_grouping_member_is_an_enum_member():
     for grouping in _GROUPINGS:
         for label in grouping:
             assert label in CrawlClassification.__members__, (
-                f"{label!r} is listed in a classification grouping but is not a "
-                f"CrawlClassification member"
+                f"{label!r} is listed in a classification grouping but is not a CrawlClassification member"
             )
 
 
@@ -326,7 +325,9 @@ def test_every_table_status_is_a_declared_result_status():
     from app.constants import ResultStatus
 
     declared = set(typing.get_args(ResultStatus))
-    bad = {label: status for label, status in CLASSIFICATION_STATUS_BY_LABEL.items() if status not in declared}
+    bad = {
+        label: status for label, status in CLASSIFICATION_STATUS_BY_LABEL.items() if status not in declared
+    }
     assert not bad, f"table entries with an undeclared status: {bad}"
 
 

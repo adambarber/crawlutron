@@ -2,7 +2,7 @@
 
 from functools import partial
 
-from _fetcher_factories import make_fetch, run_http_strategy
+from _fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher, sequenced_fetcher
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
@@ -25,11 +25,8 @@ async def _run(**kwargs):
 
 
 def _html_fetcher(html: str):
-    # Returns an async fetcher that serves a fixed HTML body for any URL.
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=html.encode("utf-8"))
-
-    return fetcher
+    """An async fetcher that serves a fixed HTML body for any URL."""
+    return scripted_fetcher(status=200, ctype="text/html", body=html.encode("utf-8"))
 
 
 def _run_kwargs(fetcher):
@@ -70,15 +67,11 @@ class TestHttpStrategy:
         # 304s -- discovery fetches get base headers only.
         recorded: list[tuple[str, dict]] = []
 
-        async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
+        def respond(url, headers):
             recorded.append((url, headers))
-            return make_fetch(
-                url=url,
-                final_url=url,
-                status=200,
-                ctype="text/html",
-                body=b"<html><body><a href='/p'>p</a></body></html>",
-            )
+            return (200, b"<html><body><a href='/p'>p</a></body></html>", "text/html")
+
+        fetcher = request_fetcher(respond)
 
         cache = HttpCache()
         cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
@@ -132,7 +125,6 @@ class TestHttpStrategy:
         assert result.discovered_links == []
         assert result.next_page_url == f"{base_url}/page2"
         assert result.http_status == 200
-
 
     async def test_http_strategy_404_classified_not_found(self, base_url):
         result = await _run(
@@ -269,10 +261,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 
     monkeypatch.setattr(http_mod, "_discovery_diagnostics", fake_diag)
 
-    async def fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(
-            url=url, final_url=url, status=200, ctype="text/html", body=b"<html><body>x</body></html>"
-        )
+    fetcher = scripted_fetcher(status=200, ctype="text/html", body=b"<html><body>x</body></html>")
 
     kwargs = dict(
         original_url="http://x.test/",
@@ -301,21 +290,15 @@ class TestHttpStrategyRetry:
     async def test_http_strategy_with_cffi_retry(self):
         from app.crawl.cache import HttpCache
 
-        call_count = [0]
-
-        def retry_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise ConnectionError("first attempt fails")
-
-            class Resp:
-                status_code = 200
-                headers = {"content-type": "text/html"}
-                body = b"<html><body>recovered</body></html>"
-                final_url = url
-                elapsed_ms = 10
-
-            return Resp()
+        # The cffi retry is the second step, so the sequence is the fixture:
+        # attempt one fails, attempt two succeeds.
+        retry_fetcher = sequenced_fetcher(
+            [
+                ConnectionError("first attempt fails"),
+                (200, b"<html><body>recovered</body></html>", "text/html"),
+            ],
+            repeat_last=False,
+        )
 
         result = await run_http_strategy(
             url="http://x/",
@@ -349,14 +332,7 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
     # been quietly testing a policy change instead of the copy bug.
     archive = b"PK\x03\x04" + b"\x00" * 64
 
-    async def binary_fetcher(url, headers, timeout, max_content_length=50 * 1024 * 1024):
-        return make_fetch(
-            url=url,
-            final_url=url,
-            status=200,
-            ctype="application/octet-stream",
-            body=archive,
-        )
+    binary_fetcher = scripted_fetcher(status=200, ctype="application/octet-stream", body=archive)
 
     result = await _run(policy=http_policy(), **_run_kwargs(binary_fetcher))
 

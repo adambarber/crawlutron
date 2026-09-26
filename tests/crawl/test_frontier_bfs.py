@@ -4,10 +4,7 @@ The frontier was a list using O(n) pop(0); it is now a collections.deque with
 O(1) popleft. Behavior (BFS completeness/ordering) must be unchanged.
 """
 
-from _fetcher_factories import site_fetcher
-
-from app.crawl.cache import HttpCache
-from app.crawl.engine import crawl_request
+from _fetcher_factories import crawled_urls
 
 
 def _build_hub(n_leaves: int):
@@ -23,12 +20,9 @@ def _build_hub(n_leaves: int):
 
 async def test_bfs_crawls_all_discovered_leaves():
     pages = _build_hub(300)
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000}},
-    }
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    urls = {r["normalized_url"] for r in out["results"]}
+    urls = set(
+        await crawled_urls(pages, limits={"max_depth": 2, "max_pages": 1000, "max_discovered_links": 2000})
+    )
     # root, hub, and all 300 leaves must be present.
     assert "http://example.com" in urls
     assert "http://example.com/hub" in urls
@@ -47,9 +41,7 @@ async def test_frontier_processes_in_bfs_order():
         "/b1": (200, "<html></html>", "text/html"),
         "/b2": (200, "<html></html>", "text/html"),
     }
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 20}}}
-    out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())
-    urls = [r["normalized_url"] for r in out["results"]]
+    urls = await crawled_urls(pages, limits={"max_depth": 2, "max_pages": 20})
     # BFS: root, then a and b (depth 1), then their children (depth 2).
     assert urls.index("http://example.com/a") < urls.index("http://example.com/a1")
     assert urls.index("http://example.com/a") < urls.index("http://example.com/a2")

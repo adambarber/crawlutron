@@ -64,11 +64,9 @@ def test_deliver_pinned_webhook_is_called_only_from_post_webhook():
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             for inner in nodes_of(node):
-                if (
-                    isinstance(inner, ast.Call)
-                    and getattr(inner.func, "id", "")
-                    in {"deliver_pinned_webhook"}
-                ):
+                if isinstance(inner, ast.Call) and getattr(inner.func, "id", "") in {
+                    "deliver_pinned_webhook"
+                }:
                     callers.add(f"{path.name}::{node.name}")
     assert callers == {"webhooks.py::post_webhook"}, callers
 
