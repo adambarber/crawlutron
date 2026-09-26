@@ -18,9 +18,8 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Request
 from fastapi.responses import JSONResponse, Response
-from starlette.requests import Request
 
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error

@@ -9,11 +9,11 @@ FastAPI layer (``app.main``) calls into.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
 import tempfile
-import threading
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -187,20 +187,49 @@ def _stale_seeds(
 
 _SPILL_PREFIX = "bc-spill-"
 
-# Spill paths a live _ResultSpill still owns, and the single answer the
-# stale-spill sweep consults before unlinking. Age is not ownership: a spill
-# outlives its own creation by as long as its crawl runs, and the sweep runs
-# process-wide, so any spill past gc_age_seconds is reachable by a GC pass while
-# its writer is still appending. The lock guards set operations only -- nothing
-# is awaited while it is held.
-_LIVE_SPILL_PATHS: set[str] = set()
-_LIVE_SPILL_LOCK = threading.Lock()
+# A spill is owned for as long as some process holds an exclusive advisory lock
+# on it, and that ownership is a kernel fact rather than a fact about this
+# process's memory. An earlier version tracked ownership in a module-level set,
+# which could only answer "is a spill owned by *me* live?" -- so a concurrent
+# process's in-flight spill looked identical to one abandoned by a killed run
+# and was unlinked mid-crawl. The temp dir is shared with every other process on
+# the host, so that was the default outcome whenever two processes crawled at
+# once. The lock is held on the spill's own descriptor: closing it, or the
+# process dying, releases ownership automatically, which is what lets the sweep
+# still reclaim what killed runs leave behind.
 
 # Cadence gate for _ResultSpill's stale-spill sweep (perf tier-2 T5): at most
 # one temp-dir scan per interval per process; None means "never scanned",
 # forcing the first construction to sweep immediately.
 _SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
 _LAST_SPILL_GC_MONOTONIC: float | None = None
+
+
+def _spill_is_unowned(path: str) -> bool:
+    """True when no live process holds ``path``'s ownership lock.
+
+    Taking the lock IS the test. The kernel grants it only when no other open
+    file description holds it, and drops every holder's lock when its process
+    dies -- so a spill abandoned by a killed run is collectable while a spill
+    another worker is still appending to is not. That is the distinction age
+    alone cannot make, and it holds across processes rather than only within
+    this one.
+
+    An unopenable path is reported as owned: the sweep must not delete a file
+    whose state it cannot establish.
+    """
+    try:
+        probe = os.open(path, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    else:
+        return True
+    finally:
+        os.close(probe)
 
 
 class _ResultSpill:
@@ -247,8 +276,7 @@ class _ResultSpill:
             self._fh = open(resolved, "w", encoding="utf-8")
         self.path = resolved
         self.count = 0
-        with _LIVE_SPILL_LOCK:
-            _LIVE_SPILL_PATHS.add(resolved)
+        self._claim_ownership()
         # Serialize writes (the file handle is shared) while the (potentially
         # large) json.dumps is offloaded off the event loop (adversarial #1.3).
         self._write_lock = asyncio.Lock()
@@ -271,18 +299,33 @@ class _ResultSpill:
                 # review). The next interval boundary will retry.
                 pass
 
+    def _claim_ownership(self) -> None:
+        """Hold this spill's ownership lock for as long as the spill is open.
+
+        Held on the spill's own descriptor, so it cannot be released by any
+        path other than closing that descriptor or the process exiting. A
+        failure here leaves the spill collectable while it is being written, so
+        it is logged rather than swallowed; it needs another process to already
+        hold this exact caller-supplied path.
+        """
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logger.warning("spill %s could not be locked for ownership", self.path)
+
     def _gc_stale_spills(self, max_age: float) -> None:
-        """Delete spill files older than ``max_age`` that no live spill owns.
+        """Delete spill files older than ``max_age`` that no live process owns.
 
         Age alone is not permission to unlink. A spill is reassembled by opening
         its path BY NAME in :meth:`load_ordered`, so removing the directory entry
         out from under a running spill does not cost that worker a local
         checkpoint -- it makes the finished crawl's own output unreadable, after
-        the crawl has already been paid for. The earlier version of this method
-        documented that as an acceptable worst case; it is data loss, and a
-        whole-site job living past ``gc_age_seconds`` is ordinary rather than
-        exotic, so the sweep consults :data:`_LIVE_SPILL_PATHS` instead of
-        reasoning about who might still be reading.
+        the crawl has already been paid for. A whole-site job living past
+        ``gc_age_seconds`` is ordinary rather than exotic, and the temp dir is
+        shared with every other process on the host, so the sweep asks the
+        kernel whether each candidate is still owned
+        (:func:`_spill_is_unowned`) rather than consulting a live set only this
+        process can see.
 
         Unlinking an unowned file is still safe on Unix (a reader holding the fd
         keeps the inode) and raises ``PermissionError`` on Windows, which the
@@ -293,13 +336,11 @@ class _ResultSpill:
             names = os.listdir(tempfile.gettempdir())
         except OSError:
             return
-        with _LIVE_SPILL_LOCK:
-            in_use = frozenset(_LIVE_SPILL_PATHS)
         for name in names:
             if not name.startswith(_SPILL_PREFIX):
                 continue
             candidate = os.path.join(tempfile.gettempdir(), name)
-            if candidate in in_use:
+            if not _spill_is_unowned(candidate):
                 continue
             try:
                 if now - os.path.getmtime(candidate) > max_age:
@@ -343,10 +384,9 @@ class _ResultSpill:
             self._fh.close()
         except Exception:
             pass
-        # Release the in-use claim before the unlink, so the sweep and this
-        # cleanup cannot race over the same path.
-        with _LIVE_SPILL_LOCK:
-            _LIVE_SPILL_PATHS.discard(self.path)
+        # Closing the descriptor released the ownership lock, so the sweep and
+        # this cleanup can no longer both act on the same path.
+        #
         # Auto-cleanup of owned files: when this spill was created without
         # an explicit path (caller-owned spills retain their file), drop the
         # backing temp file so a happy-path close never orphans it.

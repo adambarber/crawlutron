@@ -255,7 +255,22 @@ __all__ = [
 # caller silently skips for the other. This changes estimator inputs on the
 # render path on purpose; the three tests drive both real models, and the one
 # that was red is the render one.
-_APP_TREE_CODE_LINE_BUDGET = 14_467
+# RAISED to 14,476 from 14,467: nine lines to make spill ownership a fact the
+# kernel can answer instead of a fact this process happens to be holding. The
+# sweep consults a module-level live set, so it could only protect spills owned
+# by the caller -- a concurrent process's in-flight spill was indistinguishable
+# from one abandoned by a killed run and was unlinked mid-crawl, which deletes
+# the finished crawl's own reassembled result. The temp dir is shared with every
+# other process on the host, so that was the default outcome whenever two
+# processes crawled at once. Ownership is now an exclusive advisory lock held on
+# the spill's own descriptor: the kernel grants it only when no live process
+# holds it and drops it when a process dies, so the sweep still reclaims what
+# killed runs leave behind. The live set, its threading.Lock and the threading
+# import are gone, so this is one mechanism in place of two. The regression test
+# reproduces the cross-process case deterministically by holding the lock on a
+# second open file description -- the kernel state another process creates --
+# and it was red before the change.
+_APP_TREE_CODE_LINE_BUDGET = 14_476
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -2444,12 +2459,13 @@ def test_unowned_age_deletion_detector_bites():
     )
     assert len(_unowned_age_deletions(bad, REPO_ROOT / "app" / "_synthetic.py")) == 1
 
-    # The fixed shape: the same sweep, consulting the live set first.
+    # The fixed shape: the same sweep, asking who owns each candidate first.
+    # The guard has to be something the KERNEL can answer -- ownership another
+    # process can also see -- not a set this process happens to be holding.
     good = ast.parse(
         "def _gc_stale(max_age):\n"
-        "    in_use = frozenset(_LIVE_SPILL_PATHS)\n"
         "    for name in os.listdir(tmp):\n"
-        "        if name in in_use:\n"
+        "        if not _spill_is_unowned(name):\n"
         "            continue\n"
         "        os.unlink(name)\n"
     )

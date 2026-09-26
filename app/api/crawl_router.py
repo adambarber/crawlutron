@@ -9,8 +9,7 @@ FastAPI machinery.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends
-from starlette.requests import Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
 
 from app.api.crawl_endpoint import crawl as crawl_handler
 from app.api.crawl_endpoint import get_crawl_result as get_crawl_result_handler

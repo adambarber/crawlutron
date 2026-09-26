@@ -1,5 +1,6 @@
 """M10: _ResultSpill.load_ordered single-pass reassembly contract."""
 
+import fcntl
 import inspect
 import json
 import os
@@ -194,3 +195,34 @@ class TestGcNeverUnlinksASpillStillInUse:
             live.close()
             if os.path.exists(abandoned_path):
                 os.unlink(abandoned_path)
+
+    def test_a_spill_owned_by_another_process_is_not_collected(self):
+        """Ownership is a kernel fact, not a fact about this process's memory.
+
+        The in-process live set could only answer "is a spill owned by *me*
+        live?", so a concurrent process's in-flight spill was indistinguishable
+        from one abandoned by a killed run and got unlinked mid-crawl. The whole
+        temp dir is shared, so that is the default outcome whenever two
+        processes crawl at once -- a dev server beside a test run, or any
+        future second worker.
+
+        A distinct open file description holding the lock reproduces exactly
+        the kernel state a second process creates, without spawning one.
+        """
+        seed = _ResultSpill()
+        path = seed.path
+        seed.close()
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write('{"i":0,"r":{}}\n')
+        foreign = open(path, "r+", encoding="utf-8")
+        try:
+            fcntl.flock(foreign.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._age(path, 7200)
+
+            _ResultSpill()._gc_stale_spills(1.0)
+
+            assert os.path.exists(path), "GC unlinked a spill another process owns"
+        finally:
+            foreign.close()
+            if os.path.exists(path):
+                os.unlink(path)
