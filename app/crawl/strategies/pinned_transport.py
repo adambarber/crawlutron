@@ -11,6 +11,7 @@ import concurrent.futures
 import functools
 import socket
 import time
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
@@ -254,3 +255,51 @@ def _redirect_target(
     if new_host != current_host:
         request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
     return new_url, request_headers
+
+
+class _RedirectChain:
+    """One hop-by-hop redirect walk: its state, and the decision that advances it.
+
+    Both transports follow redirects by hand -- automatic following would
+    connect to a target nobody re-validated -- so each one carried the walk's
+    state as three locals (current url, per-hop headers, hop count) and each
+    spelled that state back out as six arguments to ``_redirect_target``. The
+    state is one value, so it is one value here, and the hop budget and the
+    cross-host credential strip are applied by the same code on both paths
+    rather than by two call sites that can disagree.
+    """
+
+    __slots__ = ("hops", "headers", "policy", "url")
+
+    def __init__(self, url: str, headers: dict[str, str], *, policy: HostPolicy) -> None:
+        self.url = url
+        # Copied, not aliased: a cross-host hop strips credentials by rebuilding
+        # the mapping, and the caller's dict must not be rewritten underneath it.
+        self.headers = dict(headers)
+        self.policy = policy
+        self.hops = 0
+
+    async def pin(self) -> tuple[str, dict[str, str]]:
+        """The connect-ready request for the current hop (DNS off the loop)."""
+        return await _build_pinned_request_async(self.url, self.headers, policy=self.policy)
+
+    def advance(self, response: Any) -> bool:
+        """Step to the next hop; return True when the caller should re-request.
+
+        False means this response is terminal and the caller should read its
+        body. The next iteration re-runs :meth:`pin`, which re-validates the
+        new target against the SSRF blocklist and re-pins its DNS.
+
+        Takes the response rather than ``(status_code, location)`` so that
+        reading the redirect off it is part of the hop decision instead of two
+        per-transport header lookups that have to agree.
+        """
+        target = _redirect_target(
+            self.url, self.headers, response.status_code,
+            response.headers.get("location"), self.hops, policy=self.policy,
+        )
+        if target is None:
+            return False
+        self.url, self.headers = target
+        self.hops += 1
+        return True

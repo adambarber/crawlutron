@@ -438,7 +438,14 @@ __all__ = [
 # is deleted -- because reaching the function required fabricating thirteen
 # unrelated fields. Four lines cheaper in app/, and the pinning tests now
 # exercise the code they are named after.
-_APP_TREE_CODE_LINE_BUDGET = 14_988
+# Nine lines cheaper still: the two concrete fetchers each carried the
+# redirect walk's own state as three locals and spelled it back out as six
+# arguments to the hop decision. That state is now one `_RedirectChain` in
+# pinned_transport, shared by both transports, so the walk is written once.
+# The fetcher contract it is spelled against is irreducible in Python (two
+# entry points, two signatures) and is declared once as
+# `HttpFetchContract` with a tree-wide guard proving both still match.
+_APP_TREE_CODE_LINE_BUDGET = 14_979
 
 
 def test_app_tree_code_line_count_does_not_grow():

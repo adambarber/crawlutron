@@ -30,7 +30,9 @@ async def _default_http_fetcher(
     *,
     policy: HostPolicy,
 ) -> HttpFetchResult:
-    """Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
+    """The httpx transport: async HTTP/2 fetch over the shared pooled client.
+
+    Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
     SSRF-safe manual redirect handling (F1).
 
@@ -39,44 +41,26 @@ async def _default_http_fetcher(
     because it would connect to a redirect target without re-checking it.
     Sensitive headers (Cookie, Authorization) are stripped when crossing host
     boundaries to prevent credential leakage (Fix 3).
+
+    The signature is :data:`app.models.HttpFetchContract`; see
+    :func:`_default_cffi_fetcher` for why the contract is spelled twice.
     """
     await http_client_pool._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    current_url = url
-    hops = 0
-    # Work with a copy of headers so we can mutate per-hop
-    request_headers = dict(headers)
+    chain = pinned_transport._RedirectChain(url, headers, policy=policy)
     while True:
-        pinned_url, hop_headers = await pinned_transport._build_pinned_request_async(
-            current_url,
-            request_headers,
-            policy=policy,
-        )
+        pinned_url, hop_headers = await chain.pin()
         # follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
         ) as response:
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
-                return pinned_transport._http_413(url, current_url, started)
+                return pinned_transport._http_413(url, chain.url, started)
             status_code = response.status_code
-            location = response.headers.get("location")
-            # SSRF-safe redirect: only follow within the hop budget. The next
-            # loop iteration re-runs _build_pinned_request, which re-validates
-            # (and re-pins) the redirect target against the SSRF blocklist.
-            redirect = pinned_transport._redirect_target(
-                current_url,
-                request_headers,
-                status_code,
-                location,
-                hops,
-                policy=policy,
-            )
-            if redirect is not None:
-                current_url, request_headers = redirect
-                hops += 1
+            if chain.advance(response):
                 continue
             # Terminal response: stream RAW bytes, capping total read (#5).
             # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
@@ -90,8 +74,8 @@ async def _default_http_fetcher(
             async for chunk in response.aiter_raw():
                 raw.extend(chunk)
                 if len(raw) > max_content_length:
-                    return pinned_transport._http_413(url, current_url, started)
-            final_url = current_url
+                    return pinned_transport._http_413(url, chain.url, started)
+            final_url = chain.url
             response_headers = response.headers
         elapsed_ms = int((time.monotonic() - started) * 1000)
         return _finish_fetch(
@@ -102,7 +86,7 @@ async def _default_http_fetcher(
             response_headers=response_headers,
             max_content_length=max_content_length,
             elapsed_ms=elapsed_ms,
-            too_large=functools.partial(pinned_transport._http_413, url, current_url, started),
+            too_large=functools.partial(pinned_transport._http_413, url, chain.url, started),
         )
 
 
@@ -163,60 +147,26 @@ def _finish_fetch(
     )
 
 
-async def _fallback_to_httpx(
+async def _cffi_fetch(
     url: str,
     headers: dict[str, str],
     timeout_seconds: int,
     max_content_length: int,
     *,
     policy: HostPolicy,
-) -> HttpFetchResult:
-    return await _default_http_fetcher(
-        url, headers, timeout_seconds, max_content_length, policy=policy
-    )
+) -> HttpFetchResult | None:
+    """The curl_cffi transport behind :func:`_default_cffi_fetcher`.
 
+    TLS-fingerprint-impersonated, mirroring the httpx transport including its
+    SSRF-safe manual redirect handling (F1) and sensitive-header stripping on
+    cross-domain redirects (Fix 3).
 
-def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:
-    return HttpFetchResult(
-        url=url,
-        final_url=current_url,
-        status_code=413,
-        headers={key.lower(): value for key, value in response.headers.items()},
-        body=b"",
-        elapsed_ms=elapsed_ms,
-    )
-
-
-def _release_stream_noblock(response: Any) -> None:
-    """Schedule a best-effort stream close without awaiting it (N-5).
-
-    Callers are abandoning a live or wedged producer; awaiting
-    ``response.aclose()`` would join that task and can hang (H1). The done
-    callback consumes the result so a failed close never surfaces.
-    """
-    try:
-        aclose = getattr(response, "aclose", None)
-        if aclose is None:  # queue-contract fakes carry no close handle
-            return
-        task = asyncio.ensure_future(aclose())
-    except RuntimeError:  # no running loop (tests driving the helper raw)
-        return
-    task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
-
-
-async def _default_cffi_fetcher(
-    url: str,
-    headers: dict[str, str],
-    timeout_seconds: int,
-    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-    *,
-    policy: HostPolicy,
-) -> HttpFetchResult:
-    """TLS-fingerprint-impersonated async HTTP fetcher using curl_cffi.
-
-    Mirrors _default_http_fetcher, including SSRF-safe manual redirect handling
-    (F1) and sensitive-header stripping on cross-domain redirects (Fix 3).
-    Falls back to plain httpx on any import/fetch failure.
+    Returns ``None`` -- not a result -- when curl_cffi is unavailable or the
+    attempt failed for any transport reason, so the caller decides the
+    fallback. A transport that cannot answer must not answer with an error
+    result: the httpx path is the same page fetched differently, not a
+    different outcome, and a 200 from the fallback is not a failure of the
+    impersonated attempt.
     """
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
@@ -225,9 +175,7 @@ async def _default_cffi_fetcher(
         from curl_cffi.requests.exceptions import RequestException
         from curl_cffi.requests.models import STREAM_END
     except ImportError:
-        return await _fallback_to_httpx(
-            url, headers, timeout_seconds, max_content_length, policy=policy
-        )
+        return None
     # Shared session (perf throughput #4): built once per event loop instead of
     # per request. Unavailable (ImportError at build) -> plain httpx fallback.
     # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
@@ -235,21 +183,12 @@ async def _default_cffi_fetcher(
     # and would silently degrade every impersonated fetch to plain httpx.
     client = http_client_pool.get_cffi_session()
     if client is None:
-        return await _fallback_to_httpx(
-            url, headers, timeout_seconds, max_content_length, policy=policy
-        )
+        return None
     try:
-        current_url = url
-        hops = 0
         started = time.monotonic()
-        # Work with a copy of headers so we can mutate per-hop
-        request_headers = dict(headers)
+        chain = pinned_transport._RedirectChain(url, headers, policy=policy)
         while True:
-            pinned_url, hop_headers = await pinned_transport._build_pinned_request_async(
-            current_url,
-            request_headers,
-            policy=policy,
-        )
+            pinned_url, hop_headers = await chain.pin()
             try:
                 response = await client.get(
                     pinned_url,
@@ -260,32 +199,17 @@ async def _default_cffi_fetcher(
                 )
             except Exception:
                 # Fall back to plain httpx for this request on transport errors.
-                return await _fallback_to_httpx(
-                    url, headers, timeout_seconds, max_content_length, policy=policy
-                )
+                return None
             # Content-length check (#5)
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
                 await response.aclose()  # N8: release the curl handle
                 return _cffi_too_large_result(
-                    url, current_url, response, int((time.monotonic() - started) * 1000)
+                    url, chain.url, response, int((time.monotonic() - started) * 1000)
                 )
             status_code = response.status_code
-            location = response.headers.get("location")
-            # SSRF-safe redirect: only follow within the hop budget; the next
-            # iteration re-validates + re-pins the target via _build_pinned_request.
-            redirect = pinned_transport._redirect_target(
-                current_url,
-                request_headers,
-                status_code,
-                location,
-                hops,
-                policy=policy,
-            )
-            if redirect is not None:
+            if chain.advance(response):
                 await response.aclose()  # N8: release the curl handle
-                current_url, request_headers = redirect
-                hops += 1
                 continue
             # N7: do not trust response.elapsed across curl_cffi versions
             # (timedelta in a requests-compatible build would TypeError
@@ -345,7 +269,7 @@ async def _default_cffi_fetcher(
                         # Mid-stream abandon: a 413 out of the loop is still an
                         # abandon, and the producer may be a hostile drip --
                         # never wait on it. The finally releases the handle.
-                        return _cffi_too_large_result(url, current_url, response, elapsed_ms)
+                        return _cffi_too_large_result(url, chain.url, response, elapsed_ms)
             finally:
                 if not stream_completed:
                     _release_stream_noblock(response)
@@ -359,19 +283,75 @@ async def _default_cffi_fetcher(
             # headers and persist cookies via the shared tail.
             return _finish_fetch(
                 url=url,
-                final_url=current_url,
+                final_url=chain.url,
                 status_code=status_code,
                 raw=bytes(raw),
                 response_headers=response.headers,
                 max_content_length=max_content_length,
                 elapsed_ms=elapsed_ms,
                 too_large=functools.partial(
-                    _cffi_too_large_result, url, current_url, response, elapsed_ms
+                    _cffi_too_large_result, url, chain.url, response, elapsed_ms
                 ),
             )
     except DecompressionError:
         raise
     except Exception:  # any cffi failure falls back to plain httpx
-        return await _fallback_to_httpx(
-            url, headers, timeout_seconds, max_content_length, policy=policy
-        )
+        return None
+
+
+async def _default_cffi_fetcher(
+    url: str,
+    headers: dict[str, str],
+    timeout_seconds: int,
+    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    *,
+    policy: HostPolicy,
+) -> HttpFetchResult:
+    """TLS-fingerprint-impersonated fetch, falling back to the httpx transport.
+
+    The signature is the contract (four positional parameters plus a
+    keyword-only policy, per :data:`app.models.HttpFetcher`) and it is
+    *repeated* rather than shared: the engine hands both entries to the
+    strategy chain, and both must carry the content-length cap's default,
+    because neither caller supplies it. Python cannot express one signature
+    across two entry points, so the repetition is irreducible -- what is not
+    irreducible is the two implementations behind it, which were two
+    hand-written redirect loops and are now one :class:`_RedirectChain` plus
+    two transport bodies. :data:`app.models.HttpFetchContract` states the
+    contract once and ``test_http_fetcher_contract_holds_tree_wide`` proves
+    every production fetcher still matches it, so the copy cannot drift.
+    """
+    result = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)
+    if result is not None:
+        return result
+    return await _default_http_fetcher(
+        url, headers, timeout_seconds, max_content_length, policy=policy
+    )
+
+
+def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:
+    return HttpFetchResult(
+        url=url,
+        final_url=current_url,
+        status_code=413,
+        headers={key.lower(): value for key, value in response.headers.items()},
+        body=b"",
+        elapsed_ms=elapsed_ms,
+    )
+
+
+def _release_stream_noblock(response: Any) -> None:
+    """Schedule a best-effort stream close without awaiting it (N-5).
+
+    Callers are abandoning a live or wedged producer; awaiting
+    ``response.aclose()`` would join that task and can hang (H1). The done
+    callback consumes the result so a failed close never surfaces.
+    """
+    try:
+        aclose = getattr(response, "aclose", None)
+        if aclose is None:  # queue-contract fakes carry no close handle
+            return
+        task = asyncio.ensure_future(aclose())
+    except RuntimeError:  # no running loop (tests driving the helper raw)
+        return
+    task.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)

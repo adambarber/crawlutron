@@ -77,7 +77,7 @@ _BUDGETS = {
     "function length": 40,
     "abc size": 6,
     "class length": 3,
-    "block length": 14,
+    "block length": 13,
 }
 
 _BRANCH_NODES = (

@@ -3,7 +3,7 @@ from __future__ import annotations
 import types
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import TYPE_CHECKING, Any, Literal, NewType, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, NewType, Protocol, Union, get_args, get_origin
 
 from app.constants import ResultStatus
 
@@ -391,7 +391,41 @@ CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # (_default_http_fetcher / _default_cffi_fetcher) and the retry wrapper passes
 # it positionally, so the alias must describe four parameters -- a caller typed
 # against it must be able to invoke the real fetcher it is handed (P2-A).
+# Four positional parameters: (url, headers, timeout_seconds, max_content_length).
+# Every concrete fetcher accepts the content-length cap
+# (_default_http_fetcher / _default_cffi_fetcher) and the retry wrapper passes
+# it positionally, so the alias must describe four parameters -- a caller typed
+# against it must be able to invoke the real fetcher it is handed (P2-A).
 HttpFetcher = Callable[[str, dict[str, str], int, int], Any]
+
+
+class HttpFetchContract(Protocol):
+    """The concrete-fetcher contract, stated once.
+
+    Four positional parameters -- (url, headers, timeout_seconds,
+    max_content_length) -- a keyword-only ``policy``, and an
+    :class:`HttpFetchResult` return. ``_default_http_fetcher`` and
+    ``_default_cffi_fetcher`` both satisfy it and both *spell* it, because the
+    engine hands them to the strategy chain as separate callables and neither
+    caller supplies the cap's default, so the default has to live on each.
+    Python cannot state one signature across two entry points.
+
+    What this type buys is the other half: it is the one place the shape is
+    declared, and ``test_http_fetcher_contract_holds_tree_wide`` walks all of
+    ``app/`` to prove every coroutine returning a fetch result still matches
+    it. The duplicated signature therefore cannot drift, which is the only
+    thing the duplication was ever able to cause.
+    """
+
+    async def __call__(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout_seconds: int,
+        max_content_length: int = ...,
+        *,
+        policy: HostPolicy,
+    ) -> HttpFetchResult: ...
 
 
 def to_dict(result: Any) -> dict[str, Any]:
