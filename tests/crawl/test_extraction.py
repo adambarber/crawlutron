@@ -263,7 +263,12 @@ class TestExtractionMethods:
     ):
         calls = []
 
-        def fake_html(html, url):
+        def fake_html(html, url, css_selector=None, xpath=None):
+            # The selector pair is part of the real `_extract_html` contract:
+            # `extract_content` owns the HTML branch and hands the pair down
+            # rather than dispatching on it itself, so a double that did not
+            # accept it would be modelling a narrower function than the one
+            # production routes through.
             calls.append("html")
             return ExtractedContent("html", "html")
 
@@ -736,3 +741,51 @@ class TestTrafilaturaChatterIsSuppressed:
             r for r in caplog.records if r.name.startswith("trafilatura") and r.levelno >= logging.ERROR
         ]
         assert not errors
+
+
+def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
+    """A selector against a body with no DOM cannot be honoured, and must say so.
+
+    ``extract_content`` routes the selector pair only on the HTML branch. A PDF
+    or a plain text body has no DOM to target, so the pair cannot narrow
+    anything and the full content comes back instead -- which is a *different
+    answer*, not a smaller one, and the caller has no way to tell: the same
+    request against an HTML page does narrow, and both return a populated
+    ``ExtractedContent``. So the warning is the load-bearing assertion here, for
+    the same reason it is in ``test_css_selector_slow_must_not_hang``: the
+    returned value is identical whether or not the drop is reported, so a
+    regression that stopped reporting it would pass on the result alone.
+
+    Reachable from the wire, not just from here: the crawl path builds the pair
+    from caller policy and spreads it into this function.
+    """
+    pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
+    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+        result = extraction_mod.extract_content(
+            pdf, "application/pdf", "http://example.com/doc.pdf", css_selector="#agenda"
+        )
+    assert "extraction_selector_ignored_non_html" in caplog.text, (
+        "a selector supplied for a PDF was dropped with no warning; the caller "
+        f"receives the whole document believing it was narrowed (result: {result!r})"
+    )
+    record = next(r for r in caplog.records if r.getMessage() == "extraction_selector_ignored_non_html")
+    assert record.css_selector == "#agenda", record.__dict__
+    assert record.content_type == "application/pdf", record.__dict__
+
+    # The same call against HTML does narrow, and so must NOT warn -- otherwise
+    # this passes by warning unconditionally and proves nothing.
+    caplog.clear()
+    html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
+    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+        narrowed = extraction_mod.extract_content(
+            html, "text/html", "http://example.com/", css_selector="#agenda"
+        )
+    assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
+    assert "item one" in (narrowed.markdown or ""), narrowed
+    assert "filler" not in (narrowed.markdown or ""), narrowed
+
+    # No selector, no warning: the common path must stay quiet.
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
+        extraction_mod.extract_content(pdf, "application/pdf", "http://example.com/doc.pdf")
+    assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text

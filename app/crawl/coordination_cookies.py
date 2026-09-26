@@ -22,13 +22,11 @@ being bounded.
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
 import time
 from pathlib import Path
 
+from app.crawl.coordination_store import CoordinationStore
 from app.crawl.migrations.manifest import StoreSchema
-from app.crawl.sqlite_store import connect_store
 
 __all__ = ["DEFAULT_MAX_HOSTS", "SharedCookieStore"]
 
@@ -38,21 +36,18 @@ __all__ = ["DEFAULT_MAX_HOSTS", "SharedCookieStore"]
 DEFAULT_MAX_HOSTS = 1024
 
 
-class SharedCookieStore:
+class SharedCookieStore(CoordinationStore):
     """Cookie storage shared by every worker process.
 
     ``namespace`` and ``host`` are both caller-derived, so both are bound
     parameters on every statement; no path here interpolates either into SQL.
     """
 
+    schema = StoreSchema.COORDINATION_COOKIES
+
     def __init__(self, db_path: str | Path, *, max_hosts: int = DEFAULT_MAX_HOSTS) -> None:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        # The store chokepoint owns the PRAGMAs and the migration.
-        self._conn: sqlite3.Connection = connect_store(
-            db_path, schema=StoreSchema.COORDINATION_COOKIES
-        )
+        super().__init__(db_path)
         self._max_hosts = max(1, int(max_hosts))
-        self._lock = threading.Lock()
 
     def get(self, namespace: str, host: str) -> dict[str, str]:
         """Return the cookies for one slot and mark it recently used."""

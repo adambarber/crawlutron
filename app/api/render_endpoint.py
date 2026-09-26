@@ -4,39 +4,44 @@ Backward-compatible browser-render endpoint that wraps
 :func:`app.api.render.render_request` with the readiness gate and the
 unified response shape. Extracted from the previous monolith in
 ``app/main.py`` so the handler logic and the FastAPI URL→handler mapping
-live in different modules.
-
-The handler is exposed as a plain async function; the router in
-:mod:`app.api.render_router` calls it. main.py wires the router into the
-FastAPI app via ``include_router``.
+live in different modules; the router in :mod:`app.api.render_router`
+calls it.
 """
-
-from __future__ import annotations
 
 import logging
 
+from fastapi import HTTPException
+
 from app.api.exceptions import browser_pool_unavailable, http_error
+from app.api.main_helpers import request_gate
 from app.api.render import render_request
-from app.api.response_shaping import (
-    abuild_unified_crawl_response,
-    render_result_to_unified,
-)
-from app.api_models import POLICY_SCHEMA_VERSION, RenderRequest, UnifiedCrawlResponse
+from app.api.response_shaping import _aunified_response_from_result, render_result_to_unified
+from app.api_models import RenderRequest, UnifiedCrawlResponse
 from app.crawl.strategies.browser_pool import (
     BrowserPoolExhaustedError,
     PooledBrowserWorker,
     get_browser_pool,
 )
-from app.health.readiness import READINESS_STATE as readiness_state
 from app.settings import CrawlerSettings
 
 logger = logging.getLogger(__name__)
 
 
+def _render_rejection(error: ValueError) -> HTTPException:
+    """``/v1/render``'s reject envelope: 400, and the ValueError text as the message.
+
+    ``code`` is the machine-readable contract clients branch on and the
+    ValueError text stays as the message. Emitting the text as the code made
+    every new rejection reason a new, unenumerated wire value, so this is a
+    named factory handed to the shared gate rather than a literal at a raise
+    the handler no longer has.
+    """
+    return http_error(400, "validation_error", str(error))
+
+
 async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCrawlResponse:
     """Render ``payload`` URLs with the pooled browser worker."""
-    readiness_state.begin_request()
-    try:
+    with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
         # Every render request needs the browser by definition: fail clean
         # with a 503 when the pool is down (startup/shutdown window, M13)
         # instead of an AttributeError 500 from inside the worker.
@@ -57,29 +62,11 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
             "render_request_completed",
             extra={"url_count": len(result.get("results", []))},
         )
-        # The render results are adapted through the SAME per-item shape guard
-        # /v1/crawl uses: render_result_to_unified used to run unguarded in a
-        # list comprehension here, so a result dict the adapter could not read
-        # (the KeyError the scheduler's EngineCrawlResult envelope produced,
-        # which carries no "url") escaped as a 500 instead of degrading to a
-        # terminal failure for that item. _collect now normalizes the shape
-        # before it reaches this point; the guard is the defense-in-depth that
-        # keeps a future shape divergence a degraded item, not a 500.
-        return await abuild_unified_crawl_response(
-            result.get("results", []),
-            request_id=result["request_id"],
-            submitted_count=result["submitted_count"],
-            policy_schema_version=POLICY_SCHEMA_VERSION,
-            adapt=render_result_to_unified,
-        )
-    except ValueError as error:
-        logger.warning("render_request_rejected", extra={"error": str(error)})
-        # ``code`` is the machine-readable contract clients branch on and the
-        # ValueError text stays as the message. Emitting the text as the code
-        # made every new rejection reason a new, unenumerated wire value.
-        raise http_error(400, "validation_error", str(error)) from error
-    finally:
-        readiness_state.end_request()
+        # The render results go through the SAME per-item shape guard
+        # /v1/crawl uses (``render_result_to_unified`` reaches it as the
+        # adaptation step), so a result dict the adapter cannot read degrades
+        # to a terminal failure for that item instead of 500ing the response.
+        return await _aunified_response_from_result(result, adapt=render_result_to_unified)
 
 
 __all__ = ["render"]

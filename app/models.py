@@ -195,6 +195,28 @@ def _check_literal_fields(obj: Any) -> None:
             )
 
 
+class _LiteralChecked:
+    """The construction-time taxonomy check, inherited rather than re-spelled.
+
+    Every result dataclass below declares fields whose annotation is a taxonomy
+    ``Literal``, so every one of them has to run :func:`_check_literal_fields` at
+    construction. That check is one function, but the ``__post_init__`` that calls
+    it was a two-line trampoline repeated on each class, which is a second place
+    to forget: a result dataclass added tomorrow would validate nothing and read
+    exactly like the ones that do. Inheriting makes the check part of the class
+    rather than something it remembers to ask for, and it leaves one spelling of
+    it in the tree for a guard to point at.
+
+    Subclassing note: defining ``__post_init__`` on a subclass would *override*
+    this one, so a result dataclass that grows a post-init of its own has to call
+    ``super().__post_init__()``. The taxonomy check is the reason the base
+    exists, so losing it silently is the one outcome that must not happen.
+    """
+
+    def __post_init__(self) -> None:
+        _check_literal_fields(self)
+
+
 @dataclass(frozen=True)
 class RenderOptions:
     timeout_seconds: int = 30
@@ -215,7 +237,7 @@ class CrawlJob:
 
 
 @dataclass(frozen=True)
-class CrawlResult:
+class CrawlResult(_LiteralChecked):
     url: str
     status: ResultStatus
     classification: Classification
@@ -235,10 +257,6 @@ class CrawlResult:
     # from "we rendered it headless".
     selected_strategy: CrawlStrategyName | None = None
 
-    def __post_init__(self) -> None:
-        _check_literal_fields(self)
-
-
 
 @dataclass(frozen=True)
 class HttpFetchResult:
@@ -255,7 +273,7 @@ class HttpFetchResult:
 
 
 @dataclass(frozen=True)
-class CrawlStrategyAttempt:
+class CrawlStrategyAttempt(_LiteralChecked):
     # Optional, not bare CrawlStrategyName: the worker-exception and
     # budget-timeout envelopes are built after a failure that preceded any
     # strategy attempt, and "no strategy was attempted" is not a strategy. The
@@ -267,9 +285,6 @@ class CrawlStrategyAttempt:
     content_type: str | None
     elapsed_ms: int
     error: CrawlError | None = None
-
-    def __post_init__(self) -> None:
-        _check_literal_fields(self)
 
 
 @dataclass(frozen=True)
@@ -310,7 +325,7 @@ class CrawlTask:
 
 
 @dataclass(frozen=True)
-class EngineCrawlResult:
+class EngineCrawlResult(_LiteralChecked):
     original_url: str
     normalized_url: str | None
     final_url: str | None
@@ -366,10 +381,6 @@ class EngineCrawlResult:
             return int(self.attempted_strategies[0].elapsed_ms)
         return 0
 
-    def __post_init__(self) -> None:
-        _check_literal_fields(self)
-
-
 
 # ---------------------------------------------------------------------------
 # Shared callable aliases (single source of truth for worker/fetcher types).
@@ -413,8 +424,13 @@ class HttpFetchContract(Protocol):
     What this type buys is the other half: it is the one place the shape is
     declared, and ``test_http_fetcher_contract_holds_tree_wide`` walks all of
     ``app/`` to prove every coroutine returning a fetch result still matches
-    it. The duplicated signature therefore cannot drift, which is the only
-    thing the duplication was ever able to cause.
+    it -- by name *and* by which parameters it makes optional. Both halves are
+    load-bearing and the second one was found the hard way: a fetcher that
+    gave ``policy`` a default satisfied this Protocol and satisfied a
+    name-only comparison, because protocol conformance is one-directional (an
+    implementation may accept more than the contract asks for) and a default
+    changes no name. That is the only thing the duplication was ever able to
+    cause, so it is now checked rather than asserted.
     """
 
     async def __call__(

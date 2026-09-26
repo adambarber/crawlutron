@@ -23,7 +23,7 @@ import pytest
 from chokepoint_walks import app_python_files
 
 from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
-from app.models import HttpFetcher
+from app.models import HttpFetchContract, HttpFetcher
 
 _CONCRETE_FETCHERS = [
     pytest.param(_default_http_fetcher, id="_default_http_fetcher"),
@@ -37,6 +37,44 @@ _CONTRACT = {
     "keyword_only": ("policy",),
     "is_coroutine": True,
 }
+
+# Which parameters HttpFetchContract gives a default to, read off the Protocol
+# rather than typed here. This is the axis the name comparison above cannot see,
+# and it is the one with a safety edge: a default on `policy` turns a missing
+# SSRF keyword from a TypeError into an unrestricted HostPolicy, and the caller
+# never finds out. A name-only comparison passes that mutation -- verified: a
+# twin with `policy: HostPolicy = HostPolicy((), ())` satisfies HttpFetchContract
+# (mypy is happy, because protocol conformance is one-directional: an
+# implementation may accept more than the contract asks for) and matches every
+# key in _CONTRACT, so both the type checker and the tree-wide guard below went
+# green on a fetcher that silently stopped requiring the policy.
+_CONTRACT_DEFAULTED = frozenset(
+    name
+    for name, param in inspect.signature(HttpFetchContract.__call__).parameters.items()
+    if param.default is not inspect.Parameter.empty
+)
+
+
+def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    """The parameters of ``node`` that a caller may omit.
+
+    ``...`` (Ellipsis) is what a Protocol body writes in place of a default, so
+    on the declaration side it means "this parameter is optional in the shape
+    being declared" -- which is exactly the question being asked. On the
+    implementation side a real default expression appears instead, and either
+    way the presence of something in the defaults tuple is the signal.
+    """
+    args = node.args
+    positional = [
+        arg.arg
+        for arg, default in zip(
+            [*args.posonlyargs, *args.args],
+            [None] * (len(args.posonlyargs) + len(args.args) - len(args.defaults)) + list(args.defaults),
+        )
+        if default is not None
+    ]
+    keyword_only = [arg.arg for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None]
+    return frozenset([*positional, *keyword_only])
 
 
 @pytest.mark.parametrize("fetcher", _CONCRETE_FETCHERS)
@@ -105,8 +143,17 @@ def test_http_fetcher_contract_holds_tree_wide():
     check the only thing standing between the copy and silent drift: if a
     parameter is added to one fetcher and not the other, this fails instead of
     the first call site that omits it.
+
+    Names alone are not the whole shape. Which parameters are *optional* is a
+    separate axis, and it is the one that bites: a fetcher that gives ``policy``
+    a default accepts a call the contract forbids, so an SSRF keyword silently
+    goes missing and the fetch runs against a default policy instead of raising.
+    mypy cannot see it, because a protocol only constrains what an
+    implementation must accept, never what it may accept beyond that. So the
+    comparison here includes defaulting, taken from the Protocol itself.
     """
     offenders = []
+    contract_defaulted = _CONTRACT_DEFAULTED
     for filename, funcname, node in _concrete_fetchers_in_app():
         args = node.args
         positional = tuple(arg.arg for arg in [*args.posonlyargs, *args.args])
@@ -118,9 +165,56 @@ def test_http_fetcher_contract_holds_tree_wide():
         }
         if actual != _CONTRACT:
             offenders.append(f"{filename}:{node.lineno} {funcname} -> {actual}")
-    assert not offenders, (
-        "production fetchers must match app.models.HttpFetchContract:\n  "
-        + "\n  ".join(offenders)
+            continue
+        defaulted = _defaulted_params(node)
+        if defaulted != contract_defaulted:
+            offenders.append(
+                f"{filename}:{node.lineno} {funcname} makes {sorted(defaulted)} optional "
+                f"but HttpFetchContract makes {sorted(contract_defaulted)} optional; a caller "
+                f"may omit a parameter the contract requires"
+            )
+    assert not offenders, "production fetchers must match app.models.HttpFetchContract:\n  " + "\n  ".join(
+        offenders
+    )
+
+
+def test_the_contract_guard_sees_defaulting_not_just_names():
+    """The guard must fail on a fetcher whose *names* match but whose optionals differ.
+
+    This is the mutation that motivated comparing defaulting at all, and it is
+    the one mypy accepts: a protocol constrains what an implementation must
+    accept, not what it may additionally accept, so widening one twin with a
+    default on a required parameter satisfies HttpFetchContract and every
+    name-based key in the comparison above. On ``policy`` the default would be
+    a HostPolicy, and a caller omitting the SSRF keyword would get that instead
+    of a TypeError.
+
+    Written against the real tree: the sweep finds the fetchers, then the
+    comparison is run over a synthetic fetcher carrying the mutation, so this
+    fails if the guard stops considering defaulting.
+    """
+    found = _concrete_fetchers_in_app()
+    assert {name for _, name, _ in found} == {"_default_http_fetcher", "_default_cffi_fetcher"}, (
+        f"the sweep found {sorted(name for _, name, _ in found)}; this test asserts against "
+        "the real set, so it has to be the real set"
+    )
+    honest = next(node for _, name, node in found if name == "_default_http_fetcher")
+    assert _defaulted_params(honest) == _CONTRACT_DEFAULTED, (
+        f"the production fetcher defaults {sorted(_defaulted_params(honest))} but the contract "
+        f"defaults {sorted(_CONTRACT_DEFAULTED)}; the clean tree must agree or this test is "
+        "asserting nothing"
+    )
+
+    # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
+    mutated = ast.parse(
+        "async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None): ...\n"
+    ).body[0]
+    assert tuple(arg.arg for arg in mutated.args.args) == _CONTRACT["positional"]
+    assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _CONTRACT["keyword_only"]
+    widened = _defaulted_params(mutated)
+    assert widened == _CONTRACT_DEFAULTED | {"policy"}, widened
+    assert widened != _CONTRACT_DEFAULTED, (
+        "the mutation must differ from the contract in defaulting only, or it proves nothing"
     )
 
 

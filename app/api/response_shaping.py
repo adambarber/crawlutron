@@ -245,26 +245,54 @@ def frontier_link_url(
     return str(validated) if validated is not None else None
 
 
-def _unified_response(results: list[UnifiedCrawlResult], **fields: Any) -> UnifiedCrawlResponse:
-    return UnifiedCrawlResponse(results=results, **fields)
-
-
-def build_unified_crawl_response(
-    results: list[dict[str, Any]],
-    *,
-    request_id: str = "",
-    policy_schema_version: str = "",
-    success: bool = True,
-    submitted_count: int | None = None,
+def _response_envelope(
+    shaped: list[UnifiedCrawlResult], result_count: int, request_id: str, policy_schema_version: str,
+    success: bool, submitted_count: int | None,
 ) -> UnifiedCrawlResponse:
-    """Build the unified crawl response from a list of engine-result dicts."""
-    return _unified_response(
-        _shape_all(results), request_id=request_id, policy_schema_version=policy_schema_version,
-        success=success, submitted_count=submitted_count if submitted_count is not None else len(results),
+    """The one construction of the response envelope: shaped results plus every scalar field.
+
+    The sync builder, the async builder, and every endpoint's raw-result
+    adaptation funnel through here, so the field list exists once. Every field
+    of :class:`UnifiedCrawlResponse` is required by the model, so a new one has
+    to be passed HERE or the whole tree starts raising at the first request --
+    which is the loud outcome; the quiet one is a builder that drops it.
+
+    The ``submitted_count`` fallback -- the count the wire reports when the
+    caller could not say how many URLs were admitted -- used to be spelled in
+    both builders, and two copies of a fallback is how two paths start
+    disagreeing about a batch's size. ``test_abuild_unified_crawl_response_matches_sync``
+    is what proves they still agree.
+
+    ``result_count`` is the length of the RAW result list, passed separately
+    from ``shaped`` on purpose: counting the shaped list instead would make a
+    dropped item silently change a number the response claims was submitted.
+    """
+    return UnifiedCrawlResponse(
+        results=shaped, request_id=request_id, policy_schema_version=policy_schema_version, success=success,
+        submitted_count=result_count if submitted_count is None else submitted_count,
     )
 
 
-def _shape_all(results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> list[UnifiedCrawlResult]:
+def build_unified_crawl_response(
+    results: list[dict[str, Any]], *, request_id: str = "", policy_schema_version: str = "",
+    success: bool = True, submitted_count: int | None = None,
+) -> UnifiedCrawlResponse:
+    """Build the unified crawl response from a list of engine-result dicts.
+
+    The async twin below is the same contract with the shaping off the event
+    loop; both take the same envelope options and both hand them to
+    :func:`_response_envelope`, so the response they build is decided in one
+    place. The options are named rather than ``**options`` on both: a misspelled
+    or unpassed envelope field is a field the response silently lacks.
+    """
+    return _response_envelope(
+        _shape_all(results), len(results), request_id, policy_schema_version, success, submitted_count
+    )
+
+
+def _shape_all(
+    results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
     :func:`abuild_unified_crawl_response`).
 
@@ -315,8 +343,7 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
     peeked: dict[str, Any] = {}
     try:
         peeked = {
-            key: item.get(key)
-            for key in ("normalized_url", "original_url", "url", "final_url", "error")
+            key: item.get(key) for key in ("normalized_url", "original_url", "url", "final_url", "error")
         }
     except Exception:
         _logger.debug("unshapable item refused even best-effort field reads", exc_info=True)
@@ -354,14 +381,10 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
 
 
 async def abuild_unified_crawl_response(
-    results: list[dict[str, Any]],
-    **options: Any,
+    results: list[dict[str, Any]], *, request_id: str = "", policy_schema_version: str = "",
+    success: bool = True, submitted_count: int | None = None,
+    adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> UnifiedCrawlResponse:
-    request_id = options.pop("request_id", "")
-    policy_schema_version = options.pop("policy_schema_version", "")
-    success = options.pop("success", True)
-    submitted_count = options.pop("submitted_count", None)
-    adapt = options.pop("adapt", None)
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
     The whole batch is shaped in ONE event-loop offload (perf throughput #2):
@@ -374,11 +397,34 @@ async def abuild_unified_crawl_response(
     rejects degrades instead of failing the response.
     """
     shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
-    fields = dict(
-        request_id=request_id, policy_schema_version=policy_schema_version, success=success,
-        submitted_count=submitted_count if submitted_count is not None else len(results),
+    return _response_envelope(shaped, len(results), request_id, policy_schema_version, success, submitted_count)
+
+
+async def _aunified_response_from_result(
+    result: dict[str, Any], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+) -> UnifiedCrawlResponse:
+    """The one adapter from a raw producer envelope to the unified response.
+
+    Both wire endpoints (``/v1/crawl`` and ``/v1/render``) read their envelope
+    here, so an envelope field is passed once and cannot reach one path while
+    being forgotten on the other. That mistake is silent by construction --
+    ``UnifiedCrawlResponse`` drops an unpassed field rather than raising -- and
+    a response field has already shipped missing from one endpoint and been
+    caught only by curling the live endpoint.
+
+    ``adapt`` is the per-item transform a producer needs (render maps its
+    browser-result dicts through :func:`render_result_to_unified`); it runs
+    inside ``_shape_all``'s per-item guard either way, so a result dict the
+    adapter cannot read degrades to a terminal failure for that item instead of
+    500ing the response.
+    """
+    return await abuild_unified_crawl_response(
+        result.get("results", []),
+        request_id=result["request_id"],
+        submitted_count=result["submitted_count"],
+        policy_schema_version=result["policy_schema_version"],
+        adapt=adapt,
     )
-    return _unified_response(list(shaped), **fields)
 
 
 __all__ = ["aformat_crawl_item", "abuild_unified_result", "abuild_unified_crawl_response", "format_crawl_item", "build_unified_result", "render_result_to_unified", "frontier_link_url", "build_unified_crawl_response"]

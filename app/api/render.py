@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.api_models import POLICY_SCHEMA_VERSION
 from app.crawl.ids import new_request_id
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.render_options import resolve_render_options
@@ -191,6 +192,12 @@ async def render_request(
     return {
         "request_id": new_request_id(),
         "submitted_count": len(urls),
+        # The producer envelope carries the same key the engine's crawl
+        # envelope does, so response_shaping's single adapter reads one shape
+        # from both producers. /v1/render used to substitute the constant at
+        # the endpoint instead, which is a second place a version could be
+        # updated and a silent one (an unpassed field is dropped by the model).
+        "policy_schema_version": POLICY_SCHEMA_VERSION,
         "results": [to_dict(result) for result in ordered_results],
     }
 

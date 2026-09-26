@@ -213,3 +213,22 @@ async def test_browser_result_carries_the_shared_builder_shape(monkeypatch):
     assert attempt.strategy == "BROWSER_HEADLESS"
     assert attempt.status == "success"
     assert attempt.http_status is None
+
+
+async def test_both_strategies_agree_on_the_discovery_result_fields(monkeypatch):
+    """The two paths over one page must not disagree about a discovery field.
+
+    Every discovered-links field reaches a result through
+    ``content_pipeline._discovery_result_fields``, and this is the behavioural
+    half of that chokepoint: a field threaded into one strategy and not the
+    other is invisible in both results -- each is individually well-formed --
+    and shows up only as a difference between them. Stated on the two real
+    builders, over one page, so the pair is what is compared.
+    """
+    http = await invoke_http_strategy(monkeypatch, policy=_full_discovery_policy(), resp=_page_resp)
+    browser = await _render(monkeypatch, HTML)
+    for field in ("discovered_link_count", "discovered_links_truncated", "next_page_url", "error"):
+        assert getattr(http, field) == getattr(browser, field), field
+    assert {link.normalized_url for link in http.discovered_links} == {
+        link.normalized_url for link in browser.discovered_links
+    }

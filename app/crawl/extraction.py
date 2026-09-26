@@ -509,11 +509,35 @@ def extract_content(
     css_selector: str | None = None,
     xpath: str | None = None,
 ) -> ExtractedContent:
-    """Extract ``(text, markdown)`` from raw content using the unified pipeline."""
-    if _is_html(content_type, content) and (css_selector or xpath):
-        return _extract_selected(_decode(content), url, css_selector=css_selector, xpath=xpath)
+    """Extract ``(text, markdown)`` from raw content using the unified pipeline.
+
+    The HTML branch hands the selector pair down rather than dispatching on it
+    here: ``_extract_html`` already routes a selector to :func:`_extract_selected`
+    and a bare page to trafilatura, so deciding it in both places was two copies
+    of one rule that could disagree about the same page.
+
+    A selector only means something to a DOM. Applied to a document or a plain
+    text body there is no DOM to target, so the pair cannot be honoured and the
+    full content is extracted instead. That is logged rather than dropped in
+    silence: the caller asked to narrow and is being handed the whole thing, and
+    the only other signal it gets is a result that looks like a successful
+    narrowing. The same request against an HTML page does narrow, so the
+    difference between the two is invisible on the wire otherwise.
+    """
+    if css_selector is None and xpath is None:
+        pass
+    elif not _is_html(content_type, content):
+        logger.warning(
+            "extraction_selector_ignored_non_html",
+            extra={
+                "css_selector": css_selector,
+                "xpath": xpath,
+                "content_type": content_type,
+                "url": url,
+            },
+        )
     if _is_html(content_type, content):
-        return _extract_html(_decode(content), url)
+        return _extract_html(_decode(content), url, css_selector=css_selector, xpath=xpath)
     if _looks_like_document(content_type, content, url):
         body = (
             bytes(content)
@@ -535,6 +559,21 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
         md = None
     text = _text_from_html(html_fragment) or None
     return text, md
+
+
+# The selector pair is ONE contract with three entry points: ``extract_content``
+# (every strategy's funnel), ``_extract_html`` (the trafilatura-only path) and
+# ``_extract_selected`` (the DOM-targeting engine). All three take the pair by
+# name because their callers hand it over as keywords --
+# ``app/crawl/strategies/content_pipeline.py`` builds one ``**selectors`` mapping
+# and passes it to two of them -- so the tail of the three signatures is
+# necessarily the same four lines, and Python cannot state one signature across
+# three entry points. That is the irreducibility argument, and the reason the
+# contract is not left as prose: ``test_the_selector_pair_is_one_contract``
+# sweeps the tree so a function accepting one selector must accept both, by name,
+# defaulting to None, returning ``ExtractedContent``. A fourth extractor taking
+# only ``css_selector`` would silently ignore half of the caller's narrowing
+# request, which is the failure a shared signature is supposed to make impossible.
 
 
 def _extract_selected(
@@ -652,6 +691,13 @@ def _extract_html(
     css_selector: str | None = None,
     xpath: str | None = None,
 ) -> ExtractedContent:
+    """The single owner of the HTML selector dispatch, for both callers.
+
+    The unified :func:`extract_content` entry and the trafilatura-only strategy
+    path both route HTML here, which is why the pair is a parameter on this
+    function at all: one place decides whether a page is selector-targeted or
+    full-page, so the two callers cannot disagree about the same page.
+    """
     if css_selector or xpath:
         return _extract_selected(html, url, css_selector=css_selector, xpath=xpath)
     try:

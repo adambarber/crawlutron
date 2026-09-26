@@ -2,29 +2,22 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from app.constants import (
     DEFAULT_EXTRACTION,
-    EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_DOCUMENT,
     EXTRACTION_METHOD_DOM_TEXT,
-    EXTRACTION_METHOD_TRAFILATURA,
-    EXTRACTION_TRAFILATURA,
-)
-from app.crawl.extraction import (
-    _extract_document,
-    _extract_html,
-    extract_content,
-    extract_post_fetch_discovery,
-    normalized_extraction,
 )
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import _make_engine_result
 from app.crawl.strategies.body_decode import _quality_score
+from app.crawl.strategies.content_pipeline import (
+    _discover_after_fetch,
+    _discovery_result_fields,
+    _ExtractedContent,
+    _post_fetch_diagnostics,
+    _run_extraction,
+)
 from app.crawl.worker import call_worker
 from app.models import (
     CrawlJob,
@@ -34,14 +27,7 @@ from app.models import (
     EngineCrawlResult,
     RenderOptions,
 )
-from app.validation import HostPolicy, filter_js_endpoints, registrable_domain
-
-
-@dataclass(frozen=True)
-class _BrowserContent:
-    text: str
-    markdown: str | None
-    extraction_method: str
+from app.validation import HostPolicy, registrable_domain
 
 
 def _browser_options(policy: dict[str, Any]) -> RenderOptions:
@@ -69,49 +55,27 @@ def _browser_job(normalized_url: str, options: RenderOptions, host_policy: HostP
 
 
 async def _extract_browser_content(
-    content: str | bytes | bytearray | None,
+    content: str | None,
     result: Any,
     policy: dict[str, Any],
-) -> _BrowserContent:
+) -> _ExtractedContent:
     if not content:
-        return _BrowserContent(
+        return _ExtractedContent(
             text="",
             markdown=None,
             extraction_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
         )
-    extraction = policy.get("extraction", DEFAULT_EXTRACTION)
-    extractor: Callable[..., Any]
-    args: tuple[Any, ...]
-    # The selector pair belongs to the two HTML paths only; the document path
-    # takes neither, and handing it one is a TypeError.
-    selector_options = {
-        "css_selector": policy.get("css_selector"),
-        "xpath": policy.get("xpath"),
-    }
-    if extraction == EXTRACTION_DOCUMENT:
-        extractor = _extract_document
-        args = (
-            content.encode("utf-8", "replace") if isinstance(content, str) else content,
-            result.final_url,
-        )
-        options: dict[str, Any] = {}
-        method = EXTRACTION_METHOD_DOCUMENT
-    elif extraction == EXTRACTION_TRAFILATURA:
-        extractor = _extract_html
-        args = (content, result.final_url)
-        options = selector_options
-        method = EXTRACTION_METHOD_TRAFILATURA
-    else:
-        extractor = extract_content
-        args = (content, None, result.final_url)
-        options = selector_options
-        method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
-    extracted = await asyncio.to_thread(extractor, *args, **options)
-    text, markdown = normalized_extraction(extracted)
-    return _BrowserContent(
-        text=text,
-        markdown=markdown,
-        extraction_method=method,
+    return await _run_extraction(
+        extraction=policy.get("extraction", DEFAULT_EXTRACTION),
+        content=content,
+        decoded=content,
+        content_type=None,
+        final_url=result.final_url,
+        policy=policy,
+        # A render reports the method its own worker used; the pipeline cannot
+        # label that branch for us.
+        default_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
+        html=True,
     )
 
 
@@ -120,23 +84,21 @@ async def _discover_browser_content(
     policy: dict[str, Any],
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    return await asyncio.to_thread(
-        extract_post_fetch_discovery,
-        result.html,
-        result.final_url,
+    return await _discover_after_fetch(
+        html=result.html,
+        final_url=result.final_url,
         js_base_url=result.final_url,
         max_links=policy["limits"]["max_discovered_links"],
         include_diagnostics=True,
         include_links=result.status == "success",
         include_js_endpoints=True,
-        include_metadata=True,
         host_policy=host_policy,
     )
 
 
 def _browser_diagnostics(
     result: Any,
-    content: _BrowserContent,
+    content: _ExtractedContent,
     policy: dict[str, Any],
     host_policy: HostPolicy,
     post_fetch: dict[str, Any],
@@ -154,13 +116,7 @@ def _browser_diagnostics(
         value = result.metadata.get(key)
         if value:
             diagnostics[key] = value
-    if post_fetch["next_page_url"]:
-        diagnostics["next_page_url"] = post_fetch["next_page_url"]
-    diagnostics["js_endpoints"] = filter_js_endpoints(
-        post_fetch["js_endpoints"],
-        resolve_against=result.final_url,
-        policy=host_policy,
-    )
+    diagnostics.update(_post_fetch_diagnostics(post_fetch, result.final_url, host_policy))
     return diagnostics
 
 
@@ -170,7 +126,7 @@ def _build_browser_result(
     normalized_url: str,
     strategy: CrawlStrategyName,
     result: Any,
-    content: _BrowserContent,
+    content: _ExtractedContent,
     diagnostics: dict[str, Any],
     post_fetch: dict[str, Any],
 ) -> EngineCrawlResult:
@@ -198,18 +154,15 @@ def _build_browser_result(
         text=content.text,
         markdown=content.markdown,
         extraction_method=content.extraction_method,
-        quality_score=_quality_score(
-            result.status, result.classification, content.text, result.html, None
-        ),
-        classification_evidence=[],
+        quality_score=_quality_score(result.status, result.classification, content.text, result.html, None),
         diagnostics=diagnostics,
-        discovered_link_count=post_fetch["discovered_link_count"],
-        discovered_links_truncated=post_fetch["discovered_links_truncated"],
-        discovered_links=post_fetch["discovered_links"],
-        error=result.error,
+        **_discovery_result_fields(
+            post_fetch,
+            classification_evidence=[],
+            error=result.error,
+        ),
         next_page_url=post_fetch["next_page_url"],
         validators={},
-        llm_metadata=post_fetch["llm_metadata"] or None,
     )
 
 
@@ -222,7 +175,9 @@ async def browser_strategy_result(
     browser_worker: CrawlWorker,
     host_policy: HostPolicy,
 ) -> EngineCrawlResult:
-    result = await call_worker(browser_worker, _browser_job(normalized_url, _browser_options(policy), host_policy))
+    result = await call_worker(
+        browser_worker, _browser_job(normalized_url, _browser_options(policy), host_policy)
+    )
     content = result.html if result.html else result.text
     extracted = await _extract_browser_content(content, result, policy)
     post_fetch = await _discover_browser_content(result, policy, host_policy)

@@ -69,6 +69,67 @@ def client(job_store):
     return AsyncClient(transport=transport, base_url="http://test")
 
 
+def test_every_job_endpoint_declares_its_providers_through_an_alias():
+    """No job endpoint wires a provider as an invisible ``= Depends(...)`` default.
+
+    Read off the registered routes, so a new endpoint is covered by declaring
+    itself. A default is invisible in a signature -- it does not read as a
+    requirement, and it is the shape that let two hand-written dependency lists
+    (one per endpoint) look equivalent without being checked against anything.
+    """
+    import inspect
+
+    from fastapi.params import Depends as DependsParam
+
+    from app.api import dependencies, jobs_router
+
+    aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
+    assert aliases, "app.api.dependencies declares no provider aliases"
+
+    for route in jobs_router.router.routes:
+        for name, param in inspect.signature(route.endpoint, eval_str=True).parameters.items():
+            where = f"{route.endpoint.__name__}.{name}"
+            assert param.default is inspect.Parameter.empty, (
+                f"{where} uses an invisible default; a provider belongs in the annotation"
+            )
+            for meta in getattr(param.annotation, "__metadata__", ()):
+                if isinstance(meta, DependsParam):
+                    assert any(param.annotation is alias for alias in aliases), (
+                        f"{where} wires {meta.dependency.__name__} outside a declared alias"
+                    )
+
+
+def test_creating_and_controlling_a_job_need_the_same_providers():
+    """The identity claim behind the shared aliases, checked against the signatures.
+
+    ``create_job`` and ``control_job`` were two hand-written copies of the same
+    triple; they now name the same three aliases. If a fourth provider ever
+    becomes necessary for one of them and not the other, this is what says so.
+    """
+    import inspect
+
+    from fastapi.params import Depends as DependsParam
+
+    from app.api import jobs_router
+    from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
+
+    def _providers(handler) -> dict[str, object]:
+        declared = {}
+        # eval_str: the router module defers its annotations (PEP 563), so the
+        # alias objects are only reachable after the string is resolved.
+        for name, param in inspect.signature(handler, eval_str=True).parameters.items():
+            for meta in getattr(param.annotation, "__metadata__", ()):
+                if isinstance(meta, DependsParam):
+                    declared[name] = meta.dependency
+        return declared
+
+    created = _providers(jobs_router.create_job)
+    controlled = _providers(jobs_router.control_job)
+
+    assert created == controlled
+    assert set(created.values()) == {get_job_store, get_settings, get_shutdown_event}
+
+
 class TestCrashRecovery:
     """A process killed mid-engine-call must not silently drop the in-flight batch.
 
@@ -304,11 +365,8 @@ class TestWholeSiteJobExecution:
             client,
             job_store,
             GRAPH_ROOT,
-            ScriptedExecute(results=[
-                    _canned_result(
-                        GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]
-                    )
-                ]
+            ScriptedExecute(
+                results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])]
             ),
         )
         assert job.stats["total_crawled"] == 3
@@ -347,8 +405,8 @@ class TestWholeSiteJobExecution:
             client,
             job_store,
             GRAPH_ROOT,
-            ScriptedExecute(results=[_canned_result(GRAPH_ROOT, links=leaves)]
-                + [_canned_result(url) for url in leaves]
+            ScriptedExecute(
+                results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(url) for url in leaves]
             ),
         )
         assert job.stats["total_discovered"] == 25
@@ -356,16 +414,14 @@ class TestWholeSiteJobExecution:
         assert len(job.results) == 26
         assert job.frontier == []
 
-
     async def test_discovered_links_dedupe(self, client, job_store):
         # a discovers b and c; b discovers a again — visited dedupe wins.
         job_id = await _create_api_job(
             client,
             GRAPH_ROOT,
-            ScriptedExecute(results=[
-                    _canned_result(
-                        GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]
-                    ),
+            ScriptedExecute(
+                results=[
+                    _canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"]),
                     _canned_result(GRAPH_CHILD, links=[GRAPH_ROOT]),
                     _canned_result("http://example.test/c"),
                 ]
@@ -375,6 +431,7 @@ class TestWholeSiteJobExecution:
         job = job_store.load(job_id)
         assert job.stats["total_crawled"] == 3
         assert job.visited == {GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c"}
+
 
 class TestTransientFailureRequeue:
     """A page that can't be reached for a *transient* reason (network/dns/tls/
@@ -388,9 +445,7 @@ class TestTransientFailureRequeue:
 
     async def test_transient_failure_is_requeued_then_succeeds(self, client, job_store):
         root = GRAPH_ROOT
-        engine = ScriptedExecute(
-            _flaky(root, "network_error", "dns_error", lands_on=_canned_result(root))
-        )
+        engine = ScriptedExecute(_flaky(root, "network_error", "dns_error", lands_on=_canned_result(root)))
         job = await run_api_job(client, job_store, root, engine)
         # The two early failures must not have finalized the page; the crawl
         # retried and the single committed outcome is the eventual success.
@@ -441,7 +496,7 @@ class TestTransientFailureRequeue:
 
     async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store):
         root = GRAPH_ROOT
-        engine = ScriptedExecute({root: [_canned_result(root, status='failed', classification='not_found')]})
+        engine = ScriptedExecute({root: [_canned_result(root, status="failed", classification="not_found")]})
         job = await run_api_job(client, job_store, root, engine)
         # "Page is gone" is an answer, not a transient blip: recorded once, not retried.
         assert job.status == JobStatus.COMPLETED
@@ -459,7 +514,8 @@ class TestTransientFailureRequeue:
         unvalidated hrefs and dedupes them inconsistently against visited URLs.
         """
         divergent = _link("/rel", GRAPH_ROOT, normalized="https://ok.test/abs")
-        install = ScriptedExecute(results=[
+        install = ScriptedExecute(
+            results=[
                 _canned_result(GRAPH_ROOT, raw_links=[divergent]),
             ]
         )
@@ -503,9 +559,7 @@ class TestTransientFailureRequeue:
 class TestRunnerLifecycle:
     async def test_shutdown_cancels_running_tasks(self, job_store):
         hang = asyncio.Event()
-        job_runner.install_execute_crawl(
-            ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang)
-        )
+        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
         job = job_store.create(GRAPH_ROOT, {})
         job_runner.start_job(job.job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event())
         await _wait_status(job_store, job.job_id, {"running"})
@@ -528,9 +582,7 @@ class TestRunnerLifecycle:
         from app.settings import CrawlerSettings as _CS
 
         hang = _asyncio.Event()
-        job_runner.install_execute_crawl(
-            ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang)
-        )
+        job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)], hang=hang))
         # Orphan RUNNING row rewinds to PENDING...
         job = job_store.create(GRAPH_ROOT, {})
         job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
@@ -670,7 +722,6 @@ class TestJobStateWaitContract:
             await wait_status(bare, job_id, {"completed"})
 
 
-
 class TestJobControlOverRunner:
     """Control transitions observed on a live runner, not on a finished row.
 
@@ -744,6 +795,7 @@ class TestJobControlOverRunner:
             "the deleted job is still registered as running",
         )
         assert job_store.load(job_id) is None
+
 
 class TestJobControlTransitions:
     async def test_main_job_control_invalid_action(self):
@@ -823,9 +875,7 @@ class TestWholeSiteAdmissionContract:
     async def test_depth_zero_does_not_expand(self, client, job_store):
         root = "https://example.test/root"
         child = "https://example.test/child"
-        job = await self._admission_scenario(
-            client, job_store, root, [child], self._policy(0, 10)
-        )
+        job = await self._admission_scenario(client, job_store, root, [child], self._policy(0, 10))
 
         assert job.visited == {"https://example.test/root"}
         assert job.frontier == []
@@ -910,9 +960,7 @@ class TestWholeSiteAdmissionContract:
     async def test_canonical_root_alias_counts_once(self, client, job_store):
         root = "https://example.test"
         self_alias = "https://example.test/"
-        job = await self._admission_scenario(
-            client, job_store, root, [self_alias], self._policy(1, 2)
-        )
+        job = await self._admission_scenario(client, job_store, root, [self_alias], self._policy(1, 2))
 
         assert job.visited == {root}
         assert len(job.results) == 1
@@ -1120,7 +1168,8 @@ class TestWholeSiteAdmissionContract:
             client,
             job_store,
             root,
-            ScriptedExecute(results=[
+            ScriptedExecute(
+                results=[
                     _canned_result(
                         root,
                         links=[

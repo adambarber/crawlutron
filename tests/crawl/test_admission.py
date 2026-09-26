@@ -31,6 +31,7 @@ from app.resource_pressure import (
     _HTTP_TASK_RAM_BYTES,
     CpuGate,
     ResourceGate,
+    TaskRamBudget,
     WeightedAdmission,
     _build_admission_policy,
     default_admission_policy,
@@ -721,7 +722,11 @@ def _policy(limit=3 * 1024 * 1024 * 1024, pool_size=2, max_concurrent_pages=3, d
         limit,
         pool_size=pool_size,
         max_concurrent_pages=max_concurrent_pages,
-        doc_workers=doc_workers,
+        # The real budget, not a test-local restatement of its fields: these
+        # four call sites assert the policy that production's dataclass builds,
+        # so a test that spelled the weights itself could pass against a
+        # dataclass that no longer reserved them.
+        budget=TaskRamBudget(doc_workers=doc_workers),
     )
 
 

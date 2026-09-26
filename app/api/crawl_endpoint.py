@@ -18,19 +18,18 @@ import time
 from collections.abc import Awaitable
 from typing import Any
 
-from fastapi import BackgroundTasks, Request
+from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.api.crawl_executor import execute_crawl
 from app.api.exceptions import http_error, validation_http_error
-from app.api.main_helpers import record_crawl_completion
-from app.api.response_shaping import abuild_unified_crawl_response
+from app.api.main_helpers import record_crawl_completion, request_gate
+from app.api.response_shaping import _aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
 from app.crawl.job_store import JobKind
 from app.crawl.payload_helpers import checked_payload_urls
-from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 from app.output_formats import serialize_results
 from app.validation import HostPolicy
@@ -59,6 +58,16 @@ async def await_or_client_gone(work: Awaitable[Any], request: Request, *, poll_i
         await asyncio.sleep(poll_interval)
 
 
+def _crawl_rejection(error: ValueError) -> HTTPException:
+    """``/v1/crawl``'s refusal: the shared 422 envelope, counted as a crawl error.
+
+    This is the gate's ``reject`` hook, so the metric is part of refusing rather
+    than a line a handler can forget once the reject tail stopped being its own.
+    """
+    get_metrics().observe_crawl(errors=1)
+    return validation_http_error(error)
+
+
 async def crawl(
     payload: CrawlRequest,
     background_tasks: BackgroundTasks,
@@ -69,8 +78,7 @@ async def crawl(
     request: Request | None = None,
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
-    readiness_state.begin_request()
-    try:
+    with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
         if payload.output_format:
             try:
                 serialize_results([], payload.output_format)
@@ -138,12 +146,7 @@ async def crawl(
             event="crawl_request_completed",
             logger=logger,
         )
-        response_model = await abuild_unified_crawl_response(
-            result.get("results", []),
-            request_id=result["request_id"],
-            submitted_count=result["submitted_count"],
-            policy_schema_version=result["policy_schema_version"],
-        )
+        response_model = await _aunified_response_from_result(result)
         try:
             await result_store.aput(result["request_id"], response_model.model_dump())
         except Exception:
@@ -158,12 +161,6 @@ async def crawl(
                 raise http_error(422, "validation_error", str(error)) from error
             return Response(content=body, media_type=media_type)
         return response_model
-    except ValueError as error:
-        get_metrics().observe_crawl(errors=1)
-        logger.warning("crawl_request_rejected", extra={"error": str(error)})
-        raise validation_http_error(error) from error
-    finally:
-        readiness_state.end_request()
 
 
 async def get_crawl_result(

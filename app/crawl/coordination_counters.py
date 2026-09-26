@@ -23,33 +23,21 @@ dies would take its tallies with it; a shared total survives both.
 from __future__ import annotations
 
 import math
-import sqlite3
-import threading
-from pathlib import Path
 
+from app.crawl.coordination_store import CoordinationStore
 from app.crawl.migrations.manifest import StoreSchema
-from app.crawl.sqlite_store import connect_store
 
 __all__ = ["CoordinationCounters"]
 
 
-class CoordinationCounters:
+class CoordinationCounters(CoordinationStore):
     """Named float totals shared by every worker process.
 
     Counter names arrive from metric labels, so every name is a bound
     parameter. There is no path in this class that interpolates one into SQL.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        # The store chokepoint owns the PRAGMAs and the migration; this class
-        # must not open its own connection or re-declare a schema.
-        self._conn: sqlite3.Connection = connect_store(
-            db_path, schema=StoreSchema.COORDINATION_COUNTERS
-        )
-        # Intra-process serialization only. Cross-process ordering is SQLite's
-        # job, and is the entire reason this class exists.
-        self._lock = threading.Lock()
+    schema = StoreSchema.COORDINATION_COUNTERS
 
     def add(self, name: str, delta: float = 1.0) -> None:
         """Add ``delta`` to ``name``, creating the counter at zero if new.

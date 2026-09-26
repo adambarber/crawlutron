@@ -49,9 +49,7 @@ async def _default_http_fetcher(
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
     timeout = Timeouts.for_request(timeout_seconds).as_httpx()
-    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(
-        url, headers, policy=policy
-    ):
+    async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(url, headers, policy=policy):
         # follow_redirects=False: we follow manually so each hop is SSRF-checked.
         async with client.stream(
             "GET", pinned_url, headers=hop_headers, timeout=timeout, follow_redirects=False
@@ -290,9 +288,7 @@ async def _cffi_fetch(
                 response_headers=response.headers,
                 max_content_length=max_content_length,
                 elapsed_ms=elapsed_ms,
-                too_large=functools.partial(
-                    _cffi_too_large_result, url, chain.url, response, elapsed_ms
-                ),
+                too_large=functools.partial(_cffi_too_large_result, url, chain.url, response, elapsed_ms),
             )
         raise AssertionError("apinned_hops raises on a body that neither returned nor advanced")
     except DecompressionError:
@@ -321,14 +317,15 @@ async def _default_cffi_fetcher(
     hand-written redirect loops and are now one :class:`_RedirectChain` plus
     two transport bodies. :data:`app.models.HttpFetchContract` states the
     contract once and ``test_http_fetcher_contract_holds_tree_wide`` proves
-    every production fetcher still matches it, so the copy cannot drift.
+    every production fetcher still matches it -- by name and by which
+    parameters it makes optional, because names alone missed a twin that
+    defaulted ``policy`` and quietly stopped requiring the SSRF keyword. So the
+    copy cannot drift.
     """
     result = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)
     if result is not None:
         return result
-    return await _default_http_fetcher(
-        url, headers, timeout_seconds, max_content_length, policy=policy
-    )
+    return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length, policy=policy)
 
 
 def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:

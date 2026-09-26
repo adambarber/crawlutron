@@ -132,7 +132,7 @@ def _policy(limit: int) -> rp.AdmissionPolicy:
         limit,
         pool_size=rp.derive_browser_pool_size(limit),
         max_concurrent_pages=3,
-        doc_workers=rp.doc_worker_count(),
+        budget=rp.TaskRamBudget(doc_workers=rp.doc_worker_count()),
     )
 
 

@@ -177,46 +177,70 @@ def _provider_message(provider: str, status: int, payload: dict[str, Any]) -> st
 
 
 class _ApiKeyProvider:
-    """Shared credential slot for the keyed providers (Tavily/Brave/Serper).
+    """Shared credential slot and shared flow for the keyed providers.
 
-    The three providers differ only in endpoint, shape, and key names. The
-    constructor contract and the *whole* response contract -- parse, refuse a
+    The three providers differ only in endpoint, method, where the API key
+    travels, and key names. Everything else -- issue the request, refuse a
     non-200 with the provider-specific message, normalize the result list --
-    are one place each, so a fourth provider cannot reach a result by
-    forgetting the non-200 check, which is the one step of the flow that
-    silently turns an error page into an empty result set.
+    is this class, so a fourth provider cannot reach a result by forgetting the
+    non-200 check, which is the one step of the flow that silently turns an
+    error page into an empty result set.
 
-    ``items_of`` is passed the parsed payload and returns the raw result list,
-    because that is the only part the three disagree on beyond key names:
-    Tavily nests under ``results``, Brave under ``web.results``, Serper under
-    ``organic``.
+    A subclass supplies :meth:`_request` (its endpoint and credential placement)
+    and :meth:`_items_of` (where the raw result list sits in the payload: Tavily
+    nests under ``results``, Brave under ``web.results``, Serper under
+    ``organic``), plus the three response field names as class attributes. The
+    flow itself used to be spelled once per provider, which is what jscpd
+    reported: the two POST-then-``_results`` bodies were the same shape with a
+    different payload lambda and a different set of key names, so the only part
+    that genuinely varied was the part that was left as a hook.
     """
 
     name: str
+    # Declared here so `_results` has one shape to read; assigned per provider.
+    # A subclass that omits one fails loudly on the first result rather than
+    # silently reporting a blank title for every hit.
+    _url_key: str
+    _title_key: str
+    _description_key: str
 
     def __init__(self, api_key: str, host_policy: HostPolicy) -> None:
         self._api_key = api_key
         self._host_policy = host_policy
 
-    def _results(
-        self,
-        status: int,
-        body: str,
-        items_of: Callable[[dict[str, Any]], object],
-        *,
-        url_key: str,
-        title_key: str,
-        description_key: str,
-    ) -> list[SearchResult]:
-        """The keyed-provider response contract, in one place."""
+    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
+        """Query this provider and return SSRF-screened, normalized results."""
+        status, body = await self._request(query, limit, timeout_seconds)
+        return self._results(status, body, self._items_of)
+
+    async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
+        """Issue this provider's request over the shared pooled client.
+
+        Subclass hook: the endpoint, the method, and whether the key travels in
+        a header or the JSON body are per-provider facts, and none of them is a
+        fact about what to do with the response.
+        """
+        raise NotImplementedError
+
+    def _items_of(self, payload: dict[str, Any]) -> object:
+        """The raw result list inside a parsed payload. Subclass hook."""
+        raise NotImplementedError
+
+    def _results(self, status: int, body: str, items_of: Callable[[dict[str, Any]], object]) -> list[SearchResult]:
+        """The keyed-provider response contract, in one place.
+
+        The three field names are read off the instance rather than passed in:
+        they are per-provider class state, and taking them as arguments let a
+        call site hand one provider's keys to another's collector.
+        """
         payload = _parse_json(body)
         if status != 200:
             raise SearchProviderError(_provider_message(self.name, status, payload))
         return _collect_results(
             items_of(payload),
-            url_key=url_key,
-            title_key=title_key,
-            description_key=description_key,
+            url_key=self._url_key,
+            title_key=self._title_key,
+            description_key=self._description_key,
             policy=self._host_policy,
         )
 
@@ -225,9 +249,16 @@ class TavilyProvider(_ApiKeyProvider):
     """Tavily Search API (api.tavily.com). Free tier ~1000 credits/month."""
 
     name = "tavily"
+    _url_key = "url"
+    _title_key = "title"
+    _description_key = "content"
 
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        status, body = await _provider_http(
+    def _items_of(self, payload: dict[str, Any]) -> object:
+        return payload.get("results")
+
+    async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
+        # Tavily carries the key in the JSON body, not a header.
+        return await _provider_http(
             "POST",
             _TAVILY_URL,
             json_body={
@@ -241,36 +272,26 @@ class TavilyProvider(_ApiKeyProvider):
             headers={"Content-Type": "application/json"},
             timeout_seconds=timeout_seconds,
         )
-        return self._results(
-            status,
-            body,
-            lambda payload: payload.get("results"),
-            url_key="url",
-            title_key="title",
-            description_key="content",
-        )
 
 
 class BraveProvider(_ApiKeyProvider):
     """Brave Search API (api.search.brave.com). Free tier 2000 queries/month."""
 
     name = "brave"
+    _url_key = "url"
+    _title_key = "title"
+    _description_key = "description"
 
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        status, body = await _provider_http(
+    def _items_of(self, payload: dict[str, Any]) -> object:
+        return (payload.get("web") or {}).get("results")
+
+    async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
+        return await _provider_http(
             "GET",
             _BRAVE_URL,
             params={"q": query, "count": limit, "safesearch": "off"},
             headers={"X-Subscription-Token": self._api_key, "Accept": "application/json"},
             timeout_seconds=timeout_seconds,
-        )
-        return self._results(
-            status,
-            body,
-            lambda payload: (payload.get("web") or {}).get("results"),
-            url_key="url",
-            title_key="title",
-            description_key="description",
         )
 
 
@@ -278,22 +299,20 @@ class SerperProvider(_ApiKeyProvider):
     """Serper.dev Google SERP proxy. Free tier 2500 queries."""
 
     name = "serper"
+    _url_key = "link"
+    _title_key = "title"
+    _description_key = "snippet"
 
-    async def search(self, query: str, limit: int, timeout_seconds: float) -> list[SearchResult]:
-        status, body = await _provider_http(
+    def _items_of(self, payload: dict[str, Any]) -> object:
+        return payload.get("organic")
+
+    async def _request(self, query: str, limit: int, timeout_seconds: float) -> tuple[int, str]:
+        return await _provider_http(
             "POST",
             _SERPER_URL,
             json_body={"q": query, "num": limit},
             headers={"X-API-KEY": self._api_key, "Content-Type": "application/json"},
             timeout_seconds=timeout_seconds,
-        )
-        return self._results(
-            status,
-            body,
-            lambda payload: payload.get("organic"),
-            url_key="link",
-            title_key="title",
-            description_key="snippet",
         )
 
 

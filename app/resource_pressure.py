@@ -547,6 +547,34 @@ def max_http_concurrency_for(
     return max(1, min(_MAX_HTTP_CONCURRENCY, free // max(1, http_task_bytes)))
 
 
+@dataclass(frozen=True)
+class TaskRamBudget:
+    """The per-task RAM weights admission sizing is derived from, as one value.
+
+    ``_build_admission_policy`` and ``max_http_concurrency_for`` sized a
+    process's admission from the same four inputs, and the pair jscpd reported
+    was those two keyword-only parameter lists rather than any logic: the
+    duplication was the argument list, not the arithmetic. Binding the list into
+    a value the caller builds and this function hands on unchanged means the
+    weights exist once, and a caller adding a weight edits a dataclass instead
+    of two signatures that have to agree. The same move
+    ``app.crawl.result_helpers.TerminalResult`` made for the terminal-result
+    constructors, for the same reason.
+
+    Every field defaults to the env-read weight this module already reserves
+    against, so admission built without a budget reserves exactly what it did
+    before. ``doc_workers`` defaults to zero rather than to
+    :func:`doc_worker_count` because a caller that spawns no markitdown pool
+    must not have one silently reserved for it -- the count is a fact about the
+    caller's process, not a default the sizing can know.
+    """
+
+    http_task_bytes: int = _HTTP_TASK_RAM_BYTES
+    browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES
+    doc_workers: int = 0
+    doc_task_bytes: int = _DOC_TASK_RAM_BYTES
+
+
 @dataclass
 class AdmissionPolicy:
     """Sizing inputs for :class:`WeightedAdmission` (all in bytes / counts)."""
@@ -571,30 +599,33 @@ def _build_admission_policy(
     *,
     pool_size: int,
     max_concurrent_pages: int,
-    http_task_bytes: int = _HTTP_TASK_RAM_BYTES,
-    browser_task_bytes: int = _BROWSER_TASK_RAM_BYTES,
-    doc_workers: int = 0,
-    doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
+    budget: TaskRamBudget | None = None,
 ) -> AdmissionPolicy:
-    """Derive an admission policy from the memory limit plus the fixed pools."""
+    """Derive an admission policy from the memory limit plus the fixed pools.
+
+    The four sizing weights arrive as one :class:`TaskRamBudget` rather than as
+    four parameters, because they were four parameters here *and* four there and
+    the two lists had to be edited together. The budget is passed to
+    :func:`max_http_concurrency_for` unchanged, so the HTTP ceiling this policy
+    reports is computed from exactly the weights the policy was built from --
+    the property the flat signature made a coincidence of ordering.
+    """
+    sizing = budget or TaskRamBudget()
     limit = max(limit_bytes, 256 * 1024 * 1024)
-    browser_pool_reserve_bytes = pool_size * browser_task_bytes
-    doc_pool_reserve_bytes = doc_workers * doc_task_bytes
-    max_http = max_http_concurrency_for(
-        limit,
-        pool_size,
-        http_task_bytes=http_task_bytes,
-        browser_task_bytes=browser_task_bytes,
-        doc_workers=doc_workers,
-        doc_task_bytes=doc_task_bytes,
-    )
     return AdmissionPolicy(
-        http_task_bytes=http_task_bytes,
-        browser_task_bytes=browser_task_bytes,
-        browser_pool_reserve_bytes=browser_pool_reserve_bytes,
-        max_http_concurrency=max_http,
+        http_task_bytes=sizing.http_task_bytes,
+        browser_task_bytes=sizing.browser_task_bytes,
+        browser_pool_reserve_bytes=pool_size * sizing.browser_task_bytes,
+        max_http_concurrency=max_http_concurrency_for(
+            limit,
+            pool_size,
+            http_task_bytes=sizing.http_task_bytes,
+            browser_task_bytes=sizing.browser_task_bytes,
+            doc_workers=sizing.doc_workers,
+            doc_task_bytes=sizing.doc_task_bytes,
+        ),
         max_browser_concurrency=max(1, pool_size * max_concurrent_pages),
-        doc_pool_reserve_bytes=doc_pool_reserve_bytes,
+        doc_pool_reserve_bytes=sizing.doc_workers * sizing.doc_task_bytes,
     )
 
 
@@ -612,7 +643,7 @@ def default_admission_policy(gate: ResourceGate) -> WeightedAdmission:
             limit,
             pool_size=2,
             max_concurrent_pages=3,
-            doc_workers=doc_worker_count(),
+            budget=TaskRamBudget(doc_workers=doc_worker_count()),
         ),
     )
 

@@ -8,10 +8,10 @@ JobStore operations.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from app.api import job_runner
-from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
+from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error
 from app.api.main_helpers import _build_job_status
 from app.api_models import (
@@ -52,9 +52,9 @@ def _raise_conflict(message: str) -> None:
 )
 async def create_job(
     payload: JobCreateRequest,
-    job_store=Depends(get_job_store),
-    settings=Depends(get_settings),
-    shutdown_event=Depends(get_shutdown_event),
+    job_store: JobStoreDep,
+    settings: SettingsDep,
+    shutdown_event: ShutdownEventDep,
 ) -> JobCreateResponse:
     try:
         host_policy = HostPolicy.from_settings(settings)
@@ -82,7 +82,7 @@ async def create_job(
     summary="List crawl jobs with live status",
     description="Return a list of all crawl jobs with basic status info.",
 )
-async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
+async def list_jobs(job_store: JobStoreDep) -> JobListResponse:
     jobs = await job_store.alist_jobs()
     return JobListResponse(jobs=[_build_job_status(row) for row in jobs])
 
@@ -96,7 +96,7 @@ async def list_jobs(job_store=Depends(get_job_store)) -> JobListResponse:
     ),
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
-async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusResponse:
+async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
     row = await job_store.astatus(job_id)
     if row is None:
         _raise_not_found(job_id)
@@ -104,6 +104,10 @@ async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusRes
     return _build_job_status(row)
 
 
+# The same provider triple as ``create_job``, deliberately: creating a job and
+# controlling one need identical state. The equality is verified against both
+# live signatures (test_job_endpoints_declare_the_same_dependencies), not
+# against a second hand-kept list of names here.
 @router.post(
     "/{job_id}/control",
     summary="Control a running crawl job (pause/resume/cancel)",
@@ -122,9 +126,9 @@ async def get_job(job_id: str, job_store=Depends(get_job_store)) -> JobStatusRes
 async def control_job(
     job_id: str,
     payload: JobControlRequest,
-    job_store=Depends(get_job_store),
-    settings=Depends(get_settings),
-    shutdown_event=Depends(get_shutdown_event),
+    job_store: JobStoreDep,
+    settings: SettingsDep,
+    shutdown_event: ShutdownEventDep,
 ) -> JobStatusResponse:
     action = payload.action.lower()
     if action not in {"pause", "resume", "cancel"}:
@@ -154,7 +158,7 @@ async def control_job(
     description="Permanently remove a crawl job and its data. Deleting a running job cancels its runner task first.",
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
-async def delete_job(job_id: str, job_store=Depends(get_job_store)) -> dict[str, str]:
+async def delete_job(job_id: str, job_store: JobStoreDep) -> dict[str, str]:
     if job_runner.is_running(job_id):
         job_runner.cancel_job_task(job_id)
     if not await job_store.adelete(job_id):

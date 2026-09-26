@@ -7,6 +7,7 @@ parse with ``asyncio.to_thread`` via the additive async shaping API.
 
 import asyncio
 
+import pytest
 from _assertions import install_to_thread_spy
 
 from app.api.response_shaping import (
@@ -91,6 +92,26 @@ async def test_abuild_unified_crawl_response_matches_sync():
     sync = build_unified_crawl_response(items, request_id="r", policy_schema_version="v")
     async_ = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
     assert async_.model_dump() == sync.model_dump()
+
+
+@pytest.mark.parametrize("submitted", [None, 0, 2, 7])
+async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(submitted):
+    """The ``submitted_count`` fallback is resolved once, for both builders.
+
+    It used to be written out in each of them -- ``submitted_count if submitted
+    is not None else len(results)`` -- and two copies of a fallback is how two
+    paths start disagreeing about how many URLs a batch held. The number is what
+    a caller reconciles its own accounting against, so a divergence here is a
+    wire bug, not a cosmetic one.
+    """
+    items = [_html_item(0), _html_item(1)]
+    sync = build_unified_crawl_response(items, request_id="r", submitted_count=submitted)
+    async_ = await abuild_unified_crawl_response(items, request_id="r", submitted_count=submitted)
+    assert async_.model_dump() == sync.model_dump()
+    # None means "the caller could not say", which the wire answers as the
+    # batch it is reporting; anything else is the caller's number verbatim,
+    # including a count that disagrees with the batch on purpose.
+    assert async_.submitted_count == (len(items) if submitted is None else submitted)
 
 
 async def test_abuild_unified_result_single_item_matches_sync():

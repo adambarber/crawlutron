@@ -1,23 +1,17 @@
 """``/v1/map`` endpoint handler.
 
 Map a root URL to its discovered-link frontier (in-page links plus
-robots/sitemap/feed URLs). The handler is exposed as a plain async
-function; the router in :mod:`app.api.map_router` calls it. main.py wires
-the router into the FastAPI app via ``include_router``.
+robots/sitemap/feed URLs). The router in :mod:`app.api.map_router` calls it.
 """
-
-from __future__ import annotations
 
 import asyncio
 import logging
 import time
 
 from app.api.crawl_executor import execute_crawl
-from app.api.exceptions import validation_http_error
-from app.api.main_helpers import record_crawl_completion
+from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api_models import MapRequest
 from app.constants import MAX_DISCOVERED_LINKS
-from app.health.readiness import READINESS_STATE as readiness_state
 from app.map import build_site_map
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -31,8 +25,7 @@ async def map_site(
     shutdown_event: asyncio.Event | None = None,  # injected via Depends(get_shutdown_event)
 ) -> dict:
     """Map ``payload.root_url`` to its discovered-link frontier."""
-    readiness_state.begin_request()
-    try:
+    with request_gate("map_request_rejected", logger=logger):
         payload_dict = payload.model_dump(exclude_none=True)
         # Mapping is a discovery operation; force discovery on regardless of caller input.
         policy = payload_dict.setdefault("policy", {})
@@ -58,11 +51,6 @@ async def map_site(
             logger=logger,
         )
         return build_site_map(result, host_policy=HostPolicy.from_settings(active_settings))
-    except ValueError as error:
-        logger.warning("map_request_rejected", extra={"error": str(error)})
-        raise validation_http_error(error) from error
-    finally:
-        readiness_state.end_request()
 
 
 __all__ = ["map_site"]

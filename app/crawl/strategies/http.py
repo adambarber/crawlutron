@@ -6,7 +6,6 @@ It must not reimplement client, transport, cookie, body, retry, or discovery pol
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import time
 from dataclasses import dataclass, field, replace
@@ -17,10 +16,8 @@ from app.constants import (
     DEFAULT_EXTRACTION,
     DEFAULT_MAX_DISCOVERED_LINKS,
     EXTRACTION_DOCUMENT,
-    EXTRACTION_METHOD_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,
     EXTRACTION_METHOD_HTTP_HTML,
-    EXTRACTION_METHOD_TRAFILATURA,
     EXTRACTION_TRAFILATURA,
     status_for_classification,
 )
@@ -28,13 +25,6 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.document_text import _format_extracted_document_text
-from app.crawl.extraction import (
-    _extract_document,
-    _extract_html,
-    extract_content,
-    extract_post_fetch_discovery,
-    normalized_extraction,
-)
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     _binary_no_text_result,
@@ -42,6 +32,12 @@ from app.crawl.result_helpers import (
     _make_engine_result,
 )
 from app.crawl.strategies import body_decode, content_cache_key, fetch_policy, request_profile
+from app.crawl.strategies.content_pipeline import (
+    _discover_after_fetch,
+    _discovery_result_fields,
+    _post_fetch_diagnostics,
+    _run_extraction,
+)
 from app.models import (
     Classification,
     CrawlStrategyAttempt,
@@ -49,7 +45,7 @@ from app.models import (
     EngineCrawlResult,
     HttpFetchResult,
 )
-from app.validation import HostPolicy, filter_js_endpoints
+from app.validation import HostPolicy
 
 
 @dataclass
@@ -81,9 +77,7 @@ class _HttpStrategyContext:
     content_hit: bool = False
     revalidated_304: bool = False
     response: Any = None
-    retry_diagnostics: dict[str, Any] = field(
-        default_factory=lambda: {"attempts": 0, "transient_errors": []}
-    )
+    retry_diagnostics: dict[str, Any] = field(default_factory=lambda: {"attempts": 0, "transient_errors": []})
 
 
 @dataclass
@@ -209,9 +203,7 @@ async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, A
     )
 
 
-def _not_modified_result(
-    ctx: _HttpStrategyContext, response: Any
-) -> EngineCrawlResult | None:
+def _not_modified_result(ctx: _HttpStrategyContext, response: Any) -> EngineCrawlResult | None:
     """Build the terminal result for a negotiated HTTP 304 response."""
     response_headers = {key.lower(): value for key, value in response.headers.items()}
     echoed_validators: dict[str, str] = {
@@ -225,18 +217,12 @@ def _not_modified_result(
             (
                 "last_modified",
                 response_headers.get("last-modified")
-                or (
-                    ctx.caller_conditional.get("If-Modified-Since")
-                    if ctx.caller_conditional
-                    else None
-                ),
+                or (ctx.caller_conditional.get("If-Modified-Since") if ctx.caller_conditional else None),
             ),
         )
         if value
     }
-    sent_conditional = any(
-        key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since")
-    )
+    sent_conditional = any(key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since"))
     if response.status_code != 304 or ctx.revalidated_304 or not sent_conditional:
         return None
 
@@ -338,36 +324,20 @@ async def _extract_http_phase(
         ("<html", "<!doctype html")
     )
     html = body_text if is_html else None
-    if ctx.extraction == EXTRACTION_DOCUMENT:
-        extracted = await asyncio.to_thread(_extract_document, decompressed, response.final_url)
-        text, markdown = normalized_extraction(extracted)
-        if (content_type or "").lower().startswith("text/"):
-            text = _format_extracted_document_text(text, source_url=response.final_url)
-            markdown = text
-        extraction_method = EXTRACTION_METHOD_DOCUMENT
-    elif ctx.extraction == EXTRACTION_TRAFILATURA:
-        if is_html:
-            extracted = await asyncio.to_thread(
-                _extract_html,
-                body_text,
-                response.final_url,
-                **_extraction_selector_kwargs(ctx.policy),
-            )
-            text, markdown = normalized_extraction(extracted)
-        else:
-            text = ""
-            markdown = None
-        extraction_method = EXTRACTION_METHOD_TRAFILATURA
-    else:
-        extracted = await asyncio.to_thread(
-            extract_content,
-            decompressed,
-            content_type,
-            response.final_url,
-            **_extraction_selector_kwargs(ctx.policy),
-        )
-        text, markdown = normalized_extraction(extracted)
-        extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY
+    extracted = await _run_extraction(
+        extraction=ctx.extraction,
+        content=decompressed,
+        decoded=body_text,
+        content_type=content_type,
+        final_url=response.final_url,
+        policy=ctx.policy,
+        default_method=EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY,
+        html=is_html,
+    )
+    text, markdown = extracted.text, extracted.markdown
+    if ctx.extraction == EXTRACTION_DOCUMENT and (content_type or "").lower().startswith("text/"):
+        text = _format_extracted_document_text(text, source_url=response.final_url)
+        markdown = text
 
     return _ExtractedHttpContent(
         decompressed=decompressed,
@@ -376,7 +346,7 @@ async def _extract_http_phase(
         html=html,
         text=text,
         markdown=markdown,
-        extraction_method=extraction_method,
+        extraction_method=extracted.extraction_method,
         strategy_decompression_failed=strategy_decompression_failed,
         content_metrics=body_decode._content_metrics(text, html),
     )
@@ -386,13 +356,6 @@ def _request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
     return {
         "user_agent_family": str(profile.get("user_agent_family", "generic_crawler")),
         "cookie_jar": str(profile.get("cookie_jar", "none")),
-    }
-
-
-def _extraction_selector_kwargs(policy: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "css_selector": policy.get("css_selector"),
-        "xpath": policy.get("xpath"),
     }
 
 
@@ -473,8 +436,7 @@ async def _construct_http_result(
     status = status_for_classification(classification)
     diagnostics: dict[str, Any] = {
         "decompression_failed": bool(
-            extracted.strategy_decompression_failed
-            or getattr(response, "decompression_failed", False)
+            extracted.strategy_decompression_failed or getattr(response, "decompression_failed", False)
         ),
         "request_profile": _request_profile_diagnostics(ctx.profile),
         "retry": ctx.retry_diagnostics,
@@ -484,16 +446,14 @@ async def _construct_http_result(
     discovery = ctx.policy.get("discovery") or {}
     max_depth = int((ctx.policy.get("limits") or {}).get("max_depth") or 0)
     want_discovery_links = bool(discovery) or max_depth > 0
-    post_fetch = await asyncio.to_thread(
-        extract_post_fetch_discovery,
-        extracted.html,
-        response.final_url,
+    post_fetch = await _discover_after_fetch(
+        html=extracted.html,
+        final_url=response.final_url,
         js_base_url=ctx.normalized_url,
         max_links=ctx.limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
         include_diagnostics=bool(discovery),
         include_links=status == "success" and want_discovery_links,
         include_js_endpoints=bool(discovery),
-        include_metadata=True,
         host_policy=ctx.host_policy,
     )
     if discovery:
@@ -519,14 +479,8 @@ async def _construct_http_result(
         if discovery_diag:
             discovery_diag.pop("sitemap_urls", None)
             discovery_diag.pop("feeds", None)
-    diagnostics["js_endpoints"] = filter_js_endpoints(
-        post_fetch["js_endpoints"],
-        resolve_against=response.final_url,
-        policy=ctx.host_policy,
-    )
     next_page_url = post_fetch["next_page_url"]
-    if next_page_url:
-        diagnostics["next_page_url"] = next_page_url
+    diagnostics.update(_post_fetch_diagnostics(post_fetch, response.final_url, ctx.host_policy))
 
     quality = body_decode._quality_score(
         status,
@@ -577,16 +531,15 @@ async def _construct_http_result(
         content_type=content_type,
         html=html,
         text=extracted.text,
-        llm_metadata=post_fetch["llm_metadata"] or None,
         markdown=extracted.markdown,
         extraction_method=extracted.extraction_method,
         quality_score=quality,
-        classification_evidence=classification_evidence,
         diagnostics=diagnostics,
-        discovered_link_count=post_fetch["discovered_link_count"],
-        discovered_links_truncated=post_fetch["discovered_links_truncated"],
-        discovered_links=post_fetch["discovered_links"],
-        error=error_classification,
+        **_discovery_result_fields(
+            post_fetch,
+            classification_evidence=classification_evidence,
+            error=error_classification,
+        ),
         next_page_url=next_page_url,
         validators=origin_validators,
     )

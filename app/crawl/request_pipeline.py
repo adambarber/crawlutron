@@ -29,6 +29,7 @@ from app.memory_pressure import read_memory_stats
 from app.models import CrawlTask, CrawlWorker, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import (
     ResourceGate,
+    TaskRamBudget,
     WeightedAdmission,
     _build_admission_policy,
     derive_browser_pool_size,
@@ -307,7 +308,7 @@ async def _run_recursive(state: _PipelineState) -> None:
             read_memory_stats().total_bytes or 0,
             pool_size=derive_browser_pool_size(),
             max_concurrent_pages=state.settings.max_concurrent_pages,
-            doc_workers=doc_worker_count(),
+            budget=TaskRamBudget(doc_workers=doc_worker_count()),
         ),
     )
     await run_recursive_crawl(

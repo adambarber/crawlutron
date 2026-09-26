@@ -10,6 +10,7 @@ turns the build red.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import inspect
 import pathlib
 import re
@@ -52,6 +53,7 @@ from chokepoint_walks import (
 )
 from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
+from app.api_models import UnifiedCrawlResponse
 from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from app.settings import ENVIRONMENT_FIELD_ALIASES
 
@@ -490,7 +492,45 @@ __all__ = [
 # that increments `chain.hops`, so a re-spelled loop that forgot it terminates
 # the walk instead of looping, and a re-spelled loop that dropped the re-pin
 # simply had no chokepoint to drift from.
-_APP_TREE_CODE_LINE_BUDGET = 14_915
+# Spent, argued in the same terms: the browser and HTTP strategies each spelled
+# the three-way extraction dispatch, the offloaded post-fetch discovery call,
+# and the same block of discovered-links result fields, and jscpd reported the
+# import block and the result block. The consolidation is
+# `strategies/content_pipeline.py`: `_run_extraction` owns the mode chain,
+# `_discover_after_fetch` the single offloaded discovery parse,
+# `_discovery_result_fields` the one projection from an envelope to result
+# fields, and `_post_fetch_diagnostics` the pagination hint plus the
+# `filter_js_endpoints` egress door both answers to a page must share. The +27
+# is one module's imports, four signatures and the wiring behind them; it buys
+# the property that a discovered-links field cannot reach one strategy's result
+# and not the other's -- a divergence between two well-formed results that
+# nothing else in the tree can see, and that the HTTP path alone threading a
+# new field would have shipped. `test_the_selector_pair_is_one_contract` names
+# the same module for the same reason: the selector pair reaches extraction as
+# one `**selectors` mapping, built where the dispatch is.
+#
+# +8 since the last reconciliation, and the three slices that spent it are
+# recorded in the same terms as the ones above:
+#   * `crawl/strategies/content_pipeline.py` (+102, agent 2) buys the four
+#     chokepoints named immediately above this comment.
+#   * `crawl/coordination_store.py` (+14, agent 3) moves the `StoreSchema` +
+#     `connect_store` pairing -- a claim about who owns a schema -- behind one
+#     base class, so `CoordinationCounters` lost its `__init__` entirely and
+#     both stores dropped their `sqlite3`/`threading` imports.
+#   * `crawl/extraction.py` (+20, mine) makes the non-HTML selector drop
+#     reportable instead of silent. That is behaviour, not refactor: a
+#     `css_selector` against a PDF reached the public API and returned the whole
+#     document looking like a successful narrowing. A chokepoint that cannot
+#     express "this input does not apply here" is not a chokepoint, so the
+#     line is the fix.
+# Against that, `browser_result.py` and `http.py` are down 43 and 45 lines
+# (`_BrowserContent` deleted; both strategies now build the pipeline's
+# `_ExtractedContent`), `search/providers.py` is down 8 (a provider inherits
+# `_request`/`_items_of`, and `_results` lost three key parameters that had
+# become redundant with the class attributes), and `models.py` is down 3 (the
+# taxonomy `__post_init__` trampoline is gone; every result dataclass now
+# inherits it from `_LiteralChecked`).
+_APP_TREE_CODE_LINE_BUDGET = 14_923
 
 
 def assert_trees_clean(
@@ -529,6 +569,98 @@ def test_app_tree_code_line_count_does_not_grow():
         f"docstrings excluded); the whole-tree ceiling is "
         f"{_APP_TREE_CODE_LINE_BUDGET}. Lower the ceiling when code is removed; "
         "a raise must be argued in the comment above, never spent silently."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The admission sizing weights are one value
+#
+# ``_build_admission_policy`` and ``max_http_concurrency_for`` each took the same
+# four sizing weights as keyword-only parameters, and the pair jscpd reported was
+# those two signatures rather than any logic. The weights are now one frozen
+# ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
+# function hands on unchanged.
+#
+# The drift this guards is a caller going back to the flat list. Nothing about
+# the arithmetic stops that: a ``doc_workers=2`` keyword would work again the
+# moment the parameter was re-added, and the weight would be reserved outside the
+# budget the policy is built from -- the two lists drifting apart again, which is
+# the shape the consolidation removed. So the budget is the only way in, and
+# this says so over the whole tree rather than over the two modules involved.
+# ---------------------------------------------------------------------------
+
+# The four weights, read from the dataclass rather than transcribed: a weight
+# added to TaskRamBudget is covered here the day it lands.
+_ADMISSION_POLICY = "_build_admission_policy"
+
+
+def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A ``_build_admission_policy`` call carrying a sizing weight as a keyword."""
+    from app.resource_pressure import TaskRamBudget
+
+    weights = {field.name for field in dataclasses.fields(TaskRamBudget)}
+    assert weights, "TaskRamBudget declared no weights; this sweep would be a no-op"
+    offenders: list[str] = []
+    for node in calls_to_any(tree, {_ADMISSION_POLICY}):
+        for keyword in node.keywords:
+            if keyword.arg not in weights:
+                continue
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...)"
+                    " spells a sizing weight directly; pass a"
+                    " resource_pressure.TaskRamBudget so the policy is built from the"
+                    " same weights it reports",
+                )
+            )
+    return offenders
+
+
+def test_admission_sizing_reaches_the_policy_as_one_budget():
+    """No caller re-spells the four sizing weights as keywords to the policy builder."""
+    assert_trees_clean(
+        _admission_budget_offenders,
+        "admission sizing weights must arrive as a TaskRamBudget, not as four"
+        " keywords that can drift from the budget the policy reports",
+    )
+
+
+def test_admission_budget_detector_bites():
+    """The flat keyword fires on every weight; the budget form is clean.
+
+    ``max_http_concurrency_for`` is deliberately NOT in this set: it is the
+    per-call computation the budget is bound for, so it still takes the four
+    weights flat and its own call inside the policy function is the sanctioned
+    forwarding. What is banned is a *caller* re-spelling them.
+    """
+    assert_fires_once(
+        _admission_budget_offenders,
+        {
+            "from app.resource_pressure import _build_admission_policy\n"
+            "def build(limit, pool_size):\n"
+            "    return _build_admission_policy(limit, pool_size=pool_size,"
+            " max_concurrent_pages=3, doc_workers=2)\n": "doc_workers=2",
+        },
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _admission_budget_offenders,
+        (
+            "from app.resource_pressure import TaskRamBudget, _build_admission_policy\n"
+            "def build(limit, pool_size):\n"
+            "    return _build_admission_policy(limit, pool_size=pool_size,"
+            " max_concurrent_pages=3, budget=TaskRamBudget(doc_workers=2))\n",
+            # The computation itself is not this guard's subject.
+            "from app.resource_pressure import max_http_concurrency_for\n"
+            "def ceiling(limit, pool_size):\n"
+            "    return max_http_concurrency_for(limit, pool_size, doc_workers=2)\n",
+            "from app.resource_pressure import _build_admission_policy\n"
+            "def build(limit, pool_size):\n"
+            "    return _build_admission_policy(limit, pool_size=pool_size, max_concurrent_pages=3)\n",
+        ),
+        REPO_ROOT / "app" / "_synthetic.py",
     )
 
 
@@ -706,7 +838,14 @@ def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag re.<method>(<non-literal pattern>, ...) -- the ReDoS shape."""
     offenders: list[str] = []
     for node in nodes_of_type(tree, ast.Call):
-        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and (node.func.value.id == 're') and (node.func.attr in _RE_DYNAMIC_METHODS) and node.args and (not isinstance(node.args[0], ast.Constant)):
+        if (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and (node.func.value.id == "re")
+            and (node.func.attr in _RE_DYNAMIC_METHODS)
+            and node.args
+            and (not isinstance(node.args[0], ast.Constant))
+        ):
             offenders.append(offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)"))
     return offenders
 
@@ -714,7 +853,8 @@ def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_no_dynamic_pattern_re_calls():
     """re.* with a non-literal pattern must go through app.safe_regex."""
     assert_trees_clean(
-        _dynamic_pattern_re_calls, 'Use app.safe_regex.compile_untrusted/match_bounded',
+        _dynamic_pattern_re_calls,
+        "Use app.safe_regex.compile_untrusted/match_bounded",
         trees=app_trees(),
     )
 
@@ -739,7 +879,14 @@ def test_no_bare_re_compile_on_nonliteral():
     offenders: list[str] = []
     for path, tree in app_trees():
         for node in nodes_of_type(tree, ast.Call):
-            if isinstance(node.func, ast.Attribute) and node.func.attr == 'compile' and isinstance(node.func.value, ast.Name) and (node.func.value.id == 're') and node.args and (not isinstance(node.args[0], ast.Constant)):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "compile"
+                and isinstance(node.func.value, ast.Name)
+                and (node.func.value.id == "re")
+                and node.args
+                and (not isinstance(node.args[0], ast.Constant))
+            ):
                 offenders.append(offender(path, node.lineno))
     assert not offenders, "Use app.safe_regex.compile_untrusted for non-literal patterns: " + ", ".join(
         offenders
@@ -810,7 +957,8 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
 def test_no_await_inside_lock_bodies():
     """A lock held across an await blocks the loop and can deadlock (M3)."""
     assert_trees_clean(
-        _lock_bodies_with_awaits, 'Lock held across await',
+        _lock_bodies_with_awaits,
+        "Lock held across await",
         trees=app_trees(),
     )
 
@@ -887,8 +1035,9 @@ def test_no_hand_rolled_redirect_hops():
     """Redirect hops anywhere go through SafeUrl.redirect_hop (or the pinned
     fetch helper), never a raw urljoin combined with a 3xx status test."""
     assert_trees_clean(
-        _hand_rolled_redirect_hops, 'Use SafeUrl.redirect_hop for redirect hops',
-        trees=app_trees(exclude=SANCTIONED | {'safe_url.py'}),
+        _hand_rolled_redirect_hops,
+        "Use SafeUrl.redirect_hop for redirect hops",
+        trees=app_trees(exclude=SANCTIONED | {"safe_url.py"}),
     )
 
 
@@ -938,7 +1087,8 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_batch_dedup_keys_on_canonical_page_identity():
     """URL-batch dedup must collapse by ``normalize_public_http_url``, never raw strings."""
     assert_trees_clean(
-        _raw_batch_dedup_offenders, 'dedup url batches via normalize_public_http_url, not raw dict.fromkeys',
+        _raw_batch_dedup_offenders,
+        "dedup url batches via normalize_public_http_url, not raw dict.fromkeys",
         trees=app_trees(),
     )
 
@@ -996,8 +1146,9 @@ def test_no_bare_body_reads():
     convention to avoid flagging file/socket reads.
     """
     assert_trees_clean(
-        _bare_body_reads, 'Use app.bounded_io.read_capped_sync/read_capped_async',
-        trees=app_trees(exclude=SANCTIONED | {'bounded_io.py'}),
+        _bare_body_reads,
+        "Use app.bounded_io.read_capped_sync/read_capped_async",
+        trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
     )
 
 
@@ -1048,9 +1199,7 @@ def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
     for node in nodes_of_type(tree, ast.Dict):
         keys = {
-            key.value
-            for key in node.keys
-            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            key.value for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
         }
         if required <= keys:
             offenders.append(offender(path, node.lineno, "cache-envelope"))
@@ -1069,8 +1218,8 @@ def test_cache_envelope_is_built_by_one_owner():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED | {"content_cache.py"}):
         offenders.extend(_cache_envelope_literals(tree, path))
-    assert not offenders, (
-        "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(offenders)
+    assert not offenders, "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(
+        offenders
     )
 
 
@@ -1128,9 +1277,8 @@ def test_extraction_text_is_normalized_by_one_owner():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED | {"extraction.py"}):
         offenders.extend(_inline_extraction_normalizations(tree, path))
-    assert not offenders, (
-        "extraction text is normalized inline instead of by its owner:\n  "
-        + "\n  ".join(offenders)
+    assert not offenders, "extraction text is normalized inline instead of by its owner:\n  " + "\n  ".join(
+        offenders
     )
 
 
@@ -1139,9 +1287,9 @@ def test_extraction_text_normalization_detector_bites():
     lookalike -- otherwise it either misses the shape or flags a pattern that
     belongs to somebody else."""
     synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    inline = ast.parse("def f(e):\n    return e.text or \"\"\n")
+    inline = ast.parse('def f(e):\n    return e.text or ""\n')
     assert _inline_extraction_normalizations(inline, synthetic), "inline normalization escaped"
-    other = ast.parse("def f(d):\n    return d.label or \"\"\n")
+    other = ast.parse('def f(d):\n    return d.label or ""\n')
     assert not _inline_extraction_normalizations(other, synthetic), "unrelated or-'' flagged"
 
 
@@ -1159,8 +1307,9 @@ def test_html_input_cap_is_declared_once():
     alongside the stream caps.
     """
     assert_trees_clean(
-        _local_html_input_caps, 'Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input instead of declaring a second HTML input cap',
-        trees=app_trees(exclude=SANCTIONED | {'bounded_io.py'}),
+        _local_html_input_caps,
+        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input instead of declaring a second HTML input cap",
+        trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
     )
 
 
@@ -1201,7 +1350,7 @@ def _scope_matcher_definitions() -> list[str]:
     defs: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
         for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
-            if node.name in {'scope_allows', '_scope_allows'}:
+            if node.name in {"scope_allows", "_scope_allows"}:
                 defs.append(offender(path, node.lineno))
     return defs
 
@@ -1378,10 +1527,92 @@ def _frontier_link_url_call(node: ast.AST) -> bool:
     )
 
 
+def _optional_host_policy_offenders(tree, path):
+    """A ``HostPolicy`` parameter must never be optional.
+
+    The host policy is the SSRF gate. Every one of the 70-odd functions that
+    takes one requires it, and requiring it is the point: a caller that forgot
+    to pass a policy gets a ``TypeError`` at the boundary rather than a fetch
+    that quietly ran against the wrong target policy.
+
+    Defaulting one turns that into a silent bypass, and nothing else in the
+    stack catches it. Verified by mutation, twice:
+
+      * ``fetchers._default_cffi_fetcher`` with
+        ``policy: HostPolicy = HostPolicy((), ())`` -- ``mypy app`` reported no
+        issues across 111 files, because protocol conformance is
+        one-directional and an implementation may accept more than the contract
+        asks for. The fetcher contract guard now covers that one specifically
+        (see test_type_contracts).
+      * ``pinned_transport._build_pinned_request_async`` with the same default
+        -- no Protocol covers that pair, and every AST invariant in this file
+        passed. This rule is what closes it.
+
+    The rule is derived from the *type* rather than from a name list, which is
+    what makes it hold for a function nobody has written yet: any
+    ``HostPolicy``-annotated parameter anywhere in ``app/``, in any module, at
+    any nesting depth. ``policy`` and ``host_policy`` are both in scope because
+    the rule keys off the annotation, not the name.
+    """
+    for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda):
+        args = node.args
+        positional = [*args.posonlyargs, *args.args]
+        defaulted = set()
+        for index, arg in enumerate(positional):
+            if index >= len(positional) - len(args.defaults):
+                defaulted.add(arg.arg)
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+            if default is not None:
+                defaulted.add(arg.arg)
+        for arg in [*positional, *args.kwonlyargs]:
+            if arg.arg not in defaulted:
+                continue
+            annotation = arg.annotation
+            if isinstance(annotation, ast.Name) and annotation.id == "HostPolicy":
+                yield offender(
+                    path,
+                    arg.lineno,
+                    f"{getattr(node, 'name', '<lambda>')}: parameter {arg.arg!r} is a "
+                    "HostPolicy and is optional; a caller that omits the SSRF policy gets "
+                    "the default instead of a TypeError",
+                )
+
+
+def test_the_host_policy_is_never_optional():
+    offenders = []
+    for path, tree in app_trees():
+        offenders.extend(_optional_host_policy_offenders(tree, path))
+    assert not offenders, (
+        "a HostPolicy parameter must be required everywhere in app/; an optional one is an "
+        "SSRF bypass that neither mypy nor any other guard catches: " + ", ".join(offenders)
+    )
+
+
+def test_optional_host_policy_detector_bites():
+    bad = ast.parse("async def f(url, *, policy: HostPolicy = HostPolicy((), ())):\n    return url\n")
+    found = list(_optional_host_policy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(found) == 1, found
+    assert "is a HostPolicy and is optional" in found[0], found
+
+    # A default on a *positional* HostPolicy is caught too, not just the
+    # keyword-only form the mutations used.
+    positional = ast.parse("def g(policy: HostPolicy = HostPolicy((), ())):\n    pass\n")
+    assert list(_optional_host_policy_offenders(positional, REPO_ROOT / "app" / "_synthetic.py"))
+
+    # The required form is left alone, and so is a required parameter the rule
+    # does not key off -- it is the annotation that matters, not the name.
+    good = ast.parse(
+        "async def h(url, *, policy: HostPolicy, host_policy: HostPolicy, other: str = 'x'):\n"
+        "    return url\n"
+    )
+    assert not list(_optional_host_policy_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
+
+
 def test_no_raw_href_frontier_sinks():
     """The frontier only ever carries frontier_link_url()-validated URLs (H1)."""
     assert_trees_clean(
-        _frontier_sink_offenders, 'Read normalized_url via frontier_link_url(), never raw url',
+        _frontier_sink_offenders,
+        "Read normalized_url via frontier_link_url(), never raw url",
         trees=app_trees(),
     )
 
@@ -1434,6 +1665,218 @@ def test_crawl_response_chokepoint_detector_bites():
     assert len(offenders) == 1, offenders
     stored = ast.parse("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n")
     assert not _crawl_response_construction_offenders(stored, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
+# The same chokepoint, two more edges
+#
+# ``abuild_unified_crawl_response`` is the response builder, but the drift that
+# actually shipped was never in the builder: it was in the ADAPTER -- the two
+# endpoints each read a raw producer envelope and passed four fields by name,
+# and a field added to one and forgotten on the other was dropped by the model
+# without a word. The rules below close both ends of that: the envelope is
+# adapted in one module, and its scalar fields are passed in one function.
+# ---------------------------------------------------------------------------
+
+_ENVELOPE_OWNER_MODULE = "app/api/response_shaping.py"
+_ENVELOPE_OWNER_FUNCTION = "_response_envelope"
+_ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_response")
+# The only callers permitted to skip the owner's envelope read, each named with
+# the reason it is not the same shape as a wire endpoint's:
+#   app/api/async_crawl_runner.py -- the detached background runner. It answers a
+#     webhook instead of a caller and reads the envelope LENIENTLY
+#     (``result.get("submitted_count")``), because a producer that stopped
+#     stamping a key must fail a job, not raise out of a background task that
+#     has no caller to answer.
+#   app/mcp/tools.py -- the MCP crawl tool, which is the same adaptation as
+#     /v1/crawl and is still spelled out at its own call site. PENDING: it is
+#     outside app/api, so it is named here rather than migrated, and this entry
+#     is what a reviewer should delete once it goes through the owner.
+_ENVELOPE_ADAPTER_EXEMPT = frozenset({"app/api/async_crawl_runner.py", "app/mcp/tools.py"})
+# Derived from the model, not transcribed: the rule is "every field the wire
+# model requires is passed by one function", so the field set has to come from
+# the model or this guard would check a list that can fall behind it.
+_ENVELOPE_SCALAR_FIELDS = frozenset(UnifiedCrawlResponse.model_fields) - {"results"}
+
+
+def _unsanctioned_envelope_adapter_offenders(tree, path):
+    """Flag a response builder called from outside the shaping owner module."""
+    relative = relative_posix(path)
+    if relative == _ENVELOPE_OWNER_MODULE or relative in _ENVELOPE_ADAPTER_EXEMPT:
+        return []
+    return [
+        offender(path, call.lineno, f"{call.func.id}() outside {_ENVELOPE_OWNER_MODULE}")
+        for call in calls_to_any(tree, _ENVELOPE_BUILDERS)
+    ]
+
+
+def test_crawl_response_envelope_is_adapted_by_one_owner():
+    """Endpoints read a producer envelope through the shaping owner, not by hand."""
+    assert_trees_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        "adapt a producer envelope with app.api.response_shaping's envelope owner, "
+        "so an envelope field cannot be passed on one path and forgotten on another",
+    )
+
+
+def test_crawl_response_envelope_adapter_detector_bites():
+    """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
+    fires = {
+        "async def f(result):\n"
+        "    return await abuild_unified_crawl_response(result['results'], request_id=result['request_id'])\n": "abuild_unified_crawl_response",
+        "def f(results):\n    return build_unified_crawl_response(results)\n": "build_unified_crawl_response",
+    }
+    assert_fires_once(
+        _unsanctioned_envelope_adapter_offenders,
+        fires,
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        (
+            "async def f(result):\n"
+            "    return await _aunified_response_from_result(result, adapt=render_result_to_unified)\n",
+        ),
+        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+    )
+    assert_stays_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        (
+            "async def f(request_id):\n"
+            "    return await abuild_unified_crawl_response([], request_id=request_id, success=False)\n",
+        ),
+        REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
+    )
+
+
+def _hand_rolled_envelope_fields_offenders(tree, path):
+    """Flag the unified envelope's scalar fields being passed outside their owner.
+
+    Every one of those fields is REQUIRED by :class:`UnifiedCrawlResponse`, so a
+    second spelling of the list is a second place to forget a field -- and a
+    forgotten field is dropped silently, which is how one shipped missing from
+    one endpoint and was caught only by curling the live endpoint. The
+    ``submitted_count`` fallback that decides what the wire calls a batch's size
+    lives in the same function for the same reason: it used to be written in both
+    builders, and two copies of a fallback is how two paths start disagreeing
+    about a count.
+    """
+    relative = relative_posix(path)
+    offenders: list[str] = []
+    for call in calls_named(tree, "UnifiedCrawlResponse"):
+        if not any(keyword.arg in _ENVELOPE_SCALAR_FIELDS for keyword in call.keywords):
+            continue
+        enclosing = next(
+            (f for f in functions(tree) if f.lineno <= call.lineno <= (f.end_lineno or f.lineno)),
+            None,
+        )
+        if (
+            relative == _ENVELOPE_OWNER_MODULE
+            and getattr(enclosing, "name", None) == _ENVELOPE_OWNER_FUNCTION
+        ):
+            continue
+        offenders.append(
+            offender(path, call.lineno, f"envelope fields are passed by {_ENVELOPE_OWNER_FUNCTION} only")
+        )
+    return offenders
+
+
+def test_crawl_response_envelope_fields_are_passed_by_one_owner():
+    assert_trees_clean(
+        _hand_rolled_envelope_fields_offenders,
+        "pass the unified envelope's fields in app.api.response_shaping._response_envelope; "
+        "a field the model requires is dropped, not rejected, when a caller forgets it",
+    )
+
+
+def test_crawl_response_envelope_fields_detector_bites():
+    """A second field spelling fires, anywhere; the owner's own build and a
+    ``**stored`` deserialization stay clean."""
+    hand_rolled = (
+        "def build(results, request_id):\n"
+        "    return UnifiedCrawlResponse(results=results, request_id=request_id, success=True, "
+        "submitted_count=len(results), policy_schema_version='v')\n"
+    )
+    assert_fires_once(
+        _hand_rolled_envelope_fields_offenders,
+        {hand_rolled: _ENVELOPE_OWNER_FUNCTION},
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _hand_rolled_envelope_fields_offenders,
+        ("def get_crawl_result(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _hand_rolled_envelope_fields_offenders,
+        (hand_rolled.replace("def build(", f"def {_ENVELOPE_OWNER_FUNCTION}("),),
+        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint readiness gate (the rejection tail)
+#
+# ``request_gate`` (app/api/main_helpers.py) owns the whole gated tail: admit,
+# reject (operator warning + the shared 4xx), release. Spelled per endpoint the
+# three obligations were independently droppable, and the expensive one to lose
+# is the release -- a rejected request that skips ``end_request`` holds its
+# readiness slot for the life of the process. Pinning the counters to one module
+# makes "an endpoint cannot forget to release" structural: a new gated endpoint
+# has to enter the gate, and a re-spelled tail has no chokepoint to drift from.
+# ---------------------------------------------------------------------------
+
+_READINESS_GATE_EXEMPT = (
+    # The owner itself.
+    "app/api/main_helpers.py",
+    # PENDING: the fourth gated endpoint, outside app/api. It admits and releases
+    # the same slot but has no ValueError rejection to delegate -- it answers 503
+    # and 502 from provider failures, which is not what request_gate converts --
+    # so it takes the counters directly. Migrating it means teaching the gate
+    # those codes or splitting admission from rejection; either way the entry
+    # below should go with the migration.
+    "app/search/endpoint.py",
+)
+
+
+def _unsanctioned_readiness_counter_offenders(tree, path):
+    """Flag a direct readiness-slot admit/release outside the gate chokepoint."""
+    return [
+        offender(path, call.lineno, f"{callee.attr}() outside app.api.main_helpers.request_gate")
+        for call, callee in attribute_calls(tree)
+        if callee.attr in {"begin_request", "end_request"}
+    ]
+
+
+def test_readiness_slots_are_admitted_and_released_by_the_gate():
+    offenders = app_offenders(_unsanctioned_readiness_counter_offenders, skip=_READINESS_GATE_EXEMPT)
+    assert not offenders, (
+        "take a readiness slot with app.api.main_helpers.request_gate; a hand-written "
+        "admit/release is how a rejected request holds its slot for the life of the "
+        "process: " + ", ".join(offenders)
+    )
+
+
+def test_readiness_counter_detector_bites():
+    """A hand-rolled admit, and a hand-rolled release, both fire; the gate stays clean."""
+    fires = {
+        "def f():\n    readiness_state.begin_request()\n": "begin_request",
+        "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n": "end_request",
+        "def f():\n    return READINESS_STATE.end_request()\n": "end_request",
+    }
+    assert_fires_once(
+        _unsanctioned_readiness_counter_offenders, fires, REPO_ROOT / "app" / "api" / "_synthetic.py"
+    )
+    assert_stays_clean(
+        _unsanctioned_readiness_counter_offenders,
+        (
+            "async def f(payload):\n"
+            '    with request_gate("crawl_request_rejected", logger=logger):\n'
+            "        return await execute(payload)\n",
+            "def f():\n    get_metrics().observe_crawl(errors=1)\n",
+        ),
+        REPO_ROOT / "app" / "api" / "_synthetic.py",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1570,7 +2013,7 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
         if fn.name not in _CACHE_TWIN_METHODS:
             continue
         for sub in nodes_of_type(fn, ast.Subscript):
-            if isinstance(sub.value, ast.Attribute) and sub.value.attr == '_memory_cache':
+            if isinstance(sub.value, ast.Attribute) and sub.value.attr == "_memory_cache":
                 offenders.append(
                     offender(path, fn.lineno, f"{fn.name}() reads/writes _memory_cache directly")
                 )
@@ -1581,7 +2024,8 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
 def test_memory_cache_only_via_locked_helpers():
     """get/set/aget/aset never touch the raw RAM-mirror dict."""
     assert_trees_clean(
-        _memory_cache_twin_offenders, 'Use _take_memory_locked/_remember_memory_locked',
+        _memory_cache_twin_offenders,
+        "Use _take_memory_locked/_remember_memory_locked",
         trees=app_trees(),
     )
 
@@ -1656,7 +2100,8 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
 def test_locked_cache_helpers_are_called_under_the_lock():
     """M1 class: every ``_*_locked`` call sits inside a ``with ...lock`` block."""
     assert_trees_clean(
-        _locked_calls_outside_lock_offenders, 'call *_locked helpers inside `with self._lock`',
+        _locked_calls_outside_lock_offenders,
+        "call *_locked helpers inside `with self._lock`",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -1718,7 +2163,8 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_no_hand_rolled_error_envelopes():
     """Every HTTP error body flows through error_envelope/http_error (#1722)."""
     assert_trees_clean(
-        _envelope_dict_offenders, 'Use app.api.exceptions.http_error/browser_pool_unavailable',
+        _envelope_dict_offenders,
+        "Use app.api.exceptions.http_error/browser_pool_unavailable",
         trees=app_trees(exclude=ENVELOPE_SANCTIONED),
     )
 
@@ -1780,7 +2226,8 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_no_provider_dedupe_loop_reinlines():
     """One normalize/dedupe/clip contract for all keyed providers."""
     assert_trees_clean(
-        _provider_loop_reinlines, 'Use app.search.providers._collect_results',
+        _provider_loop_reinlines,
+        "Use app.search.providers._collect_results",
         trees=app_trees(),
     )
 
@@ -1809,6 +2256,188 @@ def test_provider_loop_detector_bites():
         "    return results\n"
     )
     assert not _provider_loop_reinlines(ddg_like, REPO_ROOT / "app" / "search" / "_synthetic.py")
+
+
+# The names of the one selector contract; see
+# ``app/crawl/extraction.py`` for why three entry points share it and why the
+# shared tail cannot be collapsed.
+_SELECTOR_PARAMS = ("css_selector", "xpath")
+
+
+def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A function taking one selector must take both; an extractor defaults both.
+
+    The selector pair reaches extraction as one ``**selectors`` mapping
+    (``app/crawl/strategies/content_pipeline.py``), so a function that declares
+    only one of the two names cannot be handed both, and a selector is a
+    *narrowing* request: a function that defaults one to a real selector applies
+    a narrowing the caller never asked for. Both are the same defect class -- a
+    narrowing parameter accepted and then not honoured (or honoured wrongly) for
+    some value the caller can send.
+
+    The "both or neither" half holds for every consumer, including the content
+    cache key that legitimately *requires* both. The "defaults to None" half is
+    scoped to the extractors, identified by their return type, because a
+    required selector is the right shape everywhere else.
+    """
+    offenders: list[str] = []
+    for node in functions(tree):
+        params = node.args
+        positional = [arg.arg for arg in (*params.posonlyargs, *params.args)]
+        names = [*positional, *(arg.arg for arg in params.kwonlyargs)]
+        if not any(name in names for name in _SELECTOR_PARAMS):
+            continue
+        declared = [name for name in names if name in _SELECTOR_PARAMS]
+        if declared != list(_SELECTOR_PARAMS):
+            offenders.append(offender(path, node.lineno, f"{node.name} takes only {declared}"))
+            continue
+        returns = node.returns
+        if not (isinstance(returns, ast.Name) and returns.id == "ExtractedContent"):
+            continue
+        # Defaults align to the TAIL of the positional list, not the head.
+        default_of = dict(zip(positional[len(positional) - len(params.defaults) :], params.defaults))
+        default_of.update({arg.arg: value for arg, value in zip(params.kwonlyargs, params.kw_defaults)})
+        for name in _SELECTOR_PARAMS:
+            value = default_of.get(name)
+            if not (isinstance(value, ast.Constant) and value.value is None):
+                offenders.append(offender(path, node.lineno, f"{node.name}.{name} does not default to None"))
+    return offenders
+
+
+def test_the_selector_pair_is_one_contract():
+    """A selector-aware extractor takes both selectors, both defaulting to None."""
+    assert_trees_clean(
+        _selector_contract_offenders,
+        "a selector-aware function must take css_selector and xpath together, and"
+        " an extractor must default both to None; a lone or defaulted selector is"
+        " accepted and then not honoured",
+    )
+
+
+def test_selector_contract_detector_bites():
+    """A lone selector fires, a defaulted extractor selector fires, the real shape passes."""
+    assert_fires_once(
+        _selector_contract_offenders,
+        {
+            "def _extract_html(html, url, css_selector=None) -> ExtractedContent:\n"
+            "    ...\n": "takes only ['css_selector']",
+            "def _extract_html(html, url, css_selector='h1', xpath=None) -> ExtractedContent:\n"
+            "    ...\n": "css_selector does not default to None",
+        },
+        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _selector_contract_offenders,
+        (
+            # Keyword-only, exactly as the three live entry points spell it.
+            "def _extract_selected(html, source_url, *, css_selector=None, xpath=None)"
+            " -> ExtractedContent:\n    ...\n",
+            # A consumer that REQUIRES both selectors is the right shape: it is
+            # not narrowing a caller's request, it is keying one.
+            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
+            # A function that takes no selector is somebody else's business.
+            "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
+        ),
+        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    )
+
+
+def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A keyed provider supplies a request and a payload hook, not the flow.
+
+    The normalize/dedupe/clip contract above is only half the shared flow. The
+    other half -- issue the request, refuse a non-200, hand the result list to
+    the collector -- used to be spelled once per provider, and the two POST
+    bodies jscpd reported were those spellings: identical but for the endpoint
+    and the payload lambda, so the only part that genuinely varied was the part
+    left as a hook. This says the hooks are mandatory and the flow is not
+    writable, which is what makes a fourth provider a subclass with two methods
+    instead of a fourth copy of the non-200 check.
+
+    The base is matched on the resolved name's last segment because
+    ``_ApiKeyProvider`` is module-private: inside ``app/search/providers.py`` it
+    is a bare name with no import to resolve, and outside it is only ever
+    reachable through that one import.
+    """
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.ClassDef):
+        if not any(
+            resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "_ApiKeyProvider" for base in node.bases
+        ):
+            continue
+        defined = {
+            child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for hook in ("_request", "_items_of"):
+            if hook not in defined:
+                offenders.append(offender(path, node.lineno, f"{node.name} does not define {hook}()"))
+        if "search" in defined:
+            offenders.append(
+                offender(path, node.lineno, f"{node.name} re-spells the shared provider flow in search()")
+            )
+    return offenders
+
+
+def test_keyed_providers_inherit_the_shared_response_flow():
+    """One flow for the keyed providers: request and payload hook per subclass."""
+    assert_trees_clean(
+        _keyed_provider_offenders,
+        "a keyed search provider must supply _request() and _items_of() and inherit"
+        " _ApiKeyProvider.search, so the non-200 check cannot be re-spelled or dropped",
+    )
+
+
+def test_keyed_provider_flow_detector_bites():
+    """The re-spelled flow fires, the incomplete subclass fires, the hooks pass.
+
+    The first shape is what the two POST providers did: the whole flow written
+    per provider, differing only in the endpoint and the payload lambda. The
+    second is the quieter failure -- a provider that inherits the flow and
+    defines only one of the two hooks, which reaches ``NotImplementedError`` on
+    the first query instead of at import. The third is the shape the class is
+    for.
+    """
+    assert_fires_once(
+        _keyed_provider_offenders,
+        {
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class SerperProvider(_ApiKeyProvider):\n"
+            "    name = 'serper'\n"
+            "    def _items_of(self, payload):\n"
+            "        return payload.get('organic')\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n"
+            "    async def search(self, query, limit, timeout_seconds):\n"
+            "        status, body = await self._request(query, limit, timeout_seconds)\n"
+            "        return self._results(status, body, lambda p: p.get('organic'), url_key='link',\n"
+            "            title_key='title', description_key='snippet')\n": "re-spells the shared provider flow",
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class TavilyProvider(_ApiKeyProvider):\n"
+            "    name = 'tavily'\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n": "does not define _items_of()",
+        },
+        REPO_ROOT / "app" / "search" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _keyed_provider_offenders,
+        (
+            "class TavilyProvider(_ApiKeyProvider):\n"
+            "    name = 'tavily'\n"
+            "    _url_key = 'url'\n"
+            "    def _items_of(self, payload):\n"
+            "        return payload.get('results')\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n",
+            # A provider that does not inherit the keyed flow (DuckDuckGo) is not
+            # this guard's business; the loop guard above owns its shape.
+            "class DuckDuckGoProvider:\n"
+            "    name = 'duckduckgo'\n"
+            "    async def search(self, query, limit, timeout_seconds):\n"
+            "        return []\n",
+        ),
+        REPO_ROOT / "app" / "search" / "_synthetic.py",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1848,7 +2477,8 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_robots_line_scanner_lives_in_one_place():
     """Every robots consumer walks lines through the shared tokenizer."""
     assert_trees_clean(
-        _robots_scanner_offenders, 'app/crawl/robots_parse.iter_robots_fields is the single scanner',
+        _robots_scanner_offenders,
+        "app/crawl/robots_parse.iter_robots_fields is the single scanner",
         trees=app_trees(),
     )
 
@@ -1885,7 +2515,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     for node in nodes_of_type(tree, ast.Call):
-        if getattr(node.func, 'id', '') == 'HttpFetchResult':
+        if getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
                 offender(
                     path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)"
@@ -2018,7 +2648,8 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_all_decompress_calls_pass_a_cap():
     """Every production decompression is size-bounded (H2 closure)."""
     assert_trees_clean(
-        _decompress_cap_offenders, 'decompress_body needs max_output_bytes=',
+        _decompress_cap_offenders,
+        "decompress_body needs max_output_bytes=",
         trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
     )
 
@@ -2122,7 +2753,8 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
 def test_decompression_reaches_only_through_the_chokepoint():
     """No app module touches gzip/zlib/brotli except the decompression chokepoint."""
     assert_trees_clean(
-        _decompress_bypass_offenders, 'decompress only via decompression.decompress_body()',
+        _decompress_bypass_offenders,
+        "decompress only via decompression.decompress_body()",
         trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
     )
 
@@ -2173,7 +2805,8 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_handles_are_minted_in_one_place():
     """Only app/crawl/ids.py calls uuid4 or slices its hex (H4 residue)."""
     assert_trees_clean(
-        _id_mint_offenders, 'handle minting is single-sourced in app/crawl/ids.py',
+        _id_mint_offenders,
+        "handle minting is single-sourced in app/crawl/ids.py",
         trees=app_trees(exclude=SANCTIONED | _ID_MINT_SANCTIONED),
     )
 
@@ -2262,7 +2895,8 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
 def test_header_numbers_are_converted_under_guard():
     """No unguarded int()/float() on a header value anywhere in app/ (L2)."""
     assert_trees_clean(
-        _unguarded_header_int_offenders, 'parse header numbers through a guard or try/except ValueError',
+        _unguarded_header_int_offenders,
+        "parse header numbers through a guard or try/except ValueError",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -2325,7 +2959,8 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
 def test_domain_politeness_floor_is_committed_only_via_the_setter():
     """Only set_domain_min_delay writes _domain_min_delay (M1 chokepoint)."""
     assert_trees_clean(
-        _unbounded_domain_delay_writes, 'commit the Crawl-delay floor through the clamped set_domain_min_delay',
+        _unbounded_domain_delay_writes,
+        "commit the Crawl-delay floor through the clamped set_domain_min_delay",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -2410,7 +3045,8 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 def test_whole_site_visited_commit_is_transient_gated():
     """A transiently-failed whole-site URL is re-queued, never counted done."""
     assert_trees_clean(
-        _ungated_job_visited_offenders, 'gate every job.visited.add on is_transient_classification() so transient failures are re-queued, not marked visited',
+        _ungated_job_visited_offenders,
+        "gate every job.visited.add on is_transient_classification() so transient failures are re-queued, not marked visited",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -2487,7 +3123,8 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_every_test_function_is_one_pytest_can_collect():
     assert_trees_clean(
-        _uncollectible_tests, 'these test functions are silently never run; pytest collects only module-level tests and Test* class methods',
+        _uncollectible_tests,
+        "these test functions are silently never run; pytest collects only module-level tests and Test* class methods",
         trees=trees_under(TESTS_DIR),
     )
 
@@ -2991,7 +3628,8 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_asdict_is_never_unpacked_into_a_constructor():
     """Copying a dataclass with asdict must not survive anywhere in app/."""
     assert_trees_clean(
-        _asdict_rebuild_offenders, 'copy dataclasses with dataclasses.replace(), not asdict(**...)',
+        _asdict_rebuild_offenders,
+        "copy dataclasses with dataclasses.replace(), not asdict(**...)",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -3198,7 +3836,8 @@ def _hand_rolled_failed_result_offenders(tree, path):
 
 def test_no_hand_rolled_failed_results_outside_the_chokepoint():
     assert_trees_clean(
-        _hand_rolled_failed_result_offenders, 'failed results with a hardcoded classification must go through _engine_result_from_exception (the single exception->result chokepoint)',
+        _hand_rolled_failed_result_offenders,
+        "failed results with a hardcoded classification must go through _engine_result_from_exception (the single exception->result chokepoint)",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -3242,7 +3881,8 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
 
 def test_pool_exhaustion_catch_sites_are_sanctioned():
     assert_trees_clean(
-        _unsanctioned_pool_exhaustion_catch_offenders, 'BrowserPoolExhaustedError may only be caught by the render transports (503 response) and the browser worker guard; the crawl path reads the browser_pool_exhausted classification',
+        _unsanctioned_pool_exhaustion_catch_offenders,
+        "BrowserPoolExhaustedError may only be caught by the render transports (503 response) and the browser worker guard; the crawl path reads the browser_pool_exhausted classification",
         trees=app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED),
     )
 
@@ -3272,7 +3912,7 @@ def test_classifier_lives_in_the_neutral_home():
     across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
         for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
-            if node.name == '_classify_error_code':
+            if node.name == "_classify_error_code":
                 raise AssertionError(
                     offender(path, node.lineno, "_classify_error_code defined outside result_helpers")
                 )
@@ -4058,7 +4698,8 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
 def test_no_unfiltered_urljoin_returns():
     """A URL joined from untrusted input is egress-filtered before it leaves."""
     assert_trees_clean(
-        _unfiltered_urljoin_return_offenders, 'filter joined URLs through public_url_or_none',
+        _unfiltered_urljoin_return_offenders,
+        "filter joined URLs through public_url_or_none",
         trees=app_trees(),
     )
 
@@ -4124,7 +4765,8 @@ def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 def test_no_raw_exception_text_in_result_error_field():
     """The ``error`` field is a stable classification, never ``str(exc)``."""
     assert_trees_clean(
-        _raw_exception_error_offenders, 'classify via _classify_error_code, never raw exception text',
+        _raw_exception_error_offenders,
+        "classify via _classify_error_code, never raw exception text",
         trees=app_trees(exclude=_TERMINAL_RESULT_SANCTIONED),
     )
 
@@ -4184,7 +4826,8 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
 def test_js_endpoints_filter_is_not_reinlined():
     """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
     assert_trees_clean(
-        _reinline_js_endpoints_filter_offenders, 'route endpoints through filter_js_endpoints',
+        _reinline_js_endpoints_filter_offenders,
+        "route endpoints through filter_js_endpoints",
         trees=app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED),
     )
 
@@ -5015,6 +5658,159 @@ def test_the_gate_would_have_caught_the_shipped_defect():
         )
 
 
+# ---------------------------------------------------------------------------
+# The construction check has exactly one owner
+#
+# ``_check_literal_fields`` is a module-level function and the result dataclasses
+# each had to reach it through their own ``__post_init__``. That trampoline was
+# the second thing to keep in sync: the check is one function, but a result
+# dataclass added tomorrow would validate nothing while reading exactly like the
+# ones that do. It is now inherited from ``models._LiteralChecked``, so the check
+# is part of the class rather than something it remembers to ask for -- and
+# "inherited" is a claim the tree can check, which is what these two do:
+# a caller of the check outside the owner is a second copy of it, and a result
+# dataclass that does not inherit the owner is a class with no check.
+# ---------------------------------------------------------------------------
+
+
+def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Any call to ``_check_literal_fields`` outside its one owning ``__post_init__``."""
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Call):
+        if resolved_call_name(tree, node) != "app.models._check_literal_fields":
+            continue
+        owner = _enclosing_class(tree, node)
+        if owner is not None and owner.name == "_LiteralChecked":
+            continue
+        offenders.append(offender(path, node.lineno, "literal-check-called-outside-its-owner"))
+    return offenders
+
+
+def _enclosing_class(tree: ast.AST, node: ast.AST) -> ast.ClassDef | None:
+    """The innermost ``class`` body containing ``node``, or None.
+
+    A call to the check has to be attributed to the class it is written in, and
+    a nested function inside that class is still that class's: the whole point
+    of the guard is that the check runs at construction, which is a property of
+    the class, not of the function that happens to spell the call.
+    """
+    found: list[ast.ClassDef | None] = []
+
+    def visit(current: ast.AST, enclosing: tuple[ast.ClassDef, ...]) -> bool:
+        for child in ast.iter_child_nodes(current):
+            if child is node:
+                found.append(enclosing[-1] if enclosing else None)
+                return True
+            nested = enclosing + (child,) if isinstance(child, ast.ClassDef) else enclosing
+            if visit(child, nested):
+                return True
+        return False
+
+    visit(tree, ())
+    return found[0] if found else None
+
+
+def test_the_literal_field_check_is_called_by_one_owner():
+    """One caller for ``_check_literal_fields``, and it is the owning base class.
+
+    A second caller is a second place the construction check can be re-spelled,
+    which is the shape this consolidation removed: the check was one function
+    reached through three identical trampolines, and a class that re-spelled it
+    would be indistinguishable from one that inherited it.
+    """
+    assert_trees_clean(
+        _literal_check_offenders,
+        "_check_literal_fields is called outside models._LiteralChecked, so the"
+        " construction-time taxonomy check exists in more than one place",
+    )
+
+
+def test_literal_check_owner_detector_bites():
+    """The owner guard fires on a re-spelled trampoline and admits the base.
+
+    The first shape is the pre-consolidation one -- a class calling the check for
+    itself -- and the second is the class that is allowed to. The third is the
+    shape the guard must NOT fire on: a *different* module's function that
+    happens to share the name, resolved by import bindings rather than by text.
+    """
+    assert_fires_once(
+        _literal_check_offenders,
+        {
+            "from app.models import _check_literal_fields\n"
+            "@dataclass(frozen=True)\n"
+            "class CrawlResult:\n"
+            "    status: str\n"
+            "    def __post_init__(self) -> None:\n"
+            "        _check_literal_fields(self)\n": "literal-check-called-outside-its-owner",
+        },
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _literal_check_offenders,
+        (
+            "from app.models import _check_literal_fields\n"
+            "class _LiteralChecked:\n"
+            "    def __post_init__(self) -> None:\n"
+            "        _check_literal_fields(self)\n",
+            # A module that never mentions the check is nobody else's business.
+            "from app.models import CrawlResult\ndef build() -> CrawlResult:\n    return CrawlResult()\n",
+        ),
+        REPO_ROOT / "app" / "_synthetic.py",
+    )
+
+
+def test_every_taxonomy_literal_dataclass_inherits_the_construction_check():
+    """A dataclass that declares a taxonomy ``Literal`` field inherits the check.
+
+    The half of the property the owner guard cannot see: an *omission* rather
+    than a duplicate. Which dataclasses qualify is derived from the taxonomy's
+    own declaration -- ``models._LITERAL_FIELDS`` for the field names and
+    ``models._literal_members`` for whether the annotation is really a taxonomy
+    alias -- and the classes are enumerated from the module that declares them,
+    so a result dataclass added tomorrow is covered the day it lands and nothing
+    here is a hand-kept class list. A field merely *named* like a taxonomy field
+    but annotated ``str`` is not one of these and is not reported.
+
+    The taxonomy aliases live in this module by construction: ``Classification``,
+    ``CrawlError`` and ``CrawlStrategyName`` are declared here, and
+    ``ResultStatus`` is the one member set imported from ``app.constants``. A
+    dataclass in another module that carries such a field is not covered here,
+    which is why the owner guard above is tree-wide and this one is not: that
+    guard is what catches a check re-spelled anywhere, and this one is what
+    catches a class in the taxonomy's own home that forgot to ask for it.
+    """
+    import typing
+    from dataclasses import is_dataclass
+
+    from app import models
+
+    checked: dict[str, list[str]] = {}
+    for name, cls in sorted(vars(models).items()):
+        if not (isinstance(cls, type) and is_dataclass(cls)):
+            continue
+        # Field names first: a dataclass with no taxonomy-named field cannot be
+        # one of these, and asking for its resolved hints would evaluate a
+        # TYPE_CHECKING-only annotation (CrawlJob's HostPolicy) for nothing.
+        named = [field for field in cls.__dataclass_fields__ if field in models._LITERAL_FIELDS]
+        if not named:
+            continue
+        hints = typing.get_type_hints(cls)
+        fields = [field for field in named if models._literal_members(hints.get(field))]
+        if not fields:
+            continue
+        checked[name] = fields
+        assert issubclass(cls, models._LiteralChecked), (
+            f"{name} declares the taxonomy Literal field(s) {sorted(fields)} but no"
+            " construction check; inherit models._LiteralChecked so a non-member is"
+            " rejected when the value is built rather than at the wire"
+        )
+    assert checked, (
+        "no taxonomy Literal field was enumerated, so the sweep is a no-op:"
+        f" _LITERAL_FIELDS={sorted(models._LITERAL_FIELDS)}"
+    )
+    assert set(checked) == {"CrawlResult", "CrawlStrategyAttempt", "EngineCrawlResult"}, sorted(checked)
+
+
 # ===========================================================================
 # ALIAS-BLINDNESS (program 3): detectors must resolve import bindings, not
 # match on a literal module name
@@ -5262,7 +6058,8 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
 
 def test_job_engine_payload_uses_single_builder():
     assert_trees_clean(
-        _job_engine_payload_chokepoint_offenders, 'Build whole-site engine payloads only with _job_engine_payload',
+        _job_engine_payload_chokepoint_offenders,
+        "Build whole-site engine payloads only with _job_engine_payload",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -5321,7 +6118,11 @@ def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> l
     guarded = _guarded_node_ids(tree)
     offenders: list[str] = []
     for node in nodes_of_type(tree, ast.Call):
-        if isinstance(node.func, ast.Name) and node.func.id in _STRATEGY_RUNNERS and (id(node) not in guarded):
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id in _STRATEGY_RUNNERS
+            and (id(node) not in guarded)
+        ):
             offenders.append(
                 offender(path, node.lineno, f"{node.func.id} invoked outside a try/except Exception")
             )
@@ -5330,7 +6131,8 @@ def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 def test_every_strategy_runner_call_is_guarded():
     assert_trees_clean(
-        _unguarded_strategy_runner_offenders, 'A strategy that raises must become a failed step, not escape the chain',
+        _unguarded_strategy_runner_offenders,
+        "A strategy that raises must become a failed step, not escape the chain",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -5462,7 +6264,8 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_no_sync_store_method_is_called_from_an_async_frame():
     assert_trees_clean(
-        _sync_store_call_offenders, 'A store call on the event loop stalls every in-flight request',
+        _sync_store_call_offenders,
+        "A store call on the event loop stalls every in-flight request",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -5593,7 +6396,8 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_result_delivery_never_runs_inside_the_worker_try():
     assert_trees_clean(
-        _sink_call_in_try_body, 'Delivery raised from a worker handler',
+        _sink_call_in_try_body,
+        "Delivery raised from a worker handler",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -7121,7 +7925,7 @@ def _environment_reader_reference(
 def _settings_fields() -> set[str]:
     tree = file_tree("app/settings.py")[1]
     for node in nodes_of_type(tree, ast.ClassDef):
-        if node.name == 'CrawlerSettings':
+        if node.name == "CrawlerSettings":
             return {
                 item.target.id
                 for item in node.body
@@ -8266,14 +9070,18 @@ def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
             # Only clearing to None is a release. _acquire_browser assigns a
             # real context manager and a real browser, which is the opposite
             # of forgetting them.
-            cleared = [
-                t
-                for t in inner.targets
-                if isinstance(t, ast.Attribute)
-                and t.attr in fields
-                and isinstance(inner.value, ast.Constant)
-                and inner.value.value is None
-            ] if isinstance(inner, ast.Assign) else []
+            cleared = (
+                [
+                    t
+                    for t in inner.targets
+                    if isinstance(t, ast.Attribute)
+                    and t.attr in fields
+                    and isinstance(inner.value, ast.Constant)
+                    and inner.value.value is None
+                ]
+                if isinstance(inner, ast.Assign)
+                else []
+            )
             for target in cleared:
                 yield offender(
                     path,
@@ -8322,7 +9130,9 @@ class Renderer:
     }
     # list(), not the generator: a generator object is always truthy, so
     # asserting on one directly would pass without ever running the sweep.
-    offenders = list(_browser_release_offenders(ast.parse(source), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args))
+    offenders = list(
+        _browser_release_offenders(ast.parse(source), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args)
+    )
     assert offenders, "a field cleared outside the release chokepoint escaped the sweep"
     elsewhere = list(
         _browser_release_offenders(
@@ -8369,7 +9179,7 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
         if not node.name.startswith("_handle_"):
             continue
         for inner in nodes_of_type(node, ast.Call):
-            if isinstance(inner.func, ast.Attribute) and inner.func.attr == 'model_json_schema':
+            if isinstance(inner.func, ast.Attribute) and inner.func.attr == "model_json_schema":
                 yield offender(
                     path,
                     inner.lineno,
@@ -8381,9 +9191,7 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
 def test_every_mcp_tool_declares_the_model_that_validates_its_arguments():
     offenders: list[str] = []
     for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(
-            _mcp_unvalidated_tool_offenders(tree, path, tools_module=_MCP_TOOLS_MODULE)
-        )
+        offenders.extend(_mcp_unvalidated_tool_offenders(tree, path, tools_module=_MCP_TOOLS_MODULE))
     assert not offenders, "an MCP tool is missing its validated contract: " + ", ".join(offenders)
 
 
@@ -8395,7 +9203,9 @@ def test_mcp_request_model_detector_bites():
         "        output_schema=None,\n        handler=h,\n    )\n"
     )
     offenders = list(
-        _mcp_unvalidated_tool_offenders(missing, REPO_ROOT / "crawl" / "synthetic.py", tools_module="synthetic.py")
+        _mcp_unvalidated_tool_offenders(
+            missing, REPO_ROOT / "crawl" / "synthetic.py", tools_module="synthetic.py"
+        )
     )
     assert offenders, "a ToolSpec without a request_model escaped the sweep"
     # A handler that builds its own schema is the other half of the bypass.
@@ -8415,3 +9225,207 @@ def test_mcp_request_model_detector_bites():
             for k, v in spec.request_model.model_json_schema().get("properties", {}).items()
             if k not in spec.unsupported_fields
         }, f"{spec.name} advertises a schema its request model does not describe"
+
+
+# ---------------------------------------------------------------------------
+# The content pipeline: one dispatch, one discovery call, one projection
+#
+# The browser and HTTP strategies each carried the same three-way extraction
+# dispatch, the same offloaded post-fetch discovery call, and the same block of
+# discovered-links result fields. All three now live in
+# app/crawl/strategies/content_pipeline.py, and `_discovery_result_fields` is
+# the one place a discovery envelope becomes result fields.
+#
+# The projection was a correctness risk rather than cosmetics: a field threaded
+# into the HTTP result but not the browser one is a divergence between the two
+# answers to the same page, and nothing in the tree can see it -- both results
+# are individually well-formed. So the two sweeps below are tree-wide rather
+# than file-scoped: a guard that only looked at the two modules it was written
+# for would keep passing while a third strategy grew its own copy, which is the
+# same empty-sweep failure the other chokepoint guards in this file were written
+# against.
+# ---------------------------------------------------------------------------
+
+_CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
+# Import-resolved, so an alias cannot slip past the sweep.
+_EXTRACTION_ENTRY_POINTS = frozenset(
+    {
+        "app.crawl.extraction._extract_document",
+        "app.crawl.extraction._extract_html",
+        "app.crawl.extraction.extract_content",
+        "app.crawl.extraction.extract_post_fetch_discovery",
+        "app.crawl.extraction.normalized_extraction",
+    }
+)
+# The terminal-result builders, not the model: result_helpers constructing
+# EngineCrawlResult is where the discovered-links fields are DEFINED, which is
+# a different thing from a call site spelling them.
+_RESULT_BUILDERS = frozenset(
+    {
+        "_binary_no_text_result",
+        "_engine_result_from_exception",
+        "_failed_engine_result",
+        "_make_engine_result",
+        "_skipped_engine_result",
+        "_terminal_engine_result",
+    }
+)
+_DISCOVERY_RESULT_FIELDS = frozenset(
+    {"discovered_link_count", "discovered_links", "discovered_links_truncated"}
+)
+_DISCOVERY_PROJECTION = "_discovery_result_fields"
+
+
+def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a use of a raw extractor outside the content pipeline.
+
+    Keyed on the *name in load position* rather than on a call: the shape both
+    strategies used was an offloaded extractor, ``asyncio.to_thread(_extract_html,
+    ...)``, where the extractor is an argument rather than a callee, and a
+    call-keyed detector misses exactly that. Keyed on the use rather than the
+    import because binding a name is not the duplication, dispatching on it is.
+
+    ``self._extract_html(page)`` in the browser worker is a method on the
+    renderer, not this function, so it resolves to a different name and is not
+    an offender. A reference *within* extraction.py resolves to the bare name
+    rather than the dotted one, which is how the owner of these functions is
+    left out of its own sweep without being named in it.
+    """
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Name):
+        if not isinstance(node.ctx, ast.Load):
+            continue
+        name = resolved_expr_name(tree, node)
+        if name in _EXTRACTION_ENTRY_POINTS:
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"{name} is dispatched outside strategies/content_pipeline.py; "
+                    "run the mode chain through _run_extraction",
+                )
+            )
+    return offenders
+
+
+def test_extraction_is_dispatched_by_the_content_pipeline_alone():
+    """The three extraction modes are dispatched in one module, not per strategy."""
+    assert_trees_clean(
+        _extraction_reach_past_offenders,
+        "dispatch extraction through strategies/content_pipeline._run_extraction",
+        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
+    )
+
+
+def test_extraction_reach_past_detector_bites():
+    """A re-spelled dispatch fires, offloaded and aliased; routing through it stays clean."""
+    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+    spelled = ast.parse(
+        "from app.crawl.extraction import _extract_html, normalized_extraction\n"
+        "async def f(decoded, final_url):\n"
+        "    extracted = await asyncio.to_thread(_extract_html, decoded, final_url)\n"
+        "    return normalized_extraction(extracted)\n"
+    )
+    offenders = _extraction_reach_past_offenders(spelled, synthetic)
+    assert len(offenders) == 2, offenders
+    assert all("_run_extraction" in item for item in offenders), offenders
+    aliased = ast.parse(
+        "from app.crawl.extraction import extract_content as _ec\n"
+        "def f(body, content_type, url):\n"
+        "    return _ec(body, content_type, url)\n"
+    )
+    assert _extraction_reach_past_offenders(aliased, synthetic), "an aliased extractor call escaped the sweep"
+    routed = ast.parse(
+        "from app.crawl.strategies.content_pipeline import _run_extraction\n"
+        "async def f(body, final_url):\n"
+        "    return await _run_extraction(extraction='full', content=body, decoded='')\n"
+    )
+    assert not _extraction_reach_past_offenders(routed, synthetic), "the chokepoint call was flagged"
+    # The exemption is not what makes the tree clean: the owner's own calls are
+    # the shape this detector matches.
+    owner = next((path, tree) for path, tree in app_trees() if path.name in _CONTENT_PIPELINE_OWNER)
+    assert owner[0].name == "content_pipeline.py", owner[0]
+    assert _extraction_reach_past_offenders(owner[1], synthetic), "the detector no longer matches the owner"
+
+
+def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag discovered-links result fields spelled at a result-builder call.
+
+    ``**`` spread is the sanctioned shape and is not a keyword, so a strategy
+    that routes the envelope through ``_discovery_result_fields`` reports
+    nothing; a strategy that re-spells one field reports that field.
+    """
+    offenders: list[str] = []
+    for node in calls_to_any(tree, _RESULT_BUILDERS):
+        spelled = sorted({kw.arg for kw in node.keywords if kw.arg in _DISCOVERY_RESULT_FIELDS})
+        if spelled:
+            offenders.append(
+                offender(
+                    path,
+                    node.lineno,
+                    f"{node.func.id} spells {', '.join(spelled)}; spread "
+                    "content_pipeline._discovery_result_fields instead",
+                )
+            )
+    return offenders
+
+
+def test_discovered_link_result_fields_come_from_the_pipeline():
+    """A discovery envelope reaches a result through one projection."""
+    assert_trees_clean(
+        _respelled_discovery_result_fields_offenders,
+        "project the discovery envelope through content_pipeline._discovery_result_fields",
+        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
+    )
+
+
+def test_discovery_result_field_detector_bites():
+    """A re-spelled projection fires; the spread, and a non-result sink, stay clean."""
+    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+    # The historical shape: the block spelled at the result call.
+    respelled = ast.parse(
+        "def build(post_fetch, error):\n"
+        "    return _make_engine_result(\n"
+        "        discovered_link_count=post_fetch['discovered_link_count'],\n"
+        "        discovered_links=post_fetch['discovered_links'],\n"
+        "        error=error,\n"
+        "    )\n"
+    )
+    offenders = _respelled_discovery_result_fields_offenders(respelled, synthetic)
+    assert len(offenders) == 1, offenders
+    assert "_discovery_result_fields" in offenders[0], offenders
+    spread = ast.parse(
+        "def build(post_fetch, error):\n"
+        "    return _make_engine_result(\n"
+        "        **_discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
+        "        next_page_url=post_fetch['next_page_url'],\n"
+        "    )\n"
+    )
+    assert not _respelled_discovery_result_fields_offenders(spread, synthetic), (
+        "the sanctioned spread was flagged"
+    )
+    # A discovered-links field that is not a result field is somebody else's.
+    unrelated = ast.parse(
+        "def count(post_fetch):\n"
+        "    return stats(discovered_link_count=post_fetch['discovered_link_count'])\n"
+    )
+    assert not _respelled_discovery_result_fields_offenders(unrelated, synthetic), (
+        "a non-result sink was flagged"
+    )
+
+
+def test_discovery_result_projection_has_exactly_one_definition():
+    """The projection is one function, so it cannot be forked per strategy.
+
+    Tree-wide for the same reason the sweeps above are: a second definition
+    would satisfy every structural guard above while reintroducing the exact
+    duplication they exist to prevent.
+    """
+    definitions = [
+        offender(path, node.lineno)
+        for path, tree in app_trees(exclude=frozenset())
+        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef)
+        if node.name == _DISCOVERY_PROJECTION
+    ]
+    assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
+    assert "app/crawl/strategies/content_pipeline.py" in definitions[0], definitions

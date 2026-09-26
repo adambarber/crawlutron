@@ -28,7 +28,10 @@ def _pool_up():
 async def test_render_value_error_reports_validation_error_code(monkeypatch, _pool_up):
     from dataclasses import replace
 
+    from app.health.readiness import READINESS_STATE
+
     settings = replace(CrawlerSettings.from_mapping(), max_batch_size=1)
+    active_before = READINESS_STATE.snapshot().active_requests
 
     payload = RenderRequest(urls=["http://example.com/", "http://example.com/2"])
     with pytest.raises(Exception) as exc_info:
@@ -38,3 +41,7 @@ async def test_render_value_error_reports_validation_error_code(monkeypatch, _po
     assert detail["code"] == "validation_error", detail
     # The ValueError text stays as the human-readable message, not the code.
     assert detail["message"] == "batch_size_exceeded"
+    # The refusal hands its readiness slot back: the gate that converts the
+    # rejection also releases it, so /v1/render cannot hold a slot per bad
+    # request. /v1/crawl's equivalent is tests/api/test_request_gate.py.
+    assert READINESS_STATE.snapshot().active_requests == active_before
