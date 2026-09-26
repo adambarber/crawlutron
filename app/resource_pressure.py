@@ -451,37 +451,69 @@ _BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", 0.
 _MAX_DERIVED_POOL_SIZE = get_env_int("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", 4)
 
 
+def worker_count() -> int:
+    """How many uvicorn worker processes this deployment runs.
+
+    The single home for the value. It lives here rather than in ``app.main``
+    because the functions that size a process's pools live here, and a pool
+    sized from a shared cgroup limit has to know how many processes are
+    spending it -- so importing the number from the module that refuses N>1
+    would be circular.
+
+    Reads through the never-raise env chokepoint, so a typo'd value falls back
+    to one worker instead of dividing every budget to nothing.
+    """
+    return get_env_int("BROWSER_CRAWLER_WORKERS", 1, lo=1)
+
+
 def doc_worker_count() -> int:
-    """Configured persistent markitdown worker count (process pool size).
+    """Persistent markitdown worker count *for this process*.
 
     The single home for this count: ``app.crawl.extraction`` borrows it so the
     pool it spawns is exactly the size admission reserved. Reading the env var
     in two places would let the spawned pool and the RAM reservation drift
     apart. A malformed value falls back to the default rather than aborting
     startup -- extraction is a nicety, not a load-bearing path.
+
+    The configured count is a fleet total: each worker spawns its own markitdown
+    process pool, and each holds 100-300 MiB for the life of the process, so N
+    workers at the configured count would be N times the reserved RAM.
     """
     try:
-        return get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
+        configured = get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
     except ValueError:
-        return _DEFAULT_DOC_WORKERS
+        configured = _DEFAULT_DOC_WORKERS
+    return max(1, configured // worker_count())
 
 
 def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
-    """Single global browser-pool size from the cgroup memory limit.
+    """Browser-pool size *for this process*, from the cgroup memory limit.
 
-    Honors ``BROWSER_CRAWLER_BROWSER_POOL_SIZE``; else derives so the pool uses at
-    most ``_BROWSER_RAM_FRACTION`` of RAM; falls back to 1 when no limit is
-    discoverable. Shared by ``app.crawl.strategies.browser_pool`` and the httpx
-    pool sizing so the connection ceiling tracks the admission's HTTP concurrency.
+    Honors ``BROWSER_CRAWLER_BROWSER_POOL_SIZE``; else derives so this process's
+    share of the fleet uses at most ``_BROWSER_RAM_FRACTION`` of RAM; falls back
+    to 1 when no limit is discoverable. Shared by
+    ``app.crawl.strategies.browser_pool`` and the httpx pool sizing so the
+    connection ceiling tracks the admission's HTTP concurrency.
+
+    The cgroup limit belongs to the container, so it is the same number in every
+    worker while the pool is each worker's own. Un-divided, N workers would each
+    spend the whole budget. The configured size is therefore a fleet total too,
+    which coincides with the previous per-process reading in the single-worker
+    configuration that ships.
     """
+    workers = worker_count()
     explicit = get_env_int("BROWSER_CRAWLER_BROWSER_POOL_SIZE", 0, lo=0)
     if explicit > 0:
-        return explicit
+        return max(1, explicit // workers)
     limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes
     if limit and limit > 0:
-        budget = int(limit * _BROWSER_RAM_FRACTION)
+        # The cap is a fleet ceiling, not a per-process one. Left undivided it
+        # is the worse half of the bug: a large container would let N workers
+        # each take the full cap, which is N times the number it names.
+        cap = max(1, _MAX_DERIVED_POOL_SIZE // workers)
+        budget = int(limit * _BROWSER_RAM_FRACTION) // workers
         size = max(1, budget // _BROWSER_RAM_BYTES)
-        return min(size, _MAX_DERIVED_POOL_SIZE)
+        return min(size, cap)
     return 1
 
 
@@ -494,15 +526,19 @@ def max_http_concurrency_for(
     doc_workers: int = 0,
     doc_task_bytes: int = _DOC_TASK_RAM_BYTES,
 ) -> int:
-    """Admission's HTTP concurrency ceiling for a given RAM limit + fixed pools.
+    """Admission's HTTP concurrency ceiling *for this process*.
 
-    Reserves the fixed pools' RAM, then divides the remainder by the per-task
-    estimate. This is exactly the ceiling ``WeightedAdmission`` uses, so the
-    httpx pool can be bound to it with zero drift as RAM scales.
+    Reserves this process's fixed pools' RAM, then divides the remainder by the
+    per-task estimate. This is exactly the ceiling ``WeightedAdmission`` uses, so
+    the httpx pool can be bound to it with zero drift as RAM scales.
+
+    The remainder is this worker's share: the limit is the container's and
+    ``pool_size`` and ``doc_workers`` are already per-process, so dividing by
+    the worker count is what keeps the fleet inside the RAM the gate measures.
     """
     limit = max(limit_bytes, 256 * 1024 * 1024)
     reserve = pool_size * browser_task_bytes + doc_workers * doc_task_bytes
-    free = max(0, limit - reserve)
+    free = max(0, limit - reserve) // worker_count()
     return max(1, min(_MAX_HTTP_CONCURRENCY, free // max(1, http_task_bytes)))
 
 

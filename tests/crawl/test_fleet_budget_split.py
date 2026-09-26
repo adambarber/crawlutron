@@ -1,0 +1,127 @@
+"""A cgroup budget is shared; the pools that spend it are not.
+
+`derive_browser_pool_size` and `max_http_concurrency_for` size themselves from
+the cgroup memory limit. That limit belongs to the container, so it is the
+same number in every worker -- but each worker's pools are its own. With N
+workers every one of them reads the whole budget and grants a whole pool's
+worth, so the fleet spends N times the RAM the admission gate is reasoning
+about. The gate reads genuinely shared pressure and then hands out per-process
+capacity at the observed ratio, which is the combination that produces an OOM
+kill of the whole service rather than a slow request.
+
+The division belongs where the budget is derived, not at each pool's call site:
+the httpx pool, the browser pool and the extraction pool all size from these
+functions, and dividing at a call site would let one of them keep the
+undivided number.
+
+`doc_worker_count` is in the same file for the same reason -- each persistent
+markitdown worker holds 100-300 MiB for the life of the process, so N workers
+at the default 2 is 2N of them.
+"""
+
+import pytest
+
+from app import resource_pressure as rp
+
+
+@pytest.fixture(autouse=True)
+def _one_worker(monkeypatch):
+    """Default every test to a single worker unless it says otherwise."""
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+
+
+def test_worker_count_reads_through_the_never_raise_chokepoint(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+
+    assert rp.worker_count() == 4
+
+
+def test_a_typo_in_the_worker_count_does_not_zero_every_budget(monkeypatch):
+    """A malformed value must fall back to one worker, not to zero.
+
+    Zero would divide every budget to nothing and silently refuse all work,
+    which reads as "the crawler is broken" rather than "the config is wrong".
+    """
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "many")
+
+    assert rp.worker_count() == 1
+
+
+def test_a_non_positive_worker_count_is_clamped_to_one(monkeypatch):
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "0")
+
+    assert rp.worker_count() == 1
+
+
+def test_every_worker_derives_a_pool_that_fits_the_whole_fleet(monkeypatch):
+    """The defect: N workers each spending the whole RAM budget.
+
+    The assertion is on the fleet total against the cap that names it, not
+    against a single worker's pool: with N workers each guaranteed at least one
+    browser, an undersized container cannot always keep the fleet at or below
+    what one worker would have taken, and pretending otherwise would only be
+    satisfiable by giving a worker no browser at all.
+    """
+    limit = 16 * 1024 * 1024 * 1024
+    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "")
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    per_worker = rp.derive_browser_pool_size(limit)
+
+    assert per_worker * 4 <= rp._MAX_DERIVED_POOL_SIZE
+    assert per_worker >= 1
+
+    # Un-divided, 4 workers on this limit would each take the full cap.
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    assert rp.derive_browser_pool_size(limit) * 4 > per_worker * 4
+
+
+def test_the_pool_size_knob_is_a_fleet_total_not_a_per_process_one(monkeypatch):
+    """An operator setting 4 means four browsers, not four per worker.
+
+    With the shipped single-worker configuration the two readings coincide, so
+    this changes no shipped behaviour -- it stops the fleet from quietly
+    multiplying the number the operator thought they were capping.
+    """
+    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "4")
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    assert rp.derive_browser_pool_size() == 4
+
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    assert rp.derive_browser_pool_size() == 1
+
+
+def test_http_concurrency_is_split_across_workers(monkeypatch):
+    """Each worker's HTTP ceiling is its share of the container's RAM."""
+    limit = 4 * 1024 * 1024 * 1024
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    single = rp.max_http_concurrency_for(limit, pool_size=1, doc_workers=1)
+
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    per_worker = rp.max_http_concurrency_for(limit, pool_size=1, doc_workers=1)
+
+    assert per_worker * 4 <= single
+    assert per_worker >= 1
+
+
+def test_doc_workers_are_split_across_workers(monkeypatch):
+    """2 markitdown workers per process is 2N of them, each 100-300 MiB."""
+    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", "8")
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    assert rp.doc_worker_count() == 8
+
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    assert rp.doc_worker_count() == 2
+
+
+def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
+    """Division must never produce a zero budget.
+
+    A worker that admits nothing is indistinguishable from a hung service, and
+    an over-subscribed fleet is the operator's memory-limit error, not a
+    reason to make the crawler refuse to work at all.
+    """
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "64")
+
+    assert rp.derive_browser_pool_size(64 * 1024 * 1024) >= 1
+    assert rp.max_http_concurrency_for(64 * 1024 * 1024, pool_size=1) >= 1
+    assert rp.doc_worker_count() >= 1

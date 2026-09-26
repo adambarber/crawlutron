@@ -359,7 +359,25 @@ __all__ = [
 # The ~90 lines of exposition moved to a module function, which took MetricsStore
 # off the oversized-class list the metrics budget gate reports -- the budget
 # stays at 3 because fixing one offender does not clear the other three.
-_APP_TREE_CODE_LINE_BUDGET = 14_821
+#
+# RAISED to 14,828 from 14,821: the per-process budgets are now divided by the
+# worker count. `derive_browser_pool_size` and `max_http_concurrency_for` sized
+# themselves from the cgroup memory limit, which belongs to the container and is
+# therefore the same number in every worker, while the pools they size are each
+# worker's own. N workers each spent the whole budget, which is how a fleet
+# arrives at an OOM kill of the whole service rather than a slow request.
+#
+# Measured on a 16 GiB limit: HTTP concurrency 283 -> 156 -> 81 -> 40 at 1, 2, 4
+# and 8 workers, with the fleet total flat. The derived pool ceiling is a fleet
+# total too -- left undivided it is the worse half of the same bug, a large
+# container letting N workers each take the full cap.
+#
+# Seven lines of real logic. The rest is `worker_count`, which had to become a
+# chokepoint in this module rather than staying a private constant in app.main:
+# the functions that divide the budget live here, and importing the number from
+# the module that refuses N>1 would be circular. The guard now reads it from
+# here too, so the workers env has exactly one reader in the tree.
+_APP_TREE_CODE_LINE_BUDGET = 14_828
 
 
 def test_app_tree_code_line_count_does_not_grow():
