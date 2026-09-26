@@ -12,6 +12,7 @@ from app.crawl.sqlite_store import table_columns, table_indexes
 class StoreSchema(StrEnum):
     CRAWL_JOBS = "crawl_jobs"
     RESULTS = "results"
+    COORDINATION_COUNTERS = "coordination_counters"
 
 
 @dataclass(frozen=True)
@@ -71,9 +72,21 @@ RESULTS_SCHEMA = TableSchema(
     ),
 )
 
+COORDINATION_COUNTERS_SCHEMA = TableSchema(
+    name="coordination_counters",
+    columns=(
+        ColumnSchema("name", "TEXT", False, None, 1),
+        # NOT NULL with a default so a row can never exist without a value. The
+        # increment is atomic because the upsert names the column in its SET
+        # list (see CoordinationCounters.add), not because of this default.
+        ColumnSchema("value", "REAL", True, "0"),
+    ),
+)
+
 CURRENT_SCHEMAS = {
     StoreSchema.CRAWL_JOBS: CRAWL_JOBS_SCHEMA,
     StoreSchema.RESULTS: RESULTS_SCHEMA,
+    StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -81,11 +94,13 @@ LEGACY_COLUMNS = {
         ColumnSchema("canonicalized", "INTEGER", True, "0"),
     ),
     StoreSchema.RESULTS: (),
+    StoreSchema.COORDINATION_COUNTERS: (),
 }
 
 MIGRATION_SEQUENCES = {
     StoreSchema.CRAWL_JOBS: ("0001_crawl_jobs_initial", "0002_crawl_jobs_drop_canonicalized"),
     StoreSchema.RESULTS: ("0001_results_initial",),
+    StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
 }
 
 MIGRATION_IDS = {

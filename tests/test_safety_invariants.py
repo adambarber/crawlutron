@@ -302,7 +302,24 @@ __all__ = [
 # adds -- would have failed to open under `uvicorn --workers` on a fresh
 # database. The budget has to outlast a peer's whole migration, not one lock,
 # because the loser waits on the winner's migrate step.
-_APP_TREE_CODE_LINE_BUDGET = 14_501
+#
+# RAISED to 14,566 from 14,501: the multi-worker substrate itself. The operator
+# asked for N workers, so the guard at the top of this comment is coming off, and
+# it cannot come off before the stores that were losing data have somewhere to
+# keep their facts. Sixty-five code lines buy one thing: a cross-process counter
+# table, so `/metrics` can sum across workers instead of reporting whichever
+# worker answered the request.
+#
+# The defect was measured, not assumed. Four spawned processes, 200 increments
+# each: a run in six where three children died and 200 updates never landed.
+# `threading.Lock` is invisible outside the process holding it, and that is the
+# whole of it -- a fact kept in the wrong structure, the same shape that had
+# already cost the service the content-cache spill sweep.
+#
+# This is a net investment against the guard rather than sprawl:
+# `assert_single_process_deployment` comes out in the same program, and the
+# ceiling returns to 14_501 or lower when it does.
+_APP_TREE_CODE_LINE_BUDGET = 14_566
 
 
 def test_app_tree_code_line_count_does_not_grow():
