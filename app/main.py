@@ -127,16 +127,26 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
         raise RuntimeError("shutdown steps failed: " + " | ".join(failures))
 
 
+# ONE database for the whole service. The store chokepoint opens a connection
+# per StoreSchema and the migration runner filters each schema's migrations by
+# id against the file's single ledger, so four tables in one file cost nothing
+# structurally -- and a second file would mean a second ledger, a second backup,
+# and a second thing to reason about when something is locked.
+#
+# WAL serializes writers, so the small frequent counter and cookie writes do
+# not contend for anything the large infrequent job writes need.
+DATABASE_PATH = settings.cache_dir + "/crawler.db"
+
 # Job store for resumable crawls (#3+#14)
 job_store = JobStore(
-    settings.cache_dir + "/jobs.db",
+    DATABASE_PATH,
     policy=HostPolicy.from_settings(settings),
 )
 
 # Completed single-request crawl results (fixes the dead status_url promise and
 # makes results recoverable if the HTTP connection drops mid-response).
 result_store = CrawlResultStore(
-    settings.cache_dir + "/results.db",
+    DATABASE_PATH,
     ttl_seconds=get_env_float("BROWSER_CRAWLER_RESULT_TTL_SECONDS", 3600.0),
     max_entries=get_env_int("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", 1000),
 )
@@ -208,9 +218,19 @@ if FastAPI is not None:
             from app.crawl.strategies import cookie_jar as cookie_jar_module
             from app.crawl.strategies.cookie_jar import CookieJar
 
-            jar = CookieJar(SharedCookieStore(settings.cache_dir + "/coordination.db"))
+            jar = CookieJar(SharedCookieStore(DATABASE_PATH))
             jar.import_file_into(settings.cookie_jar_path)
             cookie_jar_module._GLOBAL_COOKIE_JAR = jar
+        # /metrics must report the service, not this worker. Counters go to the
+        # same shared store as the cookies; the two resource gauges stay
+        # process-local because they read a cgroup every worker shares and
+        # summing them would report a utilization no process experiences.
+        from app.crawl.coordination_counters import CoordinationCounters
+
+        from .metrics import get_metrics
+
+        get_metrics().bind_counters(CoordinationCounters(DATABASE_PATH))
+
         # Jobs: rewind crash orphans and resume every PENDING whole-site job.
         from .api.job_runner import recover_and_start_pending_jobs
 

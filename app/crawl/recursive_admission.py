@@ -152,7 +152,7 @@ async def _resource_admitted_batch(
             metrics.resource_cpu_utilization,
         )
         batch_size = max(1, int(batch_size * scale))
-        metrics.resource_throttle_batches_total += 1
+        metrics.record_throttle()
     want_http, want_browser = _count_strategy_tiers(
         run.scheduler,
         state.frontier,
@@ -160,7 +160,7 @@ async def _resource_admitted_batch(
     )
     admit_http, admit_browser = await run.admission.admit(want_http, want_browser)
     if admit_http + admit_browser < batch_size:
-        metrics.resource_throttle_batches_total += 1
+        metrics.record_throttle()
         batch_size = admit_http + admit_browser
     return _pop_admitted(state.frontier, admit_http, admit_browser, run.scheduler)
 

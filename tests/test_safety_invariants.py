@@ -336,7 +336,30 @@ __all__ = [
 # because keeping it authoritative would keep the last-writer-wins path alive.
 #
 # One hundred forty-nine lines, and the guard is one step closer to coming off.
-_APP_TREE_CODE_LINE_BUDGET = 14_715
+#
+# RAISED to 14,821 from 14,715: `/metrics` reports the service, not the worker
+# that answered. MetricsStore was a dataclass whose counters were plain integer
+# increments reachable only from the process holding them, so under
+# `uvicorn --workers` the endpoint served one worker's numbers and called it
+# total traffic -- and the admission gate tunes itself from those numbers, so
+# the error fed back into the thing it was measuring.
+#
+# Counter names now live in one place, in `_COUNTERS`, instead of as a field
+# name plus a separate increment site. Reads are properties over the shared
+# store; the only write path is `observe_crawl` / `observe_search` /
+# `record_throttle` / `record_pause`, and a property setter cannot know its own
+# delta without a read-then-write that loses increments when two workers set it
+# at once, which is why the throttle counter is a method.
+#
+# The gauges stay process-local on purpose: memory and CPU utilization measure a
+# cgroup every worker shares, so summing them would multiply a ratio by the
+# worker count and alert on a healthy service. That split is the design, not an
+# omission.
+#
+# The ~90 lines of exposition moved to a module function, which took MetricsStore
+# off the oversized-class list the metrics budget gate reports -- the budget
+# stays at 3 because fixing one offender does not clear the other three.
+_APP_TREE_CODE_LINE_BUDGET = 14_821
 
 
 def test_app_tree_code_line_count_does_not_grow():
