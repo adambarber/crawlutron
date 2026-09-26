@@ -50,15 +50,29 @@ class SchedulerResult(Protocol):
     """What the domain scheduler reads off a worker's result.
 
     The breaker, latency-estimator and failure-bookkeeping paths below consult
-    ``.status``; nothing else about the result shape is scheduler business.
-    Declaring the requirement as a protocol keeps ``run`` generic over the
-    crawl (``EngineCrawlResult``) and render (``CrawlResult``) pipelines
-    without naming either, and without a union leaking into the caller's type.
+    ``.status`` and ``.elapsed_ms``; nothing else about the result shape is
+    scheduler business. Declaring the requirement as a protocol keeps ``run``
+    generic over the crawl (``EngineCrawlResult``) and render (``CrawlResult``)
+    pipelines without naming either, and without a union leaking into the
+    caller's type.
+
+    ``elapsed_ms`` is declared rather than ``getattr``-ed because the two
+    shapes carry it in different places: ``CrawlResult`` has the field and no
+    ``diagnostics`` at all, while ``EngineCrawlResult`` computes it from
+    ``diagnostics`` or its first attempt. A member only one of them has is a
+    member the scheduler silently skips for the other, which is how every
+    render-pipeline latency went unlearned while the estimator looked
+    correctly fed from crawl traffic alone.
     """
 
     @property
     def status(self) -> ResultStatus:
         """Terminal status of this job's attempt."""
+        ...
+
+    @property
+    def elapsed_ms(self) -> int:
+        """Milliseconds this attempt took, or 0 when nothing observed it."""
         ...
 
 
@@ -233,13 +247,10 @@ class DomainScheduler:
         if accounting != "success":
             return
         self.record_success(domain)
-        # Feed observed latency into the adaptive estimator (#6); render results
-        # may carry no diagnostics at all.
-        diag = getattr(result, "diagnostics", None)
-        latency = None
-        if isinstance(diag, dict):
-            rt = diag.get("runtime") or {}
-            latency = rt.get("elapsed_ms")
+        # Feed observed latency into the adaptive estimator (#6). One declared
+        # member, satisfied by both result shapes, so this reads the same
+        # whether the job came through the crawl or the render pipeline.
+        latency = result.elapsed_ms
         if latency:
             self.record_latency(domain, latency)
 

@@ -156,6 +156,82 @@ class TestAdaptiveThrottling:
         assert abs(second - 0.55) < 1e-6
 
 
+class TestObservedLatencyCrossesPipelines:
+    """Both result shapes must feed the estimator, through one attribute.
+
+    The scheduler used to dig latency out of ``result.diagnostics["runtime"]``,
+    and only ``EngineCrawlResult`` carries ``diagnostics``. Every /v1/render
+    result is a ``CrawlResult``, which has ``elapsed_ms`` directly and no
+    ``diagnostics`` at all -- so the getattr returned None and the render
+    pipeline's latencies were silently dropped, leaving the adaptive estimator
+    calibrated on crawl traffic alone.
+
+    Both shapes are the real models, and the crawl one is built through the
+    real ``_make_engine_result`` chokepoint. A stand-in carrying a
+    ``diagnostics`` key would have passed against the old code, which is the
+    whole point: the defect was the attribute a shape does not have, so the
+    fixture has to be the shape itself.
+    """
+
+    @staticmethod
+    def _rendered_result(elapsed_ms: int):
+        from app.models import CrawlResult
+
+        return CrawlResult(
+            url="https://example.com/x",
+            status="success",
+            classification="rendered",
+            final_url="https://example.com/x",
+            html=None,
+            text=None,
+            attempts=1,
+            elapsed_ms=elapsed_ms,
+            domain="example.com",
+        )
+
+    @staticmethod
+    def _crawled_result(elapsed_ms: int):
+        from app.crawl.result_helpers import _make_engine_result
+        from app.models import CrawlStrategyAttempt
+
+        return _make_engine_result(
+            original_url="https://example.com/x",
+            normalized_url="https://example.com/x",
+            final_url="https://example.com/x",
+            status="success",
+            classification="rendered",
+            attempt=CrawlStrategyAttempt(
+                strategy="HTTP_DECLARED_CRAWLER",
+                status="success",
+                classification="rendered",
+                http_status=200,
+                content_type="text/html",
+                elapsed_ms=elapsed_ms,
+            ),
+            http_status=200,
+            error=None,
+            diagnostics={"runtime": {"elapsed_ms": elapsed_ms}},
+        )
+
+    @pytest.mark.parametrize(
+        "build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"]
+    )
+    def test_latency_reaches_the_estimator_from_either_pipeline(self, build_result):
+        s = _adaptive_scheduler()
+        s._record_result_health("example.com", build_result(1000))
+        assert abs(s.current_delay("example.com") - 1.0) < 1e-6
+
+    @pytest.mark.parametrize(
+        "build_result", [_rendered_result, _crawled_result], ids=["render", "crawl"]
+    )
+    def test_a_result_with_no_observation_leaves_the_delay_alone(self, build_result):
+        s = _adaptive_scheduler()
+        s._record_result_health("example.com", build_result(0))
+        # Same baseline the sibling test asserts for an unlearned domain: the
+        # configured fixed delay, unchanged because nothing was observed.
+        assert s.current_delay("example.com") == 1.0
+
+
 class TestCircuitBreakerSpillsOnResult:
     """with ``on_result`` set, an open circuit must spill the failed
     envelope through ``on_result`` instead of writing ``results[index]``

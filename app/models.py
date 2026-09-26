@@ -339,6 +339,28 @@ class EngineCrawlResult:
     # (build_unified_result maps it into the existing PageMetadata fields).
     llm_metadata: dict[str, Any] | None = None
 
+    @property
+    def elapsed_ms(self) -> int:
+        """How long this result's work took, or 0 when nothing observed it.
+
+        The scheduler is generic over two result shapes and needs this number
+        from both, so it is one attribute with one meaning rather than a
+        ``getattr`` for a member only one of the two happens to carry. The
+        diagnostics block is consulted first because that is what the HTTP and
+        browser strategies have always written, and the attempt is the fallback
+        for a result built without diagnostics (the worker-exception and
+        budget-timeout envelopes). Both are milliseconds, so no caller has to
+        know which one it got.
+        """
+        runtime = self.diagnostics.get("runtime")
+        if isinstance(runtime, dict):
+            observed = runtime.get("elapsed_ms")
+            if isinstance(observed, int | float):
+                return int(observed)
+        if self.attempted_strategies:
+            return int(self.attempted_strategies[0].elapsed_ms)
+        return 0
+
     def __post_init__(self) -> None:
         _check_literal_fields(self)
 

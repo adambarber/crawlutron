@@ -240,7 +240,22 @@ __all__ = [
 # real resource gate; a first draft replaced the gate with a stand-in and broke
 # on startup's start_lag_probe, which is the fake-imitates-the-chokepoint trap
 # the suite already has a standing rule about.
-_APP_TREE_CODE_LINE_BUDGET = 14_458
+# RAISED to 14,467 from 14,458: nine lines to give the scheduler one way to
+# read a duration. SchedulerResult declared .status and nothing else, and the
+# estimator dug the rest out with getattr(result, "diagnostics", None) --
+# a member only EngineCrawlResult has. Every /v1/render result is a
+# CrawlResult, which carries elapsed_ms directly and has no diagnostics at
+# all, so the render pipeline's latencies were silently dropped and the
+# adaptive estimator was calibrated on crawl traffic alone while looking
+# correctly fed. elapsed_ms is now a declared member both shapes satisfy:
+# CrawlResult's is the field it always had, EngineCrawlResult's is computed
+# from the diagnostics block first (what the HTTP and browser strategies have
+# always written) and its first attempt as the fallback. The getattr is gone
+# because a member only one implementation carries is a member the generic
+# caller silently skips for the other. This changes estimator inputs on the
+# render path on purpose; the three tests drive both real models, and the one
+# that was red is the render one.
+_APP_TREE_CODE_LINE_BUDGET = 14_467
 
 
 def test_app_tree_code_line_count_does_not_grow():
