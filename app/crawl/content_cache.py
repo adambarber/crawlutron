@@ -322,16 +322,33 @@ class ContentCache:
         envelope = self._read_envelope(key)
         return envelope.get("cached_at") if envelope is not None else None
 
+    def _entry_to_store(self, value: Any, ttl: int | None) -> tuple[dict[str, Any], float | None]:
+        """Build the on-disk envelope for one write, and the expiry it resolved to.
+
+        The envelope is this cache's stored contract, and the sync and async
+        write paths were each building it independently -- so a field added for
+        one was invisible to the other, and an entry written through the other
+        path would not carry it. One owner, so the two cannot disagree about
+        what an entry looks like on disk.
+
+        Also one clock read per write. ``expires`` and ``cached_at`` came from
+        separate ``clock()`` calls, so ``cached_at`` recorded a later instant
+        than the one the expiry was derived from -- which is the instant a
+        caller compares its remote last-modified signal against (#3).
+        """
+        effective_ttl = self.default_ttl if ttl is None else ttl
+        # cached_at records when this entry was written so callers can compare a
+        # remote "last modified" signal against our local fetch time (#3).
+        now = self.clock()
+        expires = None if effective_ttl <= 0 else now + effective_ttl
+        return {"expires": expires, "value": value, "cached_at": now}, expires
+
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Store ``value`` (must be JSON-serializable) with a TTL in seconds.
 
         ``ttl <= 0`` means "never expires".
         """
-        effective_ttl = self.default_ttl if ttl is None else ttl
-        expires = None if effective_ttl <= 0 else self.clock() + effective_ttl
-        # cached_at records when this entry was written so callers can compare a
-        # remote "last modified" signal against our local fetch time (#3).
-        envelope = {"expires": expires, "value": value, "cached_at": self.clock()}
+        envelope, expires = self._entry_to_store(value, ttl)
         # Serialize first: entries over the per-entry cap are refused before
         # any disk write (H9), and the byte size feeds total-budget accounting.
         data = json.dumps(envelope)
@@ -380,9 +397,9 @@ class ContentCache:
         is serialized in a worker thread first, the size decision is made
         under the lock before any index or disk mutation, and the large disk
         write is offloaded so the event loop is never stalled."""
-        effective_ttl = self.default_ttl if ttl is None else ttl
-        expires = None if effective_ttl <= 0 else self.clock() + effective_ttl
-        envelope = {"expires": expires, "value": value, "cached_at": self.clock()}
+        # Built off the loop with the serialize: it is pure, and the envelope is
+        # the sync path's own contract (``_entry_to_store``).
+        envelope, expires = await asyncio.to_thread(self._entry_to_store, value, ttl)
         path = self._path_for(key)
         # Serialize FIRST: the refuse/keep decision must be made from the
         # exact bytes that will hit disk, before anything is mutated.

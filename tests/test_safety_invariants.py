@@ -445,7 +445,15 @@ __all__ = [
 # The fetcher contract it is spelled against is irreducible in Python (two
 # entry points, two signatures) and is declared once as
 # `HttpFetchContract` with a tree-wide guard proving both still match.
-_APP_TREE_CODE_LINE_BUDGET = 14_979
+# One line spent, and this is the argument for spending it: the content-cache
+# envelope is the cache's *stored contract* and both write paths were building
+# it themselves. That is now `ContentCache._entry_to_store`, guarded tree-wide
+# by test_cache_envelope_is_built_by_one_owner so a third write path cannot
+# hand-roll a different shape. The extra line buys a single clock read per
+# write -- `expires` and `cached_at` were separate `clock()` calls, so the
+# instant a caller compares its remote last-modified signal against (#3) was
+# later than the one the expiry was derived from.
+_APP_TREE_CODE_LINE_BUDGET = 14_980
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -993,6 +1001,64 @@ def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
             if "HTML" in head and head.endswith("BYTES"):
                 offenders.append(offender(path, node.lineno, name))
     return offenders
+
+
+def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag any dict literal shaped like a content-cache envelope.
+
+    Keyed on the *stored shape* -- the key set every cache entry carries --
+    rather than on the two write paths that happened to spell it, so a third
+    writer is caught too. A dict that merely mentions ``expires`` is not an
+    envelope; it has to carry the whole contract.
+    """
+    required = {"expires", "value", "cached_at"}
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {
+            key.value
+            for key in node.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        if required <= keys:
+            offenders.append(offender(path, node.lineno, "cache-envelope"))
+    return offenders
+
+
+def test_cache_envelope_is_built_by_one_owner():
+    """The content-cache entry envelope has one builder.
+
+    ``set`` and ``aset`` each built the on-disk envelope themselves, which is
+    the cache's *stored contract*: a field added for one write path was absent
+    from the other, so an entry written through it was missing something the
+    reader expects. ``ContentCache._entry_to_store`` is the owner; a new write
+    path has to go through it.
+    """
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | {"content_cache.py"}):
+        offenders.extend(_cache_envelope_literals(tree, path))
+    assert not offenders, (
+        "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_cache_envelope_detector_bites():
+    """The envelope sweep must fire on a hand-rolled envelope elsewhere.
+
+    Without this, an exhausted or renamed sink pattern would report zero
+    offenders and the guard above would pass forever while covering nothing.
+    """
+    synthetic = REPO_ROOT / "app" / "_synthetic.py"
+    sneaky = ast.parse(
+        "def write(self, key, value, expires):\n"
+        '    return {"expires": expires, "value": value, "cached_at": expires}\n'
+    )
+    assert _cache_envelope_literals(sneaky, synthetic), "a hand-rolled envelope escaped the sweep"
+    # A dict that merely mentions one envelope key is not an envelope, and
+    # flagging it would make the guard something people route around.
+    near_miss = ast.parse('def f(expires, value):\n    return {"expires": expires, "value": value}\n')
+    assert not _cache_envelope_literals(near_miss, synthetic), "incomplete envelope flagged"
 
 
 def _is_numeric_expr(node: ast.expr) -> bool:
