@@ -285,7 +285,28 @@ def _short(fragment_hash: str) -> str:
 
 
 def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[str, Any]:
-    """One jscpd invocation over one root at one floor."""
+    """One jscpd invocation over one root at one floor, scored as a gate."""
+    report = jscpd_report(root, floor, threshold=args.threshold, fail_on_empty=True)
+    if report is None:
+        raise OSError(f"jscpd found no sources under {root}")
+    return report
+
+
+def jscpd_report(
+    root: str, floor: tuple[int, int], *, threshold: int = 0, fail_on_empty: bool = False
+) -> dict[str, Any] | None:
+    """Run jscpd over one root at one (lines, tokens) floor and parse the report.
+
+    The one place that knows how to invoke jscpd. The gate scores what comes
+    back and the frontier sweep enumerates the whole staircase of floors, and
+    a second copy of this command line is a second answer to "what did jscpd
+    see" -- which is the question the whole gate exists to keep one answer to.
+
+    ``fail_on_empty`` is a gate concern, not a measurement one: it makes jscpd
+    refuse an empty result so a mis-pointed scan root cannot read as clean.
+    A sweep wants the report either way. Returns None only when jscpd produced
+    no report at all, which is the one failure a caller cannot interpret.
+    """
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
         command = [
@@ -299,19 +320,24 @@ def _scan(root: str, floor: tuple[int, int], args: argparse.Namespace) -> dict[s
             "--min-tokens",
             str(floor[1]),
             "--threshold",
-            str(args.threshold),
-            "--fail-on-empty",
+            str(threshold),
             "--reporters",
             "json",
             "--output",
             str(output),
+            # The root stays last: it is a positional, and every caller -- the
+            # gate, the sweep, and the test stubs that read ``command[-1]`` to
+            # tell which root was scanned -- reads it from the end.
+            *(["--fail-on-empty"] if fail_on_empty else []),
             root,
         ]
         completed = subprocess.run(command, cwd=SERVICE_ROOT, capture_output=True, text=True, check=False)
         report_path = output / "jscpd-report.json"
-        if completed.returncode not in (0, 1) or not report_path.is_file():
+        if report_path.is_file():
+            return json.loads(report_path.read_text(encoding="utf-8"))
+        if completed.returncode not in (0, 1):
             raise OSError(f"jscpd failed on {root}: {completed.stdout}{completed.stderr}".strip())
-        return json.loads(report_path.read_text(encoding="utf-8"))
+        return None
 
 
 def _footprint(duplicate: dict[str, Any]) -> int:
