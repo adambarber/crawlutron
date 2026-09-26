@@ -7759,6 +7759,115 @@ def test_wire_mirror_detector_bites():
     )
 
 
+# --- An advertised payload key may not be dropped by its response model -------
+#
+# The two discovery endpoints build a dict by hand and hand it to FastAPI with a
+# strict `response_model=`. Pydantic DROPS every key the model does not declare,
+# so advertising a new block is not a type error and not a test failure -- the key
+# stops existing on the wire while every test that calls the payload function
+# directly stays green, because those tests never go through the model. This
+# project has shipped that once: `crawl_timing` was advertised and absent from
+# the endpoint, and was caught only by curling the live service.
+#
+# The gate above covers the other twin, a domain dataclass and its response
+# model. This covers the shape that actually shipped the bug: a hand-written dict
+# literal beside a model that is maintained by hand. Both have to be edited for
+# the payload to be correct, and nothing checked that they agreed.
+#
+# The pair is declared as data so adding a third advertised endpoint is one line
+# here, and so the real tree and the bites proof below exercise the same code.
+
+_ADVERTISED_PAYLOADS = (
+    ("app/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
+    ("app/discovery/agent_hints.py", "agent_hints_payload", "AgentHintsResponse"),
+)
+
+
+def _advertised_keys(tree: ast.Module, function_name: str) -> set[str]:
+    """Top-level string keys of a payload function's single returned dict.
+
+    Asserts rather than degrading when the shape is not statically readable. A
+    payload assembled across several statements defeats extraction, and quietly
+    reporting "nothing dropped" for exactly the shape this gate cannot see would
+    recreate the defect it exists to catch -- a detector that goes blind without
+    saying so is the gap, not the fix.
+    """
+    function = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name),
+        None,
+    )
+    assert function is not None, f"{function_name} not found; update _ADVERTISED_PAYLOADS"
+    returns = [n for n in ast.walk(function) if isinstance(n, ast.Return)]
+    assert len(returns) == 1, (
+        f"{function_name} must be a single `return {{...}}` so its advertised keys can be "
+        f"read; found {len(returns)} return statements"
+    )
+    payload = returns[0].value
+    assert isinstance(payload, ast.Dict), (
+        f"{function_name} must return a dict literal so its keys can be compared against the "
+        f"response model; got {type(payload).__name__}"
+    )
+    return {k.value for k in payload.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+
+def _undeclared_advertised_keys(
+    payload_tree: ast.Module, wire_tree: ast.Module, function_name: str, model_name: str
+) -> list[str]:
+    """Advertised payload keys the response model does not declare."""
+    model = next(
+        (n for n in wire_tree.body if isinstance(n, ast.ClassDef) and n.name == model_name), None
+    )
+    assert model is not None, f"{model_name} not found in {_WIRE_MODEL_MODULE}"
+    declared = set(_declared_fields(model))
+    return [
+        f"advertised key {key!r} is dropped by {model_name}"
+        for key in sorted(_advertised_keys(payload_tree, function_name) - declared)
+    ]
+
+
+@pytest.mark.parametrize(("payload_module", "function_name", "model_name"), _ADVERTISED_PAYLOADS)
+def test_every_advertised_payload_key_is_declared_on_its_response_model(
+    payload_module: str, function_name: str, model_name: str
+):
+    """An advertised key that the response model does not declare is dropped on the wire."""
+    _, payload_tree = file_tree(payload_module)
+    _, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    dropped = _undeclared_advertised_keys(payload_tree, wire_tree, function_name, model_name)
+    assert not dropped, (
+        f"{function_name} advertises keys that {model_name} does not declare, and "
+        f"response_model={model_name} silently filters every undeclared key -- so they reach "
+        f"the dict-returning tests and never the wire. Add the field to {model_name}: "
+        + "; ".join(dropped)
+    )
+
+
+def test_advertised_payload_detector_bites():
+    """An undeclared advertised key fires; an exact pair stays clean; a blind spot raises."""
+    wire = ast.parse("class Capabilities(BaseModel):\n    service: str\n    crawl_timing: Timing\n")
+    exact = ast.parse("def payload():\n    return {'service': 'x', 'crawl_timing': {}}\n")
+    assert not _undeclared_advertised_keys(exact, wire, "payload", "Capabilities")
+
+    drifted = ast.parse(
+        "def payload():\n    return {'service': 'x', 'crawl_timing': {}, 'limits': {}, 'extra': 1}\n"
+    )
+    reported = _undeclared_advertised_keys(drifted, wire, "payload", "Capabilities")
+    assert len(reported) == 2, reported
+    assert "'extra'" in reported[0] and "dropped by Capabilities" in reported[0], reported
+    assert "'limits'" in reported[1], reported
+
+    # A declared field the payload never sends is not drift in this direction: the
+    # model is the stricter of the two and a required field is caught by FastAPI.
+    assert not _undeclared_advertised_keys(
+        ast.parse("def payload():\n    return {'service': 'x'}\n"), wire, "payload", "Capabilities"
+    )
+
+    # A payload assembled statement by statement defeats static extraction, and
+    # going quiet on that shape would be the very defect this gate exists to stop.
+    assembled = ast.parse("def payload():\n    d = {}\n    d['service'] = 'x'\n    return d\n")
+    with pytest.raises(AssertionError, match="dict literal"):
+        _undeclared_advertised_keys(assembled, wire, "payload", "Capabilities")
+
+
 # --- A result may not spell its own (status, classification) pair -------------
 #
 # app/crawl/result_helpers.py is the chokepoint for building results, and both
