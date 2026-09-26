@@ -291,7 +291,18 @@ __all__ = [
 # loss. It runs before the browser pool is touched, reads through the never-raise
 # env chokepoint so a typo cannot deny boot, and is inert in both shipped
 # deployments, which pin the value to 1.
-_APP_TREE_CODE_LINE_BUDGET = 14_488
+#
+# RAISED to 14,501 from 14,488: a bounded retry around the WAL conversion in the
+# store chokepoint, which is thirteen lines and is a prerequisite for the
+# operator's request to remove the guard above rather than a cost of it. Four
+# spawned processes, six runs, one where three children died 0.000s into
+# `PRAGMA journal_mode=WAL` with "database is locked". The 0.000s is the whole
+# finding: `busy_timeout` is never invoked for a journal-mode change, so every
+# store in the service -- jobs, results, and whatever the multi-worker work
+# adds -- would have failed to open under `uvicorn --workers` on a fresh
+# database. The budget has to outlast a peer's whole migration, not one lock,
+# because the loser waits on the winner's migrate step.
+_APP_TREE_CODE_LINE_BUDGET = 14_501
 
 
 def test_app_tree_code_line_count_does_not_grow():

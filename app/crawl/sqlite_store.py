@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,22 @@ if TYPE_CHECKING:
     from app.crawl.migrations.manifest import StoreSchema
 
 _BUSY_TIMEOUT_MS = 5000
+
+# `PRAGMA journal_mode=WAL` is a write to the database header, and converting a
+# file that is not yet WAL needs a lock no other connection holds. When
+# `uvicorn --workers` starts its children together, every one of them converts
+# the same fresh database in the same instant; SQLite grants the lock to one and
+# returns SQLITE_BUSY to the rest. `busy_timeout` does not cover this: measured
+# with four spawned processes, three of four children failed 0.000s into the
+# call, so the busy handler is never invoked. A retry is the only remedy for an
+# error the library declines to wait out.
+#
+# The budget covers the cascade, not one lock: a loser waits while the winner
+# runs its migrations, so the wait must outlast a peer's whole migration rather
+# than a single header write. Bounded, because an unbounded retry turns a hard
+# lock into a hang only an operator can clear.
+_WAL_RETRY_SECONDS = 15.0
+_WAL_RETRY_BACKOFF_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
@@ -36,8 +53,26 @@ class IndexInfo:
 def configure_store_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
     """Apply every connection-scoped service SQLite PRAGMA in this one function."""
     conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA journal_mode=WAL")
+    _ensure_wal(conn)
     return conn
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    """Put the database in WAL, retrying while a sibling process holds the file.
+
+    On an already-WAL database the PRAGMA is a no-op read and never takes a
+    write lock, so the steady state stays uncontended; the retry is reached
+    only by the first conversion, which is the only time this is a write.
+    """
+    deadline = time.monotonic() + _WAL_RETRY_SECONDS
+    while True:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_WAL_RETRY_BACKOFF_SECONDS)
 
 
 def _open_raw_store_connection(
