@@ -36,7 +36,7 @@ def test_save_to_file_is_atomic_on_failure():
     try:
         with patch("json.dumps", side_effect=boom):
             try:
-                jar.save_to_file(target)
+                jar.export_to_file(target)
             except Boom:
                 pass
         # On failure the original target must be untouched (atomic rename only
@@ -55,7 +55,7 @@ def test_save_to_file_persists_and_no_temp_leftovers():
     if os.path.exists(target):
         os.unlink(target)
     try:
-        jar.save_to_file(target)
+        jar.export_to_file(target)
         with open(target, encoding="utf-8") as f:
             data = json.load(f)
         assert data == {"x.example": {"sess": "abc"}}

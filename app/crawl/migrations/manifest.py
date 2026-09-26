@@ -13,6 +13,7 @@ class StoreSchema(StrEnum):
     CRAWL_JOBS = "crawl_jobs"
     RESULTS = "results"
     COORDINATION_COUNTERS = "coordination_counters"
+    COORDINATION_COOKIES = "coordination_cookies"
 
 
 @dataclass(frozen=True)
@@ -83,10 +84,27 @@ COORDINATION_COUNTERS_SCHEMA = TableSchema(
     ),
 )
 
+COORDINATION_COOKIES_SCHEMA = TableSchema(
+    name="coordination_cookies",
+    columns=(
+        ColumnSchema("namespace", "TEXT", False, None, 1),
+        ColumnSchema("host", "TEXT", False, None, 2),
+        # One JSON object per (namespace, host). Cookies for a host are few and
+        # always rewritten together, so a row is the natural unit; a row per
+        # cookie would only add a join to answer a question the header already
+        # answers in one read.
+        ColumnSchema("payload", "TEXT", True, "'{}'"),
+        # LRU clock. The jar is long-lived and every crawled host adds a slot,
+        # so the table is bounded the same way the in-memory map was.
+        ColumnSchema("touched_at", "REAL", True, "0"),
+    ),
+)
+
 CURRENT_SCHEMAS = {
     StoreSchema.CRAWL_JOBS: CRAWL_JOBS_SCHEMA,
     StoreSchema.RESULTS: RESULTS_SCHEMA,
     StoreSchema.COORDINATION_COUNTERS: COORDINATION_COUNTERS_SCHEMA,
+    StoreSchema.COORDINATION_COOKIES: COORDINATION_COOKIES_SCHEMA,
 }
 
 LEGACY_COLUMNS = {
@@ -95,12 +113,14 @@ LEGACY_COLUMNS = {
     ),
     StoreSchema.RESULTS: (),
     StoreSchema.COORDINATION_COUNTERS: (),
+    StoreSchema.COORDINATION_COOKIES: (),
 }
 
 MIGRATION_SEQUENCES = {
     StoreSchema.CRAWL_JOBS: ("0001_crawl_jobs_initial", "0002_crawl_jobs_drop_canonicalized"),
     StoreSchema.RESULTS: ("0001_results_initial",),
     StoreSchema.COORDINATION_COUNTERS: ("0001_coordination_counters_initial",),
+    StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
 }
 
 MIGRATION_IDS = {
@@ -113,10 +133,15 @@ def _quote_identifier(value: str) -> str:
 
 
 def create_table_sql(schema: TableSchema) -> str:
+    key_columns = [column for column in schema.columns if column.primary_key_position]
     declarations: list[str] = []
     for column in schema.columns:
         declaration = f"  {_quote_identifier(column.name)} {column.sqlite_type}"
-        if column.primary_key_position:
+        # A composite key cannot be expressed inline -- SQLite rejects more
+        # than one column-level PRIMARY KEY -- so it becomes a table constraint
+        # below. A single-column key keeps the inline form, leaving the DDL of
+        # the tables already written unchanged under a new renderer.
+        if column.primary_key_position and len(key_columns) == 1:
             declaration += " PRIMARY KEY"
         if column.not_null:
             declaration += " NOT NULL"
@@ -124,6 +149,9 @@ def create_table_sql(schema: TableSchema) -> str:
             declaration += f" DEFAULT {column.default}"
         declarations.append(declaration)
     body = ",\n".join(declarations)
+    quoted_keys = ", ".join(_quote_identifier(column.name) for column in key_columns)
+    if len(key_columns) > 1:
+        return f"CREATE TABLE {_quote_identifier(schema.name)} (\n{body},\n  PRIMARY KEY ({quoted_keys})\n)"
     return f"CREATE TABLE {_quote_identifier(schema.name)} (\n{body}\n)"
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from app.crawl.coordination_cookies import SharedCookieStore
 from app.crawl.coordination_counters import CoordinationCounters
 from app.crawl.job_store import JobStatus, JobStore
 from app.crawl.migrations import (
@@ -29,13 +30,17 @@ from app.validation import HostPolicy
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
 
 
-def _open_store(schema: StoreSchema, db_path: Path) -> JobStore | CrawlResultStore | CoordinationCounters:
+def _open_store(
+    schema: StoreSchema, db_path: Path
+) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore:
     if schema is StoreSchema.CRAWL_JOBS:
         return JobStore(db_path, policy=HostPolicy.unrestricted())
     if schema is StoreSchema.RESULTS:
         return CrawlResultStore(db_path)
     if schema is StoreSchema.COORDINATION_COUNTERS:
         return CoordinationCounters(db_path)
+    if schema is StoreSchema.COORDINATION_COOKIES:
+        return SharedCookieStore(db_path)
     # The parametrization above is derived from StoreSchema, so it grows
     # whenever a schema is added. Defaulting here instead would silently
     # migrate the wrong table and fail as a confusing missing-table assertion.

@@ -192,13 +192,25 @@ if FastAPI is not None:
         # Cookies first: recovered jobs can receive cookies in their first
         # batch, and a clear-then-populate load would drop those (final #5).
         if settings.cookie_persistence_enabled:
-            # Create the parent directory before the cookie jar tries to read
-            # from it; standalone checkouts default to ./cache which may not
-            # exist on first run.
-            os.makedirs(os.path.dirname(settings.cookie_jar_path) or ".", exist_ok=True)
-            from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
+            # The jar is backed by the shared coordination store rather than by
+            # a JSON file rewritten at shutdown. That rewrite was replace-
+            # everything, so with N workers the last process to exit discarded
+            # every cookie the others had collected -- atomic, non-truncated,
+            # and still a lost update. The store merges in a transaction
+            # instead, so workers accumulate rather than overwrite.
+            #
+            # An existing cookie_jar.json is imported once, so an upgrade does
+            # not silently sign every user out. It is never written again: the
+            # file format is a legacy mirror, and keeping it authoritative
+            # would keep the last-writer-wins path alive.
+            os.makedirs(settings.cache_dir, exist_ok=True)
+            from app.crawl.coordination_cookies import SharedCookieStore
+            from app.crawl.strategies import cookie_jar as cookie_jar_module
+            from app.crawl.strategies.cookie_jar import CookieJar
 
-            _GLOBAL_COOKIE_JAR.load_from_file(settings.cookie_jar_path)
+            jar = CookieJar(SharedCookieStore(settings.cache_dir + "/coordination.db"))
+            jar.import_file_into(settings.cookie_jar_path)
+            cookie_jar_module._GLOBAL_COOKIE_JAR = jar
         # Jobs: rewind crash orphans and resume every PENDING whole-site job.
         from .api.job_runner import recover_and_start_pending_jobs
 
@@ -208,17 +220,14 @@ if FastAPI is not None:
 
         # Shutdown: stop the world FIRST so in-flight job crawls can't
         # deliver webhooks against cleared dependencies or mint cookies
-        # after the snapshot is taken (final review #4). Then persist the
-        # jar, release webhook deps, and close clients.
+        # after the snapshot is taken (final review #4). Then release webhook
+        # deps and close clients. The cookie jar needs no shutdown step: the
+        # shared store is the persistence, so there is no whole-jar write left
+        # to be last-writer-wins.
         shutdown_event.set()
         from .api.job_runner import shutdown_job_runner
 
         await shutdown_job_runner()
-
-        if settings.cookie_persistence_enabled:
-            from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
-
-            _GLOBAL_COOKIE_JAR.save_to_file(settings.cookie_jar_path)
 
         from app.crawl.strategies.http_client_pool import close_async_http_client, close_cffi_session
 

@@ -10,7 +10,13 @@ import contextvars
 import os
 import threading
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
+
+from app.crawl.coordination_cookies import DEFAULT_MAX_HOSTS
+
+if TYPE_CHECKING:
+    from app.crawl.coordination_cookies import SharedCookieStore
 
 # Per-request cookie namespace: set by ``crawl_request`` so concurrent crawls
 # from different tenants cannot leak cookies through the shared
@@ -33,16 +39,21 @@ _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
 # Cap on distinct (namespace, host) cookie slots. The jar is module-global
 # and long-lived: without eviction every crawled host accumulates forever
 # (the DNS/robots/sitemap caches are all bounded; the jar was the outlier).
-_COOKIE_JAR_MAX_HOSTS = 1024
+# Defined once by the shared store, which is what bounds the slots when the
+# jar is storage-backed; re-declared here it would be a second number to drift.
+_COOKIE_JAR_MAX_HOSTS = DEFAULT_MAX_HOSTS
 
 
 class CookieJar:
-    """In-memory cookie jar (Feature: Persistent Cookie Jars).
+    """Cookie storage, optionally shared by every worker process.
 
     Cookies are stored per-domain and merged into ``Set-Cookie`` response
-    headers / ``Cookie`` request headers across recursive page loads. All
-    access is guarded by a lock because the jar is shared across concurrent
-    requests (a single global instance).
+    headers / ``Cookie`` request headers across recursive page loads.
+
+    With a ``store`` the shared table is the single source of truth: the
+    in-memory map stays empty, so there is no second copy to diverge. Without
+    one the jar keeps cookies in a per-process LRU, which is a valid
+    single-process configuration rather than a degraded one.
 
     A caller-supplied ``namespace`` string (e.g. a tenant id, a request id,
     or a logical ``cookie_jar`` profile name) is accepted by the public API
@@ -52,7 +63,8 @@ class CookieJar:
     mitigation for multi-tenant deployments is to pass a per-tenant id.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: SharedCookieStore | None = None) -> None:
+        self._store = store
         # OrderedDict: insertion order doubles as the eviction order for the
         # (namespace, host) LRU cap (R1) — plain dict has no move_to_end.
         self._cookies: OrderedDict[tuple[str, str], dict[str, str]] = OrderedDict()
@@ -79,11 +91,16 @@ class CookieJar:
             jar.load(set_cookie_header)
         except Exception:
             return
+        parsed = {cookie.key: cookie.value for cookie in jar.values()}
+        if not parsed:
+            return
         ns_key = self._ns_key(namespace, host)
+        if self._store is not None:
+            self._store.merge(ns_key[0], ns_key[1], parsed)
+            return
         with self._lock:
             target = self._cookies.setdefault(ns_key, {})
-            for cookie in jar.values():
-                target[cookie.key] = cookie.value
+            target.update(parsed)
             # LRU: a stored host survives while it is written or read; past
             # the cap the oldest-unread slot is evicted (R1).
             self._cookies.move_to_end(ns_key)
@@ -98,16 +115,22 @@ class CookieJar:
         """
         host = (urlparse(url).hostname or "").lower()
         ns_key = self._ns_key(namespace, host)
-        with self._lock:
-            domain_cookies = dict(self._cookies.get(ns_key, {}))
-            if ns_key in self._cookies:
-                self._cookies.move_to_end(ns_key)
+        if self._store is not None:
+            domain_cookies = self._store.get(ns_key[0], ns_key[1])
+        else:
+            with self._lock:
+                domain_cookies = dict(self._cookies.get(ns_key, {}))
+                if ns_key in self._cookies:
+                    self._cookies.move_to_end(ns_key)
         if not domain_cookies:
             return ""
         return "; ".join(f"{key}={value}" for key, value in domain_cookies.items())
 
     def clear(self, *, namespace: str = "") -> None:
         """Clear cookies. With a ``namespace``, only that namespace is cleared."""
+        if self._store is not None:
+            self._store.clear(namespace or "")
+            return
         with self._lock:
             if not namespace:
                 self._cookies.clear()
@@ -116,52 +139,80 @@ class CookieJar:
             for key in stale:
                 del self._cookies[key]
 
-    def save_to_file(self, path: str) -> None:
-        """Persist the cookie jar to a JSON file atomically.
+    def export_to_file(self, path: str) -> None:
+        """Write the jar's legacy shared namespace to a JSON file atomically.
+
+        Import/export, not live persistence. The shutdown save that used to
+        live here was last-writer-wins across workers: it rewrote the whole
+        file and discarded every sibling's cookies, which is why a shared store
+        exists. A caller wanting a file now gets a mirror of shared state, and
+        the mirror is never read back on the request path.
 
         Routes through the app.atomic_write chokepoint (temp file + fsync
         + replace), so a crash (or write error) mid-serialization cannot
-        leave a truncated/corrupted file that silently loses all cookies.
+        leave a truncated/corrupted file.
         """
         import json
 
         from app.atomic_write import atomic_write_text
 
-        with self._lock:
-            # Persist only the legacy shared namespace ("") for backward
-            # compatibility; per-namespace cookies are caller-managed and
-            # intentionally not persisted to disk.
-            data: dict[str, dict[str, str]] = {}
-            for (ns, host), cookies in self._cookies.items():
-                if ns:
-                    continue
-                data[host] = dict(cookies)
-        atomic_write_text(path, json.dumps(data))
+        atomic_write_text(path, json.dumps(self._legacy_slots()))
+
+    def import_file_into(self, path: str) -> None:
+        """Merge a legacy JSON jar's shared namespace into this jar.
+
+        The file format is read here and nowhere else, so a migration into a
+        store-backed jar cannot drift from the format an export writes. A
+        missing or corrupt file is a no-op: the caller keeps whatever it had.
+        """
+        for host, cookies in self._read_legacy_file(path).items():
+            if self._store is not None:
+                self._store.merge("", host, cookies)
+                continue
+            with self._lock:
+                self._cookies.setdefault(("", host), {}).update(cookies)
+                self._cookies.move_to_end(("", host))
+                while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
+                    self._cookies.popitem(last=False)
 
     @classmethod
-    def load_from_file(cls, path: str) -> CookieJar:
-        """Load a cookie jar from a JSON file. Returns empty jar if file missing/invalid."""
+    def import_from_file(cls, path: str) -> CookieJar:
+        """Load a JSON file into a memory-backed jar. Empty if missing/invalid."""
+        jar = cls()
+        jar.import_file_into(path)
+        return jar
+
+    def _legacy_slots(self) -> dict[str, dict[str, str]]:
+        """The jar's shared namespace, in the legacy on-disk shape.
+
+        Namespaced cookies stay in the store: they are caller-managed and were
+        never persisted, so exporting them would leak one tenant's cookies into
+        a file the next start imports into the shared namespace.
+        """
+        if self._store is not None:
+            slots = self._store.all_slots()
+            return {host: cookies for (ns, host), cookies in slots.items() if not ns}
+        with self._lock:
+            return {host: dict(cookies) for (ns, host), cookies in self._cookies.items() if not ns}
+
+    @staticmethod
+    def _read_legacy_file(path: str) -> dict[str, dict[str, str]]:
         import json
 
-        jar = cls()
         if not os.path.exists(path):
-            return jar
+            return {}
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, dict):
-                with jar._lock:
-                    for domain, cookies in data.items():
-                        if isinstance(cookies, dict):
-                            # Persisted cookies live in the legacy shared
-                            # namespace ("") so single-tenant / pre-namespace
-                            # deployments keep working. Per-namespace cookies
-                            # are caller-managed and intentionally not
-                            # persisted.
-                            jar._cookies[("", domain)] = cookies
         except Exception:
-            pass  # corrupted file -> empty jar
-        return jar
+            return {}  # corrupted file -> nothing to import
+        if not isinstance(data, dict):
+            return {}
+        return {
+            domain: cookies
+            for domain, cookies in data.items()
+            if isinstance(domain, str) and isinstance(cookies, dict)
+        }
 
 
 # Module-level cookie jar for persistent cross-request cookie storage (#2).

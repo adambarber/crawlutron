@@ -319,7 +319,24 @@ __all__ = [
 # This is a net investment against the guard rather than sprawl:
 # `assert_single_process_deployment` comes out in the same program, and the
 # ceiling returns to 14_501 or lower when it does.
-_APP_TREE_CODE_LINE_BUDGET = 14_566
+#
+# RAISED to 14,715 from 14,566: the cross-process cookie store, the second of
+# the three programs the guard's refusal names. `CookieJar.save_to_file`
+# serialized the whole jar over a JSON file through the atomic-write
+# chokepoint. That makes the write non-truncated and does nothing about a lost
+# update, because the update is replace-everything: each worker loads at
+# startup and saves at shutdown, so the last worker to exit discards every
+# cookie the others collected, and the deployment reports healthy throughout.
+#
+# The store merges the read and the write in one transaction, which is the one
+# thing the file could not do, and bounds itself with a touched_at LRU so a
+# long-lived service cannot accumulate a row per host crawled forever. The
+# JSON file survives as import/export and is imported once on upgrade so an
+# existing deployment is not silently signed out; it is never written again,
+# because keeping it authoritative would keep the last-writer-wins path alive.
+#
+# One hundred forty-nine lines, and the guard is one step closer to coming off.
+_APP_TREE_CODE_LINE_BUDGET = 14_715
 
 
 def test_app_tree_code_line_count_does_not_grow():

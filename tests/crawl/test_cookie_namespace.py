@@ -61,14 +61,14 @@ def test_save_and_load_roundtrip_uses_legacy_namespace():
     jar.add_cookie_header("http://shared.example/", "sess=other", namespace="tenant_b")
     target = os.path.join(tempfile.gettempdir(), "ck_ns_roundtrip.json")
     try:
-        jar.save_to_file(target)
+        jar.export_to_file(target)
         with open(target, encoding="utf-8") as f:
             persisted = json.load(f)
         # Only the legacy (empty-namespace) entry is persisted.
         assert "shared.example" in persisted
         assert persisted["shared.example"] == {"sess": "abc"}
         # Roundtrip preserves the legacy namespace slot.
-        loaded = CookieJar.load_from_file(target)
+        loaded = CookieJar.import_from_file(target)
         assert loaded.cookie_header_for("http://shared.example/") == "sess=abc"
         assert loaded.cookie_header_for("http://shared.example/", namespace="tenant_b") == ""
     finally:

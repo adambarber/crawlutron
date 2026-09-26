@@ -510,11 +510,11 @@ class TestCookiePersistenceApi:
         # ASGITransport doesn't run FastAPI lifespan, so manually manage the global cookie jar
         from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
-        _GLOBAL_COOKIE_JAR.load_from_file(str(self.cookie_file))
+        _GLOBAL_COOKIE_JAR.import_from_file(str(self.cookie_file))
         WEBHOOK_RECEIVED.clear()
         yield
         # Save cookies on teardown
-        _GLOBAL_COOKIE_JAR.save_to_file(str(self.cookie_file))
+        _GLOBAL_COOKIE_JAR.export_to_file(str(self.cookie_file))
 
     async def test_cookie_persistence_across_requests(self):
         # First request: sets a cookie
