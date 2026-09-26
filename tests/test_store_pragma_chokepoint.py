@@ -36,6 +36,156 @@ def _pragma_exec_offenders() -> list[str]:
     return found
 
 
+# ---------------------------------------------------------------------------
+# Dynamic PRAGMA identifiers
+# ---------------------------------------------------------------------------
+
+
+def _dynamic_pragma_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
+    """SQL assembled at runtime rather than written out, in PRAGMA statements.
+
+    Bandit's S608 is the standing gate for built SQL, and it covers the four
+    injection shapes (f-string, ``+``, ``%``, ``!r``) -- but its keyword set is
+    DML, and ``PRAGMA`` is not in it. Probed against this tree's own ruff
+    config: ``conn.execute(f"SELECT ... {x}")`` is flagged, the identical
+    ``conn.execute(f"PRAGMA table_info({x})")`` is clean. So the one place a
+    SQLite identifier is interpolated is the one place the linter is silent.
+
+    The complement is the trap in :func:`_pragma_exec_offenders` above: matching
+    only ``ast.Constant`` finds the statements whose text is *already* fixed and
+    misses the ones assembled from a value. The check and the risk run in
+    opposite directions, so the shape worth gating is the one neither test saw.
+    """
+    found: list[tuple[ast.Call, str]] = []
+    for node in nodes_of(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr not in {"execute", "executemany"} or not node.args:
+            continue
+        sql = node.args[0]
+        if isinstance(sql, ast.Constant):
+            continue
+        if not _mentions_pragma(sql):
+            continue
+        shape = "f-string" if isinstance(sql, ast.JoinedStr) else type(sql).__name__
+        found.append((node, shape))
+    return found
+
+
+def _mentions_pragma(sql: ast.AST) -> bool:
+    """Whether an assembled SQL expression is a PRAGMA, however it was built.
+
+    Joins the literal fragments and looks for the keyword in them, so a shape
+    that hides the keyword behind concatenation is still recognised.
+    """
+    text = "".join(
+        part.value
+        for part in ast.walk(sql)
+        if isinstance(part, ast.Constant) and isinstance(part.value, str)
+    ).lower()
+    return "pragma" in text
+
+
+def _is_identifier_chokepoint(node: ast.AST) -> bool:
+    """Whether an expression is, or is derived from, the allowlist call."""
+    if not isinstance(node, ast.Call):
+        return False
+    if not (isinstance(node.func, ast.Name) and node.func.id == "_validated_identifier"):
+        return False
+    # `_validated_identifier(str(row[1]))` is the same guarantee: the argument is
+    # coerced, then allowlisted, before it is ever spliced into a statement.
+    return True
+
+
+def _module_constants(tree: ast.AST) -> set[str]:
+    """Module-level names bound to a literal.
+
+    A PRAGMA that interpolates one of these is not naming an identifier -- it is
+    splicing a constant into a pragma *value* (``busy_timeout=5000``). The
+    module is not reachable from a request, so this is not an injection surface
+    and forcing it through the identifier allowlist would be theatre.
+    """
+    constants: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
+            constants.add(target.id)
+    return constants
+
+
+def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
+    """Names in this function assigned the result of the allowlist call.
+
+    The live shape in ``sqlite_store.py`` validates into a local and then
+    interpolates the local, so a check that only recognised the *inline* call
+    would reject correct code and push the next editor back toward a raw
+    parameter -- the detector would be manufacturing the defect it exists to
+    prevent. Reaching one hop back is what makes the sanctioned shape and the
+    banned shape distinguishable.
+    """
+    bound: set[str] = set()
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and _is_identifier_chokepoint(node.value):
+            bound.add(target.id)
+    return bound
+
+
+def _enclosing_function(tree: ast.AST, target: ast.AST) -> ast.AST | None:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(child is target for child in ast.walk(node)):
+                return node
+    return None
+
+
+def _unvalidated_interpolations(tree: ast.AST, sql: ast.JoinedStr, at: ast.AST) -> list[str]:
+    """Interpolated expressions that skip the identifier chokepoint.
+
+    ``_validated_identifier`` is an alnum+underscore allowlist, which is the
+    whole defence for a PRAGMA identifier: the argument is spliced into the
+    statement text verbatim, so anything outside ``[A-Za-z0-9_]`` would be a
+    syntax break at best and an injection at worst. An expression is accepted
+    when it is the call itself, a local bound to its result, or a module
+    constant -- and rejected when it is a bare parameter.
+    """
+    safe = _module_constants(tree)
+    function = _enclosing_function(tree, at)
+    if function is not None:
+        safe |= _local_chokepoint_bindings(function)
+    unvalidated: list[str] = []
+    for part in sql.values:
+        if not isinstance(part, ast.FormattedValue):
+            continue
+        expression = part.value
+        if _is_identifier_chokepoint(expression):
+            continue
+        if isinstance(expression, ast.Name) and expression.id in safe:
+            continue
+        unvalidated.append(ast.unparse(expression))
+    return unvalidated
+
+
+def _dynamic_pragma_offenders() -> list[str]:
+    """A PRAGMA whose identifier is not allowlisted, or assembled outside the chokepoint."""
+    found: list[str] = []
+    for path, tree in app_trees():
+        at_chokepoint = path.name == "sqlite_store.py"
+        for node, shape in _dynamic_pragma_calls(tree):
+            where = f"{path.name}:{node.lineno}"
+            if not at_chokepoint:
+                found.append(f"{where} builds a {shape} PRAGMA outside sqlite_store")
+                continue
+            assert isinstance(node.args[0], ast.JoinedStr), where
+            for expression in _unvalidated_interpolations(tree, node.args[0], node):
+                found.append(f"{where} interpolates {expression} without _validated_identifier")
+    return found
+
+
 def test_both_stores_share_the_pragma_configuration(tmp_path):
     for store in (
         make_job_store(tmp_path),
@@ -67,3 +217,89 @@ def test_pragma_confinement_detector_bites():
         if n.args
     ]
     assert hits == ["1"]
+
+
+def test_dynamic_pragma_identifiers_go_through_the_chokepoint():
+    """Every PRAGMA identifier is allowlisted, in the one module allowed to build one."""
+    offenders = _dynamic_pragma_offenders()
+    assert not offenders, (
+        "A PRAGMA splices its identifier into the statement verbatim; route it through "
+        "_validated_identifier in sqlite_store.py, or write the statement as a literal: "
+        + ", ".join(offenders)
+    )
+
+
+def test_dynamic_pragma_detector_bites():
+    """Every way to get this wrong fires; the two live shapes stay clean."""
+    # A bare parameter spliced straight into the statement: the actual injection.
+    bare = ast.parse("def f(conn, table):\n    conn.execute(f'PRAGMA table_info({table})')\n")
+    call = bare.body[0].body[0].value
+    assert _mentions_pragma(call.args[0])
+    assert _unvalidated_interpolations(bare, call.args[0], call) == ["table"]
+
+    # Concatenation, not an f-string, and the keyword is still recognized.
+    concatenated = 'def f(conn, table):\n    conn.execute("PRAGMA index_info(" + table + ")")\n'
+    parsed_concat = ast.parse(concatenated).body[0].body[0].value
+    assert _mentions_pragma(parsed_concat.args[0])
+
+    # Live shape 1: allowlisted inline.
+    inline = ast.parse(
+        "def f(conn, table):\n"
+        "    return conn.execute(f'PRAGMA table_info({_validated_identifier(table)})')\n"
+    )
+    inline_call = inline.body[0].body[0].value
+    assert _mentions_pragma(inline_call.args[0])
+    assert not _unvalidated_interpolations(inline, inline_call.args[0], inline_call)
+
+    # Live shape 2: allowlisted into a local, then the local is interpolated.
+    # sqlite_store.py does this twice (index_list, index_info) and an
+    # inline-only check would have failed both.
+    hoisted = ast.parse(
+        "def f(conn, table, index_name):\n"
+        "    table = _validated_identifier(table)\n"
+        "    index_name = _validated_identifier(str(index_name))\n"
+        '    return conn.execute(f"PRAGMA index_list({table})")\n'
+        '    return conn.execute(f"PRAGMA index_info({index_name})")\n'
+    )
+    for node, _ in _dynamic_pragma_calls(hoisted):
+        assert not _unvalidated_interpolations(hoisted, node.args[0], node)
+
+    # A module constant is a pragma *value*, not an identifier (busy_timeout=5000).
+    constant = ast.parse(
+        "_TIMEOUT = 5000\n"
+        "def f(conn):\n"
+        '    return conn.execute(f"PRAGMA busy_timeout={_TIMEOUT}")\n'
+    )
+    constant_call = constant.body[1].body[0].value
+    assert not _unvalidated_interpolations(constant, constant_call.args[0], constant_call)
+
+    # But hoisting a raw parameter into a local is not laundering: the binding
+    # has to be the chokepoint itself, not any assignment at all.
+    laundered = ast.parse(
+        "def f(conn, table):\n"
+        "    table = str(table)\n"
+        '    return conn.execute(f"PRAGMA table_info({table})")\n'
+    )
+    laundered_call = laundered.body[0].body[-1].value
+    assert _unvalidated_interpolations(laundered, laundered_call.args[0], laundered_call) == ["table"]
+
+
+def test_pragma_confinement_does_not_only_match_literals():
+    """Why the literal-only check above is not enough on its own.
+
+    The existing confinement detector requires ``ast.Constant``, so the
+    assembled-PRAGMA case it cannot see is the only case with an interpolated
+    identifier in it. This pins that gap shut rather than leaving it as a
+    comment: if the sibling test is ever widened to constants *and* assembled
+    forms, this one is redundant and should be deleted with it.
+    """
+    source = ast.parse('conn.execute(f"PRAGMA table_info({table})")')
+    seen_by_the_literal_check = [
+        node
+        for node in nodes_of(source)
+        if isinstance(node, ast.Call)
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ]
+    assert not seen_by_the_literal_check, "the literal check now sees assembled PRAGMAs too"
+    assert _dynamic_pragma_calls(source), "but the dynamic check must still catch it"
