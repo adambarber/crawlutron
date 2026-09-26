@@ -195,15 +195,14 @@ def _engine_result_from_exception(
     # diagnostics a caller built under the redaction contract.
     if extra_diagnostics:
         diagnostics.update(extra_diagnostics)
-    return _terminal_engine_result(
+    return _failed_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
         strategy=strategy,
-        status="failed",
         classification=classification,
         error=classification,
-        http_status=None,
         diagnostics=diagnostics,
+        http_status=None,
         attempt_elapsed_ms=elapsed,
     )
 
@@ -489,8 +488,27 @@ def _failed_engine_result(
     diagnostics: dict | None = None,
     http_status: int | None = None,
     final_url: str | None = None,
+    attempt_elapsed_ms: int = 0,
 ) -> EngineCrawlResult:
-    """Construct a failed EngineCrawlResult with a single attempt."""
+    """Construct a failed EngineCrawlResult with a single attempt.
+
+    One of two per-status names over :func:`_terminal_engine_result`, and the
+    duplication between them is irreducible in Python: ``status`` is
+    keyword-only and must stay supplied, because ``CONTEXT_VARYING_STATUS``
+    classifications legitimately need a status other than the table default, so
+    the value cannot be derived here. Binding the status with
+    ``functools.partial`` was tried and is worse, not better -- a partial
+    merges keywords rather than owning them, so a caller could pass
+    ``status="skipped"`` to this function and get a skipped result, and mypy
+    does not close that hole. So each name is a real function.
+
+    What makes it safe is not the shape but the guard underneath:
+    :func:`status_agrees_with_classification` rejects any ``(classification,
+    status)`` pair the taxonomy does not allow, at the point the attempt is
+    built. That is what these names are for -- pinning a status and having it
+    checked -- and it is why a third copy of this forwarding call, inlined in
+    :func:`_classify_and_build`, was the one that actually needed removing.
+    """
     return _terminal_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,
@@ -501,6 +519,7 @@ def _failed_engine_result(
         diagnostics=diagnostics,
         http_status=http_status,
         final_url=final_url,
+        attempt_elapsed_ms=attempt_elapsed_ms,
     )
 
 
@@ -513,7 +532,11 @@ def _skipped_engine_result(
     error: CrawlError,
     diagnostics: dict | None = None,
 ) -> EngineCrawlResult:
-    """Construct a skipped EngineCrawlResult (e.g., robots_disallowed)."""
+    """Construct a skipped EngineCrawlResult (e.g., robots_disallowed).
+
+    The sibling of :func:`_failed_engine_result`; see that one for why these
+    two are two functions rather than one bound status.
+    """
     return _terminal_engine_result(
         original_url=original_url,
         normalized_url=normalized_url,

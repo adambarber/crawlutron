@@ -461,7 +461,21 @@ __all__ = [
 # clone list never showed, because at one line it sat under the clone floor
 # while carrying the same drift. A ceiling that only moves for things the
 # report happens to name is not measuring what the rule is for.
-_APP_TREE_CODE_LINE_BUDGET = 14_982
+# One spent, and this is the argument: `_classify_and_build` was inlining a
+# third copy of the terminal-result forwarding that `_failed_engine_result`
+# already exists for, so it now routes through the name -- which is what
+# `status_agrees_with_classification` is there to check, and an inline call
+# bypassed. Reaching that copy needed `attempt_elapsed_ms` on the wrapper.
+#
+# The duplication that remains between `_failed_engine_result` and
+# `_skipped_engine_result` is irreducible in Python and is NOT a drift risk:
+# `status` is keyword-only and cannot be derived (CONTEXT_VARYING_STATUS
+# classifications need a status other than the table default), and binding it
+# with functools.partial is worse -- a partial merges keywords instead of
+# owning them, so `_failed_engine_result(status="skipped", ...)` would return
+# a skipped result, and mypy does not close that. The guard under both names
+# is the enforcement.
+_APP_TREE_CODE_LINE_BUDGET = 14_983
 
 
 def test_app_tree_code_line_count_does_not_grow():
