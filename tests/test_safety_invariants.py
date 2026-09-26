@@ -13,7 +13,9 @@ import ast
 import inspect
 import pathlib
 import re
+from collections.abc import Callable, Iterable
 from contextvars import ContextVar
+from pathlib import Path
 
 import pytest
 from chokepoint_walks import (
@@ -27,21 +29,25 @@ from chokepoint_walks import (
     app_trees,
     assert_fires_once,
     assert_stays_clean,
+    assignments,
     attribute_calls,
     call_keyword_values,
     calls_named,
     calls_to_any,
     code_line_count,
     file_tree,
+    functions,
     has_method_call,
     literal_keyword_membership_offenders,
     local_call_leaf_names,
     local_nodes,
     nodes_of,
+    nodes_of_type,
     offender,
     relative_posix,
     resolved_call_name,
     resolved_expr_name,
+    trees_excluding,
     trees_under,
 )
 from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
@@ -461,21 +467,43 @@ __all__ = [
 # clone list never showed, because at one line it sat under the clone floor
 # while carrying the same drift. A ceiling that only moves for things the
 # report happens to name is not measuring what the rule is for.
-# One spent, and this is the argument: `_classify_and_build` was inlining a
-# third copy of the terminal-result forwarding that `_failed_engine_result`
-# already exists for, so it now routes through the name -- which is what
-# `status_agrees_with_classification` is there to check, and an inline call
-# bypassed. Reaching that copy needed `attempt_elapsed_ms` on the wrapper.
-#
-# The duplication that remains between `_failed_engine_result` and
-# `_skipped_engine_result` is irreducible in Python and is NOT a drift risk:
-# `status` is keyword-only and cannot be derived (CONTEXT_VARYING_STATUS
-# classifications need a status other than the table default), and binding it
-# with functools.partial is worse -- a partial merges keywords instead of
-# owning them, so `_failed_engine_result(status="skipped", ...)` would return
-# a skipped result, and mypy does not close that. The guard under both names
-# is the enforcement.
+# Two spent, argued in the same terms: the four terminal-result constructors
+# each spelled the same nine keyword-only parameters, and the two pairs jscpd
+# reported were those argument lists, not the logic. The irreducibility argument
+# above held for exactly one field -- `status` -- and the remaining nine are now
+# a frozen `TerminalResult` the constructors take positionally, so the field
+# list exists once and a caller passes one value. A scheduler test proved the
+# point in the other direction: a `status=` keyword on a constructor was
+# invisible to mypy, which runs over app/ only, and only the runtime assertion
+# caught a migrated call site that folded it into the value.
 _APP_TREE_CODE_LINE_BUDGET = 14_896
+
+
+def assert_trees_clean(
+    detector: Callable[[ast.AST, Path], list[str]],
+    message: str,
+    *,
+    trees: Iterable[tuple[Path, ast.AST]] | None = None,
+) -> None:
+    """Sweep every module through `detector` and fail on the offenders it finds.
+
+    This is the tree-wide walk every invariant check in this file depends on, so
+    it is written once here rather than per detector. It used to be four lines
+    copied into each of ~60 tests -- declare the list, walk ``app_trees()``,
+    ``extend``, assert -- and a copy is exactly what makes a check that sweeps
+    nothing, or sweeps a hard-coded file list, look identical to one that sweeps
+    the tree the rule actually requires (see :func:`app_trees`).
+
+    ``trees`` defaults to the whole app tree; a check passes an explicit walker
+    only to exclude sanctioned modules, and the default is what makes a forgotten
+    sweep fail loudly rather than silently pass on an empty list.
+    """
+    offenders = [
+        offender
+        for path, tree in (app_trees() if trees is None else trees)
+        for offender in detector(tree, path)
+    ]
+    assert not offenders, f"{message}: {', '.join(offenders)}"
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -663,26 +691,18 @@ _RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findal
 def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag re.<method>(<non-literal pattern>, ...) -- the ReDoS shape."""
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "re"
-            and node.func.attr in _RE_DYNAMIC_METHODS
-            and node.args
-            and not isinstance(node.args[0], ast.Constant)
-        ):
+    for node in nodes_of_type(tree, ast.Call):
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and (node.func.value.id == 're') and (node.func.attr in _RE_DYNAMIC_METHODS) and node.args and (not isinstance(node.args[0], ast.Constant)):
             offenders.append(offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)"))
     return offenders
 
 
 def test_no_dynamic_pattern_re_calls():
     """re.* with a non-literal pattern must go through app.safe_regex."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_dynamic_pattern_re_calls(tree, path))
-    assert not offenders, "Use app.safe_regex.compile_untrusted/match_bounded: " + ", ".join(offenders)
+    assert_trees_clean(
+        _dynamic_pattern_re_calls, 'Use app.safe_regex.compile_untrusted/match_bounded',
+        trees=app_trees(),
+    )
 
 
 def test_no_direct_regex_engine_import():
@@ -704,16 +724,8 @@ def test_no_bare_re_compile_on_nonliteral():
     """Non-literal re.compile must go through app.safe_regex.compile_untrusted."""
     offenders: list[str] = []
     for path, tree in app_trees():
-        for node in nodes_of(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "compile"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "re"
-                and node.args
-                and not isinstance(node.args[0], ast.Constant)
-            ):
+        for node in nodes_of_type(tree, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == 'compile' and isinstance(node.func.value, ast.Name) and (node.func.value.id == 're') and node.args and (not isinstance(node.args[0], ast.Constant)):
                 offenders.append(offender(path, node.lineno))
     assert not offenders, "Use app.safe_regex.compile_untrusted for non-literal patterns: " + ", ".join(
         offenders
@@ -737,9 +749,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     lock_names = _threading_lock_bindings(tree)
-    for node in nodes_of(tree):
-        if not isinstance(node, (ast.With, ast.AsyncWith)):
-            continue
+    for node in nodes_of_type(tree, ast.With, ast.AsyncWith):
         if isinstance(node, ast.AsyncWith):
             continue  # asyncio.Lock bodies may await by design
         for item in node.items:
@@ -785,10 +795,10 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
 
 def test_no_await_inside_lock_bodies():
     """A lock held across an await blocks the loop and can deadlock (M3)."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_lock_bodies_with_awaits(tree, path))
-    assert not offenders, "Lock held across await: " + ", ".join(offenders)
+    assert_trees_clean(
+        _lock_bodies_with_awaits, 'Lock held across await',
+        trees=app_trees(),
+    )
 
 
 def test_lock_detector_bites():
@@ -840,9 +850,7 @@ def _uses_redirect_status(node: ast.AST) -> bool:
 
 def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
-    for func in _functions_with(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         has_urljoin = any(
             isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "urljoin"
             for n in nodes_of(func)
@@ -864,10 +872,10 @@ def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_no_hand_rolled_redirect_hops():
     """Redirect hops anywhere go through SafeUrl.redirect_hop (or the pinned
     fetch helper), never a raw urljoin combined with a 3xx status test."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"safe_url.py"}):
-        offenders.extend(_hand_rolled_redirect_hops(tree, path))
-    assert not offenders, "Use SafeUrl.redirect_hop for redirect hops: " + ", ".join(offenders)
+    assert_trees_clean(
+        _hand_rolled_redirect_hops, 'Use SafeUrl.redirect_hop for redirect hops',
+        trees=app_trees(exclude=SANCTIONED | {'safe_url.py'}),
+    )
 
 
 _CANONICALIZER = frozenset({"normalize_public_http_url"})
@@ -884,9 +892,7 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     raw-key dedup fails the suite the moment it lands.
     """
     offenders: list[str] = []
-    for func in _functions_with(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         uses_fromkeys = any(
             isinstance(n, ast.Call)
             and isinstance(n.func, ast.Attribute)
@@ -917,11 +923,9 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_batch_dedup_keys_on_canonical_page_identity():
     """URL-batch dedup must collapse by ``normalize_public_http_url``, never raw strings."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_raw_batch_dedup_offenders(tree, path))
-    assert not offenders, (
-        "dedup url batches via normalize_public_http_url, not raw dict.fromkeys: " + ", ".join(offenders)
+    assert_trees_clean(
+        _raw_batch_dedup_offenders, 'dedup url batches via normalize_public_http_url, not raw dict.fromkeys',
+        trees=app_trees(),
     )
 
 
@@ -977,10 +981,10 @@ def test_no_bare_body_reads():
     it survives a tree-wide sweep. Widening kept precise on the response-object
     convention to avoid flagging file/socket reads.
     """
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"bounded_io.py"}):
-        offenders.extend(_bare_body_reads(tree, path))
-    assert not offenders, "Use app.bounded_io.read_capped_sync/read_capped_async: " + ", ".join(offenders)
+    assert_trees_clean(
+        _bare_body_reads, 'Use app.bounded_io.read_capped_sync/read_capped_async',
+        trees=app_trees(exclude=SANCTIONED | {'bounded_io.py'}),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1008,20 +1012,13 @@ def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
     a cap that delegates elsewhere is not a second declaration.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        targets: list[ast.expr] = []
-        value: ast.expr | None = None
-        if isinstance(node, ast.Assign):
-            targets, value = list(node.targets), node.value
-        elif isinstance(node, ast.AnnAssign):
-            targets, value = [node.target], node.value
+    for node, target, value in assignments(nodes_of(tree)):
         if value is None or not _is_numeric_expr(value):
             continue
-        for target in targets:
-            name = target.id if isinstance(target, ast.Name) else ""
-            head = name.upper()
-            if "HTML" in head and head.endswith("BYTES"):
-                offenders.append(offender(path, node.lineno, name))
+        name = target.id if isinstance(target, ast.Name) else ""
+        head = name.upper()
+        if "HTML" in head and head.endswith("BYTES"):
+            offenders.append(offender(path, node.lineno, name))
     return offenders
 
 
@@ -1035,9 +1032,7 @@ def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     required = {"expires", "value", "cached_at"}
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Dict):
-            continue
+    for node in nodes_of_type(tree, ast.Dict):
         keys = {
             key.value
             for key in node.keys
@@ -1149,12 +1144,9 @@ def test_html_input_cap_is_declared_once():
     app/bounded_io.py is exempt because it IS the chokepoint that owns the cap
     alongside the stream caps.
     """
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"bounded_io.py"}):
-        offenders.extend(_local_html_input_caps(tree, path))
-    assert not offenders, (
-        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input "
-        "instead of declaring a second HTML input cap: " + ", ".join(offenders)
+    assert_trees_clean(
+        _local_html_input_caps, 'Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input instead of declaring a second HTML input cap',
+        trees=app_trees(exclude=SANCTIONED | {'bounded_io.py'}),
     )
 
 
@@ -1194,11 +1186,8 @@ def _scope_matcher_definitions() -> list[str]:
     """
     defs: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        for node in nodes_of(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in {
-                "scope_allows",
-                "_scope_allows",
-            }:
+        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
+            if node.name in {'scope_allows', '_scope_allows'}:
                 defs.append(offender(path, node.lineno))
     return defs
 
@@ -1296,9 +1285,7 @@ def test_no_inline_pinned_url_composition():
     """
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset({"safe_url.py", "safe_regex.py"})):
-        for node in nodes_of(tree):
-            if not isinstance(node, ast.JoinedStr):
-                continue
+        for node in nodes_of_type(tree, ast.JoinedStr):
             for value in node.values:
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
                     if "pinned_ip" in value.value:
@@ -1379,11 +1366,9 @@ def _frontier_link_url_call(node: ast.AST) -> bool:
 
 def test_no_raw_href_frontier_sinks():
     """The frontier only ever carries frontier_link_url()-validated URLs (H1)."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_frontier_sink_offenders(tree, path))
-    assert not offenders, "Read normalized_url via frontier_link_url(), never raw url: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _frontier_sink_offenders, 'Read normalized_url via frontier_link_url(), never raw url',
+        trees=app_trees(),
     )
 
 
@@ -1465,9 +1450,7 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     # column named exactly the banned word does.
     pattern = re.compile(r"\b(" + "|".join(sorted(banned)) + r")\b")
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Constant):
-            continue
+    for node in nodes_of_type(tree, ast.Constant):
         if not isinstance(node.value, str) or "crawl_jobs" not in node.value:
             continue
         named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
@@ -1572,12 +1555,8 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         if fn.name not in _CACHE_TWIN_METHODS:
             continue
-        for sub in nodes_of(fn):
-            if (
-                isinstance(sub, ast.Subscript)
-                and isinstance(sub.value, ast.Attribute)
-                and sub.value.attr == "_memory_cache"
-            ):
+        for sub in nodes_of_type(fn, ast.Subscript):
+            if isinstance(sub.value, ast.Attribute) and sub.value.attr == '_memory_cache':
                 offenders.append(
                     offender(path, fn.lineno, f"{fn.name}() reads/writes _memory_cache directly")
                 )
@@ -1587,10 +1566,10 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
 
 def test_memory_cache_only_via_locked_helpers():
     """get/set/aget/aset never touch the raw RAM-mirror dict."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_memory_cache_twin_offenders(tree, path))
-    assert not offenders, "Use _take_memory_locked/_remember_memory_locked: " + ", ".join(offenders)
+    assert_trees_clean(
+        _memory_cache_twin_offenders, 'Use _take_memory_locked/_remember_memory_locked',
+        trees=app_trees(),
+    )
 
 
 def test_memory_cache_twin_detector_bites():
@@ -1642,9 +1621,7 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
         for child in ast.iter_child_nodes(node):
             parents[child] = node
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    for node in nodes_of_type(tree, ast.Call):
         fname = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
         if not _is_locked_helper_name(fname):
             continue
@@ -1664,10 +1641,10 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 def test_locked_cache_helpers_are_called_under_the_lock():
     """M1 class: every ``_*_locked`` call sits inside a ``with ...lock`` block."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_locked_calls_outside_lock_offenders(tree, path))
-    assert not offenders, "call *_locked helpers inside `with self._lock`: " + ", ".join(offenders)
+    assert_trees_clean(
+        _locked_calls_outside_lock_offenders, 'call *_locked helpers inside `with self._lock`',
+        trees=app_trees(exclude=SANCTIONED),
+    )
 
 
 def test_locked_helper_lock_ownership_detector_bites():
@@ -1726,11 +1703,9 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_no_hand_rolled_error_envelopes():
     """Every HTTP error body flows through error_envelope/http_error (#1722)."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=ENVELOPE_SANCTIONED):
-        offenders.extend(_envelope_dict_offenders(tree, path))
-    assert not offenders, "Use app.api.exceptions.http_error/browser_pool_unavailable: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _envelope_dict_offenders, 'Use app.api.exceptions.http_error/browser_pool_unavailable',
+        trees=app_trees(exclude=ENVELOPE_SANCTIONED),
     )
 
 
@@ -1790,10 +1765,10 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_no_provider_dedupe_loop_reinlines():
     """One normalize/dedupe/clip contract for all keyed providers."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_provider_loop_reinlines(tree, path))
-    assert not offenders, "Use app.search.providers._collect_results: " + ", ".join(offenders)
+    assert_trees_clean(
+        _provider_loop_reinlines, 'Use app.search.providers._collect_results',
+        trees=app_trees(),
+    )
 
 
 def test_provider_loop_detector_bites():
@@ -1837,9 +1812,7 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     gate; the tokenizer in app/crawl/robots_parse.py is now the only one.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
-            continue
+    for node in functions(tree):
         if node.name == _ROBOTS_SCANNER_SANCTIONED:
             continue
         has_bom_strip = any(
@@ -1860,11 +1833,9 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_robots_line_scanner_lives_in_one_place():
     """Every robots consumer walks lines through the shared tokenizer."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_robots_scanner_offenders(tree, path))
-    assert not offenders, "app/crawl/robots_parse.iter_robots_fields is the single scanner: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _robots_scanner_offenders, 'app/crawl/robots_parse.iter_robots_fields is the single scanner',
+        trees=app_trees(),
     )
 
 
@@ -1899,8 +1870,8 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "HttpFetchResult":
+    for node in nodes_of_type(tree, ast.Call):
+        if getattr(node.func, 'id', '') == 'HttpFetchResult':
             offenders.append(
                 offender(
                     path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)"
@@ -1911,12 +1882,11 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_tests_do_not_hand_build_http_fetch_results():
     """Every fetch fake comes from the one sanctioned builder."""
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        if path.name in _FAKE_BUILDER_SANCTIONED:
-            continue
-        offenders.extend(_fetcher_factory_offenders(tree, path))
-    assert not offenders, "Use _fetcher_factories.make_fetch(): " + ", ".join(offenders)
+    assert_trees_clean(
+        _fetcher_factory_offenders,
+        "Use _fetcher_factories.make_fetch()",
+        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
+    )
 
 
 def test_fetch_builder_detector_bites():
@@ -1950,9 +1920,7 @@ def _call_node_names(node: ast.AST) -> set[str]:
 
 def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node in functions(tree):
         src = ast.dump(node)
         has_while_true = any(
             isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in nodes_of(node)
@@ -1971,12 +1939,11 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_tests_do_not_relinline_poll_loop():
     """One sanctioned poller; tests must not re-roll their own."""
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        if path.name in _FAKE_BUILDER_SANCTIONED:
-            continue
-        offenders.extend(_poll_loop_offenders(tree, path))
-    assert not offenders, "Use _testkit.poll_until: " + "; ".join(offenders)
+    assert_trees_clean(
+        _poll_loop_offenders,
+        "Use _testkit.poll_until",
+        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
+    )
 
 
 def test_poll_loop_detector_bites():
@@ -2022,9 +1989,7 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     against a caller reaching for an ``int`` default or ``**kwargs``.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    for node in nodes_of_type(tree, ast.Call):
         if resolved_expr_name(tree, node.func).rsplit(".", 1)[-1] == "getattr":
             continue
         fname = resolved_call_name(tree, node).rsplit(".", 1)[-1]
@@ -2038,10 +2003,10 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_all_decompress_calls_pass_a_cap():
     """Every production decompression is size-bounded (H2 closure)."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED):
-        offenders.extend(_decompress_cap_offenders(tree, path))
-    assert not offenders, "decompress_body needs max_output_bytes=: " + ", ".join(offenders)
+    assert_trees_clean(
+        _decompress_cap_offenders, 'decompress_body needs max_output_bytes=',
+        trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
+    )
 
 
 def test_decompress_cap_detector_bites():
@@ -2142,10 +2107,10 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
 
 def test_decompression_reaches_only_through_the_chokepoint():
     """No app module touches gzip/zlib/brotli except the decompression chokepoint."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED):
-        offenders.extend(_decompress_bypass_offenders(tree, path))
-    assert not offenders, "decompress only via decompression.decompress_body(): " + ", ".join(offenders)
+    assert_trees_clean(
+        _decompress_bypass_offenders, 'decompress only via decompression.decompress_body()',
+        trees=app_trees(exclude=SANCTIONED | _DECOMPRESS_SANCTIONED),
+    )
 
 
 def test_decompress_bypass_detector_bites():
@@ -2193,10 +2158,10 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_handles_are_minted_in_one_place():
     """Only app/crawl/ids.py calls uuid4 or slices its hex (H4 residue)."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | _ID_MINT_SANCTIONED):
-        offenders.extend(_id_mint_offenders(tree, path))
-    assert not offenders, "handle minting is single-sourced in app/crawl/ids.py: " + ", ".join(offenders)
+    assert_trees_clean(
+        _id_mint_offenders, 'handle minting is single-sourced in app/crawl/ids.py',
+        trees=app_trees(exclude=SANCTIONED | _ID_MINT_SANCTIONED),
+    )
 
 
 def test_id_mint_detector_bites():
@@ -2253,9 +2218,7 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
     request-cap check). Tree-wide because any module can grow a header read.
     """
     offenders: list[str] = []
-    for func in _functions_with(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         header_names = {
             target.id
             for node in nodes_of(func)
@@ -2284,11 +2247,9 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
 
 def test_header_numbers_are_converted_under_guard():
     """No unguarded int()/float() on a header value anywhere in app/ (L2)."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_unguarded_header_int_offenders(tree, path))
-    assert not offenders, "parse header numbers through a guard or try/except ValueError: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _unguarded_header_int_offenders, 'parse header numbers through a guard or try/except ValueError',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -2333,9 +2294,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     ):
         if func.name == "set_domain_min_delay":
             continue
-        for node in nodes_of(func):
-            if not isinstance(node, (ast.Assign, ast.AugAssign)):
-                continue
+        for node in nodes_of_type(func, ast.Assign, ast.AugAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if (
@@ -2351,11 +2310,9 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
 
 def test_domain_politeness_floor_is_committed_only_via_the_setter():
     """Only set_domain_min_delay writes _domain_min_delay (M1 chokepoint)."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_unbounded_domain_delay_writes(tree, path))
-    assert not offenders, (
-        "commit the Crawl-delay floor through the clamped set_domain_min_delay: " + ", ".join(offenders)
+    assert_trees_clean(
+        _unbounded_domain_delay_writes, 'commit the Crawl-delay floor through the clamped set_domain_min_delay',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -2410,9 +2367,7 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     URL within one crawl is pointless — is not matched.
     """
     offenders: list[str] = []
-    for func in _functions_with(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         commits = [
             n
             for n in nodes_of(func)
@@ -2440,12 +2395,9 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 
 def test_whole_site_visited_commit_is_transient_gated():
     """A transiently-failed whole-site URL is re-queued, never counted done."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_ungated_job_visited_offenders(tree, path))
-    assert not offenders, (
-        "gate every job.visited.add on is_transient_classification() so transient "
-        "failures are re-queued, not marked visited: " + ", ".join(offenders)
+    assert_trees_clean(
+        _ungated_job_visited_offenders, 'gate every job.visited.add on is_transient_classification() so transient failures are re-queued, not marked visited',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -2520,12 +2472,9 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_every_test_function_is_one_pytest_can_collect():
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        offenders.extend(_uncollectible_tests(tree, path))
-    assert not offenders, (
-        "these test functions are silently never run; pytest collects only "
-        "module-level tests and Test* class methods: " + ", ".join(offenders)
+    assert_trees_clean(
+        _uncollectible_tests, 'these test functions are silently never run; pytest collects only module-level tests and Test* class methods',
+        trees=trees_under(TESTS_DIR),
     )
 
 
@@ -2578,9 +2527,7 @@ _CONTAINMENT_CALL = "relative_to"
 def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
     """Report path validators that return an input parameter on some branch."""
     offenders: list[str] = []
-    for func in ast.walk(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         body_calls = {
             node.func.attr
             for node in ast.walk(func)
@@ -2589,12 +2536,8 @@ def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
         if _CONTAINMENT_CALL not in body_calls:
             continue
         parameters = {arg.arg for arg in (*func.args.args, *func.args.posonlyargs, *func.args.kwonlyargs)}
-        for node in ast.walk(func):
-            if (
-                isinstance(node, ast.Return)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in parameters
-            ):
+        for node in nodes_of_type(func, ast.Return):
+            if isinstance(node.value, ast.Name) and node.value.id in parameters:
                 offenders.append(
                     f"{path.name}:{node.lineno} {func.name}() returns its own parameter "
                     f"{node.value.id!r} on a branch that bypasses the containment check; "
@@ -2812,9 +2755,7 @@ _OWNERSHIP_GUARDS = ("in_use", "live", "in_flight", "active", "owned", "holder",
 def _unowned_age_deletions(tree, path) -> list[str]:
     """Report sweep-like functions that unlink without consulting ownership."""
     offenders: list[str] = []
-    for func in ast.walk(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         name = func.name.lower()
         if not any(part in name for part in _SWEEP_NAME_PARTS):
             continue
@@ -3014,9 +2955,7 @@ def _is_asdict_call(node: ast.AST) -> bool:
 def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag unpacking ``asdict(...)`` into a constructor call."""
     offenders: list[str] = []
-    for call in ast.walk(tree):
-        if not isinstance(call, ast.Call):
-            continue
+    for call in nodes_of_type(tree, ast.Call):
         for keyword in call.keywords:
             if keyword.arg is not None or not isinstance(keyword.value, ast.AST):
                 continue
@@ -3037,11 +2976,9 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 def test_asdict_is_never_unpacked_into_a_constructor():
     """Copying a dataclass with asdict must not survive anywhere in app/."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_asdict_rebuild_offenders(tree, path))
-    assert not offenders, "copy dataclasses with dataclasses.replace(), not asdict(**...): " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _asdict_rebuild_offenders, 'copy dataclasses with dataclasses.replace(), not asdict(**...)',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -3108,33 +3045,27 @@ def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     gets -- did not.
     """
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = node.targets
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        for target in targets:
-            name = getattr(target, "id", None)
-            if not isinstance(name, str) or not _TRANSIENCE_SET_NAME.match(name):
-                continue
-            if not isinstance(node.value, _TRANSIENCE_COLLECTIONS):
-                continue
-            # A named alias to the taxonomy's own set is a re-export, not a
-            # second opinion: that is the one legitimate spelling here.
-            if isinstance(node.value, ast.Name) and node.value.id in {
-                "TRANSIENT_CLASSIFICATIONS",
-                "NON_TRANSIENT_CLASSIFICATIONS",
-                "is_transient_classification",
-            }:
-                continue
-            offenders.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"local {name} re-answers the taxonomy's transience verdict",
-                )
+    for node, target, value in assignments(nodes_of(tree)):
+        name = getattr(target, "id", None)
+        if not isinstance(name, str) or not _TRANSIENCE_SET_NAME.match(name):
+            continue
+        if value is None or not isinstance(value, _TRANSIENCE_COLLECTIONS):
+            continue
+        # A named alias to the taxonomy's own set is a re-export, not a
+        # second opinion: that is the one legitimate spelling here.
+        if isinstance(value, ast.Name) and value.id in {
+            "TRANSIENT_CLASSIFICATIONS",
+            "NON_TRANSIENT_CLASSIFICATIONS",
+            "is_transient_classification",
+        }:
+            continue
+        offenders.append(
+            offender(
+                path,
+                node.lineno,
+                f"local {name} re-answers the taxonomy's transience verdict",
             )
+        )
     return offenders
 
 
@@ -3252,12 +3183,9 @@ def _hand_rolled_failed_result_offenders(tree, path):
 
 
 def test_no_hand_rolled_failed_results_outside_the_chokepoint():
-    offenders = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_hand_rolled_failed_result_offenders(tree, path))
-    assert not offenders, (
-        "failed results with a hardcoded classification must go through "
-        "_engine_result_from_exception (the single exception->result chokepoint): " + ", ".join(offenders)
+    assert_trees_clean(
+        _hand_rolled_failed_result_offenders, 'failed results with a hardcoded classification must go through _engine_result_from_exception (the single exception->result chokepoint)',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -3299,13 +3227,9 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
 
 
 def test_pool_exhaustion_catch_sites_are_sanctioned():
-    offenders = []
-    for path, tree in app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED):
-        offenders.extend(_unsanctioned_pool_exhaustion_catch_offenders(tree, path))
-    assert not offenders, (
-        "BrowserPoolExhaustedError may only be caught by the render transports "
-        "(503 response) and the browser worker guard; the crawl path reads the "
-        "browser_pool_exhausted classification: " + ", ".join(offenders)
+    assert_trees_clean(
+        _unsanctioned_pool_exhaustion_catch_offenders, 'BrowserPoolExhaustedError may only be caught by the render transports (503 response) and the browser worker guard; the crawl path reads the browser_pool_exhausted classification',
+        trees=app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED),
     )
 
 
@@ -3333,11 +3257,8 @@ def test_classifier_lives_in_the_neutral_home():
     in a strategy module (the old site, http.py, forced browser.py to import
     across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
-        for node in nodes_of(tree):
-            if (
-                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name == "_classify_error_code"
-            ):
+        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
+            if node.name == '_classify_error_code':
                 raise AssertionError(
                     offender(path, node.lineno, "_classify_error_code defined outside result_helpers")
                 )
@@ -3829,9 +3750,7 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
 
 def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     found: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node in functions(tree):
         if _url_return_shapes(node, tree):
             found.append(
                 offender(path, node.lineno, f"{node.name}() returns URLs without required HostPolicy")
@@ -3997,9 +3916,7 @@ _NORMALIZE_OR_NONE_OFFENDERS = frozenset(
 
 def _normalize_or_none_offenders(tree, path):
     """A try/except ValueError around the normalizer outside the chokepoint."""
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Try):
-            continue
+    for node in nodes_of_type(tree, ast.Try):
         body_names = {
             getattr(n.func, "id", None) or getattr(n.func, "attr", None)
             for n in nodes_of(node)
@@ -4096,9 +4013,7 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
     if path.name == "safe_url.py":
         return []
     offenders: list[str] = []
-    for func in _functions_with(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for func in functions(tree):
         joined: set[str] = set()
         returns_raw = False
         returns_binding = False
@@ -4128,10 +4043,10 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 def test_no_unfiltered_urljoin_returns():
     """A URL joined from untrusted input is egress-filtered before it leaves."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_unfiltered_urljoin_return_offenders(tree, path))
-    assert not offenders, "filter joined URLs through public_url_or_none: " + ", ".join(offenders)
+    assert_trees_clean(
+        _unfiltered_urljoin_return_offenders, 'filter joined URLs through public_url_or_none',
+        trees=app_trees(),
+    )
 
 
 def test_unfiltered_urljoin_detector_bites():
@@ -4194,11 +4109,9 @@ def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 
 def test_no_raw_exception_text_in_result_error_field():
     """The ``error`` field is a stable classification, never ``str(exc)``."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=_TERMINAL_RESULT_SANCTIONED):
-        offenders.extend(_raw_exception_error_offenders(tree, path))
-    assert not offenders, "classify via _classify_error_code, never raw exception text: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _raw_exception_error_offenders, 'classify via _classify_error_code, never raw exception text',
+        trees=app_trees(exclude=_TERMINAL_RESULT_SANCTIONED),
     )
 
 
@@ -4241,9 +4154,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     if path.name == "validation.py":
         return []
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            continue
+    for node in nodes_of_type(tree, ast.ListComp, ast.SetComp, ast.GeneratorExp):
         elt = node.elt
         if not isinstance(elt, ast.Dict):
             continue
@@ -4258,10 +4169,10 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
 
 def test_js_endpoints_filter_is_not_reinlined():
     """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED):
-        offenders.extend(_reinline_js_endpoints_filter_offenders(tree, path))
-    assert not offenders, "route endpoints through filter_js_endpoints: " + ", ".join(offenders)
+    assert_trees_clean(
+        _reinline_js_endpoints_filter_offenders, 'route endpoints through filter_js_endpoints',
+        trees=app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED),
+    )
 
 
 def test_reinline_js_endpoints_detector_bites():
@@ -4531,8 +4442,8 @@ def _reaps_retired(value: ast.AST) -> bool:
         return False
     for generator in value.generators:
         for condition in generator.ifs:
-            for node in nodes_of(condition):
-                if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            for node in nodes_of_type(condition, ast.UnaryOp):
+                if isinstance(node.op, ast.Not):
                     if _has_retired_attr(node.operand):
                         return True
                 if isinstance(node, ast.Compare):
@@ -5303,9 +5214,7 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
         return []
     execute_names = {"_execute_crawl", "_real_execute_crawl"}
     builder_names = {"_job_engine_payload"}
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Assign | ast.AnnAssign):
-            continue
+    for node in nodes_of_type(tree, ast.Assign, ast.AnnAssign):
         value = node.value
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if isinstance(value, ast.Name) and value.id in execute_names:
@@ -5338,11 +5247,9 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
 
 
 def test_job_engine_payload_uses_single_builder():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_job_engine_payload_chokepoint_offenders(tree, path))
-    assert not offenders, "Build whole-site engine payloads only with _job_engine_payload: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _job_engine_payload_chokepoint_offenders, 'Build whole-site engine payloads only with _job_engine_payload',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -5385,9 +5292,7 @@ def _guarded_node_ids(tree: ast.AST) -> set[int]:
     would open exactly the hole this detector closes.
     """
     guarded: set[int] = set()
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Try):
-            continue
+    for node in nodes_of_type(tree, ast.Try):
         if not any(
             isinstance(handler.type, ast.Name) and handler.type.id in {"Exception", "BaseException"}
             for handler in node.handlers
@@ -5401,13 +5306,8 @@ def _guarded_node_ids(tree: ast.AST) -> set[int]:
 def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     guarded = _guarded_node_ids(tree)
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in _STRATEGY_RUNNERS
-            and id(node) not in guarded
-        ):
+    for node in nodes_of_type(tree, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id in _STRATEGY_RUNNERS and (id(node) not in guarded):
             offenders.append(
                 offender(path, node.lineno, f"{node.func.id} invoked outside a try/except Exception")
             )
@@ -5415,11 +5315,9 @@ def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> l
 
 
 def test_every_strategy_runner_call_is_guarded():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_unguarded_strategy_runner_offenders(tree, path))
-    assert not offenders, (
-        "A strategy that raises must become a failed step, not escape the chain: " + ", ".join(offenders)
+    assert_trees_clean(
+        _unguarded_strategy_runner_offenders, 'A strategy that raises must become a failed step, not escape the chain',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -5530,9 +5428,7 @@ def _store_receivers(function: ast.AST) -> dict[str, str]:
 def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     sync_methods = _sync_store_methods()
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.AsyncFunctionDef):
-            continue
+    for node in nodes_of_type(tree, ast.AsyncFunctionDef):
         receivers = _store_receivers(node)
         for inner in nodes_of(node):
             if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)):
@@ -5551,11 +5447,9 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_no_sync_store_method_is_called_from_an_async_frame():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_sync_store_call_offenders(tree, path))
-    assert not offenders, "A store call on the event loop stalls every in-flight request: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _sync_store_call_offenders, 'A store call on the event loop stalls every in-flight request',
+        trees=app_trees(exclude=SANCTIONED),
     )
 
 
@@ -5657,9 +5551,7 @@ def _is_result_sink_owner(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
+    for node in functions(tree):
         if not _is_result_sink_owner(node):
             continue
         for statement in node.body:
@@ -5686,10 +5578,10 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_result_delivery_never_runs_inside_the_worker_try():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_sink_call_in_try_body(tree, path))
-    assert not offenders, "Delivery raised from a worker handler: " + ", ".join(offenders)
+    assert_trees_clean(
+        _sink_call_in_try_body, 'Delivery raised from a worker handler',
+        trees=app_trees(exclude=SANCTIONED),
+    )
 
 
 def test_sink_try_detector_bites():
@@ -7214,8 +7106,8 @@ def _environment_reader_reference(
 
 def _settings_fields() -> set[str]:
     tree = file_tree("app/settings.py")[1]
-    for node in nodes_of(tree):
-        if isinstance(node, ast.ClassDef) and node.name == "CrawlerSettings":
+    for node in nodes_of_type(tree, ast.ClassDef):
+        if node.name == 'CrawlerSettings':
             return {
                 item.target.id
                 for item in node.body
@@ -7250,12 +7142,8 @@ def _production_browser_knob_references() -> set[str]:
     fields = _settings_fields()
     field_knobs = {f"BROWSER_CRAWLER_{field.upper()}": field for field in fields}
     for path, tree in app_trees(exclude=frozenset()):
-        for node in nodes_of(tree):
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and not _settings_alias_declaration_constant(path, tree, node)
-            ):
+        for node in nodes_of_type(tree, ast.Constant):
+            if isinstance(node.value, str) and (not _settings_alias_declaration_constant(path, tree, node)):
                 environment = _environment_reader_reference(
                     tree,
                     node,
@@ -7291,8 +7179,8 @@ def _documented_knob_offenders(
 
 def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     references: set[str] = set()
-    for node in nodes_of(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+    for node in nodes_of_type(tree, ast.Constant):
+        if isinstance(node.value, str):
             environment = _environment_reader_reference(tree, node, ENVIRONMENT_FIELD_ALIASES)
             if environment is not None:
                 references.add(environment)
@@ -7633,9 +7521,7 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     """Report every call in this module that can mutate a path under `app/`."""
     anchors, rooted = _app_path_names(tree)
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    for node in nodes_of_type(tree, ast.Call):
         callee = node.func
         if isinstance(callee, ast.Attribute):
             name = callee.attr
@@ -8017,15 +7903,15 @@ def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
 def test_cookie_tail_detector_bites():
     """Every bypass shape fires; the sanctioned two-hop chain stays clean."""
     synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    fires = {
-        "import x\nx._store_set_cookies(url, headers)\n": "_store_set_cookies()",
-        "import jar\njar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
-        "def nested():\n    jar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
-    }
-    for src, expected in fires.items():
-        offenders = _cookie_writes_off_the_fetch_tail(ast.parse(src), synthetic)
-        assert len(offenders) == 1, (src, offenders)
-        assert expected in offenders[0], (src, offenders)
+    assert_fires_once(
+        _cookie_writes_off_the_fetch_tail,
+        {
+            "import x\nx._store_set_cookies(url, headers)\n": "_store_set_cookies()",
+            "import jar\njar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
+            "def nested():\n    jar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
+        },
+        synthetic,
+    )
 
     tail_call = (
         "from app.crawl.strategies.request_profile import _store_set_cookies\n"
@@ -8287,9 +8173,7 @@ def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> l
     if relative_posix(path) == _RESULT_CHOKEPOINT_MODULE:
         return []
     offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not isinstance(node, ast.Call):
-            continue
+    for node in nodes_of_type(tree, ast.Call):
         if resolved_call_name(tree, node).rsplit(".", 1)[-1] not in _RESULT_CONSTRUCTORS:
             continue
         spelled = {
@@ -8361,9 +8245,7 @@ def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
     # equal, which would make the whole sweep silently yield nothing.
     if path != owner:
         return
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node in functions(tree):
         if node.name in (chokepoint, *_BROWSER_RELEASE_EXEMPT):
             continue
         for inner in ast.walk(node):
@@ -8469,17 +8351,11 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
                 "has no validated contract",
             )
     # The dispatcher must be the one validating, not the handlers.
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node in functions(tree):
         if not node.name.startswith("_handle_"):
             continue
-        for inner in ast.walk(node):
-            if (
-                isinstance(inner, ast.Call)
-                and isinstance(inner.func, ast.Attribute)
-                and inner.func.attr == "model_json_schema"
-            ):
+        for inner in nodes_of_type(node, ast.Call):
+            if isinstance(inner.func, ast.Attribute) and inner.func.attr == 'model_json_schema':
                 yield offender(
                     path,
                     inner.lineno,

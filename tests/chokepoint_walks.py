@@ -99,6 +99,74 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
     return cached
 
 
+def nodes_of_type(root: ast.AST, *types: type) -> tuple[ast.AST, ...]:
+    """``nodes_of`` narrowed to `types`, cached alongside it.
+
+    The narrow walk and the type filter are one decision. Every detector spelled
+    both halves separately -- ``for node in nodes_of(tree): if not isinstance(
+    node, ast.Call): continue`` -- which is why the predicate, not the rule, was
+    what two detectors had in common. One parameterized funnel beats a named
+    selector per node kind: the kinds are unbounded, and a zoo of one-line
+    wrappers is the same sprawl with better ergonomics.
+    """
+    key = (root, types)
+    cached = _TYPED_NODES_BY_ROOT.get(key)
+    if cached is None:
+        cached = tuple(node for node in nodes_of(root) if isinstance(node, types))
+        _TYPED_NODES_BY_ROOT[key] = cached
+    return cached
+
+
+def assignments(nodes: Iterable[ast.AST]) -> Iterator[tuple[ast.AST, ast.expr, ast.expr | None]]:
+    """Every ``(node, target, value)`` written by any of `nodes`, in walk order.
+
+    "What does this node assign, and to what?" has exactly two answers --
+    ``ast.Assign``'s ``targets``/``value`` and ``ast.AnnAssign``'s single
+    ``target``/``value`` -- and detectors kept writing both as an ``isinstance``
+    ladder over a local ``targets`` list they had to declare and re-initialise
+    on every node. The ladder is the failure mode: a detector that writes the
+    ``AnnAssign`` branch and forgets the ``Assign`` one under-reports silently,
+    which is indistinguishable from a clean tree.
+
+    The owning node rides along because a detector almost always reports against
+    it, and recovering it afterwards means re-walking to line the two sequences
+    up -- which is where a mismatched pair goes unnoticed.
+    """
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                yield node, target, node.value
+        elif isinstance(node, ast.AnnAssign):
+            yield node, node.target, node.value
+
+
+def trees_excluding(root: pathlib.Path, *sanctioned: str) -> Iterator[tuple[pathlib.Path, ast.AST]]:
+    """``trees_under`` without the named files.
+
+    A check that exempts a file used to spell the exemption as a ``continue``
+    inside its own loop, so the walk and the exemption were two decisions in
+    every detector that had one -- and a detector that forgot the ``continue``
+    flagged the very file the rule carves out, which reads as a broken rule
+    rather than a missing exemption. The exemption belongs to the walk.
+    """
+    skip = frozenset(sanctioned)
+    return ((path, tree) for path, tree in trees_under(root) if path.name not in skip)
+
+
+def functions(root: ast.AST) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...]:
+    """Every function definition in `root`, and nothing else.
+
+    This replaces ``_functions_with``, which also yielded ``ast.Module``. That
+    extra node was not a feature: a helper whose name says functions returned
+    something that is not one, and the mismatch was paid for in seven detectors
+    that each opened with an ``isinstance`` guard to drop it. Zero of them used
+    it, so the lie only ever cost the guard.
+    """
+    return nodes_of_type(root, ast.FunctionDef, ast.AsyncFunctionDef)  # ty: ignore[invalid-return-type]
+
+
+_TYPED_NODES_BY_ROOT: dict[tuple[ast.AST, tuple[type, ...]], tuple[ast.AST, ...]] = {}
+
 _STRUCTURAL_TOKENS = frozenset(
     {
         tokenize.COMMENT,
