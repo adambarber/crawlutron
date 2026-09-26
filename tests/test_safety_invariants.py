@@ -7586,3 +7586,122 @@ def test_cookie_tail_detector_bites():
     # the function name alone would wave this tree through, which is the whole
     # reason the rule is keyed on the path.
     assert _cookie_writes_off_the_fetch_tail(ast.parse(tail_call), synthetic)
+
+
+# --- A wire model may not silently drop a domain model's field ---------------
+#
+# app/models.py holds the internal dataclasses and app/api_models.py the pydantic
+# response models. `DiscoveredLink` is declared in both, with the same seven
+# field names, and *nothing* connects the two: response_shaping converts
+# generically by attribute, and a strict pydantic response model DROPS any key
+# it does not declare. So adding a field to the dataclass and forgetting the
+# BaseModel is not a type error and not a test failure -- the field stops
+# existing on the wire, and everything downstream reads a default. That is the
+# CapabilitiesResponse failure mode this project already shipped once, which
+# is why the pair gets a gate rather than a comment asking people to keep two
+# lists in step.
+#
+# Written as a rule over whatever pair exists rather than a hardcoded name, so
+# the next twin is covered without a second edit here.
+
+_DOMAIN_MODEL_MODULE = "app/models.py"
+_WIRE_MODEL_MODULE = "app/api_models.py"
+
+
+def _is_dataclass(node: ast.ClassDef) -> bool:
+    """True for a ``@dataclass`` class, bare or parameterised."""
+    return any(
+        (isinstance(d, ast.Name) and d.id == "dataclass")
+        or (isinstance(d, ast.Call) and getattr(d.func, "id", None) == "dataclass")
+        for d in node.decorator_list
+    )
+
+
+def _is_pydantic_model(node: ast.ClassDef) -> bool:
+    """True for a class deriving from ``BaseModel``, directly or subscripted."""
+    return any(
+        isinstance(target := (base.value if isinstance(base, ast.Subscript) else base), ast.Name)
+        and target.id == "BaseModel"
+        for base in node.bases
+    )
+
+
+def _declared_fields(node: ast.ClassDef) -> list[str]:
+    return [
+        stmt.target.id
+        for stmt in node.body
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+    ]
+
+
+def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[str]:
+    """Field names that differ between a domain dataclass and its wire model."""
+    domain = {
+        n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_dataclass(n)
+    }
+    wire = {
+        n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)
+    }
+    drifted: list[str] = []
+    for name in sorted(domain.keys() & wire.keys()):
+        internal = set(_declared_fields(domain[name]))
+        external = set(_declared_fields(wire[name]))
+        drifted.extend(
+            f"{name}.{field_name} exists internally and is dropped on the wire"
+            for field_name in sorted(internal - external)
+        )
+        drifted.extend(
+            f"{name}.{field_name} is declared on the wire and nowhere internally"
+            for field_name in sorted(external - internal)
+        )
+    return drifted
+
+
+def test_wire_models_mirror_every_domain_field():
+    """A domain field cannot disappear between the dataclass and the response model."""
+    domain_path, domain_tree = file_tree(_DOMAIN_MODEL_MODULE)
+    wire_path, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    drifted = _wire_mirror_drift(domain_tree, wire_tree)
+    assert not drifted, (
+        f"A pydantic response model DROPS every key it does not declare, so a field added to "
+        f"a domain dataclass in {domain_path.name} without a twin in {wire_path.name} does not "
+        f"fail loudly -- it quietly stops existing on the wire. Keep the pair in step, or give "
+        f"them separate names and a deliberate converter: " + "; ".join(drifted)
+    )
+
+
+def test_wire_mirror_detector_bites():
+    """A dropped field and a wire-only field both fire; an exact pair stays clean."""
+    domain = ast.parse(
+        "@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n"
+    )
+    matching = ast.parse(
+        "from pydantic import BaseModel\nclass Link(BaseModel):\n"
+        "    url: str\n    host: str\n    depth: int\n"
+    )
+    assert not _wire_mirror_drift(domain, matching)
+
+    drifted = _wire_mirror_drift(
+        domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n")
+    )
+    assert len(drifted) == 1, drifted
+    assert "Link.depth" in drifted[0] and "dropped on the wire" in drifted[0], drifted
+
+    drifted = _wire_mirror_drift(
+        domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n")
+    )
+    assert len(drifted) == 1, drifted
+    assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
+
+    # A bare @dataclass and a subscripted BaseModel[str] base are the same two
+    # decorators spelled the other way round; both must still be matched.
+    assert _wire_mirror_drift(
+        ast.parse("@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n"),
+        ast.parse("class Link(BaseModel[str]):\n    url: str\n    host: str\n"),
+    )
+    # An unrelated name on both sides is not a pair -- a wire-only model and a
+    # domain-only dataclass must not be reported against each other.
+    assert not _wire_mirror_drift(
+        ast.parse("@dataclass\nclass Link:\n    url: str\n"),
+        ast.parse("class Other(BaseModel):\n    url: str\n    host: str\n"),
+    )
