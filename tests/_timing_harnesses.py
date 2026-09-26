@@ -22,10 +22,18 @@ Three shapes, none of which wait for wall-clock seconds:
 
 ``HANG_GUARD_SECONDS`` is the one wall-clock number here, and it is deliberately
 NOT an instrument. An event-driven wait returns the instant its event fires, no
-matter how long ago that was; the guard only catches a coroutine that will
-*never* receive its event, and would otherwise hang the whole run instead of
-failing one test. It is re-armed by every observed signal, so it measures
-silence rather than slowness, and a correct wait returns in microseconds.
+matter how long ago that was, so a correct wait costs microseconds and the guard
+only ever fires on a wait that cannot complete -- a coroutine that will never
+receive its event, which would otherwise hang the whole run rather than failing
+one test.
+
+It is an absolute bound on the whole wait, not a silence meter: it is set once
+and is NOT re-armed as the wait observes progress. So a wait that trickles
+progress for longer than the guard still fails. That is the stricter contract,
+and the deliberate one -- a suite that rides out arbitrarily slow progress is a
+suite that has stopped noticing a stall. The job-store harness in
+``_job_harnesses`` takes the other trade for its own waits, where a live runner
+task exists to be joined instead of a deadline to be met.
 """
 
 from __future__ import annotations
