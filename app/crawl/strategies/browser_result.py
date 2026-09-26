@@ -20,6 +20,7 @@ from app.crawl.extraction import (
     _extract_html,
     extract_content,
     extract_post_fetch_discovery,
+    normalized_extraction,
 )
 from app.crawl.render_options import resolve_render_options
 from app.crawl.result_helpers import _make_engine_result
@@ -106,9 +107,10 @@ async def _extract_browser_content(
         options = selector_options
         method = result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT
     extracted = await asyncio.to_thread(extractor, *args, **options)
+    text, markdown = normalized_extraction(extracted)
     return _BrowserContent(
-        text=extracted.text or "",
-        markdown=extracted.markdown,
+        text=text,
+        markdown=markdown,
         extraction_method=method,
     )
 

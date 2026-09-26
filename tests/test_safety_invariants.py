@@ -453,7 +453,15 @@ __all__ = [
 # write -- `expires` and `cached_at` were separate `clock()` calls, so the
 # instant a caller compares its remote last-modified signal against (#3) was
 # later than the one the expiry was derived from.
-_APP_TREE_CODE_LINE_BUDGET = 14_980
+# Two more spent, argued in the same terms: an extractor's text is coerced to
+# a string in exactly one place now (extraction.normalized_extraction, beside
+# the type whose invariant it is), because that `or ""` is what keeps an
+# extractor's None text from reaching a result at all. Writing the sweep that
+# enforces it is what found a fourth call site -- browser_result.py -- that the
+# clone list never showed, because at one line it sat under the clone floor
+# while carrying the same drift. A ceiling that only moves for things the
+# report happens to name is not measuring what the rule is for.
+_APP_TREE_CODE_LINE_BUDGET = 14_982
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -1059,6 +1067,59 @@ def test_cache_envelope_detector_bites():
     # flagging it would make the guard something people route around.
     near_miss = ast.parse('def f(expires, value):\n    return {"expires": expires, "value": value}\n')
     assert not _cache_envelope_literals(near_miss, synthetic), "incomplete envelope flagged"
+
+
+def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag an inline ``<something>.text or \"\"`` outside the extraction normalizer.
+
+    Keyed on the *normalization itself* -- an extractor's text being coerced to
+    a string -- rather than on the extractor branches that happened to spell it,
+    so a fourth extractor is caught too. An ``or \"\"`` on a non-``.text``
+    attribute is somebody else's business.
+    """
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.BoolOp) or not isinstance(node.op, ast.Or):
+            continue
+        if len(node.values) != 2:
+            continue
+        left, right = node.values
+        if not (isinstance(left, ast.Attribute) and left.attr == "text"):
+            continue
+        if isinstance(right, ast.Constant) and right.value == "":
+            offenders.append(offender(path, node.lineno, "extraction-text-normalization"))
+    return offenders
+
+
+def test_extraction_text_is_normalized_by_one_owner():
+    """An extractor's text is coerced to a string in exactly one place.
+
+    ``_extract_document``/``_extract_html``/``extract_content`` each had the
+    same ``extracted.text or ""`` tail spelled at their call site. That
+    coercion is what keeps an extractor's ``None`` text from reaching a result
+    at all, so a branch that omitted it produced a None that only surfaced
+    further downstream. ``extraction.normalized_extraction`` is the owner; it
+    lives beside ``ExtractedContent`` because the coercion is a fact about
+    extractor output, not about any one strategy's result builder.
+    """
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED | {"extraction.py"}):
+        offenders.extend(_inline_extraction_normalizations(tree, path))
+    assert not offenders, (
+        "extraction text is normalized inline instead of by its owner:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_extraction_text_normalization_detector_bites():
+    """The normalization sweep must fire on a hand-rolled one, and not on a
+    lookalike -- otherwise it either misses the shape or flags a pattern that
+    belongs to somebody else."""
+    synthetic = REPO_ROOT / "app" / "_synthetic.py"
+    inline = ast.parse("def f(e):\n    return e.text or \"\"\n")
+    assert _inline_extraction_normalizations(inline, synthetic), "inline normalization escaped"
+    other = ast.parse("def f(d):\n    return d.label or \"\"\n")
+    assert not _inline_extraction_normalizations(other, synthetic), "unrelated or-'' flagged"
 
 
 def _is_numeric_expr(node: ast.expr) -> bool:

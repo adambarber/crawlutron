@@ -33,6 +33,7 @@ from app.crawl.extraction import (
     _extract_html,
     extract_content,
     extract_post_fetch_discovery,
+    normalized_extraction,
 )
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
@@ -339,8 +340,7 @@ async def _extract_http_phase(
     html = body_text if is_html else None
     if ctx.extraction == EXTRACTION_DOCUMENT:
         extracted = await asyncio.to_thread(_extract_document, decompressed, response.final_url)
-        text = extracted.text or ""
-        markdown = extracted.markdown
+        text, markdown = normalized_extraction(extracted)
         if (content_type or "").lower().startswith("text/"):
             text = _format_extracted_document_text(text, source_url=response.final_url)
             markdown = text
@@ -353,8 +353,7 @@ async def _extract_http_phase(
                 response.final_url,
                 **_extraction_selector_kwargs(ctx.policy),
             )
-            text = extracted.text or ""
-            markdown = extracted.markdown
+            text, markdown = normalized_extraction(extracted)
         else:
             text = ""
             markdown = None
@@ -367,8 +366,7 @@ async def _extract_http_phase(
             response.final_url,
             **_extraction_selector_kwargs(ctx.policy),
         )
-        text = extracted.text or ""
-        markdown = extracted.markdown
+        text, markdown = normalized_extraction(extracted)
         extraction_method = EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY
 
     return _ExtractedHttpContent(

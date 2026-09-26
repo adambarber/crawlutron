@@ -1003,6 +1003,23 @@ def _extract_discovered_links(
     return links, total_count, total_count > len(links)
 
 
+def normalized_extraction(extracted: ExtractedContent) -> tuple[str, str | None]:
+    """The ``(text, markdown)`` an extractor result contributes to a crawl result.
+
+    Every caller of every extractor normalized the result the same two-line way
+    -- ``extracted.text or ""`` and ``extracted.markdown`` -- so the
+    normalization had as many copies as there were extractor call sites. The
+    ``or ""`` is load-bearing: it is what keeps an extractor's ``None`` text
+    from reaching a result at all, and a call site that omitted it produced a
+    None that only surfaced further downstream.
+
+    It lives here, beside ``ExtractedContent``, because that is the type whose
+    invariant it is: the coercion is a fact about extractor output, not about
+    any one strategy's result builder.
+    """
+    return extracted.text or "", extracted.markdown
+
+
 def extract_post_fetch_discovery(
     html: str | None,
     final_url: str | None,
