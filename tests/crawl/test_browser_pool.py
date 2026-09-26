@@ -184,7 +184,7 @@ class TestWorkerExtractorErrorDegrades:
 
     async def test_browser_renderer_reset_browser_error(self):
         renderer, _cm, assert_released = _renderer_with_exploding_cm()
-        await renderer._reset_browser()
+        await renderer._release_browser()
         assert_released()
 
     async def test_browser_renderer_close_error(self):

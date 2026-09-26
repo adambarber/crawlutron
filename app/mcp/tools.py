@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 Handler = Callable[..., Awaitable["ToolResult"]]
 
+#: The request fields the crawl tool advertises *and* rejects from one list, so
+#: the schema cannot offer a field the handler then refuses.
+_UNSUPPORTED_CRAWL_FIELDS = frozenset({"async_mode", "webhook_url"})
+
 
 @dataclass(frozen=True)
 class ToolResult:
@@ -51,14 +55,42 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """A registered MCP tool definition plus its handler."""
+    """A registered MCP tool definition plus its handler.
+
+    ``request_model`` is the source of truth for both the advertised
+    ``inputSchema`` and the validation of a call's arguments, so the two cannot
+    describe different contracts. That used to be a hand-written JSON schema
+    beside a handler that validated independently: the schema advertised a
+    narrower contract than the handler accepted while claiming
+    ``additionalProperties: False``, which pydantic does not enforce -- a
+    client reading the schema could neither use a real field nor rely on
+    extras being rejected. A field added to a request model is now advertised
+    the day it is added.
+
+    ``unsupported_fields`` names the model fields this tool deliberately will
+    not accept. It is the same list the handler rejects on, so the advertised
+    contract and the enforced one cannot drift apart either.
+    """
 
     name: str
     description: str
-    input_schema: dict[str, Any]
+    request_model: type[BaseModel]
     output_schema: dict[str, Any] | None
     handler: Handler
     title: str = ""
+    unsupported_fields: Collection[str] = ()
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        """The request model's own JSON schema, less the unsupported fields."""
+        schema = self.request_model.model_json_schema()
+        properties = {k: v for k, v in schema.get("properties", {}).items() if k not in self.unsupported_fields}
+        required = [k for k in schema.get("required", []) if k not in self.unsupported_fields]
+        return {
+            **{k: v for k, v in schema.items() if k not in ("properties", "required")},
+            "properties": properties,
+            "required": required,
+        }
 
 
 def _http_exception_message(error: HTTPException) -> str:
@@ -68,7 +100,7 @@ def _http_exception_message(error: HTTPException) -> str:
     return str(detail) if detail else str(error)
 
 
-def _validation_message(error: Exception) -> str:
+def validation_message(error: Exception) -> str:
     if isinstance(error, ValidationError):
         return "; ".join(
             f"{'.'.join(str(part) for part in err.get('loc', []))}: {err.get('msg', '')}"
@@ -87,17 +119,13 @@ def _tool_success(value: BaseModel | dict[str, Any]) -> ToolResult:
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
-async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
-    if "async_mode" in args or "webhook_url" in args:
+async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
+    if _UNSUPPORTED_CRAWL_FIELDS & payload.model_fields_set:
         return ToolResult(
             text="async_mode and webhook_url are not supported over MCP; "
             "use POST /v1/crawl for webhook/async delivery.",
             is_error=True,
         )
-    try:
-        payload = CrawlRequest(**args)
-    except (ValidationError, ValueError) as error:
-        return ToolResult(text=_validation_message(error), is_error=True)
     try:
         result = await execute_crawl(
             payload.model_dump(exclude_none=True),
@@ -115,11 +143,7 @@ async def _handle_crawl(args: dict[str, Any], settings, shutdown_event) -> ToolR
     return _tool_success(unified)
 
 
-async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
-    try:
-        payload = MapRequest(**args)
-    except (ValidationError, ValueError) as error:
-        return ToolResult(text=_validation_message(error), is_error=True)
+async def _handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
     try:
         frontier = await map_site(payload, settings=settings, shutdown_event=shutdown_event)
     except (HTTPException, ValueError) as error:
@@ -127,11 +151,7 @@ async def _handle_map(args: dict[str, Any], settings, shutdown_event) -> ToolRes
     return _tool_success(frontier)
 
 
-async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
-    try:
-        payload = RenderRequest(**args)
-    except (ValidationError, ValueError) as error:
-        return ToolResult(text=_validation_message(error), is_error=True)
+async def _handle_render(payload: RenderRequest, settings, shutdown_event) -> ToolResult:
     if get_browser_pool() is None:
         return ToolResult(
             text="Browser pool is not initialized; the service is starting up or shutting down.",
@@ -144,11 +164,7 @@ async def _handle_render(args: dict[str, Any], settings, shutdown_event) -> Tool
     return _tool_success(unified)
 
 
-async def _handle_search(args: dict[str, Any], settings, shutdown_event) -> ToolResult:
-    try:
-        payload = SearchRequest(**args)
-    except (ValidationError, ValueError) as error:
-        return ToolResult(text=_validation_message(error), is_error=True)
+async def _handle_search(payload: SearchRequest, settings, shutdown_event) -> ToolResult:
     try:
         response = await search_endpoint_handler(payload, settings=settings)
     except (HTTPException, ValueError) as error:
@@ -171,20 +187,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "description) and does NOT crawl result URLs. Result titles and snippets are "
             "provider-supplied and unverified; pipe result URLs into the crawl tool."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Web search query."},
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 100,
-                    "description": "Maximum results; clamped to the server's configured maximum.",
-                },
-            },
-            "required": ["query"],
-            "additionalProperties": False,
-        },
+        request_model=SearchRequest,
         output_schema=_schema(SearchResponse),
         handler=_handle_search,
     ),
@@ -201,22 +204,8 @@ TOOL_SPECS: list[ToolSpec] = [
             "(origin-scoped authorization). Webhook/async delivery is not "
             "available over MCP."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "Single public HTTP(S) URL to crawl."},
-                "urls": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Batch of public HTTP(S) URLs to crawl. Use either url or urls.",
-                },
-                "policy": {
-                    "type": "object",
-                    "description": "CrawlPolicy per POST /v1/crawl (strategies, extraction, limits, discovery, scope_regex, css_selector, xpath, request_profile, browser_profile, headers, credentials). Omit to use service defaults.",
-                },
-            },
-            "additionalProperties": False,
-        },
+        request_model=CrawlRequest,
+        unsupported_fields=_UNSUPPORTED_CRAWL_FIELDS,
         output_schema=_schema(UnifiedCrawlResponse),
         handler=_handle_crawl,
     ),
@@ -229,18 +218,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "frontier; callers own cross-run recursion, frontier persistence, and host-policy decisions. "
             "Within a request the service already collapses URLs that normalize to the same page."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "Root public HTTP(S) URL to map."},
-                "policy": {
-                    "type": "object",
-                    "description": "Optional crawl policy for the mapping crawl; discovery is always enabled.",
-                },
-            },
-            "required": ["url"],
-            "additionalProperties": False,
-        },
+        request_model=MapRequest,
         output_schema=_schema(SiteMapResponse),
         handler=_handle_map,
     ),
@@ -253,22 +231,7 @@ TOOL_SPECS: list[ToolSpec] = [
             "JavaScript rendering. Options mirror POST /v1/render: timeout_seconds, "
             "max_retries, respect_robots, include_html, include_text."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "url": {"type": "string", "description": "Single public HTTP(S) URL to render."},
-                "urls": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Batch of public HTTP(S) URLs to render. Use either url or urls.",
-                },
-                "options": {
-                    "type": "object",
-                    "description": "RenderOptions per POST /v1/render (timeout_seconds, max_retries, respect_robots, include_html, include_text).",
-                },
-            },
-            "additionalProperties": False,
-        },
+        request_model=RenderRequest,
         output_schema=_schema(UnifiedCrawlResponse),
         handler=_handle_render,
     ),

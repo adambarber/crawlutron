@@ -537,11 +537,15 @@ class BrowserRenderer:
         except Exception as error:
             logger.debug("browser_cookies_harvest_failed", extra={"error": str(error)})
 
-    async def _reset_browser(self) -> None:
-        """Close any cached browser instance so the next render recreates it.
+    async def _release_browser(self) -> None:
+        """Take the cached context manager and tear it down, best-effort.
 
-        The previous browser context manager is torn down (best-effort) so its
-        underlying Camoufox process is not leaked between failed attempts.
+        The single owner of "forget the browser": both the per-attempt reset
+        and the service-shutdown close have to drop the same three fields, and
+        when they were spelled separately one of them grew a stale
+        ``_browser_reused`` that the other did not clear. Clearing the whole
+        set here means a field added later is cleared in both places or in
+        neither, which is the only way that stays true.
         """
         cm = self._browser_cm
         self._browser_cm = None
@@ -575,7 +579,7 @@ class BrowserRenderer:
                     "navigation_timeout" if isinstance(error, TimeoutError) else "unknown_error"
                 )
                 last_error = _classify_error_code(error)
-                await self._reset_browser()
+                await self._release_browser()
                 if attempts >= max_attempts:
                     return self._failure_result(
                         url, "retry_exhausted", classification, attempts, started, last_error
@@ -596,7 +600,7 @@ class BrowserRenderer:
             or self._render_count >= self._max_browser_renders
         ):
             if self._browser is not None:
-                await self._reset_browser()
+                await self._release_browser()
             launch_kwargs = self._get_browser_kwargs(options.browser_profile)
             cm = self._browser_factory(**launch_kwargs)
             self._browser = await cm.__aenter__()
@@ -621,14 +625,7 @@ class BrowserRenderer:
 
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown (#6)."""
-        cm = self._browser_cm
-        self._browser_cm = None
-        self._browser = None
-        if cm is not None:
-            try:
-                await cm.__aexit__(None, None, None)
-            except Exception:  # best-effort teardown
-                pass
+        await self._release_browser()
 
     async def _render_with_browser(
         self,

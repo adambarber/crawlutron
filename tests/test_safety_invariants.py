@@ -475,7 +475,7 @@ __all__ = [
 # owning them, so `_failed_engine_result(status="skipped", ...)` would return
 # a skipped result, and mypy does not close that. The guard under both names
 # is the enforcement.
-_APP_TREE_CODE_LINE_BUDGET = 14_983
+_APP_TREE_CODE_LINE_BUDGET = 14_931
 
 
 def test_app_tree_code_line_count_does_not_grow():
@@ -8340,3 +8340,188 @@ def test_result_status_pair_detector_bites():
         ast.parse('def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n'),
         path,
     )
+
+
+# --- browser instance release -------------------------------------------------
+# Both the per-attempt reset and the service-shutdown close have to forget the
+# same cached fields. Spelling that out twice is how one of them grows a stale
+# field the other never clears -- which is exactly what happened to
+# ``_browser_reused`` before _release_browser existed. Only the owner may
+# clear them, so a new field cannot be added to one path and forgotten on the
+# other.
+_BROWSER_RELEASE_FIELDS = ("_browser_cm", "_browser", "_browser_reused")
+_BROWSER_RELEASE_OWNER = "app/crawl/strategies/browser.py"
+_BROWSER_RELEASE_CHOKEPOINT = "_release_browser"
+#: __init__ puts the fields at their initial None; that is not a release.
+_BROWSER_RELEASE_EXEMPT = frozenset({"__init__"})
+
+
+def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
+    # Path == Path, not path.name: comparing a str against a Path is never
+    # equal, which would make the whole sweep silently yield nothing.
+    if path != owner:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name in (chokepoint, *_BROWSER_RELEASE_EXEMPT):
+            continue
+        for inner in ast.walk(node):
+            # Only clearing to None is a release. _acquire_browser assigns a
+            # real context manager and a real browser, which is the opposite
+            # of forgetting them.
+            cleared = [
+                t
+                for t in inner.targets
+                if isinstance(t, ast.Attribute)
+                and t.attr in fields
+                and isinstance(inner.value, ast.Constant)
+                and inner.value.value is None
+            ] if isinstance(inner, ast.Assign) else []
+            for target in cleared:
+                yield offender(
+                    path,
+                    inner.lineno,
+                    f"{target.attr} is cleared to None in {node.name}() rather than "
+                    f"{chokepoint}(); route the release through the chokepoint so every "
+                    "exit path clears the same set of fields",
+                )
+
+
+def test_browser_instance_fields_are_cleared_only_by_the_release_chokepoint():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(
+            _browser_release_offenders(
+                tree,
+                path,
+                owner=REPO_ROOT / _BROWSER_RELEASE_OWNER,
+                fields=_BROWSER_RELEASE_FIELDS,
+                chokepoint=_BROWSER_RELEASE_CHOKEPOINT,
+            )
+        )
+    assert not offenders, "the browser release chokepoint was bypassed: " + ", ".join(offenders)
+
+
+def test_browser_release_detector_bites():
+    source = f"""
+class Renderer:
+    def __init__(self):
+        self._browser_cm = None
+        self._browser = None
+        self._browser_reused = False
+
+    async def {_BROWSER_RELEASE_CHOKEPOINT}(self):
+        self._browser_cm = None
+        self._browser = None
+        self._browser_reused = False
+
+    async def close(self):
+        self._browser = None
+"""
+    args = {
+        "owner": REPO_ROOT / _BROWSER_RELEASE_OWNER,
+        "fields": _BROWSER_RELEASE_FIELDS,
+        "chokepoint": _BROWSER_RELEASE_CHOKEPOINT,
+    }
+    # list(), not the generator: a generator object is always truthy, so
+    # asserting on one directly would pass without ever running the sweep.
+    offenders = list(_browser_release_offenders(ast.parse(source), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args))
+    assert offenders, "a field cleared outside the release chokepoint escaped the sweep"
+    elsewhere = list(
+        _browser_release_offenders(
+            ast.parse(source), REPO_ROOT / "app" / "crawl" / "content_cache.py", **args
+        )
+    )
+    assert not elsewhere, f"scoped to the wrong module -- ignored: {elsewhere}"
+    clean = "class R:\n    async def _release_browser(self):\n        self._browser = None\n"
+    assert not list(
+        _browser_release_offenders(ast.parse(clean), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args)
+    ), "the chokepoint's own body must not be flagged"
+
+
+# --- MCP tool request models --------------------------------------------------
+# The MCP dispatcher used to hand each handler the raw ``arguments`` dict and
+# let the handler validate, while the *advertised* inputSchema was a separate
+# hand-written JSON schema. Two descriptions of one contract, neither derived
+# from the other -- and the advertised one claimed additionalProperties: False
+# for a request model that in fact ignores extras. Now the registration names
+# the pydantic model, the schema is derived from it, and the dispatcher
+# validates. This guard keeps all three attached to one another.
+_MCP_TOOLS_MODULE = "app/mcp/tools.py"
+
+
+def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
+    if path.name != tools_module:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        if node.func.id != "ToolSpec":
+            continue
+        named = {kw.arg for kw in node.keywords if kw.arg}
+        if "request_model" not in named:
+            yield offender(
+                path,
+                node.lineno,
+                "ToolSpec registers a tool without a request_model; the inputSchema and the "
+                "call's argument validation are both derived from it, so a tool without one "
+                "has no validated contract",
+            )
+    # The dispatcher must be the one validating, not the handlers.
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.name.startswith("_handle_"):
+            continue
+        for inner in ast.walk(node):
+            if (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr == "model_json_schema"
+            ):
+                yield offender(
+                    path,
+                    inner.lineno,
+                    f"{node.name}() still derives a schema itself; the schema belongs to "
+                    "ToolSpec.input_schema, derived from the request model",
+                )
+
+
+def test_every_mcp_tool_declares_the_model_that_validates_its_arguments():
+    offenders: list[str] = []
+    for path, tree in app_trees(exclude=SANCTIONED):
+        offenders.extend(
+            _mcp_unvalidated_tool_offenders(tree, path, tools_module=_MCP_TOOLS_MODULE)
+        )
+    assert not offenders, "an MCP tool is missing its validated contract: " + ", ".join(offenders)
+
+
+def test_mcp_request_model_detector_bites():
+    from app.mcp.tools import TOOL_SPECS
+
+    missing = ast.parse(
+        "def register():\n    return ToolSpec(\n        name='x',\n        description='d',\n"
+        "        output_schema=None,\n        handler=h,\n    )\n"
+    )
+    offenders = list(
+        _mcp_unvalidated_tool_offenders(missing, REPO_ROOT / "crawl" / "synthetic.py", tools_module="synthetic.py")
+    )
+    assert offenders, "a ToolSpec without a request_model escaped the sweep"
+    # A handler that builds its own schema is the other half of the bypass.
+    self_scheming = ast.parse(
+        "async def _handle_x(payload, settings, shutdown_event):\n"
+        "    schema = CrawlRequest.model_json_schema()\n"
+        "    return schema\n"
+    )
+    assert list(
+        _mcp_unvalidated_tool_offenders(self_scheming, REPO_ROOT / _MCP_TOOLS_MODULE, tools_module="tools.py")
+    ), "a handler deriving its own schema escaped the sweep"
+    # And the live registry must satisfy the invariant the guard asserts.
+    for spec in TOOL_SPECS:
+        assert spec.request_model is not None, spec.name
+        assert spec.input_schema["properties"] == {
+            k: v
+            for k, v in spec.request_model.model_json_schema().get("properties", {}).items()
+            if k not in spec.unsupported_fields
+        }, f"{spec.name} advertises a schema its request model does not describe"

@@ -18,6 +18,8 @@ import logging
 from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
+
 from app.mcp.constants import (
     CACHE_SCOPE,
     DEFAULT_TTL_MS,
@@ -182,7 +184,7 @@ async def _call_tool(
     settings,
     shutdown_event,
 ) -> dict[str, Any]:
-    from app.mcp.tools import TOOLS_BY_NAME
+    from app.mcp.tools import TOOLS_BY_NAME, validation_message
 
     name = params.get("name")
     if not isinstance(name, str):
@@ -193,15 +195,30 @@ async def _call_tool(
     arguments = params.get("arguments")
     if not isinstance(arguments, dict):
         return error_response(request_id, INVALID_PARAMS, "Tool arguments must be an object")
-    result = await spec.handler(arguments, settings=settings, shutdown_event=shutdown_event)
-    payload: dict[str, Any] = {
+    try:
+        payload = spec.request_model(**arguments)
+    except (ValidationError, ValueError) as error:
+        # Every tool rejects a malformed call the same way, from the one place
+        # that knows the tool's request model, so a tool cannot be added that
+        # surfaces a pydantic error as a transport failure instead of an
+        # is_error result.
+        return result_response(
+            request_id,
+            {
+                "resultType": "complete",
+                "content": [{"type": "text", "text": validation_message(error)}],
+                "isError": True,
+            },
+        )
+    result = await spec.handler(payload, settings=settings, shutdown_event=shutdown_event)
+    success: dict[str, Any] = {
         "resultType": "complete",
         "content": [{"type": "text", "text": result.text}],
         "isError": result.is_error,
     }
     if result.structured is not None:
-        payload["structuredContent"] = result.structured
-    return result_response(request_id, payload)
+        success["structuredContent"] = result.structured
+    return result_response(request_id, success)
 
 
 async def handle_mcp_request(
