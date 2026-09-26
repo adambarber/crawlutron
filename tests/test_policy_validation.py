@@ -1,6 +1,5 @@
 """URL and network policy validation: schemes, private networks, registrable domains."""
 
-import os
 
 import pytest
 from _validation_helpers import normalize_public_http_url, public_url_or_none, registrable_domain
@@ -13,17 +12,10 @@ class TestPolicyValidation:
         with pytest.raises(ValueError):
             normalize_public_http_url("ftp://example.com/")
 
-    def test_private_network_blocked(self):
-        saved = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS")
-        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "0"
-        try:
-            with pytest.raises(ValueError):
-                normalize_public_http_url("http://127.0.0.1/x")
-        finally:
-            if saved is None:
-                os.environ.pop("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", None)
-            else:
-                os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = saved
+    def test_private_network_blocked(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://127.0.0.1/x")
 
     def test_trailing_colon_path(self):
         assert normalize_public_http_url("https://example.com/seg:") == "https://example.com/seg"
@@ -88,29 +80,15 @@ class TestPolicyValidation:
         with pytest.raises(ValueError):
             normalize_public_http_url("http:///path")
 
-    def test_private_network_localhost_blocked(self):
-        saved = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS")
-        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "0"
-        try:
-            with pytest.raises(ValueError):
-                normalize_public_http_url("http://localhost/x")
-        finally:
-            if saved is None:
-                os.environ.pop("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", None)
-            else:
-                os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = saved
+    def test_private_network_localhost_blocked(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        with pytest.raises(ValueError):
+            normalize_public_http_url("http://localhost/x")
 
-    def test_private_network_normal_domain_passed_through(self):
-        saved = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS")
-        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "0"
-        try:
-            out = normalize_public_http_url("http://example.com/x")
-            assert out == "http://example.com/x"
-        finally:
-            if saved is None:
-                os.environ.pop("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", None)
-            else:
-                os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = saved
+    def test_private_network_normal_domain_passed_through(self, monkeypatch):
+        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        out = normalize_public_http_url("http://example.com/x")
+        assert out == "http://example.com/x"
 
     def test_registrable_domain_two_part_suffix(self):
         assert registrable_domain("https://a.b.example.co.uk/x") == "example.co.uk"

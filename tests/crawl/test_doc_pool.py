@@ -5,6 +5,7 @@ import time
 
 import pytest
 from _lifespan_doubles import stub_heavy_teardown
+from _lock_doubles import DelegatingLock
 from _process_doubles import (
     StubConn,
     StubProc,
@@ -285,38 +286,12 @@ def test_acquire_budget_starts_after_the_lock_not_before_it(fake_pool):
     acquirer_thread: dict[str, int] = {}
     acquirer_inside = threading.Event()
 
-    class _RecordingLock:
-        def __init__(self, inner):
-            self._inner = inner
-
+    class _RecordingLock(DelegatingLock):
         def acquire(self, *args, **kwargs):
-            got = self._inner.acquire(*args, **kwargs)
+            got = super().acquire(*args, **kwargs)
             if threading.get_ident() == acquirer_thread.get("id"):
                 acquirer_inside.set()
             return got
-
-        def release(self):
-            return self._inner.release()
-
-        def locked(self):
-            return self._inner.locked()
-
-        def wait(self, *args, **kwargs):
-            return self._inner.wait(*args, **kwargs)
-
-        def notify(self, *args):
-            return self._inner.notify(*args)
-
-        def notify_all(self):
-            return self._inner.notify_all()
-
-        def __enter__(self):
-            self.acquire()
-            return self
-
-        def __exit__(self, *exc):
-            self.release()
-            return False
 
     real_lock = ext_mod._POOL_LOCK
     fake_pool.setattr(ext_mod, "_POOL_LOCK", _RecordingLock(real_lock), raising=False)

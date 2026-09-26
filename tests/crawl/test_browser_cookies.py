@@ -4,6 +4,7 @@ import threading
 from collections import OrderedDict
 
 import pytest
+from _lock_doubles import DelegatingLock
 
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import _BROWSER_COOKIES_MAX, _store_browser_cookies, get_browser_cookies_for
@@ -116,7 +117,7 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         "the cookie store has no lock; reads are unsynchronized and the eviction race is wide open"
     )
 
-    class _RecordingLock:
+    class _RecordingLock(DelegatingLock):
         """Delegating lock that records which thread acquired it, and how often.
 
         Per-thread, not just a total: the probe below deliberately holds the
@@ -126,27 +127,16 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
         """
 
         def __init__(self, inner):
-            self._inner = inner
+            super().__init__(inner)
             self.acquisitions: dict[int, int] = {}
 
         def acquire(self, *args, **kwargs):
             me = threading.get_ident()
             self.acquisitions[me] = self.acquisitions.get(me, 0) + 1
-            return self._inner.acquire(*args, **kwargs)
-
-        def release(self):
-            return self._inner.release()
+            return super().acquire(*args, **kwargs)
 
         def locked(self):
             return self._inner.locked()
-
-        def __enter__(self):
-            self.acquire()
-            return self
-
-        def __exit__(self, *exc):
-            self.release()
-            return False
 
     real_lock = store._lock
     recording = _RecordingLock(real_lock)
