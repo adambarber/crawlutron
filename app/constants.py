@@ -167,42 +167,61 @@ class CrawlClassification(str, Enum):
 # ---------------------------------------------------------------------------
 # Classification groupings (consumed by HTTP/browser strategy status mappers
 # and the test suite). Centralized so the HTTP vs browser blocked sets cannot
-# silently drift apart across modules. Derived from the taxonomy above so a
-# grouping can never name a label the enum does not know about.
+# silently drift apart across modules.
+#
+# These are set OPERATIONS over one another, not one transcription of the
+# taxonomy per grouping. Naming the members is allowed exactly once each, in the
+# leaf grouping that is about them; everything downstream composes. That is the
+# property the previous four hand-written lists did not have: ``HTTP_BLOCKED``
+# was already a union, so a new blocked label reached it for free, while
+# ``NON_TRANSIENT`` re-listed the same eleven labels and a new one had to be
+# added there by hand -- with nothing failing when it was not, because a
+# frozenset that is merely missing a member is still a valid frozenset.
+# ``test_a_classification_grouping_is_derived_not_restated`` is the drift guard.
+#
+# Deriving from the enum also means a grouping can never name a label the
+# taxonomy does not know about: a typo is an AttributeError at import.
 # ---------------------------------------------------------------------------
-BROWSER_BLOCKED_CLASSIFICATIONS = frozenset(
-    member.value
-    for member in (
-        CrawlClassification.captcha_detected,
-        CrawlClassification.bot_challenge_detected,
-        CrawlClassification.access_denied,
-        CrawlClassification.login_required,
-        CrawlClassification.paywall_detected,
-        CrawlClassification.rate_limited,
-    )
+def _classification_values(*members: CrawlClassification) -> frozenset[str]:
+    """The label set for a leaf grouping declared as enum members.
+
+    Every grouping below that is not a leaf is a ``|`` of earlier ones, so this
+    is called with a member only in the one place that member is being
+    classified, and a member is never spelled twice.
+    """
+    return frozenset(member.value for member in members)
+
+
+# The anti-bot / consent / access walls a page can be behind. The base of every
+# blocked grouping below.
+BROWSER_BLOCKED_CLASSIFICATIONS = _classification_values(
+    CrawlClassification.captcha_detected,
+    CrawlClassification.bot_challenge_detected,
+    CrawlClassification.access_denied,
+    CrawlClassification.login_required,
+    CrawlClassification.paywall_detected,
+    CrawlClassification.rate_limited,
 )
 
-HTTP_BLOCKED_CLASSIFICATIONS = BROWSER_BLOCKED_CLASSIFICATIONS | frozenset(
-    member.value
-    for member in (
-        CrawlClassification.cookie_consent_required,
-        CrawlClassification.javascript_required,
-        CrawlClassification.unsupported_browser,
-        CrawlClassification.geolocation_blocked,
-        CrawlClassification.waf_challenge_detected,
-    )
+# The walls only the HTTP path can report, because only it fetches without a
+# renderer. Named separately so ``HTTP_BLOCKED`` reads as the superset it is.
+_HTTP_ONLY_CLASSIFICATIONS = _classification_values(
+    CrawlClassification.cookie_consent_required,
+    CrawlClassification.javascript_required,
+    CrawlClassification.unsupported_browser,
+    CrawlClassification.geolocation_blocked,
+    CrawlClassification.waf_challenge_detected,
 )
+
+HTTP_BLOCKED_CLASSIFICATIONS = BROWSER_BLOCKED_CLASSIFICATIONS | _HTTP_ONLY_CLASSIFICATIONS
 
 # Content was retrieved but yielded nothing usable (HTTP/browser status mappers
 # and the browser strategy's retry hints all key off this group).
-FAILED_CLASSIFICATIONS: frozenset[str] = frozenset(
-    member.value
-    for member in (
-        CrawlClassification.not_found,
-        CrawlClassification.site_error,
-        CrawlClassification.gone,
-        CrawlClassification.binary_no_text,
-    )
+FAILED_CLASSIFICATIONS = _classification_values(
+    CrawlClassification.not_found,
+    CrawlClassification.site_error,
+    CrawlClassification.gone,
+    CrawlClassification.binary_no_text,
 )
 
 # ---------------------------------------------------------------------------
@@ -391,25 +410,12 @@ TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
 # pages the origin characterized, or capabilities we chose not to use. not_found
 # and gone are statuses the origin chose. rendered and not_modified are not
 # failures at all.
-NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
-    member.value
-    for member in (
-        CrawlClassification.rendered,
-        CrawlClassification.captcha_detected,
-        CrawlClassification.bot_challenge_detected,
-        CrawlClassification.access_denied,
-        CrawlClassification.login_required,
-        CrawlClassification.paywall_detected,
-        CrawlClassification.rate_limited,
-        CrawlClassification.cookie_consent_required,
-        CrawlClassification.javascript_required,
-        CrawlClassification.unsupported_browser,
-        CrawlClassification.geolocation_blocked,
-        CrawlClassification.waf_challenge_detected,
-        CrawlClassification.not_found,
-        CrawlClassification.site_error,
-        CrawlClassification.gone,
-        CrawlClassification.binary_no_text,
+NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = (
+    HTTP_BLOCKED_CLASSIFICATIONS
+    | FAILED_CLASSIFICATIONS
+    # Fetch-level refusals and the pipeline's own errors. Ours, not the page's:
+    # they resolve only when the caller changes.
+    | _classification_values(
         CrawlClassification.robots_disallowed,
         CrawlClassification.payload_too_large,
         CrawlClassification.http_status_error,
@@ -417,6 +423,11 @@ NON_TRANSIENT_CLASSIFICATIONS: frozenset[str] = frozenset(
         CrawlClassification.invalid_url,
         CrawlClassification.unsupported_scheme,
         CrawlClassification.private_network_target,
+    )
+    # Not failures at all: a page that rendered, and a page the caller's own
+    # validators proved fresh.
+    | _classification_values(
+        CrawlClassification.rendered,
         CrawlClassification.not_modified,
     )
 )

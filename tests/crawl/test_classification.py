@@ -1,9 +1,10 @@
 """Page classification: phrases, structural markers, taxonomy, status resolution and memory bounds."""
 
+import ast
 import inspect
 
 import pytest
-from chokepoint_walks import nodes_of
+from chokepoint_walks import app_trees, nodes_of
 
 from app import constants as app_constants
 from app.api_models import CrawlClassification
@@ -18,6 +19,7 @@ from app.constants import (
     CLASSIFICATION_STATUS_BY_LABEL,
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,
+    NON_TRANSIENT_CLASSIFICATIONS,
     status_for_classification,
 )
 from app.crawl.result_helpers import TerminalResult
@@ -108,6 +110,175 @@ def test_the_status_resolver_is_defined_once_not_per_strategy():
         assert "status_for_classification(" in source, (
             f"{module.__name__} no longer resolves classifications through the shared app.constants table"
         )
+
+
+# The classification groupings are set OPERATIONS over one another, not one
+# transcription of the taxonomy per grouping. Two properties enforce that, and
+# they need two different detectors because they fail in different ways.
+#
+# 1. A grouping may not embed string literals, and must reach the taxonomy
+#    through enum member references -- directly or by composing another
+#    grouping. A hand-copied ``{"rate_limited", "access_denied"}`` is correct
+#    until the taxonomy grows, and then it is silently short.
+#
+# 2. A member may not be SPELLED in two groupings. This is the half that a value
+#    assertion cannot see and the half that actually bit: the relation tests
+#    cannot tell a derived set from a transcribed one, because a set that
+#    happens to be correct today is identical under ``in``, ``<=`` and ``==``.
+#    What was wrong with the four hand-written lists is that only some of them
+#    were operations. ``HTTP_BLOCKED`` was a union, so a new blocked label
+#    reached it for free; ``NON_TRANSIENT`` re-listed the same eleven labels, so
+#    the same new label had to be added there by hand and nothing failed when it
+#    was not. A frozenset missing a member is still a valid frozenset.
+#
+# The walk is tree-wide over app/ rather than scoped to ``app/constants.py``: a
+# grouping declared in a second module is the same drift at a different address,
+# and a check that reads one file cannot see it.
+_GROUPING_ASSIGNMENTS = frozenset(
+    {
+        "BROWSER_BLOCKED_CLASSIFICATIONS",
+        "HTTP_BLOCKED_CLASSIFICATIONS",
+        "FAILED_CLASSIFICATIONS",
+        "TRANSIENT_CLASSIFICATIONS",
+        "NON_TRANSIENT_CLASSIFICATIONS",
+    }
+)
+
+
+def _grouping_declarations() -> dict[str, ast.AST]:
+    """Every classification-grouping assignment in app/, as ``name -> value``."""
+    out: dict[str, ast.AST] = {}
+    for _path, tree in app_trees():
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                targets, value = [node.target], node.value
+            else:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _GROUPING_ASSIGNMENTS:
+                    out[target.id] = value
+    return out
+
+
+def _spelled_classification_members(value: ast.AST) -> set[str]:
+    """Every ``CrawlClassification.<member>`` named inside ``value``."""
+    return {
+        node.attr
+        for node in nodes_of(value)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "CrawlClassification"
+    }
+
+
+def _string_literals(value: ast.AST) -> list[str]:
+    return [node.value for node in nodes_of(value) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+def _reaches_the_taxonomy(name: str, declarations: dict[str, ast.AST], seen: frozenset[str] = frozenset()) -> bool:
+    """Whether a grouping names enum members directly or via another grouping.
+
+    The transitive half matters because a derived grouping legitimately contains
+    no member reference of its own: ``HTTP_BLOCKED`` is a union of two earlier
+    groupings, and requiring it to spell a member would force the transcription
+    this whole section exists to prevent. A cycle terminates instead of hanging,
+    and reports False -- a grouping that only ever refers to itself has not
+    reached the taxonomy by any path.
+    """
+    if name in seen or name not in declarations:
+        return False
+    value = declarations[name]
+    if _spelled_classification_members(value):
+        return True
+    return any(
+        _reaches_the_taxonomy(referenced, declarations, seen | {name})
+        for referenced in {
+            node.id
+            for node in nodes_of(value)
+            if isinstance(node, ast.Name) and node.id in _GROUPING_ASSIGNMENTS
+        }
+    )
+
+
+def test_groupings_are_derived_from_the_enum_not_relisted():
+    """No grouping embeds a string literal, and every one reaches the taxonomy.
+
+    The literal half is the historical check. The reachability half replaces a
+    proxy that was narrower than its own intent: it used to demand a direct
+    ``CrawlClassification.x`` reference inside every grouping, which a correct
+    transitive union does not have, so enforcing it would have required
+    re-introducing the transcription.
+    """
+    declarations = _grouping_declarations()
+    assert set(declarations) == _GROUPING_ASSIGNMENTS, (
+        f"expected every grouping to be declared, found {sorted(set(_GROUPING_ASSIGNMENTS) - set(declarations))}"
+    )
+    for name, value in sorted(declarations.items()):
+        literals = _string_literals(value)
+        assert not literals, f"{name} embeds string literals: {literals}"
+        unknown = [
+            attr for attr in sorted(_spelled_classification_members(value)) if attr not in CrawlClassification.__members__
+        ]
+        assert not unknown, f"{name} references non-members: {unknown}"
+        assert _reaches_the_taxonomy(name, declarations), (
+            f"{name} reaches no CrawlClassification member, directly or through another grouping"
+        )
+
+
+def test_a_grouping_that_embeds_a_literal_fails_the_check():
+    """The literal half of the guard above must fire on a hand-copied grouping."""
+    copied = ast.parse('GROUP = frozenset({"rate_limited", "access_denied"})\n').body[0].value
+    assert _string_literals(copied) == ["rate_limited", "access_denied"]
+
+
+def test_a_grouping_with_no_path_to_the_taxonomy_fails_the_check():
+    """The reachability half must fire on a grouping that composes nothing."""
+    declarations = {"LOOP": ast.parse("LOOP = LOOP | frozenset()\n").body[0].value}
+    assert not _reaches_the_taxonomy("LOOP", declarations)
+
+
+def test_a_classification_grouping_is_derived_not_restated():
+    """No taxonomy member is spelled in two grouping declarations.
+
+    Every grouping after the leaves is composed with a set operation, so a
+    classification added to the taxonomy lands in the derived groupings without
+    anyone editing them, and this sweep has nothing to report.
+    """
+    spelled: dict[str, list[str]] = {}
+    for name, value in sorted(_grouping_declarations().items()):
+        for member in sorted(_spelled_classification_members(value)):
+            spelled.setdefault(member, []).append(name)
+    restated = [f"{member} spelled in {names}" for member, names in sorted(spelled.items()) if len(names) > 1]
+    assert not restated, "classification groupings re-state a member: " + "; ".join(restated)
+
+
+def test_the_restated_grouping_detector_bites():
+    """A member transcribed into two groupings must fail the sweep above."""
+    restated = ast.parse(
+        "FIRST = frozenset(m.value for m in (CrawlClassification.rendered,))\n"
+        "SECOND = frozenset(m.value for m in (CrawlClassification.rendered,))\n"
+    )
+    first = _spelled_classification_members(restated.body[0].value)
+    second = _spelled_classification_members(restated.body[1].value)
+    assert first & second == {"rendered"}
+
+
+def test_the_grouping_relations_still_hold():
+    """The relations the derived declarations must preserve, stated as values.
+
+    Deriving the groupings is only safe if the sets are still the same sets.
+    These are the properties the hand-written transcriptions were carrying, and
+    they are what a refactor of ``app/constants.py`` could silently break.
+    """
+    entire = {member.value for member in CrawlClassification}
+    assert BROWSER_BLOCKED_CLASSIFICATIONS <= HTTP_BLOCKED_CLASSIFICATIONS
+    assert BROWSER_BLOCKED_CLASSIFICATIONS <= NON_TRANSIENT_CLASSIFICATIONS
+    assert HTTP_BLOCKED_CLASSIFICATIONS <= NON_TRANSIENT_CLASSIFICATIONS
+    assert FAILED_CLASSIFICATIONS <= NON_TRANSIENT_CLASSIFICATIONS
+    assert not HTTP_BLOCKED_CLASSIFICATIONS & FAILED_CLASSIFICATIONS
+    assert entire >= HTTP_BLOCKED_CLASSIFICATIONS | FAILED_CLASSIFICATIONS
 
 
 def test_every_classifiable_label_is_an_explicit_table_entry():
@@ -435,53 +606,6 @@ def test_capabilities_advertises_exactly_the_taxonomy():
 
     advertised = capabilities_payload(CrawlerSettings.from_mapping())["supported_classifications"]
     assert advertised == [member.value for member in CrawlClassification]
-
-
-def test_groupings_are_derived_from_the_enum_not_relisted():
-    """Each grouping is built from enum member references, not a hand-copied set
-    of string literals -- the AST has no string constant inside a grouping."""
-    import ast
-    import inspect
-
-    from app import constants
-
-    tree = ast.parse(inspect.getsource(constants))
-    assignments = {}
-    for node in nodes_of(tree):
-        target = None
-        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
-            target, value = node.targets[0].id, node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            target, value = node.target.id, node.value
-        if target in (
-            "HTTP_BLOCKED_CLASSIFICATIONS",
-            "BROWSER_BLOCKED_CLASSIFICATIONS",
-            "FAILED_CLASSIFICATIONS",
-        ):
-            assignments[target] = value
-    for name in (
-        "HTTP_BLOCKED_CLASSIFICATIONS",
-        "BROWSER_BLOCKED_CLASSIFICATIONS",
-        "FAILED_CLASSIFICATIONS",
-    ):
-        value = assignments[name]
-        literals = [
-            node.value
-            for node in nodes_of(value)
-            if isinstance(node, ast.Constant) and isinstance(node.value, str)
-        ]
-        assert not literals, f"{name} embeds string literals: {literals}"
-
-        grouped = [
-            node.attr
-            for node in nodes_of(value)
-            if isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "CrawlClassification"
-        ]
-        assert grouped, f"{name} groups no enum members"
-        unknown = [attr for attr in grouped if attr not in CrawlClassification.__members__]
-        assert not unknown, f"{name} references non-members: {unknown}"
 
 
 class TestClassificationComments:
