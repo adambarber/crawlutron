@@ -142,12 +142,8 @@ async def drive_recursive_crawl(
             "scheduler": the_scheduler,
             "resource_gate": the_gate,
             "admission": admission,
-            "host_policy": (
-                host_policy if host_policy is not None else UNRESTRICTED_HOST_POLICY
-            ),
-            **_crawl_defaults(
-                robots_disallowed=robots_disallowed, sitemap_seeds=sitemap_seeds
-            ),
+            "host_policy": (host_policy if host_policy is not None else UNRESTRICTED_HOST_POLICY),
+            **_crawl_defaults(robots_disallowed=robots_disallowed, sitemap_seeds=sitemap_seeds),
             **overrides,
         }
     )

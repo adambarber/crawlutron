@@ -8,14 +8,7 @@ When the client sends a Transfer-Encoding: chunked request with multiple
 
 import inspect
 
-from _assertions import extract_function_body
-
-
-def _read_main_source() -> str:
-
-    from app import main as main_mod
-
-    return inspect.getsource(main_mod)
+from _assertions import extract_function_body, read_main_source
 
 
 def _read_middleware_source() -> str:
@@ -68,7 +61,7 @@ def test_chunked_request_cap_is_16_mib():
 class TestBodySizeMiddlewareRegistration:
     def test_body_size_middleware_registered(self):
         """The middleware must be installed on the FastAPI app."""
-        src = _read_main_source()
+        src = read_main_source()
         # Registration lives in main.py; implementation lives in app/api/middleware.py
         assert "limit_request_body" in src
         assert 'app.middleware("http")(limit_request_body)' in src or '@app.middleware("http")' in src

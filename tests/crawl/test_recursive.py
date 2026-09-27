@@ -4,7 +4,13 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl, site_linking_to
+from _fetcher_factories import (
+    LINKED_PAIR_LIMITS,
+    crawled_results,
+    crawled_urls,
+    run_scoped_crawl,
+    site_linking_to,
+)
 
 
 def _assert_memory_stripped(out) -> None:
@@ -24,7 +30,7 @@ def _assert_memory_stripped(out) -> None:
 class TestRecursiveCrawl:
     async def test_max_depth_one_discovers_links(self):
         pages = site_linking_to("/a", "/b")
-        out = await crawled_results(pages, limits={"max_depth": 1, "max_pages": 10})
+        out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS)
         assert out["submitted_count"] == 1
         urls = {r["normalized_url"] for r in out["results"]}
         assert "http://example.com" in urls
@@ -83,9 +89,7 @@ class TestRecursiveCrawl:
             "/s2": (200, "<html>s2</html>", "text/html"),
         }
         urls = set(
-            await crawled_urls(
-                pages, limits={"max_depth": 1, "max_pages": 10}, policy={"discovery": {"sitemaps": True}}
-            )
+            await crawled_urls(pages, limits=LINKED_PAIR_LIMITS, policy={"discovery": {"sitemaps": True}})
         )
         assert "http://example.com/s1" in urls
         assert "http://example.com/s2" in urls
@@ -94,7 +98,7 @@ class TestRecursiveCrawl:
         pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
         out = await crawled_results(
             pages,
-            limits={"max_depth": 1, "max_pages": 10},
+            limits=LINKED_PAIR_LIMITS,
             policy={"browser_profile": {"include_html": False}},
         )
         _assert_memory_stripped(out)
@@ -155,7 +159,7 @@ async def test_real_sitemap_parser_feeds_scope_filtered_recursive_crawl():
     normalized = await crawled_urls(
         pages,
         url="https://example.com/",
-        limits={"max_depth": 1, "max_pages": 10},
+        limits=LINKED_PAIR_LIMITS,
         policy={"discovery": {"sitemaps": True}, "scope_regex": r"^https://example\.com/keep/?$"},
     )
 

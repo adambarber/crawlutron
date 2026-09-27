@@ -55,23 +55,36 @@ class TestSafeUrlParse:
         assert safe.pinned_ip == "93.184.216.34"
 
 
+@pytest.fixture
+def public_url(monkeypatch):
+    """A ``SafeUrl`` for a public page, under the private-target policy.
+
+    Three of the hop tests are about where a *public* URL is allowed to go, and
+    the two lines that establish that -- block private targets, resolve the host
+    to a public address -- were written out in each. A hop test that forgot
+    ``block_private_targets`` would pass for the wrong reason: nothing would
+    have been pinned, so nothing would have been revalidated.
+    """
+    block_private_targets(monkeypatch)
+    with _resolve_as(_PUBLIC):
+        yield _parse("http://example.com/a")
+
+
 class TestSafeUrlRedirectHop:
-    def test_public_to_public_hop_revalidates(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with _resolve_as(_PUBLIC):
-            safe = _parse("http://example.com/a")
-            hopped = safe.redirect_hop("/b")
+    def test_public_to_public_hop_revalidates(self, public_url):
+        safe = public_url
+        hopped = safe.redirect_hop("/b")
         assert hopped.hostname == "example.com"
         assert hopped.raw == "http://example.com/b"
 
-    def test_public_to_private_hop_raises(self, monkeypatch):
-        block_private_targets(monkeypatch)
-        with _resolve_as(_PUBLIC):
-            safe = _parse("http://example.com/a")
+    def test_public_to_private_hop_raises(self, public_url):
         with _resolve_as(_PRIVATE), pytest.raises(ValueError):
-            safe.redirect_hop("http://127.0.0.1:8080/evil")
+            public_url.redirect_hop("http://127.0.0.1:8080/evil")
 
     def test_hop_preserves_pin_preference(self, monkeypatch):
+        # Not the public_url fixture: this one is about the pin surviving the
+        # hop, so the hop has to happen while the public resolver is still
+        # installed -- a hop performed outside it re-resolves for real.
         block_private_targets(monkeypatch)
         with _resolve_as(_PUBLIC):
             safe = _parse("http://example.com/a", pin=True)

@@ -50,9 +50,7 @@ class TestEngineCrawlRequest:
         assert result["http_status"] == 304
 
     async def test_crawl_request_browser_strategy_without_worker_is_browser_crash(self, base_url):
-        result = await crawled_result(
-            f"{base_url}/", strategies=[BROWSER_HEADLESS], max_discovered_links=10
-        )
+        result = await crawled_result(f"{base_url}/", strategies=[BROWSER_HEADLESS], max_discovered_links=10)
         assert result["status"] == "failed"
         assert result["classification"] == "browser_crash"
 

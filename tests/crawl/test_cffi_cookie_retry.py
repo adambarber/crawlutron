@@ -3,11 +3,9 @@ the browser-minted session cookies before accepting the render result."""
 
 from _browser_doubles import _fake_browser
 from _chain_policies import chain_policy
-from _fetcher_factories import request_fetcher
+from _fetcher_factories import request_fetcher, run_chain
 
 from app.constants import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
-from app.crawl.strategy_chain import execute_crawl_chain
-from app.validation import HostPolicy
 
 #: A browser worker's success shape, which is what the strategy chain needs
 #: back once the cffi hop has the cookies.
@@ -43,19 +41,16 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
     async def browser_worker(job):
         return _rendered(job)
 
-    result = await execute_crawl_chain(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
+    result = await run_chain(
+        fetcher=http_fetcher,
+        cffi_fetcher=cffi_fetcher,
+        browser_worker=browser_worker,
         policy=chain_policy(
             HTTP_DECLARED_CRAWLER,
             HTTP_CFFI_IMPERSONATE,
             BROWSER_HEADLESS,
             discovery={"robots": True},
         ),
-        http_fetcher=http_fetcher,
-        cffi_fetcher=cffi_fetcher,
-        browser_worker=browser_worker,
-        host_policy=HostPolicy.unrestricted(),
     )
     assert result.status == "success"
     assert result.diagnostics["robots"]["evaluation"] == "disabled"

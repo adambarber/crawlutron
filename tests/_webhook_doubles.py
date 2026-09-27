@@ -61,3 +61,14 @@ def record_webhook_delivery(
 
     monkeypatch.setattr(httpx, "AsyncClient", _scripted_client)
     return requests
+
+
+def assert_delivered_once(delivered) -> None:
+    """Exactly one webhook was delivered, and it is the one under test.
+
+    Every delivery test here follows with assertions on ``delivered[0]``, so a
+    zero- or two-delivery outcome raised ``IndexError`` or asserted against the
+    wrong one. This says what the tests mean -- one delivery, and here it is --
+    and the following lines read as the property that delivery had.
+    """
+    assert len(delivered) == 1, delivered

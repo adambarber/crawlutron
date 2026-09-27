@@ -10,16 +10,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 import time
 from pathlib import Path
 
+from app.crawl.coordination_store import CoordinationStore
 from app.crawl.migrations import StoreSchema
-from app.crawl.sqlite_store import connect_store
 
 
-class CrawlResultStore:
-    """SQLite-backed store of completed crawl responses keyed by request id."""
+class CrawlResultStore(CoordinationStore):
+    """SQLite-backed store of completed crawl responses keyed by request id.
+
+    The connection, its PRAGMAs, the intra-process lock and ``close`` are the
+    base's. This store used to open its own connection and keep its own lock,
+    which made it the one store that could drift from the shared WAL/busy-timeout
+    configuration and the one whose ``close`` was written twice.
+    """
+
+    schema = StoreSchema.RESULTS
 
     def __init__(
         self,
@@ -29,14 +36,10 @@ class CrawlResultStore:
         max_entries: int = 1000,
         clock=None,
     ) -> None:
+        super().__init__(db_path)
         self._ttl_seconds = max(0.0, float(ttl_seconds))
         self._max_entries = max(1, int(max_entries))
         self._clock = clock or time.time
-        self._lock = threading.Lock()
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        # Shared store configuration (busy_timeout + WAL; M1) -- previously a
-        # plain connect while JobStore ran WAL, so the two stores drifted.
-        self._conn = connect_store(db_path, schema=StoreSchema.RESULTS)
 
     def put(self, request_id: str, payload: dict) -> None:
         """Store a completed response; prune expired/oldest entries first."""
@@ -88,7 +91,3 @@ class CrawlResultStore:
         if self._ttl_seconds <= 0:
             return
         self._conn.execute("DELETE FROM results WHERE stored_at < ?", (now - self._ttl_seconds,))
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()

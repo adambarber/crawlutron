@@ -13,16 +13,6 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 
 
-async def _run_revalidation(url, policy, fetcher, cache, content_cache):
-    return await run_http_strategy(
-        url=url,
-        policy=policy,
-        http_fetcher=fetcher,
-        cache=cache,
-        content_cache=content_cache,
-    )
-
-
 class _CountingFetcher:
     """A fetcher that counts calls and always returns a fresh 200.
 
@@ -74,14 +64,18 @@ class TestRevalidationFetchesOnce:
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
         # First crawl: no cache entry yet, one fetch, stores it with its etag.
-        first = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
+        first = await run_http_strategy(
+            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
+        )
         assert first.status == "success"
         assert fetcher.calls == 1, fetcher.calls
 
         # Second crawl: cache hit with a validator. The origin returns 200
         # (content "changed"), so the revalidation response is used directly.
         # The bug re-fetched unconditionally here, giving 3 fetches total.
-        second = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
+        second = await run_http_strategy(
+            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
+        )
         assert second.status == "success"
         assert fetcher.calls == 2, f"expected one fetch for the revalidation, got {fetcher.calls - 1}"
         # The second fetch must be the conditional one, not an unconditional repeat.
@@ -125,7 +119,9 @@ class TestRevalidationFetchesOnce:
         content_cache = ContentCache(cache_dir=str(tmp_path / "cc"), default_ttl=3600)
 
         async def _crawl():
-            result = await _run_revalidation(url, self._policy(), fetcher, cache, content_cache)
+            result = await run_http_strategy(
+            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
+        )
             assert result.status == "success"
             return result
 

@@ -324,7 +324,9 @@ class TestWorkerExtractorErrorDegrades:
         def _consent_query(*_args, **_kwargs):
             return _page(is_visible=_visible, click=_click)
 
-        result = await _bare_renderer()._auto_accept_cookie_consent(_page(query_selector=_consent_query), True)
+        result = await _bare_renderer()._auto_accept_cookie_consent(
+            _page(query_selector=_consent_query), True
+        )
         assert result
 
 

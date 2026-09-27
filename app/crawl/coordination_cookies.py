@@ -136,7 +136,3 @@ class SharedCookieStore(CoordinationStore):
             # empty rather than crashing every request that reads the host.
             return {}
         return {str(k): str(v) for k, v in decoded.items()} if isinstance(decoded, dict) else {}
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()

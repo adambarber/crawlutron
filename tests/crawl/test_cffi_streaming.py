@@ -358,10 +358,21 @@ def _patch_client(monkeypatch, body: bytes):
     monkeypatch.setattr(cffi_requests, "AsyncSession", lambda **kw: _FakeCffiClient(body))
 
 
+async def _capped_fetch(monkeypatch, body_size: int):
+    """One impersonated cffi fetch of ``body_size`` bytes against a 64-byte cap.
+
+    The cap tests are about the streaming read stopping, not about the request,
+    so the body, the cap and the URL are fixed here: spelled per test, a change
+    to the cap was four edits and one of them was in a test that was asserting
+    something else.
+    """
+    _patch_client(monkeypatch, b"x" * body_size)
+    return await _DEFAULT_CFFI_FETCHER("http://example.test/page", {}, 10, 64)
+
+
 class TestCffiStreamingCap:
     async def test_chunked_body_over_cap_returns_413(self, monkeypatch):
-        _patch_client(monkeypatch, b"x" * 10_000)
-        result = await _DEFAULT_CFFI_FETCHER("http://example.test/page", {}, 10, 64)
+        result = await _capped_fetch(monkeypatch, 10_000)
         assert result.status_code == 413
 
     async def test_real_client_class_exists(self):
@@ -373,8 +384,7 @@ class TestCffiStreamingCap:
         assert hasattr(cffi_requests, "AsyncSession")
 
     async def test_streaming_stops_shortly_after_cap(self, monkeypatch):
-        _patch_client(monkeypatch, b"x" * 100_000)
-        result = await _DEFAULT_CFFI_FETCHER("http://example.test/page", {}, 10, 64)
+        result = await _capped_fetch(monkeypatch, 100_000)
         assert result.status_code == 413
         consumed = _FakeCffiClient.last_instance.response.chunks_yielded * 1024
         assert consumed <= 64 + 1024
@@ -462,4 +472,3 @@ async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
         await http_mod.close_cffi_session()
     assert resp.status_code == 200
     assert counting_server.hits == 1, "the fallback did not serve the page"
-

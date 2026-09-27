@@ -9,7 +9,13 @@ pathological patterns) and uses the compiled pattern's .search() in the loop.
 
 import re
 
-from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl, site_linking_to
+from _fetcher_factories import (
+    LINKED_PAIR_LIMITS,
+    crawled_results,
+    crawled_urls,
+    run_scoped_crawl,
+    site_linking_to,
+)
 
 CATASTROPHIC = "(a+)+$"
 
@@ -30,11 +36,7 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
     # a wall-clock budget instead of rejecting it at compile. It genuinely
     # matches /a (ends in "a") and not /b, so scope filtering now WORKS
     # where the old reject-on-shape guard silently dropped the filter.
-    urls = set(
-        await crawled_urls(
-            pages, limits={"max_depth": 1, "max_pages": 10}, policy={"scope_regex": CATASTROPHIC}
-        )
-    )
+    urls = set(await crawled_urls(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": CATASTROPHIC}))
     assert "http://example.com/a" in urls
     assert "http://example.com/b" not in urls
 
@@ -56,9 +58,7 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     # the recursive loop and the sitemap-seed filter.
     monkeypatch.setattr("app.crawl.scope_match.match_bounded", _always_timeout)
     pages = site_linking_to("/a", "/b")
-    out = await crawled_results(
-        pages, limits={"max_depth": 1, "max_pages": 10}, policy={"scope_regex": r"^/keep/"}
-    )
+    out = await crawled_results(pages, limits=LINKED_PAIR_LIMITS, policy={"scope_regex": r"^/keep/"})
     assert calls["n"] > 0, "bounded match never invoked"
     urls = {r["normalized_url"] for r in out["results"]}
     assert "http://example.com" in urls

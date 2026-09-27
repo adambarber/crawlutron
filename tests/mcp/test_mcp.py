@@ -107,10 +107,12 @@ async def _assert_header_mismatch(
 
 async def _tool_call(client, name: str, arguments: dict) -> dict:
     """Invoke one MCP tool; return its structuredContent on success."""
-    return (await _assert_complete_tool(
-        client,
-        _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
-    ))["structuredContent"]
+    return (
+        await _assert_complete_tool(
+            client,
+            _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META}),
+        )
+    )["structuredContent"]
 
 
 def _search_tool_body(query: str = "x") -> dict:
@@ -137,9 +139,7 @@ class TestRequestMetadataValidation:
     async def test_header_body_protocol_version_mismatch_rejected(self, async_client):
         body = _body("server/discover")
         body["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] = "2025-06-18"
-        await _assert_header_mismatch(
-            async_client, body=body
-        )  # header stays 2026-07-28
+        await _assert_header_mismatch(async_client, body=body)  # header stays 2026-07-28
 
     async def test_missing_meta_rejected(self, async_client):
         # An absent _meta block is InvalidParams, not a header mismatch: the
@@ -161,14 +161,10 @@ class TestRequestMetadataValidation:
         )
 
     async def test_missing_mcp_name_header_on_tools_call_rejected(self, async_client):
-        await _assert_header_mismatch(
-            async_client, body=_search_tool_body(), headers={"Mcp-Name": None}
-        )
+        await _assert_header_mismatch(async_client, body=_search_tool_body(), headers={"Mcp-Name": None})
 
     async def test_mcp_name_header_body_mismatch_rejected(self, async_client):
-        await _assert_header_mismatch(
-            async_client, body=_search_tool_body(), headers={"Mcp-Name": "crawl"}
-        )
+        await _assert_header_mismatch(async_client, body=_search_tool_body(), headers={"Mcp-Name": "crawl"})
 
     async def test_unknown_method_returns_404(self, async_client):
         resp = await _mcp(async_client, _body("resources/list"))
@@ -304,38 +300,39 @@ class TestToolsCall:
         monkeypatch.setattr(f"app.mcp.tools.{handler_name}", refuse)
         if name == "render":
             monkeypatch.setattr("app.mcp.tools.get_browser_pool", lambda: object())
-        body = _body(
-            "tools/call",
-            params={"name": name, "arguments": arguments, "_meta": _META},
-        )
-        resp = await _mcp(async_client, body)
+        resp, payload = await _call_tool(async_client, name, arguments)
 
         assert resp.status_code == 200
-        payload = resp.json()
         assert "error" not in payload
         result = payload["result"]
         assert result["isError"] is True
         assert "host_denied" in result["content"][0]["text"]
 
     async def test_unknown_tool_returns_protocol_error(self, async_client):
-        body = _body(
-            "tools/call",
-            params={"name": "not_a_tool", "arguments": {}, "_meta": _META},
-        )
-        resp = await _mcp(async_client, body)
+        resp, payload = await _call_tool(async_client, "not_a_tool", {})
         assert resp.status_code == 200
-        error = resp.json()["error"]
+        error = payload["error"]
         assert error["code"] == -32602
         assert "Unknown tool" in error["message"]
 
     async def test_non_object_arguments_rejected(self, async_client):
-        body = _body(
-            "tools/call",
-            params={"name": "search", "arguments": "not-a-dict", "_meta": _META},
-        )
-        resp = await _mcp(async_client, body)
+        resp, payload = await _call_tool(async_client, "search", "not-a-dict")
         assert resp.status_code == 200
-        assert resp.json()["error"]["code"] == -32602
+        assert payload["error"]["code"] == -32602
+
+
+async def _call_tool(async_client, name, arguments):
+    """POST a ``tools/call`` for ``name`` and return ``(response, payload)``.
+
+    Every wire-level test here states the same request -- method, the tool name,
+    the arguments, and the required ``_meta`` -- and the ``_meta`` is the part
+    that must never be dropped, since a request without it is rejected before
+    the tool is even named. Written per test it was three copies of the frame
+    and one of them was the copy someone edited.
+    """
+    body = _body("tools/call", params={"name": name, "arguments": arguments, "_meta": _META})
+    resp = await _mcp(async_client, body)
+    return resp, resp.json()
 
 
 class TestInternalErrorContract:

@@ -6,10 +6,7 @@ subsequent navigations) carries the spoofed Host. The render must set it
 for the navigation, then clear it.
 """
 
-from _browser_doubles import ROUTE_ARG_UNSET, FakeRequest, FakeRoute, render_pinned
-from _policy_factories import UNRESTRICTED_HOST_POLICY
-
-import app.crawl.strategies.browser as browser_mod
+from _browser_doubles import ROUTE_ARG_UNSET, render_pinned, run_route_with_pinner
 
 
 async def test_pinned_host_cleared_after_navigation(monkeypatch):
@@ -23,32 +20,21 @@ async def test_pinned_host_cleared_after_navigation(monkeypatch):
 async def test_route_continue_omits_empty_headers(monkeypatch):
     # M1: an explicit headers={} can replace (wipe) the request's headers
     # in Playwright; the kwarg must be omitted when there are no overrides.
-    handler = browser_mod._make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    route = FakeRoute()
-    request = FakeRequest("https://example.com/app.js", "script")
-
-    monkeypatch.setattr(
-        browser_mod,
-        "_build_pinned_request",
-        lambda url, headers, *, policy: (url, {}),  # https: URL kept, no Host override
-    )
-    await handler(route, request)
+    # https URL kept, no Host override -- supplying neither `pinned` nor
+    # `raises` is that shape.
+    route = await run_route_with_pinner(monkeypatch, "https://example.com/app.js", resource_type="script")
     assert route.decision == "continue"
     assert route.continued_headers is ROUTE_ARG_UNSET
 
 
 async def test_route_continue_passes_host_override(monkeypatch):
     # The http pinned-IP hop still carries its Host override.
-    handler = browser_mod._make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    route = FakeRoute()
-    request = FakeRequest("http://example.com/app.js", "script")
-
-    monkeypatch.setattr(
-        browser_mod,
-        "_build_pinned_request",
-        lambda url, headers, *, policy: ("http://1.2.3.4:80/app.js", {"Host": "example.com"}),
+    route = await run_route_with_pinner(
+        monkeypatch,
+        "http://example.com/app.js",
+        pinned=("http://1.2.3.4:80/app.js", {"Host": "example.com"}),
+        resource_type="script",
     )
-    await handler(route, request)
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4:80/app.js"
     assert route.continued_headers == {"Host": "example.com"}

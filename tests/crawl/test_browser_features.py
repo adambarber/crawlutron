@@ -1,19 +1,19 @@
-import pytest
-
-pytestmark = pytest.mark.browser
-
 """Browser feature tests (reuse, action chains, targeted screenshots).
 
-Uses a hand-rolled fake Playwright-compatible page (no real browser, no
-unittest.mock) so the orchestration logic is exercised deterministically.
+Drives the renderer over a fake Playwright-compatible page -- no real browser,
+no ``unittest.mock`` -- so the orchestration logic is exercised deterministically.
+That is also why this file carries no ``browser`` marker: the marker means
+"launches a real headless browser", and every test here runs against a double.
+Marking it excluded six unit tests from the default suite and from the
+pre-commit hook, so a change to the renderer's page surface could break them
+with nothing red.
 """
-
 
 import base64
 
+from _browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
-from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
 
@@ -31,49 +31,30 @@ class FakeElement:
         return b"elementpng"
 
 
-class FakePage:
+class FakePage(ScriptedPage):
+    """A scripted page plus the element/interaction surface these tests drive.
+
+    The navigation, evaluation and content half is :class:`ScriptedPage`; what
+    stays here is the part specific to this suite -- a keyed element store, the
+    interaction calls the renderer records, and the response listener the XHR
+    interception installs.
+    """
+
     def __init__(self):
-        self._url = ""
+        super().__init__()
         self.calls = []
         self.elements = {}
         self.responses = []
         self.extra_http_headers = {}
 
-    def on(self, event, handler):
-        self.calls.append(("on", event))
-
     async def route(self, pattern, handler):
-        # Mirrors the real (async) Playwright page.route coroutine.
-        self.calls.append(("route", pattern))
+        self.route_calls.append((pattern, handler))
 
     async def set_extra_http_headers(self, headers):
         self.extra_http_headers = headers
 
-    async def goto(self, url, wait_until="load", **kwargs):
-        # Mirror the real Playwright/Camoufox goto signature (accepts
-        # extra_http_headers etc.); the production code passes extra_http_headers.
-        if "extra_http_headers" in kwargs:
-            raise TypeError("unexpected keyword argument 'extra_http_headers'")
-        self._url = url
-        self.calls.append(("goto", url))
-
-    @property
-    def url(self):
-        return self._url
-
-    async def evaluate(self, expression):
-        if "readyState" in expression:
-            return "complete"
-        if "document.title" in expression:
-            return "Fake Title"
-        if "innerText" in expression:
-            return "Visible body text"
-        if "scrollTo" in expression:
-            return None
-        return ""
-
-    async def content(self):
-        return "<html><body><h1>Visible body text</h1></body></html>"
+    def on(self, event, handler):
+        self.calls.append(("on", event))
 
     async def click(self, selector):
         self.calls.append(("click", selector))
@@ -90,19 +71,16 @@ class FakePage:
     async def query_selector(self, selector):
         if "missing" in selector:
             return None
-        el = self.elements.setdefault(selector, FakeElement(selector))
-        return el
+        return self.elements.setdefault(selector, FakeElement(selector))
 
     async def screenshot(self, full_page=False):
         self.calls.append(("screenshot", full_page))
         return b"fakepngbytes"
 
-    @property
-    def is_closed(self):
-        return False
-
 
 class FakeBrowser:
+    """Hands out a fresh page per tab and counts the tabs it has opened."""
+
     def __init__(self):
         self.pages = 0
 
@@ -115,27 +93,9 @@ class FakeBrowser:
         return False
 
 
-class FakeBrowserCM:
-    def __init__(self, browser):
-        self.browser = browser
-        self.enters = 0
-
-    async def __aenter__(self):
-        self.enters += 1
-        return self.browser
-
-    async def __aexit__(self, *exc):
-        return False
-
-
 def _renderer():
-    """A renderer over a fresh fake browser, for a test that keeps no handle on it.
-
-    ``sleep=lambda _s: None`` is the renderer's own wait budget, stubbed the way
-    the suite stubs every other sleep: a feature test here is about what the
-    render orchestrates, not how long it waited.
-    """
-    return BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()), sleep=lambda _s: None)
+    """A renderer over a fresh fake browser, for a test that keeps no handle on it."""
+    return scripted_renderer(FakeBrowser())
 
 
 def _reuse_renderer():
@@ -145,8 +105,8 @@ def _reuse_renderer():
     many pages they handed out, so the test has to be holding them.
     """
     browser = FakeBrowser()
-    cm = FakeBrowserCM(browser)
-    return browser, cm, BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
+    cm = BrowserFakeContextManager(browser)
+    return browser, cm, scripted_renderer(browser, cm)
 
 
 async def _render(renderer, path: str = "/"):

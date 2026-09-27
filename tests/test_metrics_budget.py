@@ -45,6 +45,7 @@ import re
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from _jscpd_sweep import COMPOUND_NODES
@@ -89,6 +90,7 @@ _BUDGETS = {
 # is already measuring. ``ast.comprehension`` is counted separately below, as
 # ``conditions``.
 _BRANCH_NODES = COMPOUND_NODES + (ast.ExceptHandler, ast.Assert, ast.BoolOp)
+
 
 @dataclass(frozen=True)
 class Offender:
@@ -254,6 +256,20 @@ def test_metric_collection_is_deterministic() -> None:
         assert offenders(metric) == offenders(metric), f"{metric} collection is not deterministic"
 
 
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """One non-raising ``git`` call rooted at `root`, as decoded text.
+
+    This test shells out three times and every one of them wants the same thing:
+    text out, no raise, cwd pinned. Restated, the third call is the one that
+    stopped checking ``returncode`` and started returning a ``stdout`` of "" that
+    the loop below read as "no budget at this revision" -- a silently weakened
+    history, not a failing one.
+    """
+    return subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, check=False
+    )
+
+
 def test_metric_budgets_have_never_risen() -> None:
     """The budget gate and the tight-budget check can both be satisfied at once by
     RAISING the budget alongside a new offender. That is not hypothetical: the
@@ -296,26 +312,14 @@ def test_metric_budgets_have_never_risen() -> None:
     if not log:
         pytest.skip("no history for this file in this clone")
 
-    shallow = subprocess.run(
-        ["git", "rev-parse", "--is-shallow-repository"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    shallow = _git(root, "rev-parse", "--is-shallow-repository")
     if shallow.stdout.strip() == "true" and len(log) < 5:
         pytest.skip("shallow clone: cannot see the budget's history")
 
     pattern = re.compile(r'^\s{4}"(?P<name>[a-z ]+)":\s*(?P<value>\d+),$')
     history: dict[str, list[tuple[str, int]]] = defaultdict(list)
     for revision in log:
-        source = subprocess.run(
-            ["git", "show", f"{revision}:{tracked}"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        source = _git(root, "show", f"{revision}:{tracked}")
         if source.returncode != 0:
             continue
         for line in source.stdout.splitlines():

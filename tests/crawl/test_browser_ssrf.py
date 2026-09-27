@@ -4,7 +4,14 @@ import urllib.request
 
 import pytest
 from _assertions import block_private_targets
-from _browser_doubles import FakeRequest, FakeRoute, pinned_page_renderer, render_pinned, stub_pinned_request
+from _browser_doubles import (
+    FakeRequest,
+    FakeRoute,
+    pinned_page_renderer,
+    render_bare,
+    render_pinned,
+    stub_pinned_request,
+)
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
@@ -16,7 +23,6 @@ from app.crawl.strategies.browser import (
     _make_ssrf_route_handler,
     _resolve_browser_target,
 )
-from app.models import RenderOptions
 
 # --------------------------------------------------------------------------
 # document.py: SSRF gate on urlopen (F2)
@@ -67,7 +73,9 @@ async def test_resolve_browser_target_pins_ip_and_preserves_host(monkeypatch):
         "_build_pinned_request_async",
         stub_pinned_request(("http://1.2.3.4:80/path", {"Host": "example.com"})),
     )
-    pinned_url, headers = await _resolve_browser_target("http://example.com/path", policy=UNRESTRICTED_HOST_POLICY)
+    pinned_url, headers = await _resolve_browser_target(
+        "http://example.com/path", policy=UNRESTRICTED_HOST_POLICY
+    )
     assert pinned_url == "http://1.2.3.4:80/path"
     assert headers == {"Host": "example.com"}
 
@@ -138,11 +146,7 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
     page.url = "http://127.0.0.1:9/"  # site redirected the browser to loopback
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
-        await renderer._render_with_browser(
-            "http://example.com/",
-            RenderOptions(browser_profile={}),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        await render_bare(renderer)
 
 
 # --------------------------------------------------------------------------
@@ -172,10 +176,6 @@ async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
 
 async def test_render_registers_ssrf_route_guard(monkeypatch):
     page, renderer = pinned_page_renderer(monkeypatch)
-    await renderer._render_with_browser(
-        "http://example.com/",
-        RenderOptions(browser_profile={}),
-        policy=UNRESTRICTED_HOST_POLICY,
-    )
+    await render_bare(renderer)
     # The SSRF route guard must be registered on the page.
     assert any(pattern == "**/*" for pattern, _ in page.route_calls)

@@ -6,6 +6,8 @@ namespace contextvar is set per ``crawl_request`` from
 ``request_profile.cookie_namespace`` so cookies are keyed by tenant.
 """
 
+from _cookie_helpers import cookie_file, read_cookie_file
+
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE, CookieJar
 from app.crawl.strategies.request_profile import cookie_namespace_for
 
@@ -62,28 +64,18 @@ def test_clear_without_namespace_clears_everything():
 def test_save_and_load_roundtrip_uses_legacy_namespace():
     """Persisted cookies live in the shared namespace; per-namespace cookies
     are intentionally not persisted so each caller can manage them itself."""
-    import json
-    import os
-    import tempfile
-
     jar = CookieJar()
     jar.add_cookie_header("http://shared.example/", "sess=abc", namespace="")
     jar.add_cookie_header("http://shared.example/", "sess=other", namespace="tenant_b")
-    target = os.path.join(tempfile.gettempdir(), "ck_ns_roundtrip.json")
-    try:
-        jar.export_to_file(target)
-        with open(target, encoding="utf-8") as f:
-            persisted = json.load(f)
+    with cookie_file(jar, "ck_ns_roundtrip.json") as target:
         # Only the legacy (empty-namespace) entry is persisted.
+        persisted = read_cookie_file(target)
         assert "shared.example" in persisted
         assert persisted["shared.example"] == {"sess": "abc"}
         # Roundtrip preserves the legacy namespace slot.
         loaded = CookieJar.import_from_file(target)
         assert loaded.cookie_header_for("http://shared.example/") == "sess=abc"
         assert loaded.cookie_header_for("http://shared.example/", namespace="tenant_b") == ""
-    finally:
-        if os.path.exists(target):
-            os.unlink(target)
 
 
 def test_cookie_namespace_for_helper_reads_profile():

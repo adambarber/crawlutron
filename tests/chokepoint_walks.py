@@ -554,7 +554,6 @@ def assert_fires_once(detector, fires: dict[str, str], path: pathlib.Path) -> No
     assert_detector(detector, path=path, fires=fires)
 
 
-
 def assert_stays_clean(detector, clean: tuple[str, ...], path: pathlib.Path) -> None:
     """A ``*_bites`` proof's clean half: sanctioned shapes must not fire."""
     assert_detector(detector, path=path, fires={}, clean=clean)
@@ -596,8 +595,10 @@ def call_keyword_arguments(
     matching a value against the wrong axis.
     """
     names = {function_names} if isinstance(function_names, str) else function_names
-    keywords = None if keyword_names is None else (
-        {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
+    keywords = (
+        None
+        if keyword_names is None
+        else ({keyword_names} if isinstance(keyword_names, str) else set(keyword_names))
     )
     for node in calls_to_any(tree, names):
         # One pair per DISTINCT keyword name: Python itself rejects a repeated
@@ -738,3 +739,39 @@ def resolved_expr_name(tree: ast.AST, expr: ast.AST) -> str:
 def resolved_call_name(tree: ast.AST, call: ast.Call) -> str:
     """Return a call's import-resolved dotted name for AST detectors."""
     return resolved_expr_name(tree, call)
+
+
+def real_members(type_name: str) -> frozenset[str]:
+    """The live member set of a taxonomy named by string.
+
+    The one answer to "what is a real member of X", for the detectors that guard
+    a call site against a literal that is not one. It exists because the
+    detectors were taking the set as a keyword: every scan test re-derived it
+    and every bites fixture could hand a detector a different answer to the
+    question the detector exists to ask, which does not fail -- it approves the
+    wrong literals.
+
+    Two spellings, and the split is the load-bearing part rather than a
+    convenience. A ``str``-Enum contributes its values, because a caller writes
+    ``CrawlStrategy.HTTP_DECLARED_CRAWLER`` and the wire carries ``.value``. A
+    ``Literal`` alias goes through ``app.models._literal_members`` rather than
+    ``typing.get_args``, because that one is total over a union -- which is what
+    lets a taxonomy be *defined* as a union of two others instead of restating
+    one of them, and ``get_args`` would hand back the nested aliases instead of
+    their members.
+
+    Raises ``LookupError`` for a name that is not a taxonomy. A guard that
+    silently resolved to the empty set would approve every literal, which is the
+    failure this function exists to make impossible.
+    """
+    from app import api_models, constants, models
+
+    for module in (models, api_models, constants):
+        owner = getattr(module, type_name, None)
+        if owner is not None:
+            break
+    else:
+        raise LookupError(f"{type_name} is not a taxonomy on app.models/app.api_models/app.constants")
+    if hasattr(owner, "__members__"):
+        return frozenset(member.value for member in owner)
+    return models._literal_members(owner)

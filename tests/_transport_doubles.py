@@ -170,7 +170,9 @@ class CffiFetchOutcome:
 
     __slots__ = ("detail", "error", "ok", "status")
 
-    def __init__(self, *, ok: bool, status: int | None = None, error: str | None = None, detail: str = "") -> None:
+    def __init__(
+        self, *, ok: bool, status: int | None = None, error: str | None = None, detail: str = ""
+    ) -> None:
         self.ok = ok
         self.status = status
         self.error = error
@@ -219,6 +221,25 @@ def _outcome_worker(url: str, timeout_seconds: int, max_content_length: int, out
     out_queue.put(_genuine_cffi_outcome(url, timeout_seconds, max_content_length))
 
 
+def join_or_kill(worker, join_timeout: float, what: str) -> None:
+    """Wait ``join_timeout`` for ``worker``; kill it and fail if it is still running.
+
+    The guard every spawned-interpreter test needs, and the part that goes wrong
+    quietly: a bare ``join(timeout)`` returns, the test proceeds, and the wedged
+    child keeps running -- a curl watchdog busy-spinning the GIL is exactly the
+    process that then takes the whole suite down with it. Written per test, the
+    terminate step is the part that gets dropped.
+
+    ``what`` names the work in the failure message, because "a worker hung" in a
+    2000-test run is not enough to find the test.
+    """
+    worker.join(join_timeout)
+    if worker.is_alive():
+        worker.terminate()
+        worker.join()
+        pytest.fail(f"{what} was still running {join_timeout}s after the join")
+
+
 def real_cffi_fetch_outcome(
     url: str,
     *,
@@ -243,11 +264,7 @@ def real_cffi_fetch_outcome(
         target=_outcome_worker, args=(url, timeout_seconds, max_content_length, out_queue)
     )
     worker.start()
-    worker.join(join_timeout)
-    if worker.is_alive():
-        worker.terminate()
-        worker.join()
-        pytest.fail(f"the genuine cffi fetcher was still running {join_timeout}s after the join: {url}")
+    join_or_kill(worker, join_timeout, f"the genuine cffi fetcher on {url}")
     if worker.exitcode != 0:
         pytest.fail(f"the cffi worker crashed: exitcode={worker.exitcode} for {url}")
     if out_queue.empty():

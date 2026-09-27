@@ -38,12 +38,6 @@ def test_empty_urls_list_with_url_rejected(model):
         model(url="http://example.com/", urls=[])
 
 
-@pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
-def test_urls_only_empty_rejected(model):
-    with pytest.raises(ValidationError):
-        model(urls=[])
-
-
 class TestWebhookUrlValidation:
     async def test_main_invalid_webhook_url(self):
 

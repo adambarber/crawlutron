@@ -244,7 +244,9 @@ class ScriptedExecute:
     ):
         if (scripts is None) == (results is None):
             raise AssertionError("ScriptedExecute takes exactly one of scripts= or results=")
-        self._scripts = dict(scripts) if scripts is not None else {r["original_url"]: [r] for r in results or []}
+        self._scripts = (
+            dict(scripts) if scripts is not None else {r["original_url"]: [r] for r in results or []}
+        )
         self._default = "rendered" if scripts is not None else "failed"
         self._hang = hang
         self.attempts: dict[str, int] = {}
@@ -473,18 +475,37 @@ async def run_scripted_api_job(
     return await run_api_job(client, job_store, root_url, ScriptedExecute(results=results), policy)
 
 
-async def run_seeded_job(job, job_store, execute):
-    """Drive an already-persisted job in-line to terminal; return the row."""
+def drive_job(job_id, job_store, settings=None, shutdown_event=None):
+    """Run ``_run_job`` for one already-persisted job; return the task.
+
+    ``_run_job``'s call shape -- id, store, settings, shutdown event -- is what
+    every runner-lifecycle test ends on, and ``CrawlerSettings.from_mapping({})``
+    was spelled out at each site. A settings default that changes, or a fourth
+    argument, is then a four-edit change, and one of the four is this harness:
+    the one that silently stops exercising the same call the tests do.
+
+    Returned as a task rather than awaited, because the tests that need to cancel
+    or wait on a *running* job have to hold the task to do it.
+    """
     from app.api import job_runner
     from app.settings import CrawlerSettings
 
-    job_runner.install_execute_crawl(execute)
-    await job_runner._run_job(
-        job.job_id,
-        job_store,
-        CrawlerSettings.from_mapping({}),
-        asyncio.Event(),
+    return asyncio.ensure_future(
+        job_runner._run_job(
+            job_id,
+            job_store,
+            CrawlerSettings.from_mapping({}) if settings is None else settings,
+            asyncio.Event() if shutdown_event is None else shutdown_event,
+        )
     )
+
+
+async def run_seeded_job(job, job_store, execute):
+    """Drive an already-persisted job in-line to terminal; return the row."""
+    from app.api import job_runner
+
+    job_runner.install_execute_crawl(execute)
+    await drive_job(job.job_id, job_store)
     return await run_to_terminal(job_store, job.job_id)
 
 
@@ -644,3 +665,19 @@ async def post_render_with_pool(client, pool, url: str):
         return await client.post("/v1/render", json={"url": url})
     finally:
         set_browser_pool(old)
+
+
+def write_row_policy(job_store, job_id: str, policy_json: str) -> None:
+    """Put a policy on a job's row as raw text, bypassing the validating write path.
+
+    A row the API would refuse -- a JSON array where a mapping belongs, a limits
+    block that is a string -- can only be produced by writing the table directly,
+    which is what the ``load``-path sanitizer exists to survive. The UPDATE and
+    its commit live here so a test cannot write the row and forget to commit it,
+    which reads as a passing sanitizer test on a row that never changed.
+    """
+    with raw_job_row(job_store) as connection:
+        connection.execute(
+            "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
+            (policy_json, job_id),
+        )

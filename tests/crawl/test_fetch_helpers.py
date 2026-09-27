@@ -20,6 +20,16 @@ class _FakeResp:
         self.body = body
 
 
+def _gzip_bomb() -> bytes:
+    """A gzipped body that decompresses to more than the discovery cap allows.
+
+    One construction because "over the cap" is a fact about the decoder, not about
+    either caller -- and a bomb sized against a constant that later moved was a
+    bomb that stopped testing the cap without anything going red.
+    """
+    return gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
+
+
 def _fetcher(resp):
     """A fetcher that always returns ``resp`` and records its call arguments."""
 
@@ -88,12 +98,11 @@ class TestFetchDecodeDiscovery:
     async def test_decompression_cap_returns_headers_without_body(self):
         # A gzip bomb past the cap: no text, but status + headers survive so the
         # sitemap path keeps its validators instead of losing them to the bomb.
-        bomb = gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
         fetcher = _fetcher(
             _FakeResp(
                 200,
                 {"content-type": "text/plain", "content-encoding": "gzip", "etag": '"e"'},
-                bomb,
+                _gzip_bomb(),
             )
         )
         text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
@@ -123,8 +132,7 @@ class TestFetchAndDecodeContract:
         assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, None)
 
     async def test_decompression_cap_returns_none_with_status(self):
-        bomb = gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
-        fetcher = _fetcher(_FakeResp(200, {"content-encoding": "gzip"}, bomb))
+        fetcher = _fetcher(_FakeResp(200, {"content-encoding": "gzip"}, _gzip_bomb()))
         assert await _fetch_and_decode(fetcher, "http://e.com/robots.txt", {}, 5) == (None, 200)
 
 

@@ -83,7 +83,3 @@ class CoordinationCounters(CoordinationStore):
         with self._lock:
             self._conn.execute("DELETE FROM coordination_counters")
             self._conn.commit()
-
-    def close(self) -> None:
-        with self._lock:
-            self._conn.close()

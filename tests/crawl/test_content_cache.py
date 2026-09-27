@@ -83,9 +83,7 @@ def cached_strategy_runner(url, policy, fetcher, cache=None, content_cache=None)
     """
 
     async def run():
-        return await run_http_strategy(
-            url=url, policy=policy, http_fetcher=fetcher, cache=cache, content_cache=content_cache
-        )
+        return await run_http_strategy(url, policy, fetcher, cache=cache, content_cache=content_cache)
 
     return run
 
@@ -834,16 +832,20 @@ class TestContentCacheEntryLifecycle:
         clock[0] = 1002.0
         assert cache.get("key") is None
 
-    def test_content_cache_prune(self, tmp_path):
+    @pytest.mark.parametrize("drop", ["prune", "clear"])
+    def test_content_cache_drops_entries_and_reports_the_count(self, tmp_path, drop):
+        """Whatever retired them, the entries are gone and the count said so.
+
+        ``prune`` retires on TTL and ``clear`` retires unconditionally; the
+        property under test is identical, so it is one test over the two
+        operations. Advancing the clock for both costs nothing and keeps the
+        fixture to one shape -- spelled per operation it was two copies of the
+        same four assertions, which is how the ``clear`` copy ended up not
+        checking that the count matched the entries that disappeared.
+        """
         cache, clock = make_seeded_cache(tmp_path, "key1", "key2", default_ttl=1)
         clock[0] = 1002.0
-        assert cache.prune() == 2
-        assert cache.get("key1") is None
-        assert cache.get("key2") is None
-
-    def test_content_cache_clear(self, tmp_path):
-        cache, _ = make_seeded_cache(tmp_path, "key1", "key2")
-        assert cache.clear() == 2
+        assert getattr(cache, drop)() == 2
         assert cache.get("key1") is None
         assert cache.get("key2") is None
 

@@ -11,7 +11,7 @@ from _fetcher_factories import (
     routed_fetcher,
     scripted_fetcher,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
@@ -327,16 +327,7 @@ class TestSeedingIsOffLoop:
         fresh_url = "http://seed-batch.test/fresh"
         payload = {
             "url": _CRAWL_URL,
-            "policy": {
-                "strategies": ["HTTP_DECLARED_CRAWLER"],
-                "discovery": {"sitemaps": True},
-                "limits": {
-                    "timeout_seconds": 10,
-                    "max_retries": 0,
-                    "max_discovered_links": 10,
-                    "max_depth": 1,
-                },
-            },
+            "policy": crawl_policy(discovery={"sitemaps": True}, limits={"max_depth": 1}),
         }
 
         from app.crawl.payload_helpers import _payload_policy
@@ -370,27 +361,42 @@ class TestSeedingIsOffLoop:
         assert fresh_url not in fetched
 
 
-def test_build_site_map_aggregates_and_dedupes():
-    crawl_response = {
+def _crawl_response(original_url, links=(), *, sitemaps=(), feeds=()):
+    """The one result shape ``build_site_map`` reads, from the pieces a test varies.
+
+    Every site-map test is about what the aggregation *does* with the URLs -- dedupe
+    them, resolve them against the origin, keep the sitemaps and feeds separate --
+    and none is about the envelope around them. Restating the envelope per test
+    meant the two URLs each test listed were easy to change without the assertion
+    changing with them, which is how a site-map test ends up passing on a link it
+    no longer declares.
+    """
+    return {
         "results": [
             {
-                "original_url": "http://x.example/",
-                "final_url": "http://x.example/",
+                "original_url": original_url,
+                "final_url": original_url,
                 "diagnostics": {
-                    "robots": {"sitemaps": ["http://x.example/sitemap.xml", "http://x.example/sitemap2.xml"]},
-                    "discovery": {
-                        "sitemap_urls": ["http://x.example/sitemap.xml"],
-                        "feeds": ["http://x.example/feed.xml"],
-                    },
+                    "robots": {"sitemaps": list(sitemaps)},
+                    "discovery": {"sitemap_urls": list(sitemaps), "feeds": list(feeds)},
                 },
-                "discovered_links": [
-                    {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
-                    {"url": "http://x.example/b", "normalized_url": "http://x.example/b"},
-                    {"url": "http://x.example/a", "normalized_url": "http://x.example/a"},
-                ],
+                "discovered_links": [{"url": link, "normalized_url": link} for link in links],
             }
         ]
     }
+
+
+def test_build_site_map_aggregates_and_dedupes():
+    crawl_response = _crawl_response(
+        "http://x.example/",
+        links=[
+            "http://x.example/a",
+            "http://x.example/b",
+            "http://x.example/a",  # the duplicate this test exists to collapse
+        ],
+        sitemaps=["http://x.example/sitemap.xml", "http://x.example/sitemap2.xml"],
+        feeds=["http://x.example/feed.xml"],
+    )
     m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["url"] == "http://x.example/"
     assert m["links"] == ["http://x.example/a", "http://x.example/b"]
@@ -434,19 +440,10 @@ def test_build_site_map_resolves_relative_paths():
     # L6: origin-relative paths must resolve against the root instead of
     # leaking verbatim -- the SiteMapResponse contract promises normalized
     # public URLs.
-    crawl_response = {
-        "results": [
-            {
-                "original_url": "http://x.example/dir/",
-                "final_url": "http://x.example/dir/",
-                "diagnostics": {},
-                "discovered_links": [
-                    {"url": "/page1", "normalized_url": "/page1"},
-                    {"url": "http://x.example/abs", "normalized_url": "http://x.example/abs"},
-                ],
-            }
-        ]
-    }
+    crawl_response = _crawl_response(
+        "http://x.example/dir/",
+        links=["/page1", "http://x.example/abs"],
+    )
     m = build_site_map(crawl_response, host_policy=UNRESTRICTED_HOST_POLICY)
     assert m["links"] == ["http://x.example/abs", "http://x.example/page1"]
     assert all(not u.startswith("/") for u in m["all_urls"])

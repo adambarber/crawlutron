@@ -12,6 +12,7 @@ import threading
 from contextlib import contextmanager
 
 from _fetcher_factories import _spawn_fetch
+from helpers.server import SilentHandler
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
@@ -22,24 +23,22 @@ def _make_server():
     bomb_compressed = gzip.compress(b"A" * 5_000_000)
     ok_compressed = gzip.compress(b"hello world")
 
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def _send_gzip(self, body: bytes) -> None:
-            """One gzipped response. The bomb and the ordinary body differ only
-            in what they carry -- a per-path copy of these five lines is a place
-            for the two to stop being the same response."""
-            self.send_response(200)
-            self.send_header("Content-Encoding", "gzip")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
+    class Handler(SilentHandler):
         def do_GET(self):
-            if self.path == "/bomb":
-                self._send_gzip(bomb_compressed)
-            elif self.path == "/ok":
-                self._send_gzip(ok_compressed)
+            if self.path in ("/bomb", "/ok"):
+                # The bomb and the ordinary body differ only in what they carry,
+                # so they go out through the one response shape: a per-path copy
+                # of these headers is a place for the two to stop being the same
+                # response, and the bomb's size would no longer be the only
+                # difference between them.
+                self.send_body(
+                    200,
+                    bomb_compressed if self.path == "/bomb" else ok_compressed,
+                    **{"Content-Encoding": "gzip", "Content-Type": "text/plain"},
+                )
             elif self.path == "/chunked_huge":
-                # No Content-Length -> chunked; stream a large raw body.
+                # No Content-Length -> chunked; stream a large raw body. This one
+                # cannot use send_body, which sets a content-length.
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain")
                 self.end_headers()
@@ -52,9 +51,6 @@ def _make_server():
             else:
                 self.send_response(404)
                 self.end_headers()
-
-        def log_message(self, *args):
-            pass
 
     return http.server.HTTPServer(("127.0.0.1", 0), Handler)
 

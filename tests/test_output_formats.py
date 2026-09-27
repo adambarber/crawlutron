@@ -10,6 +10,12 @@ from app.output_formats import (
     serialize_results,
 )
 
+# The two result shapes the serialization table is built from. Module level so
+# the table reads as formats-over-bodies rather than as four bodies spelling
+# the same result four times.
+_TEXT_RESULT = [{"url": "http://x/", "text": "content"}]
+_MARKDOWN_RESULT = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
+
 SAMPLE = [
     {
         "original_url": "http://a.example/",
@@ -239,28 +245,17 @@ class TestOutputFormatsEdges:
         result = _default(obj)
         assert result == {"attr": "value"}
 
+    # One body per shape, named once. The line-oriented formats differ only in
+    # the name the caller passes and the media type that comes back, so the
+    # table is a list of names over two bodies -- spelling the body per row made
+    # a format rename four edits and a body change four more.
     @pytest.mark.parametrize(
         ("fmt", "results", "needle", "media_type"),
         [
-            ("json", [{"url": "http://x/", "text": "content"}], "http://x/", "application/json"),
-            (
-                "jsonl",
-                [{"url": "http://x/", "text": "content"}],
-                "http://x/",
-                "application/x-ndjson",
-            ),
-            (
-                "ndjson",
-                [{"url": "http://x/", "text": "content"}],
-                "http://x/",
-                "application/x-ndjson",
-            ),
-            (
-                "markdown",
-                [{"url": "http://x/", "markdown": "# Title\n\nContent"}],
-                "# Title",
-                "text/markdown; charset=utf-8",
-            ),
+            ("json", _TEXT_RESULT, "http://x/", "application/json"),
+            ("jsonl", _TEXT_RESULT, "http://x/", "application/x-ndjson"),
+            ("ndjson", _TEXT_RESULT, "http://x/", "application/x-ndjson"),
+            ("markdown", _MARKDOWN_RESULT, "# Title", "text/markdown; charset=utf-8"),
         ],
     )
     def test_serialize_results_carries_the_url_and_the_media_type(self, fmt, results, needle, media_type):

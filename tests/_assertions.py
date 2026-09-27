@@ -74,9 +74,44 @@ def assert_result_success(result, classification: str = "rendered") -> None:
     assert result.classification == classification
 
 
+def _field(result, name: str):
+    """Read ``name`` off a wire dict or a result object.
+
+    The two spellings of the same assertion is the whole reason this exists: the
+    endpoint tests read the serialized dict and the strategy tests read the
+    result object, and the dict half had no shared assertion to call, so it
+    restated two lines per test.
+    """
+    return result[name] if isinstance(result, dict) else getattr(result, name)
+
+
 def assert_result_failed(result, classification: str) -> None:
-    assert result.status == "failed"
-    assert result.classification == classification
+    """A failed result whose status agrees with the classification table.
+
+    ``status`` is read from the production table rather than restated as the
+    literal ``"failed"``, so this cannot drift from what a classification
+    actually means: a classification added to the table as skipped would fail
+    here instead of being asserted into "failed" by a test that copied the
+    string.
+    """
+    from app.constants import status_for_classification
+
+    assert _field(result, "classification") == classification
+    assert _field(result, "status") == status_for_classification(classification)
+
+
+def assert_pool_unavailable(resp) -> None:
+    """A 503 carrying the browser-pool-unavailable envelope.
+
+    Two endpoint tests assert this shape and for two different reasons -- one
+    that the guard fires before URL validation, one that an exhausted pool is
+    reported rather than raised -- and they had the same three lines written
+    out. Restated, a change to the envelope's code left one of them asserting a
+    shape the server no longer returns, and that test still passed because the
+    other half of the pair was the one being read.
+    """
+    assert resp.status_code == 503, resp.status_code
+    assert resp.json()["code"] == "browser_pool_unavailable", resp.json()
 
 
 async def poll_until(predicate, *, timeout: float = 10.0, interval: float = 0.1, message: str | None = None):
@@ -115,6 +150,20 @@ def install_to_thread_spy(monkeypatch):
 
     monkeypatch.setattr(asyncio, "to_thread", spy)
     return seen
+
+
+def read_main_source() -> str:
+    """The source of ``app.main``, imported inside the call.
+
+    Two lifecycle suites need to assert on how main.py is written rather than on
+    what it returns, and the import has to stay inside the function: ``app.main``
+    is heavy, and the middleware suite has no other use for it. It was written
+    out in both, so a change to what the read should see (a decorator, a
+    re-export) was two edits and one of them would have been missed.
+    """
+    from app import main as main_mod
+
+    return inspect.getsource(main_mod)
 
 
 def extract_function_body(source: str, name: str) -> str:

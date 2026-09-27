@@ -4,14 +4,8 @@ import asyncio
 import inspect
 
 import pytest
+from _assertions import assert_pool_unavailable, read_main_source
 from _job_harnesses import post_render_with_pool
-
-
-def _read_main_source() -> str:
-
-    from app import main as main_mod
-
-    return inspect.getsource(main_mod)
 
 
 class TestMultiWorkerInvariants:
@@ -39,7 +33,7 @@ class TestMultiWorkerInvariants:
 
     def test_lifespan_does_not_refuse_more_than_one_worker(self, monkeypatch):
         monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
-        source = _read_main_source()
+        source = read_main_source()
         assert "assert_single_process_deployment" not in source
         assert "is not supported" not in source
 
@@ -83,7 +77,7 @@ class TestMultiWorkerInvariants:
         from app.main import DATABASE_PATH
 
         assert DATABASE_PATH.endswith("/crawler.db")
-        source = _read_main_source()
+        source = read_main_source()
         for ctor in ("JobStore(", "CrawlResultStore(", "CoordinationCounters(", "SharedCookieStore("):
             assert ctor in source, ctor
             line = next(ln for ln in source.splitlines() if ctor in ln)
@@ -103,9 +97,7 @@ class TestAppLifecycleEdges:
         # ASGI harness runs no lifespan, so the pool is None; M13's guard
         # answers 503 browser_pool_unavailable before URL validation.
         # Own the premise explicitly: ordering must never decide it.
-        resp = await post_render_with_pool(async_client, None, "invalid")
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "browser_pool_unavailable"
+        assert_pool_unavailable(await post_render_with_pool(async_client, None, "invalid"))
 
     async def test_render_endpoint_success(self, async_client):
         # Missing 'url' triggers the standardized 422 validation envelope
@@ -148,7 +140,7 @@ class TestAppLifecycleEdges:
 class TestLifespanContextManager:
     def test_lifespan_is_direct_contextmanager(self):
         """The FastAPI lifespan must be a direct contextmanager, not ``_lifespan(None)``."""
-        src = _read_main_source()
+        src = read_main_source()
         # The old pattern was: lifespan=_lifespan(None) with def _lifespan(app: FastAPI)
         assert "lifespan=_lifespan(None)" not in src
         # The new pattern: a directly-decorated async context manager.

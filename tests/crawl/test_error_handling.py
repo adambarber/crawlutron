@@ -12,7 +12,7 @@ import httpx
 import pytest
 from _browser_doubles import _fake_browser
 from _chain_policies import chain_policy
-from _fetcher_factories import failing_fetcher, raise_fetcher
+from _fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 
 from app.constants import (
     BROWSER_HEADED_WARMED,
@@ -22,7 +22,6 @@ from app.constants import (
 from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models import EngineCrawlResult
-from app.validation import HostPolicy
 
 # ---------------------------------------------------------------------------
 # Classification: the taxonomy is the single source of "what went wrong"
@@ -319,7 +318,6 @@ class TestStrategyChainGuardsRaisingStrategies:
     """
 
     async def test_a_raising_step_is_enveloped_and_the_ladder_continues(self):
-        from app.crawl.strategy_chain import execute_crawl_chain
 
         attempts: list[str] = []
 
@@ -330,14 +328,10 @@ class TestStrategyChainGuardsRaisingStrategies:
                     raise RuntimeError("camoufox binding vanished mid-render")
                 return _rendered(job)
 
-        result = await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            policy=chain_policy(BROWSER_HEADLESS, BROWSER_HEADED_WARMED),
-            http_fetcher=_unreachable_fetcher,
-            cffi_fetcher=_unreachable_fetcher,
+        result = await run_chain(
+            fetcher=_unreachable_fetcher,
             browser_worker=_FlakyWorker(),
-            host_policy=HostPolicy.unrestricted(),
+            policy=chain_policy(BROWSER_HEADLESS, BROWSER_HEADED_WARMED),
         )
 
         assert len(attempts) == 2, "the ladder must continue past a raising step"
@@ -351,19 +345,14 @@ class TestStrategyChainGuardsRaisingStrategies:
         ]
 
     async def test_a_raising_final_step_is_a_classified_terminal_result(self):
-        from app.crawl.strategy_chain import execute_crawl_chain
 
         async def raising_worker(job):
             raise RuntimeError("internal-host.local /etc/passwd")
 
-        result = await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            policy=chain_policy(BROWSER_HEADLESS),
-            http_fetcher=_unreachable_fetcher,
-            cffi_fetcher=_unreachable_fetcher,
+        result = await run_chain(
+            fetcher=_unreachable_fetcher,
             browser_worker=raising_worker,
-            host_policy=HostPolicy.unrestricted(),
+            policy=chain_policy(BROWSER_HEADLESS),
         )
 
         assert result.status == "failed"
@@ -376,16 +365,9 @@ class TestStrategyChainGuardsRaisingStrategies:
     async def test_the_guard_does_not_re_wrap_the_http_strategy_sink(self):
         """The HTTP strategy already envelopes its own raise; the chain guard
         must leave that result exactly as the sink built it."""
-        from app.crawl.strategy_chain import execute_crawl_chain
-
-        result = await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
+        result = await run_chain(
+            fetcher=raise_fetcher,
             policy=chain_policy(HTTP_DECLARED_CRAWLER),
-            http_fetcher=raise_fetcher,
-            cffi_fetcher=_unreachable_fetcher,
-            browser_worker=None,
-            host_policy=HostPolicy.unrestricted(),
         )
 
         assert result.status == "failed"

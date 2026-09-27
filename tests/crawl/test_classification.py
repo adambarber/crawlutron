@@ -4,6 +4,7 @@ import ast
 import inspect
 
 import pytest
+from _result_builders import skipped_result
 from chokepoint_walks import app_trees, nodes_of
 
 from app import constants as app_constants
@@ -174,10 +175,16 @@ def _spelled_classification_members(value: ast.AST) -> set[str]:
 
 
 def _string_literals(value: ast.AST) -> list[str]:
-    return [node.value for node in nodes_of(value) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+    return [
+        node.value
+        for node in nodes_of(value)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
 
 
-def _reaches_the_taxonomy(name: str, declarations: dict[str, ast.AST], seen: frozenset[str] = frozenset()) -> bool:
+def _reaches_the_taxonomy(
+    name: str, declarations: dict[str, ast.AST], seen: frozenset[str] = frozenset()
+) -> bool:
     """Whether a grouping names enum members directly or via another grouping.
 
     The transitive half matters because a derived grouping legitimately contains
@@ -219,7 +226,9 @@ def test_groupings_are_derived_from_the_enum_not_relisted():
         literals = _string_literals(value)
         assert not literals, f"{name} embeds string literals: {literals}"
         unknown = [
-            attr for attr in sorted(_spelled_classification_members(value)) if attr not in CrawlClassification.__members__
+            attr
+            for attr in sorted(_spelled_classification_members(value))
+            if attr not in CrawlClassification.__members__
         ]
         assert not unknown, f"{name} references non-members: {unknown}"
         assert _reaches_the_taxonomy(name, declarations), (
@@ -539,16 +548,13 @@ class TestStatusAgreesWithClassification:
 
     def test_robots_disallowed_builder_status_matches_the_table(self):
         from app.constants import status_for_classification
-        from app.crawl.result_helpers import _skipped_engine_result
 
-        result = _skipped_engine_result(
-    TerminalResult(
-                original_url="http://example.com/",
-                normalized_url="http://example.com/",
-                strategy="HTTP_DECLARED_CRAWLER",
-                classification="robots_disallowed",
-                error="robots_txt_disallowed",
-))
+        result = skipped_result(
+            "http://example.com/",
+            "robots_disallowed",
+            strategy="HTTP_DECLARED_CRAWLER",
+            error="robots_txt_disallowed",
+        )
         assert result.status == status_for_classification("robots_disallowed") == "skipped"
 
     def test_browser_retry_exhausted_status_matches_the_table(self):
@@ -583,7 +589,7 @@ class TestStatusAgreesWithClassification:
 
         with pytest.raises(ValueError, match="disagrees with the taxonomy status"):
             _failed_engine_result(
-    TerminalResult(
+                TerminalResult(
                     original_url="http://example.com/",
                     normalized_url="http://example.com/",
                     strategy=None,
@@ -595,7 +601,8 @@ class TestStatusAgreesWithClassification:
                     # non-member before the agreement guard is reached); the
                     # disagreement under test is status-vs-classification.
                     error="robots_disallowed",
-))
+                )
+            )
 
 
 def test_capabilities_advertises_exactly_the_taxonomy():

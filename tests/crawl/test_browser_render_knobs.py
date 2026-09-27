@@ -7,18 +7,10 @@ defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 
 import pytest
 from _assertions import set_optional_env
+from _browser_doubles import ScriptedPage
 from _policy_factories import BOOL_ENV_CASES
 
 from app.crawl.strategies.browser import BrowserRenderer
-
-
-class _FakePage:
-    def __init__(self):
-        self.evaluates = 0
-
-    async def evaluate(self, script):
-        self.evaluates += 1
-        return None
 
 
 def _settings(**overrides):
@@ -41,9 +33,9 @@ async def test_lazy_scroll_follows_settings_or_profile(profile, expected_evaluat
         sleep=lambda seconds: sleeps.append(seconds),
         settings=_settings(browser_lazy_scroll_steps=1, browser_lazy_scroll_delay_seconds=0.25),
     )
-    page = _FakePage()
+    page = ScriptedPage(answers={})
     await renderer._lazy_load_scroll(page, profile)
-    assert page.evaluates == expected_evaluates
+    assert len(page.evaluates) == expected_evaluates
     assert sleeps == expected_sleeps
 
 
@@ -52,9 +44,9 @@ async def test_lazy_scroll_zero_steps_skips_work():
         sleep=lambda seconds: (_ for _ in ()).throw(AssertionError("must not sleep")),
         settings=_settings(browser_lazy_scroll_steps=0),
     )
-    page = _FakePage()
+    page = ScriptedPage(answers={})
     await renderer._lazy_load_scroll(page)
-    assert page.evaluates == 0
+    assert page.evaluates == []
 
 
 def test_harvest_timeout_resolution_order():

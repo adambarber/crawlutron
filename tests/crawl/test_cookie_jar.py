@@ -11,6 +11,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
+from _cookie_helpers import cookie_file, read_cookie_file
 from _thread_fanout import run_thread_fanout
 
 from app.crawl.strategies.cookie_jar import CookieJar
@@ -52,20 +53,13 @@ def test_save_to_file_is_atomic_on_failure():
 def test_save_to_file_persists_and_no_temp_leftovers():
     jar = CookieJar()
     jar.add_cookie_header("http://x.example/p", "sess=abc; Path=/")
-    target = os.path.join(tempfile.gettempdir(), "ck_persist_test.json")
-    if os.path.exists(target):
-        os.unlink(target)
-    try:
-        jar.export_to_file(target)
-        with open(target, encoding="utf-8") as f:
-            data = json.load(f)
-        assert data == {"x.example": {"sess": "abc"}}
-        # No leftover .tmp files in the directory.
-        leftovers = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith(".cookiejar.")]
-        assert not leftovers
-    finally:
-        if os.path.exists(target):
-            os.unlink(target)
+    with cookie_file(jar, "ck_persist_test.json") as target:
+        assert read_cookie_file(target) == {"x.example": {"sess": "abc"}}
+    # No leftover .tmp files in the directory. Checked after the context exits
+    # because the export's temp file is written beside the target, and the
+    # teardown that removes the target is the last thing that could strand one.
+    leftovers = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith(".cookiejar.")]
+    assert not leftovers
 
 
 def test_concurrent_cookie_writes_do_not_raise():
@@ -81,31 +75,46 @@ def test_concurrent_cookie_writes_do_not_raise():
     assert not errors, errors
 
 
+def _cookie_jar_max_hosts() -> int:
+    """The jar's LRU cap, read from the module that owns it."""
+    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
+
+    return _COOKIE_JAR_MAX_HOSTS
+
+
+def _jar_with_hosts(count: int):
+    """A jar holding ``host0..host{count - 1}``, each with a distinct cookie.
+
+    The LRU tests are about *which* host is evicted, so the population has to be
+    named and identical across them -- the loop stated per test is how two
+    eviction tests end up filling different numbers of slots and passing for the
+    wrong reason.
+    """
+    jar = CookieJar()
+    for i in range(count):
+        jar.add_cookie_header(f"http://host{i}.example/", f"k=v{i}; Path=/")
+    return jar
+
+
 def test_cookie_jar_evicts_oldest_host_past_cap():
     """The jar is module-global and long-lived: distinct (namespace, host)
     slots are LRU-bounded so every crawled host cannot accumulate forever."""
-    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
-
-    jar = CookieJar()
-    for i in range(_COOKIE_JAR_MAX_HOSTS + 5):
-        jar.add_cookie_header(f"http://host{i}.example/", f"k=v{i}; Path=/")
-    assert len(jar._cookies) == _COOKIE_JAR_MAX_HOSTS
-    newest = _COOKIE_JAR_MAX_HOSTS + 4
+    cap = _cookie_jar_max_hosts()
+    jar = _jar_with_hosts(cap + 5)
+    assert len(jar._cookies) == cap
+    newest = cap + 4
     assert jar.cookie_header_for(f"http://host{newest}.example/") == f"k=v{newest}"
 
 
 def test_cookie_jar_read_refreshes_host_recency():
     """Reading a host's cookies marks it recently used: a read host survives
     the next eviction instead of the oldest-unread slot."""
-    from app.crawl.strategies.cookie_jar import _COOKIE_JAR_MAX_HOSTS
-
-    jar = CookieJar()
-    for i in range(_COOKIE_JAR_MAX_HOSTS):
-        jar.add_cookie_header(f"http://host{i}.example/", f"k=v{i}; Path=/")
+    cap = _cookie_jar_max_hosts()
+    jar = _jar_with_hosts(cap)
     assert jar.cookie_header_for("http://host0.example/") == "k=v0"
     jar.add_cookie_header("http://fresh.example/", "k=fresh; Path=/")
     assert jar.cookie_header_for("http://host0.example/") == "k=v0"
-    assert len(jar._cookies) == _COOKIE_JAR_MAX_HOSTS
+    assert len(jar._cookies) == cap
 
 
 class TestCookieJarHeaderHandling:

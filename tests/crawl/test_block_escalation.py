@@ -4,29 +4,15 @@ successful result; the engine must try the next strategy in the chain
 
 import pytest
 from _assertions import assert_result_success
-from _fetcher_factories import scripted_fetcher, sequenced_fetcher
+from _fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
 
 from app.constants import (
     HTTP_CFFI_IMPERSONATE,
     HTTP_DECLARED_CRAWLER,
 )
-from app.crawl.strategy_chain import execute_crawl_chain
-from app.validation import HostPolicy
 
 
 class TestBlockAutoEscalation:
-    async def _run_chain(self, strategies, fetcher, base_policy, **kwargs):
-        return await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            policy=dict(base_policy, strategies=list(strategies)),
-            http_fetcher=fetcher,
-            cffi_fetcher=fetcher,
-            browser_worker=None,
-            host_policy=HostPolicy.unrestricted(),
-            **kwargs,
-        )
-
     @pytest.mark.parametrize(
         ("challenge_body", "real_body", "blocked_classification"),
         [
@@ -67,7 +53,10 @@ class TestBlockAutoEscalation:
             ]
         )
 
-        result = await self._run_chain([HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE], fetcher, base_policy)
+        result = await run_chain(
+            fetcher=fetcher,
+            policy=dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]),
+        )
         assert_result_success(result, classification="rendered")
         assert result.classification != blocked_classification
         assert result.selected_strategy == HTTP_CFFI_IMPERSONATE
@@ -81,7 +70,9 @@ class TestBlockAutoEscalation:
             body=b"<html><body>Access denied - please sign in to continue</body></html>"
         )
 
-        result = await self._run_chain([HTTP_DECLARED_CRAWLER], fetcher, base_policy)
+        result = await run_chain(
+            fetcher=fetcher, policy=dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER])
+        )
         # With no further strategy to escalate to, the blocked result is returned.
         assert result.status == "blocked"
         assert result.classification == "login_required"

@@ -3,7 +3,8 @@
 from collections import deque
 
 import pytest
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _assertions import assert_result_failed
+from _policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
@@ -24,7 +25,6 @@ class ExhaustedPool:
 
     def release(self, renderer):
         pass
-
 
 
 @pytest.mark.asyncio
@@ -121,22 +121,12 @@ class TestTransientRequeue:
 
         payload = {
             "url": f"{base_url}/",
-            "policy": {
-                "strategies": [BROWSER_HEADLESS],
-                # max_depth > 0 selects the recursive dispatcher, which owns the
-                # pool-exhaustion frontier re-queue.
-                "limits": {
-                    "timeout_seconds": 10,
-                    "max_retries": 0,
-                    "max_discovered_links": 10,
-                    "max_depth": 1,
-                },
-            },
+            # max_depth > 0 selects the recursive dispatcher, which owns the
+            # pool-exhaustion frontier re-queue.
+            "policy": crawl_policy([BROWSER_HEADLESS], limits={"max_depth": 1}),
         }
         response = await run_crawl_async(payload, browser_worker=browser_worker)
-        result = response["results"][0]
-        assert result["status"] == "failed"
-        assert result["classification"] == "browser_pool_exhausted"
+        assert_result_failed(response["results"][0], "browser_pool_exhausted")
         # One initial attempt plus the cap of frontier re-queues: the URL was
         # retried at least once rather than recorded as a permanent failure.
         assert len(invocations) == 1 + MAX_TRANSIENT_REQUEUES, invocations

@@ -59,7 +59,7 @@ def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
 # PREAMBLE when the fragment is only imports, docstrings, comments, or bare
 # constants. Only LOGIC is worth a chokepoint, and only LOGIC should set the
 # floor.
-_DOCSTRING_OPENERS = ('"""', "'''", 'r"""', 'r\'\'\'')
+_DOCSTRING_OPENERS = ('"""', "'''", 'r"""', "r'''")
 
 # The statements that open a nested scope. This is the vocabulary for "can
 # contain a definition", and the metrics gate imports it rather than restating
@@ -119,8 +119,7 @@ def classify(fragment: str) -> str:
     # never silently a guess.
     stripped = [line for line in text.splitlines() if line.strip()]
     if not stripped or all(
-        line.strip().startswith(("import ", "from ", "#") + _DOCSTRING_OPENERS)
-        for line in stripped
+        line.strip().startswith(("import ", "from ", "#") + _DOCSTRING_OPENERS) for line in stripped
     ):
         return "preamble"
     return "logic"
@@ -132,7 +131,11 @@ _span = gate._footprint
 
 
 def sweep(min_lines: int, max_lines: int, min_tokens: int, max_tokens: int) -> dict:
-    floors = [(lines, tokens) for lines in range(min_lines, max_lines + 1) for tokens in range(min_tokens, max_tokens + 1)]
+    floors = [
+        (lines, tokens)
+        for lines in range(min_lines, max_lines + 1)
+        for tokens in range(min_tokens, max_tokens + 1)
+    ]
     roots = list(gate.PROFILE_PATHS["all"])
     results: dict[tuple[int, int], dict[str, list[dict]]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -217,7 +220,9 @@ def _first_appearance(results: dict, floors: list) -> list[tuple[tuple[int, int]
                 key = f"{location['tree']}/{location['name']}"
                 if key not in seen:
                     seen[key] = (floor, duplicate)
-    return [(floor, key, duplicate) for key, (floor, duplicate) in sorted(seen.items(), key=lambda kv: kv[1][0])]
+    return [
+        (floor, key, duplicate) for key, (floor, duplicate) in sorted(seen.items(), key=lambda kv: kv[1][0])
+    ]
 
 
 def main() -> int:
@@ -235,7 +240,9 @@ def main() -> int:
     roots = sorted(results[floors[0]])
 
     print(f"jscpd frontier sweep  roots={roots}")
-    print(f"floors: {args.min_lines}/{args.min_tokens} .. {args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n")
+    print(
+        f"floors: {args.min_lines}/{args.min_tokens} .. {args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
+    )
 
     print("PAIRS PER FLOOR")
     print(_matrix(results))
@@ -258,7 +265,9 @@ def main() -> int:
         print(f"\n  {key}  --  first at {floor[0]}/{floor[1]}, span {_span(duplicate)} lines")
         for side in ("firstFile", "secondFile"):
             location = duplicate[side]
-            print(f"    {side[:-4]}: {location['tree']}/{location['name']}:{location['start']}-{location['end']}")
+            print(
+                f"    {side[:-4]}: {location['tree']}/{location['name']}:{location['start']}-{location['end']}"
+            )
         fragment = duplicate.get("fragment", "")
         body = "\n".join("      " + line for line in fragment.splitlines()[:12])
         print(f"    fragment:\n{body}")
@@ -274,7 +283,9 @@ def main() -> int:
         logic = [d for d, k in kinds if k == "logic"]
         mass = sum(int(d.get("tokens", 0)) for d in logic)
         share = len(logic) / len(pairs) * 100 if pairs else 0.0
-        print(f"  {floor[0]:>2}/{floor[1]:<3} | {len(pairs):>6} {len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}")
+        print(
+            f"  {floor[0]:>2}/{floor[1]:<3} | {len(pairs):>6} {len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
+        )
         tipping.append((floor[1], len(logic), share, mass))
     print("\n  the tipping point is the highest token floor at which logic still outnumbers preamble")
     for tokens, logic, share, mass in tipping:

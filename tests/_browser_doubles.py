@@ -2,6 +2,11 @@ ROUTE_ARG_UNSET = object()
 
 
 class BrowserFakePage:
+    """A page double whose ``url`` is a plant the test sets, not a navigation result.
+
+    See :meth:`goto` for why navigation deliberately leaves it alone.
+    """
+
     def __init__(self):
         self.goto_calls = []
         self.route_calls = []
@@ -15,6 +20,10 @@ class BrowserFakePage:
         pass
 
     async def goto(self, url, wait_until="load", **kwargs):
+        # ``url`` is deliberately NOT updated here. On this double it is a
+        # *plant* -- the redirect tests set it to the internal host they want
+        # the render to be caught redirecting to, and a goto that assigned it
+        # would quietly overwrite the plant and let the render pass.
         if "extra_http_headers" in kwargs:
             raise TypeError("unexpected keyword argument 'extra_http_headers'")
         self.goto_calls.append((url, kwargs))
@@ -23,6 +32,9 @@ class BrowserFakePage:
         self.set_extra_http_headers_calls.append(headers)
 
     async def evaluate(self, *a, **k):
+        return ""
+
+    async def content(self):
         return ""
 
     async def close(self):
@@ -35,12 +47,101 @@ class BrowserFakePage:
         return None
 
 
+#: What the renderer reads out of a page, in the order it asks. A double that
+#: answers these is indistinguishable from a loaded page for everything the
+#: renderer does; anything beyond this list is a read the test cares about.
+DEFAULT_PAGE_ANSWERS = {
+    "readyState": "complete",
+    "document.title": "Fake Title",
+    "innerText": "Visible body text",
+    "scrollTo": None,
+    "document.body": "Visible body text",
+}
+
+DEFAULT_PAGE_HTML = "<html><body><h1>Visible body text</h1></body></html>"
+
+
+class ScriptedPage(BrowserFakePage):
+    """A page that answers the renderer's real reads and records its writes.
+
+    Four browser suites each wrote out the same Playwright surface -- ``route``,
+    ``on``, ``goto``, ``set_extra_http_headers``, ``evaluate``, ``content``,
+    ``close`` -- and kept one behaviour of their own. The surface is what a
+    change to the renderer breaks first, and it broke unevenly: a read the
+    renderer newly made raised ``AttributeError`` in one suite and returned
+    ``""`` in another, so which tests failed depended on which file the double
+    happened to be written in.
+
+    ``answers`` maps a fragment of the evaluated expression to what the page
+    reports, so a suite states the reads it cares about rather than re-deriving
+    the whole list. ``on_goto`` is the hook for the behaviour that genuinely
+    differs -- the page-cap suite counts overlapping tabs on navigation and
+    nothing else needs to -- and ``html`` carries the content a test asserts on.
+    Every evaluated expression is appended to ``evaluates``, so a test about how
+    many times the renderer asks is a length check rather than a counter it has
+    to increment itself and keep in agreement.
+    """
+
+    def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None):
+        self.goto_calls = []
+        self.route_calls = []
+        self.set_extra_http_headers_calls = []
+        self._url = url
+        self._answers = dict(DEFAULT_PAGE_ANSWERS if answers is None else answers)
+        self._html = DEFAULT_PAGE_HTML if html is None else html
+        self._on_goto = on_goto
+        self.evaluates: list[str] = []
+        self.closed = False
+
+    @property
+    def url(self):
+        return self._url
+
+    async def goto(self, url, wait_until="load", **kwargs):
+        self._url = url
+        if self._on_goto is not None:
+            await self._on_goto(self)
+        return await super().goto(url, wait_until=wait_until, **kwargs)
+
+    async def evaluate(self, expression, *args, **kwargs):
+        self.evaluates.append(expression)
+        for fragment, value in self._answers.items():
+            if fragment in expression:
+                return value
+        return ""
+
+    async def content(self):
+        return self._html
+
+    async def close(self):
+        self.closed = True
+
+    @property
+    def is_closed(self):
+        return self.closed
+
+
 class BrowserFakeBrowser:
     def __init__(self, page):
         self._page = page
 
     async def new_page(self, **kwargs):
         return self._page
+
+
+class BrowserFakeContextManager:
+    """The ``async with`` wrapper a browser factory hands back, over one browser."""
+
+    def __init__(self, browser):
+        self.browser = browser
+        self.enters = 0
+
+    async def __aenter__(self):
+        self.enters += 1
+        return self.browser
+
+    async def __aexit__(self, *exc):
+        return False
 
 
 async def _browser_noop(self, *a, **k):
@@ -254,6 +355,82 @@ async def assert_route_decision(
         route = FakeRoute()
         await handler(route, FakeRequest(url, resource_type))
         assert route.decision == decision, f"expected {decision} for {url}, got {route.decision}"
+
+
+async def run_route_with_pinner(monkeypatch, url, *, pinned=None, raises=None, resource_type="document"):
+    """Run the SSRF route handler over one request with ``_build_pinned_request`` stubbed.
+
+    The pinner is a seam the handler reaches through ``asyncio.to_thread``, so a
+    test about the guard's *verdict* replaces it rather than resolving a real
+    host. ``pinned`` is what the stub returns and ``raises`` is what it raises
+    instead; supplying neither pins to the request's own URL with no header
+    overrides, which is the shape the https/no-Host-override case needs.
+
+    Returns the :class:`FakeRoute` the handler decided on, because the decision,
+    the continued URL and the continued headers are what each test is about --
+    and because a helper that returned only the verdict would force every caller
+    to re-derive the route object to assert the rest.
+    """
+    import app.crawl.strategies.browser as browser_mod
+
+    if raises is not None:
+
+        def pin(url, headers, *, policy):
+            raise raises
+
+    else:
+        outcome = pinned if pinned is not None else (url, {})
+
+        def pin(url, headers, *, policy):
+            return outcome
+
+    monkeypatch.setattr(browser_mod, "_build_pinned_request", pin)
+    route = FakeRoute()
+    await ssrf_route_handler()(route, FakeRequest(url, resource_type))
+    return route
+
+
+def scripted_renderer(browser, cm=None, *, sleep=None):
+    """A ``BrowserRenderer`` whose browser factory hands back `browser`.
+
+    ``sleep`` is stubbed to a no-op by default because both suites that need a
+    renderer are about *what the render orchestrates*, never about how long it
+    waited; a suite that genuinely wants the delay passes its own.
+
+    ``cm`` is for the reuse assertions: a test that counts how many times the
+    context manager was entered has to be holding the one the factory returns, so
+    it passes its own. Left out, a fresh wrapper is made per acquire -- which is
+    the right default for a test that does not care.
+
+    Two suites each wrote this lambda, along with the four imports behind it, and
+    they agreed by accident. A renderer built with a real sleep made the
+    page-cap test take its cap in wall-clock, which is the one measurement it
+    explicitly is not.
+    """
+    from app.crawl.strategies.browser import BrowserRenderer
+
+    return BrowserRenderer(
+        browser_factory=lambda **kw: cm or BrowserFakeContextManager(browser),
+        sleep=lambda _s: None if sleep is None else sleep(_s),
+    )
+
+
+async def render_bare(renderer, url: str = "http://example.com/"):
+    """One render at the empty browser profile over `renderer`, as a raw call.
+
+    ``_render_with_browser`` rather than ``render``: these tests are about what
+    the browser half registers and refuses, and the public entry point is the
+    thing that decides when the pool is consulted. The empty profile and the
+    unrestricted policy are the baseline -- what is under test is what the render
+    adds to it, so those two are the same in every one of these calls.
+    """
+    from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+    from app.models import RenderOptions
+
+    return await renderer._render_with_browser(
+        url, RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
+    )
 
 
 def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):

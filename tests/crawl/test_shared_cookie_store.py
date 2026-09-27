@@ -40,10 +40,20 @@ def _worker_jar(store_path) -> CookieJar:
     return CookieJar(SharedCookieStore(store_path))
 
 
+def _two_workers(store_path):
+    """Two independent jars over one shared store: the multi-worker shape.
+
+    Every property in this file is about a *second* worker observing a first
+    worker's write, so the pair is part of the setup rather than of each test.
+    Building it per test meant four copies of the same two lines, and the copy
+    that forgot to open the second jar would still have read as a sibling test.
+    """
+    return _worker_jar(store_path), _worker_jar(store_path)
+
+
 def test_a_sibling_worker_s_cookie_is_visible(store_path):
     """The property a per-process jar cannot provide."""
-    first = _worker_jar(store_path)
-    second = _worker_jar(store_path)
+    first, second = _two_workers(store_path)
 
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
 
@@ -56,8 +66,7 @@ def test_concurrent_writes_to_one_host_merge_rather_than_clobber(store_path):
     A last-writer-wins write would leave only the second cookie, so this fails
     for the same reason the real shutdown did.
     """
-    first = _worker_jar(store_path)
-    second = _worker_jar(store_path)
+    first, second = _two_workers(store_path)
 
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
     second.add_cookie_header("http://example.com/", "pref=dark; Path=/")
@@ -86,8 +95,7 @@ def test_namespaces_stay_isolated_in_shared_storage(store_path):
 
 def test_clear_in_one_worker_is_seen_by_another(store_path):
     """A clear that only reached its own process would replay revoked cookies."""
-    first = _worker_jar(store_path)
-    second = _worker_jar(store_path)
+    first, second = _two_workers(store_path)
     first.add_cookie_header("http://example.com/", "session=abc; Path=/")
 
     first.clear()
@@ -101,8 +109,7 @@ def test_export_captures_what_a_sibling_wrote(store_path, tmp_path):
     This is the exact shape of the original data loss: one process exits with
     the whole file to itself and drops everything the others held.
     """
-    first = _worker_jar(store_path)
-    second = _worker_jar(store_path)
+    first, second = _two_workers(store_path)
     first.add_cookie_header("http://example.com/", "a=1; Path=/")
     second.add_cookie_header("http://other.com/", "b=2; Path=/")
 

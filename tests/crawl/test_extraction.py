@@ -1,8 +1,7 @@
-import logging
-
 """Content extraction: markdown/text extraction, selector timeouts, bounds and single-pass parsing."""
 
 import asyncio
+import logging
 import threading
 
 import bs4
@@ -34,6 +33,18 @@ from app.crawl.extraction import (
     _parse_html_tree,
     _text_from_html,
 )
+
+
+def assert_extraction_empty(result) -> None:
+    """A failed document extraction yields nothing at all, in both fields.
+
+    A timeout, a crash and a parse failure all arrive here, and all three are
+    the same claim: no text *and* no markdown. Asserting one field would let a
+    half-filled result through, which is how an empty page reaches the caller
+    dressed as a successful extraction.
+    """
+    assert result.text is None
+    assert result.markdown is None
 
 
 def test_document_test_hooks_accept_shared_bool_spellings(monkeypatch):
@@ -330,9 +341,7 @@ async def test_extract_document_timeout_is_enforced(monkeypatch):
     # Set short timeout - patch the module variable directly.
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_TIMEOUT", 0.01)
 
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
-    assert result.text is None
-    assert result.markdown is None
+    assert_extraction_empty(_extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
     # Clean up
     monkeypatch.delenv("TEST_MARKITDOWN_HANG", raising=False)
@@ -344,9 +353,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
 
     monkeypatch.setenv("TEST_MARKITDOWN_DIE", "1")
     monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
-    assert result.text is None
-    assert result.markdown is None
+    assert_extraction_empty(_extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf"))
 
     # M8 is per worker, not process-global: the pool is persistent and sized
     # above one, so an idle worker from an earlier extraction legitimately

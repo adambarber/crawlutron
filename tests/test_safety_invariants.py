@@ -48,6 +48,7 @@ from chokepoint_walks import (
     nodes_of_type,
     non_member_literals,
     offender,
+    real_members,
     relative_posix,
     resolved_call_name,
     resolved_expr_name,
@@ -2084,9 +2085,7 @@ def test_memory_cache_twin_detector_bites():
             "            if key in self._memory_cache:\n"
             "                return self._memory_cache[key][1]\n": "aget() reads/writes _memory_cache directly",
         },
-        clean=(
-            "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",
-        ),
+        clean=("class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",),
     )
 
 
@@ -2401,15 +2400,12 @@ def test_selector_contract_detector_bites():
         _selector_contract_offenders,
         (
             # The carrier itself: the one place the two names are spelled.
-            "class Selectors:\n"
-            "    css: str | None = None\n"
-            "    xpath: str | None = None\n",
+            "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
             # An extractor carrying the pair as the one value.
             "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
             # A key builder legitimately requires both: it keys a request rather
             # than narrowing one.
-            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n"
-            "    ...\n",
+            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
             # A function that takes no selector is somebody else's business.
             "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
         ),
@@ -2789,34 +2785,38 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     removed — the ``_decompress_cap`` sweep only guards the chokepoint's own
     callers, so this closes the bypass around it.
     """
-    return [
-        offender(
-            path,
-            node.lineno,
-            f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
-        )
-        for node in nodes_of_type(tree, ast.Import)
-        for alias in node.names
-        if alias.name.split(".")[0] in _DECOMPRESS_CODECS
-    ] + [
-        offender(
-            path,
-            node.lineno,
-            f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
-        )
-        for node in nodes_of_type(tree, ast.ImportFrom)
-        if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS
-    ] + [
-        offender(
-            path,
-            call.lineno,
-            f"calls {call.func.value.id}.{call.func.attr}() directly (bypasses decompress_body)",
-        )
-        for call, func in attribute_calls(tree)
-        if isinstance(func.value, ast.Name)
-        and func.value.id in _DECOMPRESS_CODECS
-        and func.attr in _DECOMPRESS_CODEC_METHODS
-    ]
+    return (
+        [
+            offender(
+                path,
+                node.lineno,
+                f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
+            )
+            for node in nodes_of_type(tree, ast.Import)
+            for alias in node.names
+            if alias.name.split(".")[0] in _DECOMPRESS_CODECS
+        ]
+        + [
+            offender(
+                path,
+                node.lineno,
+                f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
+            )
+            for node in nodes_of_type(tree, ast.ImportFrom)
+            if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS
+        ]
+        + [
+            offender(
+                path,
+                call.lineno,
+                f"calls {call.func.value.id}.{call.func.attr}() directly (bypasses decompress_body)",
+            )
+            for call, func in attribute_calls(tree)
+            if isinstance(func.value, ast.Name)
+            and func.value.id in _DECOMPRESS_CODECS
+            and func.attr in _DECOMPRESS_CODEC_METHODS
+        ]
+    )
 
 
 def test_decompression_reaches_only_through_the_chokepoint():
@@ -2993,9 +2993,7 @@ def test_id_mint_detector_bites():
         path=REPO_ROOT / "app" / "api" / "_synthetic.py",
         # uuid4 call AND hex slice are two findings, not one.
         trips={"import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n": 2},
-        clean=(
-            "from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",
-        ),
+        clean=("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
     )
 
 
@@ -4159,7 +4157,7 @@ def _result_primitive_names() -> frozenset[str]:
     return RESULT_PRIMITIVES
 
 
-def _non_member_classification_offenders(tree, path, *, members):
+def _non_member_classification_offenders(tree, path, *, members=None):
     """A literal classification passed to a result primitive must be a member.
 
     ``members`` is the live ``CrawlClassification`` value set. There is no
@@ -4174,6 +4172,8 @@ def _non_member_classification_offenders(tree, path, *, members):
     strategy, Literal-field and error sweeps go through, so the guard that
     admits a variable cannot be dropped from one axis and kept on another.
     """
+    if members is None:
+        members = real_members("CrawlClassification")
     return [
         offender(
             path,
@@ -4193,10 +4193,7 @@ def _non_member_classification_offenders(tree, path, *, members):
 
 
 def test_engine_emitted_classifications_are_enum_members():
-    from app.constants import CrawlClassification
-
-    members = {m.value for m in CrawlClassification}
-    offenders = app_offenders(_non_member_classification_offenders, members=members)
+    offenders = app_offenders(_non_member_classification_offenders)
     assert not offenders, (
         "a literal classification passed to a result primitive must be a "
         "CrawlClassification member, or the strict enum at response shaping "
@@ -4257,7 +4254,7 @@ def test_non_member_classification_detector_bites():
 _STRATEGY_VALUE_SOURCES = ("strategy",)
 
 
-def _non_member_strategy_offenders(tree, path, *, members):
+def _non_member_strategy_offenders(tree, path, *, members=None):
     """A literal strategy passed to a result primitive must be a real member.
 
     ``members`` is the live ``CrawlStrategy`` value set. ``None`` is admitted
@@ -4269,6 +4266,9 @@ def _non_member_strategy_offenders(tree, path, *, members):
     lockstep with the enum. A non-literal (variable, attribute, or module
     constant) is what callers should write and passes without comment.
     """
+    if members is None:
+        members = real_members("CrawlStrategy")
+
     for node, value in call_keyword_values(
         tree,
         function_names=_result_primitive_names(),
@@ -4288,10 +4288,7 @@ def _non_member_strategy_offenders(tree, path, *, members):
 
 
 def test_engine_emitted_strategies_are_enum_members():
-    from app.api_models import CrawlStrategy
-
-    members = {m.value for m in CrawlStrategy}
-    offenders = app_offenders(_non_member_strategy_offenders, members=members)
+    offenders = app_offenders(_non_member_strategy_offenders)
     assert not offenders, (
         "a literal strategy passed to a result primitive must be a "
         "CrawlStrategy member, or None when no strategy was attempted; the "
@@ -4301,38 +4298,25 @@ def test_engine_emitted_strategies_are_enum_members():
 
 
 def test_non_member_strategy_detector_bites():
-    from app.api_models import CrawlStrategy
-
-    members = {m.value for m in CrawlStrategy}
     # An invented member name -- exactly the shape that shipped on the browser
     # worker's failure path.
     bad = ast.parse(
         'def f():\n    return _engine_result_from_exception(strategy="BROWSER_DECLARED_CRAWLER")\n'
     )
-    offenders = list(
-        _non_member_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    offenders = list(_non_member_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
     assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
     # The empty string is the same lie in cheaper clothing.
     bad_empty = ast.parse('def f():\n    return _failed_engine_result(strategy="")\n')
-    offenders = list(
-        _non_member_strategy_offenders(bad_empty, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    offenders = list(_non_member_strategy_offenders(bad_empty, REPO_ROOT / "app" / "_synthetic.py"))
     assert len(offenders) == 1 and "CrawlStrategy member" in offenders[0], offenders
     # None is admitted: it is the honest "no strategy attempted" label.
     good_none = ast.parse("def f():\n    return _failed_engine_result(strategy=None)\n")
-    assert not list(
-        _non_member_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    assert not list(_non_member_strategy_offenders(good_none, REPO_ROOT / "app" / "_synthetic.py"))
     # A real member literal and a non-literal both pass without comment.
     good_member = ast.parse('def f():\n    return _skipped_engine_result(strategy="BROWSER_HEADLESS")\n')
-    assert not list(
-        _non_member_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    assert not list(_non_member_strategy_offenders(good_member, REPO_ROOT / "app" / "_synthetic.py"))
     good_var = ast.parse("def f(s):\n    return _crawl_result_from_exception(strategy=s)\n")
-    assert not list(
-        _non_member_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    assert not list(_non_member_strategy_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py"))
 
 
 _HOST_POLICY_VALIDATORS = frozenset(
@@ -4424,6 +4408,19 @@ def _host_policy_call_is_validated(tree: ast.AST, node: ast.Call, policy_names: 
     )
 
 
+def _reads_url_field(receiver, field, url_names: set[str]) -> bool:
+    """True when ``field`` is read off a name the walk already knows is a URL.
+
+    The attribute form (``url.final_url``) and the subscript form
+    (``url["final_url"]``) are one question with two spellings, and so is the
+    ``url.get("final_url")`` call the caller below handles. Answering them in
+    three places is how the dict form came to check a different field set than
+    the attribute form -- a URL field the walk missed is an unvalidated URL
+    reaching a host-policy call, and the guard would have reported the tree clean.
+    """
+    return isinstance(receiver, ast.Name) and receiver.id in url_names and field in _HOST_POLICY_URL_FIELDS
+
+
 def _host_policy_expression_state(
     tree: ast.AST,
     node: ast.AST | None,
@@ -4437,20 +4434,14 @@ def _host_policy_expression_state(
         return node.id in url_names, node.id in validated_names
     if isinstance(node, ast.Constant):
         return isinstance(node.value, str) and node.value.lower().startswith(("http://", "https://")), False
-    if isinstance(node, ast.Attribute):
-        return (
-            isinstance(node.value, ast.Name)
-            and node.value.id in url_names
-            and node.attr in _HOST_POLICY_URL_FIELDS
-        ), False
-    if isinstance(node, ast.Subscript):
-        key = node.slice
-        return (
-            isinstance(node.value, ast.Name)
-            and node.value.id in url_names
-            and isinstance(key, ast.Constant)
-            and key.value in _HOST_POLICY_URL_FIELDS
-        ), False
+    if isinstance(node, ast.Attribute) and _reads_url_field(node.value, node.attr, url_names):
+        return True, False
+    if (
+        isinstance(node, ast.Subscript)
+        and isinstance(node.slice, ast.Constant)
+        and _reads_url_field(node.value, node.slice.value, url_names)
+    ):
+        return True, False
     if isinstance(node, ast.Call):
         if _host_policy_call_is_validated(tree, node, policy_names):
             return True, True
@@ -4461,12 +4452,7 @@ def _host_policy_expression_state(
         if resolved_call_name(tree, node).rsplit(".", 1)[-1] == "get" and node.args:
             key = node.args[0]
             receiver = node.func.value if isinstance(node.func, ast.Attribute) else None
-            return (
-                isinstance(receiver, ast.Name)
-                and receiver.id in url_names
-                and isinstance(key, ast.Constant)
-                and key.value in _HOST_POLICY_URL_FIELDS
-            ), False
+            return (isinstance(key, ast.Constant) and _reads_url_field(receiver, key.value, url_names)), False
         if resolved_call_name(tree, node).rsplit(".", 1)[-1] in {"str", "format", "join"}:
             child_states = [
                 _host_policy_expression_state(tree, child, url_names, validated_names, policy_names)
@@ -5160,7 +5146,7 @@ def test_robots_pattern_compile_detector_bites():
 _STATUS_VALUE_SOURCES = ("status",)
 
 
-def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) -> list[str]:
+def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members=None) -> list[str]:
     """A literal ``status`` passed to a result primitive must be a real member.
 
     Mirrors the classification/strategy detectors: ``status`` feeds the strict
@@ -5169,12 +5155,15 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) 
     ``ResultStatus`` argument set, read at test time -- a hand-maintained
     exemption list is precisely how an invented status would ship.
     """
+    if members is None:
+        members = real_members("ResultStatus")
+
     return literal_keyword_membership_offenders(
         tree,
         path,
-        members=members,
         function_names=_result_primitive_names(),
         keyword_names=_STATUS_VALUE_SOURCES,
+        members=members,
         label="status",
         type_name="ResultStatus",
         advice=("add it to the Literal (app/models.py) or derive it from an existing member"),
@@ -5182,12 +5171,7 @@ def _non_member_status_offenders(tree: ast.AST, path: pathlib.Path, *, members) 
 
 
 def test_result_primitives_emit_real_status_members():
-    from typing import get_args
-
-    from app.models import ResultStatus
-
-    members = set(get_args(ResultStatus))
-    offenders = app_offenders(_non_member_status_offenders, members=members)
+    offenders = app_offenders(_non_member_status_offenders)
     assert not offenders, (
         "a literal status passed to a result primitive must be a ResultStatus "
         "member, or the strict enum on the wire model rejects the batch: " + ", ".join(offenders)
@@ -5195,19 +5179,14 @@ def test_result_primitives_emit_real_status_members():
 
 
 def test_non_member_status_detector_bites():
-    from typing import get_args
-
-    from app.models import ResultStatus
-
-    members = set(get_args(ResultStatus))
     bad = ast.parse('def f():\n    return _terminal_crawl_result(status="never_a_status")\n')
-    offenders = list(_non_member_status_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members))
+    offenders = list(_non_member_status_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
     assert len(offenders) == 1 and "ResultStatus member" in offenders[0], offenders
     good = ast.parse('def f():\n    return _terminal_crawl_result(status="failed")\n')
-    assert not _non_member_status_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not _non_member_status_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
     # A non-literal (a variable or the caller's own status field) passes.
     good_var = ast.parse("def f(s):\n    return _make_engine_result(status=s)\n")
-    assert not _non_member_status_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not _non_member_status_offenders(good_var, REPO_ROOT / "app" / "_synthetic.py")
 
 
 # --- 4c: the webhook semaphore is touched only through its loop accessor -----
@@ -5377,7 +5356,7 @@ _ATTEMPT_CLASS = "CrawlStrategyAttempt"
 _ATTEMPT_STRATEGY_KWARG = "strategy"
 
 
-def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *, members) -> list[str]:
+def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *, members=None) -> list[str]:
     """A literal ``strategy=`` at a ``CrawlStrategyAttempt`` site must be a member.
 
     Covers the class directly rather than the builder primitives, so a new
@@ -5386,25 +5365,23 @@ def _non_member_attempt_strategy_offenders(tree: ast.AST, path: pathlib.Path, *,
     strategy was attempted". ``members`` is the live ``CrawlStrategyName``
     argument set, read at test time.
     """
+    if members is None:
+        members = real_members("CrawlStrategyName")
+
     return literal_keyword_membership_offenders(
         tree,
         path,
-        members=members,
         function_names=_ATTEMPT_CLASS,
         keyword_names=_ATTEMPT_STRATEGY_KWARG,
+        members=members,
         label="strategy",
         type_name="CrawlStrategyName",
         advice="pass a real member, or None when no strategy was attempted",
     )
 
 
-def test_crawl_strategy_attempt_sites_use_real_members():
-    from typing import get_args
-
-    from app.models import CrawlStrategyName
-
-    members = set(get_args(CrawlStrategyName))
-    offenders = app_offenders(_non_member_attempt_strategy_offenders, members=members)
+def test_crawl_strategy_attempt_sites_usereal_members():
+    offenders = app_offenders(_non_member_attempt_strategy_offenders)
     assert not offenders, (
         "a literal strategy at a CrawlStrategyAttempt construction site must be a "
         "CrawlStrategyName member, or None when no strategy was attempted: " + ", ".join(offenders)
@@ -5421,9 +5398,7 @@ def test_crawl_strategy_attempt_detector_bites():
         "def f():\n    return CrawlStrategyAttempt(strategy='BROWSER_DECLARED_CRAWLER', status='failed',"
         " classification='site_error', http_status=None, content_type=None, elapsed_ms=0)\n"
     )
-    offenders = list(
-        _non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
-    )
+    offenders = list(_non_member_attempt_strategy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
     assert len(offenders) == 1 and "CrawlStrategyName member" in offenders[0], offenders
     # None is admitted -- the honest "no strategy attempted" label.
     good_none = ast.parse(
@@ -6159,10 +6134,7 @@ def test_error_field_values_are_classification_members():
     """
     from membership_gate import error_field_taxonomy_offenders
 
-    from app.models import CrawlError, _literal_members
-
-    members = _literal_members(CrawlError)
-    offenders = app_offenders(error_field_taxonomy_offenders, members=members)
+    offenders = app_offenders(error_field_taxonomy_offenders)
     assert not offenders, (
         "error= must be a member of the declared CrawlError taxonomy (the field is"
         f" documented as a stable code callers key on): {'; '.join(offenders)}"
@@ -6173,18 +6145,15 @@ def test_error_field_taxonomy_detector_bites():
     """The hunt detector fires on the shipped shape and admits the classified one."""
     from membership_gate import error_field_taxonomy_offenders
 
-    from app.models import CrawlError, _literal_members
-
-    members = _literal_members(CrawlError)
     bad = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="worker_failed")\n')
-    hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
     assert len(hits) == 1 and "worker_failed" in hits[0], hits
     # A member literal passes.
     good = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="site_error")\n')
-    assert not error_field_taxonomy_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not error_field_taxonomy_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
     # A classified variable is the sanctioned shape and passes.
     var = ast.parse("def f(c):\n    return _terminal_crawl_result(url='u', error=c)\n")
-    assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
+    assert not error_field_taxonomy_offenders(var, REPO_ROOT / "app" / "_synthetic.py")
 
 
 def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -7610,21 +7579,32 @@ def test_property_registry_detector_bites():
     )
 
 
+#: A module that defines ``parse_bool_value`` twice -- the shape both registry
+#: proofs below are about. Named because each carried its own copy of the source
+#: and its own re-walk for the duplicate definitions, so a change to the synthetic
+#: definition had to be made twice to be made at all, and a change to the walk had
+#: to be made once and forgotten once.
+DUPLICATE_DEF_SOURCE = (
+    "def parse_bool_value(raw, default, *, env_name):\n"
+    "    return default\n"
+    "def parse_bool_value(raw, default, *, env_name):\n"
+    "    return raw.strip().lower() in {'0', 'false', 'no', 'off'}\n"
+)
+
+
+def _duplicate_def_nodes(tree: ast.AST) -> list[ast.FunctionDef]:
+    """Every ``parse_bool_value`` definition in ``tree``, in source order."""
+    return [
+        node
+        for node in nodes_of(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
+    ]
+
+
 def test_property_registry_rejects_duplicate_owner_count():
     prop = _property("bool-env")
-    tree = ast.parse(
-        "def parse_bool_value(raw, default, *, env_name):\n"
-        "    return default\n"
-        "def parse_bool_value(raw, default, *, env_name):\n"
-        "    return raw.strip().lower() in {'0', 'false', 'no', 'off'}\n"
-    )
-    definitions = {
-        "parse_bool_value": [
-            ("app/validation.py", node)
-            for node in nodes_of(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
-        ]
-    }
+    tree = ast.parse(DUPLICATE_DEF_SOURCE)
+    definitions = {"parse_bool_value": [("app/validation.py", node) for node in _duplicate_def_nodes(tree)]}
     assert _property_owner_failures((prop,), definitions) == ["parse_bool_value=2"]
 
 
@@ -7645,19 +7625,10 @@ def test_property_registry_rejects_deleted_fingerprint():
 
 def test_property_owner_duplicate_is_not_sanctioned():
     prop = _property("bool-env")
-    tree = ast.parse(
-        "def parse_bool_value(raw, default, *, env_name):\n"
-        "    return default\n"
-        "def parse_bool_value(raw, default, *, env_name):\n"
-        "    return raw.strip().lower() in {'0', 'false', 'no', 'off'}\n"
-    )
+    tree = ast.parse(DUPLICATE_DEF_SOURCE)
     path = REPO_ROOT / "app" / "validation.py"
     owner_ids = _owner_definition_ids(tree, path, prop)
-    duplicate = [
-        node
-        for node in nodes_of(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "parse_bool_value"
-    ][1]
+    duplicate = _duplicate_def_nodes(tree)[1]
     assert len(owner_ids) == 1
     assert not _property_owner(path, prop, tree=tree, node=duplicate)
     assert _bool_env_offenders(tree, path, prop)
@@ -9309,17 +9280,19 @@ def test_browser_instance_fields_are_cleared_only_by_the_release_chokepoint():
 
 
 def test_browser_release_detector_bites():
+    # The reset is generated from the field tuple the detector sweeps, so the
+    # synthetic source cannot claim to cover a field the guard does not check.
+    # Written out twice it was the same three lines of drift-prone fixture, and
+    # the drift is invisible: a field added to the tuple would leave this proof
+    # asserting on a source that never mentions it.
+    reset = "\n".join(f"        self.{field} = None" for field in _BROWSER_RELEASE_FIELDS)
     source = f"""
 class Renderer:
     def __init__(self):
-        self._browser_cm = None
-        self._browser = None
-        self._browser_reused = False
+{reset}
 
     async def {_BROWSER_RELEASE_CHOKEPOINT}(self):
-        self._browser_cm = None
-        self._browser = None
-        self._browser_reused = False
+{reset}
 
     async def close(self):
         self._browser = None

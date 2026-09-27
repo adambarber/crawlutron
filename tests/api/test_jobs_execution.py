@@ -21,16 +21,17 @@ from _job_harnesses import (
     _wait_status,
     _wait_until,
     assert_settled,
+    drive_job,
     job_limits,
     make_job_store,
     post_api_job,
-    raw_job_row,
     recording_execute,
     run_api_job,
     run_job_control_test,
     run_scripted_api_job,
     run_seeded_scripted_job,
     submit_blocked_job,
+    write_row_policy,
 )
 from _result_builders import (
     GRAPH_CHILD,
@@ -185,12 +186,7 @@ class TestCrashRecovery:
     async def test_normal_completion_clears_in_flight(self, client, job_store):
         # A healthy run must not leave a stale in_flight that would double-crawl on a
         # later resume: the batch is cleared in the same save that records its results.
-        job = await run_api_job(
-            client,
-            job_store,
-            GRAPH_ROOT,
-            ScriptedExecute(results=_root_child_results()),
-        )
+        job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
         assert job.visited == {GRAPH_ROOT, GRAPH_CHILD}
         assert job.in_flight == []
 
@@ -238,16 +234,17 @@ class TestCrashRecovery:
 class TestWholeSiteJobExecution:
     def test_engine_payload_builder_disables_recursion_and_preserves_limits(self, job_store):
         root = GRAPH_ROOT
-        original_policy = {
-            "limits": {
-                "max_depth": 2,
-                "max_pages": 50,
-                "max_discovered_links": 17,
-                "max_rps": 2.5,
-            },
-            "scope_regex": "^https://example\\.test/",
+        # The limit block is stated once and then restated with the one field
+        # this test is about changed. Written out twice it is how a limit got
+        # "preserved" in the name of the test while the expectation quietly
+        # changed the value it was preserving.
+        original_limits = {
+            "max_depth": 2,
+            "max_pages": 50,
+            "max_discovered_links": 17,
+            "max_rps": 2.5,
         }
-        job = job_store.create(root, original_policy)
+        job = job_store.create(root, job_limits(**original_limits, scope_regex=r"^https://example\.test/"))
         batch = [
             FrontierEntry(url=root, depth=0),
             FrontierEntry(url=GRAPH_CHILD, depth=1),
@@ -257,20 +254,14 @@ class TestWholeSiteJobExecution:
 
         assert payload == {
             "urls": [root, GRAPH_CHILD],
-            "policy": {
-                "limits": {
-                    "max_depth": 0,
-                    "max_pages": 50,
-                    "max_discovered_links": 17,
-                    "max_rps": 2.5,
-                },
-                "scope_regex": "^https://example\\.test/",
-            },
+            # Depth zero and nothing else moved: this builder exists to stop the
+            # per-call max_depth from re-expanding a whole-site job's frontier.
+            "policy": job_limits(**{**original_limits, "max_depth": 0}, scope_regex=r"^https://example\.test/"),
             "url": root,
             "headers": {},
             "request_profile": {},
         }
-        assert job.policy == original_policy
+        assert job.policy == job_limits(**original_limits, scope_regex=r"^https://example\.test/")
 
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = GRAPH_ROOT
@@ -354,7 +345,8 @@ class TestWholeSiteJobExecution:
         # Batch 2 submits b and c, both fail: the per-item `failed` counter is
         # cumulative, so adding it inside the loop once reported 1+2=3.
         job = await run_scripted_api_job(
-            client, job_store, GRAPH_ROOT, results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
+            client, job_store, GRAPH_ROOT,
+            results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
         )
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
@@ -389,7 +381,8 @@ class TestWholeSiteJobExecution:
         """M2: a 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
         job = await run_scripted_api_job(
-            client, job_store, GRAPH_ROOT, results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(url) for url in leaves],
+            client, job_store, GRAPH_ROOT,
+            results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(u) for u in leaves],
         )
         assert job.stats["total_discovered"] == 25
         assert job.stats["total_crawled"] == 26
@@ -616,9 +609,7 @@ class TestWholeSiteRedirectedUrlResolution:
 
         monkeypatch.setattr("app.api.job_runner._execute_crawl", fake_execute_crawl)
 
-        from app.api.job_runner import _run_job
-
-        await _run_job(job_id, job_store, MagicMock(), asyncio.Event())
+        await drive_job(job_id, job_store, settings=MagicMock())
 
         finished = job_store.load(job_id)
         assert finished is not None
@@ -666,9 +657,7 @@ class TestJobStateWaitContract:
         job_runner.install_execute_crawl(ScriptedExecute(results=[_canned_result(GRAPH_ROOT)]))
         assert job_store.status_bus is not None
 
-        runner = asyncio.ensure_future(
-            job_runner._run_job(job_id, job_store, CrawlerSettings.from_mapping({}), asyncio.Event())
-        )
+        runner = drive_job(job_id, job_store)
         try:
             waiter = asyncio.ensure_future(_wait_status(job_store, job_id, {"completed", "failed"}))
             # One turn is enough and not a guess: the waiter task cannot run at
@@ -819,6 +808,16 @@ def assert_pair_crawled_once(finished, engine, root: str, child: str) -> None:
     assert len(finished.results) == 2
 
 
+#: The one link every admission test here expects to survive, and the root it is
+#: discovered from. Named because three tests spelled the URL and three spelled
+#: the settled shape that goes with it: a test that declared a different
+#: ``admitted`` and asserted a different ``visited`` passed, because neither
+#: number was derived from anything.
+ADMITTED = "https://example.test/included"
+ADMISSION_ROOT = "https://example.test/root"
+ADMITTED_ONLY_SCOPE = r"^https://example\.test/included$"
+
+
 class TestWholeSiteAdmissionContract:
     @staticmethod
     def _policy(max_depth: int, max_pages: int, scope_regex: str | None = None) -> dict[str, Any]:
@@ -834,6 +833,18 @@ class TestWholeSiteAdmissionContract:
             policy["scope_regex"] = scope_regex
         return policy
 
+    async def _admitted(self, client, job_store, root, links, policy):
+        """``links`` offered, :data:`ADMITTED` the only survivor; assert the settled shape.
+
+        The three admission tests differ in *why* the other links were refused --
+        scope regex, robots, shape -- and agree on everything else. This carries
+        the agreement, so a test states its refusal and nothing else.
+        """
+        job = await self._admission_scenario(
+            client, job_store, root, links, policy, admitted=[ADMITTED]
+        )
+        assert_settled(job, visited={root, ADMITTED}, discovered=1, crawled=2)
+
     async def _admission_scenario(self, client, job_store, root, links, policy, admitted=()):
         """Run one page offering ``links``, of which exactly ``admitted`` survive.
 
@@ -844,11 +855,17 @@ class TestWholeSiteAdmissionContract:
         the links and the policy vary, so only they are arguments -- and the
         count and the discovery total come from the argument rather than being
         restated, which is what kept two of them drifting.
+
+        The visited set is asserted here too, for the same reason: it is the same
+        statement every one of these tests ends on, derived from ``admitted``,
+        and a test that declared the survivors and then asserted a different
+        visited set would have passed.
         """
         engine = ScriptedExecute({root: [_canned_result(root, links=links)]})
         job = await run_api_job(client, job_store, root, engine, policy)
         assert engine.attempts == {root: 1, **{url: 1 for url in admitted}}
         assert job.stats["total_discovered"] == len(admitted)
+        assert job.visited == {root, *admitted}
         return job
 
     async def test_depth_zero_does_not_expand(self, client, job_store):
@@ -873,35 +890,21 @@ class TestWholeSiteAdmissionContract:
         assert_settled(job, visited={root, child}, discovered=1)
 
     async def test_scope_regex_excludes_link_before_page_slot(self, client, job_store):
-        root = "https://example.test/root"
-        excluded = "https://example.test/excluded"
-        included = "https://example.test/included"
-        job = await self._admission_scenario(
-            client,
-            job_store,
-            root,
-            [excluded, included],
-            self._policy(1, 2, r"^https://example\.test/included$"),
-            admitted=[included],
+        await self._admitted(
+            client, job_store, ADMISSION_ROOT,
+            ["https://example.test/excluded", ADMITTED], self._policy(1, 2, ADMITTED_ONLY_SCOPE),
         )
-        assert job.visited == {root, included}
 
     async def test_robots_disallowed_link_does_not_consume_page_slot(self, client, job_store, monkeypatch):
-        root = "https://example.test/root"
-        blocked = "https://example.test/blocked"
-        included = "https://example.test/included"
-
         async def fetch_robots(fetcher, url, headers, timeout_seconds):
             return "User-agent: *\nDisallow: /blocked\n", 200
 
         monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
         policy = self._policy(1, 2)
         policy["limits"]["respect_robots"] = True
-        job = await self._admission_scenario(
-            client, job_store, root, [blocked, included], policy, admitted=[included]
+        await self._admitted(
+            client, job_store, ADMISSION_ROOT, ["https://example.test/blocked", ADMITTED], policy
         )
-
-        assert job.visited == {root, included}
 
     async def test_legacy_oversized_frontier_truncates_at_pop(self, job_store):
         root = "https://example.test/root"
@@ -961,11 +964,7 @@ class TestWholeSiteAdmissionContract:
     async def test_non_dict_policy_shapes_do_not_raise_mid_crawl(self, job_store, policy_json):
 
         def _corrupt_policy(job, store):
-            with raw_job_row(store) as connection:
-                connection.execute(
-                    "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
-                    (policy_json, job.job_id),
-                )
+            write_row_policy(store, job.job_id, policy_json)
 
         finished = await run_seeded_scripted_job(
             job_store,
@@ -1001,20 +1000,11 @@ class TestWholeSiteAdmissionContract:
         assert_settled(job, visited={root, seed}, discovered=1)
 
     async def test_analytics_and_document_links_do_not_consume_slots(self, client, job_store):
-        root = "https://example.test/root"
-        analytics = "https://www.google-analytics.com/analytics.js"
-        document = "https://example.test/report.pdf"
-        included = "https://example.test/included"
-        job = await self._admission_scenario(
-            client,
-            job_store,
-            root,
-            [analytics, document, included],
+        await self._admitted(
+            client, job_store, ADMISSION_ROOT,
+            ["https://www.google-analytics.com/analytics.js", "https://example.test/report.pdf", ADMITTED],
             self._policy(1, 2),
-            admitted=[included],
         )
-
-        assert job.visited == {root, included}
 
     async def test_robots_crawl_delay_is_committed_before_admission(self, client, job_store, monkeypatch):
         from app.scheduler import DomainScheduler
@@ -1103,7 +1093,10 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
         job = await run_scripted_api_job(
-            client, job_store, root, results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves],
+            client,
+            job_store,
+            root,
+            results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves],
             policy={"limits": {"max_depth": 1, "max_pages": 0}},
         )
 
@@ -1134,18 +1127,21 @@ class TestWholeSiteAdmissionContract:
         child = "https://example.test/child"
         other = "https://example.test/other"
         job = await run_scripted_api_job(
-            client, job_store, root, results=[
-                    _canned_result(
-                        root,
-                        links=[
-                            f"{child}?utm_source=one",
-                            f"{child}/",
-                            other,
-                        ],
-                    ),
-                    _canned_result(child),
-                    _canned_result(other),
-                ],
+            client,
+            job_store,
+            root,
+            results=[
+                _canned_result(
+                    root,
+                    links=[
+                        f"{child}?utm_source=one",
+                        f"{child}/",
+                        other,
+                    ],
+                ),
+                _canned_result(child),
+                _canned_result(other),
+            ],
             policy={"limits": {"max_depth": 1, "max_pages": 3}},
         )
 
@@ -1196,10 +1192,5 @@ class TestEveryVisitedUrlHasAnEnvelope:
 
     async def test_results_never_exceed_the_visited_set(self, client, job_store):
         """The accounting is a partition: each visited URL, exactly one envelope."""
-        job = await run_api_job(
-            client,
-            job_store,
-            GRAPH_ROOT,
-            ScriptedExecute(results=_root_child_results()),
-        )
+        job = await run_scripted_api_job(client, job_store, GRAPH_ROOT, results=_root_child_results())
         assert len(job.results) == job.stats["total_crawled"]

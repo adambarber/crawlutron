@@ -104,6 +104,7 @@ class TestPydanticDefaultPreservesRamScaling:
         )
         assert policy["limits"]["max_content_length_bytes"] == 4096
 
+
 class TestMaxContentLengthBytesActuallyEnforced:
     async def test_crawl_enforces_explicit_content_cap(self, base_url, monkeypatch):
         # The advertised limit must bite end-to-end: normalization keeps it

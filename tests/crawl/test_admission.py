@@ -4,7 +4,7 @@ import asyncio
 import time
 
 import pytest
-from _fetcher_factories import crawled_results
+from _fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
 from _policy_factories import admit
 from _recursive_harnesses import drive_recursive_crawl, make_crawl_task
 from _scheduler_doubles import FakeScheduler as _Scheduler
@@ -59,26 +59,30 @@ class TestReadinessState:
         snap = state.snapshot()
         assert snap.active_requests == 0
 
-    def test_saturated_when_memory_at_ceiling(self):
+    # Each gate rides at its own target (memory 0.92, cpu 0.90); the values below
+    # are over-the-line readings, and they are the only data the property differs on.
+    @pytest.mark.parametrize(
+        ("gauge", "over_the_line"),
+        [("resource_memory_utilization", 0.95), ("resource_cpu_utilization", 0.93)],
+    )
+    def test_saturated_when_a_gate_is_over_its_line(self, gauge, over_the_line):
+        """Both gates carry the same shape: ready below the line, saturated above it.
+
+        One test over the two gauges because the shape is the property -- zero
+        the other gauge so this one is what decides, read ready, push this one
+        over, read saturated. Written per gate it was twice the same walk with a
+        different number, and the CPU copy had quietly stopped asserting the
+        status string the memory copy checked.
+        """
         metrics = get_metrics()
         metrics.resource_memory_utilization = 0.0
         metrics.resource_cpu_utilization = 0.0
         state = ReadinessState()
         assert state.snapshot().saturated is False
-        # Memory gate rides at 0.92; at/above target the service is saturated.
-        metrics.resource_memory_utilization = 0.95
+        setattr(metrics, gauge, over_the_line)
         snap = state.snapshot()
         assert snap.saturated is True
         assert snap.status == "saturated"
-
-    def test_saturated_when_cpu_at_ceiling(self):
-        metrics = get_metrics()
-        metrics.resource_memory_utilization = 0.0
-        metrics.resource_cpu_utilization = 0.0
-        state = ReadinessState()
-        # CPU gate rides at 0.90; at/above target the service is saturated.
-        metrics.resource_cpu_utilization = 0.93
-        assert state.snapshot().saturated is True
 
     def test_end_request_does_not_go_negative(self):
         state = ReadinessState()
@@ -413,16 +417,11 @@ async def _crawl_under_pressure(monkeypatch, *, cpu_ratio, memory_ratio):
     """
     import app.crawl.engine as engine_mod
 
-    gate, waits = _pinned_resource_gate(
-        monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio
-    )
+    gate, waits = _pinned_resource_gate(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     monkeypatch.setattr(engine_mod, "_resource_gate", gate)
 
-    pages = {
-        "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
-        "/a": (200, "<html>a</html>", "text/html"),
-    }
-    return await crawled_results(pages, limits={"max_depth": 1, "max_pages": 10}), waits
+    pages = site_linking_to("/a")
+    return await crawled_results(pages, limits=LINKED_PAIR_LIMITS), waits
 
 
 @pytest.mark.parametrize(
@@ -435,9 +434,7 @@ async def test_engine_throttles_batches_under_pressure(monkeypatch, cpu_ratio, m
     (gate waits) yet the crawl still completes. The combined ResourceGate is
     exercised; the other resource is pinned idle so only the named one drives
     the throttle."""
-    out, waits = await _crawl_under_pressure(
-        monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio
-    )
+    out, waits = await _crawl_under_pressure(monkeypatch, cpu_ratio=cpu_ratio, memory_ratio=memory_ratio)
     assert {r["normalized_url"] for r in out["results"]} == {
         "http://example.com",
         "http://example.com/a",

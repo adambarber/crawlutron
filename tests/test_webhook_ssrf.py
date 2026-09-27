@@ -7,7 +7,7 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 
 import pytest
 from _assertions import block_private_targets, host_resolves_to
-from _webhook_doubles import record_webhook_delivery
+from _webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 from app.api.webhooks import (
     post_webhook as _post_webhook,
@@ -67,7 +67,7 @@ class TestWebhookDeliveryPinning:
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert len(delivered) == 1, delivered
+        assert_delivered_once(delivered)
         assert "8.8.8.8" in str(delivered[0].url), delivered
         assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
 
@@ -85,7 +85,7 @@ class TestWebhookDeliveryPinning:
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert len(delivered) == 1, delivered
+        assert_delivered_once(delivered)
         assert str(delivered[0].url) == "https://webhook.example.com/cb", delivered
         assert "8.8.8.8" not in str(delivered[0].url), delivered
 

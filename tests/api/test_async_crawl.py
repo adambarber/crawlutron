@@ -36,7 +36,9 @@ class TestAsyncCrawlApi:
         assert resp.status_code == 422, resp.text
         assert "batch_size_exceeded" in resp.text
 
-    async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(self, crawl_api, override_settings):
+    async def test_v1_crawl_rejects_policy_blocked_async_target_before_acceptance(
+        self, crawl_api, override_settings
+    ):
         from app.main import job_store
 
         override_settings(denied_hosts="blocked.test")
@@ -191,9 +193,7 @@ class TestAsyncCrawlApi:
     async def test_v1_crawl_async_mode_concurrent_limit(self, crawl_api):
         """Concurrent async crawls are bounded by semaphore."""
         payload = crawl_api.payload(async_mode=True)
-        completed = await asyncio.gather(
-            *(submit_async_crawl(crawl_api.client, payload) for _ in range(3))
-        )
+        completed = await asyncio.gather(*(submit_async_crawl(crawl_api.client, payload) for _ in range(3)))
         for request_id, response in completed:
             assert response.status_code == 200
             assert response.json()["success"] is True

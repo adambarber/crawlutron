@@ -6,7 +6,7 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from _job_harnesses import make_job_store, raw_job_row
+from _job_harnesses import make_job_store, raw_job_row, write_row_policy
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
@@ -314,11 +314,7 @@ def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
         ('{"limits":"corrupt","scope_regex":null}', {"limits": {}, "scope_regex": None}),
     ):
         job = store.create("https://example.test/root", {})
-        with raw_job_row(store) as connection:
-            connection.execute(
-                "UPDATE crawl_jobs SET policy = ? WHERE job_id = ?",
-                (policy_json, job.job_id),
-            )
+        write_row_policy(store, job.job_id, policy_json)
 
         loaded = store.load(job.job_id)
 

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from _fetcher_factories import make_fetch, routed_fetcher
+from _policy_factories import crawl_policy
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER
@@ -361,15 +362,7 @@ async def test_purge_handles_production_shaped_entries():
         result = await crawl_request(
             {
                 "url": "http://purge-new.test/page",
-                "policy": {
-                    "strategies": ["HTTP_DECLARED_CRAWLER"],
-                    "limits": {
-                        "timeout_seconds": 10,
-                        "max_retries": 0,
-                        "max_discovered_links": 10,
-                        "respect_robots": True,
-                    },
-                },
+                "policy": crawl_policy(limits={"respect_robots": True}),
             },
             settings=CrawlerSettings.from_mapping(),
             http_fetcher=fetcher,

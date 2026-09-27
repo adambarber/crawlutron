@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar, Final, Literal, Protocol
+from typing import Any, ClassVar, Final, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -392,7 +392,14 @@ class _UrlSource(Protocol):
     urls: list[str] | None
 
 
-def _require_exactly_one_url_source(model: _UrlSource) -> _UrlSource:
+#: Bounded by the protocol, not bare: the shared rule has to hand back the
+#: concrete model it was handed, or pydantic's after-validator signature check
+#: rejects every subclass that inherits it. A TypeVar rather than PEP 695
+#: syntax because the floor is 3.11.
+_UrlSourceT = TypeVar("_UrlSourceT", bound=_UrlSource)
+
+
+def _require_exactly_one_url_source(model: _UrlSourceT) -> _UrlSourceT:
     """Shared url/urls contract for crawl and render requests (L5, N4).
 
     Both set silently ignored ``url``; neither failed late in
@@ -409,10 +416,38 @@ def _require_exactly_one_url_source(model: _UrlSource) -> _UrlSource:
     return model
 
 
-class CrawlRequest(BaseModel):
-    url: str | None = Field(None, description="Single public HTTP(S) URL to crawl. Use either url or urls.")
+class _SingleUrlSourceRequest(BaseModel):
+    """Base for request models that take exactly one of ``url`` / ``urls``.
+
+    Pydantic needs the validator spelled on the model it decorates, so every such
+    model carried the same two-line stub. It is a stub, not a decision: the rule
+    lives in :func:`_require_exactly_one_url_source`, and a model that wanted to
+    opt out had to override the method to *delete* it. The rule is now attached
+    once, and joining the family is a base class rather than a copy.
+
+    The two fields are declared here, not left to the subclasses, because the
+    validator reads them: a base that enforced a contract it did not itself
+    satisfy would type-check only under a cast, and the first subclass to spell
+    ``url`` as something other than ``str | None`` would have failed at runtime
+    instead of at the type. They are declared *once* here for the same reason --
+    a subclass that restated one had to restate the default too, and the two
+    descriptions had drifted to differ only in the noun ("to crawl" / "to
+    render"), which is not a difference worth a re-declaration per model.
+    """
+
+    url: str | None = Field(None, description="Single public HTTP(S) URL. Use either url or urls.")
     urls: list[str] | None = Field(
-        None, description="Batch of public HTTP(S) URLs to crawl. Use either url or urls."
+        None, description="Batch of public HTTP(S) URLs. Use either url or urls."
+    )
+
+    @model_validator(mode="after")
+    def _require_url_source(self):
+        return _require_exactly_one_url_source(self)
+
+
+class CrawlRequest(_SingleUrlSourceRequest):
+    url: str | None = Field(  # inherited from _SingleUrlSourceRequest
+        None, description="Single public HTTP(S) URL to crawl. Use either url or urls."
     )
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan."  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
@@ -531,22 +566,17 @@ class RenderOptionsRequest(BaseModel):
     include_text: bool | None = Field(None, description="Include extracted visible text in the result.")
 
 
-class RenderRequest(BaseModel):
+class RenderRequest(_SingleUrlSourceRequest):
     """Request body for ``POST /v1/render`` (backward-compatible browser render)."""
 
     model_config = ConfigDict(extra="ignore")
 
-    url: str | None = Field(None, description="Single public HTTP(S) URL to render. Use either url or urls.")
-    urls: list[str] | None = Field(
-        None, description="Batch of public HTTP(S) URLs to render. Use either url or urls."
+    url: str | None = Field(  # inherited from _SingleUrlSourceRequest
+        None, description="Single public HTTP(S) URL to render. Use either url or urls."
     )
     options: RenderOptionsRequest | None = Field(
         None, description="Browser render options; omitted fields use server defaults."
     )
-
-    @model_validator(mode="after")  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
-    def _require_url_source(self):
-        return _require_exactly_one_url_source(self)
 
 
 class ClassificationEvidence(BaseModel):

@@ -398,6 +398,13 @@ LLM_FORMAT_TEST_HTML = (
 )
 
 
+# Deep enough to follow the seed's links, wide enough that the page cap is never
+# what a test is measuring. Named because several recursive tests stated the same
+# two numbers, and a test that meant to change the cap could not tell which of
+# them it was editing.
+LINKED_PAIR_LIMITS = {"max_depth": 1, "max_pages": 10}
+
+
 async def crawled_results(
     pages: dict[str, Any],
     *,
@@ -543,10 +550,18 @@ async def crawl_homepage_async(
     return await run_crawl_async(payload, cache=cache, browser_worker=browser_worker)
 
 
+#: The origin every chain test crawls. Named because a chain test's URL is
+#: almost never what it is about -- the ladder, the classification, the
+#: redaction -- and it was spelled at every call site, so the scheduler's
+#: per-domain limit was keyed on a domain half the tests spelled differently.
+EXAMPLE_URL = "http://example.com/"
+
+
 async def run_chain(
-    url: str,
-    fetcher: Any,
+    url: str = EXAMPLE_URL,
+    fetcher: Any = None,
     *,
+    cffi_fetcher: Any = None,
     policy: dict[str, Any],
     scheduler: Any = None,
     browser_worker: Any = None,
@@ -558,6 +573,12 @@ async def run_chain(
     needed, and a copy that dropped a slot would quietly exercise a different
     chain than the test describes. ``scheduler`` is a parameter so a test can
     inspect the cooldown or delay the chain set on it.
+
+    ``cffi_fetcher`` is a parameter for the tests whose point is that a ladder
+    step answers differently from the one before it -- the cookie-retry and
+    cffi-escalation suites fail or succeed per transport on purpose. Omitting it
+    means "the cffi step behaves like the http step", which is what a
+    single-fetcher chain test means.
     """
     from app.crawl.strategy_chain import execute_crawl_chain
     from app.scheduler import DomainScheduler
@@ -569,7 +590,7 @@ async def run_chain(
         normalized_url=url,
         policy=policy,
         http_fetcher=fetcher,
-        cffi_fetcher=fetcher,
+        cffi_fetcher=fetcher if cffi_fetcher is None else cffi_fetcher,
         browser_worker=browser_worker,
         scheduler=scheduler,
         domain=urlparse(url).netloc,
@@ -586,11 +607,7 @@ async def run_cached_twice(url: str, policy: dict[str, Any], fetcher: Any, cache
     """
     results = [
         await run_http_strategy(
-            url=url,
-            policy=policy,
-            http_fetcher=fetcher,
-            cache=cache,
-            content_cache=content_cache,
+            url, policy, fetcher, cache=cache, content_cache=content_cache
         )
         for _ in range(2)
     ]
@@ -657,7 +674,6 @@ def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> Strateg
 
 
 async def run_http_strategy(
-    *,
     url: str,
     policy: dict[str, Any],
     http_fetcher: Any,

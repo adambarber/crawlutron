@@ -30,9 +30,7 @@ def _is_attr_get(node: ast.AST) -> bool:
     The two detectors below differ only in what they then require of the
     receiver and the argument, so the call shape itself is stated once.
     """
-    return (
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-    )
+    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
 
 
 def _is_env_get(node: ast.AST) -> bool:

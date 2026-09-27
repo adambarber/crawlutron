@@ -9,12 +9,19 @@ retry that follows the render.
 import asyncio
 from contextlib import contextmanager
 
-from _browser_doubles import BrowserFakePage, build_pinned_renderer
+from _browser_doubles import BrowserFakePage, ScriptedPage, build_pinned_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from app.validation import registrable_domain
+
+
+def _page_with_context():
+    """A page whose cookie store answers with one session cookie."""
+    page = ScriptedPage()
+    page.context = _FakeContext()
+    return page
 
 
 class _FakeContext:
@@ -24,11 +31,6 @@ class _FakeContext:
         # read sees after the await returns.
         await asyncio.sleep(0)
         return [{"name": "sess", "value": "abc123"}]
-
-
-class _FakePage:
-    def __init__(self):
-        self.context = _FakeContext()
 
 
 @contextmanager
@@ -58,7 +60,7 @@ class TestCookieHarvestCompletes:
         url = "http://harvest-race.test/page"
         with isolated_browser_cookies(url) as domain:
             renderer = BrowserRenderer()
-            await renderer._harvest_session_cookies(_FakePage(), url)
+            await renderer._harvest_session_cookies(_page_with_context(), url)
             # The synchronous read the cffi retry performs must see cookies NOW.
             assert browser_mod.get_browser_cookies_for(domain) == "sess=abc123"
 

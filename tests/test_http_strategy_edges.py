@@ -4,6 +4,7 @@ import os
 import pytest
 from _fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from _policy_factories import http_strategy_policy
+from _transport_doubles import join_or_kill
 from helpers.server import _Handler, spawn_threaded_server
 
 
@@ -68,11 +69,7 @@ class TestHttpStrategyEdges:
         worker = multiprocessing.Process(target=_cffi_smoke_worker, args=(url, out_queue))
         try:
             worker.start()
-            worker.join(timeout=10.0)
-            if worker.is_alive():
-                worker.terminate()
-                worker.join()
-                pytest.fail("cffi fetcher hung past 10s on a normal response")
+            join_or_kill(worker, 10.0, "the cffi fetcher on a normal response")
         finally:
             server.shutdown()
             server.server_close()

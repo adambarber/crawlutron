@@ -5,55 +5,35 @@ tabs and crashes/OOMs the shared Camoufox process.
 """
 
 import asyncio
+from functools import partial
 
+from _browser_doubles import DEFAULT_PAGE_HTML, ScriptedPage, scripted_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
-from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 
 
-class _FakeElement:
-    def __init__(self, selector):
-        self.selector = selector
+async def _track_overlapping_tabs(page, *, tracker):
+    """Count the tabs open at the same moment, which is the cap's whole job.
+
+    A scheduling point, not a duration: the cap decides how many tabs may be
+    open *concurrently*, and ``tracker["max"]`` is that number. A cap that
+    serialized renders entirely would report 1, and a cap that ignored the cap
+    would report 6, with no stopwatch involved.
+    """
+    tracker["n"] += 1
+    tracker["max"] = max(tracker["max"], tracker["n"])
+    await asyncio.sleep(0)
+    tracker["n"] -= 1
 
 
-class _FakePage:
-    def __init__(self, tracker):
-        self._tracker = tracker
-        self.url = "http://example.com/"
-
-    async def route(self, pattern, handler):
-        return None
-
-    def on(self, event, handler):
-        return None
-
-    async def set_extra_http_headers(self, headers):
-        return None
-
-    async def goto(self, url, wait_until="load", **kwargs):
-        # Yield once so overlapping renders are observable. A single scheduling
-        # point is all the window this needs: the cap's job is to decide how
-        # many tabs may be open at the same time, and ``tracker["max"]`` is that
-        # number. A cap that serialized renders entirely would report 1, and a
-        # cap that ignored the cap would report 6, with no stopwatch involved.
-        self._tracker["n"] += 1
-        self._tracker["max"] = max(self._tracker["max"], self._tracker["n"])
-        await asyncio.sleep(0)
-        self._tracker["n"] -= 1
-
-    async def evaluate(self, expression):
-        if "readyState" in expression:
-            return "complete"
-        if "document.title" in expression:
-            return "Fake Title"
-        return ""
-
-    async def content(self):
-        return "<html><body><h1>Visible body text</h1></body></html>"
-
-    async def close(self):
-        return None
+def _capped_page(tracker):
+    return ScriptedPage(
+        url="http://example.com/",
+        on_goto=partial(_track_overlapping_tabs, tracker=tracker),
+        answers={"readyState": "complete", "document.title": "Fake Title"},
+        html=DEFAULT_PAGE_HTML,
+    )
 
 
 class _FakeBrowser:
@@ -61,28 +41,17 @@ class _FakeBrowser:
         self._tracker = tracker
 
     async def new_page(self, **kwargs):
-        return _FakePage(self._tracker)
+        return _capped_page(self._tracker)
 
     @property
     def is_closed(self):
         return False
 
 
-class _FakeBrowserCM:
-    def __init__(self, tracker):
-        self.browser = _FakeBrowser(tracker)
-
-    async def __aenter__(self):
-        return self.browser
-
-    async def __aexit__(self, *exc):
-        return False
-
-
 async def test_concurrent_page_renders_capped(monkeypatch):
     monkeypatch.setenv("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "2")
     tracker = {"n": 0, "max": 0}
-    renderer = BrowserRenderer(browser_factory=lambda **kw: _FakeBrowserCM(tracker))
+    renderer = scripted_renderer(_FakeBrowser(tracker))
     try:
         opts = RenderOptions(browser_profile={})
         await asyncio.gather(

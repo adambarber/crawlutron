@@ -111,7 +111,10 @@ async def test_redirect_loop_is_bounded_by_hop_limit(monkeypatch):
     """The manual loop must terminate even on indefinite redirects (F1)."""
     requested, _seen = _scripted_pool(
         monkeypatch,
-        [MockResponse(302, {"location": "http://a.example/"}) for _ in range(pinned_mod._MAX_REDIRECT_HOPS + 1)],
+        [
+            MockResponse(302, {"location": "http://a.example/"})
+            for _ in range(pinned_mod._MAX_REDIRECT_HOPS + 1)
+        ],
     )
     _allow_every_host(monkeypatch)
 

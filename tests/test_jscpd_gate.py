@@ -121,8 +121,7 @@ def _stub_report(
                     "secondFile": _stripped(duplicate["secondFile"], roots[0]),
                 }
                 for duplicate in duplicates
-                if _inside(duplicate["firstFile"]["name"])
-                and _inside(duplicate["secondFile"]["name"])
+                if _inside(duplicate["firstFile"]["name"]) and _inside(duplicate["secondFile"]["name"])
             ]
         else:
             # The cross-tree pass: pairs that SPAN roots, named without their root
@@ -131,7 +130,9 @@ def _stub_report(
                 {
                     **duplicate,
                     "firstFile": _stripped(duplicate["firstFile"], _root_of(duplicate["firstFile"]["name"])),
-                    "secondFile": _stripped(duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])),
+                    "secondFile": _stripped(
+                        duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])
+                    ),
                 }
                 for duplicate in duplicates
                 if _straddles(duplicate)
@@ -192,9 +193,7 @@ def _root_relative(root: str, location: dict) -> dict:
 
 #: The scan roots this file's stubs understand, read from the gate so a root
 #: added to the gate is a root these stubs model without a second edit.
-_KNOWN_ROOTS = frozenset(
-    root for roots in gate.PROFILE_PATHS.values() for root in roots
-)
+_KNOWN_ROOTS = frozenset(root for roots in gate.PROFILE_PATHS.values() for root in roots)
 
 
 def _roots_of(command: list[str]) -> list[str]:
@@ -344,9 +343,7 @@ def _stubbed_scan(duplicates: list[dict], sources: int = 400) -> dict[str, objec
 
 
 def _without_cross_tree_scan(monkeypatch, duplicates: list[dict], sources: int = 400) -> None:
-    monkeypatch.setattr(
-        gate, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources)
-    )
+    monkeypatch.setattr(gate, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources))
 
 
 def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None:
@@ -378,9 +375,7 @@ def test_per_root_scans_alone_cannot_see_a_cross_tree_clone(monkeypatch, tmp_pat
     assert gate._run(_args()) == 0
 
 
-def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(
-    monkeypatch, tmp_path, capsys
-) -> None:
+def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(monkeypatch, tmp_path, capsys) -> None:
     """A within-tree pair is scored once, by the pass that owns its tree.
 
     The spanning invocation necessarily re-reports every within-tree clone it
@@ -467,20 +462,21 @@ def test_missing_sanctioned_clone_fails(monkeypatch, tmp_path) -> None:
     assert gate.main() == 1
 
 
+# One property: an expectation the gate cannot act on must fail the run, and the
+# only field that varies is the one carrying the defect. The legacy profile shape
+# is the same claim about a different key, so it is a row here rather than a
+# second copy of the arrange-and-assert.
 @pytest.mark.parametrize(
     ("field", "value"),
-    [("reason", " "), ("guard", "tests/test_safety_invariants.py::test_does_not_exist")],
+    [
+        ("reason", " "),
+        ("guard", "tests/test_safety_invariants.py::test_does_not_exist"),
+        ("profiles", ["all"]),
+    ],
 )
 def test_expectations_reject_unusable_attestations(monkeypatch, tmp_path, field, value) -> None:
     pair = _valid_pair()
     pair[field] = value
-    _configure(monkeypatch, tmp_path, pair, [_duplicate()])
-    assert gate.main() == 1
-
-
-def test_expectation_rejects_legacy_profile_shape(monkeypatch, tmp_path) -> None:
-    pair = _valid_pair()
-    pair["profiles"] = ["all"]
     _configure(monkeypatch, tmp_path, pair, [_duplicate()])
     assert gate.main() == 1
 
@@ -694,9 +690,9 @@ def test_one_floor_is_applied_to_every_root(monkeypatch, tmp_path) -> None:
         (command[command.index("--min-lines") + 1], command[command.index("--min-tokens") + 1])
         for command in commands
     }
-    assert carried == {
-        (str(_CONFIGURED_MIN_LINES), str(_CONFIGURED_MIN_TOKENS))
-    }, f"roots scored at differing floors: {sorted(carried)}"
+    assert carried == {(str(_CONFIGURED_MIN_LINES), str(_CONFIGURED_MIN_TOKENS))}, (
+        f"roots scored at differing floors: {sorted(carried)}"
+    )
 
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_path, capsys) -> None:
@@ -934,5 +930,7 @@ def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment()
     for pair in gate._expected_pairs():
         guard = pair["guard"]
         path, _, node = guard.partition("::")
-        assert node in gate._test_names(gate.SERVICE_ROOT / path), f"{pair['id']} names a guard that is not there"
+        assert node in gate._test_names(gate.SERVICE_ROOT / path), (
+            f"{pair['id']} names a guard that is not there"
+        )
         assert len(pair["fragment_sha256"]) == 64, f"{pair['id']} has no content pin"

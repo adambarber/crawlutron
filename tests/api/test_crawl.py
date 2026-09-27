@@ -5,7 +5,13 @@ import json
 import time
 
 import pytest
-from _assertions import accepted_crawl, browser_available, completed_crawl
+from _assertions import (
+    accepted_crawl,
+    assert_pool_unavailable,
+    assert_result_failed,
+    browser_available,
+    completed_crawl,
+)
 from _fetcher_factories import make_crawl_payload
 from _job_harnesses import post_render_with_pool
 from helpers.server import WEBHOOK_RECEIVED
@@ -84,11 +90,8 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert f"{self.base}/page2" in diagnostics["discovery"]["sitemap_urls"]
 
     async def test_v1_crawl_404_is_classified_not_found(self):
-        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][
-            0
-        ]
-        assert result["status"] == "failed"
-        assert result["classification"] == "not_found"
+        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][0]
+        assert_result_failed(result, "not_found")
 
     async def test_v1_crawl_rejects_payload_without_url(self):
         resp = await self.client.post("/v1/crawl", json={"policy": {"strategies": [HTTP_DECLARED_CRAWLER]}})
@@ -283,9 +286,9 @@ class TestDiscoveryAndRenderApi:
                     )
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _ExhaustedWorker)
-        resp = await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x")
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "browser_pool_unavailable"
+        assert_pool_unavailable(
+            await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x")
+        )
 
     async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
         # A render worker that raises a plain Exception (not pool exhaustion)

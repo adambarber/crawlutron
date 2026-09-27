@@ -12,6 +12,7 @@ from _browser_doubles import (
     assert_route_decision,
     response_handler_double,
     run_blocking_document_route,
+    run_route_with_pinner,
     ssrf_route_handler,
 )
 from _policy_factories import UNRESTRICTED_HOST_POLICY
@@ -71,18 +72,11 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
 async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
     """Safe subresource requests should be pinned to validated IP and continued
     with the pinned URL and original Host header."""
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    # Mock _build_pinned_request (sync - runs in thread pool via asyncio.to_thread)
-    def mock_build_pinned_request(url, headers, *, policy):
-        # Simulate DNS resolution + pinning
-        return ("http://1.2.3.4:80/path", {"Host": "example.com"})
-
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
-
-    route = FakeRoute()
-    request = FakeRequest("http://example.com/path", "document")
-    await handler(route, request)
+    route = await run_route_with_pinner(
+        monkeypatch,
+        "http://example.com/path",
+        pinned=("http://1.2.3.4:80/path", {"Host": "example.com"}),
+    )
 
     assert route.decision == "continue"
     assert route.continued_url == "http://1.2.3.4:80/path"
@@ -91,17 +85,11 @@ async def test_ssrf_route_handler_pins_safe_subresource(monkeypatch):
 
 async def test_ssrf_route_handler_aborts_unsafe_subresource(monkeypatch):
     """Unsafe subresource requests (resolving to private IP) should be aborted."""
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    # Mock _build_pinned_request (sync) to raise ValueError for unsafe target
-    def mock_build_pinned_request(url, headers, *, policy):
-        raise ValueError("SSRF protection: hostname resolves to private IP")
-
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", mock_build_pinned_request)
-
-    route = FakeRoute()
-    request = FakeRequest("http://127.0.0.1:9/", "document")
-    await handler(route, request)
+    route = await run_route_with_pinner(
+        monkeypatch,
+        "http://127.0.0.1:9/",
+        raises=ValueError("SSRF protection: hostname resolves to private IP"),
+    )
 
     assert route.decision == "abort"
 

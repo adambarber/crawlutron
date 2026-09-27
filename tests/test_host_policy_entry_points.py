@@ -421,14 +421,18 @@ async def _probe_mcp_crawl(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "execute_crawl", _blocked_http)
-    await _assert_refused(tools._handle_crawl(_tool_payload("crawl", url=_BLOCKED_URL), _denied_settings(), None), {})
+    await _assert_refused(
+        tools._handle_crawl(_tool_payload("crawl", url=_BLOCKED_URL), _denied_settings(), None), {}
+    )
 
 
 async def _probe_mcp_map(monkeypatch, tmp_path):
     from app.mcp import tools
 
     monkeypatch.setattr(tools, "map_site", _blocked_http)
-    await _assert_refused(tools._handle_map(_tool_payload("map", url=_BLOCKED_URL), _denied_settings(), None), {})
+    await _assert_refused(
+        tools._handle_map(_tool_payload("map", url=_BLOCKED_URL), _denied_settings(), None), {}
+    )
 
 
 async def _probe_mcp_render(monkeypatch, tmp_path):

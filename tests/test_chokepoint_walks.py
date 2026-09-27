@@ -24,10 +24,14 @@ _SOURCE = "value = 1\n"
 
 def _fires_on_marker(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A detector whose entire behaviour is 'flag a call named marker'."""
-    return [f"{path}:1 marker"] if any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "marker"
-        for node in ast.walk(tree)
-    ) else []
+    return (
+        [f"{path}:1 marker"]
+        if any(
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "marker"
+            for node in ast.walk(tree)
+        )
+        else []
+    )
 
 
 def _never_fires(tree: ast.AST, path: pathlib.Path) -> list[str]:

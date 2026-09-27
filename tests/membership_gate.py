@@ -50,6 +50,7 @@ from chokepoint_walks import (
     nodes_of,
     non_member_literals,
     offender,
+    real_members,
 )
 
 # The result dataclasses whose Literal-typed fields are the membership
@@ -665,17 +666,22 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
 
 
 def error_field_taxonomy_offenders(
-    tree: ast.AST, path: pathlib.Path, *, members: frozenset[str]
+    tree: ast.AST, path: pathlib.Path, *, members: frozenset[str] | None = None
 ) -> list[str]:
     """Flag a literal ``error=`` handed to a result primitive that is not a
     Classification member.
 
-    ``members`` is the Classification value set (derived, not transcribed). A
+    ``members`` defaults to the live ``CrawlError`` members -- the *union* of
+    the classification and error-code taxonomies, which is what makes
+    ``CrawlError`` a taxonomy rather than a restatement of one of them. The
+    default is resolved, not transcribed. A
     non-literal value is what a correct caller writes and passes without
     comment; ``None`` is the honest "no error" label and is admitted -- that
     admission is :func:`chokepoint_walks.spelled_non_member`, not a branch
     here.
     """
+    if members is None:
+        members = real_members("CrawlError")
     return [
         offender(
             path,

@@ -322,7 +322,9 @@ def test_missing_migration_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "missing-column.db"
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
-    _assert_reopen_refused(db_path, "ALTER TABLE crawl_jobs DROP COLUMN transient_retries", match="transient_retries")
+    _assert_reopen_refused(
+        db_path, "ALTER TABLE crawl_jobs DROP COLUMN transient_retries", match="transient_retries"
+    )
 
 
 def test_out_of_band_extra_column_is_refused_when_store_reopens(tmp_path):

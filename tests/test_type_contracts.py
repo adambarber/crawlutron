@@ -30,6 +30,7 @@ from app.models import HttpFetchContract, HttpFetcher
 # are spelled once in the whole tree and there is no twin to keep in step.
 _CONCRETE_FETCHERS = [pytest.param(_default_http_fetcher, id="_default_http_fetcher")]
 
+
 def _contract_signature() -> dict[str, object]:
     """The contract's own shape, read off ``HttpFetchContract``.
 
@@ -50,9 +51,7 @@ def _contract_signature() -> dict[str, object]:
         for param in parameters
         if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
     )
-    keyword_only = tuple(
-        param.name for param in parameters if param.kind is inspect.Parameter.KEYWORD_ONLY
-    )
+    keyword_only = tuple(param.name for param in parameters if param.kind is inspect.Parameter.KEYWORD_ONLY)
     return {
         "positional": positional,
         "keyword_only": keyword_only,

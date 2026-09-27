@@ -332,14 +332,25 @@ def spawn_server() -> TestServer:
 # --- Special-purpose handlers for cache/revalidation fixtures (conftest.py) ---
 
 
-class CountingHandler(BaseHTTPRequestHandler):
-    """Serves one cacheable page and counts hits on ``server.hits``."""
+class SilentHandler(BaseHTTPRequestHandler):
+    """A request handler that answers with one body and says nothing in the log.
 
-    def do_GET(self):
-        self.server.hits += 1  # type: ignore[attr-defined]
-        body = b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>"
-        self.send_response(200)
-        self.send_header("content-type", "text/html; charset=utf-8")
+    Two things every fixture handler here was re-spelling. ``send_body`` is the
+    response shape -- status, the headers you name, a content-length that
+    matches the body actually written, then the body. Spelled per handler, a
+    content-length that disagreed with the body was invisible, because nothing
+    compares the two.
+
+    ``log_message`` is the silence. ``BaseHTTPRequestHandler`` writes a line to
+    stderr per request, and in a suite this size that buries the failures; four
+    copies of a method whose only job is to return is four places for the next
+    handler to forget it.
+    """
+
+    def send_body(self, status: int, body: bytes, **headers: str) -> None:
+        self.send_response(status)
+        for name, value in headers.items():
+            self.send_header(name, value)
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -348,7 +359,19 @@ class CountingHandler(BaseHTTPRequestHandler):
         return
 
 
-class EtagHandler(BaseHTTPRequestHandler):
+class CountingHandler(SilentHandler):
+    """Serves one cacheable page and counts hits on ``server.hits``."""
+
+    def do_GET(self):
+        self.server.hits += 1  # type: ignore[attr-defined]
+        self.send_body(
+            200,
+            b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>",
+            **{"content-type": "text/html; charset=utf-8"},
+        )
+
+
+class EtagHandler(SilentHandler):
     """Serves one page with a fixed etag and honors If-None-Match.
 
     Tests may temporarily mutate the ``etag`` / ``body`` class attributes
@@ -368,15 +391,7 @@ class EtagHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         server.hits += 1  # type: ignore[attr-defined]
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("ETag", self.etag)
-        self.send_header("Content-Length", str(len(self.body)))
-        self.end_headers()
-        self.wfile.write(self.body)
-
-    def log_message(self, *args: Any) -> None:  # silence
-        return
+        self.send_body(200, self.body, **{"Content-Type": "text/html", "ETag": self.etag})
 
 
 def spawn_threaded_server(handler_cls) -> ThreadingHTTPServer:

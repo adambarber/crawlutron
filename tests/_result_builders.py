@@ -61,6 +61,36 @@ def engine_result(url: str, classification: str, **overrides: Any):
     return EngineCrawlResult(**fields)
 
 
+def skipped_result(
+    url: str,
+    classification: str,
+    *,
+    strategy: str,
+    error: str,
+    normalized_url: str | None = None,
+):
+    """A ``_skipped_engine_result`` for `url`, built through the real primitive.
+
+    The skipped-result builders are one per classification site in production, and
+    a test that wants to check the builder's status against the classification
+    table needs all five of its arguments to agree. Written out, ``error`` and
+    ``strategy`` drifted: one suite kept asserting a skipped verdict while naming
+    an error string the production builder never emits for that classification,
+    which is exactly the drift the table exists to catch.
+    """
+    from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
+
+    return _skipped_engine_result(
+        TerminalResult(
+            original_url=url,
+            normalized_url=normalized_url or url,
+            strategy=strategy,
+            classification=classification,
+            error=error,
+        )
+    )
+
+
 def _successful_engine_result(
     url: str,
     *,

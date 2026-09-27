@@ -51,3 +51,13 @@ class CoordinationStore:
         # Intra-process serialization only. Cross-process ordering is SQLite's
         # job, and is the entire reason these stores exist.
         self._lock = threading.Lock()
+
+    def close(self) -> None:
+        """Close the connection under the lock.
+
+        On the base, not on each store: every subclass had written these three
+        lines, so the close of a store nobody had extended was the one place
+        still holding a connection open, and a new store could forget it.
+        """
+        with self._lock:
+            self._conn.close()

@@ -154,3 +154,39 @@ __all__ = [
     "http_strategy_policy",
     "make_base_policy",
 ]
+
+
+def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
+    """The limits block a crawl fixture needs, with overrides merged over it.
+
+    ``timeout_seconds: 10`` is the live-server profile, on the same reasoning as
+    :data:`_STRATEGY_LIMITS` -- a fixture that timed out reports a transport
+    problem for a policy that was too tight, which is the most expensive kind of
+    wrong. Stated inline it was four copies of the same three numbers, and a
+    profile change was four edits of which one would have been missed.
+
+    ``respect_robots`` is a switch tests flip rather than a number they tune, so
+    it is a keyword; ``None`` leaves it out of the block entirely rather than
+    writing a default no caller asked for.
+    """
+    limits: dict = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10}
+    if respect_robots is not None:
+        limits["respect_robots"] = respect_robots
+    limits.update(over)
+    return limits
+
+
+def crawl_policy(strategies=None, *, limits: dict | None = None, discovery: dict | None = None) -> dict:
+    """A crawl policy carrying strategies, limits, and the named extra blocks.
+
+    The shape four tests each rebuilt around the same limits block. ``discovery``
+    is named rather than passed through ``**extra`` so that what a policy can
+    carry is a decision made here instead of a decision each caller makes.
+    """
+    policy: dict = {
+        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
+        "limits": crawl_limits(**(limits or {})),
+    }
+    if discovery is not None:
+        policy["discovery"] = discovery
+    return policy

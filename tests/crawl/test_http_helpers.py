@@ -11,6 +11,7 @@ from _fetcher_factories import (
     ok_fetcher,
     raise_fetcher,
     routed_fetcher,
+    run_chain,
     scripted_fetcher,
     strategy_request,
 )
@@ -61,7 +62,6 @@ from app.crawl.strategies.request_profile import (
     _headers_for_strategy,
     _select_fingerprint,
 )
-from app.crawl.strategy_chain import execute_crawl_chain
 from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -405,30 +405,28 @@ class TestHttpStrategyResult:
 
 
 class TestExecuteCrawlChain:
-    async def _run_chain(self, strategy, **kwargs):
-        return await execute_crawl_chain(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            policy=dict(make_base_policy(), strategies=[strategy]),
-            http_fetcher=ok_fetcher,
-            cffi_fetcher=ok_fetcher,
-            browser_worker=None,
-            host_policy=HostPolicy.unrestricted(),
-            **kwargs,
+    async def test_http_strategy_runs(self) -> None:
+        assert_result_success(
+            await run_chain(
+                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=[HTTP_DECLARED_CRAWLER])
+            )
         )
 
-    async def test_http_strategy_runs(self) -> None:
-        assert_result_success(await self._run_chain(HTTP_DECLARED_CRAWLER))
-
     async def test_browser_strategy_without_worker(self) -> None:
-        assert (await self._run_chain(BROWSER_HEADLESS)).classification == "browser_crash"
+        assert (
+            await run_chain(
+                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=[BROWSER_HEADLESS])
+            )
+        ).classification == "browser_crash"
 
     async def test_unsupported_strategy(self) -> None:
         # A strategy outside CrawlStrategyName is rejected at construction of the
         # attempt: the strategy axis is a Literal, so an invalid value cannot
         # reach a result and callers see a ValueError naming the field.
         with pytest.raises(ValueError, match=r"\.strategy="):
-            await self._run_chain("NOT_A_STRATEGY")
+            await run_chain(
+                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=["NOT_A_STRATEGY"])
+            )
 
 
 class TestCrawlRequest:

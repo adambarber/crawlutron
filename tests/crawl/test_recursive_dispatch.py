@@ -90,9 +90,7 @@ async def test_an_override_production_does_not_take_is_rejected(keyword, value):
         return make_engine_result(job.normalized_url)
 
     with pytest.raises(TypeError, match=keyword):
-        await drive_recursive_crawl(
-            [make_crawl_task(0, "a")], worker, allows=_allows, **{keyword: value}
-        )
+        await drive_recursive_crawl([make_crawl_task(0, "a")], worker, allows=_allows, **{keyword: value})
 
 
 async def test_a_real_override_still_reaches_production():
@@ -228,28 +226,30 @@ def _tiered_worker(fail_index: int | None = None):
     return worker
 
 
+def _open_scheduler(*pinned_domains: str):
+    """A scheduler wide enough not to serialize, with ``pinned_domains`` on the browser tier."""
+    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
+    for domain in pinned_domains:
+        scheduler.set_pinned_strategy(domain, BROWSER_HEADLESS)
+    return scheduler
+
+
+def _interleaved_jobs():
+    """Four jobs whose index order alternates browser, http, browser, http.
+
+    The interleaving is the point: ``_pop_admitted`` emits tasks HTTP-first (tier
+    order) while ``DomainScheduler.run`` reports results in index order with
+    failures filtered out, so a batch that is all one tier never exercises the
+    mis-pairing.
+    """
+    return [_tiered_job(0, "b1"), _tiered_job(1, "h1"), _tiered_job(2, "b2"), _tiered_job(3, "h2")]
+
+
 async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
     """A batch that interleaves HTTP and browser-pinned tasks must still write
-    each result to its own job index.
-
-    ``_pop_admitted`` emits tasks HTTP-first (tier order) while
-    ``DomainScheduler.run`` reports results in index order with failures
-    filtered out, so zipping the two mis-pairs every interleaved job.
-    """
-    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
-    scheduler.set_pinned_strategy("b1", BROWSER_HEADLESS)
-    scheduler.set_pinned_strategy("b2", BROWSER_HEADLESS)
-
-    # index/tier order deliberately interleaved: browser, http, browser, http
-    jobs = [
-        _tiered_job(0, "b1"),
-        _tiered_job(1, "h1"),
-        _tiered_job(2, "b2"),
-        _tiered_job(3, "h2"),
-    ]
-
-    worker = _tiered_worker()
-    spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
+    each result to its own job index."""
+    jobs = _interleaved_jobs()
+    spill, _, _ = await _run(jobs, _tiered_worker(), scheduler=_open_scheduler("b1", "b2"))
 
     assert_spill_keeps_job_pairing(spill, jobs)
 
@@ -257,11 +257,8 @@ async def test_mixed_http_browser_batch_aligns_each_result_to_its_own_index():
 async def test_failed_job_does_not_shift_other_results():
     """A job whose worker raises must not shift the pairing of later jobs, and
     must still receive its own failure envelope instead of vanishing."""
-    scheduler = DomainScheduler(global_limit=8, per_domain_limit=8, delay_seconds=0.0)
     jobs = [_tiered_job(i, f"h{i}") for i in range(4)]
-
-    worker = _tiered_worker(fail_index=1)
-    spill, _, _ = await _run(jobs, worker, scheduler=scheduler)
+    spill, _, _ = await _run(jobs, _tiered_worker(fail_index=1), scheduler=_open_scheduler())
 
     assert_spill_keeps_job_pairing(spill, jobs)
     assert spill.writes[1].status == "failed"

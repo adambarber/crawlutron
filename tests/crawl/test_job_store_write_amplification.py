@@ -127,7 +127,9 @@ def _accumulated_bytes(db_path, job_id: str) -> int:
 
 def _result_rows(db_path, job_id: str) -> int:
     with _on_disk(db_path) as conn:
-        return conn.execute("SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)).fetchone()[0]
+        return conn.execute("SELECT count(*) FROM crawl_job_results WHERE job_id = ?", (job_id,)).fetchone()[
+            0
+        ]
 
 
 def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:

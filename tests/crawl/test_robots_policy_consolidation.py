@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from _fetcher_factories import make_html_fetcher
+from _policy_factories import crawl_policy
 
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request
@@ -18,15 +19,7 @@ from app.validation import HostPolicy
 
 
 def _policy(*, respect_robots: bool = True) -> dict:
-    return {
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
-        "limits": {
-            "timeout_seconds": 10,
-            "max_retries": 0,
-            "max_discovered_links": 10,
-            "respect_robots": respect_robots,
-        },
-    }
+    return crawl_policy(limits={"respect_robots": respect_robots})
 
 
 def _gate() -> RobotsGate:

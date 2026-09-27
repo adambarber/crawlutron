@@ -1,5 +1,7 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
+from _result_builders import skipped_result
+
 
 class TestResultHelpersEdges:
     """Cover remaining branches in result_helpers.py"""
@@ -47,7 +49,7 @@ class TestTerminalResultContract:
         from app.crawl.result_helpers import TerminalResult, _failed_engine_result
 
         result = _failed_engine_result(
-    TerminalResult(
+            TerminalResult(
                 original_url="http://a/",
                 normalized_url="http://a/",
                 strategy="HTTP_DECLARED_CRAWLER",
@@ -56,7 +58,8 @@ class TestTerminalResultContract:
                 http_status=502,
                 final_url="http://a/final",
                 diagnostics={"k": "v"},
-))
+            )
+        )
         assert result.status == "failed"
         assert result.classification == "network_error"
         assert result.error == "connection_error"
@@ -75,16 +78,12 @@ class TestTerminalResultContract:
         }
 
     def test_skipped_engine_result_never_carries_url_or_status(self):
-        from app.crawl.result_helpers import TerminalResult, _skipped_engine_result
-
-        result = _skipped_engine_result(
-    TerminalResult(
-                original_url="http://c/",
-                normalized_url="http://c/",
-                strategy="HTTP_DECLARED_CRAWLER",
-                classification="robots_disallowed",
-                error="robots_txt_disallowed",
-))
+        result = skipped_result(
+            "http://c/",
+            "robots_disallowed",
+            strategy="HTTP_DECLARED_CRAWLER",
+            error="robots_txt_disallowed",
+        )
         assert result.status == "skipped"
         assert result.final_url is None
         assert result.http_status is None
