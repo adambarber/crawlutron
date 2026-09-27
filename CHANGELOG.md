@@ -222,6 +222,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   classification and metadata paths.
 
 ### Hardening
+- **The jscpd gate can now see a clone that spans two trees**
+  (tests/_jscpd_gate.py, tests/test_jscpd_gate.py): the gate ran one scan
+  invocation per root, which is what lets a report say which tree it is
+  talking about — and which means a fragment shared between `app/` and
+  `tests/` was compared by no invocation at all. `tests/_recursive_harnesses.py`
+  re-spelling production's `run_recursive_crawl` signature was exactly that: a
+  20-line mirror every per-tree pass was blind to by construction. A second
+  spanning scan now runs over every root; jscpd reports a name with its root
+  stripped in that mode, so the gate re-attaches the root against the
+  filesystem. A name in no root, or in two, is no longer guessed into a
+  silent pass — unresolvable raises, ambiguous is kept and reported, because
+  dropping a real cross-tree clone reads as clean.
+  `test_per_root_scans_alone_cannot_see_a_cross_tree_clone` asserts the gap
+  rather than trusting this note, and fails if the per-root scans ever grow the
+  ability to compare across roots, at which point the spanning invocation
+  should be deleted rather than kept paying for a second full scan every run.
+- **Duplicate floor 4/39 → 4/25, and the two survivors are declared**
+  (.pre-commit-config.yaml, jscpd-expectations.json): 4/39 was a number that
+  made this tree look clean. Measured at 4/25 it was not — `app/` carried 6
+  pairs in the 26-36 token band and the tree carried one more that no per-tree
+  gate could see. All seven are gone, and the floor is now 4/25, so the band
+  most real duplication in this tree measures at is enforced rather than
+  assumed empty. The two remaining `app/` pairs are **declared** rather than
+  hidden above the floor: each is duplication a machine-checked guard exists to
+  compare (the `HttpFetchContract` twin signature, the selector pair), so the
+  tree holds the copy on purpose and the guard is what makes holding it safe.
+  Each entry pins its fragment by content hash and names the guard, so editing
+  either side turns the entry into an unsanctioned clone and sends the change
+  back through review.
+- **The recursive-crawl harness derives its contract instead of restating it**
+  (tests/_recursive_harnesses.py, tests/crawl/test_recursive_dispatch.py):
+  `drive_recursive_crawl` named all twenty of `run_recursive_crawl`'s keywords
+  a second time. It now takes the uncontested defaults from `_crawl_defaults`
+  and binds every keyword against production's own `inspect.signature`, so the
+  list of keywords exists in exactly one place. This is not a `**kwargs`
+  catch-all, and the tests say so by measurement: a harness that silently
+  dropped unknown keywords fails both contract tests and passes the other nine.
+  A misspelled `max_dept` names itself instead of becoming a bound nobody set,
+  and a keyword production has dropped cannot be handed over as a default the
+  caller chose nothing about.
 - **Bounded `_PENDING_CLIENT_CLOSE`** (app/crawl/strategies/http.py):
   the async-pending client close list is now bounded at 32 entries with
   a `threading.Lock`, preventing unbounded growth across a stream of
