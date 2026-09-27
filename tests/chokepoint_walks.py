@@ -520,9 +520,16 @@ def assert_detector(
     ``trips`` rejects 0 rather than accepting it: "must not fire" already has a
     spelling, and a count of 0 as a second one would let the same fact drift
     between two forms and make a mis-edited count read as a passing proof.
+
+    Detector output is normalized to a list HERE rather than at each call site.
+    The tree's detectors are split between ``list[str]`` and generators, and that
+    split is worse than cosmetic: ``not <generator>`` is always True, so an
+    over-matching generator detector would satisfy a hand-rolled ``assert not
+    offenders`` while reporting everything. Normalizing once means a caller
+    cannot get that wrong, and a new detector can be written either way.
     """
     for src, why in (fires or {}).items():
-        offenders = detector(ast.parse(src), path)
+        offenders = list(detector(ast.parse(src), path))
         assert len(offenders) == 1, f"expected exactly 1 offender for {src!r}, got {offenders!r}"
         assert why in offenders[0], f"{offenders[0]!r} does not say {why!r}"
     for src, count in (trips or {}).items():
@@ -530,10 +537,10 @@ def assert_detector(
             raise ValueError(
                 f"trips[{src!r}] = {count}: a source that must not fire belongs in clean, not trips"
             )
-        offenders = detector(ast.parse(src), path)
+        offenders = list(detector(ast.parse(src), path))
         assert len(offenders) == count, f"expected {count} offenders for {src!r}, got {offenders!r}"
     for src in clean:
-        offenders = detector(ast.parse(src), path)
+        offenders = list(detector(ast.parse(src), path))
         assert not offenders, f"fired on the clean shape {src!r}: {offenders!r}"
 
 

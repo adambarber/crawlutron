@@ -34,6 +34,23 @@ def _never_fires(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return []
 
 
+def _yields_once(tree: ast.AST, path: pathlib.Path):
+    """A generator-returning detector that actually discriminates.
+
+    Detectors in this tree are split between ``list[str]`` and generators, which
+    is why the hand-rolled proofs each had to remember ``list(...)`` before they
+    could count. A proof helper that requires every caller to normalize its own
+    detector is a chokepoint that leaks: the day a detector is written as a
+    generator, every proof calling it raises TypeError instead of running.
+    Normalization belongs here, once.
+    """
+    if any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "marker"
+        for node in ast.walk(tree)
+    ):
+        yield f"{path}:1 marker"
+
+
 def _always_fires_twice(tree: ast.AST, path: pathlib.Path) -> list[str]:
     return [f"{path}:1 first", f"{path}:2 second"]
 
@@ -90,6 +107,21 @@ def test_assert_detector_runs_both_halves() -> None:
         assert_detector(_never_fires, path=PATH, fires={"marker()\n": "marker"})
     with pytest.raises(AssertionError):
         assert_detector(_fires_on_marker, path=PATH, fires={}, clean=("marker()\n",))
+
+
+def test_a_generator_returning_detector_is_counted_like_a_list() -> None:
+    """Both halves, both detector shapes, same assertions.
+
+    Without normalization the fires half raises TypeError on ``len()`` and the
+    clean half silently passes -- ``not <generator>`` is always True, so a
+    generator detector over-matching would look clean. That asymmetry is the
+    dangerous one: a proof that cannot fail.
+    """
+    assert_detector(_yields_once, path=PATH, fires={"marker()\n": "marker"}, clean=(_SOURCE,))
+    with pytest.raises(AssertionError):
+        assert_detector(_yields_once, path=PATH, fires={"marker()\n": "marker"}, clean=("marker()\n",))
+    with pytest.raises(AssertionError):
+        assert_detector(_yields_once, path=PATH, trips={"marker()\n": 2})
 
 
 def test_assert_detector_passes_when_both_halves_hold() -> None:

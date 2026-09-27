@@ -28,6 +28,7 @@ from chokepoint_walks import (
     app_offenders,
     app_python_files,
     app_trees,
+    assert_detector,
     assert_fires_once,
     assert_stays_clean,
     assignments,
@@ -1261,16 +1262,17 @@ def test_cache_envelope_detector_bites():
     Without this, an exhausted or renamed sink pattern would report zero
     offenders and the guard above would pass forever while covering nothing.
     """
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    sneaky = ast.parse(
-        "def write(self, key, value, expires):\n"
-        '    return {"expires": expires, "value": value, "cached_at": expires}\n'
-    )
-    assert _cache_envelope_literals(sneaky, synthetic), "a hand-rolled envelope escaped the sweep"
     # A dict that merely mentions one envelope key is not an envelope, and
     # flagging it would make the guard something people route around.
-    near_miss = ast.parse('def f(expires, value):\n    return {"expires": expires, "value": value}\n')
-    assert not _cache_envelope_literals(near_miss, synthetic), "incomplete envelope flagged"
+    assert_detector(
+        _cache_envelope_literals,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "def write(self, key, value, expires):\n"
+            '    return {"expires": expires, "value": value, "cached_at": expires}\n': "cache-envelope",
+        },
+        clean=('def f(expires, value):\n    return {"expires": expires, "value": value}\n',),
+    )
 
 
 def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -1318,11 +1320,12 @@ def test_extraction_text_normalization_detector_bites():
     """The normalization sweep must fire on a hand-rolled one, and not on a
     lookalike -- otherwise it either misses the shape or flags a pattern that
     belongs to somebody else."""
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    inline = ast.parse('def f(e):\n    return e.text or ""\n')
-    assert _inline_extraction_normalizations(inline, synthetic), "inline normalization escaped"
-    other = ast.parse('def f(d):\n    return d.label or ""\n')
-    assert not _inline_extraction_normalizations(other, synthetic), "unrelated or-'' flagged"
+    assert_detector(
+        _inline_extraction_normalizations,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={'def f(e):\n    return e.text or ""\n': "extraction-text-normalization"},
+        clean={'def f(d):\n    return d.label or ""\n'},
+    )
 
 
 def _is_numeric_expr(node: ast.expr) -> bool:
@@ -1692,11 +1695,16 @@ def test_crawl_response_built_only_by_shaping_chokepoint():
 
 def test_crawl_response_chokepoint_detector_bites():
     """Synthetic bypass fires; **stored deserialization splat stays clean."""
-    bypass = ast.parse("def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n")
-    offenders = _crawl_response_construction_offenders(bypass, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    stored = ast.parse("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n")
-    assert not _crawl_response_construction_offenders(stored, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert_detector(
+        _crawl_response_construction_offenders,
+        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
+        fires={
+            "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n": (
+                "explicit UnifiedCrawlResponse"
+            )
+        },
+        clean=("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1961,24 +1969,26 @@ def test_crawl_jobs_accumulators_are_never_row_columns():
 
 def test_job_row_accumulator_detector_bites():
     """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
-    wide = ast.parse(
-        'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n'
-    )
-    offenders = _job_row_accumulator_offenders(wide, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "visited" in offenders[0], offenders
-
     # The live shape: subqueries over the accumulator tables aliased back to
     # names that CONTAIN the dropped columns. A substring match would reject
     # this, which is why the detector matches whole words.
-    clean = ast.parse(
-        "def f(conn, job):\n"
-        '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
-        "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
-        "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
-        '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
-        'as results_count FROM crawl_jobs job")\n'
+    assert_detector(
+        _job_row_accumulator_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n': (
+                "visited"
+            )
+        },
+        clean=(
+            "def f(conn, job):\n"
+            '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
+            "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
+            "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
+            '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
+            'as results_count FROM crawl_jobs job")\n',
+        ),
     )
-    assert not _job_row_accumulator_offenders(clean, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2016,14 +2026,24 @@ def test_render_options_built_only_by_resolver():
 
 def test_render_options_chokepoint_detector_bites():
     """Synthetic bypass fires; the resolver's own construction stays clean."""
-    bypass = ast.parse(
-        "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n"
+    assert_detector(
+        _render_options_construction_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n": (
+                "built outside resolve_render_options"
+            )
+        },
     )
-    offenders = _render_options_construction_offenders(bypass, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "resolve_render_options" in offenders[0], offenders
-    resolver = ast.parse("def f(request, defaults):\n    return RenderOptions(**kwargs)\n")
-    assert not _render_options_construction_offenders(
-        resolver, REPO_ROOT / "app" / "crawl" / "render_options.py"
+    # The resolver's own construction is the ONE sanctioned build site, and the
+    # exemption is a PATH exemption -- so it has to be proved at the real path. At
+    # a synthetic path the same source fires, which is the whole point: the
+    # exemption is narrow enough to not generalize, and this asserts that.
+    assert_detector(
+        _render_options_construction_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "render_options.py",
+        fires={},
+        clean=("def f(request, defaults):\n    return RenderOptions(**kwargs)\n",),
     )
 
 
@@ -2064,17 +2084,18 @@ def test_memory_cache_only_via_locked_helpers():
 
 def test_memory_cache_twin_detector_bites():
     """Synthetic drifted twin fires; helper-shaped code stays clean."""
-    bad = ast.parse(
-        "class C:\n    async def aget(self, key):\n        with self._lock:\n"
-        "            if key in self._memory_cache:\n"
-        "                return self._memory_cache[key][1]\n"
+    assert_detector(
+        _memory_cache_twin_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            "class C:\n    async def aget(self, key):\n        with self._lock:\n"
+            "            if key in self._memory_cache:\n"
+            "                return self._memory_cache[key][1]\n": "aget() reads/writes _memory_cache directly",
+        },
+        clean=(
+            "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",
+        ),
     )
-    offenders = _memory_cache_twin_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "aget" in offenders[0], offenders
-    good = ast.parse(
-        "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n"
-    )
-    assert not _memory_cache_twin_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2140,13 +2161,19 @@ def test_locked_cache_helpers_are_called_under_the_lock():
 
 def test_locked_helper_lock_ownership_detector_bites():
     """An off-lock *_locked call fires; the guarded form stays clean."""
-    bad = ast.parse("class C:\n    def get(self, key):\n        return self._remember_memory_locked(key)\n")
-    offenders = _locked_calls_outside_lock_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(offenders) == 1 and "_remember_memory_locked" in offenders[0], offenders
-    good = ast.parse(
-        "class C:\n    def get(self, key):\n        with self._lock:\n            return self._remember_memory_locked(key)\n"
+    assert_detector(
+        _locked_calls_outside_lock_offenders,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "class C:\n    def get(self, key):\n        return self._remember_memory_locked(key)\n": (
+                "_remember_memory_locked() called outside a lock context manager"
+            )
+        },
+        clean=(
+            "class C:\n    def get(self, key):\n        with self._lock:\n"
+            "            return self._remember_memory_locked(key)\n",
+        ),
     )
-    assert not _locked_calls_outside_lock_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2207,20 +2234,24 @@ def test_no_hand_rolled_error_envelopes():
 
 def test_envelope_detector_bites():
     """All three drift shapes fire; factory-shaped code stays clean."""
-    bad = ast.parse(
-        "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
-        "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
-        "raise HTTPException(status_code=404, detail='plain string')\n"
-        "raise fastapi.HTTPException(status_code=500)\n"
+    # Four offenders from one source: two bare HTTPException builds, one
+    # detail= envelope literal, one three-key dict. Counted exactly, because a
+    # detector that reported one here would be hiding which shapes it still sees.
+    assert_detector(
+        _envelope_dict_offenders,
+        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
+        trips={
+            "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
+            "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
+            "raise HTTPException(status_code=404, detail='plain string')\n"
+            "raise fastapi.HTTPException(status_code=500)\n": 4,
+        },
+        clean=(
+            "from app.api.exceptions import http_error\n"
+            "raise http_error(404, 'not_found', 'gone')\n"
+            "response = build_thing({'code': 1, 'message': 'x'})\n",
+        ),
     )
-    offenders = _envelope_dict_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 4, offenders
-    good = ast.parse(
-        "from app.api.exceptions import http_error\n"
-        "raise http_error(404, 'not_found', 'gone')\n"
-        "response = build_thing({'code': 1, 'message': 'x'})\n"
-    )
-    assert not _envelope_dict_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2270,28 +2301,32 @@ def test_no_provider_dedupe_loop_reinlines():
 
 def test_provider_loop_detector_bites():
     """The three-provider copy fires; the DDG lxml-walk shape stays clean."""
-    bad = ast.parse(
-        "async def search(self, query, limit, timeout_seconds):\n"
-        "    results = []\n"
-        "    seen: set[str] = set()\n"
-        "    for item in payload.get('results') or []:\n"
-        "        if not isinstance(item, dict):\n"
-        "            continue\n"
-        "        results.append(SearchResult(url=item.get('url')))\n"
-        "    return results\n"
+    assert_detector(
+        _provider_loop_reinlines,
+        path=REPO_ROOT / "app" / "search" / "_synthetic.py",
+        fires={
+            "async def search(self, query, limit, timeout_seconds):\n"
+            "    results = []\n"
+            "    seen: set[str] = set()\n"
+            "    for item in payload.get('results') or []:\n"
+            "        if not isinstance(item, dict):\n"
+            "            continue\n"
+            "        results.append(SearchResult(url=item.get('url')))\n"
+            "    return results\n": "dedupe loop re-inlined outside _collect_results",
+        },
+        # DDG walks lxml nodes instead of provider dicts, so it has no dict guard
+        # and the sink never reaches it -- the scope boundary is the whole reason
+        # one collector can be mandatory for keyed providers and irrelevant here.
+        clean=(
+            "async def search(self, query, limit, timeout_seconds):\n"
+            "    results = []\n"
+            "    seen: set[str] = set()\n"
+            "    for node in tree.xpath('//div'):\n"
+            "        href = node.get('href')\n"
+            "        results.append(SearchResult(url=href))\n"
+            "    return results\n",
+        ),
     )
-    offenders = _provider_loop_reinlines(bad, REPO_ROOT / "app" / "search" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    ddg_like = ast.parse(
-        "async def search(self, query, limit, timeout_seconds):\n"
-        "    results = []\n"
-        "    seen: set[str] = set()\n"
-        "    for node in tree.xpath('//div'):\n"
-        "        href = node.get('href')\n"
-        "        results.append(SearchResult(url=href))\n"
-        "    return results\n"
-    )
-    assert not _provider_loop_reinlines(ddg_like, REPO_ROOT / "app" / "search" / "_synthetic.py")
 
 
 # The names of the one selector contract; see
@@ -2520,19 +2555,20 @@ def test_robots_line_scanner_lives_in_one_place():
 
 
 def test_robots_scanner_detector_bites():
-    bad = ast.parse(
-        "def parse_robots_rules(text):\n"
-        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
-        "        yield raw\n"
+    assert_detector(
+        _robots_scanner_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            "def parse_robots_rules(text):\n"
+            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+            "        yield raw\n": "parse_robots_rules re-rolls the robots line-scanner",
+        },
+        clean=(
+            "def iter_robots_fields(text):\n"
+            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+            "        yield raw.strip()\n",
+        ),
     )
-    offenders = _robots_scanner_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 1 and "parse_robots_rules" in offenders[0], offenders
-    good = ast.parse(
-        "def iter_robots_fields(text):\n"
-        "    for raw in text.lstrip('\\ufeff').splitlines():\n"
-        "        yield raw.strip()\n"
-    )
-    assert not _robots_scanner_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2570,11 +2606,12 @@ def test_tests_do_not_hand_build_http_fetch_results():
 
 
 def test_fetch_builder_detector_bites():
-    bad = ast.parse("def f():\n    return HttpFetchResult(url='u')\n")
-    offenders = _fetcher_factory_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    good = ast.parse("def f():\n    return make_fetch(url='u')\n")
-    assert not _fetcher_factory_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
+    assert_detector(
+        _fetcher_factory_offenders,
+        path=REPO_ROOT / "tests" / "_synthetic.py",
+        fires={"def f():\n    return HttpFetchResult(url='u')\n": "make_fetch"},
+        clean=("def f():\n    return make_fetch(url='u')\n",),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2627,29 +2664,30 @@ def test_tests_do_not_relinline_poll_loop():
 
 
 def test_poll_loop_detector_bites():
-    bad = ast.parse(
-        "async def _poll_until(pred, *, timeout=10.0):\n"
-        "    async def _runner():\n"
-        "        while True:\n"
-        "            v = pred()\n"
-        "            if asyncio.iscoroutine(v):\n"
-        "                v = await v\n"
-        "            if v:\n"
-        "                return True\n"
-        "    return await asyncio.wait_for(_runner(), timeout=timeout)\n"
+    assert_detector(
+        _poll_loop_offenders,
+        path=REPO_ROOT / "tests" / "_synthetic.py",
+        fires={
+            "async def _poll_until(pred, *, timeout=10.0):\n"
+            "    async def _runner():\n"
+            "        while True:\n"
+            "            v = pred()\n"
+            "            if asyncio.iscoroutine(v):\n"
+            "                v = await v\n"
+            "            if v:\n"
+            "                return True\n"
+            "    return await asyncio.wait_for(_runner(), timeout=timeout)\n": "poll_until",
+        },
+        clean=(
+            "async def poll_until(pred, *, timeout=10.0, message=None):\n"
+            "    async def _runner():\n"
+            "        while True:\n"
+            "            if pred():\n"
+            "                return True\n"
+            "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
+            "    pytest.fail(message)\n",
+        ),
     )
-    offenders = _poll_loop_offenders(bad, REPO_ROOT / "tests" / "_synthetic.py")
-    assert len(offenders) == 1, offenders
-    good = ast.parse(
-        "async def poll_until(pred, *, timeout=10.0, message=None):\n"
-        "    async def _runner():\n"
-        "        while True:\n"
-        "            if pred():\n"
-        "                return True\n"
-        "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
-        "    pytest.fail(message)\n"
-    )
-    assert not _poll_loop_offenders(good, REPO_ROOT / "tests" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2788,20 +2826,25 @@ def test_decompression_reaches_only_through_the_chokepoint():
 
 def test_decompress_bypass_detector_bites():
     """A header-driven raw decompress fires on both import and call."""
-    bad = ast.parse(
-        "import gzip\n"
-        "def f(raw, hdr):\n"
-        "    if 'gzip' in hdr.get('content-encoding', ''):\n"
-        "        return gzip.decompress(raw)\n"
+    # Two offenders from one source: the import AND the call are each a bypass, so
+    # a source that imports the codec but routes through decompress_body has to
+    # report 1, not 2 -- the count is what proves the detector is not just
+    # keying on the import.
+    assert_detector(
+        _decompress_bypass_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        trips={
+            "import gzip\n"
+            "def f(raw, hdr):\n"
+            "    if 'gzip' in hdr.get('content-encoding', ''):\n"
+            "        return gzip.decompress(raw)\n": 2,
+        },
+        clean=(
+            "from app.crawl.decompression import decompress_body\n"
+            "def f(raw, hdr):\n"
+            "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n",
+        ),
     )
-    offenders = _decompress_bypass_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    assert len(offenders) == 2, offenders
-    good = ast.parse(
-        "from app.crawl.decompression import decompress_body\n"
-        "def f(raw, hdr):\n"
-        "    return decompress_body(raw, hdr.get('content-encoding', ''), max_output_bytes=1024)\n"
-    )
-    assert not _decompress_bypass_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -2941,11 +2984,15 @@ def test_handles_are_minted_in_one_place():
 
 
 def test_id_mint_detector_bites():
-    bad = ast.parse("import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n")
-    offenders = _id_mint_offenders(bad, REPO_ROOT / "app" / "api" / "_synthetic.py")
-    assert len(offenders) == 2, offenders  # uuid4 call AND hex slice
-    good = ast.parse("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n")
-    assert not _id_mint_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert_detector(
+        _id_mint_offenders,
+        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
+        # uuid4 call AND hex slice are two findings, not one.
+        trips={"import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n": 2},
+        clean=(
+            "from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3095,17 +3142,21 @@ def test_domain_politeness_floor_is_committed_only_via_the_setter():
 
 
 def test_domain_delay_detector_bites():
-    bad = ast.parse(
-        "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
-        "    def bump(self):\n        self._domain_min_delay['y'] += 1\n"
+    assert_detector(
+        _unbounded_domain_delay_writes,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        # Both a write and an augmented assignment are unbounded; only the
+        # setter's clamped write is not.
+        trips={
+            "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
+            "    def bump(self):\n        self._domain_min_delay['y'] += 1\n": 2,
+        },
+        clean=(
+            "class S:\n    def set_domain_min_delay(self, d, s):\n"
+            "        self._domain_min_delay[d] = min(s, 300.0)\n"
+            "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
+        ),
     )
-    offenders = _unbounded_domain_delay_writes(bad, REPO_ROOT / "app" / "_synthetic.py")
-    assert len(offenders) == 2, offenders
-    good = ast.parse(
-        "class S:\n    def set_domain_min_delay(self, d, s):\n        self._domain_min_delay[d] = min(s, 300.0)\n"
-        "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n"
-    )
-    assert not _unbounded_domain_delay_writes(good, REPO_ROOT / "app" / "_synthetic.py")
 
 
 # ---------------------------------------------------------------------------
@@ -3987,18 +4038,19 @@ def test_no_hand_rolled_failed_results_outside_the_chokepoint():
 
 
 def test_hand_rolled_failed_result_detector_bites():
-    bad = ast.parse(
-        "def f():\n"
-        "    return _failed_engine_result(\n"
-        '        classification="network_error", error="worker_exception",\n'
-        "    )\n"
+    assert_detector(
+        _hand_rolled_failed_result_offenders,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "def f():\n"
+            "    return _failed_engine_result(\n"
+            '        classification="network_error", error="worker_exception",\n'
+            "    )\n": "_engine_result_from_exception",
+        },
+        clean=(
+            'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n',
+        ),
     )
-    offenders = list(_hand_rolled_failed_result_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "_engine_result_from_exception" in offenders[0], offenders
-    good = ast.parse(
-        'def f():\n    return _failed_engine_result(\n        classification="browser_crash",\n    )\n'
-    )
-    assert not list(_hand_rolled_failed_result_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
 
 
 _POOL_EXHAUSTION_CATCH_SANCTIONED = frozenset({"render.py", "render_endpoint.py", "browser_pool.py"})
@@ -4032,22 +4084,23 @@ def test_pool_exhaustion_catch_sites_are_sanctioned():
 
 
 def test_pool_exhaustion_catch_detector_bites():
-    bad = ast.parse(
-        "async def f():\n"
-        "    try:\n"
-        "        await crawl()\n"
-        "    except BrowserPoolExhaustedError:\n"
-        "        return None\n"
+    assert_detector(
+        _unsanctioned_pool_exhaustion_catch_offenders,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "async def f():\n"
+            "    try:\n"
+            "        await crawl()\n"
+            "    except BrowserPoolExhaustedError:\n"
+            "        return None\n": "read the classification instead",
+        },
+        clean=(
+            "async def f():\n"
+            "    result = await crawl()\n"
+            "    if result.classification == 'browser_pool_exhausted':\n"
+            "        requeue()\n",
+        ),
     )
-    offenders = list(_unsanctioned_pool_exhaustion_catch_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "classification" in offenders[0], offenders
-    good = ast.parse(
-        "async def f():\n"
-        "    result = await crawl()\n"
-        "    if result.classification == 'browser_pool_exhausted':\n"
-        "        requeue()\n"
-    )
-    assert not list(_unsanctioned_pool_exhaustion_catch_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
 
 
 def test_classifier_lives_in_the_neutral_home():
@@ -4772,17 +4825,18 @@ def test_normalize_or_none_is_not_reinlined():
 
 
 def test_normalize_or_none_detector_bites():
-    bad = ast.parse(
-        "def f(u):\n"
-        "    try:\n"
-        "        return normalize_public_http_url(u)\n"
-        "    except ValueError:\n"
-        "        return None\n"
+    assert_detector(
+        _normalize_or_none_offenders,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "def f(u):\n"
+            "    try:\n"
+            "        return normalize_public_http_url(u)\n"
+            "    except ValueError:\n"
+            "        return None\n": "safe_public_url_or_none",
+        },
+        clean=("def f(u):\n    return safe_public_url_or_none(u)\n",),
     )
-    offenders = list(_normalize_or_none_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "safe_public_url_or_none" in offenders[0], offenders
-    good = ast.parse("def f(u):\n    return safe_public_url_or_none(u)\n")
-    assert not list(_normalize_or_none_offenders(good, REPO_ROOT / "app" / "_synthetic.py"))
 
 
 # ---------------------------------------------------------------------------
@@ -6829,21 +6883,22 @@ def test_shared_admission_filter_set_has_no_twin_list():
 
 
 def test_shared_admission_filter_detector_bites():
-    pre_fix = ast.parse(
-        "def expand(links, visited, scope):\n"
-        "    candidates = []\n"
-        "    for link in links:\n"
-        "        if link.url in visited: continue\n"
-        "        if is_analytics_host(link.url): continue\n"
-        "        if is_document_url(link.url): continue\n"
-        "        if scope is not None and not scope_allows(scope, link.url): continue\n"
-        "        candidates.append(link)\n"
-        "    return candidates\n"
+    assert_detector(
+        _shared_admission_filter_offenders,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "def expand(links, visited, scope):\n"
+            "    candidates = []\n"
+            "    for link in links:\n"
+            "        if link.url in visited: continue\n"
+            "        if is_analytics_host(link.url): continue\n"
+            "        if is_document_url(link.url): continue\n"
+            "        if scope is not None and not scope_allows(scope, link.url): continue\n"
+            "        candidates.append(link)\n"
+            "    return candidates\n": "admission filter list is re-inlined",
+        },
+        clean=("async def expand(links):\n    return await admit_discovered_links(links)\n",),
     )
-    path = REPO_ROOT / "app" / "_synthetic.py"
-    assert _shared_admission_filter_offenders(pre_fix, path)
-    good = ast.parse("async def expand(links):\n    return await admit_discovered_links(links)\n")
-    assert not _shared_admission_filter_offenders(good, path)
 
 
 def test_job_frontier_detector_sanction_is_narrow():
