@@ -176,12 +176,20 @@ def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
     return limits
 
 
-def crawl_policy(strategies=None, *, limits: dict | None = None, discovery: dict | None = None) -> dict:
+def crawl_policy(
+    strategies=None, *, limits: dict | None = None, discovery: dict | None = None, scope_regex: str | None = None
+) -> dict:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
-    The shape four tests each rebuilt around the same limits block. ``discovery``
-    is named rather than passed through ``**extra`` so that what a policy can
-    carry is a decision made here instead of a decision each caller makes.
+    The shape several tests each rebuilt around the same limits block. Each extra
+    block is a named keyword rather than ``**extra``, so what a policy can carry
+    is a decision made here instead of one each caller makes -- and so a typo'd
+    block name is a TypeError rather than a policy that silently does not scope.
+
+    ``scope_regex`` is omitted from the policy entirely when not given, rather
+    than written as ``None``: the payload validators distinguish the two, and a
+    test that did not mean to scope should not hand production a key that says
+    "no scope" in a way the engine has to special-case.
     """
     policy: dict = {
         "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
@@ -189,4 +197,6 @@ def crawl_policy(strategies=None, *, limits: dict | None = None, discovery: dict
     }
     if discovery is not None:
         policy["discovery"] = discovery
+    if scope_regex is not None:
+        policy["scope_regex"] = scope_regex
     return policy

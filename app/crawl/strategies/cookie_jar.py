@@ -77,6 +77,21 @@ class CookieJar:
     def _ns_key(namespace: str, host: str) -> tuple[str, str]:
         return (namespace or "", host)
 
+    def _touch(self, ns_key: tuple[str, str]) -> None:
+        """Mark `ns_key` most-recently-used and evict past the host cap.
+
+        The LRU discipline in one place, called with the lock already held. It
+        was written out at each of the two write paths -- the parsed
+        ``Set-Cookie`` and the file import -- and the jar is module-global and
+        long-lived, so a host cap that one of them forgot to apply is a slow leak
+        that only a test watching the cap's bound would notice. A read counts as
+        a use too, which is why this is named for the fact rather than the
+        eviction.
+        """
+        self._cookies.move_to_end(ns_key)
+        while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
+            self._cookies.popitem(last=False)
+
     def add_cookie_header(self, url: str, set_cookie_header: str, *, namespace: str = "") -> None:
         """Parse a ``Set-Cookie`` header and store the cookie for the URL's domain.
 
@@ -101,11 +116,7 @@ class CookieJar:
         with self._lock:
             target = self._cookies.setdefault(ns_key, {})
             target.update(parsed)
-            # LRU: a stored host survives while it is written or read; past
-            # the cap the oldest-unread slot is evicted (R1).
-            self._cookies.move_to_end(ns_key)
-            while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
-                self._cookies.popitem(last=False)
+            self._touch(ns_key)
 
     def cookie_header_for(self, url: str, *, namespace: str = "") -> str:
         """Return a ``Cookie`` header string for the given URL's domain.
@@ -171,9 +182,7 @@ class CookieJar:
                 continue
             with self._lock:
                 self._cookies.setdefault(("", host), {}).update(cookies)
-                self._cookies.move_to_end(("", host))
-                while len(self._cookies) > _COOKIE_JAR_MAX_HOSTS:
-                    self._cookies.popitem(last=False)
+                self._touch(("", host))
 
     @classmethod
     def import_from_file(cls, path: str) -> CookieJar:

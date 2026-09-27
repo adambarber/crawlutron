@@ -4333,6 +4333,19 @@ _HOST_POLICY_URL_CALLS = frozenset({"urljoin", "urlunsplit", "urlparse", "urlspl
 _HOST_POLICY_URL_FIELDS = frozenset({"url", "raw", "href", "location", "normalized_url", "final_url"})
 _HOST_POLICY_NAMES = frozenset({"policy", "host_policy"})
 
+#: Attribute spellings that hold a ``HostPolicy``. Separate from
+#: ``_HOST_POLICY_NAMES`` because a *parameter* called ``policy`` conventionally
+#: receives one of these objects when it is handed to a URL validator, while an
+#: *attribute* called ``_policy`` is usually the crawl policy dict -- so the
+#: attribute rule cannot be the looser one.
+#:
+#: ``_host_policy`` had to be here. The ``self.`` branch below matched
+#: ``self.policy`` and ``self.host_policy`` only, and this codebase writes
+#: ``self._host_policy`` throughout: the rule had never once fired on a method
+#: that validated through the instance's own policy, because it could not see
+#: one. A leading underscore does not change what the attribute holds.
+_HOST_POLICY_ATTRS = frozenset({"policy", "host_policy", "_host_policy"})
+
 
 def _url_parameter_name(name: str) -> bool:
     lowered = name.lower()
@@ -4358,7 +4371,7 @@ def _host_policy_validator_call(tree: ast.AST, node: ast.Call) -> bool:
 def _host_policy_value(node: ast.AST | None, policy_names: set[str]) -> bool:
     if isinstance(node, ast.Name):
         return node.id in policy_names
-    if isinstance(node, ast.Attribute) and node.attr in _HOST_POLICY_NAMES:
+    if isinstance(node, ast.Attribute) and node.attr in _HOST_POLICY_ATTRS:
         return isinstance(node.value, ast.Name) and node.value.id == "self"
     return False
 
@@ -4623,6 +4636,31 @@ def test_required_host_policy_detector_bites():
         )
         == 1
     )
+    # The private spelling. ``self._host_policy`` is what this codebase writes
+    # everywhere, and the rule could not see it -- so a method validating through
+    # the instance's own policy read as a method with no policy at all, and the
+    # rule fired on it while staying silent on the one that really had none.
+    via_instance = ast.parse(
+        "from app.validation import public_url_or_none\n"
+        "class JobStore:\n"
+        "    def __init__(self, host_policy):\n"
+        "        self._host_policy = host_policy\n"
+        "    def canonical_root(self, root_url):\n"
+        "        return str(public_url_or_none(root_url, policy=self._host_policy))\n"
+    )
+    assert not _required_host_policy_offenders(
+        via_instance,
+        REPO_ROOT / "app" / "_synthetic.py",
+    ), "a method validating through self._host_policy read as having no policy"
+    with_no_policy = ast.parse(
+        "class JobStore:\n"
+        "    def canonical_root(self, root_url):\n"
+        "        return str(root_url)\n"
+    )
+    assert _required_host_policy_offenders(
+        with_no_policy,
+        REPO_ROOT / "app" / "_synthetic.py",
+    ), "a method with no policy at all must still be caught"
 
 
 _HOST_POLICY_PROPERTY = Property(

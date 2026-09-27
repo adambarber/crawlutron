@@ -226,12 +226,11 @@ class TestStatusReadNeverMaterializesTheCrawl:
         return reached
 
     def test_counts_come_without_reading_the_page_history(self, seeded_store, monkeypatch):
-        store, job = seeded_store
-        reached = self._spy_on_history_reads(monkeypatch, store)
+        store, job, reached = self._spying(seeded_store, monkeypatch)
 
         row = store.status_row(job.job_id)
 
-        assert reached == [], f"the status read materialized the crawl: {reached}"
+        assert_no_history_read(reached, "the status read")
         assert row is not None
         assert row["visited_size"] == self._PAGES
         assert row["results_count"] == self._PAGES
@@ -240,6 +239,17 @@ class TestStatusReadNeverMaterializesTheCrawl:
         assert row["stats"] == job.stats  # the row is the source of truth
         assert row["cap_truncated"] is False
         assert row["error"] is None
+
+    def _spying(self, seeded_store, monkeypatch):
+        """``(store, job, reached)`` with the history readers already instrumented.
+
+        Every test in this class is "this read must not touch the history", so the
+        instrumentation is part of the arrangement rather than of each test. Stated
+        per test, the spy loop was the shared thing and the assertion was the
+        variable one, which is backwards.
+        """
+        store, job = seeded_store
+        return store, job, self._spy_on_history_reads(monkeypatch, store)
 
     def test_a_full_load_still_reads_the_history(self, seeded_store, monkeypatch):
         """The guard above is only meaningful if the full read still does.
@@ -261,12 +271,22 @@ class TestStatusReadNeverMaterializesTheCrawl:
         assert store.status_row("no-such-job") is None
 
     def test_exists_probes_without_reading_the_row(self, seeded_store, monkeypatch):
-        store, job = seeded_store
-        reached = self._spy_on_history_reads(monkeypatch, store)
+        store, job, reached = self._spying(seeded_store, monkeypatch)
 
         assert store.exists(job.job_id) is True
         assert store.exists("no-such-job") is False
-        assert reached == []
+        assert_no_history_read(reached, "the existence probe")
+
+
+def assert_no_history_read(reached, what: str) -> None:
+    """`what` read none of the page history, and the message says which read.
+
+    These are the tests that make the O(1) status projection worth having, and
+    they all fail the same way: ``reached`` is not empty. A bare ``assert reached
+    == []`` cannot say which of the three read paths regressed, and in a 2000-test
+    run "reached" alone is not enough to find the test.
+    """
+    assert reached == [], f"{what} materialized the crawl: {reached}"
 
 
 class TestStartupRecoveryStaysOffTheLoop:

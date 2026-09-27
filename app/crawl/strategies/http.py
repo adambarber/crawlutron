@@ -281,6 +281,27 @@ async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, A
     )
 
 
+def _response_result_fields(
+    ctx: _HttpStrategyContext, resp: _FetchedResponse, attempt: CrawlStrategyAttempt
+) -> dict[str, Any]:
+    """The result fields every response-derived engine result repeats.
+
+    The two URLs, the URL the response actually landed on, the attempt record and
+    the response headers are the same four things whichever verdict the strategy
+    reached -- ``not_modified`` and the full extraction both build them the same
+    way. Stated at each site it is how a result ended up carrying the request's
+    ``normalized_url`` under ``final_url`` on one path, which is invisible to every
+    test that only checks the classification.
+    """
+    return {
+        "original_url": ctx.original_url,
+        "normalized_url": ctx.normalized_url,
+        "final_url": resp.final_url,
+        "attempt": attempt,
+        "headers": resp.headers,
+    }
+
+
 def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
     """Build the terminal result for a negotiated HTTP 304 response."""
     echoed_validators = resp.validators(ctx.caller_conditional)
@@ -304,15 +325,11 @@ def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> E
     if ctx.caller_conditional:
         diagnostics["conditional"] = dict(ctx.caller_conditional)
     return _make_engine_result(
-        original_url=ctx.original_url,
-        normalized_url=ctx.normalized_url,
-        final_url=resp.final_url,
+        **_response_result_fields(ctx, resp, attempt),
         status="success",
         classification="not_modified",
         selected_strategy=ctx.strategy,
-        attempt=attempt,
         http_status=304,
-        headers=resp.headers,
         diagnostics=diagnostics,
         error=None,
         validators=echoed_validators,
@@ -563,15 +580,11 @@ async def _construct_http_result(
     )
     html = extracted.html if ctx.include_html else None
     return _make_engine_result(
-        original_url=ctx.original_url,
-        normalized_url=ctx.normalized_url,
-        final_url=resp.final_url,
+        **_response_result_fields(ctx, resp, attempt),
         status=status,
         classification=classification,
         selected_strategy=ctx.strategy if status == "success" else None,
-        attempt=attempt,
         http_status=resp.status_code,
-        headers=resp.headers,
         content_type=resp.content_type,
         html=html,
         text=extracted.text,

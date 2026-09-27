@@ -9,6 +9,7 @@ from _browser_doubles import (
     BrowserFakePage,
     FakeRequest,
     FakeRoute,
+    assert_continued,
     assert_route_decision,
     response_handler_double,
     run_blocking_document_route,
@@ -59,7 +60,7 @@ async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
     """
     route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
 
-    assert route.decision == "continue"
+    assert_continued(route)
     assert ran_off_loop
 
 
@@ -99,8 +100,7 @@ async def test_ssrf_route_handler_runs_build_pinned_request_in_thread_pool(monke
     to avoid blocking the event loop with synchronous DNS lookups."""
     route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
 
-    assert route.decision == "continue"
-    assert route.continued_url == "http://1.2.3.4:80/"
+    assert_continued(route, url="http://1.2.3.4:80/")
     assert ran_off_loop
 
 

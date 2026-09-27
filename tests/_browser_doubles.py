@@ -7,11 +7,11 @@ class BrowserFakePage:
     See :meth:`goto` for why navigation deliberately leaves it alone.
     """
 
-    def __init__(self):
+    def __init__(self, url: str = "http://1.2.3.4/"):
         self.goto_calls = []
         self.route_calls = []
         self.set_extra_http_headers_calls = []
-        self.url = "http://1.2.3.4/"
+        self.url = url
 
     async def route(self, pattern, handler):
         self.route_calls.append((pattern, handler))
@@ -83,22 +83,21 @@ class ScriptedPage(BrowserFakePage):
     """
 
     def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None):
-        self.goto_calls = []
-        self.route_calls = []
-        self.set_extra_http_headers_calls = []
-        self._url = url
+        # Everything the base records is the base's to record. Restating the three
+        # call lists here was a second answer to "what does this double
+        # remember", and one new recorded read had to be added in two places.
+        super().__init__(url=url)
         self._answers = dict(DEFAULT_PAGE_ANSWERS if answers is None else answers)
         self._html = DEFAULT_PAGE_HTML if html is None else html
         self._on_goto = on_goto
         self.evaluates: list[str] = []
         self.closed = False
 
-    @property
-    def url(self):
-        return self._url
-
     async def goto(self, url, wait_until="load", **kwargs):
-        self._url = url
+        # Unlike the base, this one *does* move: a scripted page stands in for a
+        # page that navigated, and the ``on_goto`` hook may inspect where it
+        # landed. The base leaves ``url`` alone because there it is a plant.
+        self.url = url
         if self._on_goto is not None:
             await self._on_goto(self)
         return await super().goto(url, wait_until=wait_until, **kwargs)
@@ -333,6 +332,19 @@ def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False):
         include_screenshot=include_screenshot,
         policy=UNRESTRICTED_HOST_POLICY,
     )
+
+
+def assert_continued(route, *, url: str | None = None) -> None:
+    """The route handler continued the request, at `url` if one is named.
+
+    ``url`` is optional because the two things a continue can be wrong about are
+    independent: the decision, and which URL it continued to. Naming the
+    expected URL where there is one keeps the pinned-IP hop from being asserted
+    by a test that only meant to check the decision.
+    """
+    assert route.decision == "continue", route.decision
+    if url is not None:
+        assert route.continued_url == url, route.continued_url
 
 
 async def assert_route_decision(

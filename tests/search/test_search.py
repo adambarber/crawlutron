@@ -11,7 +11,7 @@ import json
 from unittest import mock
 
 import pytest
-from _assertions import one_search_result
+from _assertions import one_search_result, provider_results
 
 from app.search.providers import (
     BraveProvider,
@@ -162,14 +162,10 @@ class TestProviderParsing:
     async def test_results_are_deduplicated_by_url(self, fake_provider_http):
         fake_provider_http(
             200,
-            json.dumps(
-                {
-                    "results": [
-                        {"title": "A", "url": "https://example.gov/a"},
-                        {"title": "A dup", "url": "https://example.gov/a"},
-                        {"title": "B", "url": "https://example.gov/b"},
-                    ]
-                }
+            provider_results(
+                {"title": "A", "url": "https://example.gov/a"},
+                {"title": "A dup", "url": "https://example.gov/a"},
+                {"title": "B", "url": "https://example.gov/b"},
             ),
         )
         provider = TavilyProvider("key", HostPolicy.unrestricted())
@@ -330,7 +326,7 @@ class TestSearchEndpoint:
         from app.metrics import get_metrics
 
         override_settings(search_provider="tavily", tavily_api_key="k")
-        fake_provider_http(200, json.dumps({"results": [{"title": "A", "url": "https://example.gov/a"}]}))
+        fake_provider_http(200, provider_results({"title": "A", "url": "https://example.gov/a"}))
         await async_client.post("/v1/search", json={"query": "x"})
         metrics = get_metrics()
         assert metrics.search_requests_total == 1

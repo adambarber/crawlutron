@@ -100,6 +100,43 @@ def _looks_like_binary_body(body: bytes, content_type: str | None, url: str) -> 
     }
 
 
+#: Every key a ``diagnostics["robots"]`` block carries, with the answer for a
+#: robots.txt that was never consulted. One declaration of the shape, because the
+#: four branches that build it used to write it out and they did not agree: the
+#: failure branch had no ``allowed`` and no ``crawl_delay_seconds`` key at all,
+#: so a consumer reading ``robots["allowed"]`` off a robots.txt that failed to
+#: fetch raised ``KeyError`` instead of learning that the answer is unknown.
+#: ``sitemaps`` is a list in the block; callers that pass one in pass a list.
+_ROBOTS_DIAGNOSTICS: dict[str, Any] = {
+    "url": None,
+    "allowed": True,
+    "crawl_delay_seconds": None,
+    "sitemaps": [],
+    "reused_from_engine": False,
+}
+
+
+def _robots_diagnostics(evaluation: str, **overrides: Any) -> dict[str, Any]:
+    """The ``diagnostics["robots"]`` block for one robots outcome.
+
+    The base above supplies every key; ``evaluation`` says how the answer was
+    reached -- ``disabled`` (robots not consulted), ``cached`` (the engine already
+    fetched it), or ``evaluated`` (fetched here, possibly unsuccessfully) -- and
+    ``overrides`` carries what this branch knows.
+
+    Every URL in the result was resolved through ``public_url_or_none`` with the
+    request's host policy *before* it got here; this function resolves nothing,
+    so it is a packer and not a URL egress door, and it deliberately does not take
+    a ``HostPolicy`` to look like one. The alternative -- a signature naming a
+    policy it would never consult -- is a lie the reader has to disprove.
+
+    ``allowed`` stays True on the failure path on purpose: the caller falls back
+    to its own policy when robots could not be read, and a False here would read
+    as a denial that never happened.
+    """
+    return {**_ROBOTS_DIAGNOSTICS, "sitemaps": [], "evaluation": evaluation, **overrides}
+
+
 async def _discovery_diagnostics(
     *,
     normalized_url: str,
@@ -121,14 +158,7 @@ async def _discovery_diagnostics(
     origin = f"{parsed.scheme}://{parsed.netloc}"
     robots_sitemaps: list[str] = []
     if not robots_evaluated:
-        diagnostics["robots"] = {
-            "url": None,
-            "allowed": True,
-            "crawl_delay_seconds": None,
-            "sitemaps": [],
-            "reused_from_engine": False,
-            "evaluation": "disabled",
-        }
+        diagnostics["robots"] = _robots_diagnostics("disabled")
     elif engine_robots_sitemaps is not None:
         # The engine already fetched /robots.txt (for allow/deny checks) and
         # extracted its Sitemap directives; reuse them instead of hitting the
@@ -139,14 +169,9 @@ async def _discovery_diagnostics(
             for entry in engine_robots_sitemaps
             if (safe_url := public_url_or_none(entry, resolve_against=safe_source, policy=host_policy))
         ]
-        diagnostics["robots"] = {
-            "url": None,
-            "allowed": True,
-            "crawl_delay_seconds": None,
-            "sitemaps": robots_sitemaps,
-            "reused_from_engine": True,
-            "evaluation": "cached",
-        }
+        diagnostics["robots"] = _robots_diagnostics(
+            "cached", sitemaps=robots_sitemaps, reused_from_engine=True
+        )
     elif discovery.get("robots"):
         robots_url = public_url_or_none(urljoin(origin, "/robots.txt"), policy=host_policy)
         if robots_url is None:
@@ -180,22 +205,16 @@ async def _discovery_diagnostics(
                     )
                     if safe_sitemap is not None:
                         robots_sitemaps.append(safe_sitemap)
-            diagnostics["robots"] = {
-                "url": robots_url,
-                "allowed": True,
-                "crawl_delay_seconds": crawl_delay,
-                "sitemaps": robots_sitemaps,
-                "reused_from_engine": False,
-                "evaluation": "evaluated",
-            }
+            diagnostics["robots"] = _robots_diagnostics(
+                "evaluated",
+                url=robots_url,
+                crawl_delay_seconds=crawl_delay,
+                sitemaps=robots_sitemaps,
+            )
         except Exception as error:
-            diagnostics["robots"] = {
-                "url": robots_url,
-                "error": _classify_error_code(error),
-                "sitemaps": [],
-                "reused_from_engine": False,
-                "evaluation": "evaluated",
-            }
+            diagnostics["robots"] = _robots_diagnostics(
+                "evaluated", url=robots_url, error=_classify_error_code(error)
+            )
     sitemap_urls: list[str] = []
     if discovery.get("sitemaps"):
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]

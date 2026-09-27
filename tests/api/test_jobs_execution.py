@@ -1093,11 +1093,9 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
         job = await run_scripted_api_job(
-            client,
-            job_store,
-            root,
+            client, job_store, root,
             results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves],
-            policy={"limits": {"max_depth": 1, "max_pages": 0}},
+            policy=job_limits(max_depth=1, max_pages=0),
         )
 
         assert job.stats["cap_truncated"] == 0
@@ -1127,22 +1125,13 @@ class TestWholeSiteAdmissionContract:
         child = "https://example.test/child"
         other = "https://example.test/other"
         job = await run_scripted_api_job(
-            client,
-            job_store,
-            root,
+            client, job_store, root,
             results=[
-                _canned_result(
-                    root,
-                    links=[
-                        f"{child}?utm_source=one",
-                        f"{child}/",
-                        other,
-                    ],
-                ),
+                _canned_result(root, links=[f"{child}?utm_source=one", f"{child}/", other]),
                 _canned_result(child),
                 _canned_result(other),
             ],
-            policy={"limits": {"max_depth": 1, "max_pages": 3}},
+            policy=job_limits(max_depth=1, max_pages=3),
         )
 
         assert job.stats["total_discovered"] == 2

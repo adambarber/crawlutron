@@ -14,10 +14,24 @@ from _assertions import (
 )
 from _fetcher_factories import make_crawl_payload
 from _job_harnesses import post_render_with_pool
+from _policy_factories import crawl_policy
 from helpers.server import WEBHOOK_RECEIVED
 
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.main import app
+
+#: Discovery turned fully on. Three tests assert on what robots, sitemaps and
+#: feeds contributed, and spelling the triple at each is how one of them kept
+#: asking for feeds the fixture never served.
+DISCOVERY_ALL = {"robots": True, "sitemaps": True, "feeds": True}
+
+#: A scope the loopback fixture cannot match -- the point of the scope tests is
+#: that the discovered links are *outside* it.
+EXAMPLE_SCOPE = r"^https://example\.com"
+
+#: Room for 100 links and one level of depth, so the scope is the only thing
+#: deciding what comes back.
+WIDE_LIMITS = {"max_discovered_links": 100, "max_depth": 1}
 
 
 class _AsgiEndpointTests:
@@ -74,11 +88,7 @@ class TestCrawlApi(_AsgiEndpointTests):
     async def test_v1_crawl_discovery_includes_robots_and_sitemap(self):
         payload = make_crawl_payload(
             f"{self.base}/",
-            policy={
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "discovery": {"robots": True, "sitemaps": True, "feeds": True},
-                "limits": {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 10},
-            },
+            policy=crawl_policy([HTTP_DECLARED_CRAWLER], discovery=DISCOVERY_ALL),
         )
         result = (await completed_crawl(self.client, payload))["results"][0]
         diagnostics = result["diagnostics"]
@@ -109,16 +119,7 @@ class TestCrawlApi(_AsgiEndpointTests):
         # is therefore out of scope and is still reported back to the caller.
         payload = make_crawl_payload(
             f"{self.base}/",
-            policy={
-                "strategies": [HTTP_DECLARED_CRAWLER],
-                "scope_regex": r"^https://example\.com",
-                "limits": {
-                    "timeout_seconds": 10,
-                    "max_retries": 0,
-                    "max_discovered_links": 100,
-                    "max_depth": 1,
-                },
-            },
+            policy=crawl_policy([HTTP_DECLARED_CRAWLER], scope_regex=EXAMPLE_SCOPE, limits=WIDE_LIMITS),
         )
         result = (await completed_crawl(self.client, payload))["results"][0]
         assert result["discovered_link_count"] >= 1

@@ -211,6 +211,17 @@ SINGLETONS = [
 ]
 
 
+def _stub_builder(monkeypatch, builder: str, fake) -> None:
+    """Make ``http_mod.<builder>`` hand out `fake` clients.
+
+    Both singleton tests supersede one client with another, and both do it by
+    replacing the builder. Spelled per test it is one line, and it is the line
+    whose absence is invisible: a test that forgot it exercised the real pooled
+    client, which is slower, leaks a connection, and passes.
+    """
+    monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
+
+
 def _supersede_without_loop(monkeypatch, builder: str, getter: str, fake) -> tuple[object, object]:
     """Return ``(first, second)`` where the handover happened with no loop running.
 
@@ -218,7 +229,7 @@ def _supersede_without_loop(monkeypatch, builder: str, getter: str, fake) -> tup
     synchronous context, so ``loop is None`` and there is no running loop for a
     best-effort ``ensure_future`` to land on. Only a queued close can save it.
     """
-    monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
+    _stub_builder(monkeypatch, builder, fake)
 
     async def _on_a_live_loop():
         return getattr(http_mod, getter)()
@@ -333,7 +344,7 @@ def test_superseded_client_is_also_closed_eagerly_on_a_live_loop(builder, getter
     ``is_closed`` attribute, so a generic "already closed?" guard in the shared
     reaper would silently drop this eager close for sessions only.
     """
-    monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
+    _stub_builder(monkeypatch, builder, fake)
 
     first, second = asyncio.run(run_loop_rebind_scenario(lambda: getattr(http_mod, getter)()))
     assert second is not first
@@ -483,45 +494,37 @@ def test_real_pooled_classes_have_no_synchronous_close():
     assert not hasattr(AsyncSession, "is_closed"), "cffi now publishes is_closed"
 
 
+def _released_on_a_live_loop(client, what: str) -> bool:
+    """``_release_dropped_client`` on `client` must reach a real close, not a reference drop.
+
+    The wait is on the close itself: the release schedules the teardown, and this
+    returns as soon as the scheduled coroutine has finished. A fixed sleep could
+    only ever sample the flag afterwards, which is a bet about how quickly the
+    loop got round to running the task -- and the httpx twin of this test and the
+    cffi one differed only in that sleep's text, so one of them could pass while
+    the drop was broken for its kind.
+
+    ``what`` names the client in the failure message; "the teardown never ran"
+    in a 1200-test run does not say which kind failed.
+    """
+    async def _scenario():
+        http_mod._release_dropped_client(client)
+        await await_until(lambda: client.closed, f"{what}'s teardown never ran on a live loop")
+
+    asyncio.run(_scenario())
+    return client.closed is True
+
+
 def test_displaced_client_is_actually_released_when_a_loop_is_running():
     """D1: the cap's displacement must reach a real close, not a reference drop.
 
-    The wait is on the close itself: ``_release_dropped_client`` schedules the
-    teardown, and this scenario returns as soon as the scheduled coroutine has
-    finished. A fixed sleep could only ever sample the flag afterwards, which is
-    a bet about how quickly the loop got round to running the task.
+    Both kinds in one test. The cffi session's coroutine ``close`` is the only
+    teardown it has, so if the release dropped the reference for that kind
+    instead of closing it, only a test driving *that* kind would notice -- and
+    the pair differed only in a sleep's text.
     """
-    displaced = _RealShapedHttpClient()
-
-    async def _scenario():
-        http_mod._release_dropped_client(displaced)
-        await await_until(
-            lambda: displaced.closed,
-            "the displaced client's teardown never ran on a live loop",
-        )
-
-    asyncio.run(_scenario())
-    assert displaced.closed is True, (
-        "_release_dropped_client released nothing: the displaced client was only dropped"
-    )
-
-
-def test_displaced_cffi_session_is_released_not_dropped():
-    """D1, cffi kind: the coroutine ``close`` is the only teardown it has.
-
-    Waits on the close for the same reason as its httpx twin above.
-    """
-    displaced = _RealShapedSession()
-
-    async def _scenario():
-        http_mod._release_dropped_client(displaced)
-        await await_until(
-            lambda: displaced.closed,
-            "the displaced AsyncSession's teardown never ran on a live loop",
-        )
-
-    asyncio.run(_scenario())
-    assert displaced.closed is True, "a displaced AsyncSession was reference-dropped"
+    assert _released_on_a_live_loop(_RealShapedHttpClient(), "the displaced client")
+    assert _released_on_a_live_loop(_RealShapedSession(), "the displaced AsyncSession")
 
 
 def test_displaced_client_with_no_running_loop_is_not_left_as_a_broken_coroutine():

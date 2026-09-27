@@ -12,6 +12,11 @@ from app.constants import (
 )
 
 
+def escalate(base_policy: dict) -> dict:
+    """``base_policy`` with the two-step ladder that can answer a block."""
+    return dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE])
+
+
 class TestBlockAutoEscalation:
     @pytest.mark.parametrize(
         ("challenge_body", "real_body", "blocked_classification"),
@@ -53,10 +58,7 @@ class TestBlockAutoEscalation:
             ]
         )
 
-        result = await run_chain(
-            fetcher=fetcher,
-            policy=dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]),
-        )
+        result = await run_chain(fetcher=fetcher, policy=escalate(base_policy))
         assert_result_success(result, classification="rendered")
         assert result.classification != blocked_classification
         assert result.selected_strategy == HTTP_CFFI_IMPERSONATE
@@ -70,9 +72,7 @@ class TestBlockAutoEscalation:
             body=b"<html><body>Access denied - please sign in to continue</body></html>"
         )
 
-        result = await run_chain(
-            fetcher=fetcher, policy=dict(base_policy, strategies=[HTTP_DECLARED_CRAWLER])
-        )
+        result = await run_chain(fetcher=fetcher, policy=base_policy)
         # With no further strategy to escalate to, the blocked result is returned.
         assert result.status == "blocked"
         assert result.classification == "login_required"

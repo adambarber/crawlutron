@@ -398,6 +398,17 @@ LLM_FORMAT_TEST_HTML = (
 )
 
 
+def xml_page(body: str) -> tuple[int, str, str]:
+    """One ``application/xml`` page, in the shape a page map wants.
+
+    The content type is the part that carries meaning, and it is the part a
+    sitemap fixture leaves out: the crawl only reads a served document as a
+    sitemap when the type says xml, so a sitemap fixture without it exercises the
+    in-page-link fallback instead and passes while the sitemap path is broken.
+    """
+    return (200, body, "application/xml")
+
+
 # Deep enough to follow the seed's links, wide enough that the page cap is never
 # what a test is measuring. Named because several recursive tests stated the same
 # two numbers, and a test that meant to change the cap could not tell which of

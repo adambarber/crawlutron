@@ -307,16 +307,26 @@ async def admit_discovered_links(
     )
 
 
+def _per_request_timeout(limits: dict[str, Any], settings: Any) -> int:
+    """The per-request timeout for this crawl, in whole seconds, at least one.
+
+    The floor of one second is not cosmetic: a zero or negative budget would make
+    every bounded wait in the admission path fire immediately, and the crawl would
+    report every page as timed out rather than as refused -- a policy that looks
+    like it works and returns nothing.
+
+    Two callers read the same number out of two different places: the robots
+    fetch (which reads the *normalized* policy) and the engine context (which
+    reads the already-normalized limits). Stated twice it is how those two
+    disagreed about what one crawl's timeout was.
+    """
+    return max(1, _bounded_int(limits.get("timeout_seconds"), default=int(getattr(settings, "default_timeout_seconds", 30))))
+
+
 class RobotsGate:
     def __init__(self, policy: Any, settings: Any, host_policy: HostPolicy) -> None:
         self._host_policy = host_policy
-        self._timeout_seconds = max(
-            1,
-            _bounded_int(
-                policy_limits(policy).get("timeout_seconds"),
-                default=int(getattr(settings, "default_timeout_seconds", 30)),
-            ),
-        )
+        self._timeout_seconds = _per_request_timeout(policy_limits(policy), settings)
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
@@ -385,13 +395,7 @@ class JobAdmissionContext:
             want_document_bodies=normalized.get("extraction") == "document",
             respect_robots=bool(limits.get("respect_robots", True)),
             seed_sitemaps=bool(discovery_map.get("sitemaps", False)),
-            timeout_seconds=max(
-                1,
-                _bounded_int(
-                    limits.get("timeout_seconds"),
-                    default=int(getattr(settings, "default_timeout_seconds", 30)),
-                ),
-            ),
+            timeout_seconds=_per_request_timeout(limits, settings),
             robots=robots,
             scheduler=scheduler,
         )
@@ -482,23 +486,49 @@ async def admit_job_links(
     return outcome
 
 
+def _admit_page_identities(
+    job: Any,
+    known: set[str],
+    candidates: Iterable[tuple[str, int]],
+) -> tuple[list[FrontierEntry], int]:
+    """Admit the candidates that are new *and* within the page cap.
+
+    The dedupe and the cap are one decision, not two: a page is admitted if it is
+    not already known and there is room for it, and whatever the cap refused is
+    counted so the job can record that its frontier was truncated. The count is
+    the only thing that distinguishes "the cap said no" from "we had nothing to
+    admit", and it is what a caller reports back as ``cap_blocked``.
+
+    A candidate is ``(identity, depth)``. ``known`` is mutated as identities are
+    admitted, so a caller passing the same identity twice admits it once.
+    """
+    accepted: list[FrontierEntry] = []
+    cap_blocked = 0
+    for identity, depth in candidates:
+        if identity in known:
+            continue
+        capacity = remaining_page_capacity(len(known), job_max_pages(job.policy))
+        if capacity is not None and capacity <= 0:
+            cap_blocked += 1
+        accepted.append(FrontierEntry(url=identity, depth=depth))
+        known.add(identity)
+    return accepted, cap_blocked
+
+
 def requeue_admitted_pages(
     job: Any,
     entries: Iterable[FrontierEntry],
     context: JobAdmissionContext,
 ) -> AdmissionOutcome:
     known = admitted_page_identities(job, host_policy=context.host_policy)
-    accepted_entries: list[FrontierEntry] = []
-    cap_blocked = 0
-    for entry in entries:
-        identity = canonical_page_identity(entry.url, host_policy=context.host_policy) or entry.url
-        if identity in known:
-            continue
-        capacity = remaining_page_capacity(len(known), job_max_pages(job.policy))
-        if capacity is not None and capacity <= 0:
-            cap_blocked += 1
-        accepted_entries.append(FrontierEntry(url=identity, depth=entry.depth))
-        known.add(identity)
+    accepted_entries, cap_blocked = _admit_page_identities(
+        job,
+        known,
+        (
+            (canonical_page_identity(entry.url, host_policy=context.host_policy) or entry.url, entry.depth)
+            for entry in entries
+        ),
+    )
     job.frontier.extend(accepted_entries)
     if cap_blocked:
         record_cap_overcommitted(job)

@@ -10,6 +10,7 @@ from _fetcher_factories import (
     crawled_urls,
     run_scoped_crawl,
     site_linking_to,
+    xml_page,
 )
 
 
@@ -139,19 +140,15 @@ class TestRecursiveCrawlServer:
 async def test_real_sitemap_parser_feeds_scope_filtered_recursive_crawl():
     pages = {
         "/": (200, "<html>home</html>", "text/html"),
-        "/sitemap.xml": (
-            200,
-            "<sitemapindex><sitemap><loc>https://example.com/child-sitemap.xml</loc></sitemap></sitemapindex>",
-            "application/xml",
+        "/sitemap.xml": xml_page(
+            "<sitemapindex><sitemap><loc>https://example.com/child-sitemap.xml</loc></sitemap></sitemapindex>"
         ),
-        "/child-sitemap.xml": (
-            200,
+        "/child-sitemap.xml": xml_page(
             "<urlset>"
             "<url><loc>https://example.com/keep?utm_source=test</loc></url>"
             "<url><loc>https://example.com/keep/</loc></url>"
             "<url><loc>https://example.com/drop</loc></url>"
-            "</urlset>",
-            "application/xml",
+            "</urlset>"
         ),
         "/keep": (200, "<html>keep</html>", "text/html"),
         "/drop": (200, "<html>drop</html>", "text/html"),

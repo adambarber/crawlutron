@@ -889,6 +889,35 @@ def _diagnostic_inputs(html: str | None, tree: Any | None) -> Any | None:
     return _diagnostic_tree(html, tree) if html else None
 
 
+@dataclass(frozen=True)
+class _Walkable:
+    """A source URL and the tree to walk, both known good."""
+
+    source_url: str
+    tree: Any
+
+
+def _walkable(html: str | None, source_url: str | None, tree: Any | None) -> _Walkable | None:
+    """What a diagnostic extractor needs before it can look at anything, or ``None``.
+
+    Three facts, and each one is a precondition the extractors all share: there is
+    a source URL to attribute a finding to, the HTML is parsed, and the parse
+    produced a tree. Stated per extractor it reads as three separate guards, and
+    it is the ``tree is None`` one that gets dropped -- a diagnostic that walks
+    ``None`` reports nothing, which is a passing test and a permanently dead
+    signal.
+
+    A record rather than the bare tree so the caller gets the *narrowed* URL back.
+    Handing back the tree alone leaves every caller's ``source_url`` typed
+    ``str | None`` even though the None case has just returned, which is how a
+    chokepoint ends up pushing its own precondition back onto the call sites.
+    """
+    if not source_url:
+        return None
+    parsed = _diagnostic_inputs(html, tree)
+    return None if parsed is None else _Walkable(source_url=source_url, tree=parsed)
+
+
 class _FrameCollector:
     """Back-compat collector: parse once with lxml and collect frame/iframe srcs."""
 
@@ -926,20 +955,18 @@ def _extract_frames(
     host_policy: HostPolicy,
     tree: Any | None = None,
 ) -> list[dict[str, Any]]:
-    if not source_url:
+    walkable = _walkable(html, source_url, tree)
+    if walkable is None:
         return []
-    tree = _diagnostic_inputs(html, tree)
-    if tree is None:
-        return []
-    source_host = (urlparse(source_url).hostname or "").lower()
+    source_host = (urlparse(walkable.source_url).hostname or "").lower()
     frames: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for el in tree.iter("frame", "iframe"):
+    for el in walkable.tree.iter("frame", "iframe"):
         src = (el.get("src") or "").strip()
         if not src:
             continue
         normalized_url = public_url_or_none(
-            urljoin(source_url, src),
+            urljoin(walkable.source_url, src),
             policy=host_policy,
         )
         if normalized_url is None:
@@ -971,17 +998,15 @@ _CONTROL_TAGS = ("input", "select", "textarea", "button")
 def _extract_forms(html: str | None, source_url: str | None, **options: Any) -> list[dict[str, Any]]:
     host_policy: HostPolicy = options["host_policy"]
     tree: Any | None = options.get("tree")
-    if not source_url:
-        return []
-    tree = _diagnostic_inputs(html, tree)
-    if tree is None:
+    walkable = _walkable(html, source_url, tree)
+    if walkable is None:
         return []
     forms: list[dict[str, Any]] = []
-    for form_el in tree.iter("form"):
+    for form_el in walkable.tree.iter("form"):
         attrs = {key.lower(): value for key, value in form_el.attrib.items()}
         action = unescape(str(attrs.get("action", "")).strip())
         normalized_action = public_url_or_none(
-            urljoin(source_url, action) if action else source_url,
+            urljoin(walkable.source_url, action) if action else walkable.source_url,
             policy=host_policy,
         )
         if normalized_action is None:
