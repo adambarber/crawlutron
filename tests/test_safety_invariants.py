@@ -1573,7 +1573,7 @@ def _optional_host_policy_offenders(tree, path):
     Defaulting one turns that into a silent bypass, and nothing else in the
     stack catches it. Verified by mutation, twice:
 
-      * ``fetchers._default_cffi_fetcher`` with
+      * ``fetchers.impersonating_fetcher`` with
         ``policy: HostPolicy = HostPolicy((), ())`` -- ``mypy app`` reported no
         issues across 111 files, because protocol conformance is
         one-directional and an implementation may accept more than the contract
@@ -2329,83 +2329,95 @@ def test_provider_loop_detector_bites():
     )
 
 
-# The names of the one selector contract; see
-# ``app/crawl/extraction.py`` for why three entry points share it and why the
-# shared tail cannot be collapsed.
+# The names of the one selector contract, and the single parameter that carries
+# them; see ``app/crawl/extraction.py`` for why they are one value rather than
+# two parameters on three signatures.
 _SELECTOR_PARAMS = ("css_selector", "xpath")
+#: The single parameter that carries the pair, and therefore the shape a
+#: narrowing function is expected to have.
+_SELECTOR_CARRIER_PARAM = "selectors"
+#: The one place the two names are spelled: the ``Selectors`` dataclass. Its
+#: generated ``__init__`` is what the sweep sees, so that is the name checked.
+_SELECTOR_CARRIER_DECLARANT = "__init__"
+#: The content cache key legitimately declares both names: it does not narrow a
+#: caller's request, it keys one, and a key built from half the narrowing inputs
+#: is a different key. Named rather than inferred from the parameter names,
+#: because a rule that infers is a rule that stops applying when the code moves.
+_SELECTOR_KEY_BUILDER = "_content_cache_key"
 
 
 def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A function taking one selector must take both; an extractor defaults both.
+    """A narrowing extractor carries the pair in one value, never as two names.
 
-    The selector pair reaches extraction as one ``**selectors`` mapping
-    (``app/crawl/strategies/content_pipeline.py``), so a function that declares
-    only one of the two names cannot be handed both, and a selector is a
-    *narrowing* request: a function that defaults one to a real selector applies
-    a narrowing the caller never asked for. Both are the same defect class -- a
-    narrowing parameter accepted and then not honoured (or honoured wrongly) for
-    some value the caller can send.
+    The rule used to be "take both names or neither", which forbade the defect
+    by counting parameters. It could catch a function declaring one, and it
+    could say nothing about a function declaring both and then honouring only
+    one. It was also the *reason* the pair was spelled four times -- three
+    signatures plus the mapping that fed them -- because satisfying a parameter
+    rule is a spelling, and a spelling cannot be shared between entry points.
 
-    The "both or neither" half holds for every consumer, including the content
-    cache key that legitimately *requires* both. The "defaults to None" half is
-    scoped to the extractors, identified by their return type, because a
-    required selector is the right shape everywhere else.
+    :class:`app.crawl.extraction.Selectors` replaced the spelling, so the rule
+    inverts: a function narrows by taking ONE ``selectors`` value, and nothing
+    outside the carrier declares the names. That is stronger in the direction
+    that matters -- there is no longer any signature in which passing one
+    selector is expressible -- and it is what stops a future fourth extractor
+    from reintroducing the pair as parameters, which a rule checking only "both
+    or neither" would have waved through.
     """
     offenders: list[str] = []
     for node in functions(tree):
         params = node.args
         positional = [arg.arg for arg in (*params.posonlyargs, *params.args)]
         names = [*positional, *(arg.arg for arg in params.kwonlyargs)]
-        if not any(name in names for name in _SELECTOR_PARAMS):
-            continue
         declared = [name for name in names if name in _SELECTOR_PARAMS]
-        if declared != list(_SELECTOR_PARAMS):
-            offenders.append(offender(path, node.lineno, f"{node.name} takes only {declared}"))
+        if not declared or node.name in (_SELECTOR_CARRIER_DECLARANT, _SELECTOR_KEY_BUILDER):
             continue
-        returns = node.returns
-        if not (isinstance(returns, ast.Name) and returns.id == "ExtractedContent"):
-            continue
-        # Defaults align to the TAIL of the positional list, not the head.
-        default_of = dict(zip(positional[len(positional) - len(params.defaults) :], params.defaults))
-        default_of.update({arg.arg: value for arg, value in zip(params.kwonlyargs, params.kw_defaults)})
-        for name in _SELECTOR_PARAMS:
-            value = default_of.get(name)
-            if not (isinstance(value, ast.Constant) and value.value is None):
-                offenders.append(offender(path, node.lineno, f"{node.name}.{name} does not default to None"))
+        offenders.append(
+            offender(
+                path,
+                node.lineno,
+                f"{node.name} declares {declared} instead of carrying the pair in one"
+                f" {_SELECTOR_CARRIER_PARAM!r} value",
+            )
+        )
     return offenders
 
 
 def test_the_selector_pair_is_one_contract():
-    """A selector-aware extractor takes both selectors, both defaulting to None."""
+    """A narrowing extractor carries the pair in one value, never as two names."""
     assert_trees_clean(
         _selector_contract_offenders,
-        "a selector-aware function must take css_selector and xpath together, and"
-        " an extractor must default both to None; a lone or defaulted selector is"
-        " accepted and then not honoured",
+        "a narrowing function must take one `selectors` value carrying both, and"
+        " must not declare css_selector/xpath as parameters of its own; the pair is"
+        " one contract and half of it is a request that cannot be honoured",
     )
 
 
 def test_selector_contract_detector_bites():
-    """A lone selector fires, a defaulted extractor selector fires, the real shape passes."""
+    """A re-spelled pair fires, a lone name fires, the real shape passes."""
     assert_fires_once(
         _selector_contract_offenders,
         {
-            "def _extract_html(html, url, css_selector=None) -> ExtractedContent:\n"
-            "    ...\n": "takes only ['css_selector']",
-            "def _extract_html(html, url, css_selector='h1', xpath=None) -> ExtractedContent:\n"
-            "    ...\n": "css_selector does not default to None",
+            "def _extract_html(html, url, css_selector=None, xpath=None)"
+            " -> ExtractedContent:\n    ...\n": "declares ['css_selector', 'xpath'] instead of carrying",
+            "def _narrow(html, css_selector=None) -> ExtractedContent:\n"
+            "    ...\n": "declares ['css_selector'] instead of carrying",
         },
         REPO_ROOT / "app" / "crawl" / "_synthetic.py",
     )
     assert_stays_clean(
         _selector_contract_offenders,
         (
-            # Keyword-only, exactly as the three live entry points spell it.
-            "def _extract_selected(html, source_url, *, css_selector=None, xpath=None)"
-            " -> ExtractedContent:\n    ...\n",
-            # A consumer that REQUIRES both selectors is the right shape: it is
-            # not narrowing a caller's request, it is keying one.
-            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
+            # The carrier itself: the one place the two names are spelled.
+            "class Selectors:\n"
+            "    css: str | None = None\n"
+            "    xpath: str | None = None\n",
+            # An extractor carrying the pair as the one value.
+            "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
+            # A key builder legitimately requires both: it keys a request rather
+            # than narrowing one.
+            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n"
+            "    ...\n",
             # A function that takes no selector is somebody else's business.
             "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
         ),

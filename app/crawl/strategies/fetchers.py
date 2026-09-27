@@ -17,7 +17,7 @@ from app.crawl.decompression import DecompressionError, DecompressionTooLargeErr
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies import http_client_pool, pinned_transport
 from app.crawl.strategies.request_profile import _store_set_cookies
-from app.models import HttpFetchResult
+from app.models import HttpFetcher, HttpFetchResult
 from app.timeouts import Timeouts
 from app.validation import HostPolicy
 
@@ -29,10 +29,25 @@ async def _default_http_fetcher(
     max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
     *,
     policy: HostPolicy,
+    impersonate: bool = False,
 ) -> HttpFetchResult:
-    """The httpx transport: async HTTP/2 fetch over the shared pooled client.
+    """The one fetcher: TLS impersonation first when asked, the pooled httpx client otherwise.
 
-    Async HTTP/2 fetch using the shared pooled ``httpx.AsyncClient`` with
+    ``impersonate`` is the whole transport preference, as one keyword on the one
+    function that carries the contract. It used to be a second module-level
+    entry point -- ``_default_cffi_fetcher`` -- which meant the contract's five
+    parameters had to be spelled twice, and the twin could only be kept honest
+    by a guard that walked the tree. The engine now binds the preference instead
+    of the signature: ``partial(_default_http_fetcher, policy=..., impersonate=True)``
+    is a different *binding* of the same callable, so a parameter can no longer
+    be added to one role and missed on the other, because there is only one role
+    and one spelling left.
+
+    The impersonated attempt falls back to plain httpx, not to an error: the same
+    page fetched differently is not a different outcome, and a 200 from the
+    fallback is not a failure of the attempt that could not be made.
+
+    Async HTTP/2 fetch over the shared pooled ``httpx.AsyncClient`` with
     granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
     SSRF-safe manual redirect handling (F1).
 
@@ -42,9 +57,13 @@ async def _default_http_fetcher(
     Sensitive headers (Cookie, Authorization) are stripped when crossing host
     boundaries to prevent credential leakage (Fix 3).
 
-    The signature is :data:`app.models.HttpFetchContract`; see
-    :func:`_default_cffi_fetcher` for why the contract is spelled twice.
+    The signature is :data:`app.models.HttpFetchContract`, checked tree-wide by
+    ``test_http_fetcher_contract_holds_tree_wide``.
     """
+    if impersonate:
+        attempted = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)
+        if attempted is not None:
+            return attempted
     await http_client_pool._drain_pending_client_closes()
     client = http_client_pool.get_async_http_client()
     started = time.monotonic()
@@ -154,7 +173,7 @@ async def _cffi_fetch(
     *,
     policy: HostPolicy,
 ) -> HttpFetchResult | None:
-    """The curl_cffi transport behind :func:`_default_cffi_fetcher`.
+    """The curl_cffi transport behind ``_default_http_fetcher(impersonate=True)``.
 
     TLS-fingerprint-impersonated, mirroring the httpx transport including its
     SSRF-safe manual redirect handling (F1) and sensitive-header stripping on
@@ -297,35 +316,19 @@ async def _cffi_fetch(
         return None
 
 
-async def _default_cffi_fetcher(
-    url: str,
-    headers: dict[str, str],
-    timeout_seconds: int,
-    max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-    *,
-    policy: HostPolicy,
-) -> HttpFetchResult:
-    """TLS-fingerprint-impersonated fetch, falling back to the httpx transport.
+def impersonating_fetcher(policy: HostPolicy) -> HttpFetcher:
+    """The one fetcher, bound to prefer TLS impersonation.
 
-    The signature is the contract (four positional parameters plus a
-    keyword-only policy, per :data:`app.models.HttpFetcher`) and it is
-    *repeated* rather than shared: the engine hands both entries to the
-    strategy chain, and both must carry the content-length cap's default,
-    because neither caller supplies it. Python cannot express one signature
-    across two entry points, so the repetition is irreducible -- what is not
-    irreducible is the two implementations behind it, which were two
-    hand-written redirect loops and are now one :class:`_RedirectChain` plus
-    two transport bodies. :data:`app.models.HttpFetchContract` states the
-    contract once and ``test_http_fetcher_contract_holds_tree_wide`` proves
-    every production fetcher still matches it -- by name and by which
-    parameters it makes optional, because names alone missed a twin that
-    defaulted ``policy`` and quietly stopped requiring the SSRF keyword. So the
-    copy cannot drift.
+    This is the value the engine hands the chain for the impersonating strategy,
+    and it is a *binding* rather than a second function so the contract's five
+    parameters are spelled exactly once in the tree. It lives here, next to the
+    function it binds, because it was previously written out three times: the
+    engine reached for a second module-level entry point, the tests reached for
+    that same entry point, and each of them re-decided independently which
+    transport "the cffi fetcher" meant. One factory is the one place that
+    decision is made.
     """
-    result = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)
-    if result is not None:
-        return result
-    return await _default_http_fetcher(url, headers, timeout_seconds, max_content_length, policy=policy)
+    return functools.partial(_default_http_fetcher, policy=policy, impersonate=True)
 
 
 def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms: int) -> HttpFetchResult:

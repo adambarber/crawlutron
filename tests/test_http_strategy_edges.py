@@ -13,12 +13,12 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
 
     os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
 
-    from app.crawl.strategies.fetchers import _default_cffi_fetcher
+    from app.crawl.strategies.fetchers import impersonating_fetcher
     from app.validation import HostPolicy
 
     try:
         result = asyncio.run(
-            _default_cffi_fetcher(
+            impersonating_fetcher(
                 url,
                 {},
                 10,
@@ -57,7 +57,7 @@ class TestHttpStrategyEdges:
         assert not (_is_private_or_loopback_ip("8.8.8.8"))
         assert _is_private_or_loopback_ip("invalid")
 
-    def test_default_cffi_fetcher_response(self):
+    def test_impersonating_fetcher_response(self):
         """real_cffi subprocess: a normal fetch returns the served 200.
 
         In-process real cffi is banned (#1744/#1746): under fast_sleeps the

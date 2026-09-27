@@ -191,16 +191,15 @@ def _genuine_cffi_outcome(url: str, timeout_seconds: int, max_content_length: in
     """
     import asyncio
 
-    from app.crawl.strategies.fetchers import _default_cffi_fetcher
+    from app.crawl.strategies.fetchers import impersonating_fetcher
     from app.validation import HostPolicy
 
     async def _fetch():
-        return await _default_cffi_fetcher(
+        return await impersonating_fetcher(HostPolicy.unrestricted())(
             url,
             {},
             timeout_seconds,
             max_content_length,
-            policy=HostPolicy.unrestricted(),
         )
 
     try:

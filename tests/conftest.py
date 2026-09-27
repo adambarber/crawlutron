@@ -212,12 +212,16 @@ def stub_cffi_fetcher(request, monkeypatch):
     """
     if request.node.get_closest_marker("real_cffi"):
         return
-    import app.crawl.engine as engine_module
+    import app.crawl.strategies.fetchers as fetchers_module
 
     async def _stub_cffi_fetcher(url, headers, timeout_seconds, max_content_length=0):
         raise ConnectionError("curl_cffi stubbed in tests (mark test with real_cffi to opt in)")
 
-    monkeypatch.setattr(engine_module, "_default_cffi_fetcher", _stub_cffi_fetcher)
+    # The impersonating transport is a BINDING of the one fetcher, so the seam is
+    # that binding: replacing it makes impersonation unavailable while leaving the
+    # plain-httpx fetcher real, which is the distinction the old second entry
+    # point used to give for free.
+    monkeypatch.setattr(fetchers_module, "impersonating_fetcher", lambda policy: _stub_cffi_fetcher)
 
 
 @pytest.fixture(scope="session")

@@ -27,6 +27,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urljoin, urlparse
@@ -45,6 +46,33 @@ from app.validation import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class Selectors:
+    """A narrowing request: the part of a page the caller wants extracted.
+
+    CSS and XPath are two spellings of one intent, and they are only ever sent
+    together -- a request carrying a CSS selector and no XPath is not a narrower
+    request, it is half of one, and half a narrowing request is what a function
+    that takes the two names separately is able to express. As two optional
+    parameters on each of three extractors, that mistake had a spelling
+    everywhere and a rule somewhere else forbidding it; as one value it has no
+    spelling at all, so the rule stopped being necessary and became structural.
+
+    Frozen and slots because it is a settled statement of intent, built once by
+    the caller from policy and read by everything downstream: nothing here edits
+    a narrowing request, and a mutable one would let one extractor narrow and
+    another widen from the same object.
+    """
+
+    css: str | None = None
+    xpath: str | None = None
+
+    def __bool__(self) -> bool:
+        """True when the request actually narrows. ``Selectors()`` is no request."""
+        return self.css is not None or self.xpath is not None
+
 
 # Shared thread pool for extraction tasks to avoid thread leaks (Fix 4).
 # Bounded to 4 workers to limit resource consumption.
@@ -506,8 +534,7 @@ def extract_content(
     content: bytes | str,
     content_type: str | None,
     url: str | None,
-    css_selector: str | None = None,
-    xpath: str | None = None,
+    selectors: Selectors | None = None,
 ) -> ExtractedContent:
     """Extract ``(text, markdown)`` from raw content using the unified pipeline.
 
@@ -534,18 +561,18 @@ def extract_content(
     # and nothing in the text said they had to agree. Now there is one answer and
     # two consumers, so a report and a dispatch cannot describe different bodies.
     is_html = _is_html(content_type, content)
-    if (css_selector is not None or xpath is not None) and not is_html:
+    if selectors and not is_html:
         logger.warning(
             "extraction_selector_ignored_non_html",
             extra={
-                "css_selector": css_selector,
-                "xpath": xpath,
+                "css_selector": selectors.css,
+                "xpath": selectors.xpath,
                 "content_type": content_type,
                 "url": url,
             },
         )
     if is_html:
-        return _extract_html(_decode(content), url, css_selector=css_selector, xpath=xpath)
+        return _extract_html(_decode(content), url, selectors)
     if _looks_like_document(content_type, content, url):
         body = (
             bytes(content)
@@ -571,42 +598,31 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
 
 # The selector pair is ONE contract with three entry points: ``extract_content``
 # (every strategy's funnel), ``_extract_html`` (the trafilatura-only path) and
-# ``_extract_selected`` (the DOM-targeting engine), and the pair is not left as
-# prose: ``test_the_selector_pair_is_one_contract`` sweeps the tree so a function
-# accepting one selector must accept both, by name, defaulting to None, returning
-# ``ExtractedContent``. A fourth extractor taking only ``css_selector`` would
-# silently ignore half of the caller's narrowing request, which is the failure a
-# shared signature is supposed to make impossible.
+# ``_extract_selected`` (the DOM-targeting engine). It used to be four spellings:
+# those three signatures, plus the ``{"css_selector": ..., "xpath": ...}`` mapping
+# ``content_pipeline`` built and spread into two of them. Four copies of one fact
+# with a rule elsewhere forbidding disagreement between them.
 #
-# Those three declarations cannot be collapsed, and the reason is concrete rather
-# than a shrug at the language. ``app/crawl/strategies/content_pipeline.py``
-# builds ONE ``**selectors`` mapping and spreads it into two of them, so
-# ``extract_content`` and ``_extract_html`` must each accept exactly the two
-# keyword names that mapping carries. The tree-wide guard above then requires
-# both names on any function that declares either, in that order, defaulting to
-# ``None`` -- and, because both return ``ExtractedContent``, requires that return
-# annotation, which pins the closing ``) -> ExtractedContent:`` line too. Three
-# consecutive lines are then identical in both, and ``jscpd`` at ``--min-lines 4``
-# reports a three-line match: measured on an isolated reproduction, a three-line
-# common run spanning a five-line window is reported as a 5-line / 27-token clone,
-# while a two-line run is not. (Making one pair keyword-only does not help -- the
-# ``*,`` only shifts the window, and the three selector lines still align. It
-# moves the clone onto ``_extract_selected`` instead.)
+# :class:`Selectors` is the collapse. ``content_pipeline`` builds one from policy
+# and hands it whole, so the pair is now stated once, in one type, and neither the
+# signatures nor the mapping that feeds them spell it. The win is not the removed
+# clone -- it is that "half a narrowing request" stopped being expressible. With
+# two optional names per function, ``css_selector=...`` alone was a valid call at
+# three signatures, accepted and then silently not honoured in full; there was no
+# spelling of the mistake to forbid, only a detector. As one value there is no
+# second parameter to forget.
 #
-# The owner that deletes the repetition instead of dodging it is upstream: a
-# ``Selectors`` value that ``content_pipeline`` builds from the policy and hands
-# whole. Then the pair is stated once, in one type, and neither these signatures
-# nor the mapping that feeds them spells it. That is a change to the module that
-# builds the mapping, not to the extractors that receive it -- which is why it is
-# named here rather than done here.
+# ``test_the_selector_pair_is_one_contract`` now proves the carrier rather than
+# the count: an extractor must take a ``selectors`` parameter and must not declare
+# either selector name itself, so a future fourth extractor cannot reintroduce the
+# pair as parameters and quietly pass a guard that only knew the old rule.
 
 
 def _extract_selected(
     html: str,
     source_url: str | None,
     *,
-    css_selector: str | None = None,
-    xpath: str | None = None,
+    selectors: Selectors | None = None,
 ) -> ExtractedContent:
     """Mechanical DOM targeting: extract only the matched nodes as Markdown.
 
@@ -615,9 +631,10 @@ def _extract_selected(
     can target a specific section (e.g. an agenda table) without Trafilatura's
     full-page boilerplate removal.
     """
-    if not html:
+    if not html or not selectors:
         return ExtractedContent(None, None)
     fragment: str | None = None
+    css_selector = selectors.css
     if css_selector:
         try:
             from bs4 import BeautifulSoup
@@ -634,7 +651,8 @@ def _extract_selected(
         if not selected:
             return ExtractedContent(None, None)
         fragment = "\n".join(str(tag) for tag in selected)
-    elif xpath:
+    elif selectors.xpath:
+        xpath = selectors.xpath
         tree = _parse_html_tree(html)
         if tree is None:
             return ExtractedContent(None, None)
@@ -713,8 +731,7 @@ def _suppress_trafilatura_chatter() -> _LogRestorer:
 def _extract_html(
     html: str,
     url: str | None,
-    css_selector: str | None = None,
-    xpath: str | None = None,
+    selectors: Selectors | None = None,
 ) -> ExtractedContent:
     """The single owner of the HTML selector dispatch, for both callers.
 
@@ -723,8 +740,8 @@ def _extract_html(
     function at all: one place decides whether a page is selector-targeted or
     full-page, so the two callers cannot disagree about the same page.
     """
-    if css_selector or xpath:
-        return _extract_selected(html, url, css_selector=css_selector, xpath=xpath)
+    if selectors:
+        return _extract_selected(html, url, selectors=selectors)
     try:
         import trafilatura
 

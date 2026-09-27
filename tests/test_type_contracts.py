@@ -22,13 +22,13 @@ from typing import get_args
 import pytest
 from chokepoint_walks import app_python_files
 
-from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import HttpFetchContract, HttpFetcher
 
-_CONCRETE_FETCHERS = [
-    pytest.param(_default_http_fetcher, id="_default_http_fetcher"),
-    pytest.param(_default_cffi_fetcher, id="_default_cffi_fetcher"),
-]
+# There is ONE concrete fetcher. The impersonating transport is a binding of it
+# (`impersonating_fetcher`), not a second function, so the contract's parameters
+# are spelled once in the whole tree and there is no twin to keep in step.
+_CONCRETE_FETCHERS = [pytest.param(_default_http_fetcher, id="_default_http_fetcher")]
 
 # The concrete-fetcher contract, derived from HttpFetchContract rather than
 # re-spelled: (positional names, positional-only, keyword-only, async).
@@ -194,7 +194,7 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     fails if the guard stops considering defaulting.
     """
     found = _concrete_fetchers_in_app()
-    assert {name for _, name, _ in found} == {"_default_http_fetcher", "_default_cffi_fetcher"}, (
+    assert {name for _, name, _ in found} == {"_default_http_fetcher"}, (
         f"the sweep found {sorted(name for _, name, _ in found)}; this test asserts against "
         "the real set, so it has to be the real set"
     )
@@ -207,7 +207,7 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
 
     # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
     mutated = ast.parse(
-        "async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None): ...\n"
+        "async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None, impersonate=False): ...\n"
     ).body[0]
     assert tuple(arg.arg for arg in mutated.args.args) == _CONTRACT["positional"]
     assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _CONTRACT["keyword_only"]
@@ -222,14 +222,17 @@ def test_the_contract_is_not_vacuous_tree_wide():
     """The tree-wide check must actually be finding the fetchers it claims to.
 
     A detector whose sink pattern stops matching reports zero offenders and
-    passes forever. This asserts the sweep found the two concrete fetchers, so
-    a rename or an annotation change that silently emptied the search is a
-    failure here rather than a permanently green gate.
+    passes forever. This asserts the sweep found the concrete fetcher, so a
+    rename or an annotation change that silently emptied the search is a
+    failure here rather than a permanently green gate. It also pins the count
+    at ONE: a second module-level fetcher would be a second spelling of the
+    contract, which is the duplication this design removed.
     """
     names = {funcname for _, funcname, _ in _concrete_fetchers_in_app()}
-    assert {"_default_http_fetcher", "_default_cffi_fetcher"} <= names, (
+    assert names == {"_default_http_fetcher"}, (
         f"tree-wide fetcher sweep found {sorted(names)} -- it is no longer "
-        "covering the concrete fetchers, so its green result proves nothing"
+        "covering the concrete fetcher, so its green result proves nothing; a second "
+        "fetcher is a second spelling of the contract"
     )
 
 

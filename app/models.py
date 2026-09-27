@@ -398,13 +398,7 @@ SyncCrawlWorker = Callable[[CrawlJob], CrawlResult]
 AsyncCrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult]]
 CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # Four positional parameters: (url, headers, timeout_seconds, max_content_length).
-# Every concrete fetcher accepts the content-length cap
-# (_default_http_fetcher / _default_cffi_fetcher) and the retry wrapper passes
-# it positionally, so the alias must describe four parameters -- a caller typed
-# against it must be able to invoke the real fetcher it is handed (P2-A).
-# Four positional parameters: (url, headers, timeout_seconds, max_content_length).
-# Every concrete fetcher accepts the content-length cap
-# (_default_http_fetcher / _default_cffi_fetcher) and the retry wrapper passes
+# The concrete fetcher accepts the content-length cap and the retry wrapper passes
 # it positionally, so the alias must describe four parameters -- a caller typed
 # against it must be able to invoke the real fetcher it is handed (P2-A).
 HttpFetcher = Callable[[str, dict[str, str], int, int], Any]
@@ -414,23 +408,24 @@ class HttpFetchContract(Protocol):
     """The concrete-fetcher contract, stated once.
 
     Four positional parameters -- (url, headers, timeout_seconds,
-    max_content_length) -- a keyword-only ``policy``, and an
-    :class:`HttpFetchResult` return. ``_default_http_fetcher`` and
-    ``_default_cffi_fetcher`` both satisfy it and both *spell* it, because the
-    engine hands them to the strategy chain as separate callables and neither
-    caller supplies the cap's default, so the default has to live on each.
-    Python cannot state one signature across two entry points.
+    max_content_length) -- a keyword-only ``policy``, an ``impersonate`` keyword
+    carrying the transport preference, and an :class:`HttpFetchResult` return.
+    :func:`app.crawl.strategies.fetchers._default_http_fetcher` satisfies it, and
+    it is the only function in ``app/`` that does: the impersonating transport
+    used to be a second entry point, which meant the contract had to be spelled
+    twice and could only be kept honest by a guard that walked the tree. The
+    engine binds the preference instead of the signature, so there is one
+    spelling left to drift from.
 
-    What this type buys is the other half: it is the one place the shape is
-    declared, and ``test_http_fetcher_contract_holds_tree_wide`` walks all of
-    ``app/`` to prove every coroutine returning a fetch result still matches
-    it -- by name *and* by which parameters it makes optional. Both halves are
-    load-bearing and the second one was found the hard way: a fetcher that
-    gave ``policy`` a default satisfied this Protocol and satisfied a
-    name-only comparison, because protocol conformance is one-directional (an
-    implementation may accept more than the contract asks for) and a default
-    changes no name. That is the only thing the duplication was ever able to
-    cause, so it is now checked rather than asserted.
+    What this type buys is that one place. ``test_http_fetcher_contract_holds_tree_wide``
+    walks all of ``app/`` to prove every coroutine returning a fetch result still
+    matches it -- by name *and* by which parameters it makes optional. Both
+    halves are load-bearing and the second was found the hard way: a fetcher that
+    gave ``policy`` a default satisfied this Protocol and satisfied a name-only
+    comparison, because protocol conformance is one-directional (an implementation
+    may accept more than the contract asks for) and a default changes no name.
+    That is the only thing the duplication was ever able to cause, so it is now
+    checked rather than asserted.
     """
 
     async def __call__(
@@ -441,6 +436,7 @@ class HttpFetchContract(Protocol):
         max_content_length: int = ...,
         *,
         policy: HostPolicy,
+        impersonate: bool = ...,
     ) -> HttpFetchResult: ...
 
 

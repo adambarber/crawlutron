@@ -48,7 +48,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import _fetch_and_decode
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
-from app.crawl.strategies.fetchers import _default_cffi_fetcher, _default_http_fetcher
+from app.crawl.strategies.fetchers import _default_http_fetcher, impersonating_fetcher
 from app.models import (
     CrawlWorker,
     EngineCrawlResult,
@@ -437,7 +437,10 @@ async def crawl_request(
     )
     policy = _payload_policy(payload, active_settings)
     fetcher = http_fetcher or partial(_default_http_fetcher, policy=host_policy)
-    cffi = cffi_fetcher or partial(_default_cffi_fetcher, policy=host_policy)
+    # The transport preference is a BINDING of the one fetcher, not a second
+    # entry point: the impersonating strategy gets the same callable with the
+    # cffi transport preferred, so the contract is spelled once in the whole tree.
+    cffi = cffi_fetcher or impersonating_fetcher(host_policy)
     shutdown_event = shutdown_event or asyncio.Event()
     # Bind the cookie namespace for the lifetime of this crawl so concurrent
     # multi-tenant calls cannot leak cookies through the shared

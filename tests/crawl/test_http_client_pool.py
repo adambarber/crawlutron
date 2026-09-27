@@ -395,7 +395,7 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
     async def _scenario():
         # A session whose transport call fails forces the documented fallback;
         # either way the fetch must have drained the queue first.
-        return await fetchers_mod._default_cffi_fetcher(
+        return await fetchers_mod.impersonating_fetcher(
             "http://example.invalid/",
             {},
             1,

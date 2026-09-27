@@ -32,6 +32,7 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
 )
 from app.crawl.extraction import (
+    Selectors,
     _extract_document,
     _extract_html,
     extract_content,
@@ -78,7 +79,9 @@ async def _run_extraction(
     to the two HTML paths only -- the document path takes neither, and handing
     it one is a TypeError -- and it is read here rather than shaped by each
     caller so that a selector honoured on one path cannot be dropped on the
-    other for the same page.
+    other for the same page. It is read into ONE :class:`Selectors` and handed
+    whole to both HTML paths, so the two cannot be given different narrowing
+    requests for the same page.
 
     ``html`` is the caller's claim that the body is HTML and it gates
     trafilatura alone: the HTTP path computes it from the content type, while
@@ -88,7 +91,7 @@ async def _run_extraction(
     body/text mode, whose name depends on how the body was obtained (HTML vs
     decoded body vs browser render).
     """
-    selectors = {"css_selector": policy.get("css_selector"), "xpath": policy.get("xpath")}
+    selectors = Selectors(css=policy.get("css_selector"), xpath=policy.get("xpath"))
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
         payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
@@ -98,10 +101,10 @@ async def _run_extraction(
         if not html:
             # No HTML, nothing for trafilatura to read: no text, no markdown.
             return _ExtractedContent("", None, EXTRACTION_METHOD_TRAFILATURA)
-        extracted = await asyncio.to_thread(_extract_html, decoded, final_url, **selectors)
+        extracted = await asyncio.to_thread(_extract_html, decoded, final_url, selectors)
         method = EXTRACTION_METHOD_TRAFILATURA
     else:
-        extracted = await asyncio.to_thread(extract_content, content, content_type, final_url, **selectors)
+        extracted = await asyncio.to_thread(extract_content, content, content_type, final_url, selectors)
         method = default_method
     text, markdown = normalized_extraction(extracted)
     return _ExtractedContent(text=text, markdown=markdown, extraction_method=method)
