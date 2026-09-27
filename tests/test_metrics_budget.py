@@ -81,17 +81,14 @@ _BUDGETS = {
     "block length": 13,
 }
 
-_BRANCH_NODES = (
-    ast.If,
-    ast.For,
-    ast.AsyncFor,
-    ast.While,
-    ast.ExceptHandler,
-    ast.With,
-    ast.AsyncWith,
-    ast.Assert,
-    ast.BoolOp,
-)
+# The complexity approximation counts every node that introduces a branch, which
+# is the sweep's own compound-statement vocabulary plus the three that can
+# appear without opening a block. Derived rather than re-spelled: the two lists
+# agreeing is a fact nobody maintains, and the first time one of them gains a
+# node the metrics gate silently stops counting a construct the duplication sweep
+# is already measuring. ``ast.comprehension`` is counted separately below, as
+# ``conditions``.
+_BRANCH_NODES = COMPOUND_NODES + (ast.ExceptHandler, ast.Assert, ast.BoolOp)
 
 @dataclass(frozen=True)
 class Offender:
