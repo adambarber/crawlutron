@@ -15,6 +15,7 @@ from app.constants import (
 from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _failed_engine_result
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import _http_strategy_result
+from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import (
     Classification,
     CrawlError,
@@ -46,6 +47,21 @@ class _ChainContext:
     robots_sitemaps: list[str] | None
     host_policy: HostPolicy
     global_concurrency: int | None
+
+    def request_for(self, strategy: CrawlStrategyName) -> StrategyRequest:
+        """The page's identity for one ladder step.
+
+        The chain owns this mapping because the chain is what knows which URLs
+        and policy a run was dispatched with; a strategy that built its own
+        would be one more place to mix two pages up.
+        """
+        return StrategyRequest(
+            original_url=self.original_url,
+            normalized_url=self.normalized_url,
+            strategy=strategy,
+            policy=self.policy,
+            host_policy=self.host_policy,
+        )
 
 
 @dataclass
@@ -135,16 +151,12 @@ class _ChainRun:
         context = self.context
         fetcher = context.cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else context.http_fetcher
         return await _http_strategy_result(
-            original_url=context.original_url,
-            normalized_url=context.normalized_url,
-            strategy=strategy,
-            policy=context.policy,
+            request=context.request_for(strategy),
             http_fetcher=fetcher,
             cache=context.cache,
             content_cache=context.content_cache,
             caller_validators=context.caller_validators,
             robots_sitemaps=context.robots_sitemaps,
-            host_policy=context.host_policy,
             global_concurrency=context.global_concurrency,
         )
 
@@ -161,12 +173,8 @@ class _ChainRun:
                 },
             )
         return await browser_strategy_result(
-            original_url=context.original_url,
-            normalized_url=context.normalized_url,
-            strategy=strategy,
-            policy=context.policy,
+            request=context.request_for(strategy),
             browser_worker=context.browser_worker,
-            host_policy=context.host_policy,
         )
 
     def record(self, strategy: CrawlStrategyName, result: EngineCrawlResult) -> None:

@@ -10,7 +10,9 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLE
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
+from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import HttpFetchResult
+from app.validation import HostPolicy
 
 SCOPE_KEEP_DROP_PAGES = {
     "/": (
@@ -635,6 +637,24 @@ def _spawn_fetch(fn):
     finally:
         server.stop()
 
+def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> StrategyRequest:
+    """The page identity these factories hand the real strategy entry points.
+
+    One spelling, so a factory cannot pass one page's URL to a result builder
+    that expects another's -- the same mixing hazard the record exists to remove
+    in production, and the reason the factories are not free to improvise the
+    five fields. The tests drive the real entry points, so the wiring they set up
+    is the wiring production uses.
+    """
+    return StrategyRequest(
+        original_url=url,
+        normalized_url=url,
+        strategy=strategy,
+        policy=policy,
+        host_policy=HostPolicy.unrestricted(),
+    )
+
+
 
 async def run_http_strategy(
     *,
@@ -646,7 +666,6 @@ async def run_http_strategy(
     **extra: Any,
 ) -> Any:
     from app.crawl.strategies.http import _http_strategy_result
-    from app.validation import HostPolicy
 
     kwargs: dict[str, Any] = {}
     if cache is not None:
@@ -654,12 +673,8 @@ async def run_http_strategy(
     if content_cache is not None:
         kwargs["content_cache"] = content_cache
     return await _http_strategy_result(
-        original_url=url,
-        normalized_url=url,
-        strategy=HTTP_DECLARED_CRAWLER,
-        policy=policy,
+        request=strategy_request(url, policy, HTTP_DECLARED_CRAWLER),
         http_fetcher=http_fetcher,
-        host_policy=HostPolicy.unrestricted(),
         **kwargs,
         **extra,
     )
@@ -697,15 +712,10 @@ async def invoke_browser_strategy(
     monkeypatch: Any, *, policy: dict[str, Any], html: str, text: str = "Hello world"
 ) -> Any:
     from app.crawl.strategies.browser_result import browser_strategy_result
-    from app.validation import HostPolicy
 
     return await browser_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy="BROWSER_HEADLESS",
-        policy=policy,
+        request=strategy_request("http://example.com/", policy, "BROWSER_HEADLESS"),
         browser_worker=_fake_browser(html=html, text=text),
-        host_policy=HostPolicy.unrestricted(),
     )
 
 

@@ -24,6 +24,7 @@ import app.crawl.extraction as extraction
 import app.crawl.extraction as extraction_mod
 from app.crawl.extraction import (
     ExtractedContent,
+    Selectors,
     _extract_document,
     _extract_html,
     _extract_selected,
@@ -291,7 +292,7 @@ class TestHtmlTreeParsing:
 class TestSelectedExtraction:
     def test_extraction_selected_with_xpath(self):
         html = "<html><body><div>Hello</div></body></html>"
-        result = _extract_selected(html, "http://x/", css_selector=None, xpath="//div/text()")
+        result = _extract_selected(html, "http://x/", selectors=Selectors(xpath="//div/text()"))
         assert result.text == "Hello"
         assert result.markdown == "Hello"
 
@@ -494,7 +495,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
     )
     html = "<html><body><p class='x'>hi</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
-        result = _extract_selected(html, "http://example.com/", css_selector=".x")
+        result = _extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
     assert result == ExtractedContent(None, None)
     assert "extraction_selector_timeout" in caplog.text, (
         "the CSS selector returned empty rather than timing out: the extraction "
@@ -505,7 +506,7 @@ def test_css_selector_slow_must_not_hang(monkeypatch, caplog):
 def test_css_selector_fast_still_works(monkeypatch):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     html = "<html><body><p class='x'>hi</p></body></html>"
-    result = _extract_selected(html, "http://example.com/", css_selector=".x")
+    result = _extract_selected(html, "http://example.com/", selectors=Selectors(css=".x"))
     assert result.text is not None
     assert "hi" in (result.text or "")
 
@@ -532,7 +533,7 @@ def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
     monkeypatch.setattr(extraction_mod, "_parse_html_tree", lambda html: tree)
     html = "<html><body><p>x</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
-        result = _extract_selected(html, "http://example.com/", xpath="//p")
+        result = _extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
     assert result == ExtractedContent(None, None)
     assert "extraction_selector_timeout" in caplog.text, (
         "the XPath expression returned empty rather than timing out: the "
@@ -543,7 +544,7 @@ def test_xpath_selector_slow_must_not_hang(monkeypatch, caplog):
 def test_xpath_selector_fast_still_works(monkeypatch):
     monkeypatch.setattr(extraction_mod, "_EXTRACTION_SELECTOR_TIMEOUT", 0.2)
     html = "<html><body><p>x</p></body></html>"
-    result = _extract_selected(html, "http://example.com/", xpath="//p")
+    result = _extract_selected(html, "http://example.com/", selectors=Selectors(xpath="//p"))
     assert result.text is not None
     assert "x" in (result.text or "")
 
@@ -600,13 +601,13 @@ class TestExtractionEdges:
     """Cover remaining branches in extraction.py"""
 
     @pytest.mark.parametrize(
-        "selector",
-        [{"css_selector": ".target"}, {"xpath": '//div[@class="target"]'}],
+        "selectors",
+        [Selectors(css=".target"), Selectors(xpath='//div[@class="target"]')],
         ids=["css", "xpath"],
     )
-    def test_extract_content_selects_the_targeted_subtree(self, selector):
+    def test_extract_content_selects_the_targeted_subtree(self, selectors):
         html = '<div class="target">selected</div><div>ignored</div>'
-        result = extract_content(html.encode(), "text/html", "http://e.com/", **selector)
+        result = extract_content(html.encode(), "text/html", "http://e.com/", selectors=selectors)
         assert result.text == "selected"
 
     def test_html_to_markdown_markdownify_success(self):
@@ -620,21 +621,23 @@ class TestExtractionEdges:
         assert text is not None
 
     @pytest.mark.parametrize(
-        ("html", "selector"),
+        ("html", "selectors"),
         [
-            ("", {"css_selector": ".x"}),
-            ("<div>content</div>", {"css_selector": ".missing"}),
-            ("<div>content</div>", {"xpath": "//span"}),
-            ("<div>content</div>", {"xpath": "//["}),
+            ("", Selectors(css=".x")),
+            ("<div>content</div>", Selectors(css=".missing")),
+            ("<div>content</div>", Selectors(xpath="//span")),
+            ("<div>content</div>", Selectors(xpath="//[")),
         ],
         ids=["no_html", "css_no_match", "xpath_no_match", "xpath_invalid"],
     )
-    def test_extract_selected_yields_nothing_when_it_matches_nothing(self, html, selector):
-        assert _extract_selected(html, "http://e.com/", **selector) == ExtractedContent(None, None)
+    def test_extract_selected_yields_nothing_when_it_matches_nothing(self, html, selectors):
+        assert _extract_selected(html, "http://e.com/", selectors=selectors) == ExtractedContent(None, None)
 
     def test_extract_selected_xpath_string_node(self):
         result = _extract_selected(
-            "<div><span>text1</span><span>text2</span></div>", "http://e.com/", xpath="//span/text()"
+            "<div><span>text1</span><span>text2</span></div>",
+            "http://e.com/",
+            selectors=Selectors(xpath="//span/text()"),
         )
         assert result.text is not None
 
@@ -762,7 +765,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
         result = extraction_mod.extract_content(
-            pdf, "application/pdf", "http://example.com/doc.pdf", css_selector="#agenda"
+            pdf, "application/pdf", "http://example.com/doc.pdf", selectors=Selectors(css="#agenda")
         )
     assert "extraction_selector_ignored_non_html" in caplog.text, (
         "a selector supplied for a PDF was dropped with no warning; the caller "
@@ -778,7 +781,7 @@ def test_selector_on_non_html_is_reported_not_silently_dropped(caplog):
     html = "<html><body><div id='agenda'>item one</div><p>filler</p></body></html>"
     with caplog.at_level(logging.WARNING, logger="app.crawl.extraction"):
         narrowed = extraction_mod.extract_content(
-            html, "text/html", "http://example.com/", css_selector="#agenda"
+            html, "text/html", "http://example.com/", selectors=Selectors(css="#agenda")
         )
     assert "extraction_selector_ignored_non_html" not in caplog.text, caplog.text
     assert "item one" in (narrowed.markdown or ""), narrowed

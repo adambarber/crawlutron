@@ -16,16 +16,12 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
     from app.crawl.strategies.fetchers import impersonating_fetcher
     from app.validation import HostPolicy
 
+    # `impersonating_fetcher` is the factory the engine binds for the
+    # impersonating strategy, so calling the factory is what makes this a test
+    # of the shipped transport preference rather than of a second entry point.
     try:
-        result = asyncio.run(
-            impersonating_fetcher(
-                url,
-                {},
-                10,
-                50 * 1024 * 1024,
-                policy=HostPolicy.unrestricted(),
-            )
-        )
+        policy = HostPolicy.unrestricted()
+        result = asyncio.run(impersonating_fetcher(policy)(url, {}, 10, 50 * 1024 * 1024, policy=policy))
         out_queue.put(("ok", result.status_code))
     except Exception as error:
         out_queue.put(("err", type(error).__name__, str(error)[:160]))
@@ -83,8 +79,12 @@ class TestHttpStrategyEdges:
 
         assert worker.exitcode == 0, f"worker crashed: exitcode={worker.exitcode}"
         assert not out_queue.empty(), "worker produced no result"
-        outcome, status_or_exc = out_queue.get()
-        assert outcome == "ok" and status_or_exc == 200
+        # The error branch reports three values, so unpacking positionally turned
+        # a real failure into "too many values to unpack" and hid the reason the
+        # subprocess died. Read the outcome first and name the rest.
+        outcome, *detail = out_queue.get()
+        assert outcome == "ok", f"cffi fetch failed in the subprocess: {detail}"
+        assert detail == [200], detail
 
     async def test_http_strategy_result_httpx_request_error(self):
         from app.crawl.cache import HttpCache

@@ -20,6 +20,13 @@ BROWSER_HEADLESS: Final[Literal["BROWSER_HEADLESS"]] = "BROWSER_HEADLESS"
 
 # Service version: single source of truth (L2), imported directly by callers.
 SERVICE_VERSION: str = "0.3.0"
+# The service's own id, as callers and clients see it. This string was spelled
+# at seven sites -- the three discovery payloads, the MCP server name, the
+# OpenAPI service_name and its contact name, and the user-agent token -- and
+# they all answer for the same service, so a rename that missed one would make
+# the wire describe something other than what replied. One constant, seven
+# references: a site that drifts is now a visible edit rather than a silent lie.
+SERVICE_ID: Final = "browser-crawler"
 ROUTER_MODULE_DOC: Final = (
     "Pure router: imports :func:`{handler}` and binds it\n"
     "to the ``{path}`` POST path. The handler implementation lives in the\n"
@@ -33,9 +40,9 @@ ROUTER_MODULE_DOC: Final = (
 # Overridable via BROWSER_CRAWLER_USER_AGENT; update before publishing
 # to the final GitHub org (replace the placeholder URL below).
 DEFAULT_USER_AGENT: str = (
-    f"browser-crawler/{SERVICE_VERSION} (+https://github.com/browser-crawler/browser-crawler)"
+    f"{SERVICE_ID}/{SERVICE_VERSION} (+https://github.com/browser-crawler/browser-crawler)"
 )
-USER_AGENT_TOKEN: str = "browser-crawler"
+USER_AGENT_TOKEN: str = SERVICE_ID
 # TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
 # fetcher and the agent-hints copy both reference this, so they cannot drift.
 CFFI_IMPERSONATE_TARGET: str = "firefox135"

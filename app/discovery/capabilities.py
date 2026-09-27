@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
 from app.api_models import (
-    POLICY_SCHEMA_VERSION,
+    SERVICE_IDENTITY,
     CapabilitiesResponse,
     CrawlClassification,
     CrawlExtractionMethod,
@@ -17,7 +17,6 @@ from app.constants import (
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     LARGE_CRAWL_GUIDANCE,
-    SERVICE_VERSION,
 )
 from app.search import active_search_provider_name, configured_search_providers
 from app.settings import CrawlerSettings
@@ -48,9 +47,7 @@ OUTPUT_FIELDS = [
 
 def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
     return {
-        "service": "browser-crawler",
-        "version": SERVICE_VERSION,
-        "policy_schema_version": POLICY_SCHEMA_VERSION,
+        **SERVICE_IDENTITY,
         "supported_strategies": [strategy.value for strategy in CrawlStrategy],
         "supported_extractions": [method.value for method in CrawlExtractionMethod],
         "supported_classifications": [classification.value for classification in CrawlClassification],

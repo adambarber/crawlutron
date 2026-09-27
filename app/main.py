@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from app.logging_config import configure_service_logging
 from app.validation import HostPolicy, get_env_float, get_env_int
 
-from .constants import SERVICE_VERSION
+from .constants import SERVICE_ID, SERVICE_VERSION
 from .crawl.job_store import JobStore
 from .crawl.result_store import CrawlResultStore
 from .crawl.strategies.browser_pool import (
@@ -108,7 +108,7 @@ result_store = CrawlResultStore(
 if settings.log_file_path:
     os.makedirs(os.path.dirname(settings.log_file_path) or ".", exist_ok=True)
 logger = configure_service_logging(
-    service_name="browser-crawler",
+    service_name=SERVICE_ID,
     log_level=settings.log_level,
     log_file_path=settings.log_file_path,
     log_file_max_bytes=settings.log_file_max_bytes,
@@ -250,7 +250,7 @@ if FastAPI is not None:
             "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
         version=SERVICE_VERSION,
-        contact={"name": "browser-crawler"},
+        contact={"name": SERVICE_ID},
         license_info={"name": "MIT License"},
         openapi_tags=[
             {

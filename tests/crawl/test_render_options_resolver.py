@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import pytest
 from _browser_doubles import _fake_browser
+from _fetcher_factories import strategy_request
 
 from app.api.render import _render_options
 from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy
 
 #: The two knobs the resolver reads off settings, set away from the dataclass
 #: defaults so a merge assertion cannot pass by coincidence.
@@ -140,12 +140,8 @@ class TestEngineConsumesResolver:
 
         policy = _browser_policy()
         result = await browser_strategy_result(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            strategy="BROWSER_HEADLESS",
-            policy=policy,
+            request=strategy_request("http://example.com/", policy, "BROWSER_HEADLESS"),
             browser_worker=worker,
-            host_policy=HostPolicy.unrestricted(),
         )
         options = captured["options"]
         # The caller asked for no HTML in the payload...

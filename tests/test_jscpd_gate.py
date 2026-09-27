@@ -909,15 +909,28 @@ def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(mon
 def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment() -> None:
     """The baseline is load-bearing: a sanction is a guard, not a comment.
 
-    Two pairs are sanctioned at 4/25 and both exist because a machine-checked guard
-    requires two spellings of the same contract. A sanction whose guard test was
-    renamed or deleted would leave the copy unchecked and the gate green, which is
-    the shape of drift this whole program is closing. The hash is what makes the
-    baseline a claim about today's code: change either side of a pair and the
-    recorded hash stops matching, so the entry fails as unsanctioned rather than
-    continuing to vouch for a fragment that no longer exists.
+    A sanction is a standing licence to duplicate, so the baseline is empty and
+    that is the claim being asserted. The two pairs it held were the fetcher
+    contract and the selector pair, each of which existed only because a
+    machine-checked guard required two spellings of one contract; both were
+    consolidated, so the licence is no longer needed and is withdrawn rather than
+    left in place for the next duplicate to hide behind.
+
+    The loop is the other half and is what fires if a pair is ever sanctioned
+    again: a sanction whose guard test was renamed or deleted would leave the copy
+    unchecked and the gate green, which is the shape of drift this whole program
+    is closing. The hash is what makes a baseline entry a claim about today's
+    code -- change either side of a pair and the recorded hash stops matching, so
+    the entry fails as unsanctioned rather than continuing to vouch for a fragment
+    that no longer exists.
     """
-    assert gate._expected_pairs(), "the baseline is empty, so this test would prove nothing"
+    sanctioned = [pair["id"] for pair in gate._expected_pairs()]
+    assert not sanctioned, (
+        f"duplicate pairs are sanctioned again: {sanctioned}. A sanction is a standing licence "
+        "to duplicate; if a guard genuinely requires two spellings, that is a chokepoint to "
+        "build, not a pair to allow -- see app/crawl/extraction.py Selectors and "
+        "app/models.py HttpFetchContract for the two this baseline used to hold."
+    )
     for pair in gate._expected_pairs():
         guard = pair["guard"]
         path, _, node = guard.partition("::")

@@ -6,11 +6,11 @@ and the reserved JSON-RPC error range ``-32020..-32099`` is used for
 protocol-defined errors.
 """
 
-from app.constants import SERVICE_VERSION
+from app.constants import SERVICE_ID, SERVICE_VERSION
 
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SUPPORTED_PROTOCOL_VERSIONS = [MCP_PROTOCOL_VERSION]
-MCP_SERVER_NAME = "browser-crawler"
+MCP_SERVER_NAME = SERVICE_ID
 MCP_SERVER_VERSION = SERVICE_VERSION
 
 # JSON-RPC 2.0 error codes.

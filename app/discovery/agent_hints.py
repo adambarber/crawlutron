@@ -15,6 +15,7 @@ from app.constants import (
     EXTRACTION_TRAFILATURA,
     HTTP_DECLARED_CRAWLER,
     LARGE_CRAWL_GUIDANCE,
+    SERVICE_ID,
 )
 
 STRATEGY_DESCRIPTIONS = {
@@ -84,7 +85,7 @@ EXAMPLE_POLICIES = {
 
 def agent_hints_payload() -> dict[str, Any]:
     return {
-        "service": "browser-crawler",
+        "service": SERVICE_ID,
         "strategies": {
             strategy.value: description for strategy, description in STRATEGY_DESCRIPTIONS.items()
         },

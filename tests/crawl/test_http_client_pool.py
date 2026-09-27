@@ -12,9 +12,9 @@ from _async_harnesses import run_loop_rebind_scenario
 from _timing_harnesses import await_until
 from curl_cffi.requests import AsyncSession
 
-import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as http_mod
 from app import settings as settings_mod
+from app.crawl.strategies.fetchers import _cffi_fetch
 from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.validation import HostPolicy
 
@@ -150,12 +150,34 @@ class _PooledFake:
             self.is_closed = True
 
 
-def _build_httpx_fake(settings=None) -> _PooledFake:
-    client = _PooledFake("aclose", publishes_is_closed=True)
+def _bind_to_running_loop(client) -> None:
+    """Bind a fake client to the running loop, or leave it unbound if there is none.
+
+    A fake built outside a loop is how the pool's "was this closed from the loop
+    it was made on" question gets answered honestly, and the try/except was
+    written out at every construction site.
+    """
     try:
         client._bound_loop = asyncio.get_running_loop()
     except RuntimeError:
         client._bound_loop = None
+
+
+def _expected_connections(limit: int) -> int:
+    """The pool ceiling the settings must derive for a memory limit.
+
+    Spelled out per test, the expectation and the derivation could be changed
+    independently, which is the one thing a ceiling test must not allow.
+    """
+    return max(
+        100,
+        settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
+    )
+
+
+def _build_httpx_fake(settings=None) -> _PooledFake:
+    client = _PooledFake("aclose", publishes_is_closed=True)
+    _bind_to_running_loop(client)
     return client
 
 
@@ -362,11 +384,20 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatc
     assert second in queued, "a superseded session was dropped when the rebuild failed"
 
 
-def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
+def test_cffi_fetch_drains_pending_closes_before_taking_the_session(monkeypatch):
     """Coverage: a queued close is only released if the cffi path drains too.
 
-    The http fetcher drains on every request; the cffi fetcher never did, so
+    The http fetcher drains on every request; the cffi transport never did, so
     sessions queued by a cffi loop change had no release point on that path.
+
+    ``_cffi_fetch`` is driven directly because it is the function that owns the
+    drain. This test used to go through the impersonating fetcher and stub the
+    plain-httpx fallback, which cost a fake that could not be reached (the
+    fetcher is a ``functools.partial`` built at import, so patching the module
+    attribute after the fact does nothing) and made the assertion ambiguous
+    anyway: the total it counted included the httpx path's own drain, so it
+    could not tell one drain from two. The transport returns ``None`` for
+    "could not be made", so the count here is exactly the cffi path's.
     """
     drains = 0
     real_drain = http_mod._drain_pending_client_closes
@@ -380,41 +411,14 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
     monkeypatch.setattr(http_mod, "_build_cffi_session", lambda *a, **k: _build_cffi_fake())
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
 
-    async def _fake_http_fetcher(
-        url,
-        headers,
-        timeout_seconds,
-        max_content_length=0,
-        *,
-        policy,
-    ):
-        return "fell-back-to-httpx"
-
-    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", _fake_http_fetcher)
-
-    async def _scenario():
-        # A session whose transport call fails forces the documented fallback;
-        # either way the fetch must have drained the queue first.
-        return await fetchers_mod.impersonating_fetcher(
-            "http://example.invalid/",
-            {},
-            1,
-            1024,
-            policy=HostPolicy.unrestricted(),
-        )
+    async def _attempt():
+        return await _cffi_fetch("http://example.invalid/", {}, 1, 1024, policy=HostPolicy.unrestricted())
 
     try:
-        result = asyncio.run(_scenario())
-        drains_from_fetch_path = drains
+        assert asyncio.run(_attempt()) is None, "the fake session cannot answer, so the attempt declines"
+        assert drains == 1, f"expected the cffi path's own drain, got {drains}"
     finally:
         asyncio.run(http_mod.close_cffi_session())
-    assert result == "fell-back-to-httpx"
-    # Counted before the teardown above (whose shutdown drains as well), and the
-    # httpx fetcher it fell back to is a stub that never drains -- so this one
-    # drain can only have come from the cffi fetch path itself.
-    assert drains_from_fetch_path == 1, (
-        f"expected exactly the cffi path's own drain, got {drains_from_fetch_path}"
-    )
 
 
 class _PooledClientDouble:
@@ -694,10 +698,7 @@ class _FakeClient:
 
 def _fake_builder(settings):
     client = _FakeClient()
-    try:
-        client._bound_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        client._bound_loop = None
+    _bind_to_running_loop(client)
     return client
 
 
@@ -794,10 +795,7 @@ def test_3gib_limit_scales_up():
     with patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)):
         # The pool ceiling must equal the admission's HTTP concurrency for the
         # same limit + pool, whatever the per-task RAM estimate is (zero drift).
-        expected = max(
-            100,
-            settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
-        )
+        expected = _expected_connections(limit)
         assert settings_mod._default_http_max_connections() == expected
         assert settings_mod._default_http_keepalive() == max(20, min(128, expected // 2))
         # With the honest per-task RAM estimate the 3 GiB derivation sits at the
@@ -831,10 +829,7 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
     running process actually has.
     """
     limit = 8 * 1024 * 1024 * 1024
-    expected = max(
-        100,
-        settings_mod.max_http_concurrency_for(limit, settings_mod.derive_browser_pool_size(limit)),
-    )
+    expected = _expected_connections(limit)
     with (
         patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)),
         patch.dict("os.environ"),

@@ -12,7 +12,7 @@ from fastapi import APIRouter
 
 from app.api import job_runner
 from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
-from app.api.exceptions import http_error
+from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import _build_job_status
 from app.api_models import (
     CrawlerError,
@@ -65,7 +65,7 @@ async def create_job(
         )
         job = await job_store.acreate(checked[0], payload.policy.model_dump())
     except ValueError as error:
-        raise http_error(422, "validation_error", "Request validation failed", {"errors": [{"msg": str(error)}]}) from error
+        raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
     row = await job_store.astatus(job.job_id)
     assert row is not None  # written moments ago by acreate

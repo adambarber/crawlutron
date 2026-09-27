@@ -1248,9 +1248,7 @@ def test_cache_envelope_is_built_by_one_owner():
     reader expects. ``ContentCache._entry_to_store`` is the owner; a new write
     path has to go through it.
     """
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"content_cache.py"}):
-        offenders.extend(_cache_envelope_literals(tree, path))
+    offenders = app_offenders(_cache_envelope_literals, exclude=SANCTIONED | {"content_cache.py"})
     assert not offenders, "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(
         offenders
     )
@@ -1308,9 +1306,7 @@ def test_extraction_text_is_normalized_by_one_owner():
     lives beside ``ExtractedContent`` because the coercion is a fact about
     extractor output, not about any one strategy's result builder.
     """
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"extraction.py"}):
-        offenders.extend(_inline_extraction_normalizations(tree, path))
+    offenders = app_offenders(_inline_extraction_normalizations, exclude=SANCTIONED | {"extraction.py"})
     assert not offenders, "extraction text is normalized inline instead of by its owner:\n  " + "\n  ".join(
         offenders
     )
@@ -1466,9 +1462,7 @@ def _unpinned_safe_url_parses(tree, path):
 
 
 def test_safe_url_parse_always_pins():
-    offenders = []
-    for path, tree in app_trees(exclude=SANCTIONED | {"safe_url.py"}):
-        offenders.extend(_unpinned_safe_url_parses(tree, path))
+    offenders = app_offenders(_unpinned_safe_url_parses, exclude=SANCTIONED | {"safe_url.py"})
     assert not offenders, "unpinned SafeUrl.parse (DNS-rebinding window): " + "; ".join(offenders)
 
 
@@ -1614,9 +1608,7 @@ def _optional_host_policy_offenders(tree, path):
 
 
 def test_the_host_policy_is_never_optional():
-    offenders = []
-    for path, tree in app_trees():
-        offenders.extend(_optional_host_policy_offenders(tree, path))
+    offenders = app_offenders(_optional_host_policy_offenders)
     assert not offenders, (
         "a HostPolicy parameter must be required everywhere in app/; an optional one is an "
         "SSRF bypass that neither mypy nor any other guard catches: " + ", ".join(offenders)
@@ -3390,9 +3382,7 @@ def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
 
 
 def test_path_validators_never_return_an_unchecked_parameter():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_unchecked_parameter_return_offenders(tree, path))
+    offenders = app_offenders(_unchecked_parameter_return_offenders)
     assert not offenders, "; ".join(offenders)
 
 
@@ -3535,9 +3525,7 @@ def test_no_request_header_advertises_an_undecodable_encoding():
     body the process would refuse. Either way the header's claim is checked
     against the decoder set rather than trusted.
     """
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_undecodable_encoding_offenders(tree, path))
+    offenders = app_offenders(_undecodable_encoding_offenders)
     assert not offenders, "; ".join(offenders)
 
 
@@ -3623,9 +3611,7 @@ def _unowned_age_deletions(tree, path) -> list[str]:
 
 
 def test_age_based_deletion_consults_ownership_first():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_unowned_age_deletions(tree, path))
+    offenders = app_offenders(_unowned_age_deletions)
     assert not offenders, "; ".join(offenders)
 
 
@@ -4305,9 +4291,7 @@ def test_engine_emitted_strategies_are_enum_members():
     from app.api_models import CrawlStrategy
 
     members = {m.value for m in CrawlStrategy}
-    offenders = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_non_member_strategy_offenders(tree, path, members=members))
+    offenders = app_offenders(_non_member_strategy_offenders, members=members)
     assert not offenders, (
         "a literal strategy passed to a result primitive must be a "
         "CrawlStrategy member, or None when no strategy was attempted; the "
@@ -4743,9 +4727,7 @@ def test_host_policy_detector_accepts_fixed_extraction_boundaries():
 
 
 def test_url_returning_helpers_require_host_policy():
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_required_host_policy_offenders(tree, path))
+    offenders = app_offenders(_required_host_policy_offenders)
     assert not offenders, ", ".join(offenders)
 
 
@@ -5140,9 +5122,7 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
 
 
 def test_robots_pattern_compile_lives_behind_the_per_host_cache():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_robots_compile_call_offenders(tree, path))
+    offenders = app_offenders(_robots_compile_call_offenders)
     assert not offenders, ", ".join(offenders)
 
 
@@ -5207,9 +5187,7 @@ def test_result_primitives_emit_real_status_members():
     from app.models import ResultStatus
 
     members = set(get_args(ResultStatus))
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_non_member_status_offenders(tree, path, members=members))
+    offenders = app_offenders(_non_member_status_offenders, members=members)
     assert not offenders, (
         "a literal status passed to a result primitive must be a ResultStatus "
         "member, or the strict enum on the wire model rejects the batch: " + ", ".join(offenders)
@@ -5426,9 +5404,7 @@ def test_crawl_strategy_attempt_sites_use_real_members():
     from app.models import CrawlStrategyName
 
     members = set(get_args(CrawlStrategyName))
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_non_member_attempt_strategy_offenders(tree, path, members=members))
+    offenders = app_offenders(_non_member_attempt_strategy_offenders, members=members)
     assert not offenders, (
         "a literal strategy at a CrawlStrategyAttempt construction site must be a "
         "CrawlStrategyName member, or None when no strategy was attempted: " + ", ".join(offenders)
@@ -5577,9 +5553,7 @@ def test_result_primitives_emit_only_declared_literal_members():
     from membership_gate import generic_literal_field_offenders, literal_typed_field_members
 
     field_members = literal_typed_field_members()
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(generic_literal_field_offenders(tree, path, field_members=field_members))
+    offenders = app_offenders(generic_literal_field_offenders, field_members=field_members)
     assert not offenders, (
         "a literal passed to a result primitive must be a member of its field's"
         " declared Literal, or the strict enum at response shaping rejects the whole"
@@ -5753,9 +5727,7 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
     from membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
 
     field_members = literal_typed_field_members()
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(wrong_namespace_constant_offenders(tree, path, field_members=field_members))
+    offenders = app_offenders(wrong_namespace_constant_offenders, field_members=field_members)
     assert not offenders, (
         "a constant from a foreign namespace was consumed as a taxonomy member; the"
         " value collides with a real member which is exactly why a value check misses"
@@ -6032,9 +6004,7 @@ def test_dynamic_pattern_re_calls_under_any_alias():
     ``test_no_bare_re_compile_on_nonliteral``."""
     from membership_gate import aliased_dynamic_pattern_re_offenders
 
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(aliased_dynamic_pattern_re_offenders(tree, path))
+    offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
     assert not offenders, (
         "re.<method> with a dynamic pattern must go through app.safe_regex, under any"
         f" import alias: {'; '.join(offenders)}"
@@ -6067,9 +6037,7 @@ def test_sanctioned_func_calls_under_any_alias():
     requirement the way ``_re`` names its way out of the pattern check."""
     from membership_gate import aliased_sanctioned_func_offenders
 
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(aliased_sanctioned_func_offenders(tree, path))
+    offenders = app_offenders(aliased_sanctioned_func_offenders)
     assert not offenders, (
         "a sanctioned chokepoint function is called through an alias the"
         " name-matching detectors do not recognize; a missing cap or filter would"
@@ -6194,9 +6162,7 @@ def test_error_field_values_are_classification_members():
     from app.models import CrawlError, _literal_members
 
     members = _literal_members(CrawlError)
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(error_field_taxonomy_offenders(tree, path, members=members))
+    offenders = app_offenders(error_field_taxonomy_offenders, members=members)
     assert not offenders, (
         "error= must be a member of the declared CrawlError taxonomy (the field is"
         f" documented as a stable code callers key on): {'; '.join(offenders)}"
@@ -6535,9 +6501,7 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_the_action_chain_is_always_invoked_with_a_budget():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_action_chain_offenders(tree, path))
+    offenders = app_offenders(_action_chain_offenders)
     assert not offenders, "; ".join(offenders)
 
 
@@ -8948,9 +8912,7 @@ def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list
 
 def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
     """Cookie persistence has one door, and that door is the shared fetch tail."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        offenders.extend(_cookie_writes_off_the_fetch_tail(tree, path))
+    offenders = app_offenders(_cookie_writes_off_the_fetch_tail)
     assert not offenders, (
         f"Persist response cookies via {_COOKIE_TAIL}::{_COOKIE_TAIL_FN}, which calls "
         f"{_COOKIE_HELPER_FN} for you, instead of reaching for the jar where you are: " + ", ".join(offenders)
@@ -9428,9 +9390,7 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
 
 
 def test_every_mcp_tool_declares_the_model_that_validates_its_arguments():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_mcp_unvalidated_tool_offenders(tree, path, tools_module=_MCP_TOOLS_MODULE))
+    offenders = app_offenders(_mcp_unvalidated_tool_offenders, tools_module=_MCP_TOOLS_MODULE)
     assert not offenders, "an MCP tool is missing its validated contract: " + ", ".join(offenders)
 
 

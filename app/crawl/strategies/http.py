@@ -39,6 +39,7 @@ from app.crawl.strategies.content_pipeline import (
     _post_fetch_diagnostics,
     _run_extraction,
 )
+from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import (
     Classification,
     CrawlStrategyAttempt,
@@ -607,11 +608,7 @@ def _http_error_result(ctx: _HttpStrategyContext, error: Exception) -> EngineCra
 
 async def _http_strategy_result(
     *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName,
-    policy: dict[str, Any],
-    host_policy: HostPolicy,
+    request: StrategyRequest,
     http_fetcher: Any,
     cache: HttpCache | None = None,
     content_cache: ContentCache | None = None,
@@ -621,11 +618,11 @@ async def _http_strategy_result(
 ) -> EngineCrawlResult:
     """Coordinate the named HTTP fetch phases and return one crawl result."""
     ctx = _HttpStrategyContext(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
-        policy=policy,
-        host_policy=host_policy,
+        original_url=request.original_url,
+        normalized_url=request.normalized_url,
+        strategy=request.strategy,
+        policy=request.policy,
+        host_policy=request.host_policy,
         http_fetcher=http_fetcher,
         cache=cache,
         content_cache=content_cache,

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ValidationError
 from app.api.crawl_executor import execute_crawl
 from app.api.map_endpoint import map_site
 from app.api.render_endpoint import render as render_endpoint_handler
-from app.api.response_shaping import abuild_unified_crawl_response
+from app.api.response_shaping import _aunified_response_from_result
 from app.api_models import (
     CrawlRequest,
     MapRequest,
@@ -119,6 +119,35 @@ def _tool_success(value: BaseModel | dict[str, Any]) -> ToolResult:
     return ToolResult(text=json.dumps(dump, default=json_default), structured=dump)
 
 
+async def _tool_result(coro) -> ToolResult:
+    """Cross the MCP boundary for one tool call: run it, or report it as an error.
+
+    Every handler does the same two things -- await the endpoint, and turn an
+    ``HTTPException``/``ValueError`` from it into a tool error rather than a
+    raised traceback. Only the endpoint differs.
+
+    The envelope lives here because it is the boundary's contract: a handler
+    that spelled its own ``except`` could forget the arm, and the failure mode
+    is an exception escaping a JSON-RPC call as a 500.
+    """
+    try:
+        result = await coro
+    except (HTTPException, ValueError) as error:
+        return _tool_error(error)
+    return _tool_success(result)
+
+
+async def _crawled(payload: CrawlRequest, settings, shutdown_event):
+    """Run the crawl endpoint and shape it, so the handler owns only the boundary."""
+    return await _aunified_response_from_result(
+        await execute_crawl(
+            payload.model_dump(exclude_none=True),
+            settings=settings,
+            shutdown_event=shutdown_event,
+        )
+    )
+
+
 async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> ToolResult:
     if _UNSUPPORTED_CRAWL_FIELDS & payload.model_fields_set:
         return ToolResult(
@@ -126,29 +155,11 @@ async def _handle_crawl(payload: CrawlRequest, settings, shutdown_event) -> Tool
             "use POST /v1/crawl for webhook/async delivery.",
             is_error=True,
         )
-    try:
-        result = await execute_crawl(
-            payload.model_dump(exclude_none=True),
-            settings=settings,
-            shutdown_event=shutdown_event,
-        )
-        unified = await abuild_unified_crawl_response(
-            result["results"],
-            request_id=result["request_id"],
-            submitted_count=result["submitted_count"],
-            policy_schema_version=result["policy_schema_version"],
-        )
-    except (HTTPException, ValueError) as error:
-        return _tool_error(error)
-    return _tool_success(unified)
+    return await _tool_result(_crawled(payload, settings, shutdown_event))
 
 
 async def _handle_map(payload: MapRequest, settings, shutdown_event) -> ToolResult:
-    try:
-        frontier = await map_site(payload, settings=settings, shutdown_event=shutdown_event)
-    except (HTTPException, ValueError) as error:
-        return _tool_error(error)
-    return _tool_success(frontier)
+    return await _tool_result(map_site(payload, settings=settings, shutdown_event=shutdown_event))
 
 
 async def _handle_render(payload: RenderRequest, settings, shutdown_event) -> ToolResult:
@@ -157,19 +168,11 @@ async def _handle_render(payload: RenderRequest, settings, shutdown_event) -> To
             text="Browser pool is not initialized; the service is starting up or shutting down.",
             is_error=True,
         )
-    try:
-        unified = await render_endpoint_handler(payload, settings=settings)
-    except (HTTPException, ValueError) as error:
-        return _tool_error(error)
-    return _tool_success(unified)
+    return await _tool_result(render_endpoint_handler(payload, settings=settings))
 
 
 async def _handle_search(payload: SearchRequest, settings, shutdown_event) -> ToolResult:
-    try:
-        response = await search_endpoint_handler(payload, settings=settings)
-    except (HTTPException, ValueError) as error:
-        return _tool_error(error)
-    return _tool_success(response)
+    return await _tool_result(search_endpoint_handler(payload, settings=settings))
 
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:

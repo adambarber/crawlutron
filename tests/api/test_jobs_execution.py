@@ -20,6 +20,7 @@ from _job_harnesses import (
     _make_app,
     _wait_status,
     _wait_until,
+    assert_settled,
     job_limits,
     make_job_store,
     post_api_job,
@@ -27,6 +28,7 @@ from _job_harnesses import (
     recording_execute,
     run_api_job,
     run_job_control_test,
+    run_scripted_api_job,
     run_seeded_scripted_job,
     submit_blocked_job,
 )
@@ -308,12 +310,7 @@ class TestWholeSiteJobExecution:
             job_limits(max_depth=2, max_pages=2),
         )
 
-        assert job.status == JobStatus.COMPLETED
-        assert job.visited == {GRAPH_ROOT, GRAPH_CHILD}
-        assert job.frontier == []
-        assert job.in_flight == []
-        assert job.stats["total_crawled"] == 2
-        assert job.stats["total_discovered"] == 1
+        assert_settled(job, visited={GRAPH_ROOT, GRAPH_CHILD}, discovered=1, crawled=2)
 
     async def test_max_pages_absent_keeps_the_whole_site_unbounded(self, client, job_store):
         captured: list[dict[str, Any]] = []
@@ -328,15 +325,12 @@ class TestWholeSiteJobExecution:
         )
 
         assert job.status == JobStatus.COMPLETED
-        assert job.visited == {
-            GRAPH_ROOT,
-            GRAPH_CHILD,
-            "http://example.test/c",
-            "http://example.test/d",
-        }
-        assert job.frontier == []
-        assert job.stats["total_crawled"] == 4
-        assert job.stats["total_discovered"] == 3
+        assert_settled(
+            job,
+            visited={GRAPH_ROOT, GRAPH_CHILD, "http://example.test/c", "http://example.test/d"},
+            discovered=3,
+            crawled=4,
+        )
         assert captured
         assert all(payload["policy"]["limits"]["max_depth"] == 0 for payload in captured)
 
@@ -351,9 +345,7 @@ class TestWholeSiteJobExecution:
         assert status == "completed"
 
         job = job_store.load(job_id)
-        assert job.visited == {GRAPH_ROOT, GRAPH_CHILD}
-        assert job.frontier == []
-        assert job.stats["total_crawled"] == 2
+        assert_settled(job, visited={GRAPH_ROOT, GRAPH_CHILD}, crawled=2)
         assert job.stats["total_failed"] == 0
         # Discovered link b was crawled in a follow-up batch.
         assert len(job.results) == 2
@@ -361,13 +353,8 @@ class TestWholeSiteJobExecution:
     async def test_total_failed_counts_once_per_failed_item(self, client, job_store):
         # Batch 2 submits b and c, both fail: the per-item `failed` counter is
         # cumulative, so adding it inside the loop once reported 1+2=3.
-        job = await run_api_job(
-            client,
-            job_store,
-            GRAPH_ROOT,
-            ScriptedExecute(
-                results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])]
-            ),
+        job = await run_scripted_api_job(
+            client, job_store, GRAPH_ROOT, results=[_canned_result(GRAPH_ROOT, links=[GRAPH_CHILD, "http://example.test/c"])],
         )
         assert job.stats["total_crawled"] == 3
         assert job.stats["total_failed"] == 2
@@ -401,13 +388,8 @@ class TestWholeSiteJobExecution:
     async def test_wide_fanout_crawls_every_discovered_url_once(self, client, job_store):
         """M2: a 25-link fan-out across batches discovers and crawls each URL."""
         leaves = [f"http://example.test/l{i}" for i in range(25)]
-        job = await run_api_job(
-            client,
-            job_store,
-            GRAPH_ROOT,
-            ScriptedExecute(
-                results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(url) for url in leaves]
-            ),
+        job = await run_scripted_api_job(
+            client, job_store, GRAPH_ROOT, results=[_canned_result(GRAPH_ROOT, links=leaves)] + [_canned_result(url) for url in leaves],
         )
         assert job.stats["total_discovered"] == 25
         assert job.stats["total_crawled"] == 26
@@ -488,11 +470,8 @@ class TestTransientFailureRequeue:
             job_limits(max_depth=2, max_pages=2),
         )
 
-        assert job.status == JobStatus.COMPLETED
         assert engine.attempts == {root: 2, admitted: 1}
-        assert job.visited == {root, admitted}
-        assert job.frontier == []
-        assert job.stats["total_discovered"] == 1
+        assert_settled(job, visited={root, admitted}, discovered=1)
 
     async def test_permanent_failure_is_terminal_without_requeue(self, client, job_store):
         root = GRAPH_ROOT
@@ -877,8 +856,7 @@ class TestWholeSiteAdmissionContract:
         child = "https://example.test/child"
         job = await self._admission_scenario(client, job_store, root, [child], self._policy(0, 10))
 
-        assert job.visited == {"https://example.test/root"}
-        assert job.frontier == []
+        assert_settled(job, visited={"https://example.test/root"})
 
     async def test_depth_one_expands_exactly_one_level(self, client, job_store):
         root = "https://example.test/root"
@@ -892,9 +870,7 @@ class TestWholeSiteAdmissionContract:
         )
         job = await run_api_job(client, job_store, root, engine, self._policy(1, 10))
         assert engine.attempts == {root: 1, child: 1}
-        assert job.visited == {root, child}
-        assert job.frontier == []
-        assert job.stats["total_discovered"] == 1
+        assert_settled(job, visited={root, child}, discovered=1)
 
     async def test_scope_regex_excludes_link_before_page_slot(self, client, job_store):
         root = "https://example.test/root"
@@ -1022,9 +998,7 @@ class TestWholeSiteAdmissionContract:
         )
 
         assert engine.attempts == {root: 1, seed: 1}
-        assert job.visited == {root, seed}
-        assert job.frontier == []
-        assert job.stats["total_discovered"] == 1
+        assert_settled(job, visited={root, seed}, discovered=1)
 
     async def test_analytics_and_document_links_do_not_consume_slots(self, client, job_store):
         root = "https://example.test/root"
@@ -1128,14 +1102,9 @@ class TestWholeSiteAdmissionContract:
     async def test_unbounded_batch_chunking_does_not_report_truncation(self, client, job_store):
         root = "https://example.test/root"
         leaves = [f"https://example.test/leaf-{index}" for index in range(12)]
-        job = await run_api_job(
-            client,
-            job_store,
-            root,
-            ScriptedExecute(
-                results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves]
-            ),
-            {"limits": {"max_depth": 1, "max_pages": 0}},
+        job = await run_scripted_api_job(
+            client, job_store, root, results=[_canned_result(root, links=leaves)] + [_canned_result(leaf) for leaf in leaves],
+            policy={"limits": {"max_depth": 1, "max_pages": 0}},
         )
 
         assert job.stats["cap_truncated"] == 0
@@ -1164,12 +1133,8 @@ class TestWholeSiteAdmissionContract:
         root = "https://example.test/root"
         child = "https://example.test/child"
         other = "https://example.test/other"
-        job = await run_api_job(
-            client,
-            job_store,
-            root,
-            ScriptedExecute(
-                results=[
+        job = await run_scripted_api_job(
+            client, job_store, root, results=[
                     _canned_result(
                         root,
                         links=[
@@ -1180,9 +1145,8 @@ class TestWholeSiteAdmissionContract:
                     ),
                     _canned_result(child),
                     _canned_result(other),
-                ]
-            ),
-            {"limits": {"max_depth": 1, "max_pages": 3}},
+                ],
+            policy={"limits": {"max_depth": 1, "max_pages": 3}},
         )
 
         assert job.stats["total_discovered"] == 2

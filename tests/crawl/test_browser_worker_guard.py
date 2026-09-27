@@ -9,6 +9,24 @@ from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 
 
+class ExhaustedPool:
+    """A pool with no renderer: ``acquire`` always raises, the release path is inert.
+
+    The pool interface the worker reads on its failure path, and nothing else --
+    the worker under test is real, so a fake here that grew a method would be
+    modelling the production pool rather than the failure.
+    """
+
+    browser_strategy = BROWSER_HEADLESS
+
+    async def acquire(self):
+        raise BrowserPoolExhaustedError("no renderer")
+
+    def release(self, renderer):
+        pass
+
+
+
 @pytest.mark.asyncio
 class TestBrowserWorkerGuard:
     """The browser worker must return a classified result, never raise.
@@ -24,17 +42,6 @@ class TestBrowserWorkerGuard:
         the at-least-once layer can re-queue it -- not raise to the scheduler."""
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
         from app.models import CrawlJob, RenderOptions
-
-        class ExhaustedPool:
-            # The pool interface the worker reads on the failure path: the
-            # browser mode its renders would have run.
-            browser_strategy = BROWSER_HEADLESS
-
-            async def acquire(self):
-                raise BrowserPoolExhaustedError("no renderer")
-
-            def release(self, renderer):
-                pass
 
         worker = PooledBrowserWorker(ExhaustedPool())
         job = CrawlJob(
@@ -101,15 +108,6 @@ class TestTransientRequeue:
 
         from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
-
-        class ExhaustedPool:
-            browser_strategy = BROWSER_HEADLESS
-
-            async def acquire(self):
-                raise BrowserPoolExhaustedError("no renderer")
-
-            def release(self, renderer):
-                pass
 
         # The real production worker, not a stand-in: only the pool is faked
         # (no browser binary in CI), so the guard, the chokepoint

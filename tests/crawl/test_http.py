@@ -3,7 +3,13 @@
 from functools import partial
 
 from _assertions import assert_result_success
-from _fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher, sequenced_fetcher
+from _fetcher_factories import (
+    request_fetcher,
+    run_http_strategy,
+    scripted_fetcher,
+    sequenced_fetcher,
+    strategy_request,
+)
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
@@ -20,9 +26,19 @@ _default_http_fetcher_with_policy = partial(
 )
 
 
-async def _run(**kwargs):
-    kwargs.setdefault("host_policy", HostPolicy.unrestricted())
-    return await _http_strategy_result(**kwargs)
+async def _run(*, url, strategy=HTTP_DECLARED_CRAWLER, policy, http_fetcher, **kwargs):
+    """Drive the real ``_http_strategy_result`` for one page.
+
+    The page identity is one argument here rather than five, so a test that
+    means to crawl ``/a`` and asserts against ``/b`` cannot be written by
+    misspelling one of five same-shaped parameters -- and the sixteen tests
+    below share this instead of each rebuilding the record.
+    """
+    return await _http_strategy_result(
+        request=strategy_request(url, policy, strategy),
+        http_fetcher=http_fetcher,
+        **kwargs,
+    )
 
 
 def _html_fetcher(html: str):
@@ -32,9 +48,7 @@ def _html_fetcher(html: str):
 
 def _run_kwargs(fetcher):
     return dict(
-        original_url="http://x.test/",
-        normalized_url="http://x.test/",
-        strategy=HTTP_DECLARED_CRAWLER,
+        url="http://x.test/",
         http_fetcher=fetcher,
         cache=HttpCache(),
         content_cache=None,
@@ -78,8 +92,7 @@ class TestHttpStrategy:
         cache.store("http://x.test/", {"etag": '"page-etag-v1"'})
         await _run(
             policy=http_policy(discovery={"robots": True}),
-            original_url="http://x.test/",
-            normalized_url="http://x.test/",
+            url="http://x.test/",
             strategy=HTTP_DECLARED_CRAWLER,
             http_fetcher=fetcher,
             cache=cache,
@@ -112,8 +125,7 @@ class TestHttpStrategy:
         # extraction entirely -- discovered_links comes back empty instead of
         # paying an HTML parse per page nobody consumes.
         result = await _run(
-            original_url=f"{base_url}/",
-            normalized_url=f"{base_url}/",
+            url=f"{base_url}/",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -128,8 +140,7 @@ class TestHttpStrategy:
 
     async def test_http_strategy_404_classified_not_found(self, base_url):
         result = await _run(
-            original_url=f"{base_url}/missing",
-            normalized_url=f"{base_url}/missing",
+            url=f"{base_url}/missing",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -140,8 +151,7 @@ class TestHttpStrategy:
 
     async def test_http_strategy_access_denied_page_blocked(self, base_url):
         result = await _run(
-            original_url=f"{base_url}/blocked",
-            normalized_url=f"{base_url}/blocked",
+            url=f"{base_url}/blocked",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -154,8 +164,7 @@ class TestHttpStrategy:
         cache = HttpCache()
         cache.store(url, {"etag": "v1"})
         result = await _run(
-            original_url=url,
-            normalized_url=url,
+            url=url,
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -167,8 +176,7 @@ class TestHttpStrategy:
 
     async def test_http_csv_document_via_http(self, base_url):
         result = await _run(
-            original_url=f"{base_url}/sample.csv",
-            normalized_url=f"{base_url}/sample.csv",
+            url=f"{base_url}/sample.csv",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -178,8 +186,7 @@ class TestHttpStrategy:
 
     async def test_http_json_document_via_http(self, base_url):
         result = await _run(
-            original_url=f"{base_url}/sample.json",
-            normalized_url=f"{base_url}/sample.json",
+            url=f"{base_url}/sample.json",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
@@ -188,8 +195,7 @@ class TestHttpStrategy:
 
     async def test_http_pdf_table_preserved_via_http(self, base_url):
         result = await _run(
-            original_url=f"{base_url}/sample_table.pdf",
-            normalized_url=f"{base_url}/sample_table.pdf",
+            url=f"{base_url}/sample_table.pdf",
             strategy=HTTP_DECLARED_CRAWLER,
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,

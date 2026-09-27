@@ -12,6 +12,7 @@ from _fetcher_factories import (
     raise_fetcher,
     routed_fetcher,
     scripted_fetcher,
+    strategy_request,
 )
 from _http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
@@ -313,12 +314,8 @@ async def _run_http_result(
     if policy:
         pol.update(policy)
     return await _http_strategy_result(
-        original_url="http://example.com/",
-        normalized_url="http://example.com/",
-        strategy=strategy,
-        policy=pol,
+        request=strategy_request("http://example.com/", pol, strategy),
         http_fetcher=fetcher,
-        host_policy=HostPolicy.unrestricted(),
     )
 
 

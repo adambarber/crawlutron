@@ -52,7 +52,7 @@ FUNNELS = [
     (
         "http-strategy",
         "run_http_strategy",
-        'async def f():\n return await _http_strategy_result(original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER", policy=policy, http_fetcher=fetcher, host_policy=HostPolicy.unrestricted())',
+        'async def f():\n return await _http_strategy_result(request=StrategyRequest(original_url=url, normalized_url=url, strategy="HTTP_DECLARED_CRAWLER", policy=policy, host_policy=HostPolicy.unrestricted()), http_fetcher=fetcher)',
     ),
     (
         "cache-entries",
@@ -197,15 +197,25 @@ def _response_handler(node):
 
 
 def _http_strategy(node):
-    required = {"original_url", "normalized_url", "strategy", "policy", "http_fetcher", "host_policy"}
+    """A call that re-spells one page's identity inline instead of passing the record.
+
+    Kept in step with the entry point's signature: when the five identity fields
+    moved into ``StrategyRequest``, this detector had to follow them inside the
+    ``request=`` keyword, or a match on the old six-keyword shape could never
+    fire again and the clone it exists to catch would be reported as clean.
+    """
     for child in nodes_of(node):
         if not isinstance(child, ast.Call) or _name(child.func) != "_http_strategy_result":
             continue
         words = {keyword.arg: keyword.value for keyword in child.keywords}
+        request = words.get("request")
+        if not isinstance(request, ast.Call) or _name(request.func) != "StrategyRequest":
+            continue
+        fields = {keyword.arg: keyword.value for keyword in request.keywords}
         if (
-            required <= words.keys()
-            and _literal(words["strategy"]) == "HTTP_DECLARED_CRAWLER"
-            and ast.dump(words["original_url"]) == ast.dump(words["normalized_url"])
+            {"original_url", "normalized_url", "strategy"} <= fields.keys()
+            and _literal(fields["strategy"]) == "HTTP_DECLARED_CRAWLER"
+            and ast.dump(fields["original_url"]) == ast.dump(fields["normalized_url"])
         ):
             return True
     return False

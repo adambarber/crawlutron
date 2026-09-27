@@ -30,20 +30,21 @@ def test_truncated_gzip_is_rejected():
         decompress_body(body, "gzip", max_output_bytes=100)
 
 
-def test_truncated_deflate_is_rejected():
-    body = zlib.compress(b"hello world")[:-2]
-    with pytest.raises(decompression_mod.DecompressionError):
-        decompress_body(body, "deflate", max_output_bytes=100)
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(zlib.compress(b"hello world")[:-2], id="truncated"),
+        pytest.param(zlib.compress(b"first") + b"junk", id="trailing_junk"),
+        pytest.param(zlib.compress(b"first") + zlib.compress(b"second"), id="concatenated"),
+    ],
+)
+def test_deflate_that_is_not_one_stream_is_rejected(body):
+    """Truncated, junk-tailed and concatenated deflate are all rejected.
 
-
-def test_deflate_with_trailing_junk_is_rejected():
-    body = zlib.compress(b"first") + b"junk"
-    with pytest.raises(decompression_mod.DecompressionError):
-        decompress_body(body, "deflate", max_output_bytes=100)
-
-
-def test_concatenated_deflate_is_rejected():
-    body = zlib.compress(b"first") + zlib.compress(b"second")
+    One body, one claim: a deflate stream that is not a single well-formed
+    member has no valid body, and each of the three ways to break that is the
+    same rejection. They were three functions body-and-all.
+    """
     with pytest.raises(decompression_mod.DecompressionError):
         decompress_body(body, "deflate", max_output_bytes=100)
 

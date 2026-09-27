@@ -457,6 +457,24 @@ def _to_jsonable(value: Any) -> Any:
     return _to_jsonable_impl(value, set())
 
 
+def _entered(value: Any, seen: set[int]) -> set[int] | None:
+    """The seen-set to recurse into ``value`` with, or None if it is already on the path.
+
+    Every branch that recurses runs the same two steps: refuse a value already
+    being converted, and put its id on the path so its own children are checked
+    against it. Only mutable containers can take part in a cycle, which is why
+    the primitive types skip this entirely.
+
+    One function rather than three copies of the four lines: a container kind
+    added below could otherwise arrive with the guard half-remembered, and a
+    cyclic graph is a ``RecursionError`` at serialization time -- far from here.
+    """
+    oid = id(value)
+    if oid in seen:
+        return None
+    return seen | {oid}
+
+
 def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
     # Guard against cyclic dataclass graphs (e.g. a DiscoveredLink whose
     # parent/children point back to an ancestor). Without this, a cycle would
@@ -465,23 +483,20 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
     # those by id; primitives (str/int/bytes) are returned as-is and must never
     # be flagged (small strings may be interned and share an id across the tree).
     if is_dataclass(value) and not isinstance(value, type):
-        oid = id(value)
-        if oid in seen:
+        entered = _entered(value, seen)
+        if entered is None:
             return None
-        seen = seen | {oid}
-        return {f.name: _to_jsonable_impl(getattr(value, f.name), seen) for f in fields(value)}
+        return {f.name: _to_jsonable_impl(getattr(value, f.name), entered) for f in fields(value)}
     if isinstance(value, dict):
-        oid = id(value)
-        if oid in seen:
+        entered = _entered(value, seen)
+        if entered is None:
             return None
-        seen = seen | {oid}
-        return {k: _to_jsonable_impl(v, seen) for k, v in value.items()}
+        return {k: _to_jsonable_impl(v, entered) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        oid = id(value)
-        if oid in seen:
+        entered = _entered(value, seen)
+        if entered is None:
             return None
-        seen = seen | {oid}
-        return [_to_jsonable_impl(v, seen) for v in value]
+        return [_to_jsonable_impl(v, entered) for v in value]
     return value
 
 

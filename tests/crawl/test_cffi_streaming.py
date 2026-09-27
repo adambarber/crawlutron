@@ -4,7 +4,7 @@ import asyncio
 import threading
 
 import pytest
-from _fetcher_factories import make_fetch, scripted_fetcher
+from _fetcher_factories import scripted_fetcher, strategy_request
 from _policy_factories import make_base_policy
 from _timing_harnesses import await_until
 from _transport_doubles import real_cffi_fetch_outcome
@@ -14,7 +14,7 @@ from helpers.server import spawn_threaded_server
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as http_mod
-from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_CFFI_IMPERSONATE
+from app.constants import HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import impersonating_fetcher
 from app.validation import HostPolicy
 
@@ -39,13 +39,9 @@ class TestCffiImpersonateStrategy:
         policy["extraction"] = "full"
 
         result = await _http_strategy_result(
-            original_url="http://x/",
-            normalized_url="http://x/",
-            strategy=HTTP_CFFI_IMPERSONATE,
-            policy=policy,
+            request=strategy_request("http://x/", policy, HTTP_CFFI_IMPERSONATE),
             http_fetcher=cffi_fetcher,
             cache=HttpCache(),
-            host_policy=HostPolicy.unrestricted(),
         )
         assert result.classification == "rendered"
 
@@ -124,43 +120,13 @@ def _patch_session(monkeypatch, response: _Response) -> _Session:
     return session
 
 
-@pytest.fixture
-def fallback_calls() -> list[str]:
-    """The URLs the fetcher's httpx fallback was asked for."""
-    return []
-
-
-def _in_process_fallback(calls: list[str]):
-    """The fetcher's documented httpx fallback, answered without a socket.
-
-    The cffi fetcher calls the module-level ``_default_http_fetcher`` with the
-    keyword-only ``policy`` that the strategy chain's own injection seam never
-    passes, so a double for this seam carries the production signature -- and
-    imports the production byte cap rather than re-spelling it, because a test
-    that copies a cap is asserting a number production owns. The answer is a
-    real ``HttpFetchResult``: what a caller receives when curl_cffi is gone is
-    the thing these tests are about, and a sentinel string could not say it.
-    """
-
-    async def _fallback(
-        url,
-        headers,
-        timeout_seconds,
-        max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-        *,
-        policy,
-    ):
-        calls.append(url)
-        return make_fetch(url=url, final_url=url)
-
-    return _fallback
-
-
 @pytest.fixture(autouse=True)
-def _no_real_fallback(monkeypatch, fallback_calls):
-    monkeypatch.setattr(fetchers_mod, "_default_http_fetcher", _in_process_fallback(fallback_calls))
-    # Pooled-client bookkeeping is irrelevant here and other suites leave
-    # entries behind; start clean so the drain cannot close our fake.
+def _clean_pooled_client_queue():
+    """Start the pending-close queue empty.
+
+    Pooled-client bookkeeping is irrelevant here and other suites leave entries
+    behind; start clean so a drain here cannot try to close one of their fakes.
+    """
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
         http_mod._PENDING_CLIENT_CLOSE.clear()
 
@@ -187,13 +153,17 @@ def _scripted_stream(monkeypatch, items, *, headers=None) -> tuple[_Response, _S
     return response, _patch_session(monkeypatch, response), _scheduled_closes(monkeypatch)
 
 
-async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch):
+async def test_request_exception_from_the_queue_releases_the_handle(monkeypatch, counting_server):
     """The error exit: a queued RequestException must not orphan the handle."""
+    url = f"http://127.0.0.1:{counting_server.server_port}/"
     response, _session, released = _scripted_stream(monkeypatch, [b"partial", RequestException("boom")])
 
-    result = await _DEFAULT_CFFI_FETCHER(URL, {}, 5, 4096)
+    result = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 4096)
 
     assert result.status_code == 200, "the documented httpx fallback must still serve"
+    # Served by the local server, so this is the fallback and not the scripted cffi
+    # session: the assertion is about the handle, and it needs the fetch to finish.
+    assert counting_server.hits == 1, "the fallback did not serve the page"
     assert released == [response], "the error path left the streamed response handle unreleased"
     assert response.awaited is False, "abandoning must not await a live producer"
 
@@ -471,17 +441,25 @@ def test_cffi_session_rebuilt_on_loop_change(monkeypatch):
         asyncio.run(_close())
 
 
-async def test_cffi_missing_falls_back_to_httpx(monkeypatch, fallback_calls):
-    """Without curl_cffi the fetcher still delegates to the plain httpx path."""
+async def test_cffi_missing_falls_back_to_httpx(monkeypatch, counting_server):
+    """Without curl_cffi the fetcher still delegates to the plain httpx path.
+
+    Answered by a real local server rather than a fake transport, and asserted
+    through ``server.hits``: the point is that the page is fetched by *something*
+    when the impersonating transport is absent, and a stubbed fallback would
+    only prove the stub was called.
+    """
     import sys
 
     from app.crawl.strategies import http_client_pool as http_mod
 
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", None)
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
+    url = f"http://127.0.0.1:{counting_server.server_port}/"
     try:
-        resp = await _DEFAULT_CFFI_FETCHER("http://example.com/", {}, 5, 1024)
+        resp = await _DEFAULT_CFFI_FETCHER(url, {}, 5, 1024)
     finally:
         await http_mod.close_cffi_session()
     assert resp.status_code == 200
-    assert fallback_calls == ["http://example.com/"]
+    assert counting_server.hits == 1, "the fallback did not serve the page"
+

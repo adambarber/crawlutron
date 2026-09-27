@@ -21,7 +21,7 @@ from app.crawl.extraction import (
 from app.crawl.extraction import (
     _html_diagnostics as _html_diagnostics_with_policy,
 )
-from app.crawl.extraction import extract_content as _extract_content_with_policy
+from app.crawl.extraction import extract_content
 from app.crawl.extraction import extract_js_endpoints as _extract_js_endpoints_with_policy
 from app.crawl.strategies.document import (
     _default_document_text_extractor as _default_document_text_extractor_with_policy,
@@ -32,10 +32,6 @@ from app.crawl.strategies.fetchers import _default_http_fetcher as _default_http
 
 def _html_diagnostics(html, source_url, *, policy=UNRESTRICTED_HOST_POLICY):
     return _html_diagnostics_with_policy(html, source_url, host_policy=policy)
-
-
-def extract_content(html, content_type, source_url, css_selector=None, xpath=None):
-    return _extract_content_with_policy(html, content_type, source_url, css_selector, xpath)
 
 
 def extract_js_endpoints(endpoints, source_url=None, *, policy=UNRESTRICTED_HOST_POLICY):

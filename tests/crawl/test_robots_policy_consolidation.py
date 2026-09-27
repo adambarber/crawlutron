@@ -29,13 +29,20 @@ def _policy(*, respect_robots: bool = True) -> dict:
     }
 
 
+def _gate() -> RobotsGate:
+    """A gate over default settings and no host policy.
+
+    The consolidation tests all read one policy through two very different
+    paths, so the gate is built once here: the three arguments were restated at
+    every call site, and a test that changed one of them stopped being about
+    the robots cache at all.
+    """
+    return RobotsGate({}, CrawlerSettings.from_mapping({}), HostPolicy.unrestricted())
+
+
 async def test_job_fetch_populates_cache_seen_by_engine():
     robots_cache.clear()
-    gate = RobotsGate(
-        {},
-        CrawlerSettings.from_mapping({}),
-        HostPolicy.unrestricted(),
-    )
+    gate = _gate()
     fetch_calls = 0
 
     async def decode(fetcher, url, headers, timeout_seconds):
@@ -80,11 +87,7 @@ async def test_engine_fetch_populates_cache_seen_by_job_path():
     assert result["results"][0]["status"] == "success"
     assert sum(url.endswith("/robots.txt") for url in engine_calls) == 1
 
-    gate = RobotsGate(
-        {},
-        CrawlerSettings.from_mapping({}),
-        HostPolicy.unrestricted(),
-    )
+    gate = _gate()
 
     async def unexpected_decode(*args):
         raise AssertionError("job path fetched a cached robots policy")
@@ -125,11 +128,7 @@ async def test_engine_and_job_single_flight_each_collapse_same_origin_misses(mon
 
     robots_cache.clear()
     calls = 0
-    gate = RobotsGate(
-        {},
-        CrawlerSettings.from_mapping({}),
-        HostPolicy.unrestricted(),
-    )
+    gate = _gate()
     import app.crawl.admission as admission
 
     monkeypatch.setattr(admission, "_fetch_and_decode", decode)

@@ -18,6 +18,7 @@ from app.crawl.strategies.content_pipeline import (
     _post_fetch_diagnostics,
     _run_extraction,
 )
+from app.crawl.strategies.strategy_request import StrategyRequest
 from app.crawl.worker import call_worker
 from app.models import (
     CrawlJob,
@@ -168,24 +169,20 @@ def _build_browser_result(
 
 async def browser_strategy_result(
     *,
-    original_url: str,
-    normalized_url: str,
-    strategy: CrawlStrategyName,
-    policy: dict[str, Any],
+    request: StrategyRequest,
     browser_worker: CrawlWorker,
-    host_policy: HostPolicy,
 ) -> EngineCrawlResult:
     result = await call_worker(
-        browser_worker, _browser_job(normalized_url, _browser_options(policy), host_policy)
+        browser_worker, _browser_job(request.normalized_url, _browser_options(request.policy), request.host_policy)
     )
     content = result.html if result.html else result.text
-    extracted = await _extract_browser_content(content, result, policy)
-    post_fetch = await _discover_browser_content(result, policy, host_policy)
-    diagnostics = _browser_diagnostics(result, extracted, policy, host_policy, post_fetch)
+    extracted = await _extract_browser_content(content, result, request.policy)
+    post_fetch = await _discover_browser_content(result, request.policy, request.host_policy)
+    diagnostics = _browser_diagnostics(result, extracted, request.policy, request.host_policy, post_fetch)
     return _build_browser_result(
-        original_url=original_url,
-        normalized_url=normalized_url,
-        strategy=strategy,
+        original_url=request.original_url,
+        normalized_url=request.normalized_url,
+        strategy=request.strategy,
         result=result,
         content=extracted,
         diagnostics=diagnostics,

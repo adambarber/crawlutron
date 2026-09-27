@@ -11,7 +11,7 @@ import pytest
 
 from app.crawl.coordination_cookies import SharedCookieStore
 from app.crawl.coordination_counters import CoordinationCounters
-from app.crawl.job_store import JobStatus, JobStore
+from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from app.crawl.migrations import (
     CURRENT_SCHEMAS,
     LEGACY_COLUMNS,
@@ -77,6 +77,47 @@ def _assert_migration_recorded(conn: sqlite3.Connection, schema: StoreSchema) ->
     assert MIGRATION_IDS[schema] in _applied_migration_ids(conn)
 
 
+def _stamped_legacy_job(db_path: Path) -> tuple[JobStore, CrawlJobState | None]:
+    """Create a legacy jobs database, stamp it on open, and load the row back.
+
+    Both legacy-stamping tests run these four steps in this order and are about
+    what comes after them, so the stamp is written once here. Written inline,
+    the pair read as four identical lines and the tests below them were the
+    only thing that said what they were actually asserting.
+    """
+    _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
+    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    return store, store.load("legacy-job")
+
+
+def _assert_unstamped(db_path: Path) -> None:
+    """A freshly-created legacy database carries no migration record yet.
+
+    Asserted here rather than at each call site: every legacy-stamping test
+    needs the same precondition, and the two that restated it were the two that
+    could disagree about what a legacy database is.
+    """
+    before = sqlite3.connect(db_path)
+    assert "_yoyo_migration" not in _table_names(before)
+    before.close()
+
+
+def _assert_reopen_refused(db_path: Path, ddl: str, match: str) -> None:
+    """Tamper with a stamped store's shape, then require the reopen to refuse it.
+
+    The refusal is the point of the test, and the tamper is setup: written out
+    per test it was three copies of connect/DDL/commit/close and a
+    ``pytest.raises`` whose ``match`` could name a different column than the
+    DDL dropped.
+    """
+    conn = sqlite3.connect(db_path)
+    conn.execute(ddl)
+    conn.commit()
+    conn.close()
+    with pytest.raises(Exception, match=match):
+        JobStore(db_path, policy=HostPolicy.unrestricted())
+
+
 def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
     table = CURRENT_SCHEMAS[schema]
     conn = sqlite3.connect(db_path)
@@ -121,6 +162,7 @@ def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
         )
     conn.commit()
     conn.close()
+    _assert_unstamped(db_path)
 
 
 def _table_with_column(table: TableSchema, column: ColumnSchema) -> TableSchema:
@@ -156,13 +198,7 @@ def test_fresh_database_is_empty_and_current_after_migrations(tmp_path, schema):
 
 def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path):
     db_path = tmp_path / "legacy-jobs.db"
-    _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-    before = sqlite3.connect(db_path)
-    assert "_yoyo_migration" not in _table_names(before)
-    before.close()
-
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
-    loaded = store.load("legacy-job")
+    store, loaded = _stamped_legacy_job(db_path)
 
     assert loaded is not None
     assert loaded.root_url == "https://legacy.example"
@@ -182,10 +218,7 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
     db_path = tmp_path / "historical-jobs.db"
     # The fixture's legacy shape already carries `canonicalized`: it is a
     # LEGACY_COLUMN, and a database from before 0002/0003 had all three.
-    _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
-    loaded = store.load("legacy-job")
+    store, loaded = _stamped_legacy_job(db_path)
     after = sqlite3.connect(db_path)
     columns = set(_column_names(after, "crawl_jobs"))
 
@@ -273,9 +306,6 @@ def test_store_accepts_reordered_columns_at_startup(tmp_path):
 def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_path):
     db_path = tmp_path / "legacy-results.db"
     _create_legacy_database(db_path, StoreSchema.RESULTS)
-    before = sqlite3.connect(db_path)
-    assert "_yoyo_migration" not in _table_names(before)
-    before.close()
 
     store = CrawlResultStore(db_path, ttl_seconds=0)
 
@@ -292,26 +322,14 @@ def test_missing_migration_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "missing-column.db"
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
-    conn = sqlite3.connect(db_path)
-    conn.execute("ALTER TABLE crawl_jobs DROP COLUMN transient_retries")
-    conn.commit()
-    conn.close()
-
-    with pytest.raises(Exception, match="transient_retries"):
-        JobStore(db_path, policy=HostPolicy.unrestricted())
+    _assert_reopen_refused(db_path, "ALTER TABLE crawl_jobs DROP COLUMN transient_retries", match="transient_retries")
 
 
 def test_out_of_band_extra_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "extra-column.db"
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     store.close()
-    conn = sqlite3.connect(db_path)
-    conn.execute("ALTER TABLE crawl_jobs ADD COLUMN unexpected TEXT")
-    conn.commit()
-    conn.close()
-
-    with pytest.raises(Exception, match="unexpected"):
-        JobStore(db_path, policy=HostPolicy.unrestricted())
+    _assert_reopen_refused(db_path, "ALTER TABLE crawl_jobs ADD COLUMN unexpected TEXT", match="unexpected")
 
 
 def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):

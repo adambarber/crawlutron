@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar, Literal, Protocol
+from typing import Any, ClassVar, Final, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,6 +24,8 @@ from app.constants import (
     MAX_DISCOVERED_LINKS,
     MAX_RETRIES,
     MAX_TOTAL_URL_BUDGET_SECONDS,
+    SERVICE_ID,
+    SERVICE_VERSION,
     CrawlClassification,
 )
 
@@ -40,6 +42,21 @@ from app.constants import (
 # call sites are cheaper to review than a globally disabled check. Remove them
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
+
+# The identity block every discovery response opens with, declared once. It lives
+# here rather than in ``app.constants`` because it spans both: the version comes
+# from constants, the policy schema version is this module's own. Two payloads
+# were spelling the same three keys, and that is exactly the shape of bug this
+# codebase has already shipped once -- a top-level key reaching one endpoint and
+# not the other, which a strict response_model DROPS without complaint, so a
+# raw-dict unit test stays green while the wire loses the field. Spreading one
+# block means a fourth key is added in one place and cannot reach only some of
+# the endpoints.
+SERVICE_IDENTITY: Final[dict[str, str]] = {
+    "service": SERVICE_ID,
+    "version": SERVICE_VERSION,
+    "policy_schema_version": POLICY_SCHEMA_VERSION,
+}
 
 
 class CrawlStrategy(str, Enum):

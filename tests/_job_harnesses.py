@@ -34,7 +34,7 @@ import pathlib
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Container
 from contextlib import contextmanager
 from typing import Any
 
@@ -456,6 +456,23 @@ async def run_api_job(client, job_store, root_url: str, execute, policy: dict | 
     return await run_to_terminal(job_store, await _create_api_job(client, root_url, execute, policy))
 
 
+async def run_scripted_api_job(
+    client,
+    job_store,
+    root_url: str,
+    results: list[dict],
+    policy: dict | None = None,
+):
+    """``run_api_job`` for the common case: a scripted engine over canned results.
+
+    Building the engine is the decision, and it was re-spelled as a
+    ``ScriptedExecute(results=...)`` argument at every job test that only cares
+    about the job. Routing it through here means a change to how a scripted
+    engine is constructed cannot land in one test and miss the other eleven.
+    """
+    return await run_api_job(client, job_store, root_url, ScriptedExecute(results=results), policy)
+
+
 async def run_seeded_job(job, job_store, execute):
     """Drive an already-persisted job in-line to terminal; return the row."""
     from app.api import job_runner
@@ -526,6 +543,38 @@ def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> dict:
     return {"limits": limits}
 
 
+def assert_settled(
+    job,
+    *,
+    visited: Container[str],
+    discovered: int | None = None,
+    crawled: int | None = None,
+    in_flight: Container[str] = (),
+) -> None:
+    """A job that ran to terminal: stopped, nothing queued, these pages kept.
+
+    The settled-job assertion is the same claim in every whole-site job test --
+    the runner drained the frontier, committed nothing in flight, and ended on
+    exactly the pages that survived admission. Spelled out per test, the one
+    line that matters (the frontier drained) was the one most likely to be
+    forgotten, and a job that stopped with links still queued passed.
+
+    ``visited`` is compared as a set because the pages are what the test is
+    about, not the order the runner happened to commit them in; the stats a
+    test does not claim are not asserted here.
+    """
+    assert job.status == JobStatus.COMPLETED, f"job ended {job.status}"
+    assert not job.frontier, f"frontier left queued: {job.frontier}"
+    assert set(job.in_flight) == set(in_flight), f"in-flight left uncommitted: {job.in_flight}"
+    assert set(job.visited) == set(visited), (
+        f"visited {sorted(set(job.visited) ^ set(visited))} differs from what the job kept"
+    )
+    if discovered is not None:
+        assert job.stats["total_discovered"] == discovered, f"discovered {job.stats['total_discovered']}"
+    if crawled is not None:
+        assert job.stats["total_crawled"] == crawled, f"crawled {job.stats['total_crawled']}"
+
+
 @contextmanager
 def raw_job_row(job_store):
     """Direct SQL against a job's own row, for shapes the write path refuses.
@@ -558,6 +607,7 @@ async def submit_blocked_job(client, job_store, root_url: str, results, policy=N
 
 
 __all__ = [
+    "run_scripted_api_job",
     "ScriptedExecute",
     "_create_api_job",
     "_execution_payload",

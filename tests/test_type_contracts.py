@@ -30,13 +30,37 @@ from app.models import HttpFetchContract, HttpFetcher
 # are spelled once in the whole tree and there is no twin to keep in step.
 _CONCRETE_FETCHERS = [pytest.param(_default_http_fetcher, id="_default_http_fetcher")]
 
-# The concrete-fetcher contract, derived from HttpFetchContract rather than
-# re-spelled: (positional names, positional-only, keyword-only, async).
-_CONTRACT = {
-    "positional": ("url", "headers", "timeout_seconds", "max_content_length"),
-    "keyword_only": ("policy",),
-    "is_coroutine": True,
-}
+def _contract_signature() -> dict[str, object]:
+    """The contract's own shape, read off ``HttpFetchContract``.
+
+    Derived, not typed. A tuple written here is a second copy of the Protocol
+    whose only reviewer is the comparison in this same file, so the copy went
+    stale the moment ``impersonate`` was added to the contract and every
+    fetcher check below went red for a reason that had nothing to do with a
+    fetcher. Reading the Protocol means a keyword is guarded the day it is
+    added.
+    """
+    parameters = list(inspect.signature(HttpFetchContract.__call__).parameters.values())
+    if parameters and parameters[0].name == "self":
+        # Read as an unbound function, the protocol's __call__ carries `self`;
+        # the contract is about the call, not about the wrapper.
+        parameters = parameters[1:]
+    positional = tuple(
+        param.name
+        for param in parameters
+        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    keyword_only = tuple(
+        param.name for param in parameters if param.kind is inspect.Parameter.KEYWORD_ONLY
+    )
+    return {
+        "positional": positional,
+        "keyword_only": keyword_only,
+        "is_coroutine": inspect.iscoroutinefunction(HttpFetchContract.__call__),
+    }
+
+
+_CONTRACT = _contract_signature()
 
 # Which parameters HttpFetchContract gives a default to, read off the Protocol
 # rather than typed here. This is the axis the name comparison above cannot see,
