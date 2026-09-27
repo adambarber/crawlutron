@@ -8,6 +8,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import _jscpd_gate as gate
 import pytest
 import yaml
 
@@ -80,25 +81,44 @@ GATE_ENTRY_PROLOGUE = (
 # A syntactically valid config carrying a second, quoted jscpd hook that would
 # pass a lax threshold. Nothing distinguishes it from the real config to a
 # reader of the raw text except the quotes.
-QUOTED_SECOND_JSCPD_HOOK = """\
-repos:
-  - repo: local
-    hooks:
-      - id: jscpd
-        name: jscpd
-        entry: .venv/bin/python tests/_jscpd_gate.py all
-        language: system
-        files: ^(docker/browser-crawler/)?.*\\.py$
-        pass_filenames: false
-        stages: [pre-commit]
-      - id: "jscpd-legacy"
-        name: jscpd legacy
-        entry: jscpd --threshold 40 app tests || true
-        language: system
-        files: ^(docker/browser-crawler/)?.*\\.py$
-        pass_filenames: false
-        stages: [pre-commit]
-"""
+# This fixture's own `files` pattern, which is deliberately NOT
+# ENFORCEMENT_TRIGGER_PATTERN: the point is a second hook that would scan the
+# same files, and borrowing the shared anchor here would make the fixture depend
+# on a constant it is meant to be a hand-written example of.
+_FIXTURE_FILES = r"^(docker/browser-crawler/)?.*\.py$"
+
+
+def _fixture_hook(hook_id: str, name: str, entry: str, *, quoted: bool = False) -> str:
+    """One hook block of the fixture config.
+
+    The two hooks below differ only in id, name, entry, and whether the id is
+    quoted -- which is the whole defect the fixture exists to express -- so the
+    four lines they share are written once instead of twice.
+    """
+    rendered_id = f'"{hook_id}"' if quoted else hook_id
+    return (
+        f"      - id: {rendered_id}\n"
+        f"        name: {name}\n"
+        f"        entry: {entry}\n"
+        "        language: system\n"
+        f"        files: {_FIXTURE_FILES}\n"
+        "        pass_filenames: false\n"
+        "        stages: [pre-commit]\n"
+    )
+
+
+QUOTED_SECOND_JSCPD_HOOK = (
+    "repos:\n"
+    "  - repo: local\n"
+    "    hooks:\n"
+    + _fixture_hook("jscpd", "jscpd", ".venv/bin/python tests/_jscpd_gate.py all")
+    + _fixture_hook(
+        "jscpd-legacy",
+        "jscpd legacy",
+        "jscpd --threshold 40 app tests || true",
+        quoted=True,
+    )
+)
 
 
 def _hook_blocks(config: str) -> list[tuple[str, dict]]:
@@ -401,14 +421,21 @@ def test_ci_runs_every_precommit_hook_through_one_surface() -> None:
     # One floor for every root: the split it replaced existed only while a
     # loose test floor was hiding production duplication, and a second number
     # would be a second thing to ratchet.
-    assert "--min-lines 4" in entry
-    assert "--min-tokens 39" in entry
-    assert "--threshold 0" in entry
+    #
+    # The numbers are read from the hook rather than spelled here. This assertion
+    # used to carry its own copy of the pair, which is a fourth restatement of a
+    # number that lives in the entry it is checking: lowering the floor would
+    # have left the config correct and this test red, and raising it would have
+    # done the reverse. Asserting the shape -- a floor is stated, it is one pair,
+    # and it is the enforced one -- is what survives a floor change.
+    floor = re.search(r"--min-lines (\d+) --min-tokens (\d+) --threshold (\S+)", entry)
+    assert floor is not None, f"the entry states no single floor triple: {entry!r}"
+    assert floor.group(1) == str(gate.configured_floor()[0])
+    assert floor.group(2) == str(gate.configured_floor()[1])
+    assert float(floor.group(3)) == gate.configured_floor()[2]
     assert "--app-min-lines" not in entry, (
         "the per-tree floor split is gone; one number must serve both trees"
     )
-    floor = re.search(r"--min-lines (\d+) --min-tokens (\d+)", entry)
-    assert floor is not None
     assert _field(jscpd, "files") == ENFORCEMENT_TRIGGER_PATTERN
 
     expectations = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))

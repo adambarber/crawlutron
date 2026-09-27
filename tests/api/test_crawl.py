@@ -14,14 +14,26 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.main import app
 
 
-class TestCrawlApi:
-    """Tests using pytest fixtures and ASGI transport."""
+class _AsgiEndpointTests:
+    """The ASGI client plus the fixture-server base URL, for endpoint classes.
+
+    Four of the endpoint classes below opened with this identical autouse
+    fixture, and a copy of it is a rule with two owners: a class that forgot the
+    ``WEBHOOK_RECEIVED.clear()`` inherited a webhook assertion reading another
+    test's delivery. It lives here once, and a class that needs a different
+    fixture (no base URL, or one that also persists a cookie jar) keeps its own
+    rather than inheriting a superset it does not want.
+    """
 
     @pytest.fixture(autouse=True)
     def setup(self, async_client, base_url):
         self.client = async_client
         self.base = base_url
         WEBHOOK_RECEIVED.clear()
+
+
+class TestCrawlApi(_AsgiEndpointTests):
+    """Tests using pytest fixtures and ASGI transport."""
 
     async def test_v1_crawl_returns_unified_response_with_markdown_and_diagnostics(self):
         body = await completed_crawl(self.client, make_crawl_payload(f"{self.base}/"))
@@ -409,14 +421,8 @@ class TestDiscoveryAndRenderApi:
         assert response.status_code == 422
 
 
-class TestMapApi:
+class TestMapApi(_AsgiEndpointTests):
     """#2 /v1/map against a real local server (no mocks)."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, async_client, base_url):
-        self.client = async_client
-        self.base = base_url
-        WEBHOOK_RECEIVED.clear()
 
     def _map_payload(self, **extra):
         payload = {
@@ -447,14 +453,8 @@ class TestMapApi:
         assert resp.status_code == 422
 
 
-class TestShadowDomApi:
+class TestShadowDomApi(_AsgiEndpointTests):
     """#25 Shadow-DOM flattening via browser renderer (real camoufox)."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, async_client, base_url):
-        self.client = async_client
-        self.base = base_url
-        WEBHOOK_RECEIVED.clear()
 
     @pytest.mark.browser
     @pytest.mark.skipif(not browser_available(), reason="no usable browser binary (camoufox/playwright)")
@@ -530,14 +530,8 @@ class TestCookiePersistenceApi:
         assert "session_id=abc123" in (result.get("html") or result.get("text") or "")
 
 
-class TestJobApi:
+class TestJobApi(_AsgiEndpointTests):
     """#3+#14 Job API integration tests (real server)."""
-
-    @pytest.fixture(autouse=True)
-    def setup(self, async_client, base_url):
-        self.client = async_client
-        self.base = base_url
-        WEBHOOK_RECEIVED.clear()
 
     async def _seed_job(self, root_url):
         """Seed a persisted row directly; create_endpoint refuses (H5)."""

@@ -7,10 +7,13 @@ full at every call site. That is a funnel that did not exist: a new required
 keyword in production became a four-file edit, and a call site that quietly
 kept a stale default passed for the wrong reason rather than failing.
 
-``drive_recursive_crawl`` is that funnel. It is the production signature with
-the uncontested defaults filled in, so a test says what it is about by naming
-it and a contract change lands in one place. The defaults are the ones that
-mean "this test is not about admission, robots, or document bodies":
+``drive_recursive_crawl`` is that funnel. It takes the uncontested defaults from
+``_crawl_defaults`` and binds every keyword against ``run_recursive_crawl``'s own
+signature, so the harness cannot restate a contract and drift from it: the list
+of keywords exists in exactly one place, production's, and a required keyword
+added there becomes a ``TypeError`` at the harness rather than a four-file edit.
+The defaults are the ones that mean "this test is not about admission, robots,
+or document bodies":
 
 * ``FakeScheduler`` runs the jobs it is handed, in order, with no domain
   politeness and no strategy pinning -- so a scheduling assertion is a test
@@ -30,6 +33,7 @@ mean "this test is not about admission, robots, or document bodies":
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple
 
@@ -108,56 +112,86 @@ async def drive_recursive_crawl(
     gate: ContentionFreeGate | None = None,
     gate_scale: float = 1.0,
     admission: Any | None = None,
-    shutdown_event: asyncio.Event | None = None,
     host_policy: Any | None = None,
-    max_depth: int = 0,
-    max_pages: int = 50,
-    respect_robots: bool = True,
-    include_html: bool = True,
-    want_document_bodies: bool = False,
-    scope_pattern: Any | None = None,
-    global_concurrency: int = 4,
-    seed_sitemaps: bool = False,
+    **overrides: Any,
 ) -> RecursiveRun:
     """Run one recursive crawl with the uncontested defaults filled in.
 
-    Every keyword here mirrors ``run_recursive_crawl``'s, default-for-default,
-    so the harness is the production contract and not a second opinion about it:
-    a new required argument in production raises here, once, instead of being
-    missed at one of several call sites. There is no ``**kwargs`` catch-all on
-    purpose -- a typo'd or misspelled override must be a ``TypeError`` at the
-    harness rather than an argument production never received.
+    The rest of ``run_recursive_crawl``'s keywords come from
+    ``_crawl_defaults`` and are bound against ``run_recursive_crawl``'s own
+    signature before the call, so this is the production contract rather than a
+    second opinion about it -- derived, not restated. A new required keyword in
+    production raises at the harness, once, instead of at one of several call
+    sites, and the list of keywords exists in exactly one place: production's.
+
+    ``overrides`` is not the ``**kwargs`` catch-all it looks like. Every value in
+    it is bound against ``_CRAWL_SIGNATURE``, so a typo'd or misspelled override
+    is a ``TypeError`` here, naming the parameter, rather than an argument
+    production never received.
     """
     the_spill = spill if spill is not None else Spill()
     the_gate = gate if gate is not None else ContentionFreeGate(gate_scale)
     the_scheduler = scheduler if scheduler is not None else FakeScheduler()
-    await run_recursive_crawl(
-        jobs=jobs,
-        scheduler=the_scheduler,
-        worker=worker,
-        robots_allows=allows,
-        robots_crawl_delay=crawl_delay,
-        robots_disallowed=(
+    bound = _CRAWL_SIGNATURE.bind(
+        **{
+            "jobs": jobs,
+            "worker": worker,
+            "robots_allows": allows,
+            "robots_crawl_delay": crawl_delay,
+            "spill": the_spill,
+            "scheduler": the_scheduler,
+            "resource_gate": the_gate,
+            "admission": admission,
+            "host_policy": (
+                host_policy if host_policy is not None else UNRESTRICTED_HOST_POLICY
+            ),
+            **_crawl_defaults(
+                robots_disallowed=robots_disallowed, sitemap_seeds=sitemap_seeds
+            ),
+            **overrides,
+        }
+    )
+    bound.apply_defaults()
+    await run_recursive_crawl(**bound.arguments)
+    return RecursiveRun(spill=the_spill, scheduler=the_scheduler, gate=the_gate)
+
+
+#: ``run_recursive_crawl``'s own signature, read once at import. Every keyword the
+#: harness forwards is bound against this, so the harness cannot drift from the
+#: contract it exists to funnel -- there is no second list to forget to update.
+_CRAWL_SIGNATURE = inspect.signature(run_recursive_crawl)
+
+
+def _crawl_defaults(
+    *, robots_disallowed: Callable[[CrawlTask], Any] | None, sitemap_seeds: Any
+) -> dict[str, Any]:
+    """The values for the keywords a crawl test is not about.
+
+    Factories, not values: ``shutdown_event`` has to be a fresh ``Event`` per
+    call, because a shared one carries ``is_set()`` state between tests and a
+    crawl that should have run would stop immediately.
+
+    A parameter absent here is required by the signature, which is the point --
+    the harness is the contract, and a new required keyword in production becomes
+    a ``TypeError`` here rather than a silent default nobody chose.
+    """
+    return {
+        "robots_disallowed": (
             robots_disallowed
             if robots_disallowed is not None
             else (lambda job: make_engine_result(job.normalized_url))
         ),
-        sitemap_seeds=sitemap_seeds if sitemap_seeds is not None else _no_seeds,
-        spill=the_spill,
-        shutdown_event=shutdown_event if shutdown_event is not None else asyncio.Event(),
-        max_depth=max_depth,
-        max_pages=max_pages,
-        respect_robots=respect_robots,
-        include_html=include_html,
-        want_document_bodies=want_document_bodies,
-        scope_pattern=scope_pattern,
-        global_concurrency=global_concurrency,
-        seed_sitemaps=seed_sitemaps,
-        resource_gate=the_gate,
-        admission=admission,
-        host_policy=host_policy if host_policy is not None else UNRESTRICTED_HOST_POLICY,
-    )
-    return RecursiveRun(spill=the_spill, scheduler=the_scheduler, gate=the_gate)
+        "sitemap_seeds": sitemap_seeds if sitemap_seeds is not None else _no_seeds,
+        "shutdown_event": asyncio.Event(),
+        "max_depth": 0,
+        "max_pages": 50,
+        "respect_robots": True,
+        "include_html": True,
+        "want_document_bodies": False,
+        "scope_pattern": None,
+        "global_concurrency": 4,
+        "seed_sitemaps": False,
+    }
 
 
 async def _no_seeds() -> list[Any]:

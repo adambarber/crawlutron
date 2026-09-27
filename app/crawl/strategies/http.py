@@ -25,6 +25,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.document_text import _format_extracted_document_text
+from app.crawl.extraction import _is_html
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     _binary_no_text_result,
@@ -91,6 +92,82 @@ class _ExtractedHttpContent:
     extraction_method: str
     strategy_decompression_failed: bool
     content_metrics: dict[str, int | float | bool]
+
+
+@dataclass(frozen=True)
+class _FetchedResponse:
+    """One fetched response, and the header view every phase reads it through.
+
+    The owner of "how this module keys a response's headers". It exists because
+    that rule had three answers. ``_not_modified_result`` built its own
+    lowercased copy; ``_http_strategy_result`` built a second one; and
+    ``_store_http_caches`` read ``etag``/``last-modified`` off the *raw* map with
+    no lowering at all, so it was the one site whose answer depended on the
+    transport having already normalized. The fetchers do lowercase today
+    (``_finish_fetch``), which is why the third site has never been observed
+    wrong -- it is a coincidence, not a contract, and nothing said so.
+
+    What this buys is not tidiness. The phases used to take ``response``,
+    ``headers`` and ``content_type`` as three sibling parameters, which made
+    "headers from one response, content type from another" a call any of them
+    could make and none could detect. Here the header map and the content type
+    are read off the response they were derived from, so that pairing is not
+    expressible -- there is no way to hand a phase a ``content_type`` that its
+    ``headers`` does not contain, because the second is a read of the first.
+
+    Built once per response, where the response enters the phases, so the
+    lowercasing is paid once per fetch rather than once per phase that wanted a
+    header. Attribute access that is not header access falls through to the
+    response unchanged (:meth:`__getattr__`), so this is a header binding and not
+    a second response type: it cannot fall behind the transport's shape, and it
+    does not need editing when the transport grows a field.
+    """
+
+    raw: Any
+    headers: dict[str, str]
+    content_type: str | None
+
+    @classmethod
+    def of(cls, response: Any) -> _FetchedResponse:
+        """Bind ``response`` to its headers, keyed for lookup."""
+        headers = {key.lower(): value for key, value in response.headers.items()}
+        return cls(response, headers, headers.get("content-type"))
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for names the three fields above do not claim, and
+        # ``object.__getattribute__`` rather than ``self.raw`` so that a missing
+        # ``raw`` raises AttributeError instead of recursing back into here.
+        return getattr(object.__getattribute__(self, "raw"), name)
+
+    @property
+    def decompression_failed(self) -> bool:
+        """Whether a Content-Encoding promised compression the body never got.
+
+        Stated once because it is asked in two places that must not be able to
+        disagree about the same response: the diagnostic that records it, and the
+        quality ceiling that caps a result whose body is not what it claims.
+        """
+        return bool(getattr(self.raw, "decompression_failed", False))
+
+    def validators(self, echoed: dict[str, str] | None = None) -> dict[str, str]:
+        """The origin's ETag / Last-Modified, keyed the way a result spells them.
+
+        ``echoed`` is the caller's own conditional headers, read for a validator
+        a 304 did not repeat. :data:`app.models.EngineCrawlResult.validators`
+        documents ``"etag"``/``"last_modified"``, the response headers are
+        ``etag``/``last-modified``, and the caller's are ``If-None-Match``/
+        ``If-Modified-Since`` -- three spellings of two headers, which is why
+        they are read here rather than at each of the sites that report them.
+        """
+        fallback = echoed or {}
+        return {
+            key: value
+            for key, value in (
+                ("etag", self.headers.get("etag") or fallback.get("If-None-Match")),
+                ("last_modified", self.headers.get("last-modified") or fallback.get("If-Modified-Since")),
+            )
+            if value
+        }
 
 
 def _serialize_response(resp: Any) -> dict[str, Any]:
@@ -203,27 +280,11 @@ async def _fetch_http_phase(ctx: _HttpStrategyContext) -> tuple[Any, dict[str, A
     )
 
 
-def _not_modified_result(ctx: _HttpStrategyContext, response: Any) -> EngineCrawlResult | None:
+def _not_modified_result(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
     """Build the terminal result for a negotiated HTTP 304 response."""
-    response_headers = {key.lower(): value for key, value in response.headers.items()}
-    echoed_validators: dict[str, str] = {
-        key: value
-        for key, value in (
-            (
-                "etag",
-                response_headers.get("etag")
-                or (ctx.caller_conditional.get("If-None-Match") if ctx.caller_conditional else None),
-            ),
-            (
-                "last_modified",
-                response_headers.get("last-modified")
-                or (ctx.caller_conditional.get("If-Modified-Since") if ctx.caller_conditional else None),
-            ),
-        )
-        if value
-    }
+    echoed_validators = resp.validators(ctx.caller_conditional)
     sent_conditional = any(key in ctx.request_headers for key in ("If-None-Match", "If-Modified-Since"))
-    if response.status_code != 304 or ctx.revalidated_304 or not sent_conditional:
+    if resp.status_code != 304 or ctx.revalidated_304 or not sent_conditional:
         return None
 
     elapsed_ms = int((time.monotonic() - ctx.started) * 1000)
@@ -244,55 +305,47 @@ def _not_modified_result(ctx: _HttpStrategyContext, response: Any) -> EngineCraw
     return _make_engine_result(
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
-        final_url=response.final_url,
+        final_url=resp.final_url,
         status="success",
         classification="not_modified",
         selected_strategy=ctx.strategy,
         attempt=attempt,
         http_status=304,
-        headers=response.headers,
+        headers=resp.headers,
         diagnostics=diagnostics,
         error=None,
         validators=echoed_validators,
     )
 
 
-async def _store_http_caches(ctx: _HttpStrategyContext, response: Any) -> None:
+async def _store_http_caches(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> None:
     """Store origin validators and fresh content after a successful fetch."""
-    if ctx.cache is not None:
-        etag = response.headers.get("etag")
-        last_modified = response.headers.get("last-modified")
-        if etag or last_modified:
-            ctx.cache.store(ctx.normalized_url, dict(response.headers))
+    if ctx.cache is not None and (resp.headers.get("etag") or resp.headers.get("last-modified")):
+        ctx.cache.store(ctx.normalized_url, dict(resp.headers))
     if ctx.content_cache is None or ctx.ckey is None or ctx.content_hit:
         return
-    if response.status_code < 300 and response.status_code != 304:
+    if resp.status_code < 300 and resp.status_code != 304:
         try:
-            await ctx.content_cache.aset(ctx.ckey, _serialize_response(response))
+            await ctx.content_cache.aset(ctx.ckey, _serialize_response(resp.raw))
         except Exception:
             pass
 
 
-def _binary_result_if_needed(
-    ctx: _HttpStrategyContext,
-    response: Any,
-    headers: dict[str, str],
-    content_type: str | None,
-) -> EngineCrawlResult | None:
+def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:
     """Return the terminal no-text result for a binary response."""
     if ctx.extraction == EXTRACTION_DOCUMENT or not fetch_policy._looks_like_binary_body(
-        response.body, content_type, response.final_url
+        resp.body, resp.content_type, resp.final_url
     ):
         return None
     result = _binary_no_text_result(
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
-        final_url=response.final_url,
+        final_url=resp.final_url,
         strategy=ctx.strategy,
-        http_status=response.status_code,
-        headers=headers,
-        content_type=content_type,
-        elapsed_ms=response.elapsed_ms,
+        http_status=resp.status_code,
+        headers=resp.headers,
+        content_type=resp.content_type,
+        elapsed_ms=resp.elapsed_ms,
     )
     # ``replace``, not an ``asdict`` round-trip through the constructor. asdict
     # recurses into the dataclass fields, so it silently converted the frozen
@@ -302,47 +355,49 @@ def _binary_result_if_needed(
     return replace(result, diagnostics={"retry": ctx.retry_diagnostics})
 
 
-async def _extract_http_phase(
-    ctx: _HttpStrategyContext,
-    response: Any,
-    headers: dict[str, str],
-    content_type: str | None,
-) -> _ExtractedHttpContent:
-    """Decode the body, run the selected extractor, and measure content."""
-    content_encoding = headers.get("content-encoding", "")
+async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> _ExtractedHttpContent:
+    """Decode the body, run the selected extractor, and measure content.
+
+    ``is_html`` is :func:`app.crawl.extraction._is_html`, the same predicate the
+    unified funnel dispatches on, rather than a second reading of the same
+    question: this copy asked "does the content type mention html, or does the
+    decoded text open like a document" and extraction.py asked "the same", in
+    the same package, three functions apart. Two answers to one question about
+    one body is how a page that the funnel calls HTML reaches trafilatura here
+    and vice versa.
+    """
+    content_encoding = resp.headers.get("content-encoding", "")
     if content_encoding:
         decompressed = _decompress_body(
-            response.body, content_encoding, max_output_bytes=ctx.max_content_length
+            resp.body, content_encoding, max_output_bytes=ctx.max_content_length
         )
         strategy_decompression_failed = False
     else:
-        decompressed = response.body
-        strategy_decompression_failed = bool(getattr(response, "decompression_failed", False))
+        decompressed = resp.body
+        strategy_decompression_failed = resp.decompression_failed
 
-    body_text = body_decode._decode_body(decompressed, content_type)
-    is_html = "html" in (content_type or "") or body_text.lstrip().lower().startswith(
-        ("<html", "<!doctype html")
-    )
+    body_text = body_decode._decode_body(decompressed, resp.content_type)
+    is_html = _is_html(resp.content_type, body_text)
     html = body_text if is_html else None
     extracted = await _run_extraction(
         extraction=ctx.extraction,
         content=decompressed,
         decoded=body_text,
-        content_type=content_type,
-        final_url=response.final_url,
+        content_type=resp.content_type,
+        final_url=resp.final_url,
         policy=ctx.policy,
         default_method=EXTRACTION_METHOD_HTTP_HTML if is_html else EXTRACTION_METHOD_HTTP_BODY,
         html=is_html,
     )
     text, markdown = extracted.text, extracted.markdown
-    if ctx.extraction == EXTRACTION_DOCUMENT and (content_type or "").lower().startswith("text/"):
-        text = _format_extracted_document_text(text, source_url=response.final_url)
+    if ctx.extraction == EXTRACTION_DOCUMENT and (resp.content_type or "").lower().startswith("text/"):
+        text = _format_extracted_document_text(text, source_url=resp.final_url)
         markdown = text
 
     return _ExtractedHttpContent(
         decompressed=decompressed,
         body_text=body_text,
-        content_type=content_type,
+        content_type=resp.content_type,
         html=html,
         text=text,
         markdown=markdown,
@@ -361,12 +416,12 @@ def _request_profile_diagnostics(profile: dict[str, Any]) -> dict[str, str]:
 
 def _classify_extracted_content(
     ctx: _HttpStrategyContext,
-    response: Any,
+    resp: _FetchedResponse,
     extracted: _ExtractedHttpContent,
 ) -> tuple[Classification, list[dict[str, Any]]]:
     """Apply status overrides to the page classifier's evidence."""
     classification, evidence = classify_page_with_evidence(extracted.html, extracted.text)
-    if response.status_code == 403 and classification == "rendered":
+    if resp.status_code == 403 and classification == "rendered":
         classification = "access_denied"
         evidence = [
             {
@@ -376,7 +431,7 @@ def _classify_extracted_content(
                 "context": "HTTP 403",
             }
         ]
-    elif response.status_code == 404:
+    elif resp.status_code == 404:
         classification = "not_found"
         evidence = [
             {
@@ -386,12 +441,12 @@ def _classify_extracted_content(
                 "context": "HTTP 404",
             }
         ]
-    elif response.status_code == 410:
+    elif resp.status_code == 410:
         classification = "gone"
         evidence = [
             {"classification": "gone", "signature": "410", "source": "http_status", "context": "HTTP 410"}
         ]
-    elif response.status_code == 429:
+    elif resp.status_code == 429:
         classification = "rate_limited"
         evidence = [
             {
@@ -401,14 +456,14 @@ def _classify_extracted_content(
                 "context": "HTTP 429",
             }
         ]
-    elif response.status_code >= 500:
+    elif resp.status_code >= 500:
         classification = "site_error"
         evidence = [
             {
                 "classification": "site_error",
-                "signature": str(response.status_code),
+                "signature": str(resp.status_code),
                 "source": "http_status",
-                "context": f"HTTP {response.status_code}",
+                "context": f"HTTP {resp.status_code}",
             }
         ]
     if ctx.extraction == EXTRACTION_TRAFILATURA and extracted.html is None and classification == "rendered":
@@ -426,21 +481,17 @@ def _classify_extracted_content(
 
 async def _construct_http_result(
     ctx: _HttpStrategyContext,
-    response: Any,
-    headers: dict[str, str],
-    content_type: str | None,
+    resp: _FetchedResponse,
     extracted: _ExtractedHttpContent,
 ) -> EngineCrawlResult:
     """Run discovery shaping and construct the successful strategy result."""
-    classification, classification_evidence = _classify_extracted_content(ctx, response, extracted)
+    classification, classification_evidence = _classify_extracted_content(ctx, resp, extracted)
     status = status_for_classification(classification)
     diagnostics: dict[str, Any] = {
-        "decompression_failed": bool(
-            extracted.strategy_decompression_failed or getattr(response, "decompression_failed", False)
-        ),
+        "decompression_failed": extracted.strategy_decompression_failed or resp.decompression_failed,
         "request_profile": _request_profile_diagnostics(ctx.profile),
         "retry": ctx.retry_diagnostics,
-        "runtime": {"elapsed_ms": response.elapsed_ms, "final_url": response.final_url},
+        "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
         "content_metrics": extracted.content_metrics,
     }
     discovery = ctx.policy.get("discovery") or {}
@@ -448,7 +499,7 @@ async def _construct_http_result(
     want_discovery_links = bool(discovery) or max_depth > 0
     post_fetch = await _discover_after_fetch(
         html=extracted.html,
-        final_url=response.final_url,
+        final_url=resp.final_url,
         js_base_url=ctx.normalized_url,
         max_links=ctx.limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
         include_diagnostics=bool(discovery),
@@ -458,7 +509,7 @@ async def _construct_http_result(
     )
     if discovery:
         diagnostics.update(post_fetch["diagnostics"])
-    retry_after = fetch_policy._retry_after_seconds(headers)
+    retry_after = fetch_policy._retry_after_seconds(resp.headers)
     if retry_after is not None:
         diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
     if discovery:
@@ -480,26 +531,18 @@ async def _construct_http_result(
             discovery_diag.pop("sitemap_urls", None)
             discovery_diag.pop("feeds", None)
     next_page_url = post_fetch["next_page_url"]
-    diagnostics.update(_post_fetch_diagnostics(post_fetch, response.final_url, ctx.host_policy))
+    diagnostics.update(_post_fetch_diagnostics(post_fetch, resp.final_url, ctx.host_policy))
 
     quality = body_decode._quality_score(
         status,
         classification,
         extracted.text,
         extracted.html,
-        response.status_code,
+        resp.status_code,
         content_metrics=extracted.content_metrics,
     )
-    if extracted.strategy_decompression_failed or getattr(response, "decompression_failed", False):
+    if extracted.strategy_decompression_failed or resp.decompression_failed:
         quality = min(quality, 0.25)
-    origin_validators = {
-        key: value
-        for key, value in (
-            ("etag", headers.get("etag")),
-            ("last_modified", headers.get("last-modified")),
-        )
-        if value
-    }
     if (
         status == "success"
         and not extracted.strategy_decompression_failed
@@ -512,23 +555,23 @@ async def _construct_http_result(
         strategy=ctx.strategy,
         status=status,
         classification=classification,
-        http_status=response.status_code,
-        content_type=content_type,
-        elapsed_ms=response.elapsed_ms,
+        http_status=resp.status_code,
+        content_type=resp.content_type,
+        elapsed_ms=resp.elapsed_ms,
         error=error_classification,
     )
     html = extracted.html if ctx.include_html else None
     return _make_engine_result(
         original_url=ctx.original_url,
         normalized_url=ctx.normalized_url,
-        final_url=response.final_url,
+        final_url=resp.final_url,
         status=status,
         classification=classification,
         selected_strategy=ctx.strategy if status == "success" else None,
         attempt=attempt,
-        http_status=response.status_code,
-        headers=headers,
-        content_type=content_type,
+        http_status=resp.status_code,
+        headers=resp.headers,
+        content_type=resp.content_type,
         html=html,
         text=extracted.text,
         markdown=extracted.markdown,
@@ -541,7 +584,7 @@ async def _construct_http_result(
             error=error_classification,
         ),
         next_page_url=next_page_url,
-        validators=origin_validators,
+        validators=resp.validators(),
     )
 
 
@@ -596,17 +639,15 @@ async def _http_strategy_result(
     try:
         if ctx.response is None:
             ctx.response, ctx.retry_diagnostics = await _fetch_http_phase(ctx)
-        response = ctx.response
-        not_modified = _not_modified_result(ctx, response)
+        resp = _FetchedResponse.of(ctx.response)
+        not_modified = _not_modified_result(ctx, resp)
         if not_modified is not None:
             return not_modified
-        await _store_http_caches(ctx, response)
-        headers = {key.lower(): value for key, value in response.headers.items()}
-        content_type = headers.get("content-type")
-        binary_result = _binary_result_if_needed(ctx, response, headers, content_type)
+        await _store_http_caches(ctx, resp)
+        binary_result = _binary_result_if_needed(ctx, resp)
         if binary_result is not None:
             return binary_result
-        extracted = await _extract_http_phase(ctx, response, headers, content_type)
-        return await _construct_http_result(ctx, response, headers, content_type, extracted)
+        extracted = await _extract_http_phase(ctx, resp)
+        return await _construct_http_result(ctx, resp, extracted)
     except Exception as error:
         return _http_error_result(ctx, error)

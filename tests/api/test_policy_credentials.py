@@ -19,9 +19,11 @@ from app.crawl.strategies.request_profile import _apply_credentials
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
-
-def _settings() -> CrawlerSettings:
-    return CrawlerSettings.from_mapping({})
+#: The settings a payload-policy test runs against: the defaults with nothing
+#: overridden. A module constant rather than a factory because it is immutable
+#: and identical at every call site -- an environment default leaking in here
+#: would be a second variable in a test about credential keying.
+DEFAULT_SETTINGS = CrawlerSettings.from_mapping({})
 
 
 class TestWireModel:
@@ -108,12 +110,12 @@ class TestPayloadPolicy:
     def test_keys_canonicalize_to_origin_form(self):
         policy = _payload_policy(
             {"policy": {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}},
-            _settings(),
+            DEFAULT_SETTINGS,
         )
         assert policy["credentials"] == {"https://private.example": {"kind": "bearer", "token": "t"}}
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
             _payload_policy(
-                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, _settings()
+                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, DEFAULT_SETTINGS
             )

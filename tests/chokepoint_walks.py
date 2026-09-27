@@ -48,7 +48,7 @@ import io
 import pathlib
 import tokenize
 import weakref
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
@@ -296,6 +296,31 @@ def app_offenders(
     return offenders
 
 
+def call_leaf_name(call: ast.Call) -> str:
+    """The bare name a call is made through: ``uuid4()`` -> ``uuid4``, ``uuid.uuid4()`` -> ``uuid4``.
+
+    ``getattr(call.func, "id", None) or getattr(call.func, "attr", None)`` is how a
+    detector asks "is this a call to uuid4/HTTPException" without caring whether the
+    module imported the name or reached it through a module. Spelled out it is one
+    line, and it was written out separately by every detector that asked, which is
+    how one of them ended up comparing against ``None``.
+    """
+    return getattr(call.func, "id", None) or getattr(call.func, "attr", None) or ""
+
+
+def calls_named_leaf(tree: ast.AST, names: frozenset[str] | set[str]) -> Iterator[ast.Call]:
+    """Yield calls whose leaf callee name is one of ``names``.
+
+    :func:`calls_to_any` keys on the callee *expression* (a bare ``Name``), which
+    is the right question for a helper a module imported directly and the wrong
+    one for a chokepoint reached as ``module.name()``. Detectors for the second
+    shape each re-derived the leaf name, so this is that derivation, once.
+    """
+    for call in nodes_of_type(tree, ast.Call):
+        if call_leaf_name(call) in names:
+            yield call
+
+
 def attribute_calls(tree: ast.AST) -> Iterator[tuple[ast.Call, ast.Attribute]]:
     """Yield ``(call, callee)`` for every call whose callee is an attribute.
 
@@ -391,6 +416,40 @@ def has_method_call(tree: ast.AST, node: ast.AST, method_names: frozenset[str]) 
     return next(calls_naming_method(tree, node, method_names), None) is not None
 
 
+def spelled_non_member(value: ast.expr, members: Container[str]) -> str | None:
+    """The string literal at ``value`` when it is not a member, else ``None``.
+
+    The two decisions every "a spelled value must be a real member" detector has
+    to make before it can report anything, and the two it gets wrong quietly: a
+    non-literal is what a correct caller writes and passes without comment (so
+    ``None`` is admitted without a special case -- the member set is a set of
+    strings and the honest non-member is the one that is spelled), and a member
+    is not a defect. Written per detector, the dropped ``isinstance`` guard does
+    not fail a test -- it reports a variable as if it were a literal.
+    """
+    if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
+        return None
+    return None if value.value in members else value.value
+
+
+def non_member_literals(
+    candidates: Iterable[tuple[ast.AST, str, ast.expr, Container[str]]],
+) -> Iterator[tuple[ast.AST, str, str]]:
+    """``(node, field, value, members)`` tuples narrowed to spelled non-members.
+
+    The set-valued funnel over :func:`spelled_non_member`, for the detectors that
+    sweep more than one keyword at a time and so cannot fix ``members`` up front
+    -- a Literal field's members are keyed by the field name, which is also what
+    the offending message has to name. Reporting the value rather than the
+    expression is deliberate: the message is about the value, and the only thing
+    left for the caller to say is why it is wrong there.
+    """
+    for node, field, value, members in candidates:
+        spelled = spelled_non_member(value, members)
+        if spelled is not None:
+            yield node, field, spelled
+
+
 def literal_keyword_membership_offenders(
     tree: ast.AST,
     path: pathlib.Path,
@@ -412,27 +471,25 @@ def literal_keyword_membership_offenders(
     hand-kept exemption list.
 
     A non-string literal is never reported, which is what admits ``None`` for
-    "no strategy was attempted" without a special case: the member set is a set
-    of strings, and the honest non-member is the one that is spelled.
+    "no strategy was attempted" without a special case -- see
+    :func:`spelled_non_member`, which owns that decision for every detector here
+    and in ``tests/membership_gate.py`` rather than each restating it.
     """
-    offenders: list[str] = []
-    for node, value in call_keyword_values(
-        tree,
-        function_names=function_names,
-        keyword_names=keyword_names,
-    ):
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value in members:
-            continue
-        offenders.append(
-            offender(
-                path,
-                node.lineno,
-                f"{label}={value.value!r} is not a {type_name} member; {advice}",
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"{label}={value!r} is not a {type_name} member; {advice}",
+        )
+        for node, _field, value in non_member_literals(
+            (node, str(kw.arg), kw.value, members)
+            for node, kw in call_keyword_arguments(
+                tree,
+                function_names=function_names,
+                keyword_names=keyword_names,
             )
         )
-    return offenders
+    ]
 
 
 def assert_fires_once(detector, fires: dict[str, str], path: pathlib.Path) -> None:
@@ -474,15 +531,26 @@ def calls_named(tree: ast.AST, function_name: str) -> Iterator[ast.Call]:
     return calls_to_any(tree, {function_name})
 
 
-def call_keyword_values(
+def call_keyword_arguments(
     tree: ast.AST,
     *,
-    function_names: str | frozenset[str],
-    keyword_names: str | tuple[str, ...],
-) -> Iterator[tuple[ast.Call, ast.expr]]:
-    """Yield selected keyword values from direct calls to named functions."""
+    function_names: str | frozenset[str] | set[str],
+    keyword_names: str | tuple[str, ...] | set[str] | None = None,
+) -> Iterator[tuple[ast.Call, ast.keyword]]:
+    """Yield ``(call, keyword)`` for selected keywords of direct calls to named functions.
+
+    The one walk behind "what was spelled at these call sites". ``keyword_names``
+    of ``None`` selects every named keyword (``**kwargs`` carries ``arg is None``
+    and is never selectable -- it has no name to be a member of). Callers that
+    only want the value use :func:`call_keyword_values`; callers that need the
+    keyword's own name -- a Literal field's member set is keyed by it -- come
+    here, because re-walking to recover the name is how two detectors end up
+    matching a value against the wrong axis.
+    """
     names = {function_names} if isinstance(function_names, str) else function_names
-    keywords = {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
+    keywords = None if keyword_names is None else (
+        {keyword_names} if isinstance(keyword_names, str) else set(keyword_names)
+    )
     for node in calls_to_any(tree, names):
         # One pair per DISTINCT keyword name: Python itself rejects a repeated
         # keyword, so a call carrying two is un-compilable source, and emitting
@@ -490,9 +558,27 @@ def call_keyword_values(
         # behavior these detectors had before they were unified.
         seen_keywords: set[str | None] = set()
         for keyword in node.keywords:
-            if keyword.arg in keywords and keyword.arg not in seen_keywords:
-                seen_keywords.add(keyword.arg)
-                yield node, keyword.value
+            if keyword.arg is None or keyword.arg in seen_keywords:
+                continue
+            if keywords is not None and keyword.arg not in keywords:
+                continue
+            seen_keywords.add(keyword.arg)
+            yield node, keyword
+
+
+def call_keyword_values(
+    tree: ast.AST,
+    *,
+    function_names: str | frozenset[str],
+    keyword_names: str | tuple[str, ...],
+) -> Iterator[tuple[ast.Call, ast.expr]]:
+    """Yield selected keyword values from direct calls to named functions."""
+    for node, keyword in call_keyword_arguments(
+        tree,
+        function_names=function_names,
+        keyword_names=keyword_names,
+    ):
+        yield node, keyword.value
 
 
 def trees_under(directory: pathlib.Path) -> tuple[tuple[pathlib.Path, ast.Module], ...]:

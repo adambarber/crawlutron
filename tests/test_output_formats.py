@@ -239,37 +239,42 @@ class TestOutputFormatsEdges:
         result = _default(obj)
         assert result == {"attr": "value"}
 
-    def test_serialize_results_json(self):
+    @pytest.mark.parametrize(
+        ("fmt", "results", "needle", "media_type"),
+        [
+            ("json", [{"url": "http://x/", "text": "content"}], "http://x/", "application/json"),
+            (
+                "jsonl",
+                [{"url": "http://x/", "text": "content"}],
+                "http://x/",
+                "application/x-ndjson",
+            ),
+            (
+                "ndjson",
+                [{"url": "http://x/", "text": "content"}],
+                "http://x/",
+                "application/x-ndjson",
+            ),
+            (
+                "markdown",
+                [{"url": "http://x/", "markdown": "# Title\n\nContent"}],
+                "# Title",
+                "text/markdown; charset=utf-8",
+            ),
+        ],
+    )
+    def test_serialize_results_carries_the_url_and_the_media_type(self, fmt, results, needle, media_type):
+        """One row per text output format.
+
+        The three line-oriented formats differed only in the name the caller
+        passes and the media type that comes back, which is data, not behaviour:
+        as three bodies it was three places for a format rename to land in two.
+        """
         from app.output_formats import serialize_results
 
-        results = [{"url": "http://x/", "text": "content"}]
-        output, media_type = serialize_results(results, "json")
-        assert "http://x/" in output
-        assert media_type == "application/json"
-
-    def test_serialize_results_jsonl(self):
-        from app.output_formats import serialize_results
-
-        results = [{"url": "http://x/", "text": "content"}]
-        output, media_type = serialize_results(results, "jsonl")
-        assert "http://x/" in output
-        assert media_type == "application/x-ndjson"
-
-    def test_serialize_results_ndjson(self):
-        from app.output_formats import serialize_results
-
-        results = [{"url": "http://x/", "text": "content"}]
-        output, media_type = serialize_results(results, "ndjson")
-        assert "http://x/" in output
-        assert media_type == "application/x-ndjson"
-
-    def test_serialize_results_markdown(self):
-        from app.output_formats import serialize_results
-
-        results = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
-        output, media_type = serialize_results(results, "markdown")
-        assert "# Title" in output
-        assert media_type == "text/markdown; charset=utf-8"
+        output, out_media_type = serialize_results(results, fmt)
+        assert needle in output
+        assert out_media_type == media_type
 
     def test_serialize_results_csv(self):
         from app.output_formats import serialize_results

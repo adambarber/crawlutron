@@ -1,13 +1,5 @@
 """Real tests for browser.py logic (no browser; inject failing factories)."""
 
-import os
-import tempfile
-from pathlib import Path
-
-os.environ.setdefault(
-    "BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "browser-crawler-test.jsonl")
-)
-
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import BrowserRenderer

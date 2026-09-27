@@ -7,6 +7,7 @@ contract: overlapping checks must be observable via an in-flight counter.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _recursive_harnesses import drive_recursive_crawl
@@ -18,19 +19,37 @@ from app.models import DiscoveredLink
 from app.settings import CrawlerSettings
 
 
+@asynccontextmanager
+async def _overlap_window(state: dict):
+    """Hold ``state``'s in-flight window across one scheduling point.
+
+    The window is a *scheduling point*, not a duration: the guarded call yields
+    once to the event loop before it comes back, so every caller that is able to
+    run concurrently is inside the window at the same time. A scheduler that
+    awaited these one at a time would drive ``max_in_flight`` to 1, which is
+    exactly the regression these tests exist to catch -- so the assertion has
+    teeth with no wall-clock sleep anywhere in it.
+
+    It was written out twice -- once inside :func:`_tracker`, once inline in the
+    non-recursive engine test -- and the increment/decrement pair is exactly the
+    bookkeeping a copy gets wrong: leaving the window on a raised path reports
+    overlap that never happened.
+    """
+    state["in_flight"] += 1
+    state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+    try:
+        yield
+        await asyncio.sleep(0)
+    finally:
+        state["in_flight"] -= 1
+
+
 def _tracker():
     """Robots closure pair tracking max in-flight overlap.
 
-    The overlap window is a *scheduling point*, not a duration: each guarded
-    call yields once to the event loop before it comes back, so every caller
-    that is able to run concurrently is inside the window at the same time. A
-    scheduler that awaited these one at a time would drive ``max_in_flight`` to
-    1, which is exactly the regression these tests exist to catch -- so the
-    assertion has teeth with no wall-clock sleep anywhere in it.
-
-    ``first_screen_max`` narrows that to the FIRST screening of each distinct
-    URL, and it has to: a recursive crawl screens the same URL twice, once
-    through admission (the discovered-link screen) and once through the
+    ``first_screen_max`` narrows the window above to the FIRST screening of each
+    distinct URL, and it has to: a recursive crawl screens the same URL twice,
+    once through admission (the discovered-link screen) and once through the
     frontier-batch screen before the leaf is crawled. A single all-calls max
     would be satisfied by either seam alone, so it would not pin the one a
     given test is about. Measured this way, the discovered-link test fails if
@@ -42,14 +61,9 @@ def _tracker():
     async def _guarded(url: str) -> None:
         first_screening = url not in screened
         screened.add(url)
-        state["in_flight"] += 1
-        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
-        if first_screening:
-            state["first_screen_max"] = max(state["first_screen_max"], state["in_flight"])
-        try:
-            await asyncio.sleep(0)
-        finally:
-            state["in_flight"] -= 1
+        async with _overlap_window(state):
+            if first_screening:
+                state["first_screen_max"] = max(state["first_screen_max"], state["in_flight"])
 
     async def allows(url):
         state["calls"] += 1
@@ -128,12 +142,8 @@ async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
 
     async def fake_fetcher(url, headers, timeout_seconds, max_content_length=0):
         if url.endswith("/robots.txt"):
-            state["in_flight"] += 1
-            state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
-            try:
-                await asyncio.sleep(0)
-            finally:
-                state["in_flight"] -= 1
+            async with _overlap_window(state):
+                pass
 
             class _Resp:
                 status_code = 200
@@ -204,15 +214,11 @@ async def test_recursive_screen_no_robots_calls_when_disrespected():
     assert len(spill.writes) == 3
 
 
-async def test_recursive_batch_duplicate_url_crawled_once():
+async def test_recursive_batch_duplicate_url_crawled_once(recording_worker):
     """A URL repeated inside one batch keeps the old visit-once semantics."""
     allows, crawl_delay, state = _tracker()
     jobs = [_make_job(0, "dup.example"), _make_job(0, "dup.example")]
-    seen: list[str] = []
-
-    async def worker(job):
-        seen.append(job.normalized_url)
-        return make_engine_result(job.normalized_url)
+    seen, worker = recording_worker
 
     await _drive(jobs, worker, allows, crawl_delay)
     assert seen == ["http://dup.example/page0"]

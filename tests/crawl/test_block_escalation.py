@@ -2,12 +2,7 @@
 successful result; the engine must try the next strategy in the chain
 (e.g. direct HTTP -> curl_cffi TLS impersonation -> headless browser)."""
 
-import os
-import tempfile
-from pathlib import Path
-
-os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", str(Path(tempfile.gettempdir()) / "bc-block-test.jsonl"))
-
+import pytest
 from _assertions import assert_result_success
 from _fetcher_factories import scripted_fetcher, sequenced_fetcher
 
@@ -32,41 +27,54 @@ class TestBlockAutoEscalation:
             **kwargs,
         )
 
-    async def test_captcha_page_escalates_to_next_strategy(self, base_policy):
-        # First strategy hits a CAPTCHA challenge; second (escalated) gets real
-        # content. Stated as a sequence so the transition is the fixture.
+    @pytest.mark.parametrize(
+        ("challenge_body", "real_body", "blocked_classification"),
+        [
+            pytest.param(
+                b"<html><body>Please complete the captcha to continue</body></html>",
+                b"<html><body><a href='/p'>real documentation</a></body></html>",
+                "captcha_detected",
+                id="captcha",
+            ),
+            pytest.param(
+                b"<html><body>Checking your browser - cf-browser-verification</body></html>",
+                b"<html><body>Protected content here</body></html>",
+                "bot_challenge_detected",
+                id="cloudflare",
+            ),
+            # The #7 regression guard: a busy CAPTCHA interstitial still carries
+            # text, so quality_score may be > 0 and escalation must still happen.
+            pytest.param(
+                b"<html><body><h1>Verify you are human</h1><p>Some boilerplate text.</p></body></html>",
+                b"<html><body>The actual article body.</body></html>",
+                "captcha_detected",
+                id="captcha-with-content",
+            ),
+        ],
+    )
+    async def test_challenge_page_escalates_to_next_strategy(
+        self, base_policy, challenge_body, real_body, blocked_classification
+    ):
+        # First strategy hits a challenge page; second (escalated) gets real
+        # content. Stated as a sequence so the transition is the fixture. The
+        # three bodies are three shapes of the same page (plain CAPTCHA, provider
+        # interstitial, CAPTCHA carrying text), so the escalation rule is stated
+        # once and the data says which page it was proved on.
         fetcher = sequenced_fetcher(
             [
-                (200, b"<html><body>Please complete the captcha to continue</body></html>", "text/html"),
-                (200, b"<html><body><a href='/p'>real documentation</a></body></html>", "text/html"),
+                (200, challenge_body, "text/html"),
+                (200, real_body, "text/html"),
             ]
         )
 
         result = await self._run_chain([HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE], fetcher, base_policy)
         assert_result_success(result, classification="rendered")
-        assert result.classification != "captcha_detected"
+        assert result.classification != blocked_classification
         assert result.selected_strategy == HTTP_CFFI_IMPERSONATE
         assert len(result.attempted_strategies) == 2
         # The first attempt is recorded as blocked; the second succeeded.
-        assert result.attempted_strategies[0].classification == "captcha_detected"
+        assert result.attempted_strategies[0].classification == blocked_classification
         assert result.attempted_strategies[1].status == "success"
-
-    async def test_cloudflare_challenge_escalates(self, base_policy):
-        fetcher = sequenced_fetcher(
-            [
-                (
-                    200,
-                    b"<html><body>Checking your browser - cf-browser-verification</body></html>",
-                    "text/html",
-                ),
-                (200, b"<html><body>Protected content here</body></html>", "text/html"),
-            ]
-        )
-
-        result = await self._run_chain([HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE], fetcher, base_policy)
-        assert result.status == "success"
-        assert result.selected_strategy == HTTP_CFFI_IMPERSONATE
-        assert result.attempted_strategies[0].classification == "bot_challenge_detected"
 
     async def test_blocked_single_strategy_reports_blocked(self, base_policy):
         fetcher = scripted_fetcher(
@@ -79,24 +87,3 @@ class TestBlockAutoEscalation:
         assert result.classification == "login_required"
         assert result.selected_strategy is None
         assert len(result.attempted_strategies) == 1
-
-    async def test_block_escalates_even_when_blocked_page_has_content(self, base_policy):
-        # A busy CAPTCHA interstitial still carries some text, so quality_score
-        # may be > 0; escalation must still happen (#7 regression guard).
-        # A busy CAPTCHA interstitial still carries text, so quality_score may
-        # be > 0; escalation must still happen (#7 regression guard).
-        fetcher = sequenced_fetcher(
-            [
-                (
-                    200,
-                    b"<html><body><h1>Verify you are human</h1><p>Some boilerplate text.</p></body></html>",
-                    "text/html",
-                ),
-                (200, b"<html><body>The actual article body.</body></html>", "text/html"),
-            ]
-        )
-
-        result = await self._run_chain([HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE], fetcher, base_policy)
-        assert_result_success(result)
-        assert result.selected_strategy == HTTP_CFFI_IMPERSONATE
-        assert result.attempted_strategies[0].classification == "captcha_detected"

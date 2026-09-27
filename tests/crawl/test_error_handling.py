@@ -10,6 +10,8 @@ from dataclasses import asdict
 
 import httpx
 import pytest
+from _browser_doubles import _fake_browser
+from _chain_policies import chain_policy
 from _fetcher_factories import failing_fetcher, raise_fetcher
 
 from app.constants import (
@@ -19,7 +21,7 @@ from app.constants import (
 )
 from app.crawl.result_helpers import _classify_error_code, _engine_result_from_exception
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
-from app.models import CrawlResult, EngineCrawlResult
+from app.models import EngineCrawlResult
 from app.validation import HostPolicy
 
 # ---------------------------------------------------------------------------
@@ -293,35 +295,12 @@ class TestShapeAllGuardsPerItem:
 # ---------------------------------------------------------------------------
 
 
-def _rendered(job) -> CrawlResult:
-    """A browser worker's success shape, as a real Camoufox render returns it."""
-    return CrawlResult(
-        url=job.url,
-        status="success",
-        classification="rendered",
-        final_url=job.url,
-        html="<html><body><main>rendered page body</main></body></html>",
-        text="rendered page body",
-        attempts=1,
-        elapsed_ms=5,
-        domain="example.com",
-        metadata={},
-    )
-
-
-def _chain_policy(*strategies: str) -> dict:
-    return {
-        "strategies": list(strategies),
-        "limits": {
-            "timeout_seconds": 10,
-            "max_retries": 0,
-            "max_discovered_links": 10,
-            "respect_robots": False,
-        },
-        "headers": {},
-        "discovery": {"robots": False},
-    }
-
+#: A browser worker's success shape: the suite's rendered result, which is what
+#: a real Camoufox render hands the chain.
+_rendered = _fake_browser(
+    html="<html><body><main>rendered page body</main></body></html>",
+    text="rendered page body",
+)
 
 _unreachable_fetcher = failing_fetcher(AssertionError("an HTTP strategy ran but should not have"))
 
@@ -354,7 +333,7 @@ class TestStrategyChainGuardsRaisingStrategies:
         result = await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
-            policy=_chain_policy(BROWSER_HEADLESS, BROWSER_HEADED_WARMED),
+            policy=chain_policy(BROWSER_HEADLESS, BROWSER_HEADED_WARMED),
             http_fetcher=_unreachable_fetcher,
             cffi_fetcher=_unreachable_fetcher,
             browser_worker=_FlakyWorker(),
@@ -380,7 +359,7 @@ class TestStrategyChainGuardsRaisingStrategies:
         result = await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
-            policy=_chain_policy(BROWSER_HEADLESS),
+            policy=chain_policy(BROWSER_HEADLESS),
             http_fetcher=_unreachable_fetcher,
             cffi_fetcher=_unreachable_fetcher,
             browser_worker=raising_worker,
@@ -402,7 +381,7 @@ class TestStrategyChainGuardsRaisingStrategies:
         result = await execute_crawl_chain(
             original_url="http://example.com/",
             normalized_url="http://example.com/",
-            policy=_chain_policy(HTTP_DECLARED_CRAWLER),
+            policy=chain_policy(HTTP_DECLARED_CRAWLER),
             http_fetcher=raise_fetcher,
             cffi_fetcher=_unreachable_fetcher,
             browser_worker=None,

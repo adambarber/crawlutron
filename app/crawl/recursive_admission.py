@@ -6,7 +6,7 @@ import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
 from itertools import islice
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol, TypeAlias
 
 from app.constants import (
     BROWSER_STRATEGIES,
@@ -20,6 +20,11 @@ from app.resource_pressure import ResourceGate, WeightedAdmission
 from app.scheduler import DomainScheduler
 
 logger = logging.getLogger(__name__)
+
+# One admitted item as it flows down the pipeline: (depth, task). Named once so
+# every stage boundary states the item shape by reference instead of re-spelling
+# ``tuple[int, CrawlTask]`` in each signature and each local annotation.
+_Admitted: TypeAlias = tuple[int, CrawlTask]
 
 
 class _BatchState(Protocol):
@@ -45,6 +50,33 @@ class _BatchRun(Protocol):
     spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]]
 
 
+class _BatchContext(NamedTuple):
+    """Everything a batch-admission stage is allowed to see.
+
+    The ``(run, state, metrics)`` triple is bundled because a stage must never be
+    handed a ``state`` belonging to a different crawl: there is one context
+    object flowing down the pipeline, built once by ``admit_recursive_batch``, so
+    a stage cannot be wired to one run's gate and another run's bookkeeping.
+    """
+
+    run: _BatchRun
+    state: _BatchState
+    metrics: MetricsStore
+
+
+def _pinned_strategy(scheduler: DomainScheduler, task: CrawlTask) -> str | None:
+    """The strategy this task's domain is pinned to, or None when unpinned.
+
+    The one place the scheduler's optional pinning hook is read. Each of the
+    three admission decisions below needs it and each spelled its own
+    getattr-guard -- under two different local names, ``get_pin`` and
+    ``get_pinned`` -- so a scheduler without the hook was handled three
+    different ways, and a rename had to be caught three times.
+    """
+    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
+    return get_pinned(task.domain) if get_pinned is not None else None
+
+
 def _batch_is_http_heavy(
     scheduler: DomainScheduler,
     frontier: deque[tuple[int, CrawlTask]],
@@ -52,15 +84,13 @@ def _batch_is_http_heavy(
 ) -> bool:
     if not frontier or sample <= 0:
         return False
-    get_pin = getattr(scheduler, "get_pinned_strategy", None)
     counted = 0
     http_count = 0
     for _, task in islice(frontier, sample):
         if task.domain is None:
             continue
         counted += 1
-        pinned = get_pin(task.domain) if get_pin is not None else None
-        if pinned is not None and pinned in HTTP_STRATEGIES:
+        if _pinned_strategy(scheduler, task) in HTTP_STRATEGIES:
             http_count += 1
     return counted > 0 and http_count >= counted / 2
 
@@ -70,15 +100,10 @@ def _count_strategy_tiers(
     frontier: deque[tuple[int, CrawlTask]],
     count: int,
 ) -> tuple[int, int]:
-    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
     http = 0
     browser = 0
     for _, task in islice(frontier, count):
-        if get_pinned is None:
-            http += 1
-            continue
-        pinned = get_pinned(task.domain)
-        if pinned is not None and pinned in BROWSER_STRATEGIES:
+        if _pinned_strategy(scheduler, task) in BROWSER_STRATEGIES:
             browser += 1
         else:
             http += 1
@@ -90,22 +115,17 @@ def _pop_admitted(
     admit_http: int,
     admit_browser: int,
     scheduler: DomainScheduler,
-) -> list[tuple[int, CrawlTask]]:
+) -> list[_Admitted]:
     if admit_http + admit_browser == 0:
         return []
-    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
-    taken: list[tuple[int, CrawlTask]] = []
+    taken: list[_Admitted] = []
     while frontier and len(taken) < admit_http + admit_browser:
         taken.append(frontier.popleft())
-    http_tasks: list[tuple[int, CrawlTask]] = []
-    browser_tasks: list[tuple[int, CrawlTask]] = []
+    http_tasks: list[_Admitted] = []
+    browser_tasks: list[_Admitted] = []
     for item in taken:
         _depth, task = item
-        is_browser = False
-        if get_pinned is not None:
-            pinned = get_pinned(task.domain)
-            is_browser = pinned is not None and pinned in BROWSER_STRATEGIES
-        (browser_tasks if is_browser else http_tasks).append(item)
+        (browser_tasks if _pinned_strategy(scheduler, task) in BROWSER_STRATEGIES else http_tasks).append(item)
     selected = http_tasks[:admit_http] + browser_tasks[:admit_browser]
     excess = http_tasks[admit_http:] + browser_tasks[admit_browser:]
     for item in reversed(excess):
@@ -113,19 +133,14 @@ def _pop_admitted(
     return selected
 
 
-async def _resource_admitted_batch(
-    run: _BatchRun,
-    state: _BatchState,
-    metrics: MetricsStore,
-) -> list[tuple[int, CrawlTask]]:
+async def _resource_admitted_batch(ctx: _BatchContext) -> list[_Admitted]:
+    run, state, metrics = ctx
     scale = run.resource_gate.batch_scale_factor()
     metrics.resource_memory_utilization = run.resource_gate.memory_ratio()
     metrics.resource_cpu_utilization = run.resource_gate.cpu_ratio()
     http_scale = getattr(run.resource_gate, "http_scale_factor", None)
     if http_scale is not None and _batch_is_http_heavy(
-        run.scheduler,
-        state.frontier,
-        run.http_heavy_lookahead,
+        run.scheduler, state.frontier, run.http_heavy_lookahead
     ):
         scale = http_scale()
     cpu = getattr(run.resource_gate, "cpu", None)
@@ -153,11 +168,7 @@ async def _resource_admitted_batch(
         )
         batch_size = max(1, int(batch_size * scale))
         metrics.record_throttle()
-    want_http, want_browser = _count_strategy_tiers(
-        run.scheduler,
-        state.frontier,
-        batch_size,
-    )
+    want_http, want_browser = _count_strategy_tiers(run.scheduler, state.frontier, batch_size)
     admit_http, admit_browser = await run.admission.admit(want_http, want_browser)
     if admit_http + admit_browser < batch_size:
         metrics.record_throttle()
@@ -165,28 +176,22 @@ async def _resource_admitted_batch(
     return _pop_admitted(state.frontier, admit_http, admit_browser, run.scheduler)
 
 
-async def _robots_admitted_batch(
-    run: _BatchRun,
-    state: _BatchState,
-    batch: list[tuple[int, CrawlTask]],
-) -> list[tuple[int, CrawlTask]]:
-    pending: list[tuple[int, CrawlTask]] = []
+async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> list[_Admitted]:
+    run, state = ctx.run, ctx.state
+    pending: list[_Admitted] = []
     seen_in_batch: set[str] = set()
     for depth, job in batch:
         if job.normalized_url in state.visited or job.normalized_url in seen_in_batch:
             continue
         seen_in_batch.add(job.normalized_url)
         pending.append((depth, job))
+    urls: list[str] = [job.normalized_url for _, job in pending]
     decisions = (
-        await gather_robots_decisions(
-            [job.normalized_url for _, job in pending],
-            run.robots_allows,
-            run.robots_crawl_delay,
-        )
+        await gather_robots_decisions(urls, run.robots_allows, run.robots_crawl_delay)
         if run.respect_robots
         else [(True, None)] * len(pending)
     )
-    allowed_jobs: list[tuple[int, CrawlTask]] = []
+    allowed_jobs: list[_Admitted] = []
     for (depth, job), (allowed, delay) in zip(pending, decisions, strict=True):
         if run.respect_robots and not allowed:
             await run.spill_write(run.spill, job.index, run.robots_disallowed(job))
@@ -204,9 +209,15 @@ async def admit_recursive_batch(
     run: _BatchRun,
     state: _BatchState,
     metrics: MetricsStore,
-) -> list[tuple[int, CrawlTask]]:
-    batch = await _resource_admitted_batch(run, state, metrics)
-    return await _robots_admitted_batch(run, state, batch)
+) -> list[_Admitted]:
+    """Resource-gate the frontier, then robots-filter whatever survived.
+
+    The only place the batch-admission context is assembled. Both stages take
+    the resulting ``_BatchContext``, so the stage protocol is stated once here
+    instead of being re-spelled per stage.
+    """
+    ctx = _BatchContext(run, state, metrics)
+    return await _robots_admitted_batch(ctx, await _resource_admitted_batch(ctx))
 
 
 __all__ = ["admit_recursive_batch"]

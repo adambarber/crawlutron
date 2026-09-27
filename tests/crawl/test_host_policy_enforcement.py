@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from _browser_doubles import _fake_browser
 from _fetcher_factories import make_html_fetcher, routed_fetcher
 
 import app.crawl.strategies.fetchers as fetchers_mod
@@ -9,7 +10,6 @@ import app.crawl.strategies.http_client_pool as pool_mod
 import app.crawl.strategies.pinned_transport as pinned_mod
 from app.crawl.engine import crawl_request
 from app.crawl.extraction import extract_post_fetch_discovery
-from app.models import CrawlResult
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
@@ -21,6 +21,16 @@ def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
             "BROWSER_CRAWLER_DENIED_HOSTS": denied,
         }
     )
+
+
+#: One link deep, ten pages, no robots: the shallowest policy that still
+#: exercises discovery, which is the half of these crawls under test.
+ONE_HOP_LIMITS = {"max_depth": 1, "max_pages": 10, "respect_robots": False}
+
+
+def _one_hop_policy(**extra) -> dict:
+    """A one-hop crawl policy, fresh per call because callers may mutate it."""
+    return {"limits": dict(ONE_HOP_LIMITS), **extra}
 
 
 @pytest.mark.parametrize(
@@ -40,16 +50,7 @@ async def test_recursive_crawl_never_fetches_policy_blocked_discovered_host(allo
     )
 
     response = await crawl_request(
-        {
-            "url": "https://allowed.test/",
-            "policy": {
-                "limits": {
-                    "max_depth": 1,
-                    "max_pages": 10,
-                    "respect_robots": False,
-                }
-            },
-        },
+        {"url": "https://allowed.test/", "policy": _one_hop_policy()},
         settings=_settings(allowed=allowed, denied=denied),
         http_fetcher=fetcher,
     )
@@ -75,13 +76,7 @@ async def test_sitemap_blocked_host_is_refused_before_page_fetch():
     )
 
     response = await crawl_request(
-        {
-            "url": "https://allowed.test/",
-            "policy": {
-                "limits": {"max_depth": 1, "max_pages": 10, "respect_robots": False},
-                "discovery": {"sitemaps": True},
-            },
-        },
+        {"url": "https://allowed.test/", "policy": _one_hop_policy(discovery={"sitemaps": True})},
         settings=_settings(allowed="allowed.test", denied="blocked.test"),
         http_fetcher=fetcher,
     )
@@ -149,20 +144,11 @@ async def test_redirect_to_policy_blocked_host_is_refused_before_fetch(monkeypat
 
 async def test_render_request_never_invokes_worker_for_policy_blocked_host():
     calls: list[str] = []
+    rendered = _fake_browser(html="<html></html>", text="rendered")
 
     async def worker(job):
         calls.append(job.url)
-        return CrawlResult(
-            url=job.url,
-            status="success",
-            classification="rendered",
-            final_url=job.url,
-            html="<html></html>",
-            text="rendered",
-            attempts=1,
-            elapsed_ms=1,
-            domain="blocked.test",
-        )
+        return rendered(job)
 
     from app.api.render import render_request
 

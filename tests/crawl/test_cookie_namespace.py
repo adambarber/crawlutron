@@ -9,18 +9,32 @@ namespace contextvar is set per ``crawl_request`` from
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE, CookieJar
 from app.crawl.strategies.request_profile import cookie_namespace_for
 
+TENANT_A = "tenant_a"
+TENANT_B = "tenant_b"
+
+
+def two_tenant_jar() -> CookieJar:
+    """A jar holding one cookie per tenant, both for the same host.
+
+    Every operation under test here -- read back, clear one namespace, clear
+    everything -- is a question about whether the two tenants stayed apart, and
+    that question is only asked against a jar where each tenant has something to
+    lose. Staging it once keeps a test from quietly proving isolation with a jar
+    that only ever held one cookie.
+    """
+    jar = CookieJar()
+    jar.add_cookie_header("http://x.example/", "a=1", namespace=TENANT_A)
+    jar.add_cookie_header("http://x.example/", "b=2", namespace=TENANT_B)
+    return jar
+
 
 def test_namespace_isolation_prevents_cross_tenant_leak():
-    jar = CookieJar()
-    # Tenant A sets a session cookie
-    jar.add_cookie_header("http://shared.example/", "sess=A; Path=/", namespace="tenant_a")
-    # Tenant B sets a different session cookie
-    jar.add_cookie_header("http://shared.example/", "sess=B; Path=/", namespace="tenant_b")
+    jar = two_tenant_jar()
     # Neither tenant sees the other's cookie
-    assert jar.cookie_header_for("http://shared.example/", namespace="tenant_a") == "sess=A"
-    assert jar.cookie_header_for("http://shared.example/", namespace="tenant_b") == "sess=B"
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == "a=1"
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == "b=2"
     # Default namespace still empty
-    assert jar.cookie_header_for("http://shared.example/") == ""
+    assert jar.cookie_header_for("http://x.example/") == ""
 
 
 def test_empty_namespace_uses_legacy_shared_slot():
@@ -32,21 +46,17 @@ def test_empty_namespace_uses_legacy_shared_slot():
 
 
 def test_clear_with_namespace_only_clears_that_namespace():
-    jar = CookieJar()
-    jar.add_cookie_header("http://x.example/", "a=1", namespace="tenant_a")
-    jar.add_cookie_header("http://x.example/", "b=2", namespace="tenant_b")
-    jar.clear(namespace="tenant_a")
-    assert jar.cookie_header_for("http://x.example/", namespace="tenant_a") == ""
-    assert jar.cookie_header_for("http://x.example/", namespace="tenant_b") == "b=2"
+    jar = two_tenant_jar()
+    jar.clear(namespace=TENANT_A)
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == ""
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == "b=2"
 
 
 def test_clear_without_namespace_clears_everything():
-    jar = CookieJar()
-    jar.add_cookie_header("http://x.example/", "a=1", namespace="tenant_a")
-    jar.add_cookie_header("http://x.example/", "b=2", namespace="tenant_b")
+    jar = two_tenant_jar()
     jar.clear()
-    assert jar.cookie_header_for("http://x.example/", namespace="tenant_a") == ""
-    assert jar.cookie_header_for("http://x.example/", namespace="tenant_b") == ""
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_A) == ""
+    assert jar.cookie_header_for("http://x.example/", namespace=TENANT_B) == ""
 
 
 def test_save_and_load_roundtrip_uses_legacy_namespace():

@@ -417,30 +417,54 @@ def test_cffi_fetcher_drains_pending_closes_like_the_http_fetcher(monkeypatch):
     )
 
 
-class _RealShapedSession:
-    """curl_cffi-shaped: a coroutine ``close`` and NO ``is_closed`` attribute."""
+class _PooledClientDouble:
+    """The half of a pooled-client double that does not depend on the library.
+
+    ``closed`` is a class attribute so a subclass only has to say what is
+    different about its shape; assigning it in ``_finish_close`` shadows it per
+    instance, which is what the assertions read. ``_bound_loop`` is here because
+    ``_LoopBoundPooledClient`` writes it on every build. The ``sleep(0)`` is the
+    yield that lets a scheduled close finish before a test looks at the flag.
+    """
+
+    closed = False
 
     def __init__(self) -> None:
-        self.closed = False
         self._bound_loop = None
 
-    async def close(self) -> None:
+    async def _finish_close(self) -> None:
         await asyncio.sleep(0)
         self.closed = True
 
 
-class _RealShapedHttpClient:
+class _RealShapedSession(_PooledClientDouble):
+    """curl_cffi-shaped: a coroutine ``close`` and NO ``is_closed`` attribute."""
+
+    async def close(self) -> None:
+        await self._finish_close()
+
+
+class _RealShapedHttpClient(_PooledClientDouble):
     """httpx-shaped: a coroutine ``aclose`` and no sync ``close``."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.is_closed = False
-        self.closed = False
-        self._bound_loop = None
 
     async def aclose(self) -> None:
-        await asyncio.sleep(0)
+        await self._finish_close()
         self.is_closed = True
-        self.closed = True
+
+
+class _ThirdKind(_PooledClientDouble):
+    """A pooled kind that is neither httpx nor curl_cffi shaped, and is meant to be.
+
+    It reaps under ``aclose`` like httpx but publishes no ``is_closed``, which
+    is the combination neither library actually has.
+    """
+
+    async def aclose(self) -> None:
+        await self._finish_close()
 
 
 def test_real_pooled_classes_have_no_synchronous_close():
@@ -641,15 +665,6 @@ def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkey
     neither httpx nor curl_cffi shaped.
     """
     import threading
-
-    class _ThirdKind:
-        def __init__(self) -> None:
-            self.closed = False
-            self._bound_loop = None
-
-        async def aclose(self) -> None:
-            await asyncio.sleep(0)
-            self.closed = True
 
     monkeypatch.setattr(http_mod, "_THIRD_POOL_SLOT", None, raising=False)
     third = http_mod._LoopBoundPooledClient(

@@ -24,12 +24,21 @@ import ast
 from chokepoint_walks import app_trees, nodes_of, offender
 
 
+def _is_attr_get(node: ast.AST) -> bool:
+    """True for a ``<anything>.get(...)`` call -- the shape both env faces match on.
+
+    The two detectors below differ only in what they then require of the
+    receiver and the argument, so the call shape itself is stated once.
+    """
+    return (
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+    )
+
+
 def _is_env_get(node: ast.AST) -> bool:
     """True for ``os.environ.get(...)`` -- the direct env face."""
     return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
+        _is_attr_get(node)
         and isinstance(node.func.value, ast.Attribute)
         and node.func.value.attr == "environ"
         and isinstance(node.func.value.value, ast.Name)
@@ -82,9 +91,7 @@ def test_env_alias_escape_bites():
 def _is_browser_crawler_get(node: ast.AST) -> bool:
     """True for ``<mapping>.get("BROWSER_CRAWLER_...")`` under any alias."""
     return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get"
+        _is_attr_get(node)
         and node.args
         and isinstance(node.args[0], ast.Constant)
         and isinstance(node.args[0].value, str)

@@ -39,6 +39,44 @@ def fake_pool(monkeypatch):
         ext_mod._spawn_doc_worker = saved_spawn
 
 
+def _spawn_replacement(monkeypatch, pid: int) -> list[ext_mod._DocWorker]:
+    """Make the pool's spawn hand out one stub worker; return the spawn record.
+
+    Every "the pool replaced a slot" test needs the same pair: a spawn that
+    returns a known worker, and proof that a spawn happened at all. Asserting
+    only that the handed-out worker is the replacement would pass on a pool that
+    grew the slot some other way, so the record is returned and asserted too --
+    it is empty until the pool actually asked.
+    """
+    replacement = _stub_worker(pid)
+    spawned: list[ext_mod._DocWorker] = []
+
+    def _fake_spawn():
+        spawned.append(replacement)
+        return replacement
+
+    monkeypatch.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
+    return spawned
+
+
+def _acquire_the_replacement(fake_pool, monkeypatch, pid: int, bound: float = 0.3):
+    """Acquire from a pool whose only slots are unusable; report the spawn too.
+
+    Three tests here ask the same question -- can acquire still grow past a slot
+    it refuses to serve? -- and differed only in which bad slot they staged and
+    what they then said about the pool afterwards. The short acquire bound is
+    part of that arrangement rather than a detail: a pool that cannot grow must
+    come back empty instead of hanging, so a test that forgot the bound would
+    pass by timing out rather than by the assertion.
+
+    Returns ``(spawned, worker)``: the spawn record -- empty when the pool never
+    asked for a replacement -- and the worker acquire handed back.
+    """
+    spawned = _spawn_replacement(fake_pool, pid)
+    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", bound, raising=False)
+    return spawned, ext_mod._acquire_doc_worker()
+
+
 def _acquire_with_bound(monkeypatch, bound: float = 0.25):
     """Call ``_acquire_doc_worker`` under a small acquire bound, in a thread.
 
@@ -102,19 +140,12 @@ def test_retired_stubborn_worker_is_not_acquired_again(fake_pool):
 
     ext_mod._retire_doc_worker(zombie)
 
-    replacement = _stub_worker(9999)
-    spawned = []
-
-    def _fake_spawn():
-        spawned.append(True)
-        return replacement
-
-    fake_pool.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
+    spawned = _spawn_replacement(fake_pool, 9999)
 
     worker = ext_mod._acquire_doc_worker()
 
-    assert worker is replacement, f"acquire handed back a retired worker: {worker!r}"
     assert spawned, "the retired slot was not replaced"
+    assert worker is spawned[0], f"acquire handed back a retired worker: {worker!r}"
     assert worker.busy is True, "a handed-out worker must be marked busy"
 
 
@@ -383,20 +414,10 @@ def test_undead_retired_slot_does_not_consume_a_pool_slot(fake_pool, monkeypatch
     """
     install_unkillable_doc_worker()
 
-    replacement = _stub_worker(31337)
-    spawned = []
-
-    def _fake_spawn():
-        spawned.append(True)
-        return replacement
-
-    fake_pool.setattr(ext_mod, "_spawn_doc_worker", _fake_spawn)
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
-
-    worker = ext_mod._acquire_doc_worker()
+    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 31337)
 
     assert spawned, "the pool did not grow past the unkillable slot"
-    assert worker is replacement, (
+    assert worker is spawned[0], (
         "acquire gave up instead of growing: an unkillable slot permanently consumed a pool-size budget"
     )
 
@@ -562,14 +583,9 @@ def test_undead_retired_slot_is_reaped_from_the_pool(fake_pool, monkeypatch):
     """
     zombie = install_unkillable_doc_worker()
 
-    replacement = _stub_worker(31337)
+    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 31337)
 
-    fake_pool.setattr(ext_mod, "_spawn_doc_worker", lambda: replacement)
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
-
-    worker = ext_mod._acquire_doc_worker()
-
-    assert worker is replacement, "the pool did not grow past the unkillable slot"
+    assert worker is spawned[0], "the pool did not grow past the unkillable slot"
     assert zombie not in (ext_mod._DOC_POOL or []), (
         "the retired-but-undead slot was left in the pool: it can never be "
         "recovered and will occupy a slot for the life of the process"
@@ -587,13 +603,9 @@ def test_a_retired_dead_slot_is_also_reaped_not_left_as_a_placeholder(fake_pool,
     with ext_mod._POOL_LOCK:
         ext_mod._DOC_POOL = [retired]
 
-    replacement = _stub_worker(4242)
-    fake_pool.setattr(ext_mod, "_spawn_doc_worker", lambda: replacement)
-    monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.3, raising=False)
+    spawned, worker = _acquire_the_replacement(fake_pool, monkeypatch, 4242)
 
-    worker = ext_mod._acquire_doc_worker()
-
-    assert worker is replacement
+    assert worker is spawned[0]
     assert retired not in (ext_mod._DOC_POOL or []), (
         "a retired slot was left in the pool as a placeholder instead of reaped"
     )

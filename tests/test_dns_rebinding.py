@@ -9,7 +9,9 @@ pinned IP with the original ``Host`` header preserved.
 from unittest.mock import patch
 from urllib.parse import urlparse
 
+import httpx
 from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
+from _transport_doubles import MockResponse, scripted_transport_client
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
@@ -25,45 +27,17 @@ class TestDNSRebindingProtection:
         """The HTTP fetcher must connect to the pinned IP and forward the
         original Host header (so virtual-host routing is preserved)."""
         block_private_targets(monkeypatch)
-        captured = {}  # pinned IP + forwarded Host, captured from the connection
-
-        class _Resp:
-            status_code = 200
-            headers = {"content-type": "text/html"}
-
-            class _Url:
-                def __str__(self):
-                    return "http://1.2.3.4:80/"
-
-            url = _Url()
-            content = b"<html></html>"
-
-            async def aread(self):
-                return self.content
-
-            async def aiter_raw(self):
-                yield self.content
-
-        class _Stream:
-            def __init__(self, resp):
-                self._resp = resp
-
-            async def __aenter__(self):
-                return self._resp
-
-            async def __aexit__(self, *a):
-                return False
-
-        class _Client:
-            def stream(self, method, url, **kwargs):
-                captured["method"] = method
-                captured["url"] = url
-                captured["host_header"] = kwargs.get("headers", {}).get("Host")
-                return _Stream(_Resp())
+        # A real pooled client over a scripted transport: what is asserted below
+        # is the request httpx actually built, not a stand-in's account of it.
+        requested: list[httpx.Request] = []
+        client = scripted_transport_client(
+            [MockResponse(200, {"content-type": "text/html"}, b"<html></html>")],
+            observed_requests=requested,
+        )
 
         with (
             host_resolves_to(monkeypatch, "1.2.3.4"),
-            patch("app.crawl.strategies.http_client_pool.get_async_http_client", return_value=_Client()),
+            patch("app.crawl.strategies.http_client_pool.get_async_http_client", return_value=client),
         ):
             result = await _default_http_fetcher(
                 "http://example.com/page",
@@ -73,7 +47,8 @@ class TestDNSRebindingProtection:
                 policy=HostPolicy.unrestricted(),
             )
 
-        parsed = urlparse(captured["url"])
-        assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", captured
-        assert captured["host_header"] == "example.com", captured
+        request = requested[0]
+        parsed = urlparse(str(request.url))
+        assert parsed.scheme == "http" and parsed.hostname == "1.2.3.4", request.url
+        assert request.headers["Host"] == "example.com", request.headers
         assert result.status_code == 200

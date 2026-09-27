@@ -64,7 +64,25 @@ class MockResponse(httpx.Response):
         super().__init__(status_code, headers=headers, stream=_ScriptedBody(content))
 
 
-def scripted_transport_client(responses: Sequence[httpx.Response]) -> httpx.AsyncClient:
+def _recording_hook(sink: list):
+    """An httpx event hook that appends every event to `sink`.
+
+    A coroutine function because httpx *awaits* the result; a hook that returns
+    ``None`` fails at the client, not at the test that installed it.
+    """
+
+    async def hook(event):
+        sink.append(event)
+
+    return hook
+
+
+def scripted_transport_client(
+    responses: Sequence[httpx.Response],
+    *,
+    observed_requests: list[httpx.Request] | None = None,
+    observed_responses: list[httpx.Response] | None = None,
+) -> httpx.AsyncClient:
     """A real ``httpx.AsyncClient`` that answers from `responses`, in call order.
 
     ``httpx.MockTransport`` is the seam httpx itself publishes for this, so
@@ -75,6 +93,13 @@ def scripted_transport_client(responses: Sequence[httpx.Response]) -> httpx.Asyn
     script has is a fact about the test, not a reason to invent one.
 
     ``captured_headers`` holds one real ``httpx.Headers`` per request, in order.
+
+    ``observed_requests`` / ``observed_responses`` collect the client's own event
+    hooks, which is the only way to see the full ``httpx.Request`` (the URL the
+    fetcher caused, not just its headers) or the full ``httpx.Response`` -- and
+    therefore whether a redirect was followed by the fetcher's own loop or by
+    httpx, which is the difference ``response.history`` records and headers
+    cannot.
     """
     captured: list[httpx.Headers] = []
 
@@ -84,6 +109,10 @@ def scripted_transport_client(responses: Sequence[httpx.Response]) -> httpx.Asyn
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(_handle))
     client.captured_headers = captured
+    if observed_requests is not None:
+        client.event_hooks["request"].append(_recording_hook(observed_requests))
+    if observed_responses is not None:
+        client.event_hooks["response"].append(_recording_hook(observed_responses))
     return client
 
 

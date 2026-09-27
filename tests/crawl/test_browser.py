@@ -7,6 +7,8 @@ pytestmark = pytest.mark.browser
 
 import base64
 
+from _assertions import assert_result_success
+
 from app.constants import BROWSER_HEADLESS
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
@@ -34,8 +36,7 @@ class TestBrowserRenderer:
 
     async def test_browser_renders_html_content(self, base_url):
         result = await self._render("/", base_url)
-        assert result.status == "success"
-        assert result.classification == "rendered"
+        assert_result_success(result)
         assert "Example Org" in (result.text or "")
         assert "Example Org" in (result.html or "")
 

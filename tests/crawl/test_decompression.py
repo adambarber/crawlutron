@@ -113,14 +113,6 @@ class TestDecompressionEncodings:
         assert result == b"some data"
 
 
-class TestInvalidCompressedInput:
-    def test_invalid_gzip_has_typed_error(self):
-        from app.crawl.decompression import decompress_body
-
-        with pytest.raises(decompression_mod.DecompressionError):
-            decompress_body(b"not gzip data", "gzip", max_output_bytes=10_000_000)
-
-
 class TestBodyCharsetDecoding:
     def test_http_charset_decode_error(self):
         from app.crawl.strategies.body_decode import _decode_body
@@ -309,25 +301,25 @@ def test_brotli_feeds_incrementally(monkeypatch):
 
 
 class TestDecompressionSelection:
-    def test_gzip_failure_is_rejected(self):
-        with pytest.raises(decompression_mod.DecompressionError):
-            decompress_body(b"not gzip", "gzip", max_output_bytes=10_000_000)
+    @pytest.mark.parametrize(
+        ("payload", "encoding"),
+        [
+            (b"not gzip", "gzip"),
+            (b"not deflate", "deflate"),
+            (b"not brotli", "br"),
+        ],
+    )
+    def test_corrupt_compressed_input_is_rejected(self, payload, encoding):
+        """Undecodable bytes are a typed error for every supported codec.
 
-    def test_deflate_failure_is_rejected(self):
+        One row per codec rather than one test per codec: a codec added to the
+        selection table gets a row here instead of a copy of this body, and the
+        thing under test -- that a body the codec cannot read raises
+        ``DecompressionError`` rather than surfacing a codec-specific
+        exception -- is stated once.
+        """
         with pytest.raises(decompression_mod.DecompressionError):
-            decompress_body(b"not deflate", "deflate", max_output_bytes=10_000_000)
-
-    def test_brotli_failure_is_rejected(self):
-        with pytest.raises(decompression_mod.DecompressionError):
-            decompress_body(b"not brotli", "br", max_output_bytes=10_000_000)
+            decompress_body(payload, encoding, max_output_bytes=_CAP)
 
     def test_plain_passthrough(self):
-        assert decompress_body(b"plain", "identity", max_output_bytes=10_000_000) == b"plain"
-
-
-class TestBrotliFailure:
-    def test_decompress_body_rejects_invalid_brotli(self):
-        from app.crawl.decompression import decompress_body
-
-        with pytest.raises(decompression_mod.DecompressionError):
-            decompress_body(b"not brotli", "br", max_output_bytes=10_000_000)
+        assert decompress_body(b"plain", "identity", max_output_bytes=_CAP) == b"plain"

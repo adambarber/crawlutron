@@ -1,6 +1,8 @@
 """Document model: text parsing, bytearray paths and document-level extraction edges."""
 
 from pathlib import Path
+from typing import NamedTuple
+from urllib.parse import urlparse
 
 from _extraction_helpers import (
     _collect_document_item_lines,
@@ -23,6 +25,17 @@ from app.crawl.strategies.document import (
 )
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample_table.pdf"
+
+
+class _ExtractionRun(NamedTuple):
+    """What one extractor run did, as observed through the fake opener."""
+
+    fetched: list[str]
+    """Logical host names, from the ``Host`` header of each request."""
+    connect_urls: list[str]
+    """The URLs actually handed to the connection (the pinned-IP side)."""
+    markdown: str
+    """Whatever the extractor managed to extract; empty when it refused to."""
 
 
 class TestPdfTablePreservation:
@@ -149,21 +162,29 @@ class TestDocumentRedirectSsrf:
         monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
         return fetched, connect_urls
 
+    def _drive_extraction(self, monkeypatch, redirects=None, url=None) -> _ExtractionRun:
+        """Install the fakes, run the real extractor over the fixture, report the run.
+
+        The pinning questions in this class are all questions about *where* the
+        extractor connected -- the logical ``Host`` it sent, the URL it handed
+        to the connection, and what it managed to read back. Staging the fakes
+        and driving the extractor is one step, so it is written once here and a
+        test states only the question it has of the run.
+        """
+        fetched, connect_urls = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), redirects or {})
+        markdown = _default_document_text_extractor(url or self.PDF_PATH)
+        return _ExtractionRun(fetched, connect_urls, markdown)
+
     def test_redirect_to_internal_host_is_not_followed(self, monkeypatch):
-        fetched, _ = self._install_fakes(
-            monkeypatch, FIXTURE.read_bytes(), {"initial.test/doc.pdf": self.EVIL_PATH}
-        )
-        assert _default_document_text_extractor(self.PDF_PATH) == ""
-        assert "initial.test" in fetched  # the pinned connect happened
-        assert "evil.test" not in fetched  # the hop was rejected before connect
+        run = self._drive_extraction(monkeypatch, {"initial.test/doc.pdf": self.EVIL_PATH})
+        assert run.markdown == ""
+        assert "initial.test" in run.fetched  # the pinned connect happened
+        assert "evil.test" not in run.fetched  # the hop was rejected before connect
 
     def test_redirect_to_public_host_still_works(self, monkeypatch):
-        fetched, _ = self._install_fakes(
-            monkeypatch, FIXTURE.read_bytes(), {"initial.test/doc.pdf": self.ALLOWED_PATH}
-        )
-        md = _default_document_text_extractor(self.PDF_PATH)
-        assert "Alice" in md
-        assert "allowed.test" in fetched
+        run = self._drive_extraction(monkeypatch, {"initial.test/doc.pdf": self.ALLOWED_PATH})
+        assert "Alice" in run.markdown
+        assert "allowed.test" in run.fetched
 
     def test_connect_is_pinned_to_validated_ip(self, monkeypatch):
         """H5: the connection URL carries the validated IP, not the hostname.
@@ -171,10 +192,7 @@ class TestDocumentRedirectSsrf:
         urllib never re-resolves because the request URL host IS the IP that
         passed the SSRF check; the original hostname rides the Host header.
         """
-        from urllib.parse import urlparse
-
-        _, connect_urls = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), {})
-        _default_document_text_extractor(self.PDF_PATH)
+        connect_urls = self._drive_extraction(monkeypatch).connect_urls
         assert connect_urls, "extractor must issue a pinned connect"
         assert urlparse(connect_urls[0]).hostname == self.PINNED_IP
 
@@ -182,39 +200,38 @@ class TestDocumentRedirectSsrf:
         """H5-A: https keeps the hostname (certs carry no IP SANs) -- the
         pinned IP must never surface in the request URL, or every properly
         configured site would fail TLS and silently break extraction."""
-        from urllib.parse import urlparse
-
-        _, connect_urls = self._install_fakes(
-            monkeypatch, FIXTURE.read_bytes(), {"initial.test/doc.pdf": self.ALLOWED_PATH}
+        run = self._drive_extraction(
+            monkeypatch,
+            {"initial.test/doc.pdf": self.ALLOWED_PATH},
+            url="https://initial.test/doc.pdf",
         )
-        md = _default_document_text_extractor("https://initial.test/doc.pdf")
-        assert "Alice" in md
-        assert connect_urls
-        assert all(urlparse(u).scheme == "https" for u in connect_urls)
-        assert all(urlparse(u).hostname != self.PINNED_IP for u in connect_urls)
+        assert "Alice" in run.markdown
+        assert run.connect_urls
+        assert all(urlparse(u).scheme == "https" for u in run.connect_urls)
+        assert all(urlparse(u).hostname != self.PINNED_IP for u in run.connect_urls)
 
     def test_second_hop_dns_rebind_aborts(self, monkeypatch):
         """H5-B: hops 2+ re-validate and re-pin. A hop whose resolution is
         link-local must abort the extraction, closing the rebind window that
         would otherwise reopen on every hop after the first."""
-        redirects = {
-            "initial.test/doc.pdf": "http://hop1.test/one.pdf",
-            "hop1.test/one.pdf": self.EVIL_PATH,
-        }
-        fetched, _ = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), redirects)
-        assert _default_document_text_extractor(self.PDF_PATH) == ""
-        assert "evil.test" not in fetched
+        run = self._drive_extraction(
+            monkeypatch,
+            {
+                "initial.test/doc.pdf": "http://hop1.test/one.pdf",
+                "hop1.test/one.pdf": self.EVIL_PATH,
+            },
+        )
+        assert run.markdown == ""
+        assert "evil.test" not in run.fetched
 
     def test_relative_redirect_resolves_against_hostname_url(self, monkeypatch):
         """H5-B: the next Location urljoins against the LOGICAL (hostname)
         URL, never the pinned-IP connect URL -- the resolver must see the
         hostname, and a resolver that refuses IP literals proves which one
         the code actually used."""
-        redirects = {"initial.test/doc.pdf": "/doc2.pdf"}
-        fetched, _ = self._install_fakes(monkeypatch, FIXTURE.read_bytes(), redirects)
-        md = _default_document_text_extractor(self.PDF_PATH)
-        assert "Alice" in md
-        assert "initial.test" in fetched
+        run = self._drive_extraction(monkeypatch, {"initial.test/doc.pdf": "/doc2.pdf"})
+        assert "Alice" in run.markdown
+        assert "initial.test" in run.fetched
 
 
 async def test_document_extraction_with_uncompressed_bytearray_body(base_url):

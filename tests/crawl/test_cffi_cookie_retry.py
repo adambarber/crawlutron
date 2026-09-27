@@ -1,26 +1,17 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
+from _browser_doubles import _fake_browser
+from _chain_policies import chain_policy
 from _fetcher_factories import request_fetcher
 
+from app.constants import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
 from app.crawl.strategy_chain import execute_crawl_chain
-from app.models import CrawlResult
 from app.validation import HostPolicy
 
-
-def _crawl_result(url):
-    return CrawlResult(
-        url=url,
-        status="success",
-        classification="rendered",
-        final_url=url,
-        html="<html>rendered</html>",
-        text="rendered",
-        attempts=1,
-        elapsed_ms=5,
-        domain="example.com",
-        metadata={},
-    )
+#: A browser worker's success shape, which is what the strategy chain needs
+#: back once the cffi hop has the cookies.
+_rendered = _fake_browser(html="<html>rendered</html>", text="rendered")
 
 
 async def test_browser_cookies_replayed_through_cffi(monkeypatch):
@@ -50,23 +41,17 @@ async def test_browser_cookies_replayed_through_cffi(monkeypatch):
     cffi_fetcher = request_fetcher(respond_cffi)
 
     async def browser_worker(job):
-        return _crawl_result(job.url)
+        return _rendered(job)
 
-    policy = {
-        "strategies": ["HTTP_DECLARED_CRAWLER", "HTTP_CFFI_IMPERSONATE", "BROWSER_HEADLESS"],
-        "limits": {
-            "timeout_seconds": 10,
-            "max_retries": 0,
-            "max_discovered_links": 10,
-            "respect_robots": False,
-        },
-        "headers": {},
-        "discovery": {"robots": True},
-    }
     result = await execute_crawl_chain(
         original_url="http://example.com/",
         normalized_url="http://example.com/",
-        policy=policy,
+        policy=chain_policy(
+            HTTP_DECLARED_CRAWLER,
+            HTTP_CFFI_IMPERSONATE,
+            BROWSER_HEADLESS,
+            discovery={"robots": True},
+        ),
         http_fetcher=http_fetcher,
         cffi_fetcher=cffi_fetcher,
         browser_worker=browser_worker,

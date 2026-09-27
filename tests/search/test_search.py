@@ -8,7 +8,6 @@ real FastAPI app.
 from __future__ import annotations
 
 import json
-import os
 from unittest import mock
 
 import pytest
@@ -21,19 +20,28 @@ from app.search.providers import (
     SearchProviderUnavailable,
     SerperProvider,
     TavilyProvider,
+    _collect_results,
     _provider_http,
     configured_search_providers,
     get_search_provider,
 )
-from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 
-def _settings(**overrides) -> CrawlerSettings:
-    merged = dict(os.environ)
-    for key, value in overrides.items():
-        merged[f"BROWSER_CRAWLER_{key.upper()}"] = str(value)
-    return CrawlerSettings.from_mapping(merged)
+def _collect(items):
+    """``_collect_results`` with this file's uniform provider key names.
+
+    Every provider spells the same three keys, so the call shape is a constant
+    of these tests rather than a decision each one repeats -- and a copy that
+    drops ``description_key`` silently asserts against a blank description.
+    """
+    return _collect_results(
+        items,
+        url_key="url",
+        title_key="title",
+        description_key="content",
+        policy=HostPolicy.unrestricted(),
+    )
 
 
 # --- Provider parsing -------------------------------------------------------
@@ -174,20 +182,12 @@ class TestProviderParsing:
 
 class TestCollectResults:
     def test_dedupes_by_normalized_url_and_preserves_order(self):
-        from app.search.providers import _collect_results
-
         items = [
             {"url": "https://example.gov/a", "title": "A", "content": "first"},
             {"url": "https://example.gov/a/", "title": "A dup", "content": "dup"},
             {"url": "https://example.gov/b", "title": "B", "content": "second"},
         ]
-        results = _collect_results(
-            items,
-            url_key="url",
-            title_key="title",
-            description_key="content",
-            policy=HostPolicy.unrestricted(),
-        )
+        results = _collect(items)
         assert [(r.url, r.title, r.description) for r in results] == [
             ("https://example.gov/a", "A", "first"),
             ("https://example.gov/b", "B", "second"),
@@ -195,8 +195,6 @@ class TestCollectResults:
 
     def test_skips_non_dicts_blank_and_private_urls(self, monkeypatch):
         from _assertions import block_private_targets
-
-        from app.search.providers import _collect_results
 
         block_private_targets(monkeypatch)
         items = [
@@ -207,77 +205,53 @@ class TestCollectResults:
             {"title": "no url key"},
             {"url": "https://example.gov/ok", "title": "kept"},
         ]
-        results = _collect_results(
-            items,
-            url_key="url",
-            title_key="title",
-            description_key="content",
-            policy=HostPolicy.unrestricted(),
-        )
+        results = _collect(items)
         assert [r.url for r in results] == ["https://example.gov/ok"]
         assert results[0].description == ""
 
     def test_clips_whitespace_and_long_fields(self):
-        from app.search.providers import _MAX_TEXT_LENGTH, _collect_results
+        from app.search.providers import _MAX_TEXT_LENGTH
 
-        items = [
-            {"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}
-        ]
-        results = _collect_results(
-            items,
-            url_key="url",
-            title_key="title",
-            description_key="content",
-            policy=HostPolicy.unrestricted(),
+        results = _collect(
+            [{"url": "https://example.gov/x", "title": " a  b ", "content": "z" * (_MAX_TEXT_LENGTH + 50)}]
         )
         assert results[0].title == "a b"
         assert results[0].description.endswith("…")
         assert len(results[0].description) == _MAX_TEXT_LENGTH + 1  # ellipsis adds one
 
     def test_none_items_iterable_is_empty(self):
-        from app.search.providers import _collect_results
-
-        assert (
-            _collect_results(
-                None,
-                url_key="url",
-                title_key="title",
-                description_key="content",
-                policy=HostPolicy.unrestricted(),
-            )
-            == []
-        )
+        assert _collect(None) == []
 
 
 # --- Provider selection -----------------------------------------------------
 
 
 class TestProviderSelection:
-    def test_auto_picks_first_configured_keyed_provider(self):
-        settings = _settings(
+    def test_auto_picks_first_configured_keyed_provider(self, override_settings):
+        settings = override_settings(
             search_provider="auto", tavily_api_key="t", brave_api_key="b", serper_api_key="s"
         )
         assert get_search_provider(settings).name == "tavily"
 
-    def test_auto_skips_unconfigured_to_next_keyed_provider(self):
-        settings = _settings(search_provider="auto", brave_api_key="b")
+    def test_auto_skips_unconfigured_to_next_keyed_provider(self, override_settings):
+        settings = override_settings(search_provider="auto", brave_api_key="b")
         assert get_search_provider(settings).name == "brave"
 
-    def test_auto_falls_back_to_duckduckgo_without_keys(self):
-        settings = _settings(search_provider="auto")
+    def test_auto_falls_back_to_duckduckgo_without_keys(self, override_settings):
+        settings = override_settings(search_provider="auto")
         assert get_search_provider(settings).name == "duckduckgo"
 
-    def test_explicit_provider_requires_its_key(self):
-        settings = _settings(search_provider="tavily", tavily_api_key="t")
+    def test_explicit_provider_requires_its_key(self, override_settings):
+        settings = override_settings(search_provider="tavily", tavily_api_key="t")
         assert get_search_provider(settings).name == "tavily"
 
-    def test_explicit_unconfigured_provider_raises_actionable_error(self):
-        settings = _settings(search_provider="brave")
+    def test_explicit_unconfigured_provider_raises_actionable_error(self, override_settings):
+        settings = override_settings(search_provider="brave")
         with pytest.raises(SearchProviderUnavailable, match="BROWSER_CRAWLER_BRAVE_API_KEY"):
             get_search_provider(settings)
 
-    def test_configured_providers_report_priority_order(self):
-        settings = _settings(
+    def test_configured_providers_report_priority_order(self, override_settings):
+        settings = override_settings(
             search_provider="auto", tavily_api_key="t", serper_api_key="s", brave_api_key="b"
         )
         assert configured_search_providers(settings) == ["tavily", "brave", "serper"]

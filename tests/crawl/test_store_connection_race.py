@@ -23,6 +23,7 @@ that never releases must still be refused rather than hung on forever.
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 
 from app.crawl import sqlite_store
 from app.crawl.sqlite_store import configure_store_connection
@@ -66,6 +67,45 @@ class _PeerHoldingTheFile:
         self._thread.join(10)
 
 
+@contextmanager
+def _peer_locked_store(tmp_path, name: str, *, already_wal: bool = False, release_after: float | None = None):
+    """A store database with a peer PROVEN to be holding it, and our connection.
+
+    Yields the connection the chokepoint must be run through, and closes it and
+    releases the peer on the way out. The three tests here are one arrangement
+    in three states, and the arrangement was being re-derived in each: a fresh
+    ``delete``-mode database, then (optionally) a WAL conversion, then a peer
+    that holds an exclusive lock before anything else runs.
+
+    ``release_after`` schedules the peer's release that many seconds in, which is
+    how "a peer that releases is waited out" is arranged; leaving it None holds
+    the lock until the block exits, which is the "a peer that never releases"
+    case. ``already_wal`` converts the journal first, so the peer is locking a
+    database whose property is already set -- the case where any write at all
+    must be refused.
+    """
+    db_path = str(tmp_path / f"{name}.db")
+    _delete_mode_database(db_path)
+    if already_wal:
+        seed = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+        seed.execute("PRAGMA journal_mode=WAL")
+        seed.close()
+
+    peer = _PeerHoldingTheFile(db_path)
+    timer = None
+    if release_after is not None:
+        timer = threading.Timer(release_after, peer.release)
+        timer.start()
+    conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+    try:
+        yield conn
+    finally:
+        conn.close()
+        if timer is not None:
+            timer.cancel()
+        peer.release()
+
+
 def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
     """Proves the retry loop, not `busy_timeout`, is what carries the wait.
 
@@ -75,29 +115,17 @@ def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
     can only come from the retry.
     """
     monkeypatch.setattr(sqlite_store, "_BUSY_TIMEOUT_MS", 50)
-    db_path = str(tmp_path / "retry.db")
-    _delete_mode_database(db_path)
 
-    peer = _PeerHoldingTheFile(db_path)
-    threading.Timer(0.6, peer.release).start()
-
-    conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
-    try:
+    with _peer_locked_store(tmp_path, "retry", release_after=0.6) as conn:
         configure_store_connection(conn)
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-    finally:
-        conn.close()
 
 
 def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
     """Bounded, not forever: a hard lock must not become an unkillable hang."""
     monkeypatch.setattr(sqlite_store, "_WAL_RETRY_SECONDS", 0.5)
-    db_path = str(tmp_path / "stuck.db")
-    _delete_mode_database(db_path)
 
-    peer = _PeerHoldingTheFile(db_path)
-    try:
-        conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+    with _peer_locked_store(tmp_path, "stuck") as conn:
         started = time.monotonic()
         try:
             configure_store_connection(conn)
@@ -106,10 +134,6 @@ def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
             assert waited < 10, f"waited {waited:.1f}s, which is not bounded"
         else:
             raise AssertionError("expected a refusal while a peer held the database")
-        finally:
-            conn.close()
-    finally:
-        peer.release()
 
 
 def test_already_wal_database_is_never_written(tmp_path):
@@ -117,16 +141,5 @@ def test_already_wal_database_is_never_written(tmp_path):
 
     An exclusive lock makes any write fail, so surviving it is the proof.
     """
-    db_path = str(tmp_path / "wal.db")
-    _delete_mode_database(db_path)
-    seed = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
-    seed.execute("PRAGMA journal_mode=WAL")
-    seed.close()
-
-    peer = _PeerHoldingTheFile(db_path)
-    try:
-        conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
+    with _peer_locked_store(tmp_path, "wal", already_wal=True) as conn:
         configure_store_connection(conn)
-        conn.close()
-    finally:
-        peer.release()

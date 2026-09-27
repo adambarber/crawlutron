@@ -11,8 +11,8 @@ import concurrent.futures
 import functools
 import socket
 import time
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, ParamSpec, TypeVar
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
@@ -203,23 +203,49 @@ def _build_pinned_request(
 # resolver call (adversarial perf #1.1).
 _DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
-async def _build_pinned_request_async(
-    url: str,
-    headers: dict[str, str],
-    *,
-    policy: HostPolicy,
-) -> tuple[str, dict[str, str]]:
-    """Offload SSRF-safe request building (incl. the blocking ``socket.getaddrinfo``
-    call) to a worker thread so the event loop is never stalled by a resolver
-    lookup (adversarial perf #1.1). Mirrors the browser route handler, which
-    already runs ``_build_pinned_request`` via ``asyncio.to_thread``.
+
+def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable[_R]]:
+    """The one way to run blocking call machinery off the event loop (perf #1.1).
+
+    Two things are owned here instead of at the call sites: the *pool* and the
+    *argument list*. The pool is this module's ``_DNS_EXECUTOR``, so every
+    off-loop resolution in the process lands on the same 32 workers and the
+    default executor stays free for the blocking extraction work it is sized
+    for. The argument list is the builder's, carried whole by the ParamSpec
+    rather than restated: a wrapper that spelled ``(url, headers, policy)`` next
+    to a builder spelling the same list would be a second copy of the pin rule,
+    and the copy is free to disagree with the rule it wraps. Here the two cannot
+    disagree, so there is nothing left to keep in sync.
+
+    ``resolve`` is a thunk, not the builder, because the builder is a module
+    global that tests replace: resolving it when the off-loop call is *made*
+    keeps that seam, while binding it at import time would freeze the
+    pre-replacement builder into every later call.
     """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _DNS_EXECUTOR,
-        functools.partial(_build_pinned_request, url, headers, policy=policy),
-    )
+
+    async def _run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_DNS_EXECUTOR, functools.partial(resolve(), *args, **kwargs))
+
+    return functools.wraps(resolve())(_run)
+
+
+# The fetch path's off-loop entry to the pin rule -- SSRF-safe request building,
+# including the blocking ``socket.getaddrinfo`` call, on a worker thread so the
+# event loop is never stalled by a resolver lookup (adversarial perf #1.1).
+#
+# DERIVED from the rule rather than hand-written beside it. :func:`_off_loop`
+# keeps the builder's whole parameter list, so this binding has no signature of
+# its own to spell, and an off-loop pinned request is constructible exactly one
+# way: on this module's pool, with the arguments :func:`_build_pinned_request`
+# declares. It used to be a second ``async def`` that restated that list beside
+# the builder -- two spellings of the pin rule that were free to disagree, and
+# the one rule in this module a caller could get subtly wrong without any test
+# noticing.
+_build_pinned_request_async = _off_loop(lambda: _build_pinned_request)
 
 
 _MAX_REDIRECT_HOPS = 5

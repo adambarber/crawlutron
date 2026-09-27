@@ -4,20 +4,7 @@ import os
 import pytest
 from _fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from _policy_factories import http_strategy_policy
-from helpers.server import _Handler as _BaseHandler
-from helpers.server import spawn_threaded_server
-
-
-class _SimpleHandler(_BaseHandler):
-    """Minimal 200/text-html handler for the subprocess cffi smoke test."""
-
-    def do_GET(self):
-        body = b"<html><body>ok</body></html>"
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+from helpers.server import _Handler, spawn_threaded_server
 
 
 def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
@@ -79,7 +66,7 @@ class TestHttpStrategyEdges:
         """
         import multiprocessing
 
-        server = spawn_threaded_server(_SimpleHandler)
+        server = spawn_threaded_server(_Handler)
         url = f"http://127.0.0.1:{server.server_port}/"
         out_queue: multiprocessing.Queue = multiprocessing.Queue()
         worker = multiprocessing.Process(target=_cffi_smoke_worker, args=(url, out_queue))

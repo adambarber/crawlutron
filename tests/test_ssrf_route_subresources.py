@@ -15,32 +15,36 @@ from __future__ import annotations
 import socket
 
 from _assertions import block_private_targets
-from _browser_doubles import ROUTE_ARG_UNSET, FakeRequest, FakeRoute
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _browser_doubles import (
+    ROUTE_ARG_UNSET,
+    FakeRequest,
+    FakeRoute,
+    assert_route_decision,
+    ssrf_route_handler,
+)
 
 import app.crawl.strategies.pinned_transport as http_mod
-from app.crawl.strategies.browser import _make_ssrf_route_handler
 
 
 async def test_https_subresource_to_a_private_target_is_aborted(monkeypatch) -> None:
     """Every private/loopback/reserved HTTPS target is refused before connect."""
     block_private_targets(monkeypatch)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-    for url in (
-        "https://127.0.0.1:9/",
-        "https://169.254.169.254/latest/meta-data/",
-        "https://[::1]:9/",
-        "https://localhost:9/admin",
-    ):
-        route = FakeRoute()
-        await handler(route, FakeRequest(url, "document"))
-        assert route.decision == "abort", f"private target was not blocked: {url}"
+    await assert_route_decision(
+        ssrf_route_handler(),
+        (
+            "https://127.0.0.1:9/",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]:9/",
+            "https://localhost:9/admin",
+        ),
+        "abort",
+    )
 
 
 async def test_https_subresource_is_not_rewritten_to_a_pinned_ip(monkeypatch) -> None:
     """The browser keeps the original hostname for HTTPS (SNI/cert verification)."""
     block_private_targets(monkeypatch)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = ssrf_route_handler()
     route = FakeRoute()
     await handler(route, FakeRequest("https://1.2.3.4/x", "document"))
     assert route.decision == "continue"
@@ -61,7 +65,7 @@ async def test_https_subresource_reuses_the_dns_lookup(monkeypatch) -> None:
         return real_getaddrinfo(addr, *args, **kwargs)
 
     monkeypatch.setattr(socket, "getaddrinfo", counting)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = ssrf_route_handler()
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/a", "document"))
     await handler(FakeRoute(), FakeRequest("https://1.2.3.4/b", "document"))
     assert len(lookups) == 1, f"expected one shared lookup, got {lookups}"
@@ -80,7 +84,7 @@ async def test_http_subresource_still_connects_to_the_fresh_pinned_ip(monkeypatc
         return real_resolve(host, use_cache=use_cache)
 
     monkeypatch.setattr(http_mod, "_resolve_ips", recording)
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
+    handler = ssrf_route_handler()
     route = FakeRoute()
     await handler(route, FakeRequest("http://1.2.3.4/x", "document"))
     assert route.decision == "continue"

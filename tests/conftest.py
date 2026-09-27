@@ -266,6 +266,13 @@ def override_settings():
     ``CrawlerSettings`` is a frozen dataclass, so per-test overrides build a
     new instance from ``os.environ`` plus ``BROWSER_CRAWLER_*`` overrides and
     restore the original after the test.
+
+    This is also the suite's only spelling of "env plus overrides becomes
+    settings". Several test files used to carry a private module-level
+    ``_settings(**overrides)`` copy of the same four lines; a test that needs a
+    settings object with no other effect now requests this fixture and uses the
+    instance it returns, so there is one place that decides how an override key
+    becomes an environment variable.
     """
     from app.main import app
     from app.settings import CrawlerSettings
@@ -318,6 +325,27 @@ def _cleanup_extraction_executors():
 
     if _EXTRACTION_EXECUTOR is not None:
         _EXTRACTION_EXECUTOR.shutdown(wait=False)
+
+
+@pytest.fixture
+def recording_worker():
+    """``(seen, worker)``: a recursive-crawl worker that records its job URLs.
+
+    Several dispatch and robots tests assert *which* jobs reached the worker --
+    a robots-skipped URL must never appear, a batch's repeated URL must be
+    crawled once. Each of those spelled the same two-line worker, and a copy
+    that drops the ``seen.append`` turns the assertion into a vacuous truth
+    over an empty list.
+    """
+    from _result_builders import make_engine_result
+
+    seen: list[str] = []
+
+    async def worker(job):
+        seen.append(job.normalized_url)
+        return make_engine_result(job.normalized_url)
+
+    return seen, worker
 
 
 @pytest.fixture
@@ -468,8 +496,8 @@ def _reset_global_http_state():
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
     # or schedules a client close would leak state into the next test
     # (adversarial review F-test-isolation).
-    from app.crawl.strategies import cookie_jar as cookie_mod
-    from app.crawl.strategies import http_client_pool as pool_mod
+    # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this fixture;
+    # only ``pinned_mod`` is new here.
     from app.crawl.strategies import pinned_transport as pinned_mod
 
     try:

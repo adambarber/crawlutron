@@ -13,6 +13,8 @@ import threading
 import uuid
 from unittest.mock import patch
 
+from _thread_fanout import run_thread_fanout
+
 from app.crawl.strategies import pinned_transport as http_mod
 
 
@@ -83,20 +85,12 @@ class TestDnsCacheLocking:
 
         # Resolve a host that exists on every test machine
         host = "127.0.0.1"
-        errors: list[Exception] = []
 
-        def worker() -> None:
-            try:
-                for _ in range(50):
-                    http_mod._resolve_ips(host)
-            except Exception as exc:
-                errors.append(exc)
+        def worker(_index: int) -> None:
+            for _ in range(50):
+                http_mod._resolve_ips(host)
 
-        threads = [threading.Thread(target=worker) for _ in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        errors = run_thread_fanout(worker)
         assert not errors, errors
         # Cache is consistent (not corrupted by concurrent mutation) and the
         # winning write is readable.

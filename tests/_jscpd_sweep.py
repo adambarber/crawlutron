@@ -61,7 +61,25 @@ def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
 # floor.
 _DOCSTRING_OPENERS = ('"""', "'''", 'r"""', 'r\'\'\'')
 
-LOGIC_NODES = (
+# The statements that open a nested scope. This is the vocabulary for "can
+# contain a definition", and the metrics gate imports it rather than restating
+# it: two lists that happen to agree on these seven are two lists that can stop
+# agreeing.
+COMPOUND_NODES = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+)
+
+# Every compound statement is also one that does something, so the logic
+# vocabulary is the nesting vocabulary plus the flat ones. Written as a sum
+# rather than as two coincidentally-agreeing tuples, "no statement that opens a
+# scope is mere preamble" is a fact here instead of an accident.
+LOGIC_NODES = COMPOUND_NODES + (
     ast.Assign,
     ast.AnnAssign,
     ast.AugAssign,
@@ -70,13 +88,6 @@ LOGIC_NODES = (
     ast.Delete,
     ast.Call,
     ast.Await,
-    ast.If,
-    ast.For,
-    ast.AsyncFor,
-    ast.While,
-    ast.With,
-    ast.AsyncWith,
-    ast.Try,
     ast.IfExp,
     ast.BoolOp,
     ast.Compare,

@@ -11,12 +11,10 @@ shape, and the tree-wide guards in ``tests/test_safety_invariants.py`` keep it
 that way. These tests pin the two properties that made the move worth making.
 """
 
-from _browser_doubles import _fake_browser
+from _render_producer import render_stub_request
 
-from app.api.render import render_request
 from app.api.response_shaping import _aunified_response_from_result, render_result_to_unified
 from app.api_models import POLICY_SCHEMA_VERSION
-from app.settings import CrawlerSettings
 
 #: The engine's envelope, which is the shape the crawl producer emits.
 CRAWL_ENVELOPE = {
@@ -31,11 +29,7 @@ CRAWL_ENVELOPE = {
 
 
 async def _render_envelope() -> dict:
-    return await render_request(
-        {"url": "http://127.0.0.1:1/x"},
-        settings=CrawlerSettings.from_mapping(),
-        worker=_fake_browser(html="<html></html>", text="t"),
-    )
+    return await render_stub_request({"url": "http://127.0.0.1:1/x"})
 
 
 async def test_render_producer_stamps_the_envelope_the_adapter_reads():

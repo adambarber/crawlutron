@@ -128,10 +128,40 @@ class FakeBrowserCM:
         return False
 
 
+def _renderer():
+    """A renderer over a fresh fake browser, for a test that keeps no handle on it.
+
+    ``sleep=lambda _s: None`` is the renderer's own wait budget, stubbed the way
+    the suite stubs every other sleep: a feature test here is about what the
+    render orchestrates, not how long it waited.
+    """
+    return BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()), sleep=lambda _s: None)
+
+
+def _reuse_renderer():
+    """The same renderer, plus the browser and its context manager.
+
+    A reuse assertion is about how many times those two were entered and how
+    many pages they handed out, so the test has to be holding them.
+    """
+    browser = FakeBrowser()
+    cm = FakeBrowserCM(browser)
+    return browser, cm, BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
+
+
+async def _render(renderer, path: str = "/"):
+    """One render at the empty browser profile, which is what these tests mean."""
+    return await renderer.render(
+        f"http://example.com{path}",
+        RenderOptions(browser_profile={}),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
+
+
 class TestActionChain:
     async def test_action_chain_dispatches_correctly(self):
         page = FakePage()
-        renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
+        renderer = _renderer()
         actions = [
             {"type": "click", "selector": "#go"},
             {"type": "fill", "selector": "#q", "value": "hello"},
@@ -156,14 +186,14 @@ class TestActionChain:
             raise RuntimeError("nope")
 
         page.click = boom
-        renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
+        renderer = _renderer()
         await renderer._run_action_chain(page, [{"type": "click", "selector": "#x"}])
 
 
 class TestElementScreenshot:
     async def test_capture_element_screenshots(self):
         page = FakePage()
-        renderer = BrowserRenderer(browser_factory=lambda **kw: FakeBrowserCM(FakeBrowser()))
+        renderer = _renderer()
         shots = await renderer._capture_element_screenshots(page, ["#a", "#missing"])
         selectors = {s["selector"] for s in shots}
         assert "#a" in selectors
@@ -175,46 +205,22 @@ class TestElementScreenshot:
 
 class TestBrowserReuse:
     async def test_single_browser_reused_across_renders(self):
-        browser = FakeBrowser()
-        cm = FakeBrowserCM(browser)
-        renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        opts = RenderOptions(browser_profile={})
-        await renderer.render(
-            "http://example.com/",
-            opts,
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        browser, cm, renderer = _reuse_renderer()
+        await _render(renderer)
         assert not renderer._browser_reused
-        await renderer.render(
-            "http://example.com/page",
-            opts,
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        await _render(renderer, "/page")
         assert renderer._browser_reused
         assert cm.enters == 1
         assert browser.pages == 2
 
     async def test_close_releases_browser(self):
-        browser = FakeBrowser()
-        cm = FakeBrowserCM(browser)
-        renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        await renderer.render(
-            "http://example.com/",
-            RenderOptions(browser_profile={}),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        _, _, renderer = _reuse_renderer()
+        await _render(renderer)
         await renderer.close()
         assert renderer._browser is None
         assert renderer._browser_cm is None
 
     async def test_render_still_succeeds_with_fake_browser(self):
-        browser = FakeBrowser()
-        cm = FakeBrowserCM(browser)
-        renderer = BrowserRenderer(browser_factory=lambda **kw: cm, sleep=lambda _s: None)
-        result = await renderer.render(
-            "http://example.com/",
-            RenderOptions(browser_profile={}),
-            policy=UNRESTRICTED_HOST_POLICY,
-        )
+        result = await _render(_renderer())
         assert result.status == "success"
         assert "Visible body text" in (result.text or "")

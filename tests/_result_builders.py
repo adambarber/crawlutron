@@ -17,6 +17,50 @@ def make_job(index: int, url: str):
     )
 
 
+def engine_result(url: str, classification: str, **overrides: Any):
+    """An ``EngineCrawlResult`` for `url`: every optional field absent, plus `overrides`.
+
+    The absent baseline is what a result that never got a response looks like --
+    no status, no body, no strategy, zero quality, no links. A test that needs a
+    success restates that shape, because those fields ARE the difference between
+    the two, and spelling them per test is how they drift.
+
+    Two things are derived rather than accepted, because each is a property of
+    something else and two arguments that must agree should not both be the
+    caller's: ``status`` comes from the production ``status_for_classification``
+    mapping, so a test cannot assert a status that contradicts the classification
+    it named; and ``discovered_link_count`` comes from ``discovered_links``.
+    """
+    from app.constants import status_for_classification
+    from app.models import EngineCrawlResult
+
+    if "discovered_link_count" in overrides:
+        raise TypeError("discovered_link_count is derived from discovered_links; pass only the links")
+    links = list(overrides.pop("discovered_links", []))
+    fields: dict[str, Any] = {
+        "original_url": url,
+        "normalized_url": url,
+        "final_url": None,
+        "status": status_for_classification(classification),
+        "classification": classification,
+        "selected_strategy": None,
+        "attempted_strategies": [],
+        "http_status": None,
+        "headers": {},
+        "content_type": None,
+        "html": None,
+        "text": None,
+        "markdown": None,
+        "extraction_method": None,
+        "quality_score": 0.0,
+        "discovered_link_count": len(links),
+        "discovered_links": links,
+        "error": None,
+    }
+    fields.update(overrides)
+    return EngineCrawlResult(**fields)
+
+
 def _successful_engine_result(
     url: str,
     *,
@@ -25,27 +69,20 @@ def _successful_engine_result(
     markdown: str | None = None,
     links: list[Any] | None = None,
 ):
-    from app.models import EngineCrawlResult
-
-    discovered_links = list(links or [])
-    return EngineCrawlResult(
-        original_url=url,
-        normalized_url=url,
+    return engine_result(
+        url,
+        "rendered",
         final_url=url,
-        status="success",
-        classification="rendered",
         selected_strategy=HTTP_DECLARED_CRAWLER,
         attempted_strategies=attempted_strategies,
         http_status=200,
-        headers={},
         content_type="text/html",
         html="<html></html>",
         text=text,
         markdown=markdown,
         extraction_method="http_html",
         quality_score=1.0,
-        discovered_link_count=len(discovered_links),
-        discovered_links=discovered_links,
+        discovered_links=list(links or []),
     )
 
 
@@ -198,6 +235,7 @@ __all__ = [
     "_root_fans_out",
     "_scripted_result_map",
     "_small_link_graph_results",
+    "engine_result",
     "make_engine_result",
     "make_job",
     "make_result",

@@ -32,10 +32,20 @@ def _doc_pages():
     }
 
 
-async def _crawl_example_site(pages):
-    """Crawl the example fixture site; return the (envelope, fetched urls) pair."""
+async def _crawl_example_site(pages, **policy):
+    """Crawl the example fixture site; return the (envelope, fetched urls) pair.
+
+    ``policy`` is merged over the default limits, so a test that is about one
+    policy knob (a scope regex, ``extraction``) names that knob instead of
+    re-spelling the crawl it is not about -- which is how two of these tests
+    each grew their own copy of the payload, the cache and the
+    crawled-URL-set line.
+    """
     fetcher = _recording_fetcher(pages)
-    payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 2, "max_pages": 10}}}
+    payload = {
+        "url": "http://example.com/",
+        "policy": {"limits": {"max_depth": 2, "max_pages": 10}, **policy},
+    }
     out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
     return out, fetcher.calls
 
@@ -50,20 +60,16 @@ async def test_scope_records_out_of_scope_links_but_never_fetches_them():
         ),
         "/keep/x": (200, "<html>x</html>", "text/html"),
     }
-    fetcher = _recording_fetcher(pages)
-    payload = {
-        "url": "http://example.com/",
-        "policy": {
-            "limits": {"max_depth": 1, "max_pages": 10},
-            "scope_regex": r"^https?://example\.com(/|$)",
-        },
-    }
-    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
+    out, fetched = await _crawl_example_site(
+        pages,
+        limits={"max_depth": 1, "max_pages": 10},
+        scope_regex=r"^https?://example\.com(/|$)",
+    )
     crawled = {r["normalized_url"] for r in out["results"]}
     # expansion stayed in scope...
     assert crawled == {"http://example.com", "http://example.com/keep/x"}
     # ...and instagram was never fetched
-    assert not any("instagram.com" in u for u in fetcher.calls)
+    assert not any("instagram.com" in u for u in fetched)
     # ...but the advertised profile is still recorded on the seed result
     root = next(r for r in out["results"] if r["normalized_url"] == "http://example.com")
     recorded = {d["normalized_url"] for d in root["discovered_links"]}
@@ -105,13 +111,9 @@ async def test_document_urls_recorded_but_not_fetched_by_default():
 
 async def test_document_urls_fetched_when_extraction_document_requested():
     """Callers who explicitly want document contents still get them."""
-    fetcher = _recording_fetcher(
-        {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")}
+    out, _fetched = await _crawl_example_site(
+        {**_doc_pages(), "/reports/2024-minutes.pdf": (200, "%PDF-1.4 minutes", "application/pdf")},
+        extraction="document",
     )
-    payload = {
-        "url": "http://example.com/",
-        "policy": {"limits": {"max_depth": 2, "max_pages": 10}, "extraction": "document"},
-    }
-    out = await crawl_request(payload, http_fetcher=fetcher, cache=HttpCache())
     crawled = {r["normalized_url"] for r in out["results"]}
     assert "http://example.com/reports/2024-minutes.pdf" in crawled

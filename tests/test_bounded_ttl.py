@@ -1,6 +1,6 @@
 """BoundedTTLCache contract: lock-inside, TTL, LRU eviction (chokepoint #1)."""
 
-import threading
+from _thread_fanout import run_thread_fanout
 
 from app.bounded_ttl import BoundedTTLCache
 
@@ -68,21 +68,13 @@ class TestContract:
 
     def test_concurrent_put_get_are_consistent(self):
         cache = BoundedTTLCache(max_entries=256, ttl=100.0)
-        errors: list[str] = []
 
         def worker(i: int) -> None:
-            try:
-                for round_ in range(200):
-                    key = f"k{i % 16}-{round_ % 8}"
-                    cache.put(key, i)
-                    cache.get(key)
-            except Exception as exc:  # pragma: no cover
-                errors.append(repr(exc))
+            for round_ in range(200):
+                key = f"k{i % 16}-{round_ % 8}"
+                cache.put(key, i)
+                cache.get(key)
 
-        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        assert not errors
+        errors = run_thread_fanout(worker)
+        assert not errors, errors
         assert len(cache) <= 256

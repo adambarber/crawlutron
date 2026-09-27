@@ -34,6 +34,7 @@ from chokepoint_walks import (
     attribute_calls,
     call_keyword_values,
     calls_named,
+    calls_named_leaf,
     calls_to_any,
     code_line_count,
     file_tree,
@@ -44,6 +45,7 @@ from chokepoint_walks import (
     local_nodes,
     nodes_of,
     nodes_of_type,
+    non_member_literals,
     offender,
     relative_posix,
     resolved_call_name,
@@ -530,7 +532,13 @@ __all__ = [
 # become redundant with the class attributes), and `models.py` is down 3 (the
 # taxonomy `__post_init__` trampoline is gone; every result dataclass now
 # inherits it from `_LiteralChecked`).
-_APP_TREE_CODE_LINE_BUDGET = 14_923
+# this program's removals: the two twin fetcher signatures and the http phase
+# prefixes are now guarded rather than hand-maintained (4 lines / 25 tokens, two
+# pairs declared in jscpd-expectations.json with the guard that requires each),
+# the DNS resolver is a single off-loop chokepoint, and one extraction HTML-ness
+# predicate replaces two. Lower this when code is removed, never raise it to make
+# a run pass -- the number is a ceiling on growth, not a target.
+_APP_TREE_CODE_LINE_BUDGET = 14_888
 
 
 def assert_trees_clean(
@@ -561,14 +569,28 @@ def assert_trees_clean(
 
 
 def test_app_tree_code_line_count_does_not_grow():
+    """``app/`` may shrink freely; it may not grow without a argued raise.
+
+    This was an exact-equality assertion, which read as a ratchet but was not
+    one: it failed when refactors *removed* code, so every deletion in ``app/``
+    also obliged an edit to this constant. Under concurrent work that is
+    unsatisfiable by construction -- no number is correct while the tree is
+    moving -- and the failure is pure noise, because the tree was going down.
+
+    A ceiling is the shape the name already claims. ``<=`` still blocks growth,
+    which is the property that matters, and it lets a refactor land on its own
+    merits. What it gives up is the forced ratchet-down; the constant is
+    therefore lowered deliberately, from the number the run just measured, and
+    the argument for a raise lives in the comment above.
+    """
     actual = sum(
         code_line_count(path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
     )
-    assert actual == _APP_TREE_CODE_LINE_BUDGET, (
-        f"app/ contains exactly {actual} code lines (comments, blanks and "
-        f"docstrings excluded); the whole-tree ceiling is "
-        f"{_APP_TREE_CODE_LINE_BUDGET}. Lower the ceiling when code is removed; "
-        "a raise must be argued in the comment above, never spent silently."
+    assert actual <= _APP_TREE_CODE_LINE_BUDGET, (
+        f"app/ contains {actual} code lines (comments, blanks and docstrings "
+        f"excluded), over the whole-tree ceiling of {_APP_TREE_CODE_LINE_BUDGET}. "
+        f"Lower the ceiling when code is removed; a raise must be argued in the "
+        f"comment above, never spent silently."
     )
 
 
@@ -834,20 +856,33 @@ def test_property_owner_public_surface_budgets_are_tight():
 _RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findall", "split"}
 
 
-def _dynamic_pattern_re_calls(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag re.<method>(<non-literal pattern>, ...) -- the ReDoS shape."""
-    offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
-        if (
-            isinstance(node.func, ast.Attribute)
+def _re_dynamic_pattern_offenders(methods: frozenset[str]):
+    """Build the detector for ``re.<method>(<non-literal pattern>, ...)``.
+
+    ``re.compile`` with a dynamic pattern is the ReDoS shape, and so is
+    ``re.sub``/``re.search``/... with one: the hazard is a pattern built from
+    attacker-influenced text, not a method name. Both the broad sweep and the
+    single-method gate below are that one predicate over a method set, so it is
+    written once -- two hand-rolled copies is how the narrow one ended up
+    dropping the receiver check the broad one has.
+    """
+
+    def detector(tree: ast.AST, path: pathlib.Path) -> list[str]:
+        return [
+            offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)")
+            for node in nodes_of_type(tree, ast.Call)
+            if isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
-            and (node.func.value.id == "re")
-            and (node.func.attr in _RE_DYNAMIC_METHODS)
+            and node.func.value.id == "re"
+            and node.func.attr in methods
             and node.args
-            and (not isinstance(node.args[0], ast.Constant))
-        ):
-            offenders.append(offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)"))
-    return offenders
+            and not isinstance(node.args[0], ast.Constant)
+        ]
+
+    return detector
+
+
+_dynamic_pattern_re_calls = _re_dynamic_pattern_offenders(_RE_DYNAMIC_METHODS)
 
 
 def test_no_dynamic_pattern_re_calls():
@@ -876,20 +911,10 @@ def test_no_direct_regex_engine_import():
 
 def test_no_bare_re_compile_on_nonliteral():
     """Non-literal re.compile must go through app.safe_regex.compile_untrusted."""
-    offenders: list[str] = []
-    for path, tree in app_trees():
-        for node in nodes_of_type(tree, ast.Call):
-            if (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr == "compile"
-                and isinstance(node.func.value, ast.Name)
-                and (node.func.value.id == "re")
-                and node.args
-                and (not isinstance(node.args[0], ast.Constant))
-            ):
-                offenders.append(offender(path, node.lineno))
-    assert not offenders, "Use app.safe_regex.compile_untrusted for non-literal patterns: " + ", ".join(
-        offenders
+    assert_trees_clean(
+        _re_dynamic_pattern_offenders(frozenset({"compile"})),
+        "Use app.safe_regex.compile_untrusted for non-literal patterns",
+        trees=app_trees(),
     )
 
 
@@ -1169,22 +1194,29 @@ def test_no_bare_body_reads():
 # purpose, and this gate keeps the second copy from reappearing.
 
 
-def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """Flag a module that declares its own HTML input byte cap.
+def _html_input_cap_name(target: ast.expr, value: ast.expr | None) -> str | None:
+    """The name of a locally-declared HTML input byte cap, or ``None``.
 
     Keyed on the *intent* (an HTML byte budget) rather than the two names it used
-    to have, so a third spelling is caught too. Reads a numeric expression only:
-    a cap that delegates elsewhere is not a second declaration.
+    to have, so a third spelling is caught too. A cap that delegates elsewhere --
+    anything that is not a numeric expression -- is not a second declaration, and
+    that is one predicate rather than the two guards each copy of this rule used
+    to carry.
     """
-    offenders: list[str] = []
-    for node, target, value in assignments(nodes_of(tree)):
-        if value is None or not _is_numeric_expr(value):
-            continue
-        name = target.id if isinstance(target, ast.Name) else ""
-        head = name.upper()
-        if "HTML" in head and head.endswith("BYTES"):
-            offenders.append(offender(path, node.lineno, name))
-    return offenders
+    if value is None or not _is_numeric_expr(value):
+        return None
+    name = target.id if isinstance(target, ast.Name) else ""
+    head = name.upper()
+    return name if "HTML" in head and head.endswith("BYTES") else None
+
+
+def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a module that declares its own HTML input byte cap."""
+    return [
+        offender(path, node.lineno, name)
+        for node, target, value in assignments(nodes_of(tree))
+        if (name := _html_input_cap_name(target, value)) is not None
+    ]
 
 
 def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -2141,22 +2173,26 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     form); and any dict carrying all three envelope keys anywhere (catches
     JSONResponse/return-value variants).
     """
-    offenders: list[str] = []
-    for node in nodes_of(tree):
-        if isinstance(node, ast.Call):
-            func_name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if func_name == "HTTPException":
-                if node.keywords and any(
-                    kw.arg == "detail"
-                    and isinstance(kw.value, ast.Dict)
-                    and {"code", "message"} <= _dict_keys(kw.value)
-                    for kw in node.keywords
-                ):
-                    offenders.append(offender(path, node.lineno, "HTTPException detail= envelope literal"))
-                else:
-                    offenders.append(offender(path, node.lineno, "bare HTTPException construction"))
-        elif isinstance(node, ast.Dict) and {"code", "message", "details"} <= _dict_keys(node):
-            offenders.append(offender(path, node.lineno, "error envelope dict literal"))
+    offenders = [
+        offender(
+            path,
+            call.lineno,
+            "HTTPException detail= envelope literal"
+            if any(
+                kw.arg == "detail"
+                and isinstance(kw.value, ast.Dict)
+                and {"code", "message"} <= _dict_keys(kw.value)
+                for kw in call.keywords
+            )
+            else "bare HTTPException construction",
+        )
+        for call in calls_named_leaf(tree, {"HTTPException"})
+    ]
+    offenders.extend(
+        offender(path, node.lineno, "error envelope dict literal")
+        for node in nodes_of_type(tree, ast.Dict)
+        if {"code", "message", "details"} <= _dict_keys(node)
+    )
     return offenders
 
 
@@ -2711,43 +2747,34 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     removed — the ``_decompress_cap`` sweep only guards the chokepoint's own
     callers, so this closes the bypass around it.
     """
-    offenders: list[str] = []
-    for node in nodes_of(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.split(".")[0] in _DECOMPRESS_CODECS:
-                    offenders.append(
-                        offender(
-                            path,
-                            node.lineno,
-                            f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
-                        )
-                    )
-        elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS:
-                offenders.append(
-                    offender(
-                        path,
-                        node.lineno,
-                        f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
-                    )
-                )
-        elif isinstance(node, ast.Call):
-            func = node.func
-            if (
-                isinstance(func, ast.Attribute)
-                and isinstance(func.value, ast.Name)
-                and func.value.id in _DECOMPRESS_CODECS
-                and func.attr in _DECOMPRESS_CODEC_METHODS
-            ):
-                offenders.append(
-                    offender(
-                        path,
-                        node.lineno,
-                        f"calls {func.value.id}.{func.attr}() directly (bypasses decompress_body)",
-                    )
-                )
-    return offenders
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
+        )
+        for node in nodes_of_type(tree, ast.Import)
+        for alias in node.names
+        if alias.name.split(".")[0] in _DECOMPRESS_CODECS
+    ] + [
+        offender(
+            path,
+            node.lineno,
+            f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
+        )
+        for node in nodes_of_type(tree, ast.ImportFrom)
+        if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS
+    ] + [
+        offender(
+            path,
+            call.lineno,
+            f"calls {call.func.value.id}.{call.func.attr}() directly (bypasses decompress_body)",
+        )
+        for call, func in attribute_calls(tree)
+        if isinstance(func.value, ast.Name)
+        and func.value.id in _DECOMPRESS_CODECS
+        and func.attr in _DECOMPRESS_CODEC_METHODS
+    ]
 
 
 def test_decompression_reaches_only_through_the_chokepoint():
@@ -2778,6 +2805,105 @@ def test_decompress_bypass_detector_bites():
 
 
 # ---------------------------------------------------------------------------
+# A discovery response is read through _Discovery, never off the tuple (jscpd)
+#
+# The jscpd pair at fetch_helpers.py was the two discovery-fetch signatures, but
+# the rule underneath them was never owned: what a discovery response *means*.
+# The load-bearing part of that is ``headers: dict | None``, where None is the
+# transport-failure marker. ``_Discovery``'s accessors are total over it, so a
+# consumer cannot reach a ``.get`` on a missing map. Take the header map back and
+# the guard has to be re-derived by hand -- which is the shape that was actually
+# duplicated, three hand-written projections of one positional 3-tuple each
+# repeating the ``is None`` + status test. Nothing but this guard stops the
+# fourth projection from landing.
+# ---------------------------------------------------------------------------
+
+# The fetch that returns a _Discovery. The other two discovery helpers project
+# that response to caller shapes, so naming this one is what makes the rule
+# about the RESULT rather than about a call site.
+_DISCOVERY_FETCH = "_fetch_decode_discovery"
+
+# The chokepoint module that legitimately owns what it bans.
+_DISCOVERY_CHOKEPOINT = "app/crawl/fetch_helpers.py"
+
+
+def _is_discovery_fetch(value: ast.AST | None) -> bool:
+    # The result is normally reached through ``await``, so the assignment's value
+    # is the Await node and the call is inside it. Unwrapping one layer is what
+    # keeps the detector from being clean on a tree that does the banned thing.
+    if isinstance(value, ast.Await):
+        value = value.value
+    if not isinstance(value, ast.Call):
+        return False
+    func = value.func
+    leaf = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+    return leaf == _DISCOVERY_FETCH
+
+
+def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag reading a discovery response off the tuple instead of through _Discovery.
+
+    Both spellings are offenders, because both restore the reach the accessors
+    close. Destructuring is the one this replaced:
+    ``text, status, resp_headers = await _fetch_decode_discovery(...)`` followed
+    by ``resp_headers.get("etag")`` puts the ``dict | None`` back in the caller's
+    hands with the ``is None`` test re-derived by hand. A detector that only
+    understood the attribute form would call that tree clean, so the two walks
+    are reported separately and both are required.
+    """
+    nodes = nodes_of_type(tree, ast.Assign, ast.AnnAssign)
+    bound: set[str] = set()
+    destructured: list[ast.AST] = []
+    for node, target, value in assignments(nodes):
+        if not _is_discovery_fetch(value):
+            continue
+        if isinstance(target, ast.Name):
+            bound.add(target.id)
+        else:
+            destructured.append(node)
+    return [
+        offender(path, node.lineno, "destructures a discovery response off the tuple")
+        for node in destructured
+    ] + [
+        offender(path, node.lineno, "reads a discovery response's header map directly")
+        for node in nodes_of_type(tree, ast.Attribute)
+        if node.attr == "headers" and isinstance(node.value, ast.Name) and node.value.id in bound
+    ]
+
+
+def test_discovery_response_is_read_through_one_owner():
+    """Only _Discovery's accessors touch a discovery response's header map."""
+    offenders = app_offenders(_discovery_response_offenders, skip=(_DISCOVERY_CHOKEPOINT,))
+    assert not offenders, "Read a discovery response via _Discovery accessors: " + ", ".join(offenders)
+
+
+def test_discovery_response_detector_bites():
+    """Both restoration shapes fire; going through the accessors stays clean."""
+    bad = ast.parse(
+        "async def f(fetcher):\n"
+        "    text, status, resp_headers = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+        "    return text, status, resp_headers.get('etag')\n"
+    )
+    offenders = _discovery_response_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    assert "destructures a discovery response" in offenders[0], offenders
+    attr_bad = ast.parse(
+        "async def f(fetcher):\n"
+        "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+        "    return resp.headers\n"
+    )
+    offenders = _discovery_response_offenders(attr_bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1, offenders
+    assert "header map directly" in offenders[0], offenders
+    good = ast.parse(
+        "async def f(fetcher):\n"
+        "    resp = await _fetch_decode_discovery(fetcher, 'u', {}, 5)\n"
+        "    return resp.validators(), resp.not_modified(), resp.text, resp.status\n"
+    )
+    assert not _discovery_response_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+
+
+# ---------------------------------------------------------------------------
 # Handle minting is single-sourced (H4 residue / HIGH #9 entropy policy)
 # ---------------------------------------------------------------------------
 
@@ -2789,17 +2915,20 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
     Handles double as the lookup credential for status/result routes, so the
     full-entropy policy must live in exactly one primitive; a re-inlined mint
-    is where a shorter slice silently regresses to 48 bits.
+    is where a shorter slice silently regresses to 48 bits. The two shapes are
+    separate walks because a call and a subscript are different nodes; the
+    callee's leaf name is :func:`chokepoint_walks.calls_named_leaf`, shared with
+    the error-envelope sweep, so "a banned chokepoint reached as ``mod.name()``
+    or as a bare import" is decided once.
     """
-    offenders: list[str] = []
-    for node in nodes_of(tree):
-        if isinstance(node, ast.Call):
-            fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if fname == "uuid4":
-                offenders.append(offender(path, node.lineno, "uuid4() minted outside app/crawl/ids.py"))
-        elif isinstance(node, ast.Subscript) and getattr(node.value, "attr", None) == "hex":
-            offenders.append(offender(path, node.lineno, "uuid hex sliced outside app/crawl/ids.py"))
-    return offenders
+    return [
+        offender(path, call.lineno, "uuid4() minted outside app/crawl/ids.py")
+        for call in calls_named_leaf(tree, {"uuid4"})
+    ] + [
+        offender(path, node.lineno, "uuid hex sliced outside app/crawl/ids.py")
+        for node in nodes_of_type(tree, ast.Subscript)
+        if getattr(node.value, "attr", None) == "hex"
+    ]
 
 
 def test_handles_are_minted_in_one_place():
@@ -3687,6 +3816,35 @@ _TRANSIENCE_COLLECTIONS = (
 )
 
 
+# A named alias to the taxonomy's own set is a re-export, not a second opinion:
+# that is the one legitimate spelling here.
+_TRANSIENCE_REEXPORTS = frozenset(
+    {
+        "TRANSIENT_CLASSIFICATIONS",
+        "NON_TRANSIENT_CLASSIFICATIONS",
+        "is_transient_classification",
+    }
+)
+
+
+def _transience_verdict_name(target: ast.expr, value: ast.expr | None) -> str | None:
+    """The name of a module-level transience/retry verdict, or ``None``.
+
+    All three of the shape's requirements are one predicate -- a verdict-shaped
+    name, a collection-shaped value, and not a re-export of the taxonomy's own
+    set -- so the filter is stated once here instead of as three ``continue``
+    guards in each detector that wanted the same answer.
+    """
+    name = getattr(target, "id", None)
+    if not isinstance(name, str) or not _TRANSIENCE_SET_NAME.match(name):
+        return None
+    if value is None or not isinstance(value, _TRANSIENCE_COLLECTIONS):
+        return None
+    if isinstance(value, ast.Name) and value.id in _TRANSIENCE_REEXPORTS:
+        return None
+    return name
+
+
 def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a module-level transience/retry verdict defined outside app.constants.
 
@@ -3696,29 +3854,15 @@ def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     while ``connection_error`` -- the label every transport failure actually
     gets -- did not.
     """
-    offenders: list[str] = []
-    for node, target, value in assignments(nodes_of(tree)):
-        name = getattr(target, "id", None)
-        if not isinstance(name, str) or not _TRANSIENCE_SET_NAME.match(name):
-            continue
-        if value is None or not isinstance(value, _TRANSIENCE_COLLECTIONS):
-            continue
-        # A named alias to the taxonomy's own set is a re-export, not a
-        # second opinion: that is the one legitimate spelling here.
-        if isinstance(value, ast.Name) and value.id in {
-            "TRANSIENT_CLASSIFICATIONS",
-            "NON_TRANSIENT_CLASSIFICATIONS",
-            "is_transient_classification",
-        }:
-            continue
-        offenders.append(
-            offender(
-                path,
-                node.lineno,
-                f"local {name} re-answers the taxonomy's transience verdict",
-            )
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"local {name} re-answers the taxonomy's transience verdict",
         )
-    return offenders
+        for node, target, value in assignments(nodes_of(tree))
+        if (name := _transience_verdict_name(target, value)) is not None
+    ]
 
 
 def test_transience_verdict_has_one_home():
@@ -3973,30 +4117,35 @@ def _non_member_classification_offenders(tree, path, *, members):
     in lockstep with the enum, and it never is. A non-literal (variable or
     attribute access, e.g. CrawlClassification.x) is what callers should
     write, and passes without comment.
+
+    Which values count as spelled non-members is
+    :func:`chokepoint_walks.non_member_literals`, the same funnel the status,
+    strategy, Literal-field and error sweeps go through, so the guard that
+    admits a variable cannot be dropped from one axis and kept on another.
     """
-    for node, value in call_keyword_values(
-        tree,
-        function_names=_result_primitive_names(),
-        keyword_names=_CLASSIFICATION_VALUE_SOURCES,
-    ):
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value not in members:
-            yield offender(
-                path,
-                node.lineno,
-                f"classification={value.value!r} is not a CrawlClassification member; "
-                f"add it to the enum (app/constants.py) or route through the classifier",
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"classification={value!r} is not a CrawlClassification member; "
+            f"add it to the enum (app/constants.py) or route through the classifier",
+        )
+        for node, _field, value in non_member_literals(
+            (node, "classification", value, members)
+            for node, value in call_keyword_values(
+                tree,
+                function_names=_result_primitive_names(),
+                keyword_names=_CLASSIFICATION_VALUE_SOURCES,
             )
+        )
+    ]
 
 
 def test_engine_emitted_classifications_are_enum_members():
     from app.constants import CrawlClassification
 
     members = {m.value for m in CrawlClassification}
-    offenders = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_non_member_classification_offenders(tree, path, members=members))
+    offenders = app_offenders(_non_member_classification_offenders, members=members)
     assert not offenders, (
         "a literal classification passed to a result primitive must be a "
         "CrawlClassification member, or the strict enum at response shaping "
@@ -5032,29 +5181,22 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
     loop-bound violation (a Semaphore awaited off the loop it was created on).
     The module-level declaration has no enclosing function and is exempt.
     """
-    offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Name) and node.id in _SEMAPHORE_GLOBALS):
-            continue
-        scopes = _enclosing_defs(node, tree)
-        if not scopes or _SEMAPHORE_ACCESSOR in scopes:
-            continue
-        offenders.append(
-            offender(
-                path,
-                node.lineno,
-                f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the"
-                " instance stays bound to the running loop",
-            )
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the"
+            " instance stays bound to the running loop",
         )
-    return offenders
+        for node in nodes_of_type(tree, ast.Name)
+        if node.id in _SEMAPHORE_GLOBALS
+        and (scopes := _enclosing_defs(node, tree))
+        and _SEMAPHORE_ACCESSOR not in scopes
+    ]
 
 
 def test_async_crawl_semaphore_globals_are_loop_bound():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_semaphore_global_touch_offenders(tree, path))
-    assert not offenders, ", ".join(offenders)
+    assert not (offenders := app_offenders(_semaphore_global_touch_offenders)), ", ".join(offenders)
 
 
 def test_async_crawl_semaphore_loop_binding_detector_bites():
@@ -5109,6 +5251,16 @@ def _reaps_retired(value: ast.AST) -> bool:
     return False
 
 
+def _rebuilds_pool_without_retired(node: ast.AST) -> bool:
+    """Does ``node`` assign ``_DOC_POOL`` from a list comp filtering ``retired``?"""
+    return any(
+        isinstance(child, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == _DOC_POOL_NAME for target in child.targets)
+        and _reaps_retired(child.value)
+        for child in nodes_of(node)
+    )
+
+
 def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """``_acquire_doc_worker`` must rebuild the pool without retired slots.
 
@@ -5119,32 +5271,20 @@ def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     drifted permanently above the usable count. Removing the reap filter is the
     regression; this detector fails the suite when it goes.
     """
-    offenders: list[str] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.FunctionDef) and node.name == _DOC_POOL_ACQUIRER):
-            continue
-        if not any(
-            isinstance(child, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == _DOC_POOL_NAME for target in child.targets)
-            and _reaps_retired(child.value)
-            for child in nodes_of(node)
-        ):
-            offenders.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive"
-                    " slot would strand in the pool and inflate the size budget",
-                )
-            )
-    return offenders
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive"
+            " slot would strand in the pool and inflate the size budget",
+        )
+        for node in functions(tree)
+        if node.name == _DOC_POOL_ACQUIRER and not _rebuilds_pool_without_retired(node)
+    ]
 
 
 def test_doc_pool_acquirer_reaps_retired_slots():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(_doc_pool_reap_offenders(tree, path))
-    assert not offenders, ", ".join(offenders)
+    assert not (offenders := app_offenders(_doc_pool_reap_offenders)), ", ".join(offenders)
 
 
 def test_doc_pool_reap_detector_bites():
@@ -5459,26 +5599,45 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     regardless of who calls it. This is the falsifiable version of that claim --
     a bad value at a direct construction site must raise, and a member must not.
     """
+    from dataclasses import asdict
+
+    from _result_builders import engine_result
+
     from app.models import (
         CrawlResult,
         CrawlStrategyAttempt,
         EngineCrawlResult,
     )
 
-    good_domain = "example.com"
+    # The all-member baseline, named once and DERIVED rather than restated. Every
+    # axis this test exercises is Literal-typed, so a construction that is spelled
+    # twice with one field overridden is the *only* honest way to show that the
+    # gate is about the overridden field and nothing else -- the previous version
+    # restated the whole block per axis and then read the override back out of the
+    # kwargs with ``kwargs.get(field, "success")``, which reads as though the
+    # defaults were chosen per test rather than being the shared baseline.
+    #
+    # ``engine_result(url, "rendered")`` is that baseline exactly: every optional
+    # field absent, and status taken from the production classification mapping,
+    # which answers "success" for a rendered page. Spelling the same 14 fields
+    # here instead was a second statement of which values are members, in the one
+    # file whose job is to prove membership -- the worst place for a copy to live.
+    member_engine_result = asdict(engine_result("http://a/", "rendered"))
+    member_crawl_result = {
+        "url": "http://a/",
+        "status": "success",
+        "classification": "rendered",
+        "final_url": None,
+        "html": None,
+        "text": None,
+        "attempts": 1,
+        "elapsed_ms": 0,
+        "domain": "example.com",
+    }
+
     # A direct construction with all-member values is accepted: the gate must
     # not reject legitimate direct builds (tests and the primitives both do it).
-    CrawlResult(
-        url="http://a/",
-        status="success",
-        classification="rendered",
-        final_url=None,
-        html=None,
-        text=None,
-        attempts=1,
-        elapsed_ms=0,
-        domain=good_domain,
-    )
+    CrawlResult(**member_crawl_result)
     CrawlStrategyAttempt(
         strategy="BROWSER_HEADLESS",
         status="success",
@@ -5487,42 +5646,24 @@ def test_result_construction_enforces_membership_at_the_dataclass():
         content_type=None,
         elapsed_ms=0,
     )
+    EngineCrawlResult(**member_engine_result)
     # A non-member on each Literal axis raises at construction.
-    for kwargs, field in (
-        ({"status": "Bogus"}, "status"),
-        ({"classification": "Bogus"}, "classification"),
-        ({"selected_strategy": "BROWSER_INVENTED"}, "selected_strategy"),
+    for field, invented in (
+        ("status", "Bogus"),
+        ("classification", "Bogus"),
+        ("selected_strategy", "BROWSER_INVENTED"),
     ):
         with pytest.raises(ValueError, match=f".{field}="):
-            EngineCrawlResult(
-                original_url="http://a/",
-                normalized_url="http://a/",
-                final_url=None,
-                status=kwargs.get("status", "success"),
-                classification=kwargs.get("classification", "rendered"),
-                selected_strategy=kwargs.get("selected_strategy"),
-                attempted_strategies=[],
-                http_status=None,
-                headers={},
-                content_type=None,
-                html=None,
-                text=None,
-                extraction_method=None,
-                quality_score=0.0,
-            )
+            EngineCrawlResult(**{**member_engine_result, field: invented})
     # CrawlError axis: a stable code outside the declared taxonomy is rejected.
     with pytest.raises(ValueError, match=r"\.error="):
         CrawlResult(
-            url="http://a/",
-            status="failed",
-            classification="network_error",
-            final_url=None,
-            html=None,
-            text=None,
-            attempts=1,
-            elapsed_ms=0,
-            domain=good_domain,
-            error="worker_failed",
+            **{
+                **member_crawl_result,
+                "status": "failed",
+                "classification": "network_error",
+                "error": "worker_failed",
+            }
         )
 
 

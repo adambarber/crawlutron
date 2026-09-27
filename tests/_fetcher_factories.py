@@ -440,6 +440,30 @@ async def crawled_urls(pages: dict[str, Any], **kwargs: Any) -> list[str]:
     return [r["normalized_url"] for r in out["results"]]
 
 
+def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[str, Any]:
+    """A fake site: an index linking to each of ``paths``, plus a page per path.
+
+    The page map :func:`crawled_results` and :func:`crawled_urls` are driven
+    over. A test names the children it wants and gets the map; ``bodies`` is
+    there for the tests whose point is a child's *content* (the memory-strip
+    cases need a page with real text in it, not the one-word default). Nothing
+    here decides anything a crawl decides: depth, page cap, scope and policy
+    stay with the caller, because those are what those tests are about.
+
+    The default child body is the path's own name (``/a`` -> ``<html>a</html>``),
+    which keeps the map readable in an assertion diff.
+    """
+    bodies = bodies or {}
+    links = "".join(f'<a href="{path}">{path.strip("/") or path}</a>' for path in paths)
+    return {
+        "/": (200, f"<html><body>{links}</body></html>", "text/html"),
+        **{
+            path: (200, bodies.get(path, f"<html>{path.strip('/')}</html>"), "text/html")
+            for path in paths
+        },
+    }
+
+
 def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
     """An HTTP cache that already holds a validator for ``url``.
 
@@ -738,6 +762,7 @@ __all__ = [
     "hanging_fetcher",
     "ok_fetcher",
     "raise_fetcher",
+    "site_linking_to",
     "Route",
     "request_fetcher",
     "routed_fetcher",

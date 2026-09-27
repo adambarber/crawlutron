@@ -79,28 +79,33 @@ def _running_server():
         thread.join(timeout=1.0)
 
 
+async def _fetch_with_cap(port: int, path: str, cap: int):
+    """The real default fetcher against this fixture, with `cap` bytes allowed.
+
+    The caps are the subject of every test in this file, so they are a parameter
+    rather than part of a call site; ``policy`` is spelled here because a
+    fixture this local has no SSRF stand-down and the loopback target is what
+    the fetcher is being pointed at.
+    """
+    return await _default_http_fetcher(
+        f"http://127.0.0.1:{port}{path}",
+        {},
+        10,
+        cap,
+        policy=HostPolicy.unrestricted(),
+    )
+
+
 async def test_gzip_bomb_rejected_with_413():
     with _running_server() as port:
         # Cap well below the bomb's expanded size.
-        res = await _default_http_fetcher(
-            f"http://127.0.0.1:{port}/bomb",
-            {},
-            10,
-            100_000,
-            policy=HostPolicy.unrestricted(),
-        )
+        res = await _fetch_with_cap(port, "/bomb", 100_000)
         assert res.status_code == 413, res.status_code
         assert res.body == b""
 
         # A normal (small) gzipped response is decompressed correctly and the
         # content-encoding header is stripped so it isn't decoded twice.
-        res2 = await _default_http_fetcher(
-            f"http://127.0.0.1:{port}/ok",
-            {},
-            10,
-            1_000_000,
-            policy=HostPolicy.unrestricted(),
-        )
+        res2 = await _fetch_with_cap(port, "/ok", 1_000_000)
         assert res2.status_code == 200
         assert res2.body == b"hello world"
         assert "content-encoding" not in res2.headers
@@ -109,13 +114,7 @@ async def test_gzip_bomb_rejected_with_413():
 async def test_chunked_response_without_content_length_is_capped():
     with _running_server() as port:
         # ~2 MB streamed with no Content-Length; cap at 100 KB -> rejected.
-        res = await _default_http_fetcher(
-            f"http://127.0.0.1:{port}/chunked_huge",
-            {},
-            10,
-            100_000,
-            policy=HostPolicy.unrestricted(),
-        )
+        res = await _fetch_with_cap(port, "/chunked_huge", 100_000)
         assert res.status_code == 413, res.status_code
         assert res.body == b""
 

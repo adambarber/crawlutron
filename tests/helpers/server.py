@@ -245,29 +245,35 @@ WEBHOOK_RECEIVED: list[bytes] = []
 class _Handler(BaseHTTPRequestHandler):
     routes = _build_routes()
 
+    def _respond(self, status: int, headers: dict[str, str], body: bytes) -> None:
+        """Send one complete response, skipping the body for a HEAD.
+
+        Every branch below is the same four calls, and each copy is a place the
+        HEAD guard or the content-length goes missing: a branch without the HEAD
+        guard answers a HEAD with a body the client never asked for, and one
+        without content-length makes a keep-alive connection hang. The 304
+        branch is deliberately NOT this -- it carries no body and no length.
+        """
+        self.send_response(status)
+        for key, value in headers.items():
+            self.send_header(key, value)
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
     def _handle(self) -> None:
         path = self.path.split("?", 1)[0]
 
         # Dynamic route: /check-cookie echoes the received Cookie header
         if path == "/check-cookie":
             cookie_header = self.headers.get("Cookie", "")
-            body = cookie_header.encode("utf-8")
-            self.send_response(200)
-            self.send_header("content-type", "text/plain; charset=utf-8")
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+            self._respond(200, {"content-type": "text/plain; charset=utf-8"}, cookie_header.encode("utf-8"))
             return
 
         route = self.routes.get(path)
         if route is None:
-            self.send_response(404)
-            self.send_header("content-type", "text/plain")
-            self.send_header("content-length", "9")
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(b"not found")
+            self._respond(404, {"content-type": "text/plain"}, b"not found")
             return
 
         # Conditional GET: honor If-None-Match with a 304.
@@ -278,14 +284,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        body = route["body"]
-        self.send_response(route["status"])
-        for key, value in route["headers"].items():
-            self.send_header(key, value)
-        self.send_header("content-length", str(len(body)))
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+        self._respond(route["status"], route["headers"], route["body"])
 
     def do_GET(self) -> None:
         self._handle()
@@ -297,11 +296,7 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0") or "0")
         body = self.rfile.read(length) if length else b""
         WEBHOOK_RECEIVED.append(body)
-        self.send_response(200)
-        self.send_header("content-type", "application/json")
-        self.send_header("content-length", "2")
-        self.end_headers()
-        self.wfile.write(b"{}")
+        self._respond(200, {"content-type": "application/json"}, b"{}")
 
     def log_message(self, *args: Any) -> None:  # silence test noise
         return

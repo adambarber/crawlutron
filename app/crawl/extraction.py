@@ -524,9 +524,17 @@ def extract_content(
     narrowing. The same request against an HTML page does narrow, so the
     difference between the two is invisible on the wire otherwise.
     """
-    if css_selector is None and xpath is None:
-        pass
-    elif not _is_html(content_type, content):
+    # ONE decision, read twice -- by the drop report below and by the dispatch
+    # after it. The predicate is not free: it decodes the whole body, strips and
+    # lowercases it, and on a binary/document response the two halves below
+    # disagree about nothing, so evaluating it twice was a second full decode per
+    # non-HTML request (a capped multi-megabyte PDF pays it twice) to learn the
+    # same thing. It was also unreadable as written: `elif not _is_html(...)` and
+    # `if _is_html(...)` below are the same question asked in opposite polarity,
+    # and nothing in the text said they had to agree. Now there is one answer and
+    # two consumers, so a report and a dispatch cannot describe different bodies.
+    is_html = _is_html(content_type, content)
+    if (css_selector is not None or xpath is not None) and not is_html:
         logger.warning(
             "extraction_selector_ignored_non_html",
             extra={
@@ -536,7 +544,7 @@ def extract_content(
                 "url": url,
             },
         )
-    if _is_html(content_type, content):
+    if is_html:
         return _extract_html(_decode(content), url, css_selector=css_selector, xpath=xpath)
     if _looks_like_document(content_type, content, url):
         body = (
@@ -563,17 +571,34 @@ def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
 
 # The selector pair is ONE contract with three entry points: ``extract_content``
 # (every strategy's funnel), ``_extract_html`` (the trafilatura-only path) and
-# ``_extract_selected`` (the DOM-targeting engine). All three take the pair by
-# name because their callers hand it over as keywords --
-# ``app/crawl/strategies/content_pipeline.py`` builds one ``**selectors`` mapping
-# and passes it to two of them -- so the tail of the three signatures is
-# necessarily the same four lines, and Python cannot state one signature across
-# three entry points. That is the irreducibility argument, and the reason the
-# contract is not left as prose: ``test_the_selector_pair_is_one_contract``
-# sweeps the tree so a function accepting one selector must accept both, by name,
-# defaulting to None, returning ``ExtractedContent``. A fourth extractor taking
-# only ``css_selector`` would silently ignore half of the caller's narrowing
-# request, which is the failure a shared signature is supposed to make impossible.
+# ``_extract_selected`` (the DOM-targeting engine), and the pair is not left as
+# prose: ``test_the_selector_pair_is_one_contract`` sweeps the tree so a function
+# accepting one selector must accept both, by name, defaulting to None, returning
+# ``ExtractedContent``. A fourth extractor taking only ``css_selector`` would
+# silently ignore half of the caller's narrowing request, which is the failure a
+# shared signature is supposed to make impossible.
+#
+# Those three declarations cannot be collapsed, and the reason is concrete rather
+# than a shrug at the language. ``app/crawl/strategies/content_pipeline.py``
+# builds ONE ``**selectors`` mapping and spreads it into two of them, so
+# ``extract_content`` and ``_extract_html`` must each accept exactly the two
+# keyword names that mapping carries. The tree-wide guard above then requires
+# both names on any function that declares either, in that order, defaulting to
+# ``None`` -- and, because both return ``ExtractedContent``, requires that return
+# annotation, which pins the closing ``) -> ExtractedContent:`` line too. Three
+# consecutive lines are then identical in both, and ``jscpd`` at ``--min-lines 4``
+# reports a three-line match: measured on an isolated reproduction, a three-line
+# common run spanning a five-line window is reported as a 5-line / 27-token clone,
+# while a two-line run is not. (Making one pair keyword-only does not help -- the
+# ``*,`` only shifts the window, and the three selector lines still align. It
+# moves the clone onto ``_extract_selected`` instead.)
+#
+# The owner that deletes the repetition instead of dodging it is upstream: a
+# ``Selectors`` value that ``content_pipeline`` builds from the policy and hands
+# whole. Then the pair is stated once, in one type, and neither these signatures
+# nor the mapping that feeds them spells it. That is a change to the module that
+# builds the mapping, not to the extractors that receive it -- which is why it is
+# named here rather than done here.
 
 
 def _extract_selected(

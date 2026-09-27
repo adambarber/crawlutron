@@ -9,7 +9,7 @@ pathological patterns) and uses the compiled pattern's .search() in the loop.
 
 import re
 
-from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl
+from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl, site_linking_to
 
 CATASTROPHIC = "(a+)+$"
 
@@ -25,15 +25,7 @@ async def test_recursive_scope_regex_uses_safe_compilation(monkeypatch):
 
     monkeypatch.setattr(re, "search", _guarded)
 
-    pages = {
-        "/": (
-            200,
-            '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>',
-            "text/html",
-        ),
-        "/a": (200, "<html>a</html>", "text/html"),
-        "/b": (200, "<html>b</html>", "text/html"),
-    }
+    pages = site_linking_to("/a", "/b")
     # Catastrophic-but-valid pattern: bounded matching (N-1) runs it with
     # a wall-clock budget instead of rejecting it at compile. It genuinely
     # matches /a (ends in "a") and not /b, so scope filtering now WORKS
@@ -63,11 +55,7 @@ async def test_recursive_scope_regex_timeout_fails_closed(monkeypatch):
     # match_bounded is invoked there; patching that one seam now guards both
     # the recursive loop and the sitemap-seed filter.
     monkeypatch.setattr("app.crawl.scope_match.match_bounded", _always_timeout)
-    pages = {
-        "/": (200, '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>', "text/html"),
-        "/a": (200, "<html>a</html>", "text/html"),
-        "/b": (200, "<html>b</html>", "text/html"),
-    }
+    pages = site_linking_to("/a", "/b")
     out = await crawled_results(
         pages, limits={"max_depth": 1, "max_pages": 10}, policy={"scope_regex": r"^/keep/"}
     )

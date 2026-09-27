@@ -44,7 +44,13 @@ import pathlib
 import typing
 from collections.abc import Collection
 
-from chokepoint_walks import attribute_calls, nodes_of, offender
+from chokepoint_walks import (
+    attribute_calls,
+    call_keyword_arguments,
+    nodes_of,
+    non_member_literals,
+    offender,
+)
 
 # The result dataclasses whose Literal-typed fields are the membership
 # contract. Direct construction of one anywhere in app/ is checked by the
@@ -151,20 +157,15 @@ def primitive_keyword_calls(
     namespace, error-code provenance). This is the one walk; if the set of
     calls that count as primitive calls drifts, it drifts for every
     detector at once instead of only the one someone edited.
+
+    The walk itself is :func:`call_keyword_arguments` -- the same one the
+    non-primitive keyword detectors use -- with this module's registry as the
+    name set. Only the "which calls" question is local; "which keywords of
+    them" was a second implementation of a rule that already had an owner, and
+    two implementations of a walk is how the two halves of a keyword detector
+    end up disagreeing about ``**kwargs``.
     """
-    hits: list[tuple[ast.Call, ast.keyword]] = []
-    for node in nodes_of(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-            continue
-        if node.func.id not in RESULT_PRIMITIVES:
-            continue
-        for kw in node.keywords:
-            if kw.arg is None:
-                continue
-            if arg_names is not None and kw.arg not in arg_names:
-                continue
-            hits.append((node, kw))
-    return hits
+    return list(call_keyword_arguments(tree, function_names=RESULT_PRIMITIVES, keyword_names=arg_names))
 
 
 def generic_literal_field_offenders(
@@ -176,23 +177,23 @@ def generic_literal_field_offenders(
     :func:`literal_typed_field_members`, so the sweep covers ``status`` and
     ``classification`` (and any future Literal field) without naming either.
     A non-Literal field (``error``, ``extraction_method``) is not in the map and
-    is not checked here -- ``error`` has its own provenance story below.
+    is not checked here -- ``error`` has its own provenance story below. Which
+    values count as spelled non-members is
+    :func:`chokepoint_walks.non_member_literals`, shared with the ``error``
+    sweep and with the detectors in ``test_safety_invariants.py``.
     """
-    out: list[str] = []
-    for node, kw in primitive_keyword_calls(tree, arg_names=field_members):
-        value = kw.value
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value not in field_members[kw.arg]:
-            out.append(
-                offender(
-                    path,
-                    node.lineno,
-                    f"{node.func.id}({kw.arg}={value.value!r}) is not a member of the"
-                    f" {kw.arg} Literal; add it to the taxonomy or pass a member",
-                )
-            )
-    return out
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"{node.func.id}({field}={value!r}) is not a member of the"
+            f" {field} Literal; add it to the taxonomy or pass a member",
+        )
+        for node, field, value in non_member_literals(
+            (node, kw.arg, kw.value, field_members[kw.arg])
+            for node, kw in primitive_keyword_calls(tree, arg_names=field_members)
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -671,23 +672,21 @@ def error_field_taxonomy_offenders(
 
     ``members`` is the Classification value set (derived, not transcribed). A
     non-literal value is what a correct caller writes and passes without
-    comment; ``None`` is the honest "no error" label and is admitted.
+    comment; ``None`` is the honest "no error" label and is admitted -- that
+    admission is :func:`chokepoint_walks.spelled_non_member`, not a branch
+    here.
     """
-    out: list[str] = []
-    for node, kw in primitive_keyword_calls(tree, arg_names={"error"}):
-        value = kw.value
-        if not isinstance(value, ast.Constant) or not isinstance(value.value, str):
-            continue
-        if value.value in members:
-            continue
-        out.append(
-            offender(
-                path,
-                node.lineno,
-                f"error={value.value!r} is not a Classification member, but the"
-                " field is documented as carrying a stable classification code"
-                " (render.py) and _classify_error_code only returns members --"
-                " declare it in the taxonomy or route it through the classifier",
-            )
+    return [
+        offender(
+            path,
+            node.lineno,
+            f"error={value!r} is not a Classification member, but the"
+            " field is documented as carrying a stable classification code"
+            " (render.py) and _classify_error_code only returns members --"
+            " declare it in the taxonomy or route it through the classifier",
         )
-    return out
+        for node, _field, value in non_member_literals(
+            (node, "error", kw.value, members)
+            for node, kw in primitive_keyword_calls(tree, arg_names={"error"})
+        )
+    ]

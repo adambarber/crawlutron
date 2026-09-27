@@ -2,6 +2,7 @@
 
 from functools import partial
 
+from _assertions import assert_result_success
 from _fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher, sequenced_fetcher
 
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
@@ -117,8 +118,7 @@ class TestHttpStrategy:
             policy=http_policy(),
             http_fetcher=_default_http_fetcher_with_policy,
         )
-        assert result.status == "success"
-        assert result.classification == "rendered"
+        assert_result_success(result)
         assert "Example Org" in (result.text or "")
         assert "Example Org" in (result.markdown or "")
         assert result.discovered_link_count == 0
@@ -263,14 +263,7 @@ async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkey
 
     fetcher = scripted_fetcher(status=200, ctype="text/html", body=b"<html><body>x</body></html>")
 
-    kwargs = dict(
-        original_url="http://x.test/",
-        normalized_url="http://x.test/",
-        strategy=HTTP_DECLARED_CRAWLER,
-        http_fetcher=fetcher,
-        cache=HttpCache(),
-        content_cache=None,
-    )
+    kwargs = _run_kwargs(fetcher)
     r_rec = await _run(
         policy=http_policy(
             discovery={"sitemaps": True}, limits={"timeout_seconds": 10, "max_retries": 0, "max_depth": 1}

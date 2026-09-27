@@ -47,6 +47,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import pytest
+from _jscpd_sweep import COMPOUND_NODES
 from chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
 # Every collector in this file reads the same app tree, and `offenders()` is
@@ -92,17 +93,6 @@ _BRANCH_NODES = (
     ast.BoolOp,
 )
 
-_COMPOUND_NODES = (
-    ast.If,
-    ast.For,
-    ast.AsyncFor,
-    ast.While,
-    ast.With,
-    ast.AsyncWith,
-    ast.Try,
-)
-
-
 @dataclass(frozen=True)
 class Offender:
     metric: str
@@ -145,7 +135,7 @@ def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
     """
     candidates: list[tuple[int, int, int, str]] = []
     for node in nodes_of(tree):
-        if not isinstance(node, _COMPOUND_NODES):
+        if not isinstance(node, COMPOUND_NODES):
             continue
         body = list(node.body)
         if not body:

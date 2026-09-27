@@ -6,7 +6,13 @@ import gzip
 import pytest
 from _assertions import assert_result_failed, assert_result_success
 from _extraction_helpers import _extract_discovered_links
-from _fetcher_factories import ok_fetcher, raise_fetcher, routed_fetcher, scripted_fetcher
+from _fetcher_factories import (
+    make_fetch,
+    ok_fetcher,
+    raise_fetcher,
+    routed_fetcher,
+    scripted_fetcher,
+)
 from _http_test_helpers import (
     HTTP_CFFI_IMPERSONATE,
     _decode_body,
@@ -58,16 +64,6 @@ from app.crawl.strategy_chain import execute_crawl_chain
 from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
-
-# Discovery probes fail; the page fetch does not. The point of the tests below
-# is that a failed probe is recorded as diagnostics and does not fail the crawl.
-discovery_fetcher = routed_fetcher(
-    {
-        "/robots.txt": ConnectionError("discovery failed"),
-        "/sitemap.xml": ConnectionError("discovery failed"),
-    },
-    default={},
-)
 
 
 class TestValidationHelpers:
@@ -261,31 +257,96 @@ class TestPureParsing:
         assert len(collector.frames) == 1
 
 
-class TestHttpStrategyResult:
-    async def _run(
-        self,
-        status=200,
-        strategy=HTTP_DECLARED_CRAWLER,
-        fetcher=None,
-        ctype="text/html; charset=utf-8",
-        body=b"<html><body>hello</body></html>",
-        final_url="http://example.com/",
-        policy=None,
-    ):
-        if fetcher is None:
-            fetcher = scripted_fetcher(status=status, ctype=ctype, body=body)
+# The three discovery probes turned on together, as one named policy fragment.
+# Every site that asks for full discovery used to re-spell the same three
+# booleans, and the interesting half of those tests is the diagnostics, not
+# which probes were enabled.
+DISCOVERY_ALL_ON = {"robots": True, "sitemaps": True, "feeds": True}
+# The page every discovery test below is fetched from, advertising one feed.
+# The ``type`` is what makes the alternate link a FEED rather than a generic
+# one, so a test that wants discovery to report a feed names that here once.
+FEED_ADVERTISING_PAGE = (
+    200,
+    b'<html><body><link rel="alternate" type="application/rss+xml"'
+    b' href="http://example.com/feed.xml"></body></html>',
+    "text/html",
+)
 
-        pol = make_base_policy()
-        if policy:
-            pol.update(policy)
-        return await _http_strategy_result(
-            original_url="http://example.com/",
-            normalized_url="http://example.com/",
-            strategy=strategy,
-            policy=pol,
-            http_fetcher=fetcher,
-            host_policy=HostPolicy.unrestricted(),
+# The URL the default single-page drive fetches, and therefore the one a caller
+# has to differ from for ``final_url`` to mean anything.
+_PAGE_URL = "http://example.com/"
+
+
+async def _run_http_result(
+    status=200,
+    strategy=HTTP_DECLARED_CRAWLER,
+    fetcher=None,
+    ctype="text/html; charset=utf-8",
+    body=b"<html><body>hello</body></html>",
+    final_url=_PAGE_URL,
+    policy=None,
+):
+    """Drive the real ``_http_strategy_result`` over a default single-page policy.
+
+    Module-level rather than a method on the class that owns most of the callers,
+    because the discovery-diagnostics tests below need the same drive and were
+    reaching it by instantiating that test class -- a test borrowing another
+    test's harness, which reads as a second owner of the same setup.
+
+    ``final_url`` is honoured: ``scripted_fetcher`` cannot answer with a final URL
+    other than the requested one, and a caller that asks for a different one (the
+    ``.zip`` final URL the binary-body test is named for) gets a prebuilt
+    ``HttpFetchResult``, which ``routed_fetcher`` returns verbatim. It used to be
+    accepted and dropped, so that test asserted over a redirected page it thought
+    it was serving and nobody could tell from reading it.
+    """
+    if fetcher is None:
+        fetcher = (
+            scripted_fetcher(status=status, ctype=ctype, body=body)
+            if final_url == _PAGE_URL
+            else routed_fetcher(
+                default=make_fetch(status=status, body=body, ctype=ctype, final_url=final_url),
+            )
         )
+
+    pol = make_base_policy()
+    if policy:
+        pol.update(policy)
+    return await _http_strategy_result(
+        original_url="http://example.com/",
+        normalized_url="http://example.com/",
+        strategy=strategy,
+        policy=pol,
+        http_fetcher=fetcher,
+        host_policy=HostPolicy.unrestricted(),
+    )
+
+
+async def _diagnostics_for_failed_probes(fetcher, **policy):
+    """Full discovery whose probes fail: the ``(result, diagnostics)`` pair.
+
+    Discovery probes fail; the page fetch does not. The point of both tests that
+    call this is that a failed probe is recorded as diagnostics and does not fail
+    the crawl, so the crawl config and those two assertions are written once here
+    and each test says only WHICH diagnostic it is about. A copy that drops the
+    limits silently runs the default ones, and a copy that drops
+    ``DISCOVERY_ALL_ON`` passes a test that discovered nothing.
+    """
+    result = await _run_http_result(
+        fetcher=fetcher,
+        policy={
+            "limits": {"timeout_seconds": 5, "max_retries": 0},
+            "discovery": DISCOVERY_ALL_ON,
+            **policy,
+        },
+    )
+    assert result.status == "success"
+    assert "robots" in result.diagnostics
+    return result, result.diagnostics
+
+
+class TestHttpStrategyResult:
+    _run = staticmethod(_run_http_result)
 
     async def test_success_html(self) -> None:
         assert_result_success(await self._run())
@@ -336,20 +397,14 @@ class TestHttpStrategyResult:
                 "/robots.txt": ConnectionError("discovery failed"),
                 "/sitemap.xml": ConnectionError("discovery failed"),
             },
-            default=(
-                200,
-                b'<html><body><link rel="alternate" href="http://example.com/feed.xml"></body></html>',
-                "text/html",
-            ),
+            default=FEED_ADVERTISING_PAGE,
         )
 
-        result = await self._run(
-            fetcher=feed_fetcher,
-            policy={"discovery": {"robots": True, "sitemaps": True, "feeds": True}},
-        )
-        assert result.status == "success"
-        assert "robots" in result.diagnostics
-        assert result.diagnostics["robots"].get("error") is not None
+        _result, diagnostics = await _diagnostics_for_failed_probes(feed_fetcher)
+        assert diagnostics["robots"].get("error") is not None
+        # The feed the page advertises is still discovered: a failed robots or
+        # sitemap probe costs a diagnostic, not the discovery pass.
+        assert diagnostics["discovery"]["feeds"] is not None
 
 
 class TestExecuteCrawlChain:
@@ -519,25 +574,12 @@ class TestFetchHelperUtilities:
                 "/robots.txt": (200, b"User-agent: *\nCrawl-delay: notanumber\n", "text/plain"),
                 "sitemap": ConnectionError("no sitemap"),
             },
-            default=(
-                200,
-                b'<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>hi</body></html>',
-                "text/html",
-            ),
+            default=FEED_ADVERTISING_PAGE,
         )
 
-        result = await TestHttpStrategyResult()._run(
-            fetcher=fetcher,
-            policy={
-                "limits": {"timeout_seconds": 5, "max_retries": 0},
-                "discovery": {"robots": True, "sitemaps": True, "feeds": True},
-            },
-        )
-        assert result.status == "success"
-        assert "robots" in result.diagnostics
-        assert result.diagnostics["robots"].get("crawl_delay_seconds") is None
-        assert "discovery" in result.diagnostics
-        assert result.diagnostics["discovery"]["feeds"]
+        result, diagnostics = await _diagnostics_for_failed_probes(fetcher)
+        assert diagnostics["robots"].get("crawl_delay_seconds") is None
+        assert diagnostics["discovery"]["feeds"]
 
 
 class TestCallWorkerContract:

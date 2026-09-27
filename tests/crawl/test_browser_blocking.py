@@ -9,8 +9,10 @@ from _browser_doubles import (
     BrowserFakePage,
     FakeRequest,
     FakeRoute,
+    assert_route_decision,
     response_handler_double,
     run_blocking_document_route,
+    ssrf_route_handler,
 )
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 from _timing_harnesses import HANG_GUARD_SECONDS
@@ -152,12 +154,11 @@ async def test_ssrf_route_handler_fails_closed_on_unexpected_errors(monkeypatch)
 
 async def test_ssrf_route_handler_allows_non_network_schemes():
     """data:/blob:/about: requests never touch DNS; they must pass through."""
-    handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
-
-    for scheme_url in ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"):
-        route = FakeRoute()
-        await handler(route, FakeRequest(scheme_url, "document"))
-        assert route.decision == "continue", scheme_url
+    await assert_route_decision(
+        ssrf_route_handler(),
+        ("data:text/html;base64,PGI+", "blob:https://x/y", "about:blank"),
+        "continue",
+    )
 
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
@@ -182,26 +183,19 @@ async def test_ws_guard_closes_internal_targets(monkeypatch):
     assert internal.closed is True, "internal WS not closed"
 
 
-def _handler_for(resource_mode=None, *, include_screenshot=False):
-    return _make_ssrf_route_handler(
-        resource_mode,
-        include_screenshot=include_screenshot,
-        policy=UNRESTRICTED_HOST_POLICY,
-    )
-
-
 async def test_analytics_aborted_regardless_of_mode():
     route = FakeRoute()
-    handler = _handler_for(None)
+    handler = ssrf_route_handler()
     await handler(route, FakeRequest("https://www.google-analytics.com/analytics.js", "script"))
     assert route.decision == "abort"
 
 
 async def test_pinterest_aborted_with_and_without_www():
-    for url in ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"):
-        route = FakeRoute()
-        await _handler_for(None)(route, FakeRequest(url, "document"))
-        assert route.decision == "abort", url
+    await assert_route_decision(
+        ssrf_route_handler(),
+        ("https://pinterest.com/pin/123", "https://www.pinterest.com/pin/123"),
+        "abort",
+    )
 
 
 async def test_cdcgov_aborted_with_and_without_www():
@@ -209,36 +203,38 @@ async def test_cdcgov_aborted_with_and_without_www():
     # It was removed from ANALYTICS_HOST_SUFFIXES (data poisoning); the
     # route handler must let it through. Suffix match still covers apex
     # and subdomains alike for hosts that ARE on the list (see pinterest).
-    for url in ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"):
-        route = FakeRoute()
-        await _handler_for(None)(route, FakeRequest(url, "document"))
-        assert route.decision == "continue", url
+    await assert_route_decision(
+        ssrf_route_handler(),
+        ("https://cdc.gov/foo", "https://www.cdc.gov/bar", "https://data.cdc.gov/baz"),
+        "continue",
+    )
 
 
 async def test_xcom_aborted_regardless_of_mode():
     # x.com (X/Twitter) is on the hard-skip tracking list: aborted in every mode,
     # including bare-apex and www subdomain forms.
-    for url in ("https://x.com/i/web/status/1", "https://www.x.com/home"):
-        route = FakeRoute()
-        await _handler_for(None)(route, FakeRequest(url, "document"))
-        assert route.decision == "abort", url
+    await assert_route_decision(
+        ssrf_route_handler(),
+        ("https://x.com/i/web/status/1", "https://www.x.com/home"),
+        "abort",
+    )
 
 
 async def test_image_blocked_by_default_unless_screenshot():
     # default (no screenshot requested) -> abort unconditionally (#4)
     route = FakeRoute()
-    await _handler_for(None)(route, FakeRequest("https://x.test/logo.png", "image"))
+    await ssrf_route_handler()(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
     # reduced mode -> also abort
     route = FakeRoute()
-    await _handler_for("reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
+    await ssrf_route_handler("reduced")(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"
 
     # screenshot explicitly requested -> continue (renders need images/fonts)
     route = FakeRoute()
     with patch.object(browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {})):
-        await _handler_for(None, include_screenshot=True)(
+        await ssrf_route_handler(include_screenshot=True)(
             route, FakeRequest("https://x.test/logo.png", "image")
         )
     assert route.decision == "continue"
@@ -249,7 +245,7 @@ async def test_document_always_continues_with_pinned_url():
     with patch.object(
         browser_mod, "_build_pinned_request", return_value=("http://1.2.3.4/", {"Host": "x.test"})
     ):
-        await _handler_for(None)(route, FakeRequest("http://x.test/page", "document"))
+        await ssrf_route_handler()(route, FakeRequest("http://x.test/page", "document"))
     assert route.decision == "continue"
     assert route.actions[-1][1]["url"] == "http://1.2.3.4/"
 

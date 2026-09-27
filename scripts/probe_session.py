@@ -53,21 +53,18 @@ async def main() -> None:
     import curl_cffi.requests as cr
 
     async with cr.AsyncSession(impersonate="firefox135") as client:
-        r1 = await client.get(_PROBE_TARGET, allow_redirects=False)
-        out.append(f"cffi plain: {r1.status_code}")
-        r2 = await client.get(
-            _PROBE_TARGET,
-            allow_redirects=False,
-            cookies={c["name"]: c["value"] for c in cookies},
-        )
-        out.append(f"cffi + cookies: {r2.status_code}")
-        r3 = await client.get(
-            _PROBE_TARGET,
-            allow_redirects=False,
-            cookies={c["name"]: c["value"] for c in cookies},
-            headers={"User-Agent": ua},
-        )
-        out.append(f"cffi + cookies + UA: {r3.status_code}")
+        jar = {c["name"]: c["value"] for c in cookies}
+        # Each probe adds exactly one thing to the request the one before it made,
+        # so the three status codes differ only by the header under test. Spelled
+        # out as three calls they were three copies of the same request to keep in
+        # step; as a ladder the progression is the thing being read.
+        for label, extra in (
+            ("cffi plain", {}),
+            ("cffi + cookies", {"cookies": jar}),
+            ("cffi + cookies + UA", {"cookies": jar, "headers": {"User-Agent": ua}}),
+        ):
+            response = await client.get(_PROBE_TARGET, allow_redirects=False, **extra)
+            out.append(f"{label}: {response.status_code}")
     await page.close()
     out_path = Path(_PROBE_OUTPUT)
     out_path.parent.mkdir(parents=True, exist_ok=True)

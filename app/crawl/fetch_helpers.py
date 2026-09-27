@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any, NamedTuple, TypeAlias, TypeVar
 from urllib.parse import urljoin
 
 from app.bounded_ttl import BoundedTTLCache
@@ -29,32 +29,75 @@ from app.validation import HostPolicy, safe_public_url_or_none
 _T = TypeVar("_T")
 _K = TypeVar("_K")
 
+# Request headers as the discovery fetch takes them: a mapping it only ever
+# reads, or None for "send none". One declaration, because the fetch signatures
+# and the fetcher contract both spell it -- while they each spelled
+# ``dict[str, str]`` on their own, the sitemap path had to write
+# ``cond_headers or {}`` at its call site to satisfy the core, which is the rule
+# the core now owns.
+_RequestHeaders: TypeAlias = Mapping[str, str] | None
+
 
 # Discovery bodies (robots.txt / sitemap.xml) are attacker-influenced; cap their
 # decompressed size so a hostile origin cannot OOM the service via a gzip bomb.
 
 
+class _Discovery(NamedTuple):
+    """One discovery response (robots.txt / sitemap.xml): the owner of what a
+    response *means*.
+
+    ``headers is None`` is the fetch core's transport-failure marker. Every
+    accessor below is total over it, so a consumer cannot reach a ``.get`` on a
+    missing header map -- the failure the sitemap path previously had to guard
+    by hand with ``resp_headers is None or status not in (200, 304)`` and then
+    trust for the two unguarded ``.get`` calls on the following lines.
+    """
+
+    text: str | None
+    status: int | None
+    headers: dict[str, str] | None
+
+    def validators(self) -> tuple[str | None, str | None] | None:
+        """``(etag, last_modified)`` when this response can revalidate a cache.
+
+        ``None`` when it cannot: a transport failure carries no headers, and a
+        status outside 200/304 revalidates nothing. Those are one decision
+        because they must agree -- as two separate predicates, a caller can
+        check one and then read through the other, which is the shape this
+        removed.
+        """
+        if self.headers is None or self.status not in (200, 304):
+            return None
+        return self.headers.get("etag"), self.headers.get("last-modified")
+
+    def not_modified(self) -> bool:
+        """True only when the origin confirmed the cached body is unchanged."""
+        return self.status == 304
+
+
 async def _fetch_decode_discovery(
     fetcher: Any,
     url: str,
-    headers: dict[str, str],
+    headers: _RequestHeaders,
     timeout_seconds: int,
-) -> tuple[str | None, int | None, dict[str, str] | None]:
+) -> _Discovery:
     """Fetch, decompress, and decode a discovery body (robots.txt / sitemap.xml).
 
     The single place the discovery fetch policy lives: sync or coroutine
     fetcher, lowercase response headers, and a capped decompress so a hostile
     origin cannot OOM the service with a gzip bomb
-    (``DISCOVERY_BODY_MAX_BYTES``). Returns ``(text, status, headers)``; the
-    header map is present even when the body is absent -- non-200, or a body
-    that blew the cap -- so the sitemap path can still read ETag/Last-Modified
-    while the robots path ignores it. ``(None, None, None)`` on
-    transport-level failure.
+    (``DISCOVERY_BODY_MAX_BYTES``). Absent ``headers`` means "send none", so a
+    caller passes its conditional headers straight through instead of
+    normalizing them first. The header map is present even when the body is
+    absent -- non-200, or a body that blew the cap -- so the sitemap path can
+    still read ETag/Last-Modified while the robots path ignores it. All three
+    fields are ``None`` on transport-level failure, and ``_Discovery`` is the
+    only thing a consumer is meant to read off the result.
     """
     from app.crawl.decompression import DecompressionTooLargeError
 
     try:
-        resp = fetcher(url, headers, timeout_seconds)
+        resp = fetcher(url, headers or {}, timeout_seconds)
         if inspect.iscoroutine(resp):
             resp = await resp
         status = resp.status_code
@@ -67,18 +110,18 @@ async def _fetch_decode_discovery(
                     max_output_bytes=DISCOVERY_BODY_MAX_BYTES,
                 )
             except DecompressionTooLargeError:
-                return None, status, resp_headers
-            return _decode_body(body, resp_headers.get("content-type")), status, resp_headers
-        return None, status, resp_headers
+                return _Discovery(None, status, resp_headers)
+            return _Discovery(_decode_body(body, resp_headers.get("content-type")), status, resp_headers)
+        return _Discovery(None, status, resp_headers)
     except Exception:
         pass
-    return None, None, None
+    return _Discovery(None, None, None)
 
 
 async def _fetch_and_decode(
     fetcher: Any,
     url: str,
-    headers: dict[str, str],
+    headers: _RequestHeaders,
     timeout_seconds: int,
 ) -> tuple[str | None, int | None]:
     """Fetch a URL, returning ``(decoded body, HTTP status)``.
@@ -88,8 +131,8 @@ async def _fetch_and_decode(
     robots handling treats differently (fail closed, M7). ``(None, None)``
     on transport-level failure.
     """
-    text, status, _ = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
-    return text, status
+    resp = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
+    return resp.text, resp.status
 
 
 async def _single_flight(
@@ -128,16 +171,14 @@ async def _fetch_text(
     surfaced even when the body is absent (304, or a body that blew the
     decompression cap) so the cache entry stays addressable.
     """
-    text, status, resp_headers = await _fetch_decode_discovery(
-        fetcher, url, cond_headers or {}, timeout_seconds
-    )
-    if resp_headers is None or status not in (200, 304):
+    resp = await _fetch_decode_discovery(fetcher, url, cond_headers, timeout_seconds)
+    validators = resp.validators()
+    if validators is None:
         return None, None, None, False
-    etag = resp_headers.get("etag")
-    last_modified = resp_headers.get("last-modified")
-    if status == 304:
+    etag, last_modified = validators
+    if resp.not_modified():
         return None, etag, last_modified, True
-    return text, etag, last_modified, False
+    return resp.text, etag, last_modified, False
 
 
 # Sitemap cache: one locked, bounded, TTL'd store (app.bounded_ttl).
@@ -200,8 +241,7 @@ async def fetch_sitemap_urls(
             # the origin just confirmed the last-known set is still valid.
             prev = _SITEMAP_CACHE.get_stale((current_url, host_policy))
             if prev:
-                for entry in prev[0]:
-                    page_urls.add(entry)
+                page_urls.update(prev[0])
             return etag, last_modified
         if text is None:
             return etag, last_modified
@@ -254,8 +294,7 @@ async def fetch_sitemap_urls(
         elif cached[2]:
             conditional = {"If-Modified-Since": cached[2]}
     try:
-        results = await asyncio.gather(*[recurse(sitemap_url, 0, conditional)])
-        root_etag, root_lm = results[0]
+        root_etag, root_lm = await recurse(sitemap_url, 0, conditional)
     except Exception:
         root_etag, root_lm = (cached[1] if cached else None), (cached[2] if cached else None)
     # Store through the chokepoint: LRU recency refresh and bounded eviction

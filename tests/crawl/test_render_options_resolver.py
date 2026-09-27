@@ -22,22 +22,24 @@ here rather than argued per call site:
 from __future__ import annotations
 
 import pytest
+from _browser_doubles import _fake_browser
 
 from app.api.render import _render_options
 from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.crawl.strategies.browser_result import browser_strategy_result
-from app.models import CrawlResult
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
+#: The two knobs the resolver reads off settings, set away from the dataclass
+#: defaults so a merge assertion cannot pass by coincidence.
+SETTINGS_OVERRIDES = {
+    "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "11",
+    "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "7",
+}
+
 
 def _settings() -> CrawlerSettings:
-    return CrawlerSettings.from_mapping(
-        {
-            "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "11",
-            "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "7",
-        }
-    )
+    return CrawlerSettings.from_mapping(SETTINGS_OVERRIDES)
 
 
 class TestResolveRenderOptions:
@@ -127,21 +129,14 @@ class TestEngineConsumesResolver:
 
     async def test_capture_pinned_and_profile_reaches_worker(self):
         captured: dict = {}
+        rendered = _fake_browser(
+            html="<html><head><title>T</title></head><body>some page content</body></html>",
+            text="some page content",
+        )
 
         async def worker(job):
             captured["options"] = job.options
-            return CrawlResult(
-                url=job.url,
-                status="success",
-                classification="rendered",
-                final_url=job.url,
-                html="<html><head><title>T</title></head><body>some page content</body></html>",
-                text="some page content",
-                attempts=1,
-                elapsed_ms=5,
-                domain="example.com",
-                metadata={},
-            )
+            return rendered(job)
 
         policy = _browser_policy()
         result = await browser_strategy_result(

@@ -52,9 +52,29 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
     return {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
+def _column_names(conn: sqlite3.Connection, table: str) -> tuple[str, ...]:
+    """The column names of ``table``, in the order SQLite reports them.
+
+    Order, not set: a migration that reorders columns is real drift, and the
+    manifest declares an order to compare against. Every "did the migration drop
+    / add / reorder a column" assertion in this file goes through here so the
+    ``PRAGMA table_info`` row indexing and the ``str()`` of it are written once.
+    """
+    return tuple(str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def _manifest_columns(schema: StoreSchema) -> tuple[str, ...]:
+    """The column names the current manifest declares, in its own order."""
+    return tuple(column.name for column in CURRENT_SCHEMAS[schema].columns)
+
+
+def _applied_migration_ids(conn: sqlite3.Connection) -> set[str]:
+    """The migration ids the ledger says are applied to this database."""
+    return {str(row[0]) for row in conn.execute("SELECT migration_id FROM _yoyo_migration")}
+
+
 def _assert_migration_recorded(conn: sqlite3.Connection, schema: StoreSchema) -> None:
-    rows = conn.execute("SELECT migration_id FROM _yoyo_migration").fetchall()
-    assert MIGRATION_IDS[schema] in {str(row[0]) for row in rows}
+    assert MIGRATION_IDS[schema] in _applied_migration_ids(conn)
 
 
 def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
@@ -152,9 +172,7 @@ def test_legacy_job_database_is_stamped_without_losing_rows_or_columns(tmp_path)
     assert loaded.transient_retries == {"https://legacy.example": 1}
     conn = sqlite3.connect(db_path)
     assert schema_drift(conn, CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]) == ()
-    assert tuple(row[1] for row in conn.execute("PRAGMA table_info(crawl_jobs)")) == tuple(
-        column.name for column in CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS].columns
-    )
+    assert _column_names(conn, "crawl_jobs") == _manifest_columns(StoreSchema.CRAWL_JOBS)
     _assert_migration_recorded(conn, StoreSchema.CRAWL_JOBS)
     conn.close()
     store.close()
@@ -169,7 +187,7 @@ def test_historical_canonicalized_column_is_removed_during_legacy_stamping(tmp_p
     store = JobStore(db_path, policy=HostPolicy.unrestricted())
     loaded = store.load("legacy-job")
     after = sqlite3.connect(db_path)
-    columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
+    columns = set(_column_names(after, "crawl_jobs"))
 
     assert loaded is not None
     assert "canonicalized" not in columns
@@ -186,8 +204,8 @@ def test_explicit_legacy_stamp_records_only_satisfied_migration(tmp_path):
     stamp_store(db_path, StoreSchema.CRAWL_JOBS)
 
     after = sqlite3.connect(db_path)
-    columns = {str(row[1]) for row in after.execute("PRAGMA table_info(crawl_jobs)")}
-    applied = {str(row[0]) for row in after.execute("SELECT migration_id FROM _yoyo_migration")}
+    columns = set(_column_names(after, "crawl_jobs"))
+    applied = _applied_migration_ids(after)
     assert "canonicalized" in columns
     assert "0001_crawl_jobs_initial" in applied
     assert "0002_crawl_jobs_drop_canonicalized" not in applied
@@ -247,7 +265,7 @@ def test_store_accepts_reordered_columns_at_startup(tmp_path):
     reopened = JobStore(db_path, policy=HostPolicy.unrestricted())
     reopened.close()
     conn = sqlite3.connect(db_path)
-    actual = tuple(str(row[1]) for row in conn.execute("PRAGMA table_info(crawl_jobs)"))
+    actual = _column_names(conn, "crawl_jobs")
     conn.close()
     assert actual == tuple(column.name for column in reordered.columns)
 
@@ -264,9 +282,7 @@ def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_pa
     assert store.get("legacy-request") == {"request_id": "legacy-request", "results": []}
     conn = sqlite3.connect(db_path)
     assert schema_drift(conn, CURRENT_SCHEMAS[StoreSchema.RESULTS]) == ()
-    assert tuple(row[1] for row in conn.execute("PRAGMA table_info(results)")) == tuple(
-        column.name for column in CURRENT_SCHEMAS[StoreSchema.RESULTS].columns
-    )
+    assert _column_names(conn, "results") == _manifest_columns(StoreSchema.RESULTS)
     _assert_migration_recorded(conn, StoreSchema.RESULTS)
     conn.close()
     store.close()
@@ -345,6 +361,6 @@ def test_migration_rollback_is_reversible_and_updates_the_ledger(tmp_path, schem
 
     conn = sqlite3.connect(db_path)
     assert CURRENT_SCHEMAS[schema].table_name not in _table_names(conn)
-    applied = {str(row[0]) for row in conn.execute("SELECT migration_id FROM _yoyo_migration")}
+    applied = _applied_migration_ids(conn)
     assert MIGRATION_IDS[schema] not in applied
     conn.close()

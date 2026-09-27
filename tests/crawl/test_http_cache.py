@@ -1,6 +1,6 @@
 """HTTP fetch cache: batched stores, memory mirror and envelope edges."""
 
-import threading
+from _thread_fanout import run_thread_fanout
 
 from app.crawl.cache import HttpCache
 
@@ -77,23 +77,15 @@ def test_lru_eviction_bounds_memory():
 
 def test_concurrent_store_get_is_safe():
     cache = HttpCache(ttl_seconds=0)
-    errors: list[BaseException] = []
 
     def worker(prefix: str) -> None:
-        try:
-            for i in range(200):
-                url = f"http://{prefix}/{i}"
-                cache.store(url, {"etag": f'"{i}"'})
-                etag, _ = cache.get(url)
-                assert etag == f'"{i}"', (url, etag)
-        except BaseException as exc:
-            errors.append(exc)
+        for i in range(200):
+            url = f"http://{prefix}/{i}"
+            cache.store(url, {"etag": f'"{i}"'})
+            etag, _ = cache.get(url)
+            assert etag == f'"{i}"', (url, etag)
 
-    threads = [threading.Thread(target=worker, args=(f"h{t}",)) for t in range(8)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    errors = run_thread_fanout(lambda index: worker(f"h{index}"))
     assert not errors, errors
 
 

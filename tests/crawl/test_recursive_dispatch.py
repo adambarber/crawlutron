@@ -5,8 +5,9 @@ the batch-sizing and admission-gate logic is covered without standing up the
 full engine (the reason the dispatch was extracted from ``crawl_request``).
 """
 
-from _recursive_harnesses import ContentionFreeGate, drive_recursive_crawl
-from _result_builders import make_engine_result
+import pytest
+from _recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
+from _result_builders import engine_result, make_engine_result
 
 from app.constants import BROWSER_HEADLESS
 from app.models import CrawlTask, DiscoveredLink
@@ -60,6 +61,56 @@ async def _run(
         global_concurrency=global_concurrency,
         seed_sitemaps=seed_sitemaps,
     )
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value"),
+    (("max_dept", 2), ("retired_keyword", True)),
+    ids=("misspelled-at-the-call-site", "dropped-from-production"),
+)
+async def test_an_override_production_does_not_take_is_rejected(keyword, value):
+    """The harness forwards through ``**overrides``; a keyword it cannot bind must not pass.
+
+    This is the whole reason the harness is not allowed to be a plain
+    ``**kwargs`` catch-all, and the reason it cannot be. Before the signature was
+    read from production, every keyword was named in the harness's own signature
+    and Python itself raised on a misspelling. Reading the contract at runtime
+    keeps that property only if the binding is enforced, so this asserts the
+    enforcement rather than trusting it -- a rejected keyword names itself
+    instead of becoming an argument production never received.
+
+    The two cases fail differently and both matter. A misspelling is a caller
+    mistake, and silently dropping it means a test ran against a default nobody
+    chose -- a ``max_dept`` that never bounded anything. A keyword production has
+    dropped is worse: the harness would accept it, hand it over, and either pass a
+    default the caller chose nothing about or mask the removal entirely.
+    """
+
+    async def worker(job):
+        return make_engine_result(job.normalized_url)
+
+    with pytest.raises(TypeError, match=keyword):
+        await drive_recursive_crawl(
+            [make_crawl_task(0, "a")], worker, allows=_allows, **{keyword: value}
+        )
+
+
+async def test_a_real_override_still_reaches_production():
+    """Binding validates names, so the value path has to be proven separately.
+
+    A harness that rejected every override would satisfy both tests above. This
+    one drives a real bound through and reads it back off the crawl, which is the
+    only evidence that ``overrides`` is a funnel rather than a wall.
+    """
+
+    async def worker(job):
+        return make_engine_result(job.normalized_url)
+
+    jobs = [make_crawl_task(0, "a"), make_crawl_task(1, "a"), make_crawl_task(2, "a")]
+    spill, _scheduler, _gate = await drive_recursive_crawl(
+        jobs, worker, allows=_allows, max_pages=2, respect_robots=False
+    )
+    assert len(spill.writes) == 2
 
 
 async def test_dispatches_single_page_and_consults_gate():
@@ -127,13 +178,9 @@ async def test_robots_disallows_discovered_link_silently():
     assert set(spill.writes[i].normalized_url for i in spill.writes) == {"http://a/"}
 
 
-async def test_robots_disallows_initial_job_as_skip():
+async def test_robots_disallows_initial_job_as_skip(recording_worker):
     # An initial job that robots disallows is written as a skip, never crawled.
-    seen = []
-
-    async def worker(job):
-        seen.append(job.normalized_url)
-        return make_engine_result(job.normalized_url)
+    seen, worker = recording_worker
 
     async def allows(url):
         return url != "http://a/blocked"
@@ -232,32 +279,19 @@ async def test_pool_exhaustion_requeue_does_not_consume_a_max_pages_slot():
     reached only when the retries themselves cost nothing.
     """
     from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
-    from app.models import EngineCrawlResult
 
     total_attempts = 1 + MAX_TRANSIENT_REQUEUES
 
     async def worker(job):
         if job.normalized_url == "http://a/seed":
-            return EngineCrawlResult(
-                original_url=job.original_url,
-                normalized_url=job.normalized_url,
-                final_url=None,
-                status="failed",
-                classification="browser_pool_exhausted",
-                selected_strategy=None,
-                attempted_strategies=[],
-                http_status=None,
-                headers={},
-                content_type=None,
-                html=None,
-                text=None,
-                extraction_method=None,
-                quality_score=0.0,
+            return engine_result(
+                job.normalized_url,
+                "browser_pool_exhausted",
+                error="browser_pool_exhausted",
                 # Links from an eternally-exhausted URL are expanded only when
                 # its result is recorded, so the real page rides on the seed's
                 # final permanent failure, not on any re-queue.
                 discovered_links=[_link("http://a/real")],
-                error="browser_pool_exhausted",
             )
         return make_engine_result(job.normalized_url)
 

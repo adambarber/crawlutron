@@ -6,20 +6,14 @@ subsequent navigations) carries the spoofed Host. The render must set it
 for the navigation, then clear it.
 """
 
-from _browser_doubles import ROUTE_ARG_UNSET, FakeRequest, FakeRoute, pinned_renderer
+from _browser_doubles import ROUTE_ARG_UNSET, FakeRequest, FakeRoute, render_pinned
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
-from app.models import RenderOptions
 
 
 async def test_pinned_host_cleared_after_navigation(monkeypatch):
-    page, renderer = pinned_renderer(monkeypatch)
-    result = await renderer._render_with_browser(
-        "http://example.com/",
-        RenderOptions(browser_profile={}),
-        policy=UNRESTRICTED_HOST_POLICY,
-    )
+    page, result = await render_pinned(monkeypatch)
     assert result.status == "success"
     # Set for the pinned navigation, then cleared so later requests on the
     # page resolve Host from their own URLs again.

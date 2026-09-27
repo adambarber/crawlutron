@@ -16,11 +16,24 @@ def _args(threshold: float = 0) -> argparse.Namespace:
     return _args_for(threshold=threshold)
 
 
+_CONFIGURED_MIN_LINES, _CONFIGURED_MIN_TOKENS, _CONFIGURED_THRESHOLD = gate.configured_floor()
+"""The floor under test, read from the hook rather than restated here.
+
+This file used to spell 4/39 in ``_args_for`` and again in ``_GATE_ARGV``, and
+``.pre-commit-config.yaml`` spelled it a third time in the entry and a fourth in
+the hook's name. Four copies of a number, with nothing comparing them, is how the
+tests kept passing against a floor the hook no longer ran at -- the suite would
+have gone on asserting behaviour at 4/39 while every commit was gated at whatever
+the config said. ``gate.configured_floor()`` is the one read, so tightening the
+hook tightens the tests in the same edit.
+"""
+
+
 def _args_for(
-    threshold: float = 0,
+    threshold: float = _CONFIGURED_THRESHOLD,
     *,
-    min_lines: int = 4,
-    min_tokens: int = 39,
+    min_lines: int = _CONFIGURED_MIN_LINES,
+    min_tokens: int = _CONFIGURED_MIN_TOKENS,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         profile="all",
@@ -35,6 +48,25 @@ def _write_expectations(path: Path, pairs: list[dict]) -> None:
     path.write_text(json.dumps({"version": 1, "pairs": pairs}), encoding="utf-8")
 
 
+def _strip_root(name: str, root: str) -> str:
+    """jscpd's name for a file when several roots are scanned in one invocation.
+
+    A single-root invocation reports paths relative to that root. Handed several,
+    it strips the root prefix from each and reports `crawl/recursive.py` for
+    `app/crawl/recursive.py` and `_recursive_harnesses.py` for
+    `tests/_recursive_harnesses.py` -- measured, not assumed: a multi-path scan of
+    this service returns exactly those two strings, neither of which names the
+    tree it came from. The stub has to reproduce that, because the gate resolves
+    those names back to a root against the filesystem and a stub that returned
+    honest paths would be modelling a tool that does not exist.
+    """
+    return name[len(root) + 1 :] if name.startswith(root + "/") else name
+
+
+def _stripped(location: dict, root: str) -> dict:
+    return {**location, "name": _strip_root(str(location["name"]), root)}
+
+
 def _stub_report(
     monkeypatch,
     duplicates: list[dict],
@@ -43,27 +75,76 @@ def _stub_report(
 ) -> list[list[str]]:
     commands: list[list[str]] = []
 
-    def _inside(root: str, name: str) -> bool:
-        return root == "." or name == root or name.startswith(root + "/")
+    # The gate resolves a reported name back to a root against the filesystem, so
+    # the stub has to make its synthetic files exist -- for exactly the roots the
+    # duplicates were declared under, so a name in two declared roots is as
+    # ambiguous here as it would be on disk. Anything the test did not declare
+    # falls through to the real filesystem, which is what keeps an ambiguity like
+    # `zz_tree_filler.py` a real one.
+    declared = {
+        tuple(duplicate[side]["name"].split("/"))
+        for duplicate in duplicates
+        for side in ("firstFile", "secondFile")
+    }
+
+    def _is_file(path: Path) -> bool:
+        try:
+            relative = tuple(path.relative_to(gate.SERVICE_ROOT).parts)
+        except ValueError:
+            return False
+        return relative in declared or Path.is_file(path)
+
+    monkeypatch.setattr(gate, "_IS_FILE", _is_file)
 
     def run(command, **_kwargs):
         commands.append(command)
-        root = command[-1]
-        # jscpd reports `name` relative to the scan root, so a stub that returned
-        # every duplicate for every invocation would be modelling a tool that
-        # does not exist. Only pairs inside the scanned root are reported, and
-        # their names come back root-relative.
-        scoped = [
-            {
-                **duplicate,
-                "firstFile": _root_relative(root, duplicate["firstFile"]),
-                "secondFile": _root_relative(root, duplicate["secondFile"]),
-            }
-            for duplicate in duplicates
-            if _inside(root, duplicate["firstFile"]["name"])
-            and _inside(root, duplicate["secondFile"]["name"])
-        ]
-        found = sources[root] if isinstance(sources, dict) else sources
+        positionals = command[command.index("--fail-on-empty") + 1 :]
+        roots = [argument for argument in positionals if argument in _KNOWN_ROOTS]
+
+        def _inside(name: str) -> bool:
+            return any(name == root or name.startswith(root + "/") for root in roots)
+
+        def _straddles(duplicate: dict) -> bool:
+            sides = [duplicate[side]["name"] for side in ("firstFile", "secondFile")]
+            return len({_root_of(side) for side in sides}) > 1
+
+        def _root_of(name: str) -> str:
+            return next(root for root in roots if name == root or name.startswith(root + "/"))
+
+        if len(roots) == 1:
+            # One root per invocation: only pairs inside it are reported, named
+            # relative to it.
+            scoped = [
+                {
+                    **duplicate,
+                    "firstFile": _stripped(duplicate["firstFile"], roots[0]),
+                    "secondFile": _stripped(duplicate["secondFile"], roots[0]),
+                }
+                for duplicate in duplicates
+                if _inside(duplicate["firstFile"]["name"])
+                and _inside(duplicate["secondFile"]["name"])
+            ]
+        else:
+            # The cross-tree pass: pairs that SPAN roots, named without their root
+            # so they are unattributable until the gate resolves them.
+            scoped = [
+                {
+                    **duplicate,
+                    "firstFile": _stripped(duplicate["firstFile"], _root_of(duplicate["firstFile"]["name"])),
+                    "secondFile": _stripped(duplicate["secondFile"], _root_of(duplicate["secondFile"]["name"])),
+                }
+                for duplicate in duplicates
+                if _straddles(duplicate)
+            ]
+        if isinstance(sources, dict):
+            # One root per invocation is scored at that root's own count, which is
+            # what makes "this tree scanned nothing" detectable. The cross-tree
+            # invocation reads the same files a second time and its count is
+            # deliberately not added to the gate's total, so any positive count
+            # satisfies the floor it checks.
+            found = sources[roots[0]] if len(roots) == 1 else sources.get(".", max(sources.values()))
+        else:
+            found = sources
         report = {
             "statistics": {
                 "total": {"sources": found, "percentage": percentage, "duplicatedLines": 5 * len(scoped)}
@@ -80,16 +161,20 @@ def _stub_report(
 
 
 def _command_for(commands: list[list[str]], root: str) -> list[str]:
-    return next(command for command in commands if command[-1] == root)
+    return next(
+        command
+        for command in commands
+        if (command[command.index("--fail-on-empty") + 1 :] or [None])[-1] == root
+    )
 
 
 def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
     """Run the gate over a tree with no duplicates; return the commands issued.
 
     The clean run is the precondition for most of what this file asserts (a
-    threshold is honoured, a root is scanned once, a floor is per-root), so the
-    empty expectations file and the report stub are set up here once rather than
-    re-spelled per test.
+    threshold is honoured, a root is scanned once, a floor is applied to every
+    root), so the empty expectations file and the report stub are set up here
+    once rather than re-spelled per test.
     """
     _write_expectations(tmp_path / "expectations.json", [])
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
@@ -103,6 +188,25 @@ def _root_relative(root: str, location: dict) -> dict:
     if root != "." and name.startswith(root + "/"):
         name = name[len(root) + 1 :]
     return {**location, "name": name}
+
+
+#: The scan roots this file's stubs understand, read from the gate so a root
+#: added to the gate is a root these stubs model without a second edit.
+_KNOWN_ROOTS = frozenset(
+    root for roots in gate.PROFILE_PATHS.values() for root in roots
+)
+
+
+def _roots_of(command: list[str]) -> list[str]:
+    """The scan roots an invocation was handed.
+
+    Everything after the last flag, rather than ``command[-1]``: the cross-tree
+    invocation is given every root as a positional, so the last one is not the
+    only one and reading it that way would model that invocation as a `scripts`
+    scan.
+    """
+    positionals = command[command.index("--fail-on-empty") + 1 :]
+    return [argument for argument in positionals if argument in _KNOWN_ROOTS]
 
 
 def _duplicate(
@@ -172,11 +276,11 @@ _GATE_ARGV = [
     "gate",
     "all",
     "--min-lines",
-    "4",
+    str(_CONFIGURED_MIN_LINES),
     "--min-tokens",
-    "39",
+    str(_CONFIGURED_MIN_TOKENS),
     "--threshold",
-    "0",
+    str(_CONFIGURED_THRESHOLD),
     "--fail-on-empty",
 ]
 
@@ -190,9 +294,150 @@ def _configure(monkeypatch, tmp_path, pair: dict, duplicate: list[dict]) -> list
     return commands
 
 
+def _expect_nothing_sanctioned(monkeypatch, tmp_path, duplicates, **report) -> None:
+    """An attestation file that sanctions nothing, plus a scan report we choose.
+
+    Every gate failure that is NOT about a sanctioned pair needs exactly these
+    two things, and was spelling both out at each site. ``_configure`` cannot
+    stand in for it: that helper requires a declared pair, which is precisely
+    what these tests are rejecting.
+    """
+    expectations = tmp_path / "expectations.json"
+    _write_expectations(expectations, [])
+    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", expectations)
+    _stub_report(monkeypatch, duplicates, **report)
+
+
 def test_uniform_profile_shape() -> None:
     assert set(gate.PROFILE_PATHS) == {"all"}
     assert gate.MIN_SOURCES == {"all": 200}
+
+
+def _cross_tree_duplicate() -> dict:
+    """A fragment shared between production and a test, at the same floor.
+
+    The shape this is about is a test harness re-spelling production's truth: it
+    looks like one legitimate copy on each side, so a per-tree gate has nothing to
+    object to even in principle.
+    """
+    return _duplicate("app/crawl/recursive.py", "tests/_recursive_harnesses.py")
+
+
+def _sanctioned_cross_tree_pair() -> dict:
+    """A declared cross-tree pair, pinned at the locations the duplicate reports.
+
+    The locations are not incidental. ``_expected_tree`` reads the tree label off
+    the two declared paths, so a declaration whose sides are in the same tree is
+    keyed under that tree and will never be found by the cross-tree pass -- the
+    one way to write an expectation here that reads as satisfied and pins
+    nothing.
+    """
+    pair = _valid_pair()
+    pair["first"] = {"path": "app/crawl/recursive.py", "start": 10, "end": 20}
+    pair["second"] = {"path": "tests/_recursive_harnesses.py", "start": 30, "end": 40}
+    return pair
+
+
+def _stubbed_scan(duplicates: list[dict], sources: int = 400) -> dict[str, object]:
+    """A cross-tree scan result, for the cases that replace the real one."""
+    return {"statistics": {"total": {"sources": sources}}, "duplicates": duplicates}
+
+
+def _without_cross_tree_scan(monkeypatch, duplicates: list[dict], sources: int = 400) -> None:
+    monkeypatch.setattr(
+        gate, "_cross_tree_scan", lambda floor, args: _stubbed_scan(duplicates, sources)
+    )
+
+
+def test_a_clone_spanning_two_trees_fails(monkeypatch, tmp_path, capsys) -> None:
+    _expect_nothing_sanctioned(monkeypatch, tmp_path, [_cross_tree_duplicate()])
+
+    assert gate._run(_args()) == 1
+    error = capsys.readouterr().err
+    assert "[cross]" in error
+    # Both sides named, each with the root that actually holds it -- the gate has
+    # to re-attach the root jscpd stripped, or a cross-tree report would be
+    # unactionable.
+    assert "app/crawl/recursive.py" in error
+    assert "tests/_recursive_harnesses.py" in error
+
+
+def test_per_root_scans_alone_cannot_see_a_cross_tree_clone(monkeypatch, tmp_path) -> None:
+    """The gap this pass exists to close, asserted rather than remembered.
+
+    Runs the same planted cross-tree duplicate with the cross-tree scan removed
+    and requires the gate to pass. If the per-root scans ever grow the ability to
+    compare across roots -- jscpd adds a flag, the root list is folded into one
+    argument -- this fails, and the right response is to drop the spanning
+    invocation rather than keep paying for a second full scan of every file on
+    every run.
+    """
+    _expect_nothing_sanctioned(monkeypatch, tmp_path, [_cross_tree_duplicate()])
+    _without_cross_tree_scan(monkeypatch, [])
+
+    assert gate._run(_args()) == 0
+
+
+def test_a_pair_inside_one_tree_is_not_also_reported_as_cross_tree(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    """A within-tree pair is scored once, by the pass that owns its tree.
+
+    The spanning invocation necessarily re-reports every within-tree clone it
+    sees -- all three of this service's real pairs are same-file pairs in `app/`.
+    Charging those against a second expectation would let one clone satisfy two,
+    and would make the cross-tree count a second tally of findings already
+    counted rather than a count of the ones nothing else can see.
+
+    The names are real paths because the gate resolves a reported name to a root
+    against the filesystem; a synthetic name in a hand-written report is
+    unattributable, and unattributable is rejected rather than guessed.
+    """
+    _expect_nothing_sanctioned(monkeypatch, tmp_path, [])
+    _without_cross_tree_scan(
+        monkeypatch,
+        [
+            {
+                "firstFile": {"name": "crawl/ids.py", "start": 10, "end": 20},
+                "secondFile": {"name": "crawl/ids.py", "start": 30, "end": 40},
+                "fragment": "within-app-only",
+            }
+        ],
+    )
+
+    assert gate._run(_args()) == 0
+    assert "[cross] 0 pairs" in capsys.readouterr().out
+
+
+def test_a_cross_tree_clone_can_be_sanctioned_with_a_guard(monkeypatch, tmp_path) -> None:
+    """A cross-tree clone is sanctionable on the same terms as any other.
+
+    Not a concession: a guard is the only thing that ever justified a sanctioned
+    pair, and refusing cross-tree pairs specifically would make a justified one
+    unsanctionable -- so the fix would be to delete the duplication, which is the
+    outcome the gate wants anyway, by making it impossible rather than by
+    disallowing the admission.
+    """
+    _configure(monkeypatch, tmp_path, _sanctioned_cross_tree_pair(), [_cross_tree_duplicate()])
+
+    assert gate._run(_args()) == 0
+
+
+def test_a_cross_tree_pair_whose_fragment_moved_is_drift(monkeypatch, tmp_path, capsys) -> None:
+    """Attribution follows the content across both trees, as for a within-tree pair.
+
+    A sanctioned cross-tree pair identified by path and line would read as a
+    disappearance the moment the production side shifted, and the fix-forward
+    would be to copy the coordinates out of the error into the expectation -- the
+    same failure mode the within-tree content identity exists to prevent.
+    """
+    moved = _cross_tree_duplicate()
+    moved["firstFile"]["start"] = 11
+    moved["firstFile"]["end"] = 21
+    _configure(monkeypatch, tmp_path, _sanctioned_cross_tree_pair(), [moved])
+
+    assert gate._run(_args()) == 1
+    assert "drift" in capsys.readouterr().err
 
 
 def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
@@ -208,10 +453,9 @@ def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.parametrize("directory", ("app", "tests", "scripts"))
 def test_undeclared_clone_in_each_service_tree_fails(monkeypatch, tmp_path, directory):
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(
+    _expect_nothing_sanctioned(
         monkeypatch,
+        tmp_path,
         [_duplicate(f"{directory}/one.py", f"{directory}/two.py")],
     )
 
@@ -252,18 +496,19 @@ def test_valid_sanctioned_pair_passes(monkeypatch, tmp_path) -> None:
 
 
 def test_source_floor_fails_on_thin_scan(monkeypatch, tmp_path) -> None:
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(monkeypatch, [], sources=60)
+    _expect_nothing_sanctioned(monkeypatch, tmp_path, [], sources=60)
 
     assert gate._run(_args()) == 1
 
 
 def test_a_tree_that_scanned_nothing_fails(monkeypatch, tmp_path, capsys) -> None:
     """A wrong scan root reports zero sources and no error, so it must fail."""
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(monkeypatch, [], sources={"app": 0, "tests": 200, "scripts": 200})
+    _expect_nothing_sanctioned(
+        monkeypatch,
+        tmp_path,
+        [],
+        sources={"app": 0, "tests": 200, "scripts": 200},
+    )
 
     assert gate._run(_args()) == 1
     assert "scan root is wrong" in capsys.readouterr().err
@@ -416,8 +661,20 @@ def test_every_root_is_scanned_by_its_own_single_root_invocation() -> None:
 
 
 def test_each_root_gets_exactly_one_invocation(monkeypatch, tmp_path) -> None:
+    """One invocation per root, plus exactly one that spans all of them.
+
+    The spanning invocation is not a second look at the same thing. Each root's
+    own invocation cannot report a pair whose two sides are in different roots,
+    because jscpd only compares files it resolved from the paths it was handed --
+    so a fragment shared between `app/` and `tests/` is invisible to every
+    per-root scan, and the class is not small. It has to be asked for separately,
+    and asked for exactly once.
+    """
     commands = _run_against_empty_tree(monkeypatch, tmp_path)
-    scanned = [command[-1] for command in commands]
+    spanning = [command for command in commands if len(_roots_of(command)) > 1]
+    assert len(spanning) == 1, f"expected one cross-root invocation, got {len(spanning)}"
+    assert _roots_of(spanning[0]) == list(gate.PROFILE_PATHS["all"])
+    scanned = [_roots_of(command)[0] for command in commands if len(_roots_of(command)) == 1]
     assert scanned == list(gate.PROFILE_PATHS["all"]), f"one invocation per root, got {scanned}"
 
 
@@ -437,7 +694,9 @@ def test_one_floor_is_applied_to_every_root(monkeypatch, tmp_path) -> None:
         (command[command.index("--min-lines") + 1], command[command.index("--min-tokens") + 1])
         for command in commands
     }
-    assert carried == {("4", "39")}, f"roots scored at differing floors: {sorted(carried)}"
+    assert carried == {
+        (str(_CONFIGURED_MIN_LINES), str(_CONFIGURED_MIN_TOKENS))
+    }, f"roots scored at differing floors: {sorted(carried)}"
 
 
 def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_path, capsys) -> None:
@@ -449,10 +708,9 @@ def test_the_same_content_in_two_trees_is_two_findings_not_one(monkeypatch, tmp_
     should be judged by. Test boilerplate must not become cover for production
     code, so each is reported against the tree that actually holds it.
     """
-    _write_expectations(tmp_path / "expectations.json", [])
-    monkeypatch.setattr(gate, "EXPECTATIONS_PATH", tmp_path / "expectations.json")
-    _stub_report(
+    _expect_nothing_sanctioned(
         monkeypatch,
+        tmp_path,
         [
             _duplicate("app/one.py", "app/two.py", fragment="shared"),
             _duplicate("tests/one.py", "tests/two.py", fragment="shared"),
@@ -544,27 +802,23 @@ def test_python_source_globs_are_never_a_sanctioned_exception(glob) -> None:
         gate._reject_source_masking([glob])
 
 
-def test_jscpd_json_rejects_unknown_keys(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "unsanctioned",
+    [{"maxLines": 500}, {"skipLocal": True}],
+    ids=["maxLines", "skipLocal"],
+)
+def test_jscpd_json_rejects_unknown_keys(tmp_path, unsanctioned) -> None:
     """Bites: only `ignore` is allowed in .jscpd.json.
 
     The measured masking, and the reason the check runs before any scan, are
     recorded on ``gate._validate_scan_config`` -- restating them here is a
-    second copy to go stale. This test only pins the rejection.
+    second copy to go stale. This test only pins the rejection, and takes its
+    cases as a table because the one thing every unsanctioned key has in common
+    is being unsanctioned -- which is the rule, spelled once.
     """
     config = tmp_path / "jscpd.json"
     config.write_text(
-        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, "maxLines": 500}),
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="unknown keys"):
-        gate._validate_scan_config(config)
-
-
-def test_jscpd_json_rejects_skipLocal(tmp_path) -> None:
-    """skipLocal is not a sanctioned key."""
-    config = tmp_path / "jscpd.json"
-    config.write_text(
-        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, "skipLocal": True}),
+        json.dumps({"ignore": gate.SANCTIONED_IGNORE_GLOBS, **unsanctioned}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unknown keys"):
@@ -579,3 +833,93 @@ def test_jscpd_json_accepts_only_ignore(tmp_path) -> None:
         encoding="utf-8",
     )
     gate._validate_scan_config(config)
+
+
+def test_the_test_suite_reads_the_floor_the_hook_runs() -> None:
+    """The argv these tests gate on is the hook's own floor, not a copy of it.
+
+    Four spellings of 4/39 used to exist -- the hook entry, the hook's name, this
+    module's ``_args_for`` default, and this module's ``_GATE_ARGV`` -- with
+    nothing comparing them. The failure that shape hides is not a wrong number, it
+    is a green suite: every test here would keep passing against 4/39 while
+    commits were gated at whatever the config said, so the suite would vouch for a
+    floor that was no longer enforced. Asserting the argv against the config is
+    what turns the copy into a derived value.
+    """
+    argv = _GATE_ARGV
+    assert (argv[argv.index("--min-lines") + 1], argv[argv.index("--min-tokens") + 1]) == (
+        str(_CONFIGURED_MIN_LINES),
+        str(_CONFIGURED_MIN_TOKENS),
+    )
+    assert _args_for().min_tokens == _CONFIGURED_MIN_TOKENS
+
+
+def test_a_laxer_floor_is_refused_because_it_cannot_report_the_truth() -> None:
+    """A run handed a looser floor than the hook enforces fails instead of passing.
+
+    A duplication gate's number is a command-line argument, so "run it at 8/40" is
+    one flag away from the enforced value and returns a genuinely clean result for
+    the floor that was asked for. Reporting that as a pass is the whole hazard: the
+    output is true and the conclusion is wrong. Only laxer is refused -- scanning
+    stricter than the hook is how a candidate floor gets measured before adoption.
+    """
+    laxer = _args_for(
+        min_lines=_CONFIGURED_MIN_LINES + 1,
+        min_tokens=_CONFIGURED_MIN_TOKENS + 1,
+    )
+    with pytest.raises(ValueError, match="laxer than the enforced floor"):
+        gate._require_configured_floor(laxer)
+
+
+def test_the_enforced_floor_and_a_stricter_one_are_both_accepted() -> None:
+    """The floor itself, and anything below it, are legitimate runs."""
+    gate._require_configured_floor(_args_for())
+    gate._require_configured_floor(
+        _args_for(min_lines=_CONFIGURED_MIN_LINES, min_tokens=_CONFIGURED_MIN_TOKENS - 1)
+    )
+
+
+def test_a_floor_the_hook_does_not_state_is_unreadable_rather_than_defaulted(monkeypatch, tmp_path) -> None:
+    """Bites: a hook entry missing a threshold raises instead of reading as one.
+
+    The failure this guards is a silent one. If an unreadable floor fell back to a
+    default, the gate would go on comparing clones against a number the config
+    stopped stating, and the guard refusing lax runs would refuse them against that
+    same phantom value -- two checks agreeing on a floor nobody chose.
+
+    The stripped copy is written to ``tmp_path`` and the module is pointed at it,
+    because the alternative -- editing the real config to observe that it becomes
+    unreadable -- leaves the repository one failed test away from a gate that
+    cannot name its own floor.
+    """
+    stripped = (tmp_path / "config.yaml").write_text(
+        gate.PRECOMMIT_CONFIG_PATH.read_text(encoding="utf-8").replace(
+            f"--min-tokens {_CONFIGURED_MIN_TOKENS}",
+            "",
+        ),
+        encoding="utf-8",
+    )
+    assert "--min-tokens" not in (tmp_path / "config.yaml").read_text(encoding="utf-8")
+    assert stripped
+    monkeypatch.setattr(gate, "PRECOMMIT_CONFIG_PATH", tmp_path / "config.yaml")
+    with pytest.raises(ValueError, match="declares no --min-tokens"):
+        gate.configured_floor()
+
+
+def test_every_sanctioned_pair_names_a_guard_that_exists_and_pins_its_fragment() -> None:
+    """The baseline is load-bearing: a sanction is a guard, not a comment.
+
+    Two pairs are sanctioned at 4/25 and both exist because a machine-checked guard
+    requires two spellings of the same contract. A sanction whose guard test was
+    renamed or deleted would leave the copy unchecked and the gate green, which is
+    the shape of drift this whole program is closing. The hash is what makes the
+    baseline a claim about today's code: change either side of a pair and the
+    recorded hash stops matching, so the entry fails as unsanctioned rather than
+    continuing to vouch for a fragment that no longer exists.
+    """
+    assert gate._expected_pairs(), "the baseline is empty, so this test would prove nothing"
+    for pair in gate._expected_pairs():
+        guard = pair["guard"]
+        path, _, node = guard.partition("::")
+        assert node in gate._test_names(gate.SERVICE_ROOT / path), f"{pair['id']} names a guard that is not there"
+        assert len(pair["fragment_sha256"]) == 64, f"{pair['id']} has no content pin"

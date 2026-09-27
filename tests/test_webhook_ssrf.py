@@ -5,13 +5,9 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 (DNS-rebinding safe) while preserving the original Host header.
 """
 
-import socket
-from contextlib import contextmanager
-from unittest.mock import patch
-
-import httpx
 import pytest
 from _assertions import block_private_targets, host_resolves_to
+from _webhook_doubles import record_webhook_delivery
 
 from app.api.webhooks import (
     post_webhook as _post_webhook,
@@ -20,67 +16,6 @@ from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
 from app.validation import HostPolicy
-
-
-def _fake_httpx_client(capture=None, body=b""):
-    """httpx.AsyncClient double used by the delivery tests.
-
-    Records ``stream()`` args into ``capture`` and yields ``body`` as the
-    response; the delivery path aliases httpx at import time, so the same
-    double observes the call ``post_webhook`` makes into
-    ``deliver_pinned_webhook``.
-    """
-
-    class _Response:
-        def __init__(self):
-            self.status_code = 200
-
-        async def aiter_bytes(self):
-            yield body
-
-    class _StreamCtx:
-        async def __aenter__(self):
-            return _Response()
-
-        async def __aexit__(self, *exc):
-            return False
-
-    class _Client:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc_val, exc_tb):
-            return False  # httpx's __aexit__ never suppresses
-
-        def stream(self, method, url, content=None, headers=None):
-            if capture is not None:
-                capture["url"] = url
-                capture["headers"] = headers
-            return _StreamCtx()
-
-    return _Client
-
-
-def _pinned_webhook_client(capture=None, body=b""):
-    """Patch httpx.AsyncClient (recording/capped double) + DNS pin for delivery tests."""
-    original = httpx.AsyncClient
-    httpx.AsyncClient = _fake_httpx_client(capture=capture, body=body)
-
-    @contextmanager
-    def _patched():
-        try:
-            with patch(
-                "socket.getaddrinfo",
-                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))],
-            ):
-                yield
-        finally:
-            httpx.AsyncClient = original
-
-    return _patched()
 
 
 class TestWebhookUrlValidation:
@@ -124,17 +59,17 @@ class TestWebhookDeliveryPinning:
         Driven through the production funnel ``post_webhook`` -- not a deleted
         island entry point -- so the guard protects the path real crawls take.
         """
-        block_private_targets(monkeypatch)
-        captured = {}
-        with _pinned_webhook_client(capture=captured):
+        delivered = record_webhook_delivery(monkeypatch)
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
             await _post_webhook(
                 "http://webhook.example.com/cb",
                 {"results": []},
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert "8.8.8.8" in captured["url"], captured
-        assert captured["headers"].get("Host") == "webhook.example.com", captured
+        assert len(delivered) == 1, delivered
+        assert "8.8.8.8" in str(delivered[0].url), delivered
+        assert delivered[0].headers.get("Host") == "webhook.example.com", delivered
 
     async def test_https_delivery_uses_validated_hostname_not_ip(self, monkeypatch):
         """L3: rewriting an https URL to the pinned IP breaks TLS (certs
@@ -142,17 +77,17 @@ class TestWebhookDeliveryPinning:
         HTTPS delivery POSTs to the validated hostname; HTTP keeps IP pinning."""
         from app.api.webhooks import deliver_pinned_webhook
 
-        block_private_targets(monkeypatch)
-        captured = {}
-        with _pinned_webhook_client(capture=captured):
+        delivered = record_webhook_delivery(monkeypatch)
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
             await deliver_pinned_webhook(
                 "https://webhook.example.com/cb",
                 b"{}",
                 host_policy=HostPolicy.unrestricted(),
             )
 
-        assert captured["url"] == "https://webhook.example.com/cb", captured
-        assert "8.8.8.8" not in captured["url"], captured
+        assert len(delivered) == 1, delivered
+        assert str(delivered[0].url) == "https://webhook.example.com/cb", delivered
+        assert "8.8.8.8" not in str(delivered[0].url), delivered
 
     async def test_delivery_response_body_is_capped(self, monkeypatch, caplog):
         """M3: the webhook RESPONSE is attacker-controlled and must never be
@@ -162,9 +97,12 @@ class TestWebhookDeliveryPinning:
 
         from app.api.webhooks import _max_webhook_size, deliver_pinned_webhook
 
-        block_private_targets(monkeypatch)
+        # ``host_resolves_to`` also stands the private-target escape hatch down,
+        # so the rejection this test wants is the policy's answer and not an
+        # accident of what the machine's resolver returned.
         big_body = b"x" * (_max_webhook_size() + 1)
-        with _pinned_webhook_client(body=big_body):
+        delivered = record_webhook_delivery(monkeypatch, body=big_body)
+        with host_resolves_to(monkeypatch, "8.8.8.8"):
             with caplog.at_level(logging.WARNING, logger="app.api.webhooks"):
                 await deliver_pinned_webhook(
                     "http://webhook.example.com/cb",
@@ -172,6 +110,7 @@ class TestWebhookDeliveryPinning:
                     host_policy=HostPolicy.unrestricted(),
                 )
 
+        assert delivered, "delivery never ran; the cap was never exercised"
         assert any("webhook_response_too_large" in r.message for r in caplog.records), caplog.text
 
 

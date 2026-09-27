@@ -14,11 +14,26 @@ from app.crawl.strategies.pinned_transport import _declared_length_exceeds
 from app.validation import HostPolicy
 
 
-def _patch_transport(monkeypatch, response):
-    return patch_http_fetcher_transport(
+async def _fetch_behind_declared_length(monkeypatch, declared: str):
+    """Serve one small HTML body behind a declared ``Content-Length`` and fetch it.
+
+    The unknown-size case and the well-formed-oversized case below are the same
+    fetch with a different header value: same transport, same page cap, same
+    policy. Making the header the argument is what keeps the two from drifting
+    into testing two different things, and it deletes the one-call
+    ``_patch_transport`` indirection that only existed to be written twice.
+    """
+    patch_http_fetcher_transport(
         monkeypatch,
-        [response],
+        [MockResponse(200, {"content-type": "text/html", "content-length": declared}, b"<html>ok</html>")],
         allow_ssrf_bypass=True,
+    )
+    return await _default_http_fetcher(
+        "http://example.com/",
+        {},
+        30,
+        1000,
+        policy=HostPolicy.unrestricted(),
     )
 
 
@@ -47,32 +62,12 @@ class TestDeclaredLengthPredicate:
 
 async def test_httpx_fetcher_serves_body_despite_garbage_content_length(monkeypatch):
     """A small body under a bogus Content-Length streams normally (no raise)."""
-    _patch_transport(
-        monkeypatch,
-        MockResponse(200, {"content-type": "text/html", "content-length": "abc"}, b"<html>ok</html>"),
-    )
-    result = await _default_http_fetcher(
-        "http://example.com/",
-        {},
-        30,
-        1000,
-        policy=HostPolicy.unrestricted(),
-    )
+    result = await _fetch_behind_declared_length(monkeypatch, "abc")
     assert result.status_code == 200
     assert result.body == b"<html>ok</html>"
 
 
 async def test_httpx_fetcher_still_rejects_valid_oversized_declared_length(monkeypatch):
     """A well-formed oversized Content-Length keeps the pre-flight 413 behavior."""
-    _patch_transport(
-        monkeypatch,
-        MockResponse(200, {"content-type": "text/html", "content-length": "5000"}, b"<html>ok</html>"),
-    )
-    result = await _default_http_fetcher(
-        "http://example.com/",
-        {},
-        30,
-        1000,
-        policy=HostPolicy.unrestricted(),
-    )
+    result = await _fetch_behind_declared_length(monkeypatch, "5000")
     assert result.status_code == 413

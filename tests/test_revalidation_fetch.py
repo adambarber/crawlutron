@@ -29,7 +29,16 @@ class _CountingFetcher:
     Stands in for the network boundary only; ``_http_strategy_result`` itself
     runs for real, so this exercises the production cache+revalidation control
     flow rather than a substituted shape.
+
+    The 200 answer is its own method so a scripted subclass overrides *which*
+    response it hands back instead of re-stating the call bookkeeping -- the
+    count and the header capture -- that every variant has to do identically and
+    that a copy can drift from (a variant that forgets the capture silently
+    answers every header assertion with an empty dict).
     """
+
+    etag = "v1"
+    body = b"<html><body>content</body></html>"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -38,12 +47,15 @@ class _CountingFetcher:
     async def __call__(self, url, headers, timeout_seconds, max_content_length):
         self.calls += 1
         self.header_sets.append(dict(headers))
+        return self._response(url)
+
+    def _response(self, url):
         return make_fetch(
             status=200,
             url=url,
             final_url=url,
-            headers={"content-type": "text/html; charset=utf-8", "etag": "v1"},
-            body=b"<html><body>content</body></html>",
+            headers={"content-type": "text/html; charset=utf-8", "etag": self.etag},
+            body=self.body,
         )
 
 
@@ -89,22 +101,23 @@ class TestRevalidationFetchesOnce:
         """
 
         class _ScriptedFetcher(_CountingFetcher):
+            """A fresh 200 until the third call, then a permanent 304.
+
+            ``body`` is an instance attribute the test rewrites between crawls;
+            that rewrite is how the stale-versus-stored discrimination is set up,
+            so it stays a per-instance value and the response shape is inherited.
+            """
+
             def __init__(self) -> None:
                 super().__init__()
                 self.body = b"<html><body>FRESH-BODY</body></html>"
 
-            async def __call__(self, url, headers, timeout_seconds, max_content_length):
-                self.calls += 1
-                self.header_sets.append(dict(headers))
+            def _response(self, url):
                 if self.calls >= 3:  # origin reports unchanged from crawl 3 on
-                    return make_fetch(status=304, url=url, final_url=url, headers={"etag": "v1"}, body=b"")
-                return make_fetch(
-                    status=200,
-                    url=url,
-                    final_url=url,
-                    headers={"content-type": "text/html; charset=utf-8", "etag": "v1"},
-                    body=self.body,
-                )
+                    return make_fetch(
+                        status=304, url=url, final_url=url, headers={"etag": self.etag}, body=b""
+                    )
+                return super()._response(url)
 
         fetcher = _ScriptedFetcher()
         url = "http://example.com/etagged-then-stored"

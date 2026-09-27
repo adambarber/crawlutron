@@ -4,16 +4,26 @@ Uses a deterministic in-process fake fetcher (no real network I/O) plus one
 real-server smoke test.
 """
 
-from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl
+from _fetcher_factories import crawled_results, crawled_urls, run_scoped_crawl, site_linking_to
+
+
+def _assert_memory_stripped(out) -> None:
+    """Every result must have dropped html/text but kept its markdown.
+
+    The non-empty check is the half that matters: the loop below passes
+    vacuously on an empty result list, which is what a crawl that found nothing
+    hands back.
+    """
+    assert out["results"], "the crawl returned nothing, so nothing was stripped"
+    for result in out["results"]:
+        assert result["html"] is None
+        assert result["text"] is None
+        assert result["markdown"] is not None
 
 
 class TestRecursiveCrawl:
     async def test_max_depth_one_discovers_links(self):
-        pages = {
-            "/": (200, '<html><body><a href="/a">a</a><a href="/b">b</a></body></html>', "text/html"),
-            "/a": (200, "<html><body>a</body></html>", "text/html"),
-            "/b": (200, "<html><body>b</body></html>", "text/html"),
-        }
+        pages = site_linking_to("/a", "/b")
         out = await crawled_results(pages, limits={"max_depth": 1, "max_pages": 10})
         assert out["submitted_count"] == 1
         urls = {r["normalized_url"] for r in out["results"]}
@@ -22,16 +32,7 @@ class TestRecursiveCrawl:
         assert "http://example.com/b" in urls
 
     async def test_max_pages_bounds_recursion(self):
-        pages = {
-            "/": (
-                200,
-                '<html><body><a href="/a">a</a><a href="/b">b</a><a href="/c">c</a></body></html>',
-                "text/html",
-            ),
-            "/a": (200, "<html>a</html>", "text/html"),
-            "/b": (200, "<html>b</html>", "text/html"),
-            "/c": (200, "<html>c</html>", "text/html"),
-        }
+        pages = site_linking_to("/a", "/b", "/c")
         out = await crawled_results(pages, limits={"max_depth": 2, "max_pages": 2})
         assert len(out["results"]) <= 2
 
@@ -90,19 +91,13 @@ class TestRecursiveCrawl:
         assert "http://example.com/s2" in urls
 
     async def test_memory_strip_when_include_html_false(self):
-        pages = {
-            "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
-            "/a": (200, "<html><body>hello</body></html>", "text/html"),
-        }
+        pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
         out = await crawled_results(
             pages,
             limits={"max_depth": 1, "max_pages": 10},
             policy={"browser_profile": {"include_html": False}},
         )
-        for result in out["results"]:
-            assert result["html"] is None
-            assert result["text"] is None
-            assert result["markdown"] is not None
+        _assert_memory_stripped(out)
 
 
 class TestRecursiveCrawlServer:
@@ -124,10 +119,7 @@ class TestRecursiveCrawlServer:
     async def test_memory_strip_both_modes_include_html_false(self):
         # html/text must be stripped inside the loop for both the recursive and
         # non-recursive branches (#1), not retained for the whole crawl.
-        pages = {
-            "/": (200, '<html><body><a href="/a">a</a></body></html>', "text/html"),
-            "/a": (200, "<html><body>hello</body></html>", "text/html"),
-        }
+        pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
 
         async def run(max_depth):
             return await crawled_results(
@@ -137,11 +129,7 @@ class TestRecursiveCrawlServer:
             )
 
         for max_depth in (0, 1):
-            out = await run(max_depth)
-            for result in out["results"]:
-                assert result["html"] is None
-                assert result["text"] is None
-                assert result["markdown"] is not None
+            _assert_memory_stripped(await run(max_depth))
 
 
 async def test_real_sitemap_parser_feeds_scope_filtered_recursive_crawl():

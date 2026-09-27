@@ -82,13 +82,64 @@ def build_pinned_renderer(monkeypatch, page):
     return renderer
 
 
-def pinned_renderer(monkeypatch, *, pinned=("http://1.2.3.4:80/", {"Host": "example.com"})):
+#: The address a pinned-render test navigates to: a public IP literal, with the
+#: hostname restored as ``Host``. A private address is the one thing the SSRF
+#: guard refuses, so a public one is what makes these tests about the pin rather
+#: than about the guard. One literal, because every pinned-render arrangement
+#: asserting a different address is a test that quietly stopped testing the pin.
+PINNED_PUBLIC_IP = ("http://1.2.3.4:80/", {"Host": "example.com"})
+
+
+def stub_pinned_request(pinned: tuple[str, dict[str, str]] = PINNED_PUBLIC_IP):
+    """A stand-in for the off-loop pin entry, shaped like the real binding.
+
+    ``_build_pinned_request_async`` is a binding produced by ``_off_loop``, not a
+    ``def``, so an arrangement that replaces it has to supply a coroutine function
+    or the call site stops being awaitable. Returning one built here -- rather
+    than a ``lambda`` at each site -- is what lets the rendered-URL tests keep
+    asserting a fixed pin: the alternative is the real resolver, which decides
+    what ``example.com`` happens to point at today and has nothing to do with the
+    pin under test.
+    """
+
+    async def _stub(url: str, headers: dict[str, str], *, policy):
+        return pinned[0], {**headers, **pinned[1]}
+
+    return _stub
+
+
+def pinned_page_renderer(monkeypatch, page=None, *, pinned=PINNED_PUBLIC_IP):
+    """A ``BrowserRenderer`` whose browser hands out `page` and pins every request.
+
+    A plain :class:`BrowserFakePage` unless the test has a reason to want a
+    different one -- one that never returns from ``goto``, one that landed on
+    loopback -- in which case it passes its own.
+    """
     import app.crawl.strategies.browser as browser_mod
 
-    page = BrowserFakePage()
+    page = BrowserFakePage() if page is None else page
     renderer = build_pinned_renderer(monkeypatch, page)
-    monkeypatch.setattr(browser_mod, "_build_pinned_request", lambda url, headers, *, policy: pinned)
+    monkeypatch.setattr(browser_mod, "_build_pinned_request_async", stub_pinned_request(pinned))
     return page, renderer
+
+
+async def render_pinned(monkeypatch, url: str = "http://example.com/"):
+    """Render `url` through :func:`pinned_page_renderer`; return ``(page, result)``.
+
+    The one navigation a pinned-render test performs, so the two halves of the
+    arrangement -- a pinned renderer, and the call into it -- are stated once.
+    """
+    from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+    from app.models import RenderOptions
+
+    page, renderer = pinned_page_renderer(monkeypatch)
+    result = await renderer._render_with_browser(
+        url,
+        RenderOptions(browser_profile={}),
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
+    return page, result
 
 
 class FakeRoute:
@@ -153,11 +204,56 @@ __all__ = [
     "ROUTE_ARG_UNSET",
     "_fake_browser",
     "build_pinned_renderer",
-    "pinned_renderer",
+    "pinned_page_renderer",
+    "render_pinned",
+    "PINNED_PUBLIC_IP",
     "blocking_pinned_request",
     "response_handler_double",
     "run_blocking_document_route",
+    "ssrf_route_handler",
+    "assert_route_decision",
 ]
+
+
+def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False):
+    """The production SSRF route handler, over the unrestricted test policy.
+
+    The policy argument is the only difference between this and calling
+    ``_make_ssrf_route_handler`` directly, and it is the difference that keeps
+    these tests about the blocklist rather than about the guard: a test that
+    wants the guard's own verdict builds its own handler and calls it directly.
+    """
+    from _policy_factories import UNRESTRICTED_HOST_POLICY
+
+    from app.crawl.strategies.browser import _make_ssrf_route_handler
+
+    return _make_ssrf_route_handler(
+        resource_mode,
+        include_screenshot=include_screenshot,
+        policy=UNRESTRICTED_HOST_POLICY,
+    )
+
+
+async def assert_route_decision(
+    handler,
+    urls,
+    decision: str,
+    *,
+    resource_type: str = "document",
+) -> None:
+    """The handler must reach ``decision`` for every URL in ``urls``.
+
+    A host is on or off a blocklist by SUFFIX, so a tracking host is only proved
+    blocked when the apex form, ``www.`` and a deeper subdomain have all been
+    asked -- which is why these are lists of URLs rather than single requests.
+    The handler is passed in rather than built here so a test that varies the
+    mode or the policy says so once, at the call site, instead of the loop
+    growing a parameter per variation.
+    """
+    for url in urls:
+        route = FakeRoute()
+        await handler(route, FakeRequest(url, resource_type))
+        assert route.decision == decision, f"expected {decision} for {url}, got {route.decision}"
 
 
 def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
@@ -167,7 +263,7 @@ def blocking_pinned_request(thread_ids: list[int], delay: float = 0.05):
     def build(url, headers, *, policy):
         thread_ids.append(threading.get_ident())
         time.sleep(delay)
-        return ("http://1.2.3.4:80/", {"Host": "example.com"})
+        return PINNED_PUBLIC_IP
 
     return build
 

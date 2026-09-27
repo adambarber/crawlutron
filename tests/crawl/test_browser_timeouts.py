@@ -9,10 +9,9 @@
 
 import asyncio
 
-from _browser_doubles import BrowserFakePage, build_pinned_renderer
+from _browser_doubles import BrowserFakePage, pinned_page_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
-import app.crawl.strategies.browser as browser_mod
 from app.crawl.strategies.browser import _MAX_ACTION_WAIT_SECONDS, BrowserRenderer
 from app.models import RenderOptions
 
@@ -60,13 +59,7 @@ class _HangingPage(BrowserFakePage):
 
 class TestNavigationTimeout:
     async def test_navigation_honors_timeout_seconds(self, monkeypatch):
-        page = _HangingPage()
-        renderer = build_pinned_renderer(monkeypatch, page)
-        monkeypatch.setattr(
-            browser_mod,
-            "_build_pinned_request",
-            lambda url, headers, *, policy: ("http://1.2.3.4:80/", {"Host": "example.com"}),
-        )
+        page, renderer = pinned_page_renderer(monkeypatch, _HangingPage())
         # The deadline is enforced with asyncio.wait_for, which is loop-time
         # based, so the suite's zero-second sleep patch does not weaken it. The
         # caller's own guard is what makes a deadline that stopped firing a

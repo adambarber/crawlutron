@@ -9,8 +9,9 @@ truncated/corrupted file (silently losing all persisted cookies on restart).
 import json
 import os
 import tempfile
-import threading
 from unittest.mock import patch
+
+from _thread_fanout import run_thread_fanout
 
 from app.crawl.strategies.cookie_jar import CookieJar
 
@@ -70,21 +71,13 @@ def test_save_to_file_persists_and_no_temp_leftovers():
 def test_concurrent_cookie_writes_do_not_raise():
     jar = CookieJar()
     url = "http://x.example/p"
-    errors = []
 
-    def worker(thread_id):
-        try:
-            for i in range(50):
-                jar.add_cookie_header(url, f"k{thread_id}_{i}=v; Path=/")
-                _ = jar.cookie_header_for(url)
-        except Exception as exc:
-            errors.append(exc)
+    def worker(thread_id: int) -> None:
+        for i in range(50):
+            jar.add_cookie_header(url, f"k{thread_id}_{i}=v; Path=/")
+            _ = jar.cookie_header_for(url)
 
-    threads = [threading.Thread(target=worker, args=(t,)) for t in range(8)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    errors = run_thread_fanout(worker)
     assert not errors, errors
 
 

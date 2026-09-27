@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _assertions import block_private_targets, host_resolves_to
+from _webhook_doubles import record_webhook_delivery
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore
@@ -132,38 +133,11 @@ class TestWebhookValidationRunsOffLoop:
         block_private_targets(monkeypatch)
         resolver_threads = _spy_resolver_threads(monkeypatch)
 
-        # Stub only the HTTP client: SafeUrl.parse + connect() must still run,
-        # and connect() is pure (no I/O), so no network call is attempted.
-        delivered: list[tuple[str, str]] = []
-
-        class _FakeStreamResponse:
-            """A webhook response with no body: ``read_capped_async`` drains nothing."""
-
-            async def aiter_bytes(self):
-                for _ in ():
-                    yield b""
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc_info):
-                return False
-
-        class _FakeAsyncClient:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc_info):
-                return False
-
-            def stream(self, method, url, **kwargs):
-                delivered.append((method, str(url)))
-                return _FakeStreamResponse()
-
-        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+        # Stage only the HTTP answer: SafeUrl.parse + connect() must still run,
+        # and connect() is pure (no I/O), so no network call is attempted. The
+        # client is a real httpx.AsyncClient over a scripted transport, so the
+        # delivery POST, the streaming read and the close are all real.
+        delivered = record_webhook_delivery(monkeypatch)
 
         await deliver_pinned_webhook(
             "http://public.example.com/cb",

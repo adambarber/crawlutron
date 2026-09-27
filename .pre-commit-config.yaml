@@ -108,18 +108,32 @@ repos:
       # One floor for every root, because one flat floor cannot serve both
       # trees: at 8 lines / 40 tokens this whole service reported exactly one
       # pair and both sides of it were in `app/`, so production duplication was
-      # invisible behind a number picked for test scaffolding. The split floors
-      # that answered that (app 7/35, tests 8/40) are gone: at 4/39 both trees
-      # report zero, so there is nothing left for a second number to reveal.
+      # invisible behind a number picked for test scaffolding. A per-root split
+      # is the other answer and is not taken either, because a single number that
+      # every root is held to is the one that cannot be quietly relaxed for the
+      # tree it is inconvenient in.
+      #
+      # The floor is 4 lines / 25 tokens, which is where the last two pairs live.
+      # Both are DECLARED in jscpd-expectations.json rather than hidden above the
+      # floor, because they are not drift at all: each is two spellings that a
+      # machine-checked guard exists to compare, so the tree holds the copy on
+      # purpose and the guard is what makes the copy safe. The baseline pins each
+      # fragment by content hash and names the guard, so editing either side turns
+      # the entry into an unsanctioned clone and sends the change back through
+      # review instead of leaving a stale approval behind. Holding the floor above
+      # them instead would have bought a tidy list at the cost of never seeing a
+      # 25-38 token clone anywhere, which is the band most real duplication in
+      # this tree actually measured at.
       # Each root is still scanned by its own jscpd invocation, because jscpd's
       # reported names are relative to the scan root. Zero tolerance; the number
       # ratchets down, not up.
       - id: jscpd
-        name: jscpd per tree (4 lines / 39 tokens, zero tolerance)
+        name: jscpd per tree (4 lines / 25 tokens, zero tolerance)
         entry: >-
           bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
           .venv/bin/python tests/_jscpd_gate.py all --fail-on-empty
-          --min-lines 4 --min-tokens 39
+          --min-lines 4
+          --min-tokens 25
           --threshold 0
         language: system
         files: *service_trigger

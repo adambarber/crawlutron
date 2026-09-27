@@ -10,18 +10,28 @@ from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
 
 
-async def test_http_fetcher_offloads_build_pinned_request_to_thread(monkeypatch):
-    """_build_pinned_request (which performs a blocking socket.getaddrinfo) must
-    run in a worker thread, not the event loop thread."""
-    seen = {}
+def _thread_recording_spy(seen: dict, *, dead_port: bool = True):
+    """A ``_build_pinned_request`` stand-in that records the thread it ran on.
+
+    Both tests below assert one property -- the builder ran off the event-loop
+    thread -- so the recorder is one thing they share. Only what the spy hands
+    back differs: the fetcher test points the connection at a closed loopback
+    port so the fetch fails fast without real network work, and the wrapper test
+    echoes the caller's own URL back so it can assert the return value.
+    """
 
     def spy(url, headers, *, policy):
         seen["thread"] = threading.current_thread()
-        # Point the connection at a closed loopback port so the fetch fails fast
-        # without performing any real network work.
-        return "http://127.0.0.1:9/", dict(headers)
+        return ("http://127.0.0.1:9/" if dead_port else url), dict(headers)
 
-    monkeypatch.setattr(http_mod, "_build_pinned_request", spy)
+    return spy
+
+
+async def test_http_fetcher_offloads_build_pinned_request_to_thread(monkeypatch):
+    """_build_pinned_request (which performs a blocking socket.getaddrinfo) must
+    run in a worker thread, not the event loop thread."""
+    seen: dict = {}
+    monkeypatch.setattr(http_mod, "_build_pinned_request", _thread_recording_spy(seen))
 
     with pytest.raises(Exception):
         await _default_http_fetcher(
@@ -39,13 +49,9 @@ async def test_http_fetcher_offloads_build_pinned_request_to_thread(monkeypatch)
 async def test_build_pinned_request_async_runs_off_loop(monkeypatch):
     """The async wrapper itself dispatches to a thread (sanity check that the
     executor path is wired)."""
-    seen = {}
+    seen: dict = {}
 
-    def spy(url, headers, *, policy):
-        seen["thread"] = threading.current_thread()
-        return url, dict(headers)
-
-    monkeypatch.setattr(http_mod, "_build_pinned_request", spy)
+    monkeypatch.setattr(http_mod, "_build_pinned_request", _thread_recording_spy(seen, dead_port=False))
     result = await http_mod._build_pinned_request_async(
         "http://example.com/",
         {},

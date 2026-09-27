@@ -44,6 +44,7 @@ from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_resul
 from app.crawl.strategies.document import _default_document_text_extractor
 from app.crawl.strategies.pinned_transport import (
     _build_pinned_request,
+    _build_pinned_request_async,
     _check_ssrf_protection,
 )
 from app.json_safe import json_default
@@ -62,14 +63,20 @@ from app.validation import (
 logger = logging.getLogger(__name__)
 
 
-def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
+async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
     """SSRF-check + IP-pin ``url`` for browser navigation (F2).
 
     Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
     to the single resolved IP (preventing DNS-rebinding) while preserving the
     original ``Host`` header. Raises ``ValueError`` if the target is unsafe.
+
+    Async because pinning resolves DNS, and a render is not the only thing on the
+    loop: called synchronously this ran ``socket.getaddrinfo`` inline, so every
+    other in-flight crawl waited out the resolver once per rendered page. The
+    off-loop entry is the one derived from the pin rule, so this cannot acquire a
+    second, subtly different way of pinning.
     """
-    pinned_url, request_headers = _build_pinned_request(url, {}, policy=policy)
+    pinned_url, request_headers = await _build_pinned_request_async(url, {}, policy=policy)
     host = request_headers.get("Host")
     return pinned_url, ({"Host": host} if host else {})
 
@@ -654,7 +661,7 @@ class BrowserRenderer:
         # SSRF protection (F2): validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.
-        pinned_url, goto_headers = _resolve_browser_target(url, policy=policy)
+        pinned_url, goto_headers = await _resolve_browser_target(url, policy=policy)
 
         started = time.monotonic()
 

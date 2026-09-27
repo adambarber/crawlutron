@@ -7,8 +7,9 @@ retry that follows the render.
 """
 
 import asyncio
+from contextlib import contextmanager
 
-from _browser_doubles import BrowserFakePage
+from _browser_doubles import BrowserFakePage, build_pinned_renderer
 from _policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies import browser as browser_mod
@@ -30,21 +31,36 @@ class _FakePage:
         self.context = _FakeContext()
 
 
+@contextmanager
+def isolated_browser_cookies(url: str):
+    """Detach the module-global cookie slot for ``url``'s domain, then restore it.
+
+    ``_BROWSER_COOKIES_BY_DOMAIN`` is process-global and keyed by registrable
+    domain, so a test that harvests or refuses to harvest against
+    ``http://harvest-race.test/page`` is reading and writing state that outlives
+    it. The pop/else-restore dance was written out per test, and the ``else``
+    branch is exactly the part that goes missing: a test that pops the slot and
+    never puts it back leaves a real crawler's cookies deleted.
+    """
+    domain = registrable_domain(url)
+    old = browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
+    try:
+        yield domain
+    finally:
+        if old is None:
+            browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
+        else:
+            browser_mod._BROWSER_COOKIES_BY_DOMAIN[domain] = old
+
+
 class TestCookieHarvestCompletes:
     async def test_harvest_visible_to_immediate_retry(self):
         url = "http://harvest-race.test/page"
-        domain = registrable_domain(url)
-        old = browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
-        try:
+        with isolated_browser_cookies(url) as domain:
             renderer = BrowserRenderer()
             await renderer._harvest_session_cookies(_FakePage(), url)
             # The synchronous read the cffi retry performs must see cookies NOW.
             assert browser_mod.get_browser_cookies_for(domain) == "sess=abc123"
-        finally:
-            if old is None:
-                browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
-            else:
-                browser_mod._BROWSER_COOKIES_BY_DOMAIN[domain] = old
 
 
 class _WedgedContext:
@@ -59,14 +75,10 @@ class TestHarvestWaitBounded:
     whole per-URL budget; the finally-block caps the harvest wait."""
 
     async def test_render_finally_harvest_timeout(self, monkeypatch):
-        from _browser_doubles import BrowserFakePage, build_pinned_renderer
-
-        from app.crawl.strategies.browser import BrowserRenderer, RenderOptions
+        from app.crawl.strategies.browser import RenderOptions
 
         url = "http://example.com/page"
-        domain = registrable_domain(url)
-        old = browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
-        try:
+        with isolated_browser_cookies(url) as domain:
             page = BrowserFakePage()
             page.context = _WedgedContext()
             renderer = build_pinned_renderer(monkeypatch, page)
@@ -100,11 +112,6 @@ class TestHarvestWaitBounded:
             assert close_calls == [True]
             # No cookies were stored from the wedged context.
             assert browser_mod.get_browser_cookies_for(domain) is None
-        finally:
-            if old is None:
-                browser_mod._BROWSER_COOKIES_BY_DOMAIN.pop(domain, None)
-            else:
-                browser_mod._BROWSER_COOKIES_BY_DOMAIN[domain] = old
 
 
 class TestActionChainFailuresAreVisible:
