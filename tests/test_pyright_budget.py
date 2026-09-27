@@ -32,6 +32,7 @@ a declared dev dependency and its absence is an error.
 
 from __future__ import annotations
 
+import ast
 import json
 import pathlib
 import shutil
@@ -41,6 +42,7 @@ import tomllib
 from functools import cache
 
 import pytest
+from chokepoint_walks import app_trees, assert_fires_once, assert_stays_clean, assignments, nodes_of_type
 
 SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _THIS_MODULE = sys.modules[__name__]
@@ -243,4 +245,124 @@ def test_pyright_config_targets_the_running_interpreter() -> None:
         f"pyrightconfig.json targets Python {config.get('pythonVersion')}, but the "
         f"service venv is {running}. A type check against the wrong language "
         f"version is not a type check."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Keeping pyright's view of the models TRUE.
+#
+# This is not another check for annotation lies; it protects the checker itself.
+# Pyright 1.1.406 synthesises a pydantic model's __init__ from the annotation
+# and the assigned value, and reads a positional Field default as NO default --
+# so `etag: str | None = Field(None, description=...)` was reported as a
+# REQUIRED parameter while the interpreter accepted the call without it.
+# Verified directly rather than inferred: a probe constructing
+# `UnifiedCrawlResult(original_url=..., status=..., classification=...)` drew
+# fifteen "Arguments missing" errors from a model where thirty-two of its fields
+# have defaults.
+#
+# The consequence was architectural, not cosmetic. A direct `Model(...)` call
+# drew a wall of false reportCallIssue errors and a dict literal drew none,
+# because nothing type-checks a dict against a model -- so model construction
+# routed through `dict[str, Any]` throughout the service. The dicts were the
+# load-bearing workaround for a checker that misreported the signature, and a
+# dict is exactly where a key can be dropped without a trace. That is how
+# `metadata={}` shipped a /v1/render whose PageMetadata.title no input could
+# fill: four of the six keys the browser worker produced were filtered away by
+# name, and every field of the model has a default, so a dict omitting one was a
+# valid dict.
+#
+# The declared default therefore has to sit where a checker can see it:
+# `Annotated[T, Field(description=...)] = default`, or a bare `= default` when
+# the Field call carries nothing else. Both produce a byte-identical OpenAPI
+# schema, which is why this is a pure type-fidelity change and not a wire change.
+#
+# Without this gate, one comfortable `Field(None, description=...)` re-breaks the
+# checker's view of every model in the service and floods a BUDGET=0 gate with
+# findings that are all wrong -- the state this codebase was in, with six
+# `# pyright: ignore` suppressions in pyrightconfig.json's shadow.
+# ---------------------------------------------------------------------------
+
+
+def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | None = None) -> list[str]:
+    """``x: T = Field(<default>, ...)`` sites, which pyright reads as required.
+
+    Ellipsis (``Field(..., ...)``) is excluded because those fields really are
+    required and pyright is right about them. ``default_factory=`` is excluded
+    because pyright resolves the factory, so its six documented suppressions are
+    a different question from a default it cannot see.
+    """
+    found: list[str] = []
+    for _node, target, value in assignments(nodes_of_type(tree, ast.AST)):
+        if not isinstance(value, ast.Call):
+            continue
+        if not (isinstance(value.func, ast.Name) and value.func.id == "Field"):
+            continue
+        if any(key.arg == "default_factory" for key in value.keywords):
+            continue
+        if value.args:
+            default = value.args[0]
+        else:
+            default = next((key.value for key in value.keywords if key.arg == "default"), None)
+        if default is None or (isinstance(default, ast.Constant) and default.value is ...):
+            continue
+        where = f"{path.name}:" if path is not None else ""
+        found.append(
+            f"{where}{ast.unparse(target)} declares its default in Field()'s first "
+            f"positional slot; pyright reads that as no default, so the field looks "
+            f"required to every constructor call. Write "
+            f"Annotated[T, Field(...)] = <default>, or a bare = <default> when "
+            f"Field carries nothing else."
+        )
+    return found
+
+
+def test_pydantic_defaults_stay_where_a_checker_can_see_them() -> None:
+    """Whole-tree, not just api_models.py: any module may declare a model."""
+    offenders: list[str] = []
+    for path, tree in app_trees():
+        offenders.extend(_positional_field_default_offenders(tree, path))
+    assert not offenders, (
+        f"{len(offenders)} pydantic fields declare their default in a position "
+        f"pyright cannot see, which makes them look required to every "
+        f"constructor call and is what pushed this codebase's model construction "
+        f"into untyped dicts.\n" + "\n".join(f"  {why}" for why in offenders)
+    )
+
+
+def test_pydantic_default_visibility_detector_bites() -> None:
+    """The red half, and the clean half -- a detector that cannot fail is a lie."""
+    positional = (
+        "from pydantic import BaseModel, Field\n"
+        "class M(BaseModel):\n"
+        '    etag: str | None = Field(None, description="Origin ETag.")\n'
+    )
+    keyword = (
+        "from pydantic import BaseModel, Field\n"
+        "class M(BaseModel):\n"
+        '    robots: bool = Field(default=True, description="Honor robots.txt.")\n'
+    )
+    assert_fires_once(_positional_field_default_offenders, {positional: "looks required"}, pathlib.Path("bites.py"))
+    assert_fires_once(_positional_field_default_offenders, {keyword: "looks required"}, pathlib.Path("bites.py"))
+    assert_stays_clean(
+        _positional_field_default_offenders,
+        (
+            # The form the fix produces: the default sits where pyright reads it.
+            "from typing import Annotated\n"
+            "from pydantic import BaseModel, Field\n"
+            "class M(BaseModel):\n"
+            '    etag: Annotated[str | None, Field(description="Origin ETag.")] = None\n'
+            "    plain: str | None = None\n",
+            # Ellipsis is really required, and pyright is right about it.
+            "from pydantic import BaseModel, Field\n"
+            "class M(BaseModel):\n"
+            '    url: str = Field(..., description="Root URL.")\n',
+            # default_factory is resolved by pyright, so it is a different
+            # question and must not be swept up in this one.
+            "from pydantic import BaseModel, Field\n"
+            "class M(BaseModel):\n"
+            "    links: list[str] = Field(default_factory=list, description='d')\n",
+            "class M:\n    a = 1\n",
+        ),
+        path=pathlib.Path("bites.py"),
     )

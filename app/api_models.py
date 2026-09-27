@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar, Final, Literal, Protocol, TypeVar
+from typing import Annotated, Any, ClassVar, Final, Literal, Protocol, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -106,17 +106,15 @@ class DiscoveryConfig(BaseModel):
     Only recognized keys are accepted; extra keys are rejected.
     """
 
-    robots: bool = Field(
-        True,
+    robots: Annotated[bool, Field(
         description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow patterns.",
-    )
-    sitemaps: bool = Field(
-        True,
+    )] = True
+    sitemaps: Annotated[bool, Field(
         description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common locations.",
-    )
-    feeds: bool = Field(
-        True, description='Detect RSS/Atom/JSON Feed links via <link rel="alternate"> and common feed paths.'
-    )
+    )] = True
+    feeds: Annotated[bool, Field(
+        description='Detect RSS/Atom/JSON Feed links via <link rel="alternate"> and common feed paths.',
+    )] = True
 
     model_config = ConfigDict(extra="forbid")
 
@@ -131,12 +129,12 @@ class FetchValidators(BaseModel):
     full-fetch cost on unchanged pages.
     """
 
-    if_none_match: str | None = Field(
-        None, description="ETag from a previous crawl result; sent as If-None-Match."
-    )
-    if_modified_since: str | None = Field(
-        None, description="Last-Modified date from a previous crawl result; sent as If-Modified-Since."
-    )
+    if_none_match: Annotated[str | None, Field(
+        description="ETag from a previous crawl result; sent as If-None-Match.",
+    )] = None
+    if_modified_since: Annotated[str | None, Field(
+        description="Last-Modified date from a previous crawl result; sent as If-Modified-Since.",
+    )] = None
 
 
 class ContentValidators(BaseModel):
@@ -146,69 +144,61 @@ class ContentValidators(BaseModel):
     ``if_modified_since`` on a later request to revalidate cheaply.
     """
 
-    etag: str | None = Field(None, description="Origin ETag for the final representation, if provided.")
-    last_modified: str | None = Field(None, description="Origin Last-Modified date, if provided.")
+    etag: Annotated[str | None, Field(
+        description="Origin ETag for the final representation, if provided.",
+    )] = None
+    last_modified: Annotated[str | None, Field(description="Origin Last-Modified date, if provided.")] = None
 
 
 class CrawlPolicyLimits(BaseModel):
-    timeout_seconds: int = Field(
-        DEFAULT_HTTP_TIMEOUT_SECONDS,
+    timeout_seconds: Annotated[int, Field(
         ge=1,
         le=120,
         description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.",
-    )
-    max_retries: int = Field(
-        DEFAULT_MAX_RETRIES,
+    )] = DEFAULT_HTTP_TIMEOUT_SECONDS
+    max_retries: Annotated[int, Field(
         ge=0,
         le=MAX_RETRIES,
         description="Retry count for transient failures inside a selected strategy. Default: 2. Retries do not bypass explicit denial, CAPTCHA, WAF, login, or paywall classifications.",
-    )
-    challenge_wait_seconds: int = Field(
-        DEFAULT_CHALLENGE_WAIT_SECONDS,
+    )] = DEFAULT_MAX_RETRIES
+    challenge_wait_seconds: Annotated[int, Field(
         ge=0,
         le=120,
         description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.",
-    )
-    max_discovered_links: int = Field(
-        DEFAULT_MAX_DISCOVERED_LINKS,
+    )] = DEFAULT_CHALLENGE_WAIT_SECONDS
+    max_discovered_links: Annotated[int, Field(
         ge=0,
         le=MAX_DISCOVERED_LINKS,
         description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own cross-run frontier queueing, dedupe, persistence, and recursion (the service collapses URLs that normalize to the same page within a request).",
-    )
-    respect_robots: bool = Field(
-        True,
+    )] = DEFAULT_MAX_DISCOVERED_LINKS
+    respect_robots: Annotated[bool, Field(
         description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.",
-    )
-    max_depth: int = Field(
-        0,
+    )] = True
+    max_depth: Annotated[int, Field(
         ge=0,
         le=20,
         description="Bounded recursive crawl depth. 0 means a single-page crawl for both /v1/crawl and /v1/jobs. Positive values admit in-scope, robots-allowed links through that depth; durable jobs persist each frontier entry's depth.",
-    )
-    max_pages: int = Field(
-        0,
+    )] = 0
+    max_pages: Annotated[int, Field(
         ge=0,
         le=2000,
         description="Total-page bound. For /v1/crawl, 0 selects the bounded service default. For /v1/jobs, 0 or omission disables the page cap; positive values cap canonical page identities across admission, recovery, and execution. A positive cap that truncates eligible queued or discovered work sets cap_truncated; already-admitted in-flight work is preserved and recorded as cap_overcommitted.",
-    )
-    max_rps: float = Field(
-        0.0,
+    )] = 0
+    max_rps: Annotated[float, Field(
         ge=0.0,
         le=100.0,
         description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.",
-    )
-    max_content_length_bytes: int | None = Field(
-        None,
+    )] = 0.0
+    max_content_length_bytes: Annotated[int | None, Field(
         ge=0,
         le=MAX_CONTENT_LENGTH_BYTES,
         description="Maximum content size in bytes per response. Omit (recommended) to let the service scale the per-page cap against its RAM budget and concurrency; set an explicit value only when a host needs a hard cap regardless of parallelism. Capped at MAX_CONTENT_LENGTH_BYTES.",
-    )
-    total_url_budget_seconds: float = Field(
-        DEFAULT_TOTAL_URL_BUDGET_SECONDS,
+    )] = None
+    total_url_budget_seconds: Annotated[float, Field(
         ge=0.1,
         le=MAX_TOTAL_URL_BUDGET_SECONDS,
         description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit URL that exceeds this is failed as network_error instead of holding a concurrency slot. Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs should keep this generous).",
-    )
+    )] = DEFAULT_TOTAL_URL_BUDGET_SECONDS
 
 
 class Credential(BaseModel):
@@ -223,9 +213,21 @@ class Credential(BaseModel):
     """
 
     kind: Literal["bearer", "basic"]
-    token: str | None = Field(None, min_length=1, max_length=512, description="Bearer token (kind=bearer).")
-    username: str | None = Field(None, min_length=1, max_length=256, description="Basic username (kind=basic).")
-    password: str | None = Field(None, min_length=1, max_length=512, description="Basic password (kind=basic).")
+    token: Annotated[str | None, Field(
+        min_length=1,
+        max_length=512,
+        description="Bearer token (kind=bearer).",
+    )] = None
+    username: Annotated[str | None, Field(
+        min_length=1,
+        max_length=256,
+        description="Basic username (kind=basic).",
+    )] = None
+    password: Annotated[str | None, Field(
+        min_length=1,
+        max_length=512,
+        description="Basic password (kind=basic).",
+    )] = None
 
     @model_validator(mode="after")
     def _match_kind(self) -> Credential:
@@ -252,10 +254,9 @@ class CrawlPolicy(BaseModel):
         "x-real-ip": "origin-side identity headers must not be caller-controlled",
     }
 
-    schema_version: str = Field(
-        POLICY_SCHEMA_VERSION,
+    schema_version: Annotated[str, Field(
         description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.",
-    )
+    )] = POLICY_SCHEMA_VERSION
     strategies: list[CrawlStrategy] = Field(
         default_factory=lambda: [
             CrawlStrategy.HTTP_DECLARED_CRAWLER,
@@ -266,10 +267,9 @@ class CrawlPolicy(BaseModel):
         min_length=1,
         description="Ordered fetch execution chain. Default: HTTP_DECLARED_CRAWLER, then HTTP_CFFI_IMPERSONATE, then BROWSER_HEADLESS, then BROWSER_HEADED_WARMED. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available fetch strategies: HTTP_DECLARED_CRAWLER (transparent direct HTTP with the service's declared crawler identity), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via curl_cffi with browser-like headers for WAF/Cloudflare bypass), BROWSER_HEADLESS (headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
     )
-    extraction: CrawlExtractionMethod = Field(
-        CrawlExtractionMethod.FULL,
+    extraction: Annotated[CrawlExtractionMethod, Field(
         description="Output/parsing pipeline applied to the content the selected fetch strategy retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
-    )
+    )] = CrawlExtractionMethod.FULL
     limits: CrawlPolicyLimits = Field(
         default_factory=CrawlPolicyLimits,  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
         description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.",
@@ -291,22 +291,18 @@ class CrawlPolicy(BaseModel):
         default_factory=dict,
         description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), benign cookie jar hints, and auto_accept_cookie_consent (default false; when true the browser may click consent banners). Viewport changes Firefox window size; reduced resource mode disables images.",
     )
-    discovery: DiscoveryConfig | None = Field(
-        None,
+    discovery: Annotated[DiscoveryConfig | None, Field(
         description="Optional discovery toggles. Set robots, sitemaps, or feeds true to enable that source; omitted or null leaves the stored discovery map empty.",
-    )
-    scope_regex: str | None = Field(
-        None,
+    )] = None
+    scope_regex: Annotated[str | None, Field(
         description="Optional regex applied to each canonical discovered-link identity before recursive frontier admission. Non-matching links may still be reported in discovered_links but are not followed by /v1/crawl or /v1/jobs.",
-    )
-    css_selector: str | None = Field(
-        None,
+    )] = None
+    css_selector: Annotated[str | None, Field(
         description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.",
-    )
-    xpath: str | None = Field(
-        None,
+    )] = None
+    xpath: Annotated[str | None, Field(
         description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
-    )
+    )] = None
 
     @field_validator("scope_regex")
     @classmethod
@@ -435,10 +431,10 @@ class _SingleUrlSourceRequest(BaseModel):
     render"), which is not a difference worth a re-declaration per model.
     """
 
-    url: str | None = Field(None, description="Single public HTTP(S) URL. Use either url or urls.")
-    urls: list[str] | None = Field(
-        None, description="Batch of public HTTP(S) URLs. Use either url or urls."
-    )
+    url: Annotated[str | None, Field(description="Single public HTTP(S) URL. Use either url or urls.")] = None
+    urls: Annotated[list[str] | None, Field(
+        description="Batch of public HTTP(S) URLs. Use either url or urls.",
+    )] = None
 
     @model_validator(mode="after")
     def _require_url_source(self):
@@ -446,9 +442,11 @@ class _SingleUrlSourceRequest(BaseModel):
 
 
 class CrawlRequest(_SingleUrlSourceRequest):
-    url: str | None = Field(  # inherited from _SingleUrlSourceRequest
-        None, description="Single public HTTP(S) URL to crawl. Use either url or urls."
-    )
+    url: Annotated[str | None, Field(
+        # inherited from _SingleUrlSourceRequest
+        None,
+        description="Single public HTTP(S) URL to crawl. Use either url or urls.",
+    )] = None
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy, description="Resolved caller-provided policy/execution plan."  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
     )
@@ -458,18 +456,15 @@ class CrawlRequest(_SingleUrlSourceRequest):
         "Keys may be the original or normalized URL. Matching URLs are fetched with "
         "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",
     )
-    async_mode: bool = Field(
-        False,
+    async_mode: Annotated[bool, Field(
         description="When true, accept immediately (202) and run the crawl in the background. Results are persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result is delivered there on completion.",
-    )
-    webhook_url: str | None = Field(
-        None,
+    )] = False
+    webhook_url: Annotated[str | None, Field(
         description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.",
-    )
-    output_format: str | None = Field(
-        None,
+    )] = None
+    output_format: Annotated[str | None, Field(
         description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
-    )
+    )] = None
 
     @model_validator(mode="after")  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
     def _require_url_source(self):
@@ -496,7 +491,9 @@ class MapRequest(BaseModel):
 class SiteMapResponse(BaseModel):
     """Response for ``POST /v1/map``."""
 
-    url: str | None = Field(None, description="Root URL (final_url or original_url) of the mapping crawl.")
+    url: Annotated[str | None, Field(
+        description="Root URL (final_url or original_url) of the mapping crawl.",
+    )] = None
     links: list[str] = Field(
         default_factory=list, description="In-page discovered links (sorted, de-duplicated)."
     )
@@ -522,14 +519,13 @@ class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(..., min_length=1, max_length=500, description="Web search query.")
-    limit: int | None = Field(
-        None,
+    limit: Annotated[int | None, Field(
         ge=1,
         le=100,
         description="Maximum results to return. Defaults to the server setting "
         "BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT and is clamped to "
         "BROWSER_CRAWLER_SEARCH_LIMIT_MAX.",
-    )
+    )] = None
 
 
 class SearchResultItem(BaseModel):
@@ -539,13 +535,15 @@ class SearchResultItem(BaseModel):
         description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service."
     )
     title: str = Field(description="Result title from the search engine.")
-    description: str = Field("", description="Result snippet from the search engine.")
+    description: Annotated[str, Field("", description="Result snippet from the search engine.")] = ''
 
 
 class SearchResponse(BaseModel):
     """Response for ``POST /v1/search`` (LLM-friendly envelope)."""
 
-    success: bool = Field(True, description="True when the provider responded and results were shaped.")
+    success: Annotated[bool, Field(
+        description="True when the provider responded and results were shaped.",
+    )] = True
     query: str = Field(description="Echo of the submitted query.")
     provider: str = Field(description="Search provider that produced the results.")
     limit: int = Field(description="Number of results returned.")
@@ -557,13 +555,19 @@ class RenderOptionsRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    timeout_seconds: int | None = Field(None, description="Per-render navigation timeout in seconds.")
-    max_retries: int | None = Field(None, description="Maximum retries for a transient render failure.")
-    respect_robots: bool | None = Field(
-        None, description="Whether to honor robots.txt for the render target."
-    )
-    include_html: bool | None = Field(None, description="Include the rendered HTML in the result.")
-    include_text: bool | None = Field(None, description="Include extracted visible text in the result.")
+    timeout_seconds: Annotated[int | None, Field(
+        description="Per-render navigation timeout in seconds.",
+    )] = None
+    max_retries: Annotated[int | None, Field(
+        description="Maximum retries for a transient render failure.",
+    )] = None
+    respect_robots: Annotated[bool | None, Field(
+        description="Whether to honor robots.txt for the render target.",
+    )] = None
+    include_html: Annotated[bool | None, Field(description="Include the rendered HTML in the result.")] = None
+    include_text: Annotated[bool | None, Field(
+        description="Include extracted visible text in the result.",
+    )] = None
 
 
 class RenderRequest(_SingleUrlSourceRequest):
@@ -571,12 +575,14 @@ class RenderRequest(_SingleUrlSourceRequest):
 
     model_config = ConfigDict(extra="ignore")
 
-    url: str | None = Field(  # inherited from _SingleUrlSourceRequest
-        None, description="Single public HTTP(S) URL to render. Use either url or urls."
-    )
-    options: RenderOptionsRequest | None = Field(
-        None, description="Browser render options; omitted fields use server defaults."
-    )
+    url: Annotated[str | None, Field(
+        # inherited from _SingleUrlSourceRequest
+        None,
+        description="Single public HTTP(S) URL to render. Use either url or urls.",
+    )] = None
+    options: Annotated[RenderOptionsRequest | None, Field(
+        description="Browser render options; omitted fields use server defaults.",
+    )] = None
 
 
 class ClassificationEvidence(BaseModel):
@@ -585,7 +591,10 @@ class ClassificationEvidence(BaseModel):
     source: str = Field(
         description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or http_status."
     )
-    context: str = Field("", description="Short normalized context around the matched signature.")
+    context: Annotated[str, Field(
+        "",
+        description="Short normalized context around the matched signature.",
+    )] = ''
 
 
 class DiscoveredLink(BaseModel):
@@ -593,7 +602,7 @@ class DiscoveredLink(BaseModel):
     normalized_url: str = Field(
         description="Absolute public HTTP(S) URL resolved against the selected page final URL."
     )
-    text: str = Field("", description="Visible anchor text after whitespace normalization.")
+    text: Annotated[str, Field("", description="Visible anchor text after whitespace normalization.")] = ''
     rel: list[str] = Field(default_factory=list, description="Anchor rel tokens, when present.")
     source_url: str = Field(description="Final page URL where this link was discovered.")
     host: str = Field(description="Host for the normalized URL.")
@@ -608,14 +617,14 @@ class StrategyAttempt(BaseModel):
     strategy: CrawlStrategy | None = Field(description="Strategy attempted for this URL, or null when none was.")
     status: CrawlStatus = Field(description="Attempt-level status.")
     classification: CrawlClassification = Field(description="Attempt-level classification.")
-    http_status: int | None = Field(
-        None, description="HTTP status observed by this strategy, when available."
-    )
-    content_type: str | None = Field(None, description="Observed content type, when available.")
+    http_status: Annotated[int | None, Field(
+        description="HTTP status observed by this strategy, when available.",
+    )] = None
+    content_type: Annotated[str | None, Field(description="Observed content type, when available.")] = None
     elapsed_ms: int = Field(description="Attempt elapsed time in milliseconds.")
-    error: str | None = Field(
-        None, description="Stable machine-readable error detail for this attempt, if any."
-    )
+    error: Annotated[str | None, Field(
+        description="Stable machine-readable error detail for this attempt, if any.",
+    )] = None
 
 
 class PageMetadata(BaseModel):
@@ -644,50 +653,61 @@ class PageMetadata(BaseModel):
 class UnifiedCrawlResult(BaseModel):
     # 1. Identity & Routing
     original_url: str = Field(description="Caller-provided URL before normalization.")
-    normalized_url: str | None = Field(None, description="Public normalized URL used for execution.")
-    final_url: str | None = Field(None, description="Final URL after redirects or browser navigation.")
+    normalized_url: Annotated[str | None, Field(
+        description="Public normalized URL used for execution.",
+    )] = None
+    final_url: Annotated[str | None, Field(
+        description="Final URL after redirects or browser navigation.",
+    )] = None
     # 2. Execution Status
     status: CrawlStatus = Field(description="Overall per-URL status (success, blocked, failed, etc.).")
     classification: CrawlClassification = Field(description="Overall per-URL classification.")
-    selected_strategy: CrawlStrategy | None = Field(
-        None, description="Strategy that produced the selected result."
-    )
+    selected_strategy: Annotated[CrawlStrategy | None, Field(
+        description="Strategy that produced the selected result.",
+    )] = None
     attempted_strategies: list[StrategyAttempt] = Field(
         default_factory=list, description="Ordered per-strategy attempt history."
     )
-    error: str | None = Field(None, description="Stable machine-readable error detail, if any.")
+    error: Annotated[str | None, Field(description="Stable machine-readable error detail, if any.")] = None
     # 3. LLM Output (The "Meat")
-    markdown: str | None = Field(
-        None, description="Cleaned page content in Markdown format for LLM consumption."
-    )
+    markdown: Annotated[str | None, Field(
+        description="Cleaned page content in Markdown format for LLM consumption.",
+    )] = None
     metadata: PageMetadata = Field(
         default_factory=PageMetadata, description="Extracted OpenGraph, Twitter, and JSON-LD metadata."
     )
     # 4. Raw Data & Evidence (For debugging & non-LLM pipelines)
-    html: str | None = Field(None, description="Raw HTML/body evidence when requested and available.")
-    text: str | None = Field(None, description="Extracted text evidence (pre-markdown) when available.")
-    quality_score: float = Field(0.0, ge=0.0, le=1.0, description="Heuristic content quality score.")
+    html: Annotated[str | None, Field(
+        description="Raw HTML/body evidence when requested and available.",
+    )] = None
+    text: Annotated[str | None, Field(
+        description="Extracted text evidence (pre-markdown) when available.",
+    )] = None
+    quality_score: Annotated[float, Field(
+        ge=0.0,
+        le=1.0,
+        description="Heuristic content quality score.",
+    )] = 0.0
     classification_evidence: list[ClassificationEvidence] = Field(default_factory=list)
     # 5. HTTP Details
-    http_status: int | None = Field(None)
+    http_status: int | None = None
     headers: dict[str, str] = Field(default_factory=dict)
-    content_type: str | None = Field(None)
-    extraction_method: str | None = Field(
-        None, description="http_html, dom_text, pdf_text, trafilatura_extract, etc."
-    )
+    content_type: str | None = None
+    extraction_method: Annotated[str | None, Field(
+        description="http_html, dom_text, pdf_text, trafilatura_extract, etc.",
+    )] = None
     # 6. Discovery & Diagnostics
     diagnostics: dict[str, Any] = Field(
         default_factory=dict,
         description="robots, sitemaps, frames, forms, js_endpoints, intercepted_xhr, etc.",
     )
-    discovered_link_count: int = Field(0, ge=0)
-    discovered_links_truncated: bool = Field(False)
+    discovered_link_count: Annotated[int, Field(ge=0)] = 0
+    discovered_links_truncated: bool = False
     discovered_links: list[DiscoveredLink] = Field(default_factory=list)
-    next_page_url: str | None = Field(None, description="Auto-detected pagination URL, if found.")
-    validators: ContentValidators | None = Field(
-        None,
+    next_page_url: Annotated[str | None, Field(description="Auto-detected pagination URL, if found.")] = None
+    validators: Annotated[ContentValidators | None, Field(
         description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified result.",
-    )
+    )] = None
 
 
 class UnifiedCrawlResponse(BaseModel):
@@ -822,10 +842,10 @@ class JobStatusResponse(BaseModel):
     frontier_size: int
     visited_size: int
     results_count: int
-    cap_truncated: bool = Field(
+    cap_truncated: Annotated[bool, Field(
         default=False,
         description="True only when a positive job max_pages cap refused or truncated eligible queued or discovered pages. Ordinary BATCH_SIZE chunking does not set it; already-admitted in-flight overcommit is reported separately in stats.cap_overcommitted.",
-    )
+    )] = False
     stats: dict[str, int] = Field(
         default_factory=dict,
         description="Job counters; cap_truncated marks eligible queued/discovered work refused by a positive cap, while cap_overcommitted marks already-admitted in-flight work preserved beyond that cap.",

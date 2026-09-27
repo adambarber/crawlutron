@@ -17,11 +17,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import urljoin
 
-from app.api_models import CrawlStatus, PageMetadata, UnifiedCrawlResponse, UnifiedCrawlResult
+from app.api_models import (
+    CrawlStatus,
+    PageMetadata,
+    StrategyAttempt,
+    UnifiedCrawlResponse,
+    UnifiedCrawlResult,
+)
 from app.constants import CrawlClassification
 from app.validation import HostPolicy, safe_public_url_or_none
 
@@ -161,61 +167,81 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
     )
 
 
-def render_result_to_unified(item: dict[str, Any]) -> dict[str, Any]:
-    """Adapt a browser ``CrawlResult`` dict into the unified result shape.
+#: Browser ``CrawlResult.metadata`` keys the wire model carries in a declared
+#: field, so they are read out of ``diagnostics`` rather than duplicated there.
+#: This set and :data:`_RENDER_METADATA_AS_TOP_LEVEL` together name EVERY key
+#: the browser worker emits; anything else in ``metadata`` passes through. The
+#: pair is the whole browser->wire mapping, so a new worker key lands in
+#: ``diagnostics`` by default instead of being filtered away by name.
+_RENDER_METADATA_AS_MODEL_FIELD = frozenset({"title"})
+_RENDER_METADATA_AS_TOP_LEVEL = frozenset({"extraction_method"})
 
-    ``/v1/render`` reuses the same browser worker as the universal crawl path,
-    so its output is normalized through the identical ``build_unified_result``
-    pipeline. Browser-specific discovery (intercepted XHR, screenshots) lives in
-    the result ``metadata`` dict and is carried into ``diagnostics`` so the
-    unified schema stays the single source of truth for both endpoints.
+
+def _render_diagnostics(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    """What the browser worker's ``metadata`` becomes on the render wire.
+
+    Every key survives: the two the model carries in a declared field are read
+    out of here, the rest pass through untouched. Naming the two exclusions by
+    the field that holds them -- rather than excluding five keys and re-adding
+    one -- is what makes a dropped key visible, and it is why a new worker key
+    lands in ``diagnostics`` by default instead of being filtered away.
     """
-    metadata = item.get("metadata") or {}
     diagnostics: dict[str, Any] = {
         key: value
         for key, value in metadata.items()
-        if key not in {"title", "content_length", "browser_reused", "challenge_resolved", "extraction_method"}
+        if key not in _RENDER_METADATA_AS_MODEL_FIELD | _RENDER_METADATA_AS_TOP_LEVEL
     }
-    diagnostics.setdefault("browser_profile", {})
-    # The browser mode that actually served this render, threaded from the pool
-    # by the worker. Falls back to None -- never an invented member -- when no
-    # browser produced the item (a policy refusal, a worker that never ran).
+    diagnostics["browser_profile"] = diagnostics.get("browser_profile") or {}
+    return diagnostics
+
+
+def render_result_to_unified(item: dict[str, Any]) -> UnifiedCrawlResult:
+    """Adapt a browser ``CrawlResult`` into the unified result model.
+
+    Returns the model rather than a dict shaped like one. Every field of
+    ``UnifiedCrawlResult`` carries a default, so a dict that omitted one was a
+    valid dict and no checker could see the omission -- which is how
+    ``metadata={}`` shipped a ``/v1/render`` whose ``PageMetadata.title`` no
+    input could fill. The constructor names the field set, so the fields this
+    endpoint genuinely has nothing to say about are left at their defaults
+    rather than transcribed here.
+    """
+    metadata = item.get("metadata") or {}
+    status = _coerce_status(item["status"])
+    classification = _coerce_classification(item["classification"])
     selected_strategy = item.get("selected_strategy")
-    return {
-        "original_url": item["url"],
-        "normalized_url": item["url"],
-        "final_url": item.get("final_url"),
-        "status": item["status"],
-        "classification": item["classification"],
-        "selected_strategy": selected_strategy,
-        "attempted_strategies": [
-            {
-                "strategy": selected_strategy,
-                "status": item["status"],
-                "classification": item["classification"],
-                "http_status": None,
-                "content_type": None,
-                "elapsed_ms": int(item.get("elapsed_ms", 0)),
-                "error": item.get("error"),
-            }
+    return UnifiedCrawlResult(
+        original_url=item["url"],
+        normalized_url=item["url"],
+        final_url=item.get("final_url"),
+        status=status,
+        classification=classification,
+        selected_strategy=selected_strategy,
+        attempted_strategies=[
+            StrategyAttempt(
+                strategy=selected_strategy,
+                status=status,
+                classification=classification,
+                http_status=None,
+                content_type=None,
+                elapsed_ms=int(item.get("elapsed_ms", 0)),
+                error=item.get("error"),
+            )
         ],
-        "error": item.get("error"),
-        "markdown": None,
-        "metadata": {},
-        "html": item.get("html"),
-        "text": item.get("text"),
-        "quality_score": 1.0 if item["status"] == "success" else 0.0,
-        "classification_evidence": [],
-        "http_status": None,
-        "headers": {},
-        "content_type": None,
-        "extraction_method": metadata.get("extraction_method"),
-        "diagnostics": diagnostics,
-        "discovered_link_count": 0,
-        "discovered_links_truncated": False,
-        "discovered_links": [],
-        "next_page_url": None,
-    }
+        error=item.get("error"),
+        metadata=PageMetadata(title=metadata.get("title"), source_url=item["url"]),
+        html=item.get("html"),
+        text=item.get("text"),
+        quality_score=1.0 if item["status"] == "success" else 0.0,
+        extraction_method=metadata.get("extraction_method"),
+        diagnostics=_render_diagnostics(metadata),
+        # The browser worker surfaces no origin validators. The field is typed
+        # ``ContentValidators | None`` and has no model default, so this was a
+        # real omission until the adapter started constructing the model: the
+        # old dict path let ``build_unified_result`` supply the fallback
+        # silently, and pyright only saw it once the constructor was explicit.
+        validators=None,
+    )
 
 
 def frontier_link_url(
@@ -291,7 +317,7 @@ def build_unified_crawl_response(
 
 
 def _shape_all(
-    results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    results: list[dict[str, Any]], *, adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None
 ) -> list[UnifiedCrawlResult]:
     """Shape a whole batch in one pass (the worker-thread side of
     :func:`abuild_unified_crawl_response`).
@@ -303,7 +329,11 @@ def _shape_all(
 
     ``adapt`` is the optional per-item transform a pipeline applies before the
     unified shaping (``/v1/render`` maps its browser-result dicts through
-    :func:`render_result_to_unified`). It runs INSIDE the same per-item guard,
+    :func:`render_result_to_unified`). It is typed as a transform INTO the
+    model rather than into a dict-shaped one, so an adapter cannot return a
+    partial item for ``build_unified_result`` to reinterpret -- that round trip
+    through a dict is where a required field could be omitted without any
+    checker noticing. It runs INSIDE the same per-item guard,
     so an item the adapter cannot read degrades to a terminal failure for that
     item instead of failing the batch -- the same resilience ``/v1/crawl``
     already had, now extended to the render endpoint's adaptation step, which
@@ -312,8 +342,7 @@ def _shape_all(
     shaped: list[UnifiedCrawlResult] = []
     for item in results:
         try:
-            adapted = adapt(item) if adapt is not None else item
-            shaped.append(build_unified_result(adapted))
+            shaped.append(adapt(item) if adapt is not None else build_unified_result(item))
         except Exception:
             # Log loudly: the original bug was a bare except that swallowed
             # the exception, degraded the item to site_error, and left no
@@ -360,30 +389,13 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
         # hardcoded status above.
         classification=CrawlClassification.site_error,
         error=peeked.get("error") or "result_shaping_failed",
-        # The remaining fields are declared without defaults in the pydantic
-        # model even though the runtime treats them as optional (a bare
-        # ``Field()`` accepts None), so state them explicitly: the item is
-        # already malformed, the only honest payload is "nothing was extracted".
-        selected_strategy=None,
-        attempted_strategies=[],
-        markdown=None,
-        html=None,
-        text=None,
-        quality_score=0.0,
-        http_status=None,
-        content_type=None,
-        extraction_method=None,
-        discovered_link_count=0,
-        discovered_links_truncated=False,
-        next_page_url=None,
-        validators=None,
     )
 
 
 async def abuild_unified_crawl_response(
     results: list[dict[str, Any]], *, request_id: str = "", policy_schema_version: str = "",
     success: bool = True, submitted_count: int | None = None,
-    adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None,
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
@@ -401,7 +413,7 @@ async def abuild_unified_crawl_response(
 
 
 async def _aunified_response_from_result(
-    result: dict[str, Any], *, adapt: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    result: dict[str, Any], *, adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None
 ) -> UnifiedCrawlResponse:
     """The one adapter from a raw producer envelope to the unified response.
 
