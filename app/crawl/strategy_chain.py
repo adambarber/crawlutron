@@ -16,6 +16,8 @@ from app.crawl.result_helpers import TerminalResult, _engine_result_from_excepti
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import (
+    Classification,
+    CrawlError,
     CrawlStrategyAttempt,
     CrawlStrategyName,
     CrawlWorker,
@@ -76,103 +78,175 @@ def _starting_strategies(
     return ladder
 
 
-async def _run_http_strategy(
-    context: _ChainContext,
-    strategy: CrawlStrategyName,
-) -> EngineCrawlResult:
-    fetcher = context.cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else context.http_fetcher
-    return await _http_strategy_result(
-        original_url=context.original_url,
-        normalized_url=context.normalized_url,
-        strategy=strategy,
-        policy=context.policy,
-        http_fetcher=fetcher,
-        cache=context.cache,
-        content_cache=context.content_cache,
-        caller_validators=context.caller_validators,
-        robots_sitemaps=context.robots_sitemaps,
-        host_policy=context.host_policy,
-        global_concurrency=context.global_concurrency,
-    )
+@dataclass
+class _ChainRun:
+    """One walk of the ladder: the target's context plus this run's own state.
 
+    ``context`` and ``state`` were threaded through every step as a pair, so each
+    helper opened with the same two parameters, the pair was re-spelled at every
+    call site, and nothing in any signature said the two belonged together -- a
+    state from another walk was a legal argument. They are the two halves of one
+    run, so they are one value and the steps are its methods. That is also what
+    lets :meth:`terminal_failure` read the target's identity off ``self`` instead
+    of having each of its call sites declare it again.
+    """
 
-async def _run_browser_strategy(
-    context: _ChainContext,
-    strategy: CrawlStrategyName,
-) -> EngineCrawlResult:
-    if context.browser_worker is None:
+    context: _ChainContext
+    state: _ChainState
+
+    def terminal_failure(
+        self,
+        strategy: CrawlStrategyName,
+        *,
+        classification: Classification,
+        error: CrawlError,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> EngineCrawlResult:
+        """A classified failed result for a step that never reached a strategy.
+
+        The two pre-chain refusals -- no renderer available, and a strategy
+        outside the ladder -- are the same result carrying a different reason.
+        ``TerminalResult`` exists so the terminal field list is declared once;
+        a call site that re-states ``original_url``/``normalized_url``/``strategy``
+        is a second declaration of the identity, which is the duplication
+        ``TerminalResult``'s own docstring says it was built to remove.
+        """
         return _failed_engine_result(
-    TerminalResult(
-                original_url=context.original_url,
-                normalized_url=context.normalized_url,
+            TerminalResult(
+                original_url=self.context.original_url,
+                normalized_url=self.context.normalized_url,
                 strategy=strategy,
+                classification=classification,
+                error=error,
+                diagnostics=diagnostics,
+            )
+        )
+
+    def with_policy(self, policy: dict[str, Any]) -> _ChainRun:
+        """This same run re-pointed at another policy, carrying the same state.
+
+        The cffi cookie retry is a ladder step like any other, so it continues
+        this run's state rather than starting a new one -- a retry that began a
+        fresh state would report only its own attempt and lose the ladder's.
+        """
+        return _ChainRun(replace(self.context, policy=policy), self.state)
+
+    async def run_http(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
+        context = self.context
+        fetcher = context.cffi_fetcher if strategy == HTTP_CFFI_IMPERSONATE else context.http_fetcher
+        return await _http_strategy_result(
+            original_url=context.original_url,
+            normalized_url=context.normalized_url,
+            strategy=strategy,
+            policy=context.policy,
+            http_fetcher=fetcher,
+            cache=context.cache,
+            content_cache=context.content_cache,
+            caller_validators=context.caller_validators,
+            robots_sitemaps=context.robots_sitemaps,
+            host_policy=context.host_policy,
+            global_concurrency=context.global_concurrency,
+        )
+
+    async def run_browser(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
+        context = self.context
+        if context.browser_worker is None:
+            return self.terminal_failure(
+                strategy,
                 classification="browser_crash",
                 error="browser_worker_unavailable",
                 diagnostics={
                     "browser_profile": context.policy.get("browser_profile") or {},
                     "runtime": {"error": "browser_worker_unavailable"},
                 },
-))
-    return await browser_strategy_result(
-        original_url=context.original_url,
-        normalized_url=context.normalized_url,
-        strategy=strategy,
-        policy=context.policy,
-        browser_worker=context.browser_worker,
-        host_policy=context.host_policy,
-    )
+            )
+        return await browser_strategy_result(
+            original_url=context.original_url,
+            normalized_url=context.normalized_url,
+            strategy=strategy,
+            policy=context.policy,
+            browser_worker=context.browser_worker,
+            host_policy=context.host_policy,
+        )
 
+    def record(self, strategy: CrawlStrategyName, result: EngineCrawlResult) -> None:
+        state = self.state
+        state.attempts.extend(result.attempted_strategies)
+        state.last_result = result
+        if strategy == HTTP_CFFI_IMPERSONATE and result.status != "success":
+            state.cffi_was_blocked = True
+        if result.classification != "rate_limited" or self.context.scheduler is None:
+            return
+        cooldown = result.diagnostics.get("cooldown") or {}
+        retry_after = cooldown.get("retry_after_seconds")
+        if retry_after is not None:
+            self.context.scheduler.set_domain_cooldown(self.context.domain, float(retry_after))
 
-def _record_result(
-    context: _ChainContext,
-    state: _ChainState,
-    strategy: CrawlStrategyName,
-    result: EngineCrawlResult,
-) -> None:
-    state.attempts.extend(result.attempted_strategies)
-    state.last_result = result
-    if strategy == HTTP_CFFI_IMPERSONATE and result.status != "success":
-        state.cffi_was_blocked = True
-    if result.classification != "rate_limited" or context.scheduler is None:
-        return
-    cooldown = result.diagnostics.get("cooldown") or {}
-    retry_after = cooldown.get("retry_after_seconds")
-    if retry_after is not None:
-        context.scheduler.set_domain_cooldown(context.domain, float(retry_after))
+    async def retry_cookies(
+        self, strategy: CrawlStrategyName, result: EngineCrawlResult
+    ) -> EngineCrawlResult | None:
+        """Re-run the HTTP step carrying cookies the failed browser step harvested.
 
+        Returns the retry's result when it produced usable content, else None.
+        Routed through :meth:`execute` rather than :meth:`run_http`, because the
+        retry is a ladder step like any other and so is enveloped like any other.
+        """
+        state = self.state
+        if not (
+            result.status == "success"
+            and result.classification == "rendered"
+            and strategy in BROWSER_STRATEGIES
+            and state.cffi_was_blocked
+            and not state.cffi_retry_done
+        ):
+            return None
+        state.cffi_retry_done = True
+        from app.crawl.strategies.browser import get_browser_cookies_for
 
-async def _retry_browser_cookies(
-    context: _ChainContext,
-    state: _ChainState,
-    strategy: CrawlStrategyName,
-    result: EngineCrawlResult,
-) -> EngineCrawlResult | None:
-    if not (
-        result.status == "success"
-        and result.classification == "rendered"
-        and strategy in BROWSER_STRATEGIES
-        and state.cffi_was_blocked
-        and not state.cffi_retry_done
-    ):
+        cookie_header = get_browser_cookies_for(registrable_domain(self.context.original_url))
+        if not cookie_header:
+            return None
+        retry_policy = dict(self.context.policy)
+        retry_headers = dict(retry_policy.get("headers") or {})
+        retry_headers["Cookie"] = cookie_header
+        retry_policy["headers"] = retry_headers
+        retry_result = await self.with_policy(retry_policy).execute(HTTP_CFFI_IMPERSONATE)
+        state.attempts.extend(retry_result.attempted_strategies)
+        if retry_result.status == "success" and retry_result.quality_score > 0:
+            return replace(retry_result, attempted_strategies=state.attempts)
+        state.last_result = result
         return None
-    state.cffi_retry_done = True
-    from app.crawl.strategies.browser import get_browser_cookies_for
 
-    cookie_header = get_browser_cookies_for(registrable_domain(context.original_url))
-    if not cookie_header:
-        return None
-    retry_policy = dict(context.policy)
-    retry_headers = dict(retry_policy.get("headers") or {})
-    retry_headers["Cookie"] = cookie_header
-    retry_policy["headers"] = retry_headers
-    # Through _execute_strategy, not _run_http_strategy: the retry is a ladder
-    # step like any other, so its raise is enveloped like any other.
-    retry_result = await _execute_strategy(replace(context, policy=retry_policy), HTTP_CFFI_IMPERSONATE)
-    state.attempts.extend(retry_result.attempted_strategies)
-    if retry_result.status == "success" and retry_result.quality_score > 0:
-        return replace(retry_result, attempted_strategies=state.attempts)
-    state.last_result = result
-    return None
+    async def execute(self, strategy: CrawlStrategyName) -> EngineCrawlResult:
+        """Invoke ONE strategy step, converting any raise into a failed result.
+
+        A strategy is a STEP in a ladder, not a whole URL. The HTTP strategy has
+        its own broad-except sink and the browser worker catches inside
+        ``render``, but a raise at the adapter boundary between them had nowhere
+        to go: it escaped the chain, so it was enveloped with no strategy
+        attribution and every remaining ladder step skipped -- one BROWSER_HEADLESS
+        binding error ended a URL that still had BROWSER_HEADED_WARMED to try.
+        Both ``run_*`` methods AND the cffi cookie retry route through here, so a
+        raise has exactly one place it can become a result.
+        """
+        context = self.context
+        try:
+            if strategy in HTTP_STRATEGIES:
+                return await self.run_http(strategy)
+            if strategy in BROWSER_STRATEGIES:
+                return await self.run_browser(strategy)
+        except Exception as error:
+            return _engine_result_from_exception(
+                error=error,
+                original_url=context.original_url,
+                normalized_url=context.normalized_url,
+                strategy=strategy,
+            )
+        return self.terminal_failure(
+            strategy,
+            classification="unknown_error",
+            error="unsupported_strategy",
+        )
 
 
 def _is_usable(result: EngineCrawlResult) -> bool:
@@ -180,42 +254,6 @@ def _is_usable(result: EngineCrawlResult) -> bool:
         result.quality_score > 0 or result.classification == "not_modified"
     )
 
-
-async def _execute_strategy(
-    context: _ChainContext,
-    strategy: CrawlStrategyName,
-) -> EngineCrawlResult:
-    """Invoke ONE strategy step, converting any raise into a failed result.
-
-    A strategy is a STEP in a ladder, not a whole URL. The HTTP strategy has
-    its own broad-except sink and the browser worker catches inside
-    ``render``, but a raise at the adapter boundary between them had nowhere
-    to go: it escaped the chain, so it was enveloped with no strategy
-    attribution and every remaining ladder step skipped -- one BROWSER_HEADLESS
-    binding error ended a URL that still had BROWSER_HEADED_WARMED to try.
-    Both ``_run_*`` helpers AND the cffi cookie retry route through here, so a
-    raise has exactly one place it can become a result.
-    """
-    try:
-        if strategy in HTTP_STRATEGIES:
-            return await _run_http_strategy(context, strategy)
-        if strategy in BROWSER_STRATEGIES:
-            return await _run_browser_strategy(context, strategy)
-    except Exception as error:
-        return _engine_result_from_exception(
-            error=error,
-            original_url=context.original_url,
-            normalized_url=context.normalized_url,
-            strategy=strategy,
-        )
-    return _failed_engine_result(
-    TerminalResult(
-            original_url=context.original_url,
-            normalized_url=context.normalized_url,
-            strategy=strategy,
-            classification="unknown_error",
-            error="unsupported_strategy",
-))
 
 
 async def execute_crawl_chain(
@@ -251,21 +289,22 @@ async def execute_crawl_chain(
         host_policy=host_policy,
         global_concurrency=global_concurrency,
     )
-    state = _ChainState(attempts=[])
+    run = _ChainRun(context, _ChainState(attempts=[]))
     for strategy in _starting_strategies(context.policy["strategies"], context.scheduler, context.domain):
-        result = await _execute_strategy(context, strategy)
-        _record_result(context, state, strategy, result)
+        result = await run.execute(strategy)
+        run.record(strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:
             continue
-        retry_result = await _retry_browser_cookies(context, state, strategy, result)
+        retry_result = await run.retry_cookies(strategy, result)
         if retry_result is not None:
             return retry_result
         if _is_usable(result):
             if context.scheduler is not None:
                 context.scheduler.set_pinned_strategy(context.domain, strategy)
-            return replace(result, attempted_strategies=state.attempts)
-    assert state.last_result is not None
-    return replace(state.last_result, attempted_strategies=state.attempts)
+            return replace(result, attempted_strategies=run.state.attempts)
+    last = run.state.last_result
+    assert last is not None
+    return replace(last, attempted_strategies=run.state.attempts)
 
 
 __all__ = ["execute_crawl_chain"]
