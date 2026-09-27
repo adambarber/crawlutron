@@ -286,16 +286,29 @@ class ContentCache:
         if len(self._memory_cache) > self._MEMORY_CACHE_MAX:
             self._memory_cache.popitem(last=False)
 
+    def _memory_probe(self, key: str) -> Any | None:
+        """The RAM-mirror probe with ``self._lock`` taken.
+
+        ``_memory_hit_locked`` is already the single home of the probe's rules,
+        but each reader still spelled the acquire-probe-test-return dance itself,
+        so the part worth having in one place was declared twice: a reader that
+        probes without the lock is a data race against ``_enforce_limits``, and a
+        copy of the dance is where that mistake would appear. The sync and async
+        readers differ only in whether the on-disk fallback is awaited, which is
+        one line each rather than a copy of the locked read.
+        """
+        with self._lock:
+            return self._memory_hit_locked(key)
+
     def get(self, key: str, ttl: int | None = None) -> Any | None:
         """Return the cached value if present and unexpired, else ``None``.
 
         Checks the in-memory value cache first; on a miss (or an expired memory
         entry) it falls back to the on-disk envelope (#7).
         """
-        with self._lock:
-            hit = self._memory_hit_locked(key)
-            if hit is not None:
-                return hit
+        hit = self._memory_probe(key)
+        if hit is not None:
+            return hit
         envelope = self._read_envelope(key)
         return None if envelope is None else envelope.get("value")
 
@@ -384,10 +397,9 @@ class ContentCache:
         (adversarial perf #1.2 / #2.2). The read itself runs outside
         ``self._lock`` (see ``_read_envelope``), so a concurrent ``aset`` is
         not queued behind it."""
-        with self._lock:
-            hit = self._memory_hit_locked(key)
-            if hit is not None:
-                return hit
+        hit = self._memory_probe(key)
+        if hit is not None:
+            return hit
         # Disk read + JSON parse off the loop, and off the lock.
         envelope = await asyncio.to_thread(self._read_envelope, key)
         return None if envelope is None else envelope.get("value")

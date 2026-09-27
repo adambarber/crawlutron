@@ -32,13 +32,21 @@ class BoundedTTLCache(Generic[K, V]):
         self._entries: OrderedDict[K, tuple[float, V]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def _entry_if_fresh(self, key: K, *, touch: bool) -> V | None:
+    def _entry_if_fresh(self, key: K, *, touch: bool, allow_stale: bool = False) -> V | None:
         """Shared read path: return the value if fresh, else None.
 
         Expired entries are NOT deleted here -- the engines' hand-rolled
         dicts leave expired entries in place (purge-only deletion), and the
         sitemap 304 path reads stale-but-present entries directly. Callers
         that want eager eviction use purge_expired().
+
+        ``allow_stale`` is the 304-reuse contract, expressed as a flag on this
+        one read path rather than as a second read path. It used to be a second
+        path, and the cost of that is the two rules that MUST NOT differ between
+        readers -- the expiry boundary and the LRU touch -- being declared twice,
+        with nothing testing that they still agree. ``None`` and ``value`` are
+        both legitimate returns here, so a divergence is invisible until a
+        sitemap quietly stops seeing a last-known URL.
         """
         now = self._clock()
         with self._lock:
@@ -46,7 +54,7 @@ class BoundedTTLCache(Generic[K, V]):
             if entry is None:
                 return None
             expires_at, value = entry
-            if expires_at <= now:
+            if expires_at <= now and not allow_stale:
                 return None
             if touch:
                 self._entries.move_to_end(key)
@@ -72,12 +80,7 @@ class BoundedTTLCache(Generic[K, V]):
         304 Not Modified; the entry must be present, not fresh. Expiry is
         enforced by the fetch path (get), not here.
         """
-        with self._lock:
-            entry = self._entries.get(key)
-            if entry is None:
-                return None
-            self._entries.move_to_end(key)
-            return entry[1]
+        return self._entry_if_fresh(key, touch=True, allow_stale=True)
 
     def put(self, key: K, value: V, *, ttl: float | None = None) -> None:
         """Insert/refresh under the lock, evicting LRU beyond max_entries."""
