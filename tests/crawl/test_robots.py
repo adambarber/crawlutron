@@ -15,7 +15,7 @@ from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _robots_allows, _robots_pattern_to_regex, crawl_request
 from app.crawl.policy import read_policy
-from app.crawl.robots import robots_allows
+from app.crawl.robots import robots_allows, robots_origin
 from app.crawl.robots_parse import (
     iter_robots_fields,
     parse_robots_crawl_delay,
@@ -27,7 +27,19 @@ from app.crawl.strategies.fetch_policy import _discovery_diagnostics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._fetcher_factories import make_fetch, routed_fetcher
-from tests._policy_factories import crawl_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+
+
+def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
+    """The key production writes a robots cache entry under.
+
+    ``load_robots_rules`` reads ``(canonical_origin, policy)`` and
+    ``_load_uncached`` writes the same pair, so the cache is keyed by a tuple.
+    Seeding it with a bare origin string -- which is what these tests did --
+    wrote entries the read path could never find, so the purge assertions
+    passed against a cache shaped unlike the one they are standing in for.
+    """
+    return (robots_origin(origin, policy=UNRESTRICTED_HOST_POLICY), UNRESTRICTED_HOST_POLICY)
 
 
 class TestRobotsCacheLocking:
@@ -327,19 +339,24 @@ def test_purge_removes_only_expired_production_tuples():
     try:
         now = time.monotonic()
         # Expired entry: ttl-1 (engines treat expires_at > now as fresh).
-        em.robots_cache.put("http://old.test", ([], [], None), ttl=-1.0)
-        em.robots_cache.put("http://fresh.test", ([], [], None), ttl=600.0)
+        em.robots_cache.put(robots_entry_key("http://old.test"), ([], [], None), ttl=-1.0)
+        em.robots_cache.put(robots_entry_key("http://fresh.test"), ([], [], None), ttl=600.0)
         assert _purge_robots_cache(now) == 1
-        assert em.robots_cache.get("http://old.test") is None
-        assert em.robots_cache.get("http://fresh.test") is not None
+        assert em.robots_cache.get(robots_entry_key("http://old.test")) is None
+        assert em.robots_cache.get(robots_entry_key("http://fresh.test")) is not None
     finally:
         em.robots_cache.clear()
 
 
 async def test_purge_handles_production_shaped_entries():
-    """L10: _purge_robots_cache unpacked 3-tuples while production stores
-    (expires, rules, sitemaps, crawl_delay) 4-tuples -- purging a full cache
-    crashed with ValueError instead of evicting."""
+    """L10: a full robots cache must not crash purging during a real crawl.
+
+    Production stores a ``RobotsRules`` 3-tuple -- ``(rules, sitemaps,
+    crawl_delay)`` -- under a ``(canonical_origin, policy)`` key. Both halves of
+    that shape used to be wrong here at once: the value was written as a
+    4-tuple that ``_purge_robots_cache`` unpacked one field short, and the key
+    was a bare origin string the read path never looked under. Purging a full
+    cache raised ``ValueError`` instead of evicting."""
 
     import app.crawl.engine as em
     from app.crawl.engine import crawl_request
@@ -352,7 +369,7 @@ async def test_purge_handles_production_shaped_entries():
             # Stale entries (ttl -1) stay present under the chokepoint's
             # purge-only-deletion semantics; the L10 regression is that a
             # full cache must not crash purging during a real crawl.
-            em.robots_cache.put(f"http://purge-{i}.test", ([], [], None), ttl=-1.0)
+            em.robots_cache.put(robots_entry_key(f"http://purge-{i}.test"), ([], [], None), ttl=-1.0)
 
         fetcher = routed_fetcher(
             {
@@ -390,9 +407,9 @@ def test_failure_ttl_is_60s_not_600s():
         # Direct seam: drive via internal fetch (test doesn't need full crawl)
         # Pin the stored per-entry TTL by inspecting BoundedTTLCache internals.
         # A 500 response writes rules=[(False,"/")], ttl=min(600,60)=60.
-        em.robots_cache.put("http://fail-ttl.test", ([(False, "/")], [], None), ttl=60.0)
+        em.robots_cache.put(robots_entry_key("http://fail-ttl.test"), ([(False, "/")], [], None), ttl=60.0)
         entries = em.robots_cache._entries
-        expires_at, value = entries.get("http://fail-ttl.test")
+        expires_at, value = entries.get(robots_entry_key("http://fail-ttl.test"))
         delta = (expires_at - time.monotonic()) if expires_at else float("inf")
         # 60s TTL at write time → delta ≈ 60, never the 600s default.
         assert delta > 45.0 and delta < 90.0
