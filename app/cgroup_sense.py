@@ -15,7 +15,13 @@ import time
 # #2.3: "cache cgroup reads 50-200ms") removes redundant syscalls during a
 # burst without making the gate stale. The window is deliberately short.
 _CGROUP_READ_TTL_SECONDS = 0.1
-_CGROUP_CACHE: dict[str, tuple[float, object]] = {}
+# The value type is ``str | None`` and nothing else: ``_read_text`` is the only
+# writer, and it stores either a stripped read or None. It was ``object``, which
+# is not a wider truth but a lost one -- the annotation then said nothing about
+# what a reader gets back, so returning it needed a `# type: ignore[return-value]`
+# to be legal and the callers' own `str | None` contract went unchecked. Declaring
+# the value is what let both checkers read the code instead of the suppression.
+_CGROUP_CACHE: dict[str, tuple[float, str | None]] = {}
 
 
 def _invalidate_cgroup_cache() -> None:
@@ -33,7 +39,7 @@ def _read_text(path: str) -> str | None:
     if cached is not None:
         ts, value = cached
         if now - ts < _CGROUP_READ_TTL_SECONDS:
-            return value  # type: ignore[return-value]
+            return value
     try:
         with open(path) as fh:
             value = fh.read().strip()
