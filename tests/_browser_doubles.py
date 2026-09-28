@@ -1,7 +1,39 @@
 from dataclasses import dataclass
 from typing import Any
 
+from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_pool import (
+    BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
+    BrowserPool,
+)
+
 ROUTE_ARG_UNSET = object()
+
+
+class FakeBrowserPool(BrowserPool):
+    """A browser pool that satisfies the engine's guard and refuses to render.
+
+    Subclasses ``BrowserPool`` rather than duck-typing it, so ``set_browser_pool``
+    is checked against the class it actually stores: a stub that is not a pool
+    can be handed to code calling any method on it, and the signature is the only
+    thing that notices. ``BrowserPool.__init__`` does no I/O -- it only builds the
+    queue and lock -- so a real instance is as cheap as a stub.
+
+    ``acquire`` raises rather than returning a renderer. The tests that install a
+    pool do it to stop the engine 503-ing with ``browser_pool_unavailable``, and a
+    browser that renders during a hermetic test is a failure, not a slower test.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(pool_size=1)
+        self.closed = False
+
+    async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
+        raise AssertionError("a test that installs a fake pool must never acquire a renderer")
+
+    async def close(self) -> None:
+        self.closed = True
+        await super().close()
 
 
 class BrowserFakePage:

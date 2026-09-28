@@ -205,8 +205,7 @@ max-statements = 87
 # defects in test code (a `subprocess(..., shell=True)`, a hardcoded credential
 # that is not a fixture). They are now named rules, so a test that grows an
 # `eval` fails the build and one that asserts still does not.
-"tests/**" = [
-    "E402",    # pytest imports helpers after sys.path setup
+    "tests/**" = [
     "S101",    # assert IS the test mechanism; this is not a bypass
     "S104",    # 0.0.0.0 appears as the address a test asserts is BLOCKED, or as
                # a bind the settings layer is asserted to accept -- never as a

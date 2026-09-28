@@ -14,6 +14,7 @@ from app.crawl.strategies.browser_pool import (
     get_browser_pool,
     set_browser_pool,
 )
+from tests._browser_doubles import FakeBrowserPool
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -44,14 +45,6 @@ class TestAcquireTimeout:
         assert default is not None and default > 0
 
 
-class _StubPool:
-    def __init__(self):
-        self.closed = False
-
-    async def close(self):
-        self.closed = True
-
-
 class _ExplodingContextManager:
     def __init__(self):
         self.exits = 0
@@ -74,7 +67,7 @@ def test_get_browser_pool_returns_none_before_initialize():
 
 
 def test_get_browser_pool_returns_set_pool():
-    stub = _StubPool()
+    stub = FakeBrowserPool()
     try:
         set_browser_pool(stub)
         assert get_browser_pool() is stub
@@ -84,7 +77,7 @@ def test_get_browser_pool_returns_set_pool():
 
 @pytest.mark.asyncio
 async def test_close_browser_pool_nulls_global():
-    stub = _StubPool()
+    stub = FakeBrowserPool()
     try:
         set_browser_pool(stub)
         await close_browser_pool()

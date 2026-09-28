@@ -14,6 +14,7 @@ import json
 import pytest
 
 from tests._assertions import one_search_result
+from tests._browser_doubles import FakeBrowserPool
 
 _PROTOCOL_VERSION = "2026-07-28"
 
@@ -260,14 +261,7 @@ def browser_pool_stub():
     """
     from app.crawl.strategies.browser_pool import set_browser_pool
 
-    class _StubPool:
-        async def acquire(self):
-            raise AssertionError("browser strategy should not run in a hermetic MCP test")
-
-        def release(self, renderer):
-            pass
-
-    previous = set_browser_pool(_StubPool())
+    previous = set_browser_pool(FakeBrowserPool())
     yield
     set_browser_pool(previous)
 

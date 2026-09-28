@@ -1,11 +1,8 @@
-import pytest
-
-pytestmark = pytest.mark.browser
-
 """Real headless-browser behavior via Camoufox (no mocks)."""
 
-
 import base64
+
+import pytest
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.cache import HttpCache
@@ -14,6 +11,8 @@ from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
 from app.validation import HostPolicy
 from tests._assertions import assert_result_success
+
+pytestmark = pytest.mark.browser
 
 
 class TestBrowserRenderer:

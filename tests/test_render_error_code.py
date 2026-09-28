@@ -12,6 +12,7 @@ import pytest
 from app.api.render_endpoint import render
 from app.api_models import RenderRequest
 from app.settings import CrawlerSettings
+from tests._browser_doubles import FakeBrowserPool
 
 
 @pytest.fixture()
@@ -20,7 +21,7 @@ def _pool_up():
     so the test exercises the ValueError branch, not startup ordering."""
     from app.crawl.strategies.browser_pool import set_browser_pool
 
-    previous = set_browser_pool(object())
+    previous = set_browser_pool(FakeBrowserPool())
     yield
     set_browser_pool(previous)
 
