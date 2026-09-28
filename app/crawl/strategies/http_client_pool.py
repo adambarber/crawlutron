@@ -10,7 +10,7 @@ import asyncio
 import threading
 from collections.abc import Callable
 from http.cookiejar import CookieJar as _StdlibCookieJar
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 import httpx
 
@@ -59,6 +59,58 @@ class _NoStoreCookieJar(_StdlibCookieJar):
         return None
 
 
+T = TypeVar("T")
+
+
+class _LoopBound(Protocol):
+    """A pooled client carrying the event loop it was built on.
+
+    Neither ``httpx.AsyncClient`` nor curl_cffi's ``AsyncSession`` declares this
+    attribute -- this module installs it -- so its type is declared here, once,
+    rather than left to be implied by a suppression at each site that writes it.
+    A ``Protocol`` is the honest shape for an attribute added to somebody else's
+    object: it states the contract this module depends on without claiming the
+    library publishes it.
+    """
+
+    _bound_loop: asyncio.AbstractEventLoop | None
+
+
+def _bind_to_running_loop(client: T) -> T:
+    """Stamp a freshly built pooled client with the loop it was built on.
+
+    The single place that writes ``_bound_loop``. It was four: two builders, each
+    with its own no-running-loop branch, and each of the four carrying a bare
+    ``# type: ignore[attr-defined]`` for an attribute neither library declares.
+    Four suppressions for one fact about one attribute, read through a fifth
+    defaulted ``getattr`` -- and none of them said what the attribute holds or
+    when it is None.
+
+    None is an answer, not a failure. A client built outside a loop has no loop
+    to belong to, and :func:`_loop_bound_to` reports that as matching nothing, so
+    the next ``get`` rebuilds rather than handing out a client this loop cannot
+    use.
+    """
+    bound = cast(_LoopBound, client)
+    try:
+        bound._bound_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        bound._bound_loop = None
+    return client
+
+
+def _loop_bound_to(client: Any) -> asyncio.AbstractEventLoop | None:
+    """The loop a pooled client was built on, or None if it was never bound.
+
+    A defaulted read rather than an attribute access, because this is the reader
+    that has to tolerate an object this module did not build -- a test double, or
+    a client predating the attribute. Typed anyway: the declared return is what
+    makes the caller's comparison a loop-identity check instead of a comparison
+    against ``Any``.
+    """
+    return getattr(client, "_bound_loop", None)
+
+
 def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient with configurable connection pool."""
     if settings is None:
@@ -81,11 +133,7 @@ def _build_async_client(settings: CrawlerSettings | None = None) -> httpx.AsyncC
         # _GLOBAL_COOKIE_JAR chokepoint.
         cookies=_NoStoreCookieJar(),
     )
-    try:
-        client._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
-    except RuntimeError:
-        client._bound_loop = None  # type: ignore[attr-defined]
-    return client
+    return _bind_to_running_loop(client)
 
 
 async def _safe_aclose(client):
@@ -368,7 +416,7 @@ class _LoopBoundPooledClient:
                 # Nothing to release: never built, or already closed by someone
                 # else. A closed client owns no live sockets.
                 return self._rebuild(settings, None)
-            if getattr(current, "_bound_loop", None) is loop:
+            if _loop_bound_to(current) is loop:
                 # Hot path (perf review 1.1): the pooled client is alive on the
                 # current loop, so no settings are consulted at all. Settings
                 # are pool configuration consumed only at construction; a
@@ -441,11 +489,7 @@ def _build_cffi_session() -> Any:
     session: cffi_requests.AsyncSession = cffi_requests.AsyncSession(
         impersonate=CFFI_IMPERSONATE_TARGET, discard_cookies=True
     )
-    try:
-        session._bound_loop = asyncio.get_running_loop()  # type: ignore[attr-defined]
-    except RuntimeError:
-        session._bound_loop = None  # type: ignore[attr-defined]
-    return session
+    return _bind_to_running_loop(session)
 
 
 _CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
