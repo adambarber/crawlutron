@@ -11,6 +11,7 @@ import json
 from app.api_models import CrawlPolicyLimits
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.content_cache import ContentCache
+from app.resource_pressure import worker_count
 from app.validation import get_env_int
 
 
@@ -53,6 +54,12 @@ def _content_cache_key(
 # Adversarial perf #2.1: bound the RAM consumed by in-flight page bodies. At high
 # global_concurrency the per-page cap shrinks so the whole active set cannot
 # exhaust the budget. Operators with known RAM headroom can override the budget.
+#
+# The budget is a container quantity, not a per-process one: it bounds the RAM the
+# FLEET holds, so it is divided by the worker count here, where it is read. This
+# is the last cgroup budget in app/ that was still undivided -- the browser pool,
+# the HTTP ceiling and the doc-worker count are all split, and this one bounded
+# the same memory through the same container and had escaped that sweep.
 _RAM_SAFETY_BYTES = get_env_int("BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
 _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 
@@ -70,9 +77,14 @@ def _effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency:
     """Per-page body cap, scaled down as concurrency rises (adversarial perf #2.1).
 
     An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
-    the cap is ``min(DEFAULT, RAM_BUDGET / concurrency)`` so the in-flight page
-    set stays within budget even when hundreds of pages run concurrently. At the
-    default concurrency (4) this resolves to the unchanged 10 MiB default.
+    the cap is ``min(DEFAULT, RAM_BUDGET / (concurrency x workers))`` so the
+    in-flight page set stays within budget even when hundreds of pages run
+    concurrently. At the default concurrency (4) on one worker this resolves to
+    the unchanged 10 MiB default.
+
+    The two clamps are different kinds of quantity and are treated as such:
+    ``DEFAULT_MAX_CONTENT_LENGTH_BYTES`` is a per-page ceiling, so it is not
+    divided, while the RAM budget is a fleet aggregate, so it is.
     """
     # A model-bound int, so no re-validation: 0 and None both mean "no explicit
     # cap", and the model's le is the same ceiling this used to clamp to.
@@ -81,6 +93,6 @@ def _effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency:
     conc = global_concurrency or _default_global_concurrency()
     scaled = min(
         DEFAULT_MAX_CONTENT_LENGTH_BYTES,
-        max(_MIN_PER_PAGE_BYTES, _RAM_SAFETY_BYTES // max(conc, 1)),
+        max(_MIN_PER_PAGE_BYTES, _RAM_SAFETY_BYTES // (max(conc, 1) * worker_count())),
     )
     return int(scaled)

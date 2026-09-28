@@ -7,11 +7,18 @@ It must not fetch, classify pages, or assemble crawl results.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+from typing import Any
+
+# Declared before the import so the ImportError fallback below is the same type
+# as the symbol it stands in for. Without the annotation, assigning None is an
+# assignment error against the imported callable's signature.
+_charset_from_bytes: Callable[[bytes], Any] | None
 
 try:
     from charset_normalizer import from_bytes as _charset_from_bytes
 except ImportError:
-    _charset_from_bytes = None  # type: ignore[assignment]
+    _charset_from_bytes = None
 
 
 def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None) -> str:

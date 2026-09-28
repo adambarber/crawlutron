@@ -116,7 +116,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 |---|---|---|---|---|---|
 | G1 | The service sends no telemetry, and no dependency may introduce one | dependency configuration | config | `docs/references/browser-crawler-telemetry.md` documents the posture; no mechanical gate | `PARTIAL` — documentation, not enforcement |
 | G2 | Custom safety predicates have exactly one owner and one exit path; a standard linter must not reimplement them | `tests/test_safety_invariants.py` | config | architecture convention; registry integrity for properties | `PARTIAL` — not mechanically enforced |
-| G3 | No inline suppression of the style gate | ruff config | config | ruff config; the "no noqa" rule is convention | `PARTIAL` |
+| G3 | No inline suppression of the style gate | ruff config | config | `RUF100` is selected, so a `# noqa` that suppresses nothing is a lint error; the tree holds zero `# noqa` comments | `ENFORCED` |
 
 ---
 

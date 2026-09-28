@@ -220,7 +220,8 @@ def test_groupings_are_derived_from_the_enum_not_relisted():
     """
     declarations = _grouping_declarations()
     assert set(declarations) == _GROUPING_ASSIGNMENTS, (
-        f"expected every grouping to be declared, found {sorted(set(_GROUPING_ASSIGNMENTS) - set(declarations))}"
+        "expected every grouping to be declared, found "
+        "{sorted(set(_GROUPING_ASSIGNMENTS) - set(declarations))}"
     )
     for name, value in sorted(declarations.items()):
         literals = _string_literals(value)

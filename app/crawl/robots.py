@@ -232,12 +232,12 @@ def robots_allows(target_url: str, rules: list[tuple[bool, str]]) -> bool:
 
 
 __all__ = [
-    "FetchAndDecode",
     "ROBOTS_CACHE_MAX_ENTRIES",
     "ROBOTS_CACHE_TTL_SECONDS",
     "ROBOTS_FAILURE_TTL_SECONDS",
     "ROBOTS_PATTERN_CACHE_MAX_HOSTS",
     "ROBOTS_PATTERN_CACHE_PER_HOST",
+    "FetchAndDecode",
     "RobotsMatcher",
     "RobotsRules",
     "cached_sitemaps",

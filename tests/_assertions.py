@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import contextlib
 import functools
 import inspect
 import json
@@ -201,13 +202,11 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
 
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
-    try:
+    with contextlib.suppress(Exception):
         from camoufox.utils import launch_path
 
         path = launch_path()
         return bool(path) and os.path.exists(path)
-    except Exception:
-        pass
     try:
         from playwright.sync_api import sync_playwright
     except Exception:

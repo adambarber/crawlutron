@@ -29,13 +29,19 @@ test-all:
 lint:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests scripts
 
-# Type-check with mypy (the fail gate) and pyright (the third opinion that finds
-# annotation lies mypy cannot see, because the `regex` package is untyped in
-# mypy.ini and degrades its values to Any). Pyright analyses 101 files in under
-# three seconds, so it runs on every commit rather than on a schedule.
+# Type-check with mypy (the fail gate). Pyright is the third opinion that finds
+# annotation lies mypy cannot see -- the `regex` package is untyped in mypy.ini and
+# degrades its values to Any -- and it is gated by the same budget test, in the
+# two places that actually run: as part of the pytest suite (`make test`) and as
+# the pre-commit `enforcement` hook, which analyses the tree on every commit
+# rather than on a schedule.
+#
+# It used to be invoked here a third time. That was a third entry point to one
+# assertion, not a third opinion, and a gate that lives in three places is three
+# places to keep in step when the budget moves. This target is mypy because that
+# is the only one of the two with no automated home.
 typecheck:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
-	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest tests/test_pyright_budget.py -q -p no:randomly
 
 # Module coupling report: fan-in hubs, fan-out reachers, and import cycles.
 # The ranked report is the work list for the splitting programme -- a file's size

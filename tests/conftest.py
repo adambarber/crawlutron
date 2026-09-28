@@ -8,8 +8,10 @@ importable from the package root.
 """
 
 import asyncio
+import contextlib
 import os
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,11 +62,14 @@ def _enable_loopback_for_test_suite():
 
 
 # Per-xdist-worker paths: when running under pytest-xdist each worker gets its
-# own log/cache files so parallel workers cannot clobber shared state.
+# own log/cache files so parallel workers cannot clobber shared state. The
+# platform temp dir, not a hardcoded /tmp: on macOS gettempdir() is under
+# /var/folders, and a /tmp literal would scatter the suite's state off-platform.
 _XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 _WORKER_SUFFIX = f"-{_XDIST_WORKER}" if _XDIST_WORKER else ""
-os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", f"/tmp/browser_crawler_test{_WORKER_SUFFIX}.log")
-os.environ.setdefault("BROWSER_CRAWLER_CACHE_DIR", f"/tmp/browser_crawler_test_cache{_WORKER_SUFFIX}")
+_TEST_TMP = tempfile.gettempdir()
+os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", f"{_TEST_TMP}/browser_crawler_test{_WORKER_SUFFIX}.log")
+os.environ.setdefault("BROWSER_CRAWLER_CACHE_DIR", f"{_TEST_TMP}/browser_crawler_test_cache{_WORKER_SUFFIX}")
 os.environ["BROWSER_CRAWLER_CACHE_TTL_SECONDS"] = os.environ.get("BROWSER_CRAWLER_CACHE_TTL_SECONDS", "3600")
 # Keep the opt-in content cache disabled during tests so fake-fetcher suites that
 # serve different content for the same URL stay isolated (#5).
@@ -442,11 +447,9 @@ def _reset_global_http_state():
     from app.crawl.strategies import cookie_jar as cookie_mod
     from app.crawl.strategies import http_client_pool as pool_mod
 
-    try:
+    with contextlib.suppress(Exception):
         cookie_mod._GLOBAL_COOKIE_JAR.clear()
-    except Exception:
-        pass
-    try:
+    with contextlib.suppress(Exception):
         if pool_mod._DEFAULT_HTTP_CLIENT is not None:
             try:
                 loop = asyncio.get_event_loop()
@@ -458,11 +461,9 @@ def _reset_global_http_state():
                     loop.run_until_complete(pool_mod.close_async_http_client())
             except RuntimeError:
                 pool_mod._DEFAULT_HTTP_CLIENT = None
-    except Exception:
-        pass
     # Shared curl_cffi session (perf throughput #4): same loop-hygiene as the
     # pooled httpx client so tests stay order-independent under asyncio.run.
-    try:
+    with contextlib.suppress(Exception):
         if pool_mod._DEFAULT_CFFI_SESSION is not None:
             try:
                 loop = asyncio.get_event_loop()
@@ -472,24 +473,20 @@ def _reset_global_http_state():
                     loop.run_until_complete(pool_mod.close_cffi_session())
             except RuntimeError:
                 pool_mod._DEFAULT_CFFI_SESSION = None
-    except Exception:
-        pass
     # The real app's shutdown event is module-global and shared by every
     # ASGI test. A test that drives the real lifespan (shutdown) leaves it
     # SET; production never reuses a set event (fresh boot = fresh event),
     # so restore that invariant here -- otherwise later /v1/crawl calls
     # abort with empty results and fresh jobs go PAUSED (poisoned event).
-    try:
+    with contextlib.suppress(Exception):
         from app.main import app as _app
 
         _app.state.shutdown_event = asyncio.Event()
-    except Exception:
-        pass
     # robots_cache was promoted to module-level and shared across crawl_request
     # calls (#9). Tests reuse origins with different robots.txt bodies, so
     # clear it between tests for isolation. Production keeps it shared (a given
     # origin always serves the same robots.txt).
-    try:
+    with contextlib.suppress(Exception):
         from app.crawl import engine as _engine_mod
 
         _engine_mod.robots_cache.clear()
@@ -502,8 +499,6 @@ def _reset_global_http_state():
         from app.cgroup_sense import _invalidate_cgroup_cache
 
         _invalidate_cgroup_cache()
-    except Exception:
-        pass
     # DNS cache + pending client close queue + cookie namespace contextvar
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
     # or schedules a client close would leak state into the next test
@@ -512,7 +507,7 @@ def _reset_global_http_state():
     # only ``pinned_mod`` is new here.
     from app.crawl.strategies import pinned_transport as pinned_mod
 
-    try:
+    with contextlib.suppress(Exception):
         pinned_mod._DNS_CACHE.clear()
         # Drop pending-client references: we cannot await aclose from sync
         # context, but dropping the references lets GC reclaim the sockets
@@ -523,8 +518,6 @@ def _reset_global_http_state():
         # Reset the per-request cookie namespace so a test that sets one does
         # not leak into a subsequent test's request context.
         cookie_mod._COOKIE_NAMESPACE.set("")
-    except Exception:
-        pass
 
 
 @pytest.fixture(autouse=True)

@@ -9,6 +9,7 @@ runs in a child process with no other logging configuration.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 
@@ -38,10 +39,8 @@ def service_sink(tmp_path):
         yield log_file
     finally:
         for handler in root.handlers:
-            try:
+            with contextlib.suppress(Exception):
                 handler.close()
-            except Exception:
-                pass
         root.handlers[:] = saved_handlers
         root.setLevel(saved_level)
 

@@ -246,7 +246,7 @@ async def _commit_recursive_results(
     allowed_jobs: list[tuple[int, CrawlTask]],
     scheduled_results: dict[int, EngineCrawlResult] | None,
 ) -> None:
-    assert scheduled_results is not None
+    scheduled_results = cast("dict[int, EngineCrawlResult]", scheduled_results)
     for depth, job in allowed_jobs:
         result = scheduled_results[job.index]
         if not await _commit_recursive_result(run, state, job, depth, result):

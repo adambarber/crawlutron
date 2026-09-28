@@ -3,6 +3,7 @@ to a worker thread so the event loop is never stalled by a resolver call."""
 
 import threading
 
+import httpx
 import pytest
 
 from app.crawl.strategies import pinned_transport as http_mod
@@ -33,7 +34,11 @@ async def test_http_fetcher_offloads_build_pinned_request_to_thread(monkeypatch)
     seen: dict = {}
     monkeypatch.setattr(http_mod, "_build_pinned_request", _thread_recording_spy(seen))
 
-    with pytest.raises(Exception):
+    # The spy redirects the connection at a closed loopback port, so the fetch
+    # reaches the transport and fails to connect. ConnectError rather than a
+    # blind Exception: a DNS or policy failure would raise a different type, and
+    # that difference is what makes this test about offloading at all.
+    with pytest.raises(httpx.ConnectError):
         await _default_http_fetcher(
             "http://example.com/",
             {},

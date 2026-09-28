@@ -6,6 +6,7 @@ wrote directly to the target path, so a crash during json.dump left a
 truncated/corrupted file (silently losing all persisted cookies on restart).
 """
 
+import contextlib
 import json
 import os
 import tempfile
@@ -37,10 +38,8 @@ def test_save_to_file_is_atomic_on_failure():
 
     try:
         with patch("json.dumps", side_effect=boom):
-            try:
+            with contextlib.suppress(Boom):
                 jar.export_to_file(target)
-            except Boom:
-                pass
         # On failure the original target must be untouched (atomic rename only
         # happens after a successful write).
         with open(target, encoding="utf-8") as f:

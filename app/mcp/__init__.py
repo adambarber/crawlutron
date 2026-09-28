@@ -8,4 +8,4 @@ in ``_meta``.
 
 from app.mcp.tools import TOOL_SPECS, TOOLS_BY_NAME
 
-__all__ = ["TOOL_SPECS", "TOOLS_BY_NAME"]
+__all__ = ["TOOLS_BY_NAME", "TOOL_SPECS"]

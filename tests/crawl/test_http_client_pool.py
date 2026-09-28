@@ -1,6 +1,7 @@
 """HTTP client pool: shared per-loop client/session lifecycle, supersession, close queue and scaling."""
 
 import asyncio
+import contextlib
 import inspect
 import os
 import warnings
@@ -89,10 +90,8 @@ class TestPendingClientCloseCap:
                 http_mod._PENDING_CLIENT_CLOSE.append(MagicMock())
             http_mod._PENDING_CLIENT_CLOSE[0] = boom
             stale = http_mod._PENDING_CLIENT_CLOSE.pop(0)
-            try:
+            with contextlib.suppress(Exception):
                 stale.close()
-            except Exception:
-                pass
             http_mod._PENDING_CLIENT_CLOSE.append(MagicMock())
         assert len(http_mod._PENDING_CLIENT_CLOSE) == http_mod._PENDING_CLIENT_CLOSE_MAX
 

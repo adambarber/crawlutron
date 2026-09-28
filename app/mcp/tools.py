@@ -244,4 +244,4 @@ TOOL_SPECS: list[ToolSpec] = [
 
 TOOLS_BY_NAME: dict[str, ToolSpec] = {spec.name: spec for spec in TOOL_SPECS}
 
-__all__ = ["TOOL_SPECS", "TOOLS_BY_NAME", "ToolSpec", "ToolResult"]
+__all__ = ["TOOLS_BY_NAME", "TOOL_SPECS", "ToolResult", "ToolSpec"]

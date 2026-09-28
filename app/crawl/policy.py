@@ -42,8 +42,8 @@ if TYPE_CHECKING:  # pragma: no cover - import cycle guard
 __all__ = [
     "DEFAULT_MAX_PAGES",
     "DiscoveryFlags",
-    "discovery_flags",
     "PolicyTier",
+    "discovery_flags",
     "read_policy",
     "stored_policy",
     "validate_wire_policy",

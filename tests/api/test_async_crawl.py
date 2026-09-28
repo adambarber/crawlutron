@@ -194,7 +194,7 @@ class TestAsyncCrawlApi:
         """Concurrent async crawls are bounded by semaphore."""
         payload = crawl_api.payload(async_mode=True)
         completed = await asyncio.gather(*(submit_async_crawl(crawl_api.client, payload) for _ in range(3)))
-        for request_id, response in completed:
+        for _request_id, response in completed:
             assert response.status_code == 200
             assert response.json()["success"] is True
 

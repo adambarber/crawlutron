@@ -19,6 +19,7 @@ providers wired in :mod:`app.api.dependencies`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -175,7 +176,7 @@ async def run_async_crawl(
             await job_store.asave(job)
             await job_store.aset_status(request_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
         if webhook_url:
-            try:
+            with contextlib.suppress(Exception):
                 error_payload = (
                     await abuild_unified_crawl_response(
                         [], options=EnvelopeOptions(request_id=request_id, success=False)
@@ -188,8 +189,6 @@ async def run_async_crawl(
                     error_payload,
                     host_policy=HostPolicy.from_settings(crawl_settings),
                 )
-            except Exception:
-                pass
 
 
-__all__ = ["run_async_crawl", "_get_async_crawl_semaphore", "_WEBHOOK_CRAWL_CONCURRENCY"]
+__all__ = ["_WEBHOOK_CRAWL_CONCURRENCY", "_get_async_crawl_semaphore", "run_async_crawl"]

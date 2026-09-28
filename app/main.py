@@ -243,11 +243,14 @@ if FastAPI is not None:
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "
             "GET /health is lightweight liveness for Docker healthchecks; GET /ready reports active crawl "
-            "saturation without implying process death. Blocking direct HTTP, document extraction, Trafilatura, "
-            "and synchronous browser work run off the FastAPI event loop so liveness stays responsive during crawls. "
+            "saturation without implying process death. "
+            "Blocking direct HTTP, document extraction, Trafilatura, "
+            "and synchronous browser work run off the FastAPI "
+            "event loop so liveness stays responsive during crawls. "
             "Clients submit resolved crawl policies, inspect per-URL provenance, and use attempt history "
             "to make reviewable policy suggestions rather than mutating host policy automatically. "
-            "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall outcomes but does not bypass, solve, "
+            "The service classifies Cloudflare/WAF/CAPTCHA/login/paywall "
+            "outcomes but does not bypass, solve, "
             "outsource, rotate identities, rotate proxies, or inject credentials."
         ),
         version=SERVICE_VERSION,
@@ -256,7 +259,8 @@ if FastAPI is not None:
         openapi_tags=[
             {
                 "name": "Health",
-                "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",
+                "description":
+                "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",
             },
             {
                 "name": "Discovery",

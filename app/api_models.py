@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Final, Literal, Protocol, TypeVar
 from urllib.parse import urlsplit
 
@@ -63,7 +63,7 @@ SERVICE_IDENTITY: Final[dict[str, str]] = {
 }
 
 
-class CrawlStrategy(str, Enum):
+class CrawlStrategy(StrEnum):
     """Fetch execution strategies, tried in fallback order.
 
     These describe *how* to retrieve bytes for a URL. How those bytes are
@@ -78,7 +78,7 @@ class CrawlStrategy(str, Enum):
     BROWSER_HEADED_WARMED = BROWSER_HEADED_WARMED
 
 
-class CrawlExtractionMethod(str, Enum):
+class CrawlExtractionMethod(StrEnum):
     """Output/parsing pipeline applied to content a fetch strategy retrieves.
 
     Extraction is orthogonal to the fetch strategy: any fetch strategy may be
@@ -95,7 +95,7 @@ class CrawlExtractionMethod(str, Enum):
     DOM = EXTRACTION_DOM
 
 
-class CrawlStatus(str, Enum):
+class CrawlStatus(StrEnum):
     success = "success"
     blocked = "blocked"
     disallowed = "disallowed"
@@ -126,13 +126,15 @@ class DiscoveryConfig(BaseModel):
     robots: Annotated[
         bool,
         Field(
-            description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow patterns.",
+            description="Honor /robots.txt rules and report robots crawl-delay, sitemaps, and disallow "
+            "patterns.",
         ),
     ] = False
     sitemaps: Annotated[
         bool,
         Field(
-            description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common locations.",
+            description="Fetch and parse sitemap.xml / sitemap_index.xml URLs from robots.txt and common "
+            "locations.",
         ),
     ] = False
     feeds: Annotated[
@@ -191,7 +193,8 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=1,
             le=MAX_HTTP_TIMEOUT_SECONDS,
-            description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each attempted HTTP, document, or browser strategy.",
+            description="Per-strategy timeout budget in seconds. Default: 30. Applies separately to each "
+            "attempted HTTP, document, or browser strategy.",
         ),
     ] = DEFAULT_HTTP_TIMEOUT_SECONDS
     max_retries: Annotated[
@@ -213,7 +216,9 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0,
             le=120,
-            description="Passive browser challenge observation budget in seconds for browser flows. Default: 15. The service waits for public content to settle but does not click, solve, outsource, evade, rotate identities, or inject credentials.",
+            description="Passive browser challenge observation budget in seconds for browser flows. Default: "
+            "15. The service waits for public content to settle but does not click, solve, outsource, evade, "
+            "rotate identities, or inject credentials.",
         ),
     ] = DEFAULT_CHALLENGE_WAIT_SECONDS
     max_discovered_links: Annotated[
@@ -221,13 +226,19 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0,
             le=MAX_DISCOVERED_LINKS,
-            description="Bounded maximum structured discovered links returned per selected page. Default: 100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still report total discovered before truncation; callers own cross-run frontier queueing, dedupe, persistence, and recursion (the service collapses URLs that normalize to the same page within a request).",
+            description="Bounded maximum structured discovered links returned per selected page. Default: "
+            "100 (reduced from 250 to cap per-page result memory under parallel crawls). Link counts still "
+            "report total discovered before truncation; callers own cross-run frontier queueing, dedupe, "
+            "persistence, and recursion (the service collapses URLs that normalize to the same page within a "
+            "request).",
         ),
     ] = DEFAULT_MAX_DISCOVERED_LINKS
     respect_robots: Annotated[
         bool,
         Field(
-            description="When True (default), /robots.txt rules are honored before fetching and for recursive-link filtering. Set False only for domains you are authorized to crawl without robots constraints.",
+            description="When True (default), /robots.txt rules are honored before fetching and for "
+            "recursive-link filtering. Set False only for domains you are authorized to crawl without robots "
+            "constraints.",
         ),
     ] = True
     max_depth: Annotated[
@@ -235,7 +246,9 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0,
             le=20,
-            description="Bounded recursive crawl depth. 0 means a single-page crawl for both /v1/crawl and /v1/jobs. Positive values admit in-scope, robots-allowed links through that depth; durable jobs persist each frontier entry's depth.",
+            description="Bounded recursive crawl depth. 0 means a single-page crawl for both /v1/crawl and "
+            "/v1/jobs. Positive values admit in-scope, robots-allowed links through that depth; durable jobs "
+            "persist each frontier entry's depth.",
         ),
     ] = 0
     max_pages: Annotated[
@@ -243,7 +256,11 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0,
             le=2000,
-            description="Total-page bound. For /v1/crawl, 0 selects the bounded service default. For /v1/jobs, 0 or omission disables the page cap; positive values cap canonical page identities across admission, recovery, and execution. A positive cap that truncates eligible queued or discovered work sets cap_truncated; already-admitted in-flight work is preserved and recorded as cap_overcommitted.",
+            description="Total-page bound. For /v1/crawl, 0 selects the bounded service default. For "
+            "/v1/jobs, 0 or omission disables the page cap; positive values cap canonical page identities "
+            "across admission, recovery, and execution. A positive cap that truncates eligible queued or "
+            "discovered work sets cap_truncated; already-admitted in-flight work is preserved and recorded "
+            "as cap_overcommitted.",
         ),
     ] = 0
     max_rps: Annotated[
@@ -251,7 +268,9 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0.0,
             le=100.0,
-            description="Maximum requests per second per domain enforced via token bucket. 0 disables rate limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the configured RPS.",
+            description="Maximum requests per second per domain enforced via token bucket. 0 disables rate "
+            "limiting (default). When > 0, allows short bursts up to 5 tokens while sustaining the "
+            "configured RPS.",
         ),
     ] = 0.0
     max_content_length_bytes: Annotated[
@@ -259,7 +278,9 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0,
             le=MAX_CONTENT_LENGTH_BYTES,
-            description="Maximum content size in bytes per response. Omit (recommended) to let the service scale the per-page cap against its RAM budget and concurrency; set an explicit value only when a host needs a hard cap regardless of parallelism. Capped at MAX_CONTENT_LENGTH_BYTES.",
+            description="Maximum content size in bytes per response. Omit (recommended) to let the service "
+            "scale the per-page cap against its RAM budget and concurrency; set an explicit value only when "
+            "a host needs a hard cap regardless of parallelism. Capped at MAX_CONTENT_LENGTH_BYTES.",
         ),
     ] = None
     total_url_budget_seconds: Annotated[
@@ -267,7 +288,10 @@ class CrawlPolicyLimits(BaseModel):
         Field(
             ge=0.1,
             le=MAX_TOTAL_URL_BUDGET_SECONDS,
-            description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit URL that exceeds this is failed as network_error instead of holding a concurrency slot. Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs should keep this generous).",
+            description="Hard per-URL deadline across the whole strategy chain (seconds). A poisoned/tarpit "
+            "URL that exceeds this is failed as network_error instead of holding a concurrency slot. "
+            "Default: 180 (the floor of 0.1 only prevents accidental near-zero values; production configs "
+            "should keep this generous).",
         ),
     ] = DEFAULT_TOTAL_URL_BUDGET_SECONDS
 
@@ -351,7 +375,8 @@ class CrawlPolicy(BaseModel):
     schema_version: Annotated[
         str,
         Field(
-            description="Caller-resolved policy schema version. Use the current policy_schema_version from /v1/capabilities or /v1/agent-hints when constructing durable policy templates.",
+            description="Caller-resolved policy schema version. Use the current policy_schema_version from "
+            "/v1/capabilities or /v1/agent-hints when constructing durable policy templates.",
         ),
     ] = POLICY_SCHEMA_VERSION
     strategies: list[CrawlStrategy] = Field(
@@ -362,57 +387,85 @@ class CrawlPolicy(BaseModel):
             CrawlStrategy.BROWSER_HEADED_WARMED,
         ],
         min_length=1,
-        description="Ordered fetch execution chain. Default: HTTP_DECLARED_CRAWLER, then HTTP_CFFI_IMPERSONATE, then BROWSER_HEADLESS, then BROWSER_HEADED_WARMED. Strategies run in order, the service records every attempted strategy, and fallback stops at the first successful content result. Available fetch strategies: HTTP_DECLARED_CRAWLER (transparent direct HTTP with the service's declared crawler identity), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via curl_cffi with browser-like headers for WAF/Cloudflare bypass), BROWSER_HEADLESS (headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
+        description="Ordered fetch execution chain. Default: HTTP_DECLARED_CRAWLER, then "
+        "HTTP_CFFI_IMPERSONATE, then BROWSER_HEADLESS, then BROWSER_HEADED_WARMED. Strategies run in order, "
+        "the service records every attempted strategy, and fallback stops at the first successful content "
+        "result. Available fetch strategies: HTTP_DECLARED_CRAWLER (transparent direct HTTP with the "
+        "service's declared crawler identity), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via "
+        "curl_cffi with browser-like headers for WAF/Cloudflare bypass), BROWSER_HEADLESS (headless Firefox "
+        "rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
     )
     extraction: Annotated[
         CrawlExtractionMethod,
         Field(
-            description="Output/parsing pipeline applied to the content the selected fetch strategy retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
+            description="Output/parsing pipeline applied to the content the selected fetch strategy "
+            "retrieves. Orthogonal to the fetch strategy. FULL (default) uses the unified pipeline: "
+            "trafilatura HTML main text, markitdown for documents, plain-text passthrough. TRAFILATURA "
+            "forces HTML main-text extraction only. DOCUMENT forces markitdown document extraction for PDFs "
+            "and other non-HTML bodies. These are not strategies; pair any of them with any fetch strategy.",
         ),
     ] = CrawlExtractionMethod.FULL
     limits: CrawlPolicyLimits = Field(
         default_factory=CrawlPolicyLimits,
-        description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.",
+        description="Runtime limits applied to the execution plan. Omit to use service defaults from "
+        "/v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive "
+        "challenge wait, or discovered-link cap.",
     )
     headers: dict[str, str] = Field(
         default_factory=dict,
-        description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, reviewable host policies; do not use to smuggle credentials or bypass access controls. Authorization belongs in policy.credentials, which scopes it to one origin.",
+        description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, "
+        "reviewable host policies; do not use to smuggle credentials or bypass access controls. "
+        "Authorization belongs in policy.credentials, which scopes it to one origin.",
     )
     credentials: dict[str, Credential] = Field(
         default_factory=dict,
         max_length=32,
-        description="Optional per-origin credentials for credentialed crawling of the caller's own sites, keyed by canonical origin (scheme://host[:port], no path). Applied as the Authorization header only for requests to that exact origin, and stripped by the redirect chokepoint on any cross-host hop.",
+        description="Optional per-origin credentials for credentialed crawling of the caller's own sites, "
+        "keyed by canonical origin (scheme://host[:port], no path). Applied as the Authorization header only "
+        "for requests to that exact origin, and stripped by the redirect chokepoint on any cross-host hop.",
     )
     request_profile: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies and echoed in diagnostics.",
+        description="Optional direct HTTP compatibility profile for HTTP_CFFI_IMPERSONATE. Supported keys "
+        "include user_agent_family (for example desktop_chrome), accept_language, fetch metadata hints, "
+        "cookie_jar, and benign per-host cookies for public sessions. Applied only to direct HTTP strategies "
+        "and echoed in diagnostics.",
     )
     browser_profile: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional browser state profile for browser strategies. Supported keys include state (fresh), viewport (desktop or mobile), resource_mode (full or reduced), benign cookie jar hints, and auto_accept_cookie_consent (default false; when true the browser may click consent banners). Viewport changes Firefox window size; reduced resource mode disables images.",
+        description="Optional browser state profile for browser strategies. Supported keys include state "
+        "(fresh), viewport (desktop or mobile), resource_mode (full or reduced), benign cookie jar hints, "
+        "and auto_accept_cookie_consent (default false; when true the browser may click consent banners). "
+        "Viewport changes Firefox window size; reduced resource mode disables images.",
     )
     discovery: Annotated[
         DiscoveryConfig | None,
         Field(
-            description="Optional discovery toggles. Set robots, sitemaps, or feeds true to enable that source; omitted or null leaves the stored discovery map empty.",
+            description="Optional discovery toggles. Set robots, sitemaps, or feeds true to enable that "
+            "source; omitted or null leaves the stored discovery map empty.",
         ),
     ] = None
     scope_regex: Annotated[
         str | None,
         Field(
-            description="Optional regex applied to each canonical discovered-link identity before recursive frontier admission. Non-matching links may still be reported in discovered_links but are not followed by /v1/crawl or /v1/jobs.",
+            description="Optional regex applied to each canonical discovered-link identity before recursive "
+            "frontier admission. Non-matching links may still be reported in discovered_links but are not "
+            "followed by /v1/crawl or /v1/jobs.",
         ),
     ] = None
     css_selector: Annotated[
         str | None,
         Field(
-            description="Optional CSS selector. When provided, extraction targets only the matched DOM subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page Trafilatura/markdownify.",
+            description="Optional CSS selector. When provided, extraction targets only the matched DOM "
+            "subtree (BeautifulSoup) and returns it as Markdown, bypassing full-page "
+            "Trafilatura/markdownify.",
         ),
     ] = None
     xpath: Annotated[
         str | None,
         Field(
-            description="Optional XPath expression. When provided, extraction targets only the matched DOM nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
+            description="Optional XPath expression. When provided, extraction targets only the matched DOM "
+            "nodes (lxml) and returns them as Markdown, bypassing full-page Trafilatura/markdownify.",
         ),
     ] = None
 
@@ -598,19 +651,25 @@ class CrawlRequest(_SingleUrlSourceRequest):
     async_mode: Annotated[
         bool,
         Field(
-            description="When true, accept immediately (202) and run the crawl in the background. Results are persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result is delivered there on completion.",
+            description="When true, accept immediately (202) and run the crawl in the background. Results "
+            "are "
+            "persisted and available at /v1/crawl/{request_id}. If webhook_url is also provided, the result "
+            "is delivered there on completion.",
         ),
     ] = False
     webhook_url: Annotated[
         str | None,
         Field(
-            description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) and the UnifiedCrawlResponse is POSTed to this URL when complete.",
+            description="Optional callback URL. When provided with async_mode, the crawl is accepted (202) "
+            "and the UnifiedCrawlResponse is POSTed to this URL when complete.",
         ),
     ] = None
     output_format: Annotated[
         str | None,
         Field(
-            description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching media type instead of a UnifiedCrawlResponse model.",
+            description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, "
+            "ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching "
+            "media type instead of a UnifiedCrawlResponse model.",
         ),
     ] = None
 
@@ -628,7 +687,9 @@ class MapRequest(BaseModel):
     url: str = Field(..., description="Root public HTTP(S) URL to map.")
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy,
-        description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.",
+        description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). "
+        "Discovery "
+        "is always enabled.",
     )
 
 
@@ -682,7 +743,8 @@ class SearchResultItem(BaseModel):
     """A single SERP result from ``POST /v1/search``."""
 
     url: str = Field(
-        description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service."
+        description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by "
+        "the service."
     )
     title: str = Field(description="Result title from the search engine.")
     description: Annotated[str, Field(description="Result snippet from the search engine.")] = ""
@@ -754,7 +816,8 @@ class ClassificationEvidence(BaseModel):
     classification: str = Field(description="Classification selected by this matched evidence.")
     signature: str = Field(description="Signature that matched the selected source bucket.")
     source: str = Field(
-        description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or http_status."
+        description="Evidence source bucket, such as extracted_text, html_without_scripts_styles, or "
+        "http_status."
     )
     context: Annotated[
         str,
@@ -907,7 +970,9 @@ class UnifiedCrawlResult(BaseModel):
     validators: Annotated[
         ContentValidators | None,
         Field(
-            description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified result.",
+            description="Origin validators (ETag / Last-Modified) for the delivered representation. Echo "
+            "these back via CrawlRequest.validators to revalidate cheaply; a 304 yields a not_modified "
+            "result.",
         ),
     ] = None
 
@@ -928,16 +993,20 @@ class CrawlerError(BaseModel):
 
 class ReadinessResponse(BaseModel):
     status: str = Field(
-        description="Capacity state: ready below the self-managed resource ceiling, saturated when memory or CPU utilization rides at the gate target."
+        description="Capacity state: ready below the self-managed resource ceiling, saturated when memory or "
+        "CPU utilization rides at the gate target."
     )
     active_requests: int = Field(
         description="Currently active /v1/crawl and /v1/render requests tracked by the service."
     )
     max_active_requests: int = Field(
-        description="0 = unbounded; saturation is resource-driven (memory/CPU utilization at the self-managed gate target), not a fixed request cap."
+        description="0 = unbounded; saturation is resource-driven (memory/CPU utilization at the "
+        "self-managed "
+        "gate target), not a fixed request cap."
     )
     saturated: bool = Field(
-        description="True when the self-managed resource guard is at capacity; callers should treat HTTP 503 as backpressure, not process death."
+        description="True when the self-managed resource guard is at capacity; callers should treat HTTP 503 "
+        "as backpressure, not process death."
     )
 
 
@@ -965,13 +1034,15 @@ class CrawlTiming(BaseModel):
     """Latency contract advertised for ``/v1/crawl`` on ``/v1/capabilities``."""
 
     per_url_budget_seconds: int = Field(
-        description="Wall-clock budget for a single URL's whole strategy chain; a URL over it is failed, not the crawl."
+        description="Wall-clock budget for a single URL's whole strategy chain; a URL over it is failed, not "
+        "the crawl."
     )
     sync_has_server_time_ceiling: bool = Field(
         description="Whether a synchronous POST /v1/crawl is capped by a server-side wall clock (it is not)."
     )
     large_crawl_guidance: str = Field(
-        description="How to avoid a long-blocking synchronous response (async_mode / webhook_url / POST /v1/jobs)."
+        description="How to avoid a long-blocking synchronous response (async_mode / webhook_url / POST "
+        "/v1/jobs)."
     )
 
 
@@ -1048,12 +1119,15 @@ class JobStatusResponse(BaseModel):
     cap_truncated: Annotated[
         bool,
         Field(
-            description="True only when a positive job max_pages cap refused or truncated eligible queued or discovered pages. Ordinary BATCH_SIZE chunking does not set it; already-admitted in-flight overcommit is reported separately in stats.cap_overcommitted.",
+            description="True only when a positive job max_pages cap refused or truncated eligible queued or "
+            "discovered pages. Ordinary BATCH_SIZE chunking does not set it; already-admitted in-flight "
+            "overcommit is reported separately in stats.cap_overcommitted.",
         ),
     ] = False
     stats: dict[str, int] = Field(
         default_factory=dict,
-        description="Job counters; cap_truncated marks eligible queued/discovered work refused by a positive cap, while cap_overcommitted marks already-admitted in-flight work preserved beyond that cap.",
+        description="Job counters; cap_truncated marks eligible queued/discovered work refused by a positive "
+        "cap, while cap_overcommitted marks already-admitted in-flight work preserved beyond that cap.",
     )
     error: str | None = None
 

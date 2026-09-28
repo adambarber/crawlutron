@@ -1,11 +1,12 @@
 """App lifecycle edge cases: import failures, lifespan startup/shutdown paths."""
 
 import asyncio
+import dataclasses
 import inspect
 
-import pytest
 from _assertions import assert_pool_unavailable, read_main_source
 from _job_harnesses import post_render_with_pool
+from _lifespan_doubles import stub_heavy_teardown
 
 
 class TestMultiWorkerInvariants:
@@ -31,24 +32,33 @@ class TestMultiWorkerInvariants:
     the running service is actually wired to it, which is what this covers.
     """
 
-    def test_lifespan_does_not_refuse_more_than_one_worker(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
-        source = read_main_source()
-        assert "assert_single_process_deployment" not in source
-        assert "is not supported" not in source
+    async def test_the_lifespan_boots_a_four_worker_fleet(self, monkeypatch):
+        """The refusal is gone, so prove the boot rather than the absence of a token.
 
-    def test_no_refusal_survives_anywhere_in_the_tree(self):
-        """A refusal left behind in one module denies boot just as hard.
-
-        The guard was a chokepoint once; now the class it protected is closed,
-        and a second copy of the same check elsewhere would be a deployment
-        that refuses for a reason no longer true.
+        A source read cannot see a guard reintroduced under another name, and it
+        does not prove the service starts at all. This drives the real lifespan
+        at the fleet's worker count and asserts what startup built while doing
+        it: the cookie jar has to be backed by the shared store, because a jar
+        only this process can see is exactly what made N workers lose every
+        cookie the others collected while reporting healthy.
         """
-        from chokepoint_walks import app_python_files
+        from app import main as main_mod
+        from app.crawl.coordination_cookies import SharedCookieStore
+        from app.crawl.strategies import cookie_jar as cookie_jar_module
 
-        for path in app_python_files():
-            if "assert_single_process_deployment" in path.read_text():
-                pytest.fail(f"{path} still refuses multiple workers")
+        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+        monkeypatch.setattr(
+            main_mod,
+            "settings",
+            dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
+        )
+        stub_heavy_teardown(monkeypatch)
+
+        async with main_mod.app.router.lifespan_context(main_mod.app):
+            # A refusal anywhere on the startup path raises before the yield, so
+            # being inside the block is the boot assertion. The store the jar
+            # landed on is the multi-worker claim itself.
+            assert isinstance(cookie_jar_module._GLOBAL_COOKIE_JAR._store, SharedCookieStore)
 
     def test_the_worker_count_reaches_the_production_budget_wiring(self, monkeypatch):
         """The division has to be where the pools are built, not only in the helpers.
@@ -134,11 +144,6 @@ class TestAppLifecycleEdges:
         assert resp.status_code == 404
         resp = await async_client.delete("/v1/jobs/nonexistent")
         assert resp.status_code == 404
-
-    def test_app_none_fallback(self):
-        import app.main as main_mod
-
-        assert (main_mod.app) is not None
 
 
 class TestLifespanContextManager:

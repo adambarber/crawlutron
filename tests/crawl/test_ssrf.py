@@ -1,5 +1,6 @@
 """SSRF protection: blocked IP ranges, unresolved hosts, DNS pinning, local mode and fixture enforcement."""
 
+import contextlib
 import socket
 
 import pytest
@@ -177,10 +178,8 @@ def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     # Call the real helper; it will fail to resolve but the call itself
     # counts as "exercised", which is what the fixture checks.
-    try:
+    with contextlib.suppress(Exception):
         http_mod._check_ssrf_protection("http://example.invalid/")
-    except Exception:
-        pass
 
 
 def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_required):

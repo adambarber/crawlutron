@@ -162,8 +162,10 @@ class TestKatanaDiscovery:
         assert endpoints == [{"url": "/api/x"}]
 
     def test_extract_js_endpoints_empty_html(self):
+        # The helper is a thin untyped wrapper that defaults host_policy, so
+        # None is a supported input rather than a suppressed type error.
         assert extract_js_endpoints("") == []
-        assert extract_js_endpoints(None) == []  # type: ignore[arg-type]
+        assert extract_js_endpoints(None) == []
 
     def test_extract_js_endpoints_skips_empty_endpoint(self):
         # A regex match with an empty/whitespace endpoint is skipped.

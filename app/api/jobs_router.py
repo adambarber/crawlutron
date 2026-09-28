@@ -8,6 +8,8 @@ JobStore operations.
 
 from __future__ import annotations
 
+from typing import Any, NoReturn, cast
+
 from fastapi import APIRouter
 
 from app.api import job_runner
@@ -28,11 +30,16 @@ from app.validation import HostPolicy
 router = APIRouter(prefix="/v1/jobs", tags=["Crawler"])
 
 
-def _raise_not_found(job_id: str) -> None:
+# ``NoReturn``, not ``None``: both of these always raise, and saying so is what
+# lets the type checker narrow past their call sites. They were annotated ``None``,
+# which is why three ``assert x is not None`` lines existed downstream to satisfy a
+# checker that could not see the raise -- a suppression at the call site hiding a
+# wrong signature at the definition.
+def _raise_not_found(job_id: str) -> NoReturn:
     raise http_error(404, "not_found", f"Unknown job_id: {job_id}")
 
 
-def _raise_conflict(message: str) -> None:
+def _raise_conflict(message: str) -> NoReturn:
     raise http_error(409, "invalid_state", message)
 
 
@@ -68,7 +75,9 @@ async def create_job(
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)
     row = await job_store.astatus(job.job_id)
-    assert row is not None  # written moments ago by acreate
+    # Non-None by construction -- `acreate` wrote it moments ago on the same
+    # store -- so this narrows for the type checker rather than guarding.
+    row = cast("dict[str, Any]", row)
     return JobCreateResponse(
         job_id=row["job_id"],
         status=row["status"],
@@ -100,7 +109,6 @@ async def get_job(job_id: str, job_store: JobStoreDep) -> JobStatusResponse:
     row = await job_store.astatus(job_id)
     if row is None:
         _raise_not_found(job_id)
-    assert row is not None
     return _build_job_status(row)
 
 
@@ -148,14 +156,16 @@ async def control_job(
     if outcome == "conflict":
         _raise_conflict(f"Action '{action}' is not valid for the job's current state.")
     row = await job_store.astatus(job_id)
-    assert row is not None
+    # `aexists` above established the row, and the control path only reads it.
+    row = cast("dict[str, Any]", row)
     return _build_job_status(row)
 
 
 @router.delete(
     "/{job_id}",
     summary="Cancel (if running) and delete a crawl job",
-    description="Permanently remove a crawl job and its data. Deleting a running job cancels its runner task first.",
+    description="Permanently remove a crawl job and its data. Deleting a running job cancels its runner task "
+    "first.",
     responses={404: {"model": CrawlerError, "description": "Job not found."}},
 )
 async def delete_job(job_id: str, job_store: JobStoreDep) -> dict[str, str]:

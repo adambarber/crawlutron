@@ -372,7 +372,8 @@ def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | N
     where = f"{path.name}:" if path is not None else ""
     for node, target, value in assignments(nodes_of_type(tree, ast.AST)):
         candidates: list[ast.expr] = [value] if isinstance(value, ast.Call) else []
-        candidates.extend(_annotated_field_calls(node.annotation if isinstance(node, ast.AnnAssign) else None))
+        annotation = node.annotation if isinstance(node, ast.AnnAssign) else None
+        candidates.extend(_annotated_field_calls(annotation))
         for call in candidates:
             if not (isinstance(call.func, ast.Name) and call.func.id == "Field"):
                 continue

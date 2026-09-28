@@ -140,7 +140,7 @@ def _assert_taxonomy_member(value: Any, enum: Any, what: str) -> None:
 
 def _check_shaped(shaped: list[Any], expected: list[tuple[str, str] | None]) -> None:
     assert len(shaped) == len(expected), "one position per item: no drops, no 500"
-    for result, expectation in zip(shaped, expected):
+    for result, expectation in zip(shaped, expected, strict=True):
         _assert_taxonomy_member(result.status, CrawlStatus, "status")
         _assert_taxonomy_member(result.classification, CrawlClassification, "classification")
         if expectation is None:

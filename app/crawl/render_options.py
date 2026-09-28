@@ -88,4 +88,4 @@ def policy_wants_html(policy: CrawlPolicy) -> bool:
     return bool(policy.browser_profile.get("include_html", True))
 
 
-__all__ = ["resolve_render_options", "policy_wants_html"]
+__all__ = ["policy_wants_html", "resolve_render_options"]

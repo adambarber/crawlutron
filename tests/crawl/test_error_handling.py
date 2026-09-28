@@ -263,17 +263,16 @@ class TestShapeAllGuardsPerItem:
         from app.api.response_shaping import (
             EnvelopeOptions,
             abuild_unified_crawl_response,
-            build_unified_result,
         )
 
         good = _budget_item()
         bad = {**good, "status": "not-a-real-status"}
-        # the bad item is genuinely unshapable
-        try:
-            build_unified_result(bad)
-            raise AssertionError("expected the malformed item to fail shaping")
-        except Exception:
-            pass
+        # The item is NOT unshapable: `_coerce_status` reads a value outside the
+        # taxonomy as `failed` rather than raising, on purpose. This test used to
+        # assert that shaping raised, via a `raise AssertionError` that the
+        # `except Exception: pass` on the next line swallowed -- so it verified
+        # nothing, and would have kept passing if shaping had broken. The
+        # degradation is asserted below, against the real response.
 
         response = await abuild_unified_crawl_response(
             [good, bad], options=EnvelopeOptions(request_id="r", submitted_count=2)

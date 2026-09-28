@@ -39,7 +39,7 @@ task exists to be joined instead of a deadline to be met.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 # Bound on how long a wait may observe NOTHING before it calls the test a hang.
 # Measured, not guessed: the slowest edge-driven wait observed across a full
@@ -108,13 +108,13 @@ class SleepRecorder:
 
     def __init__(self) -> None:
         self.delays: list[float] = []
-        self._previous_sleep: Callable[..., object] | None = None
+        self._previous_sleep: Callable[..., Awaitable[None]] | None = None
 
     async def sleep(self, delay: float, *args: object, **kwargs: object) -> None:
         self.delays.append(delay)
         previous = self._previous_sleep
         assert previous is not None, "SleepRecorder.sleep used before install()"
-        await previous(0)  # type: ignore[operator]  # zero seconds, real yield
+        await previous(0)  # zero seconds, real yield
 
     def install(self, monkeypatch) -> SleepRecorder:
         """Patch ``asyncio.sleep`` for the duration of a test."""

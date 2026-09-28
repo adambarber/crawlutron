@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _jscpd_gate as gate  # noqa: E402
+import _jscpd_gate as gate
 
 
 def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
@@ -241,7 +241,8 @@ def main() -> int:
 
     print(f"jscpd frontier sweep  roots={roots}")
     print(
-        f"floors: {args.min_lines}/{args.min_tokens} .. {args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
+        f"floors: {args.min_lines}/{args.min_tokens} .. "
+        "{args.max_lines}/{args.max_tokens}  ({len(floors)} runs per root)\n"
     )
 
     print("PAIRS PER FLOOR")
@@ -266,7 +267,8 @@ def main() -> int:
         for side in ("firstFile", "secondFile"):
             location = duplicate[side]
             print(
-                f"    {side[:-4]}: {location['tree']}/{location['name']}:{location['start']}-{location['end']}"
+                f"    {side[:-4]}: {location['tree']}/{location['name']}:"
+                f"{location['start']}-{location['end']}"
             )
         fragment = duplicate.get("fragment", "")
         body = "\n".join("      " + line for line in fragment.splitlines()[:12])
@@ -284,7 +286,8 @@ def main() -> int:
         mass = sum(int(d.get("tokens", 0)) for d in logic)
         share = len(logic) / len(pairs) * 100 if pairs else 0.0
         print(
-            f"  {floor[0]:>2}/{floor[1]:<3} | {len(pairs):>6} {len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
+            f"  {floor[0]:>2}/{floor[1]:<3} | {len(pairs):>6} "
+            "{len(logic):>6} {len(pairs) - len(logic):>9} {share:>6.0f}% {mass:>13}"
         )
         tipping.append((floor[1], len(logic), share, mass))
     print("\n  the tipping point is the highest token floor at which logic still outnumbers preamble")

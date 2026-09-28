@@ -19,6 +19,12 @@ class _StreamingDecompressor(Protocol):
     def process(self, data: bytes | bytearray | memoryview[int], /) -> bytes: ...
 
 
+# The codings this process can undo. Membership is what makes the stacked path
+# safe: a header naming anything else is passed through whole, because there is
+# no ordering that decodes it correctly here.
+_DECODABLE_ENCODINGS = frozenset({"gzip", "x-gzip", "deflate", "br"})
+
+
 class DecompressionError(ValueError):
     """Raised when a body does not match its declared Content-Encoding."""
 
@@ -73,6 +79,30 @@ def _decompress_bounded(
         raise DecompressionError("invalid compressed stream") from error
 
 
+def _decode_one(body: bytes | bytearray | memoryview, coding: str, max_output_bytes: int) -> bytes:
+    """Decode one Content-Encoding layer, bounded by the caller's cap.
+
+    Split out so the stacked case is a loop over the same single-layer decoder
+    rather than a second selection: a header naming several codings used to pick
+    one branch on a substring test and return, so ``gzip, br`` lost only its gzip
+    layer and served the brotli bytes as if they were the body.
+    """
+    if coding == "br":
+        decoded = _decompress_brotli(body, max_output_bytes)
+        if len(decoded) > max_output_bytes:
+            raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
+        return bytes(decoded)
+    # Concatenated members are legal gzip and not legal deflate, which is the
+    # only thing the two zlib windings differ by.
+    gzip_like = coding in ("gzip", "x-gzip")
+    return _decompress_bounded(
+        lambda: zlib.decompressobj(16 + zlib.MAX_WBITS) if gzip_like else zlib.decompressobj(),
+        _passthrough(body),
+        max_output_bytes,
+        allow_concatenated=gzip_like,
+    )
+
+
 def decompress_body(
     body: bytes | bytearray | memoryview,
     content_encoding: str,
@@ -85,31 +115,31 @@ def decompress_body(
     decompression-bomb bound explicitly, so a new call site physically cannot
     expand attacker-compressed bytes without a cap (H2 closure — the optional
     default existed only for the uncapped legacy branches, which are gone).
+    Every layer is held to it, not just the outermost, so an intermediate stage
+    of a stack cannot expand past the bound on its way to a small final body.
+
+    Codings are listed in the order they were applied, so they are undone in
+    reverse. ``identity`` names the absence of a coding and is dropped.
 
     Malformed, truncated, or unavailable decoder input raises
     :class:`DecompressionError`; a genuine over-cap expansion raises
-    :class:`DecompressionTooLargeError`. Unknown encodings pass through unchanged.
+    :class:`DecompressionTooLargeError`. A header this process cannot read end to
+    end — an unknown coding, alone or stacked — passes the body through unchanged
+    rather than decoding the part it recognises: raw bytes fail downstream as a
+    parse error the caller can see, where half-decoded bytes would be a
+    successful fetch of content the server never sent.
 
-    ``body`` accepts bytes-like input; the unknown-encoding passthrough normalizes
-    it to ``bytes`` at this boundary because all consumers read the result as bytes.
+    ``body`` accepts bytes-like input; the passthrough normalizes it to ``bytes``
+    at this boundary because all consumers read the result as bytes.
     """
-    encoding = content_encoding.lower().strip()
-
-    if "gzip" in encoding or "deflate" in encoding:
-        return _decompress_bounded(
-            lambda: zlib.decompressobj(16 + zlib.MAX_WBITS) if "gzip" in encoding else zlib.decompressobj(),
-            _passthrough(body),
-            max_output_bytes,
-            allow_concatenated="gzip" in encoding,
-        )
-
-    if "br" in encoding:
-        decoded = _decompress_brotli(body, max_output_bytes)
-        if len(decoded) > max_output_bytes:
-            raise DecompressionTooLargeError(f"decompressed body exceeds {max_output_bytes} bytes")
-        return bytes(decoded)
-
-    return _passthrough(body)
+    codings = [part.strip() for part in content_encoding.lower().split(",")]
+    codings = [coding for coding in codings if coding and coding != "identity"]
+    if not codings or not set(codings) <= _DECODABLE_ENCODINGS:
+        return _passthrough(body)
+    decoded: bytes | bytearray | memoryview = body
+    for coding in reversed(codings):
+        decoded = _decode_one(decoded, coding, max_output_bytes)
+    return _passthrough(decoded)
 
 
 @functools.lru_cache(maxsize=1)

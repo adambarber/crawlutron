@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 ROUTE_ARG_UNSET = object()
 
 
@@ -270,10 +272,10 @@ class FakeRoute:
         return self.actions[-1][0] if self.actions else None
 
 
+@dataclass
 class FakeRequest:
-    def __init__(self, url: str, resource_type: str):
-        self.url = url
-        self.resource_type = resource_type
+    url: str
+    resource_type: str
 
 
 def _fake_browser(html=None, text="doc", metadata=None, status="success", classification="rendered"):

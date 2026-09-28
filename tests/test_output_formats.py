@@ -89,7 +89,8 @@ def test_csv_has_header_and_one_row_per_result():
     rows = body.splitlines()
     assert (
         rows[0]
-        == "original_url,normalized_url,final_url,status,classification,selected_strategy,quality_score,discovered_link_count,error,http_status"
+        == "original_url,normalized_url,final_url,status,classification,selected_strategy,"
+        "quality_score,discovered_link_count,error,http_status"
     )
     assert len(rows) == 3  # header + 2 rows
     assert rows[1].startswith("http://a.example/")
@@ -103,11 +104,8 @@ def test_none_format_defaults_to_json():
 
 
 def test_unsupported_format_raises():
-    try:
+    with pytest.raises(ValueError, match="^unsupported_output_format: xml$"):
         serialize_results(SAMPLE, "xml")
-        assert False, "expected ValueError"
-    except ValueError as exc:
-        assert str(exc) == "unsupported_output_format: xml"
 
 
 class TestOutputFormatDefaults:

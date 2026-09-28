@@ -536,8 +536,8 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
 
 
 __all__ = [
-    "AdmittedLink",
     "AdmissionOutcome",
+    "AdmittedLink",
     "CommitCrawlDelay",
     "JobAdmissionContext",
     "RobotsAllows",

@@ -1,6 +1,7 @@
 """CrawlerSettings defaults tuned for faster parallel single-domain crawls (#7)."""
 
 import logging
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import app.settings as settings_mod
@@ -18,11 +19,11 @@ def test_parallelism_defaults():
     assert s.adaptive_max_delay == 10.0
 
 
+@dataclass
 class _Memory:
     """The one attribute ``_default_http_max_connections`` reads."""
 
-    def __init__(self, total_bytes: int):
-        self.total_bytes = total_bytes
+    total_bytes: int
 
 
 def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():

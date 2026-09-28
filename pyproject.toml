@@ -124,17 +124,39 @@ select = [
     "C901",
     "PLR0912",
     "PLR0915",
+    "RUF100",  # a noqa that no longer suppresses anything
+    "PGH004",  # a noqa must name a specific rule, not blanket the file
 ]
-ignore = [
-    "E501",  # line length (handled by formatter)
-    "E302",
-    "E303",
-    "E306",
-    "E117",
-    "W391",
-    "B903",
-    "S101",  # use of assert (acceptable in tests)
-]
+# PLR0911 (too-many-returns) and PLR0913 (too-many-arguments) are deliberately
+# NOT selected, having been measured rather than assumed:
+#
+#   PLR0913: 55 sites, 6 to 24 arguments, across the API and crawl layers. These
+#     are explicit dependency-injection signatures. Adopting the rule would mean
+#     bundling 55 of them into parameter objects -- a large refactor of a tested
+#     API surface whose only effect is to make the dependencies less visible at
+#     the call site. That is a style preference, not a defect signal.
+#   PLR0911: 11 sites, 7 to 18 returns, in 9 production modules. Every one is
+#     dispatch-shaped (validation, extraction, JSON coercion) where early returns
+#     are the clear form; satisfying the rule would mean accumulating into a
+#     variable purely to satisfy a count.
+#
+# Both are recorded here so the omission reads as a decision rather than a gap.
+# No `ignore` list. Every rule it used to carry has been paid for: E302/E303/
+# E306/E117/W391/B903 were removed once the tree was already clean of them, so
+# they were dead weight that cost nothing to keep and everything to notice. E501
+# was exempted as "handled by formatter" while no formatter runs in any gate --
+# pre-commit runs `ruff check` alone -- which left 154 over-length lines
+# unenforced in a repo whose ratchets are otherwise all mechanical. S101 was
+# exempted as "acceptable in tests" while `tests/**` below already carried the
+# whole `S` family, so it masked 8 asserts in app/ as collateral.
+#
+# The principle this replaces: a suppression that suppresses nothing is a claim
+# about the code that nothing re-checks. The type-suppression half of that is
+# already enforced -- mypy runs `warn_unused_ignores` and pyrightconfig sets
+# `reportUnnecessaryTypeIgnoreComment: "error"` -- and the style half now has
+# RUF100 and PGH004 selected below, so a noqa that no longer earns its place
+# fails the build rather than accumulating.
+#
 # B008: FastAPI dependency injection passes Depends(...) as a default argument
 # by design; calls listed here are recognized as immutable by bugbear.
 # S311: random.uniform jitter in the scheduler is throughput shaping, not crypto.
@@ -173,49 +195,44 @@ max-statements = 87
 # Those are de-fanged in the extraction and result-helper waves, and both rules
 # turn on in the same commit that fixes them.
 
-[tool.ruff.lint.flake8-bandit]
-# The scheduler's random.uniform crawl-delay jitter is throughput shaping, not
-# security-sensitive; its S311 finding is suppressed via per-file-ignores below.
-
 [tool.ruff.lint.per-file-ignores]
-# Test suites exercise security-sensitive shapes (asserts, fake creds) that
-# bandit/bugbear flag; strict hygiene does not apply.
-"tests/**" = ["E402", "S", "B", "C901", "PLR0912", "PLR0915"]
-# Engine/strategy modules perform deferred heavy imports (optional browser
-# bindings) after module-level constants are computed; E402 is deliberate.
-# ARG002: _MatchAll.match(path) accepts `path` for surface parity with the other
-# robots matcher classes (they dispatch on it) but the empty pattern matches
-# every path, so the parameter is intentionally unused.
-"app/crawl/engine.py" = ["E402", "S110", "S112", "ARG002"]
-# Robustness boundaries: best-effort probes/cleanup where silence is the
-# contract (worker reaps, optional-binding probes, webhook best-effort).
-"app/api/async_crawl_runner.py" = ["S110", "E402"]
-"app/api/webhooks.py" = ["S110"]
-# robots single-token matcher constant (not a credential; S105 name heuristic).
-"app/constants.py" = ["S105"]
-# S310: document.py hands opener.open a urllib Request whose URL comes from
-# SafeUrl.connect() -- SafeUrl.parse admits only http/https, so the file:/
-# custom-scheme audit is a false positive there (H5 pinned connect).
-"app/crawl/strategies/document.py" = ["S310"]
-"app/crawl/strategies/http.py" = ["E402", "S110", "S112"]
-"app/crawl/strategies/http_client_pool.py" = ["S110"]
-"app/crawl/strategies/cookie_jar.py" = ["S110"]
-"app/crawl/strategies/fetch_policy.py" = ["S112"]
-"app/crawl/strategies/browser.py" = ["S108", "S110", "S112", "E402"]
-# browser_pool re-exports BrowserPoolExhaustedError for its existing importers
-# (the classifier in result_helpers isinstance-checks it without importing a
-# strategy module -- defining it there would cycle); the name is import
-# surface, not an unused local.
-"app/crawl/strategies/browser_pool.py" = ["F401"]
-# The job store wires the sqlite connection factory above the model imports.
-# Best-effort snapshot persistence: a failed cache write is never fatal.
-"app/crawl/llm_format.py" = ["S110", "S112"]
-"app/crawl/fetch_helpers.py" = ["S110", "S112"]
-
-# The str-based Enum style (class Foo(str, Enum)) is the project convention.
-"app/**" = ["UP042"]
-# The scheduler's jitter is throughput shaping, not crypto (see flake8-bandit note).
-"app/scheduler.py" = ["S311"]
+# Every `app/` entry that used to live here has been paid for and removed, and
+# `scripts/` never needed one. The list is now tests-only, and it is the honest
+# residue: rules that cannot apply to a pytest suite at all.
+#
+# Each was a blanket family mute -- "S" and "B" disabled all 30-odd bandit and
+# bugbear rules for the whole test tree, including the ones that catch real
+# defects in test code (a `subprocess(..., shell=True)`, a hardcoded credential
+# that is not a fixture). They are now named rules, so a test that grows an
+# `eval` fails the build and one that asserts still does not.
+"tests/**" = [
+    "E402",    # pytest imports helpers after sys.path setup
+    "S101",    # assert IS the test mechanism; this is not a bypass
+    "S104",    # 0.0.0.0 appears as the address a test asserts is BLOCKED, or as
+               # a bind the settings layer is asserted to accept -- never as a
+               # bind this code performs
+    "S105",    # fake credentials in fixtures
+    "S106",    # fake credentials in fixtures
+    "S311",    # seeded pseudo-random generators, for reproducible test data.
+               # Not satisfiable by any change: the rule fires on the
+               # random.Random(seed) CONSTRUCTION, not just on its methods, so
+               # every seeded fixture and every property sweep trips it
+    "S404",    # importing subprocess is not itself the risk. The risks live at
+               # the call site, and the two that can be satisfied are: S607 is
+               # satisfied by tests/_executables.require_executable, and S602
+               # (shell=True) is enforced here with no exemption at all
+    "S603",    # fires whenever a command element is not a string literal, which
+               # is every call passing a resolved executable or a runtime path.
+               # Verified against ruff 0.16.8: a fully-literal argv is clean even
+               # with cwd=, so this is the 12 unavoidable call sites, not a mute
+    "S608",    # the interpolated identifiers are SQL identifiers, which cannot
+               # be bound as parameters. They come from PRAGMA table_info and
+               # the schema enum -- never from input -- and every value on these
+               # same queries is still bound with ?
+    "C901",    # a test body that spells out one long scenario
+    "PLR0912",
+    "PLR0915",
+]
 "**/__pycache__/**" = ["ALL"]
 
 [tool.pytest.ini_options]

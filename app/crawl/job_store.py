@@ -15,7 +15,7 @@ import threading
 import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -38,14 +38,14 @@ def _json_default(obj):
     return json_default(obj)
 
 
-class JobKind(str, Enum):
+class JobKind(StrEnum):
     """Kind of crawl job."""
 
     WHOLE_SITE = "whole_site"  # Recursive crawl with frontier/visited
     SINGLE_SHOT = "single_shot"  # Single async crawl (no frontier/visited)
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     """Lifecycle status of a crawl job."""
 
     PENDING = "pending"  # Created, not yet started

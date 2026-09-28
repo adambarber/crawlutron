@@ -8,6 +8,7 @@ sites' contracts so the collapse is provably behavior-preserving.
 """
 
 import gzip
+from dataclasses import dataclass, field
 
 from app.constants import DISCOVERY_BODY_MAX_BYTES
 from app.crawl.fetch_helpers import _fetch_and_decode, _fetch_decode_discovery, _fetch_text
@@ -30,17 +31,25 @@ def _gzip_bomb() -> bytes:
     return gzip.compress(b"\x00" * (DISCOVERY_BODY_MAX_BYTES + 4096))
 
 
+@dataclass
+class _RecordingFetcher:
+    """A fetcher that always returns ``resp`` and records its call arguments.
+
+    A class rather than a closure with a bolted-on attribute: ``calls`` is part
+    of what a test inspects, so it is declared here instead of attached at
+    runtime and hidden from the type checker.
+    """
+
+    resp: object
+    calls: list[tuple] = field(default_factory=list)
+
+    def __call__(self, url, headers, timeout_seconds):
+        self.calls.append((url, dict(headers), timeout_seconds))
+        return self.resp
+
+
 def _fetcher(resp):
-    """A fetcher that always returns ``resp`` and records its call arguments."""
-
-    calls: list[tuple] = []
-
-    def fetcher(url, headers, timeout_seconds):
-        calls.append((url, dict(headers), timeout_seconds))
-        return resp
-
-    fetcher.calls = calls  # type: ignore[attr-defined]
-    return fetcher
+    return _RecordingFetcher(resp)
 
 
 def _raising_fetcher(error):

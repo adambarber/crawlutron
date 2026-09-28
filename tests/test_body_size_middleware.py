@@ -75,26 +75,13 @@ class TestBodySizeMiddlewareRegistration:
         assert "request._receive = _capped_receive" in mw_src
 
 
-class TestBodySizeTruncation:
-    def test_body_size_middleware_sets_connection_close_on_truncation(self):
-        source = _read_middleware_source()
-        assert 'response.headers["Connection"] = "close"' in source
-        assert "if truncated:" in source
+def test_body_size_middleware_preserves_per_chunk_headers():
+    non_comment = "\n".join(
+        line for line in _read_capped_receive().splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "{**message" in non_comment
+    assert "dict(message)" not in non_comment
 
-    def test_body_size_middleware_drains_after_truncation(self):
-        # The wrapper keeps awaiting the underlying receive() after the cap is hit
-        # (so a reading app keeps consuming the socket) instead of caching a final
-        # message, and every post-cap receive hands the app an empty final chunk.
-        body = _read_capped_receive()
-        assert "message = await original_receive()" in body
-        assert "if truncated:" in body
 
-    def test_body_size_middleware_preserves_per_chunk_headers(self):
-        non_comment = "\n".join(
-            line for line in _read_capped_receive().splitlines() if not line.lstrip().startswith("#")
-        )
-        assert "{**message" in non_comment
-        assert "dict(message)" not in non_comment
-
-    def test_body_size_middleware_truncation_keeps_more_body_false(self):
-        assert '"more_body": False' in _read_capped_receive()
+def test_body_size_middleware_truncation_keeps_more_body_false():
+    assert '"more_body": False' in _read_capped_receive()

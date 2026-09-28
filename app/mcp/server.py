@@ -273,4 +273,4 @@ async def handle_mcp_request(
         return 500, error_response(request_id, INTERNAL_ERROR, "Internal error")
 
 
-__all__ = ["origin_allowed", "handle_mcp_request", "discover_result", "tools_list_result"]
+__all__ = ["discover_result", "handle_mcp_request", "origin_allowed", "tools_list_result"]

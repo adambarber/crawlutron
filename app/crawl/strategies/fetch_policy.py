@@ -7,6 +7,7 @@ It must not own client construction, body decoding, extraction, or result assemb
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import re
 from typing import Any
@@ -223,7 +224,7 @@ async def _discovery_diagnostics(
         from app.crawl.fetch_helpers import fetch_sitemap_urls
 
         for sitemap_url in (urljoin(origin, entry) for entry in candidate_sitemaps):
-            try:
+            with contextlib.suppress(Exception):
                 # Recursively resolves sitemap indexes down to (loc, lastmod) pairs.
                 found_locs = await fetch_sitemap_urls(
                     http_fetcher,
@@ -242,8 +243,6 @@ async def _discovery_diagnostics(
                     sitemap_urls.append(safe_loc)
                     if lastmod:
                         diagnostics.setdefault("sitemap_lastmod", {})[safe_loc] = lastmod
-            except Exception:
-                continue
     feeds: list[str] = []
     if flags.feeds:
         for match in re.finditer(

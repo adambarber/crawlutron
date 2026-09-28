@@ -34,7 +34,7 @@ def reset_semaphore():
         yield
     finally:
         runner._async_crawl_semaphore = saved[0]
-        setattr(runner, "_async_crawl_semaphore_loop", saved[1])
+        runner._async_crawl_semaphore_loop = saved[1]
 
 
 def _get_on_a_fresh_loop():

@@ -140,9 +140,9 @@ def decode_header_value(value: str) -> str:
 
 __all__ = [
     "ProtocolValidationError",
-    "server_info",
-    "result_response",
-    "error_response",
-    "validate_meta",
     "decode_header_value",
+    "error_response",
+    "result_response",
+    "server_info",
+    "validate_meta",
 ]

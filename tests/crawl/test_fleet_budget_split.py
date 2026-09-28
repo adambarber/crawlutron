@@ -113,6 +113,59 @@ def test_doc_workers_are_split_across_workers(monkeypatch):
     assert rp.doc_worker_count() == 2
 
 
+def test_the_content_length_budget_is_split_across_workers(monkeypatch):
+    """The last cgroup budget that was read undivided.
+
+    ``BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES`` bounds the RAM held by in-flight
+    page bodies, which is container memory -- the same shared number the pool
+    sizes read. Left whole, each worker sized its per-page cap against the whole
+    budget, so the fleet held N times what the knob names. This is the same
+    over-admission ``test_http_concurrency_is_split_across_workers`` covers for
+    connections, reached through the one budget not in that sweep.
+
+    The two clamps on this cap are different kinds of quantity and the test keeps
+    them apart. ``DEFAULT_MAX_CONTENT_LENGTH_BYTES`` is a per-page ceiling, so it
+    is not divided and is what binds when the budget is generous; the RAM budget
+    is a fleet aggregate, so it is divided and is what binds when it is not.
+    """
+    from app.api_models import CrawlPolicyLimits
+    from app.crawl.strategies import content_cache_key as cck
+
+    budget = 16 * 1024 * 1024
+    monkeypatch.setattr(cck, "_RAM_SAFETY_BYTES", budget)
+    uncapped = CrawlPolicyLimits()
+
+    # 16 MiB across one worker clears the 10 MiB per-page default, so the
+    # default binds and is reported undivided.
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    assert cck._effective_max_content_length(uncapped, global_concurrency=1) == 10 * 1024 * 1024
+
+    # Below the default the budget is the binding constraint, and each worker
+    # takes its share of it.
+    for workers in (2, 4, 8):
+        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        each = cck._effective_max_content_length(uncapped, global_concurrency=1)
+        assert each == budget // workers, f"at {workers} workers"
+
+
+def test_an_explicit_content_cap_is_not_divided(monkeypatch):
+    """A per-page cap the caller set is that caller's business, not the fleet's.
+
+    Division answers "how much of a SHARED budget may this process hold", and an
+    explicit cap is a single page the caller already bounded. Scaling it by the
+    worker count would silently shrink a policy the operator wrote on purpose.
+    """
+    from app.api_models import CrawlPolicyLimits
+    from app.crawl.strategies import content_cache_key as cck
+
+    explicit = CrawlPolicyLimits(max_content_length_bytes=5 * 1024 * 1024)
+
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
+    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "8")
+    assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
+
+
 def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
     """Division must never produce a zero budget.
 

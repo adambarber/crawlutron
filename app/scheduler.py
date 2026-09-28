@@ -3,16 +3,41 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import random
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from secrets import SystemRandom
 from typing import Protocol, TypeVar
 
 from .crawl.scheduler_exceptions import _CircuitBreakerOpen
 from .models import ResultStatus
 
 logger = logging.getLogger(__name__)
+
+# The crawl-delay jitter draws from the OS entropy pool rather than the
+# Mersenne Twister. It is throughput shaping, not cryptography, so nothing here
+# depends on reproducibility -- but a predictable per-domain delay pattern is a
+# fingerprint, and the draw happens once per job against a network fetch, so the
+# syscall costs nothing.
+_JITTER = SystemRandom()
+
+# The jitter band. A fixed delay would make a fleet retry a host in lockstep; the
+# band spreads the retries without changing the configured mean.
+_JITTER_LOW, _JITTER_HIGH = 0.8, 1.2
+
+
+def jittered_delay(base_delay: float) -> float:
+    """``base_delay`` with the crawl-delay jitter applied, or 0 for a zero base.
+
+    Named and module-level so the band lives in exactly one place: the band used
+    to be an inline expression inside ``run``, which is a loop that also holds
+    the per-domain gate, so nothing could reach it in a test. A test that wanted
+    to cover the band had to re-derive the expression locally, and a test that
+    re-derives the thing it is testing asserts the re-derivation.
+    """
+    if base_delay <= 0:
+        return 0.0
+    return base_delay * _JITTER.uniform(_JITTER_LOW, _JITTER_HIGH)
 
 
 class ScheduledJob(Protocol):
@@ -457,7 +482,7 @@ class DomainScheduler:
                 # would burn a global concurrency slot on pure waiting and starve
                 # every other domain (throughput fix).
                 base_delay = self.current_delay(job.domain)
-                delay_sleep = base_delay * random.uniform(0.8, 1.2) if base_delay > 0 else 0
+                delay_sleep = jittered_delay(base_delay)
                 await asyncio.sleep(delay_sleep)
                 async with global_gate:
                     try:

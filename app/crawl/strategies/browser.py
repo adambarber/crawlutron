@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -39,6 +40,9 @@ from app.constants import (
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
     status_for_classification,
+)
+from app.constants import (
+    is_analytics_host as _is_analytics_url,
 )
 from app.crawl.result_helpers import _classify_error_code, _terminal_crawl_result
 from app.crawl.strategies.document import _default_document_text_extractor
@@ -106,13 +110,11 @@ def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
 # browser profile runs in "reduced" resource mode, these are aborted at the
 # route layer to cut render bandwidth (#2); the crawler only needs
 # document/script/xhr/stylesheet to extract content.
-_REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
-
 # Tracking/analytics hosts: never fetch them -- they return no crawlable
 # content and only add network load. The canonical list lives in
 # app.constants (single source of truth) so the engine can also refuse to
 # enqueue these hosts as jobs.
-from app.constants import is_analytics_host as _is_analytics_url
+_REDUCED_BLOCK_RESOURCE_TYPES = frozenset({"image", "font", "media"})
 
 
 def _make_ssrf_route_handler(
@@ -559,10 +561,8 @@ class BrowserRenderer:
         self._browser = None
         self._browser_reused = False
         if cm is not None:
-            try:
+            with contextlib.suppress(Exception):  # best-effort teardown
                 await cm.__aexit__(None, None, None)
-            except Exception:  # best-effort teardown
-                pass
 
     async def render(
         self,
@@ -623,12 +623,10 @@ class BrowserRenderer:
         """Best-effort page teardown so rendered tabs/processes are not leaked."""
         if page is None:
             return
-        try:
+        with contextlib.suppress(Exception):  # best-effort teardown
             close = getattr(page, "close", None)
             if close is not None:
                 await close()
-        except Exception:  # best-effort teardown
-            pass
 
     async def close(self) -> None:
         """Release the reused browser instance at service shutdown (#6)."""
@@ -905,14 +903,12 @@ class BrowserRenderer:
         """Capture targeted element screenshots as base64 (#14)."""
         shots: list[dict[str, Any]] = []
         for selector in selectors:
-            try:
+            with contextlib.suppress(Exception):  # best-effort per-element capture
                 element = await page.query_selector(selector)
                 if element is None:
                     continue
                 data = base64.b64encode(await element.screenshot()).decode("ascii")
                 shots.append({"selector": selector, "screenshot": data})
-            except Exception:  # best-effort per-element capture
-                continue
         return shots
 
     @staticmethod
@@ -920,9 +916,14 @@ class BrowserRenderer:
         # Bounds on intercepted XHR (#4): a hostile page can fire thousands of
         # JSON responses. Cap at 10 entries x 8KB payload (was 50 x 64KB =
         # ~3.2MB held per page in result metadata); feed/API discovery does not
-        # need more than a small sample.
+        # need more than a small sample. The URL is page-controlled too and is
+        # bounded on the same terms: an entry cap is not a bound on what an entry
+        # may contain, and ten multi-megabyte request URLs is ten megabytes of
+        # attacker-chosen text reaching result metadata through a field the entry
+        # count appeared to cover.
         max_entries = 10
         max_payload_chars = 8192
+        max_url_chars = 2048
 
         async def on_response(response: Any) -> None:
             if len(collected) >= max_entries:
@@ -936,12 +937,15 @@ class BrowserRenderer:
                         break
             if "application/json" not in content_type:
                 return
+            url = str(getattr(response, "url", ""))
             entry: dict[str, Any] = {
-                "url": getattr(response, "url", ""),
+                "url": url[:max_url_chars],
                 "content_type": content_type,
                 "status": getattr(response, "status", None),
                 "payload": None,
             }
+            if len(url) > max_url_chars:
+                entry["url_truncated"] = True
             try:
                 # ACCEPTED RESIDUAL: the browser process has already
                 # materialized this body in its own memory; Python parses it
@@ -1029,26 +1033,27 @@ class BrowserRenderer:
         on the box read another tenant's session tokens
         (adversarial review F-storage-state-path-traversal).
         """
+        import tempfile
         from pathlib import Path
 
         # For file paths, ensure they live under an operator-controlled dir.
-        try:
+        with contextlib.suppress(Exception):
             path = Path(storage_state).resolve()
             allowed_dirs: list[Path] = []
             if self._cache_dir:
                 allowed_dirs.append(Path(self._cache_dir).resolve())
             else:
-                # No settings -> local-mode dev usage. Use /tmp as the only
-                # fallback (and document the trade-off via the log line).
-                allowed_dirs.append(Path("/tmp").resolve())
+                # No settings -> local-mode dev usage. Use the platform temp dir
+                # as the only fallback (and document the trade-off via the log
+                # line). Not a hardcoded /tmp: the platform dir is the one the
+                # interpreter already trusts for scratch files.
+                allowed_dirs.append(Path(tempfile.gettempdir()).resolve())
             for allowed in allowed_dirs:
                 try:
                     path.relative_to(allowed)
                     return str(path)
                 except ValueError:
                     continue
-        except Exception:
-            pass
         return None
 
     def _get_page_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
@@ -1113,7 +1118,7 @@ class BrowserRenderer:
         # FIX: Collect shadow root children FIRST, then move in separate pass to
         # avoid mutation during iteration (could cause duplicates, infinite loops,
         # or HierarchyRequestError if moving a node into its own descendant).
-        try:
+        with contextlib.suppress(Exception):  # flattening is best-effort; never fail a render over it
             await page.evaluate(
                 """() => {
                     const collect = (root, acc) => {
@@ -1152,8 +1157,6 @@ class BrowserRenderer:
                     return true;
                 }"""
             )
-        except Exception:  # flattening is best-effort; never fail a render over it
-            pass
 
     async def _auto_accept_cookie_consent(self, page: Any, enabled: bool) -> bool:
         """Auto-click cookie consent accept buttons (best-effort, opt-in).
@@ -1200,7 +1203,7 @@ class BrowserRenderer:
             ]
 
             for selector in consent_selectors:
-                try:
+                with contextlib.suppress(Exception):
                     element = await page.query_selector(selector)
                     if element:
                         # Check if element is visible
@@ -1209,22 +1212,21 @@ class BrowserRenderer:
                             await element.click()
                             await self._async_sleep(0.5)  # Brief wait for consent to register
                             return True
-                except Exception:
-                    continue
-
             # Fallback: evaluate JS to find buttons by text content
             clicked = await page.evaluate("""() => {
                 const acceptTexts = [
                     'accept all', 'accept all cookies', 'i accept', 'i agree',
                     'allow all', 'allow all cookies', 'continue', 'got it', 'ok'
                 ];
-                const buttons = document.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
+                const buttons = document.querySelectorAll('button, a, input[type="button"],
+                input[type="submit"]');
                 for (const btn of buttons) {
                     const text = (btn.innerText || btn.value || btn.textContent || '').toLowerCase().trim();
                     if (acceptTexts.some(t => text.includes(t))) {
                         // Check if visible
                         const style = window.getComputedStyle(btn);
-                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !==
+                        '0') {
                             btn.click();
                             return true;
                         }

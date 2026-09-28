@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _FIXTURE_PDF = os.path.join(_HERE, "..", "fixtures", "sample_table.pdf")
@@ -21,7 +21,8 @@ JSONLD_HTML = """<!doctype html>
 <html lang="en">
 <head>
   <title>JSON-LD Example</title>
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Example Org"}</script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Organization","name":"Example Org"}</script>
 </head>
 <body>
   <h1>Example Org</h1>
@@ -358,12 +359,34 @@ class SilentHandler(BaseHTTPRequestHandler):
     def log_message(self, *args: Any) -> None:  # silence
         return
 
+    @property
+    def counter(self) -> CountingHTTPServer:
+        """The hit counter, as the type it actually is.
+
+        The one cast in this module, replacing three suppressions of the same
+        error: ``spawn_threaded_server`` always builds a ``CountingHTTPServer``,
+        so this narrows a known shape rather than hiding an unknown one.
+        """
+        return cast("CountingHTTPServer", self.server)
+
+
+class CountingHTTPServer(ThreadingHTTPServer):
+    """A threading server carrying the hit counter its handlers maintain.
+
+    ``BaseHTTPRequestHandler.server`` is typed ``BaseServer``, which declares no
+    ``hits``, so every handler that counted hits suppressed the same error and
+    nothing checked that the attribute existed. The counter is declared here
+    instead, and handlers reach it through :attr:`SilentHandler.counter`.
+    """
+
+    hits: int = 0
+
 
 class CountingHandler(SilentHandler):
     """Serves one cacheable page and counts hits on ``server.hits``."""
 
     def do_GET(self):
-        self.server.hits += 1  # type: ignore[attr-defined]
+        self.counter.hits += 1
         self.send_body(
             200,
             b"<html><body><h1>Hello</h1><p>cacheable content</p></body></html>",
@@ -382,25 +405,25 @@ class EtagHandler(SilentHandler):
     body = b"<html><body>etagged content</body></html>"
 
     def do_GET(self):
-        server = self.server
         if_none = self.headers.get("If-None-Match")
+        counter = self.counter
         if if_none == self.etag:
-            server.hits += 1  # type: ignore[attr-defined]
+            counter.hits += 1
             self.send_response(304)
             self.send_header("ETag", self.etag)
             self.end_headers()
             return
-        server.hits += 1  # type: ignore[attr-defined]
+        counter.hits += 1
         self.send_body(200, self.body, **{"Content-Type": "text/html", "ETag": self.etag})
 
 
-def spawn_threaded_server(handler_cls) -> ThreadingHTTPServer:
-    """Start a daemon-served ThreadingHTTPServer on an ephemeral port.
+def spawn_threaded_server(handler_cls) -> CountingHTTPServer:
+    """Start a daemon-served threading HTTP server on an ephemeral port.
 
     The caller owns teardown (``server.shutdown()`` + ``server.server_close()``);
     the ``counting_server`` / ``etag_server`` conftest fixtures do this.
     """
-    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    server = CountingHTTPServer(("127.0.0.1", 0), handler_cls)
     server.hits = 0
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server

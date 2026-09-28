@@ -80,67 +80,93 @@ def test_decode_body_empty_body():
     assert _decode_body(b"", "text/html") == ""
 
 
-class TestDecompressionEncodings:
-    def test_decompression_zlib(self):
-
-        from app.crawl.decompression import decompress_body
-
-        original = b"hello world " * 10
-        compressed = zlib.compress(original)
-        result = decompress_body(compressed, "deflate", max_output_bytes=10_000_000)
-        assert result == original
-
-    def test_decompression_gzip(self):
-        import gzip
-
-        from app.crawl.decompression import decompress_body
-
-        original = b"hello world " * 10
-        compressed = gzip.compress(original)
-        result = decompress_body(compressed, "gzip", max_output_bytes=10_000_000)
-        assert result == original
-
-    def test_decompression_unknown_encoding(self):
-        from app.crawl.decompression import decompress_body
-
-        result = decompress_body(b"some data", "unknown", max_output_bytes=10_000_000)
-        assert result == b"some data"
-
-    def test_decompression_none_encoding(self):
-        from app.crawl.decompression import decompress_body
-
-        # With an unrecognized encoding, returns the original body
-        result = decompress_body(b"some data", "unknown_encoding", max_output_bytes=10_000_000)
-        assert result == b"some data"
+def test_decompression_zlib():
+    original = b"hello world " * 10
+    compressed = zlib.compress(original)
+    assert decompress_body(compressed, "deflate", max_output_bytes=10_000_000) == original
 
 
-class TestBodyCharsetDecoding:
-    def test_http_charset_decode_error(self):
-        from app.crawl.strategies.body_decode import _decode_body
-
-        # Charset rides on the content-type only; a stray value can never
-        # reach the decoder as a headers argument (the parameter is gone).
-        result = _decode_body(b"hello", "text/plain; charset=invalid_charset")
-        assert isinstance(result, str)
+def test_decompression_gzip():
+    original = b"hello world " * 10
+    compressed = gzip.compress(original)
+    assert decompress_body(compressed, "gzip", max_output_bytes=10_000_000) == original
 
 
-class TestDecompressionBehaviors:
-    def test_gzip(self):
-        import gzip
+def test_http_charset_decode_error():
+    from app.crawl.strategies.body_decode import _decode_body
 
-        data = gzip.compress(b"hello world")
-        assert decompress_body(data, "gzip", max_output_bytes=10_000_000) == b"hello world"
+    # Charset rides on the content-type only; a stray value can never
+    # reach the decoder as a headers argument (the parameter is gone).
+    result = _decode_body(b"hello", "text/plain; charset=invalid_charset")
+    assert isinstance(result, str)
 
-    def test_deflate(self):
 
-        data = zlib.compress(b"hello world")
-        assert decompress_body(data, "deflate", max_output_bytes=10_000_000) == b"hello world"
+# --------------------------------------------------------------------------
+# Stacked Content-Encoding
+#
+# A header may name several codings, applied left to right, so decoding runs
+# right to left. The previous selection was a substring test over the whole
+# header value that picked ONE branch and returned: ``gzip, br`` had its gzip
+# layer removed and left the brotli layer in place as if it were the body, and
+# ``br, gzip`` was gunzipped on the outside. Both report a successful fetch of
+# bytes that were never the resource.
+# --------------------------------------------------------------------------
 
-    def test_no_encoding(self):
-        assert decompress_body(b"hello", "", max_output_bytes=10_000_000) == b"hello"
 
-    def test_unknown_encoding(self):
-        assert decompress_body(b"hello", "unknown", max_output_bytes=10_000_000) == b"hello"
+def _stack(*codings: str) -> bytes:
+    """Encode ``b"stacked payload"`` with each coding, in the order given."""
+    import brotli
+
+    data = b"stacked payload"
+    for coding in codings:
+        if coding == "gzip":
+            data = gzip.compress(data)
+        elif coding == "br":
+            data = brotli.compress(data)
+        else:
+            data = zlib.compress(data)
+    return data
+
+
+@pytest.mark.parametrize(
+    "codings",
+    [
+        pytest.param(("gzip", "br"), id="gzip-then-brotli"),
+        pytest.param(("br", "gzip"), id="brotli-then-gzip"),
+        pytest.param(("gzip", "deflate"), id="gzip-then-deflate"),
+    ],
+)
+def test_stacked_content_encoding_decodes_in_reverse_order(codings):
+    assert decompress_body(_stack(*codings), ", ".join(codings), max_output_bytes=_CAP) == b"stacked payload"
+
+
+def test_a_stacked_layer_still_honours_the_cap():
+    """The cap bounds every layer, not just the one that happens to match first."""
+    import brotli
+
+    bomb = brotli.compress(gzip.compress(b"A" * 1_000_000))
+    with pytest.raises(DecompressionTooLargeError):
+        decompress_body(bomb, "gzip, br", max_output_bytes=10_000)
+
+
+def test_an_unknown_coding_in_a_stack_passes_the_body_through():
+    """Never a half-decoded lie: if any layer is unreadable, the body is returned as-is.
+
+    Returning the raw bytes leaves the consumer with input it cannot parse, which
+    fails as a parse error it can see. Decoding the layers it does understand
+    would return confidently wrong bytes attributed to a real resource.
+    """
+    body = _stack("gzip", "br")
+    assert decompress_body(body, "gzip, compress", max_output_bytes=_CAP) == body
+
+
+def test_identity_in_a_stack_is_a_no_op():
+    assert decompress_body(gzip.compress(b"hi"), "identity, gzip", max_output_bytes=_CAP) == b"hi"
+
+
+def test_encoding_tokens_are_case_and_space_insensitive():
+    body = _stack("gzip", "br")
+    assert decompress_body(body, "  GZIP ,\tBr ", max_output_bytes=_CAP) == b"stacked payload"
 
 
 def test_decode_valid_utf8_strict():

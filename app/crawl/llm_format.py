@@ -1,5 +1,6 @@
 """LLM-friendly metadata extraction from HTML."""
 
+import contextlib
 import json
 import re
 from html import unescape
@@ -93,10 +94,8 @@ def _llm_metadata_from_tree(tree: Any, url: str) -> dict[str, Any]:
         block = script.text
         if not block:
             continue
-        try:
+        with contextlib.suppress(Exception):  # malformed JSON-LD is skipped
             parsed_json_ld.append(json.loads(block))
-        except Exception:  # malformed JSON-LD is skipped
-            continue
     if parsed_json_ld:
         metadata["json_ld"] = parsed_json_ld[0] if len(parsed_json_ld) == 1 else parsed_json_ld
 

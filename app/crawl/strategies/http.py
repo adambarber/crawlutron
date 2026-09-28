@@ -7,6 +7,7 @@ It must not reimplement client, transport, cookie, body, retry, or discovery pol
 from __future__ import annotations
 
 import base64
+import contextlib
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -343,10 +344,8 @@ async def _store_http_caches(ctx: _HttpStrategyContext, resp: _FetchedResponse) 
     if ctx.content_cache is None or ctx.ckey is None or ctx.content_hit:
         return
     if resp.status_code < 300 and resp.status_code != 304:
-        try:
+        with contextlib.suppress(Exception):
             await ctx.content_cache.aset(ctx.ckey, _serialize_response(resp.raw))
-        except Exception:
-            pass
 
 
 def _binary_result_if_needed(ctx: _HttpStrategyContext, resp: _FetchedResponse) -> EngineCrawlResult | None:

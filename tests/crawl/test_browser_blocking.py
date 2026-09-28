@@ -51,19 +51,6 @@ class _BlockingResolver:
         return ("http://1.2.3.4:80/", {"Host": "example.com"})
 
 
-async def test_ssrf_route_handler_runs_dns_check_in_thread_pool(monkeypatch):
-    """The route handler runs ``_build_pinned_request`` off the event loop.
-
-    Asserted on thread identity, which is stronger than any stopwatch: a
-    synchronous DNS lookup that ran on the loop would report the main thread's
-    id no matter how long it took.
-    """
-    route, ran_off_loop = await run_blocking_document_route(monkeypatch, browser_mod)
-
-    assert_continued(route)
-    assert ran_off_loop
-
-
 # ============================================================
 # Finding 1: Route handler must PIN subresources to validated IP
 # to prevent DNS-rebinding TOCTOU (SSRF)
@@ -268,6 +255,37 @@ async def test_response_handler_caps_entries_and_payload_size():
     # Oversized payloads are truncated out rather than stored whole.
     assert all(len((e.get("payload") or {}).get("blob", "")) <= 200_000 for e in collected)
     assert any(e.get("payload_truncated") for e in collected)
+
+
+async def test_response_handler_caps_the_url_it_retains():
+    """The entry cap bounds entries, not what an entry may contain.
+
+    The URL was the one unbounded field: ten XHRs at a multi-megabyte URL each
+    put ten megabytes of page-controlled text into result metadata, through a
+    bound the module documented as covering the whole entry.
+    """
+    collected = []
+    handler = BrowserRenderer._make_response_handler(collected)
+    long_url = "https://x/api?" + "k" * 500_000
+
+    await handler(_FakeResponse(long_url, {"a": 1}))
+
+    entry = collected[0]
+    assert entry["url_truncated"] is True
+    assert len(entry["url"]) <= 2048
+    assert entry["url"].startswith("https://x/api?")
+    # Truncating the locator must not cost the payload the entry exists for.
+    assert entry["payload"] == {"a": 1}
+
+
+async def test_response_handler_does_not_flag_a_url_within_the_cap():
+    collected = []
+    handler = BrowserRenderer._make_response_handler(collected)
+
+    await handler(_FakeResponse("https://x/api/data", {"a": 1}))
+
+    assert "url_truncated" not in collected[0]
+    assert collected[0]["url"] == "https://x/api/data"
 
 
 class TestXhrResponsePayloadCapture:

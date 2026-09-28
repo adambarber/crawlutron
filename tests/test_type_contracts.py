@@ -93,10 +93,13 @@ def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset
         for arg, default in zip(
             [*args.posonlyargs, *args.args],
             [None] * (len(args.posonlyargs) + len(args.args) - len(args.defaults)) + list(args.defaults),
+            strict=True,
         )
         if default is not None
     ]
-    keyword_only = [arg.arg for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None]
+    keyword_only = [
+        arg.arg for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True) if default is not None
+    ]
     return frozenset([*positional, *keyword_only])
 
 
@@ -230,7 +233,8 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
 
     # Same parameter names, same order, same coroutine-ness -- only the defaulting differs.
     mutated = ast.parse(
-        "async def f(url, headers, timeout_seconds, max_content_length=1, *, policy=None, impersonate=False): ...\n"
+        "async def f(url, headers, timeout_seconds, "
+        "max_content_length=1, *, policy=None, impersonate=False): ...\n"
     ).body[0]
     assert tuple(arg.arg for arg in mutated.args.args) == _CONTRACT["positional"]
     assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _CONTRACT["keyword_only"]

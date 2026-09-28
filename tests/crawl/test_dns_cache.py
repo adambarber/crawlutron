@@ -13,6 +13,7 @@ import threading
 import uuid
 from unittest.mock import patch
 
+import pytest
 from _thread_fanout import run_thread_fanout
 
 from app.crawl.strategies import pinned_transport as http_mod
@@ -62,11 +63,10 @@ def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
         "socket.getaddrinfo",
         return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))],
     ):
-        try:
+        # The reason matters as much as the type: this has to be the private-address
+        # refusal, not any incidental ValueError the parse could raise.
+        with pytest.raises(ValueError, match="resolves to private/loopback IP"):
             http_mod._check_ssrf_protection(f"http://{host}/")
-            assert False, "expected ValueError"
-        except ValueError:
-            pass
 
 
 class TestDnsCacheLocking:

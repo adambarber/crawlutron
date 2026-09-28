@@ -7,6 +7,7 @@ robots.txt/sitemap.xml responses used in engine.py.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, NamedTuple, TypeAlias, TypeVar
@@ -96,7 +97,7 @@ async def _fetch_decode_discovery(
     """
     from app.crawl.decompression import DecompressionTooLargeError
 
-    try:
+    with contextlib.suppress(Exception):
         resp = fetcher(url, headers or {}, timeout_seconds)
         if inspect.iscoroutine(resp):
             resp = await resp
@@ -113,8 +114,6 @@ async def _fetch_decode_discovery(
                 return _Discovery(None, status, resp_headers)
             return _Discovery(_decode_body(body, resp_headers.get("content-type")), status, resp_headers)
         return _Discovery(None, status, resp_headers)
-    except Exception:
-        pass
     return _Discovery(None, None, None)
 
 

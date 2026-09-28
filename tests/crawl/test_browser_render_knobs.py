@@ -5,6 +5,8 @@ Lazy-scroll steps/delay and the cookie-harvest timeout are hardcoded
 defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 """
 
+import tempfile
+
 import pytest
 from _assertions import set_optional_env
 from _browser_doubles import ScriptedPage
@@ -121,14 +123,15 @@ def test_browser_knob_env_mapping():
 def test_log_knob_env_mapping():
     from app.settings import CrawlerSettings
 
+    log_file = f"{tempfile.gettempdir()}/crawler.jsonl"
     mapped = CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_LOG_FILE": "/tmp/crawler.jsonl",
+            "BROWSER_CRAWLER_LOG_FILE": log_file,
             "BROWSER_CRAWLER_LOG_MAX_BYTES": "4096",
             "BROWSER_CRAWLER_LOG_BACKUP_COUNT": "7",
         }
     )
 
-    assert mapped.log_file_path == "/tmp/crawler.jsonl"
+    assert mapped.log_file_path == log_file
     assert mapped.log_file_max_bytes == 4096
     assert mapped.log_file_backup_count == 7

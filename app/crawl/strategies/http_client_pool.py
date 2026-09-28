@@ -7,6 +7,7 @@ and teardown. It must not assemble request policy, fetch responses, or own crawl
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import threading
 from collections.abc import Callable
 from http.cookiejar import CookieJar as _StdlibCookieJar
@@ -144,11 +145,9 @@ async def _safe_aclose(client):
     Shared by every pooled kind: httpx exposes ``aclose``, curl_cffi exposes
     ``close`` -- both coroutine methods, so one helper reaps either.
     """
-    try:
+    with contextlib.suppress(Exception):
         close = getattr(client, "aclose", None) or client.close
         await close()
-    except Exception:
-        pass
 
 
 # Superseded loop-bound pooled clients awaiting a live event loop to be closed
@@ -229,10 +228,8 @@ def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any],
         return
     close = getattr(stale_to_release, "close", None)
     if close is not None and not asyncio.iscoroutinefunction(close):
-        try:
+        with contextlib.suppress(Exception):
             close()
-        except Exception:
-            pass
         return
     _schedule_client_close(
         stale_to_release,

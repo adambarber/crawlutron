@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urljoin, urlparse
 
 from app.api_models import POLICY_SCHEMA_VERSION, CrawlExtractionMethod, CrawlPolicy
@@ -260,7 +260,7 @@ async def _spill_one(state: _PipelineState, index: int, result: EngineCrawlResul
 
 
 async def _run_nonrecursive(state: _PipelineState) -> None:
-    assert state.scheduler is not None
+    scheduler = cast("DomainScheduler", state.scheduler)
     decisions = (
         await gather_robots_decisions(
             [job.normalized_url for job in state.jobs],
@@ -276,10 +276,10 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
             await _spill_write(state.spill, job.index, _robots_disallowed(state, job))
             continue
         if state.respect_robots and crawl_delay and crawl_delay > 0:
-            state.scheduler.set_domain_min_delay(job.domain, crawl_delay)
+            scheduler.set_domain_min_delay(job.domain, crawl_delay)
         allowed_jobs.append(job)
     if allowed_jobs:
-        await state.scheduler.run(
+        await scheduler.run(
             allowed_jobs,
             lambda job: _worker(state, job),
             on_result=lambda index, result: _spill_one(state, index, result),
@@ -293,7 +293,7 @@ async def _run_nonrecursive(state: _PipelineState) -> None:
 
 
 async def _run_recursive(state: _PipelineState) -> None:
-    assert state.scheduler is not None
+    scheduler = cast("DomainScheduler", state.scheduler)
     admission = WeightedAdmission(
         state.dependencies.resource_gate,
         _build_admission_policy(
@@ -305,7 +305,7 @@ async def _run_recursive(state: _PipelineState) -> None:
     )
     await run_recursive_crawl(
         jobs=state.jobs,
-        scheduler=state.scheduler,
+        scheduler=scheduler,
         worker=lambda job: _worker(state, job),
         robots_allows=lambda url: _robots_allows(state, url),
         robots_crawl_delay=lambda url: _robots_delay(state, url),

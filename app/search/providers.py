@@ -453,15 +453,15 @@ def get_search_provider(settings: Any) -> SearchProvider:
 
 
 __all__ = [
-    "SearchResult",
+    "BraveProvider",
+    "DuckDuckGoProvider",
     "SearchProvider",
     "SearchProviderError",
     "SearchProviderUnavailable",
-    "TavilyProvider",
-    "BraveProvider",
+    "SearchResult",
     "SerperProvider",
-    "DuckDuckGoProvider",
-    "get_search_provider",
-    "configured_search_providers",
+    "TavilyProvider",
     "active_search_provider_name",
+    "configured_search_providers",
+    "get_search_provider",
 ]

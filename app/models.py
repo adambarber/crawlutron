@@ -504,7 +504,8 @@ def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
             value, seen, lambda node, path: {key: _to_jsonable_impl(item, path) for key, item in node.items()}
         )
     if isinstance(value, (list, tuple)):
-        return _build_guarded(value, seen, lambda node, path: [_to_jsonable_impl(item, path) for item in node])
+        return _build_guarded(value, seen, lambda node,
+        path: [_to_jsonable_impl(item, path) for item in node])
     return value
 
 

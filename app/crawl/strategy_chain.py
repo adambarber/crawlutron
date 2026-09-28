@@ -348,8 +348,7 @@ async def execute_crawl_chain(
             if context.scheduler is not None:
                 context.scheduler.set_pinned_strategy(context.domain, strategy)
             return replace(result, attempted_strategies=run.state.attempts)
-    last = run.state.last_result
-    assert last is not None
+    last = cast("EngineCrawlResult", run.state.last_result)
     return replace(last, attempted_strategies=run.state.attempts)
 
 

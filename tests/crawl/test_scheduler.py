@@ -1,7 +1,6 @@
 """Domain scheduler: run queue, cooldown, policies, purge cadence, resilience and starvation."""
 
 import asyncio
-import random
 import time
 
 import pytest
@@ -18,7 +17,7 @@ from _timing_harnesses import recorder
 
 from app.crawl.result_helpers import TerminalResult
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult
-from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler
+from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 
 
 def _adaptive_scheduler() -> DomainScheduler:
@@ -35,8 +34,12 @@ def _adaptive_scheduler() -> DomainScheduler:
 class TestScheduler:
     def test_jitter_in_range(self):
         scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=1.0)
-        delays = [scheduler._delay_seconds * random.uniform(0.8, 1.2) for _ in range(50)]
-        assert all(0.7 <= d <= 1.3 for d in delays)
+        base = scheduler._delay_seconds
+        delays = [jittered_delay(base) for _ in range(50)]
+        assert all(0.7 <= d <= 1.3 for d in delays), delays
+        # A zero base must not sleep at all, whatever the jitter draws. This
+        # branch is the reason the band is not applied unconditionally.
+        assert jittered_delay(0.0) == 0.0
 
     def test_set_domain_cooldown_is_in_future(self):
         scheduler = make_scheduler(global_limit=5, per_domain_limit=3, delay_seconds=0.1)

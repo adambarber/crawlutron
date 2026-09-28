@@ -8,7 +8,7 @@ import the constant instead of typing the string literal.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Final, Literal
 from urllib.parse import urlparse as _urlparse
 
@@ -77,10 +77,15 @@ SUPPORTED_EXTRACTIONS: list[str] = [
 
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
-    EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",
-    EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",
-    EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",
-    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura pipelines.",
+    EXTRACTION_FULL:
+    "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",
+    EXTRACTION_TRAFILATURA:
+    "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",
+    EXTRACTION_DOCUMENT:
+    "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",
+    EXTRACTION_DOM:
+    "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura "
+    "pipelines.",
 }
 
 # ---------------------------------------------------------------------------
@@ -105,7 +110,7 @@ EXTRACTION_METHOD_BINARY_NO_TEXT: Final = "binary_no_text"
 # ---------------------------------------------------------------------------
 
 
-class CrawlClassification(str, Enum):
+class CrawlClassification(StrEnum):
     """Normalized result classifications used across HTTP, browser, and document strategies."""
 
     rendered = "rendered"

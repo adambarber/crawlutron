@@ -5,6 +5,8 @@ scope_regex is applied to every discovered link URL. A pattern such as
 refuse to compile pathological patterns and bound the number of links scanned.
 """
 
+import contextlib
+
 from app.crawl.admission import compile_scope_pattern as compile_scope_pattern
 from app.models import EngineCrawlResult
 
@@ -45,10 +47,8 @@ def test_nested_quantifiers_compile_and_match_bounded():
         if pat is None:
             continue
         host = "http://" + "a" * 64 + ".test/"
-        try:
-            match_bounded(pat, host, timeout=0.25)
-        except RegexTimeout:
-            pass  # bounded: the budget fired instead of the match hanging
+        with contextlib.suppress(RegexTimeout):
+            match_bounded(pat, host, timeout=0.25)  # bounded: the budget fired instead of the match hanging
 
 
 def test_safe_compile_rejects_overlong_pattern():

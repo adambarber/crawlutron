@@ -62,13 +62,17 @@ PROPERTY_REGISTRY = (
                 module="app/crawl/robots_parse.py",
                 symbol="robots_groups",
                 fingerprint="parse_robots_rules_definition",
-                reason="The grouping primitive is a shared lower-level parser component consumed by the policy owner.",
+                reason="The grouping primitive is a shared "
+                "lower-level parser component consumed by the policy "
+                "owner.",
             ),
             Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="select_robots_values",
                 fingerprint="parse_robots_rules_definition",
-                reason="The selection primitive is a shared lower-level parser component consumed by the policy owner.",
+                reason="The selection primitive is a shared "
+                "lower-level parser component consumed by the policy "
+                "owner.",
             ),
             Suppression(
                 module="app/crawl/robots_parse.py",
@@ -110,7 +114,8 @@ PROPERTY_REGISTRY = (
                 module="app/crawl/robots.py",
                 symbol="<module>",
                 fingerprint="robots_bounded_ttl_cache",
-                reason="The declared module-level robots cache is the policy owner's sanctioned cache instance.",
+                reason="The declared module-level robots cache is the policy owner's sanctioned cache "
+                "instance.",
             ),
         ),
     ),

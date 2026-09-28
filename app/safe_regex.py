@@ -78,9 +78,9 @@ def match_bounded(
 
 
 __all__ = [
-    "BoundedPattern",
     "DEFAULT_MATCH_TIMEOUT_SECONDS",
     "MAX_PATTERN_LENGTH",
+    "BoundedPattern",
     "RegexTimeout",
     "UnsafePattern",
     "compile_untrusted",

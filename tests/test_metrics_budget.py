@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _executables import GIT, require_executable
 from _jscpd_sweep import COMPOUND_NODES
 from chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
@@ -265,7 +266,9 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     the loop below read as "no budget at this revision" -- a silently weakened
     history, not a failing one.
     """
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        [require_executable(GIT), *args], cwd=root, capture_output=True, text=True, check=False
+    )
 
 
 def test_metric_budgets_have_never_risen() -> None:
@@ -289,7 +292,7 @@ def test_metric_budgets_have_never_risen() -> None:
     # silent no-op ever recurring.
     root = pathlib.Path(
         subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [require_executable(GIT), "rev-parse", "--show-toplevel"],
             cwd=service_root,
             capture_output=True,
             text=True,
@@ -299,7 +302,7 @@ def test_metric_budgets_have_never_risen() -> None:
     tracked = str(pathlib.Path(__file__).resolve().relative_to(root))
     try:
         log = subprocess.run(
-            ["git", "log", "--format=%H", "--", tracked],
+            [require_executable(GIT), "log", "--format=%H", "--", tracked],
             cwd=root,
             capture_output=True,
             text=True,

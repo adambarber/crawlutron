@@ -9,6 +9,7 @@ FastAPI layer (``app.main``) calls into.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fcntl
 import json
 import logging
@@ -18,11 +19,30 @@ import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from app.api_models import CrawlPolicy
 from app.crawl import robots as _robots_policy
+from app.crawl.admission import compile_scope_pattern
+from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
+from app.crawl.fetch_helpers import _fetch_and_decode
+from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
+from app.crawl.policy import PolicyTier
+from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
+from app.crawl.strategies.fetchers import _default_http_fetcher, impersonating_fetcher
+from app.models import (
+    CrawlWorker,
+    EngineCrawlResult,
+    HttpFetcher,
+    to_dict,
+)
 from app.resource_pressure import ResourceGate
+from app.settings import CrawlerSettings
+from app.validation import (
+    HostPolicy,
+    get_env_int,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,25 +59,6 @@ load_robots_rules = _robots_policy.load_robots_rules
 cached_sitemaps = _robots_policy.cached_sitemaps
 
 _resource_gate = ResourceGate()
-from app.crawl.admission import compile_scope_pattern
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
-from app.crawl.fetch_helpers import _fetch_and_decode
-from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
-from app.crawl.policy import PolicyTier
-from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
-from app.crawl.strategies.fetchers import _default_http_fetcher, impersonating_fetcher
-from app.models import (
-    CrawlWorker,
-    EngineCrawlResult,
-    HttpFetcher,
-    to_dict,
-)
-from app.settings import CrawlerSettings
-from app.validation import (
-    HostPolicy,
-    get_env_int,
-)
 
 _DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 
@@ -263,8 +264,7 @@ class _ResultSpill:
                     pass
                 raise
         else:
-            assert path is not None
-            resolved = path
+            resolved = cast("str", path)
             self._fh = open(resolved, "w", encoding="utf-8")
         self.path = resolved
         self.count = 0
@@ -284,12 +284,8 @@ class _ResultSpill:
             # orphaned by killed runs are still reclaimed; the age predicate
             # below still protects active spills from early unlink.
             _LAST_SPILL_GC_MONOTONIC = now_mono
-            try:
+            with contextlib.suppress(Exception):
                 self._gc_stale_spills(gc_age_seconds)
-            except Exception:
-                # GC failure must not abort the spill (adversarial #result-spill
-                # review). The next interval boundary will retry.
-                pass
 
     def _claim_ownership(self) -> None:
         """Hold this spill's ownership lock for as long as the spill is open.
@@ -372,10 +368,8 @@ class _ResultSpill:
         return [slots[key] for key in sorted(slots)]
 
     def close(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._fh.close()
-        except Exception:
-            pass
         # Closing the descriptor released the ownership lock, so the sweep and
         # this cleanup can no longer both act on the same path.
         #

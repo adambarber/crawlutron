@@ -11,6 +11,7 @@ from pathlib import Path
 import _jscpd_gate as gate
 import pytest
 import yaml
+from _executables import BASH, GIT, require_executable
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
@@ -157,8 +158,10 @@ def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subproces
     config_path = Path(temp_dir) / "test-pre-commit-config.yaml"
     config_path.write_text(config_text, encoding="utf-8")
     (Path(temp_dir) / "probe.py").write_text("x = 1\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q", str(temp_dir)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True)
+    subprocess.run([require_executable(GIT), "init", "-q", str(temp_dir)], check=True, capture_output=True)
+    subprocess.run(
+        [require_executable(GIT), "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True
+    )
     return subprocess.run(
         [str(PRE_COMMIT_PATH), "run", "--all-files", "--config", str(config_path)],
         cwd=temp_dir,
@@ -331,7 +334,9 @@ def _render_results(script: str, results: dict[str, str]) -> str:
 
 def _run_script(script: str) -> subprocess.CompletedProcess[str]:
     """Execute as GitHub executes it: `bash -e {0}`."""
-    return subprocess.run(["bash", "-e", "-c", script], capture_output=True, text=True, check=False)
+    return subprocess.run(
+        [require_executable(BASH), "-e", "-c", script], capture_output=True, text=True, check=False
+    )
 
 
 def _assert_no_continue_on_error(block: dict, label: str) -> None:
@@ -474,8 +479,11 @@ def test_a_ci_job_that_reruns_a_hook_command_is_caught() -> None:
     """Bites: adding a job that re-runs a hook command fails the check."""
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
     broken = workflow.replace(
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml",
-        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config .pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests scripts",
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config "
+        ".pre-commit-config.yaml",
+        "- name: Run all configured hooks\n        run: pre-commit run --all-files --config "
+        ".pre-commit-config.yaml\n      - name: Drift copy\n        run: python -m ruff check app tests "
+        "scripts",
     )
     with pytest.raises(AssertionError):
         assert_no_hook_command_rerun(broken, {"python -m ruff check"})
@@ -590,7 +598,11 @@ def test_the_aggregate_script_is_what_fails_not_just_what_it_says() -> None:
     # The same script under a shell without errexit reports success, which is why
     # the declared shell above is a gate and not a style preference.
     without_errexit = subprocess.run(
-        ["bash", "-c", _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"})],
+        [
+            require_executable(BASH),
+            "-c",
+            _render_results(script, dict.fromkeys(needs, "success") | {"enforcement": "failure"}),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -798,7 +810,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     job cannot pass this by agreeing with a copy of itself.
     """
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
-    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
     (service_root / "scripts").mkdir(parents=True)
     (service_root / "scripts" / "gate").write_text(GATE_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
     (service_root / "scripts" / "gate").chmod(0o755)
@@ -808,7 +820,7 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     interpreter = service_root / ".venv" / "bin" / "python"
     interpreter.write_text('#!/bin/sh\nexec python3 "$@"\n', encoding="utf-8")
     interpreter.chmod(0o755)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True)
+    subprocess.run([require_executable(GIT), "-C", str(repo), "add", "-A"], check=True, capture_output=True)
 
     # pre-commit runs an entry as `shlex.split(entry)` with the repository root
     # as the working directory, so the first four tokens -- program, -c, the

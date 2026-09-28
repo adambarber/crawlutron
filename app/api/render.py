@@ -202,4 +202,4 @@ async def render_request(
     }
 
 
-__all__ = ["render_request", "_render_options"]
+__all__ = ["_render_options", "render_request"]

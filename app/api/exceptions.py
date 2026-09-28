@@ -123,6 +123,6 @@ __all__ = [
     "error_envelope_from_detail",
     "http_error",
     "http_exception_handler",
-    "validation_http_error",
     "validation_exception_handler",
+    "validation_http_error",
 ]
