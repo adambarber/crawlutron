@@ -4,7 +4,9 @@ Both set silently ignored url; neither failed downstream in _payload_urls.
 Fail fast at the model boundary instead.
 """
 
+import httpx
 import pytest
+from httpx import AsyncClient
 from pydantic import ValidationError
 
 from app.api_models import CrawlRequest, RenderRequest
@@ -40,10 +42,6 @@ def test_empty_urls_list_with_url_rejected(model):
 
 class TestWebhookUrlValidation:
     async def test_main_invalid_webhook_url(self):
-
-        import httpx
-        from httpx import AsyncClient
-
         from app.main import app
 
         transport = httpx.ASGITransport(app=app)

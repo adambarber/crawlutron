@@ -6,7 +6,9 @@ from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 import pytest
+from fastapi import BackgroundTasks, HTTPException
 
 from app.validation import HOST_POLICY_ENTRY_POINTS
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
@@ -228,8 +230,6 @@ async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
 async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     import asyncio
 
-    from fastapi import BackgroundTasks
-
     from app.api.crawl_endpoint import crawl
     from app.api_models import CrawlRequest
 
@@ -395,8 +395,6 @@ async def _probe_webhook(monkeypatch, tmp_path):
 
 
 async def _probe_webhook_delivery(monkeypatch, tmp_path):
-    import httpx
-
     from app.api import webhooks
 
     effects = _effects()
@@ -417,8 +415,6 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
 
 
 def _blocked_http(*args, **kwargs):
-    from fastapi import HTTPException
-
     raise HTTPException(status_code=422, detail="blocked by host policy")
 
 

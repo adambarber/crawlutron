@@ -48,8 +48,6 @@ def test_pool_exhaustion_classifies_distinctly():
 
 def test_existing_taxonomy_is_preserved():
     """The move must not change any existing classification."""
-    import httpx
-
     assert _classify_error_code(httpx.ConnectTimeout("x")) == "connection_error"
     assert _classify_error_code(ValueError("x")) == "value_error"
     assert _classify_error_code(RuntimeError("x")) == "network_error"

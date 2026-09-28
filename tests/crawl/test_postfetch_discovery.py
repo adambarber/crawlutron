@@ -8,6 +8,8 @@ strategy result builders. The post-fetch block must move to
 
 import asyncio
 
+from lxml import etree
+
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
 from app.validation import HostPolicy
@@ -100,8 +102,6 @@ async def test_browser_post_fetch_block_runs_off_loop(monkeypatch):
 
 async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
     """The offloaded block returns plain data: no lxml element crosses back."""
-    from lxml import etree
-
     import app.crawl.extraction as ext_mod
 
     out = await asyncio.to_thread(

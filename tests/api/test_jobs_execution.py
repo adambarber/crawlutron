@@ -14,6 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi.params import Depends as DependsParam
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
@@ -84,8 +85,6 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
     """
     import inspect
 
-    from fastapi.params import Depends as DependsParam
-
     from app.api import dependencies, jobs_router
 
     aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
@@ -112,8 +111,6 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
     becomes necessary for one of them and not the other, this is what says so.
     """
     import inspect
-
-    from fastapi.params import Depends as DependsParam
 
     from app.api import jobs_router
     from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
@@ -203,7 +200,6 @@ class TestCrashRecovery:
     async def test_rejected_job_is_not_persisted_or_started(
         self, job_store, monkeypatch, url, settings_values
     ):
-        from httpx import ASGITransport, AsyncClient
 
         from app.api.dependencies import get_settings
         from app.settings import CrawlerSettings

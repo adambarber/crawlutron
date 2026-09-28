@@ -3,6 +3,8 @@ import inspect
 from typing import Any
 from urllib.parse import urlparse
 
+import trafilatura.core
+
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -722,7 +724,6 @@ async def invoke_http_strategy(
     cap_capture: list[int] | None = None,
 ) -> Any:
     if dedupe_patch:
-        import trafilatura.core
 
         monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
 

@@ -11,6 +11,7 @@ import ast
 import pathlib
 import re
 
+import httpx
 import pytest
 
 from tests.chokepoint_walks import (
@@ -126,7 +127,6 @@ def test_table_shadowing_detector_bites():
     assert sum("can never fire" in o for o in offenders) == 2
 
     # The live shape this was written for.
-    import httpx
 
     assert (
         _table_shadowing_offenders(

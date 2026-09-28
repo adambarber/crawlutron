@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+import httpx
 import pytest
 
 from app.timeouts import Timeouts
@@ -25,8 +26,6 @@ class TestTimeoutsChokepoint:
         assert timeouts.pool == 5.0
 
     def test_as_httpx_carries_all_four_parameters(self):
-        import httpx
-
         timeout = Timeouts.for_request(12.0).as_httpx()
         assert isinstance(timeout, httpx.Timeout)
         assert timeout.read == 12.0

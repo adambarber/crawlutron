@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
 
+import httpx
+import pdfplumber
+
 from app.crawl.strategies.document import (
     _extract_pdf_bytes_to_markdown,
     _format_table,
@@ -55,8 +58,6 @@ class TestPdfTablePreservation:
         assert "|" in md
 
     def test_pdf_to_markdown_with_real_pdfplumber(self):
-        import pdfplumber
-
         with pdfplumber.open(FIXTURE) as pdf:
             md = _pdf_to_markdown(pdf)
         assert "Alice" in md
@@ -87,8 +88,6 @@ class TestDocumentRedirectSsrf:
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
         import socket
         from urllib.parse import urlparse
-
-        import httpx
 
         import app.crawl.strategies.http_client_pool as pool_mod
         import app.crawl.strategies.pinned_transport as http_strategy

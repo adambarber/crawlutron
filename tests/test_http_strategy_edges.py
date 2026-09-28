@@ -1,6 +1,7 @@
 import multiprocessing
 import os
 
+import httpx
 import pytest
 
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
@@ -90,8 +91,6 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        import httpx
-
         unreachable_fetcher = failing_fetcher(httpx.RequestError("connection failed", request=None))
 
         result = await run_http_strategy(
@@ -111,8 +110,6 @@ class TestHttpStrategyEdges:
         from app.crawl.cache import HttpCache
 
         cache = HttpCache()
-
-        import httpx
 
         class MockResponse:
             content = b"error"

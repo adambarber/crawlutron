@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from app.api_models import CrawlPolicy
 from app.crawl.payload_helpers import _payload_policy
@@ -67,7 +68,6 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
 
     def test_max_content_length_above_ceiling_is_a_validation_error(self):
         # The pydantic boundary must 422 oversized caps (le= on the model).
-        from pydantic import ValidationError
 
         from app.api_models import CrawlPolicyLimits
         from app.constants import MAX_CONTENT_LENGTH_BYTES

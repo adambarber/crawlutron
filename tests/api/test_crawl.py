@@ -5,6 +5,8 @@ import json
 import time
 
 import pytest
+from fastapi import Request
+from fastapi.exceptions import RequestValidationError
 
 from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
@@ -413,8 +415,6 @@ class TestDiscoveryAndRenderApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_validation_exception_handler_returns_422(self):
-        from fastapi import Request
-        from fastapi.exceptions import RequestValidationError
 
         handler = app.exception_handlers[RequestValidationError]
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}

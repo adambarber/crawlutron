@@ -11,11 +11,13 @@ Fourteen findings on first run, triaged against ground truth rather than taken
 at face value: four were real defects and are fixed, and ten were the checker
 being wrong -- six pydantic `default_factory` overloads, two incomplete lxml
 stubs, one `curl_cffi` re-export marker, and one Literal-annotated property that
-pyright widens. Verifying those ten mattered: "fixing" the `curl_cffi` import to
-satisfy the checker would have silently routed every streaming fetch through
-the httpx fallback, because the import sits inside the guarded
-`try: ... except ImportError: return None` at the head of the transport, and
-the plain-httpx answer is a real path, not an error.
+pyright widens. Verifying those ten mattered: the `curl_cffi` import was then
+inside a `try: ... except ImportError: return None` at the head of the transport,
+whose "fix" would have silently routed every streaming fetch through the httpx
+fallback rather than correcting anything. That guard is gone -- curl_cffi is a
+declared dependency, so a failed session build now raises instead of degrading
+the transport -- which means this import is free to be spelled the way pyright
+wants it.
 
 The budget is an exact zero rather than a count, because the triage is finished:
 there is no known-acceptable finding left, so any new one is either a real defect

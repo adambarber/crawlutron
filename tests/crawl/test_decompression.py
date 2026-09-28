@@ -3,6 +3,7 @@
 import gzip
 import zlib
 
+import brotli
 import pytest
 
 from app.crawl import decompression as decompression_mod
@@ -71,8 +72,6 @@ def test_decode_body_handles_unknown_charset():
 
 
 def test_brotli():
-    import brotli
-
     assert decompress_body(brotli.compress(b"hello brotli"), "br", max_output_bytes=_CAP) == b"hello brotli"
 
 
@@ -115,8 +114,6 @@ def test_http_charset_decode_error():
 
 def _stack(*codings: str) -> bytes:
     """Encode ``b"stacked payload"`` with each coding, in the order given."""
-    import brotli
-
     data = b"stacked payload"
     for coding in codings:
         if coding == "gzip":
@@ -142,8 +139,6 @@ def test_stacked_content_encoding_decodes_in_reverse_order(codings):
 
 def test_a_stacked_layer_still_honours_the_cap():
     """The cap bounds every layer, not just the one that happens to match first."""
-    import brotli
-
     bomb = brotli.compress(gzip.compress(b"A" * 1_000_000))
     with pytest.raises(DecompressionTooLargeError):
         decompress_body(bomb, "gzip, br", max_output_bytes=10_000)
@@ -221,8 +216,6 @@ def test_accepts_bytearray_gzip():
 
 
 def test_accepts_bytearray_brotli():
-    import brotli
-
     from app.crawl.decompression import decompress_body
 
     body = bytearray(brotli.compress(b"<html>br content</html>"))
@@ -292,7 +285,6 @@ def test_deflate_bomb_is_bounded():
 
 def test_brotli_bomb_is_bounded():
     # H6: a brotli bomb must raise, not expand unbounded in RAM.
-    import brotli
 
     bomb = brotli.compress(b"C" * 1_000_000)
     assert len(bomb) < 10_000
@@ -304,7 +296,6 @@ def test_brotli_feeds_incrementally(monkeypatch):
     # H6 mechanism: the google-brotli streaming API must be fed in chunks
     # so the full output is never materialized before the cap is checked.
     # A single process() call with the whole input means unbounded RAM.
-    import brotli
 
     calls: list[int] = []
     real_decompressor = brotli.Decompressor

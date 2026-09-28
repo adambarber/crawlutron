@@ -3,6 +3,7 @@
 import asyncio
 import gzip
 
+import brotli
 import pytest
 
 from app.api.render import _render_options
@@ -760,8 +761,6 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
         # without checking: the claim on the wire and the decoder must agree.
         import gzip
         import zlib
-
-        import brotli
 
         from app.crawl.decompression import decompress_body
 

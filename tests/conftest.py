@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 HERE = Path(__file__).resolve().parent
@@ -271,8 +272,6 @@ def _disable_lazy_scroll():
 @pytest.fixture
 async def async_client():
     """Async HTTP client using ASGI transport for FastAPI app."""
-    import httpx
-
     from app.main import app
 
     async with httpx.ASGITransport(app=app) as transport:

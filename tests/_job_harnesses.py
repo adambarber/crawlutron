@@ -38,6 +38,9 @@ from collections.abc import Callable, Container
 from contextlib import contextmanager
 from typing import Any
 
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
@@ -193,7 +196,6 @@ async def run_job_control_test(
     action: str,
     expected_status: int = 422,
 ) -> None:
-    from httpx import ASGITransport, AsyncClient
 
     async with ASGITransport(app=app) as transport:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -265,8 +267,6 @@ class ScriptedExecute:
 
 
 def _make_app(job_store):
-    from fastapi import FastAPI
-
     from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
     from app.api.jobs_router import router as jobs_router
     from app.settings import CrawlerSettings

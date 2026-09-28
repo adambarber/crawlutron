@@ -3,6 +3,7 @@
 import asyncio
 import threading
 
+import curl_cffi.requests as cffi_requests
 import pytest
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
@@ -300,8 +301,6 @@ class _FeedOnDemandQueue:
         self._offset = 0
 
     async def get(self):
-        from curl_cffi.requests.models import STREAM_END
-
         if self._offset >= len(self._body):
             return STREAM_END
         chunk = self._body[self._offset : self._offset + self._chunk_size]
@@ -353,8 +352,6 @@ class _FakeCffiClient:
 
 
 def _patch_client(monkeypatch, body: bytes):
-    import curl_cffi.requests as cffi_requests
-
     _FakeCffiClient.last_instance = None
     monkeypatch.setattr(cffi_requests, "AsyncSession", lambda **kw: _FakeCffiClient(body))
 
@@ -380,7 +377,6 @@ class TestCffiStreamingCap:
         # Detection-gap guard: the cffi path once referenced AsyncClient,
         # which does not exist in curl_cffi>=0.7, so every impersonated
         # fetch silently fell back to plain httpx. Pin the real API.
-        import curl_cffi.requests as cffi_requests
 
         assert hasattr(cffi_requests, "AsyncSession")
 
@@ -409,11 +405,9 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
     zero-second patch used to be a no-op that never yielded at all. It yields
     now, so the transfers progress.
     """
-    import curl_cffi.requests as cffi_mod
-
     from app.crawl.strategies import http_client_pool as http_mod
 
-    real_session = cffi_mod.AsyncSession
+    real_session = cffi_requests.AsyncSession
     constructions = 0
 
     class _CountingSession(real_session):
@@ -422,7 +416,7 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
             constructions += 1
             super().__init__(*args, **kwargs)
 
-    monkeypatch.setattr(cffi_mod, "AsyncSession", _CountingSession)
+    monkeypatch.setattr(cffi_requests, "AsyncSession", _CountingSession)
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None)
     try:
         r1, r2 = await _fetch_twice(base_url)

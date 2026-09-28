@@ -26,6 +26,7 @@ import functools
 import inspect
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
@@ -348,8 +349,6 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         assert response.request_id == "req-1"
 
     async def test_a_pending_single_shot_read_stays_off_the_loop(self, loop_guard_store, result_store):
-        from fastapi import HTTPException
-
         from app.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-2", _ROOT, {"strategies": []})

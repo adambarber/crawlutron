@@ -8,6 +8,7 @@ import os
 from contextlib import contextmanager
 
 import pytest
+from camoufox.utils import launch_path
 
 
 def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
@@ -203,7 +204,6 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
     with contextlib.suppress(Exception):
-        from camoufox.utils import launch_path
 
         path = launch_path()
         return bool(path) and os.path.exists(path)
