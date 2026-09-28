@@ -85,8 +85,22 @@ _THIS_MODULE = sys.modules[__name__]
 #
 # So: probing one branch of a function and generalising to the whole function is
 # how a real defect gets filed as a tool bug. The budget is zero and the gate
-# stays at zero -- the six documented suppressions for pydantic and lxml remain,
-# each with its reason at the call site.
+# stays at zero.
+#
+# The last eight suppressions are gone, and so is the reason this file needed a
+# second question asked of it. Not one of the eight had been suppressing anything:
+# five in `app/api_models.py` (a worktree at 7d0aed1, the commit that added them,
+# reports zero `reportArgumentType` findings there), two on the `lxml.etree`
+# imports (quiet because `reportPrivateImportUsage` is off, not because lxml ships
+# partial stubs), and one on `browser_pool._configured_strategy` (quiet since the
+# worker constructor began validating the strategy it is handed). One of the
+# eight was not a suppression at all but a prose sentence quoting one.
+#
+# That is a whole class of finding this budget could not see, because a
+# suppression that suppresses nothing leaves the count at zero and the
+# explanation still attached. Two rules in pyrightconfig.json make it visible,
+# and test_pyright_detects_its_own_suppressions_decaying asserts they are on --
+# with either off, the tree looks identical from here.
 BUDGET = 0
 
 
@@ -228,6 +242,40 @@ def test_pyright_budget_is_tight() -> None:
         f"the pyright budget of {BUDGET} is stale -- only {actual} findings remain. "
         f"Tighten it in this file. Zero is the target and there is no allowance "
         f"left in it."
+    )
+
+
+def test_pyright_detects_its_own_suppressions_decaying() -> None:
+    """Both rules that catch a suppression outliving its finding must be ON.
+
+    Assertions about the config, not the tree, because the failure they guard is
+    invisible FROM the tree: with either rule off, a suppression that stopped
+    suppressing anything leaves this budget at zero and the suite green. That is
+    not hypothetical. Eight suppressions sat in `app/` with comments explaining
+    why they were needed and nothing to check any of it, and five of them had
+    never suppressed anything -- from the commit that added them onward.
+
+    `enableTypeIgnoreComments` is the other half of the same defect. Pyright
+    honoring mypy's comments let four `# type: ignore[attr-defined]` in
+    http_client_pool.py satisfy mypy while pyright's own view of those same four
+    lines reported `Cannot assign to attribute "_bound_loop"`, and a bare
+    `# type: ignore[return-value]` in cgroup_sense.py hid a real `Type "object" is
+    not assignable to return type "str | None"`. Two checkers, one tree, and every
+    one of those findings visible to only one of them.
+    """
+    config = json.loads(_strip_jsonc((SERVICE_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")))
+    assert config.get("enableTypeIgnoreComments") is False, (
+        "pyright is honoring mypy's `# type: ignore` comments again, so a "
+        "suppression that satisfies the fail gate can hide a finding from the "
+        "checker whose whole job is annotation lies. Mypy owns its own comments "
+        "(`warn_unused_ignores` is on in mypy.ini); pyright must not speak for it."
+    )
+    assert config.get("reportUnnecessaryTypeIgnoreComment") == "error", (
+        "pyright is not reporting suppressions that suppress nothing, so a "
+        "suppression can outlive the finding it was written for with its "
+        "explanation still attached and this budget still reading zero. It also "
+        "catches the prose case: a comment quoting a suppression directive IS "
+        "one, and mutes the line it sits on."
     )
 
 

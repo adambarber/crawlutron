@@ -25,6 +25,32 @@
     "pythonVersion": "3.12",
     "typeCheckingMode": "basic",
 
+    // Pyright honoring mypy's `# type: ignore` meant a suppression that satisfied
+    // one checker could hide a finding from the other, and did: four bare
+    // `# type: ignore[attr-defined]` in http_client_pool.py were muting
+    // `Cannot assign to attribute "_bound_loop"` in pyright's own view of the
+    // same four lines, and a bare `# type: ignore[return-value]` in
+    // cgroup_sense.py was muting a real
+    // `Type "object" is not assignable to return type "str | None"`. Mypy owns
+    // its own comments -- `warn_unused_ignores` is on, and it is the declared
+    // fail gate -- so pyright must not speak for it.
+    "enableTypeIgnoreComments": false,
+
+    // A suppression that suppresses nothing is a claim about the code that
+    // nothing ever re-checks, and a comment explaining a suppression is
+    // indistinguishable from a working one until the code underneath changes.
+    // Five in `app/api_models.py`, two on the `lxml.etree` imports and one on
+    // `browser_pool._configured_strategy` had stopped suppressing anything while
+    // their comments still explained why they were needed; the api_models ones
+    // never suppressed anything, from the commit that added them onward. This is
+    // the rule that turns that decay into a build failure.
+    //
+    // It also catches prose: a comment that quotes a suppression directive IS a
+    // suppression directive, so an explanatory comment can silently mute the
+    // line it sits on. One paragraph in `app/api_models.py` had been doing
+    // exactly that.
+    "reportUnnecessaryTypeIgnoreComment": "error",
+
     "reportMissingTypeStubs": "none",
     "reportUnknownMemberType": "none",
     "reportUnknownVariableType": "none",
@@ -43,9 +69,10 @@
     // streaming fetch through the httpx fallback, because the import sits inside
     // a `try: ... except ImportError: return _fallback_to_httpx(...)`.
     //
-    // The pydantic `Field(default_factory=...)` findings cannot be configured
-    // away -- they are reportArgumentType, which is a rule we want -- so the six
-    // of them carry a per-line ignore with a shared explanation at the top of
-    // app/api_models.py.
+    // The pydantic `Field(default_factory=...)` findings these comments used to
+    // describe cannot be configured away -- they are reportArgumentType, which is
+    // a rule we want -- so they were per-line ignores with a shared explanation.
+    // There are none left; `reportUnnecessaryTypeIgnoreComment` above reports
+    // each of them as having suppressed nothing.
     "reportPrivateImportUsage": "none"
 }
