@@ -1,8 +1,7 @@
 """HTTP fetch cache: batched stores, memory mirror and envelope edges."""
 
-from tests._thread_fanout import run_thread_fanout
-
 from app.crawl.cache import HttpCache
+from tests._thread_fanout import run_thread_fanout
 
 
 def test_many_stores_all_retrievable():

@@ -1,8 +1,7 @@
 from typing import Any
 
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
 from app.constants import HTTP_DECLARED_CRAWLER
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 def make_job(index: int, url: str):

@@ -1,6 +1,7 @@
 import ast
 
 import pytest
+
 from tests.chokepoint_walks import TESTS_DIR, local_nodes, nodes_of, trees_under
 
 FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)

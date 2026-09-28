@@ -6,8 +6,6 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 """
 
 import pytest
-from tests._assertions import block_private_targets, host_resolves_to
-from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 from app.api.webhooks import (
     post_webhook as _post_webhook,
@@ -16,6 +14,8 @@ from app.api.webhooks import (
     validate_webhook_url as _validate_webhook_url,
 )
 from app.validation import HostPolicy
+from tests._assertions import block_private_targets, host_resolves_to
+from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 
 class TestWebhookUrlValidation:

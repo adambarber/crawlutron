@@ -20,10 +20,10 @@ import inspect
 from typing import get_args
 
 import pytest
-from tests.chokepoint_walks import app_python_files
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import HttpFetchContract, HttpFetcher
+from tests.chokepoint_walks import app_python_files
 
 # There is ONE concrete fetcher. The impersonating transport is a binding of it
 # (`impersonating_fetcher`), not a second function, so the contract's parameters

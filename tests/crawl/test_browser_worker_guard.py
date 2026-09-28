@@ -3,11 +3,11 @@
 from collections import deque
 
 import pytest
-from tests._assertions import assert_result_failed
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+from tests._assertions import assert_result_failed
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 
 class ExhaustedPool:
@@ -104,10 +104,9 @@ class TestTransientRequeue:
         classification was destroyed at the scheduler envelope (AttributeError
         -> network_error) and the re-queue never fired.
         """
-        from tests._fetcher_factories import run_crawl_async
-
         from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
         from app.crawl.strategies.browser_pool import PooledBrowserWorker
+        from tests._fetcher_factories import run_crawl_async
 
         # The real production worker, not a stand-in: only the pool is faked
         # (no browser binary in CI), so the guard, the chokepoint

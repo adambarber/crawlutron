@@ -22,14 +22,14 @@ here rather than argued per call site:
 from __future__ import annotations
 
 import pytest
-from tests._browser_doubles import _fake_browser
-from tests._fetcher_factories import strategy_request
 
 from app.api.render import _render_options
 from app.crawl.policy import read_policy
 from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.settings import CrawlerSettings
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import strategy_request
 
 #: The two knobs the resolver reads off settings, set away from the dataclass
 #: defaults so a merge assertion cannot pass by coincidence.

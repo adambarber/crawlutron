@@ -1,11 +1,11 @@
 """Cookie bootstrap: after browser renders a blocked domain, retry cffi with
 the browser-minted session cookies before accepting the render result."""
 
-from tests._browser_doubles import _fake_browser
 from _chain_policies import chain_policy
-from tests._fetcher_factories import request_fetcher, run_chain
 
 from app.constants import BROWSER_HEADLESS, HTTP_CFFI_IMPERSONATE, HTTP_DECLARED_CRAWLER
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import request_fetcher, run_chain
 
 #: A browser worker's success shape, which is what the strategy chain needs
 #: back once the cffi hop has the cookies.

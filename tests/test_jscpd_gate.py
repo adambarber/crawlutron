@@ -8,8 +8,9 @@ import json
 import sys
 from pathlib import Path
 
-import tests._jscpd_gate as gate
 import pytest
+
+import tests._jscpd_gate as gate
 
 
 def _args(threshold: float = 0) -> argparse.Namespace:

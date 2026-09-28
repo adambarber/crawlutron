@@ -4,6 +4,14 @@ import time
 import urllib.error
 
 import pytest
+
+from app.api_models import CrawlPolicy, CrawlPolicyLimits
+from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
+from app.crawl.engine import _payload_policy
+from app.crawl.policy import read_policy
+from app.crawl.strategies.browser import BrowserRenderer
+from app.models import CrawlResult, to_dict
+from app.scheduler import DomainScheduler
 from tests._assertions import browser_available
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import (
@@ -15,14 +23,6 @@ from tests._fetcher_factories import (
     scripted_fetcher,
 )
 from tests._policy_factories import http_strategy_policy
-
-from app.api_models import CrawlPolicy, CrawlPolicyLimits
-from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
-from app.crawl.engine import _payload_policy
-from app.crawl.policy import read_policy
-from app.crawl.strategies.browser import BrowserRenderer
-from app.models import CrawlResult, to_dict
-from app.scheduler import DomainScheduler
 
 
 def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPolicy:

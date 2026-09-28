@@ -15,10 +15,10 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 import pytest
-from tests._assertions import block_private_targets
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.safe_url import SafeUrl
+from tests._assertions import block_private_targets
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 _PUBLIC = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
 _PRIVATE = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80))]

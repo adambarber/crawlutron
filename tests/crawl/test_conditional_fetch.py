@@ -6,12 +6,12 @@ unchanged page yields a not_modified result without a full body fetch.
 """
 
 import pytest
-from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
-from tests._policy_factories import http_strategy_policy
 from pydantic import ValidationError
 
 from app.api_models import CrawlRequest
 from app.crawl.engine import crawl_request
+from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
+from tests._policy_factories import http_strategy_policy
 
 
 def _html(body: str) -> str:

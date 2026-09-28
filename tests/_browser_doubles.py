@@ -231,9 +231,8 @@ async def render_pinned(monkeypatch, url: str = "http://example.com/"):
     The one navigation a pinned-render test performs, so the two halves of the
     arrangement -- a pinned renderer, and the call into it -- are stated once.
     """
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
     from app.models import RenderOptions
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     page, renderer = pinned_page_renderer(monkeypatch)
     result = await renderer._render_with_browser(
@@ -325,9 +324,8 @@ def ssrf_route_handler(resource_mode=None, *, include_screenshot: bool = False):
     these tests about the blocklist rather than about the guard: a test that
     wants the guard's own verdict builds its own handler and calls it directly.
     """
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
     from app.crawl.strategies.browser import _make_ssrf_route_handler
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     return _make_ssrf_route_handler(
         resource_mode,
@@ -438,9 +436,8 @@ async def render_bare(renderer, url: str = "http://example.com/"):
     unrestricted policy are the baseline -- what is under test is what the render
     adds to it, so those two are the same in every one of these calls.
     """
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
     from app.models import RenderOptions
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     return await renderer._render_with_browser(
         url, RenderOptions(browser_profile={}), policy=UNRESTRICTED_HOST_POLICY
@@ -482,9 +479,8 @@ def response_handler_double(url: str, payload=None, error=None):
 async def run_blocking_document_route(monkeypatch, browser_module):
     import threading
 
-    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
     from app.crawl.strategies.browser import _make_ssrf_route_handler
+    from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
     thread_ids: list[int] = []
     monkeypatch.setattr(browser_module, "_build_pinned_request", blocking_pinned_request(thread_ids))

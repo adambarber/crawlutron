@@ -5,6 +5,11 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
+
+import app.crawl.strategies.browser as browser_mod
+from app.api_models import CrawlPolicy
+from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
 from tests._browser_doubles import (
     BrowserFakePage,
     FakeRequest,
@@ -18,11 +23,6 @@ from tests._browser_doubles import (
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 from tests._timing_harnesses import HANG_GUARD_SECONDS
-from pydantic import ValidationError
-
-import app.crawl.strategies.browser as browser_mod
-from app.api_models import CrawlPolicy
-from app.crawl.strategies.browser import BrowserRenderer, _make_ssrf_route_handler
 
 
 class _BlockingResolver:
@@ -138,9 +138,8 @@ async def test_ssrf_route_handler_allows_non_network_schemes():
 
 async def test_ws_guard_closes_internal_targets(monkeypatch):
     """WebSocket upgrades to private hosts are closed; public ones pass."""
-    from tests._assertions import block_private_targets
-
     from app.crawl.strategies.browser import _make_ssrf_websocket_handler
+    from tests._assertions import block_private_targets
 
     block_private_targets(monkeypatch)
     handler = _make_ssrf_websocket_handler(policy=UNRESTRICTED_HOST_POLICY)

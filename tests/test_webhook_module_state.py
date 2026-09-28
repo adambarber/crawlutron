@@ -13,10 +13,9 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from tests.chokepoint_walks import nodes_of
-
 from app.api import webhooks as wm
 from app.api_models import CrawlPolicy
+from tests.chokepoint_walks import nodes_of
 
 ISLAND_NAMES = (
     "run_and_deliver_webhook",
@@ -84,10 +83,9 @@ def test_build_job_status_handles_single_shot_jobs(tmp_path):
     case the dataclass could not: a job whose accumulators were genuinely
     never written to.
     """
-    from tests._job_harnesses import make_job_store
-
     from app.api.main_helpers import _build_job_status
     from app.api_models import JobStatusResponse
+    from tests._job_harnesses import make_job_store
 
     store = make_job_store(tmp_path)
     job = store.create_single_shot("single_test", "http://example.com/", CrawlPolicy())

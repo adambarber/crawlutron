@@ -14,11 +14,10 @@ spelling the same callback, the same log capture and the same run call.
 
 from typing import Any
 
-from tests._result_builders import make_result
-
 from app.crawl.result_helpers import _failed_result_for
 from app.models import CrawlJob, EngineCrawlResult
 from app.scheduler import DomainScheduler
+from tests._result_builders import make_result
 
 # The three knobs a scheduling test always wants and no scheduling test ever
 # wants spelled out: serial execution makes ordering observable, and a zero

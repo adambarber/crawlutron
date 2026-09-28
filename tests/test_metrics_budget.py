@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+
 from tests._executables import GIT, require_executable
 from tests._jscpd_sweep import COMPOUND_NODES
 from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of

@@ -2,16 +2,6 @@ import socket
 import threading
 
 import pytest
-from tests._assertions import block_private_targets
-from tests._browser_doubles import (
-    FakeRequest,
-    FakeRoute,
-    pinned_page_renderer,
-    render_bare,
-    render_pinned,
-    stub_pinned_request,
-)
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod
@@ -22,6 +12,16 @@ from app.crawl.strategies.browser import (
     _make_ssrf_route_handler,
     _resolve_browser_target,
 )
+from tests._assertions import block_private_targets
+from tests._browser_doubles import (
+    FakeRequest,
+    FakeRoute,
+    pinned_page_renderer,
+    render_bare,
+    render_pinned,
+    stub_pinned_request,
+)
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 # --------------------------------------------------------------------------
 # document.py: SSRF gate on urlopen (F2)

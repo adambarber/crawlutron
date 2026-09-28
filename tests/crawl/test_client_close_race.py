@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import asyncio
 
-from tests._timing_harnesses import await_until
-
 from app.crawl.strategies import http_client_pool as http_mod
+from tests._timing_harnesses import await_until
 
 
 class _ClosingClient:

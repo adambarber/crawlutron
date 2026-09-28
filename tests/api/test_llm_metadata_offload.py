@@ -8,7 +8,6 @@ parse with ``asyncio.to_thread`` via the additive async shaping API.
 import asyncio
 
 import pytest
-from tests._assertions import install_to_thread_spy
 
 from app.api.response_shaping import (
     EnvelopeOptions,
@@ -17,6 +16,7 @@ from app.api.response_shaping import (
     aformat_crawl_item,
     build_unified_crawl_response,
 )
+from tests._assertions import install_to_thread_spy
 
 
 def _html_item(i: int = 0) -> dict:

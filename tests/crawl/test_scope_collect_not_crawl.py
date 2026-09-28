@@ -7,10 +7,9 @@
   regardless of strategy.
 """
 
-from tests._fetcher_factories import site_fetcher, tap_fetcher
-
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
+from tests._fetcher_factories import site_fetcher, tap_fetcher
 
 
 def _recording_fetcher(pages):

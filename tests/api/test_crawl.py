@@ -5,6 +5,10 @@ import json
 import time
 
 import pytest
+
+from app.api_models import CrawlPolicy
+from app.constants import HTTP_DECLARED_CRAWLER
+from app.main import app
 from tests._assertions import (
     accepted_crawl,
     assert_pool_unavailable,
@@ -16,10 +20,6 @@ from tests._fetcher_factories import make_crawl_payload
 from tests._job_harnesses import post_render_with_pool
 from tests._policy_factories import crawl_policy
 from tests.helpers.server import WEBHOOK_RECEIVED
-
-from app.api_models import CrawlPolicy
-from app.constants import HTTP_DECLARED_CRAWLER
-from app.main import app
 
 #: Discovery turned fully on. Three tests assert on what robots, sitemaps and
 #: feeds contributed, and spelling the triple at each is how one of them kept

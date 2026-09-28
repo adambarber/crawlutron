@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from tests._browser_doubles import _fake_browser
-from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as pool_mod
@@ -12,6 +10,8 @@ from app.crawl.engine import crawl_request
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 
 
 def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:

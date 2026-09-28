@@ -4,11 +4,15 @@ import contextlib
 import socket
 
 import pytest
-from tests._assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
 
 import app.crawl.strategies.pinned_transport as http_mod
 from app.crawl.strategies.pinned_transport import _check_ssrf_protection, _resolve_and_pin_host
 from app.validation import HostPolicy, normalize_public_http_url
+from tests._assertions import (
+    assert_dns_pinning_uses_first_resolution,
+    block_private_targets,
+    host_resolves_to,
+)
 
 
 def _blocked(ip):

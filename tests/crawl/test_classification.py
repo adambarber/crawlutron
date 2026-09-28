@@ -4,8 +4,6 @@ import ast
 import inspect
 
 import pytest
-from tests._result_builders import skipped_result
-from tests.chokepoint_walks import app_trees, nodes_of
 
 from app import constants as app_constants
 from app.api_models import CrawlClassification
@@ -27,6 +25,8 @@ from app.crawl.result_helpers import TerminalResult
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies import http as http_mod
 from app.crawl.strategies.browser import BrowserRenderer
+from tests._result_builders import skipped_result
+from tests.chokepoint_walks import app_trees, nodes_of
 
 
 def test_single_soft_phrase_does_not_classify():

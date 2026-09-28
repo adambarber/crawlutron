@@ -14,9 +14,9 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from tests._thread_fanout import run_thread_fanout
 
 from app.crawl.strategies import pinned_transport as http_mod
+from tests._thread_fanout import run_thread_fanout
 
 
 def _counting_resolver(ip: str = "8.8.8.8"):

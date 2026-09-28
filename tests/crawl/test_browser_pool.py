@@ -3,7 +3,6 @@
 import inspect
 
 import pytest
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser_pool as bp
 from app import resource_pressure as rp
@@ -15,6 +14,7 @@ from app.crawl.strategies.browser_pool import (
     get_browser_pool,
     set_browser_pool,
 )
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 class TestAcquireTimeout:

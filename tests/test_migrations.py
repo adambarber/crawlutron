@@ -8,7 +8,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from tests._policy_factories import job_store
 
 from app.api_models import CrawlPolicy
 from app.crawl.coordination_cookies import SharedCookieStore
@@ -28,6 +27,7 @@ from app.crawl.migrations import (
 )
 from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
+from tests._policy_factories import job_store
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
 

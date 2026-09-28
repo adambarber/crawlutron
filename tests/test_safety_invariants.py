@@ -22,6 +22,10 @@ from contextvars import ContextVar
 from pathlib import Path
 
 import pytest
+
+from app.api_models import UnifiedCrawlResponse
+from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
+from app.settings import ENVIRONMENT_FIELD_ALIASES
 from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
@@ -59,10 +63,6 @@ from tests.chokepoint_walks import (
     trees_under,
 )
 from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
-
-from app.api_models import UnifiedCrawlResponse
-from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
-from app.settings import ENVIRONMENT_FIELD_ALIASES
 
 __all__ = [
     "APP_ROOT",
@@ -5154,13 +5154,12 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     """
     from dataclasses import asdict
 
-    from tests._result_builders import engine_result
-
     from app.models import (
         CrawlResult,
         CrawlStrategyAttempt,
         EngineCrawlResult,
     )
+    from tests._result_builders import engine_result
 
     # The all-member baseline, named once and DERIVED rather than restated. Every
     # axis this test exercises is Literal-typed, so a construction that is spelled

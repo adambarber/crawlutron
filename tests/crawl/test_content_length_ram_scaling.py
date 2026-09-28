@@ -8,6 +8,7 @@ be threaded from the engine's active settings to the call site.
 """
 
 import pytest
+
 from tests._fetcher_factories import invoke_http_strategy
 from tests._policy_factories import http_strategy_policy
 

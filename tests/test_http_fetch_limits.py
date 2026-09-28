@@ -11,11 +11,10 @@ import http.server
 import threading
 from contextlib import contextmanager
 
-from tests._fetcher_factories import _spawn_fetch
-from tests.helpers.server import SilentHandler
-
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy
+from tests._fetcher_factories import _spawn_fetch
+from tests.helpers.server import SilentHandler
 
 
 def _make_server():

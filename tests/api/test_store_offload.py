@@ -26,6 +26,12 @@ import functools
 import inspect
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.api import job_runner
+from app.crawl.job_store import JobAccumulators, JobStore
+from app.crawl.result_store import CrawlResultStore
+from app.settings import CrawlerSettings
 from tests._job_harnesses import (
     ScriptedExecute,
     _make_app,
@@ -35,12 +41,6 @@ from tests._job_harnesses import (
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 from tests._result_builders import _canned_result
-from httpx import ASGITransport, AsyncClient
-
-from app.api import job_runner
-from app.crawl.job_store import JobAccumulators, JobStore
-from app.crawl.result_store import CrawlResultStore
-from app.settings import CrawlerSettings
 
 _ROOT = "http://example.test/a"
 

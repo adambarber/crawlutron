@@ -1,14 +1,14 @@
 """URL and network policy validation: schemes, private networks, registrable domains."""
 
 import pytest
+
+from app.validation import HostPolicy
 from tests._validation_helpers import (
     assert_url_refused,
     normalize_public_http_url,
     public_url_or_none,
     registrable_domain,
 )
-
-from app.validation import HostPolicy
 
 
 class TestPolicyValidation:

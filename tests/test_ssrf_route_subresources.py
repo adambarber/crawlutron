@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import socket
 
+import app.crawl.strategies.pinned_transport as http_mod
 from tests._assertions import block_private_targets
 from tests._browser_doubles import (
     ROUTE_ARG_UNSET,
@@ -22,8 +23,6 @@ from tests._browser_doubles import (
     assert_route_decision,
     ssrf_route_handler,
 )
-
-import app.crawl.strategies.pinned_transport as http_mod
 
 
 async def test_https_subresource_to_a_private_target_is_aborted(monkeypatch) -> None:

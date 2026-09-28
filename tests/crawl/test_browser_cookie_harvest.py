@@ -9,12 +9,11 @@ retry that follows the render.
 import asyncio
 from contextlib import contextmanager
 
-from tests._browser_doubles import BrowserFakePage, ScriptedPage, build_pinned_renderer
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from app.validation import registrable_domain
+from tests._browser_doubles import BrowserFakePage, ScriptedPage, build_pinned_renderer
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 def _page_with_context():

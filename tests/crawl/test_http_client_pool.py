@@ -9,8 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from tests._async_harnesses import run_loop_rebind_scenario
-from tests._timing_harnesses import await_until
 from curl_cffi.requests import AsyncSession
 
 import app.crawl.strategies.http_client_pool as http_mod
@@ -18,6 +16,8 @@ from app import settings as settings_mod
 from app.crawl.strategies.fetchers import _cffi_fetch
 from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.validation import HostPolicy
+from tests._async_harnesses import run_loop_rebind_scenario
+from tests._timing_harnesses import await_until
 
 
 class TestAsyncHttpClientLifecycle:

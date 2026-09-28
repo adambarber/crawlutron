@@ -13,6 +13,13 @@ from functools import partial
 from typing import Any
 
 import pytest
+
+import app.crawl.content_cache as cc
+from app.constants import HTTP_DECLARED_CRAWLER
+from app.crawl.cache import HttpCache
+from app.crawl.content_cache import ContentCache
+from app.crawl.strategies.fetchers import _default_http_fetcher
+from app.validation import HostPolicy
 from tests._fetcher_factories import (
     clocked_cache,
     crawled_results,
@@ -22,13 +29,6 @@ from tests._fetcher_factories import (
     tap_fetcher,
 )
 from tests.helpers.server import EtagHandler
-
-import app.crawl.content_cache as cc
-from app.constants import HTTP_DECLARED_CRAWLER
-from app.crawl.cache import HttpCache
-from app.crawl.content_cache import ContentCache
-from app.crawl.strategies.fetchers import _default_http_fetcher
-from app.validation import HostPolicy
 
 
 @contextlib.contextmanager

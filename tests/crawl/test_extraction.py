@@ -6,17 +6,6 @@ import threading
 
 import bs4
 import pytest
-from tests._assertions import set_optional_env
-from tests._extraction_helpers import (
-    _detect_pagination,
-    _extract_discovered_links,
-    _html_diagnostics,
-    doc_worker_acquisitions,
-    extract_content,
-    extract_js_endpoints,
-)
-from tests._policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
-from tests._process_doubles import StubConn, StubProc
 
 import app.crawl.extraction as ext_mod
 import app.crawl.extraction as extraction
@@ -33,6 +22,17 @@ from app.crawl.extraction import (
     _parse_html_tree,
     _text_from_html,
 )
+from tests._assertions import set_optional_env
+from tests._extraction_helpers import (
+    _detect_pagination,
+    _extract_discovered_links,
+    _html_diagnostics,
+    doc_worker_acquisitions,
+    extract_content,
+    extract_js_endpoints,
+)
+from tests._policy_factories import BOOL_ENV_CASES, UNRESTRICTED_HOST_POLICY
+from tests._process_doubles import StubConn, StubProc
 
 
 def assert_extraction_empty(result) -> None:

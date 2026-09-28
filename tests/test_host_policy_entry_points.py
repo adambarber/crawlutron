@@ -4,10 +4,10 @@ import ast
 import pathlib
 
 import pytest
-from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
-from tests.test_safety_invariants import _module_definition_index
 
 from app.validation import HOST_POLICY_ENTRY_POINTS
+from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
+from tests.test_safety_invariants import _module_definition_index
 
 _DECISION_NAMES = frozenset(
     {
@@ -325,9 +325,8 @@ async def _probe_async_runner(monkeypatch, tmp_path):
     # the moment a call site moved to the async twin and reported a contract
     # change as an AttributeError, which is noise, not a finding. A real store
     # on a tmp path also proves the refusal happens with nothing persisted.
-    from tests._job_harnesses import make_job_store
-
     from app.crawl.result_store import CrawlResultStore
+    from tests._job_harnesses import make_job_store
 
     job_store = make_job_store(str(tmp_path))
     results_store = CrawlResultStore(tmp_path / "results.db")

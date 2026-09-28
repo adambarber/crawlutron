@@ -11,10 +11,9 @@ with nothing red.
 
 import base64
 
+from app.models import RenderOptions
 from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
-from app.models import RenderOptions
 
 
 class FakeElement:

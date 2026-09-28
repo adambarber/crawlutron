@@ -11,9 +11,8 @@ atomic compare-and-set on the row itself.
 
 import ast
 
-from tests._job_harnesses import make_job_store
-
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
+from tests._job_harnesses import make_job_store
 from tests.chokepoint_walks import app_trees, nodes_of, offender
 
 

@@ -4,6 +4,8 @@ import threading
 import time
 
 import pytest
+
+import app.crawl.extraction as ext_mod
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._lock_doubles import DelegatingLock
 from tests._process_doubles import (
@@ -12,8 +14,6 @@ from tests._process_doubles import (
     install_unkillable_doc_worker,
     stub_proc,
 )
-
-import app.crawl.extraction as ext_mod
 
 
 def _stub_worker(pid: int, responds_to_sigterm: bool = True) -> ext_mod._DocWorker:

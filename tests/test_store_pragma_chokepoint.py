@@ -10,9 +10,8 @@ connection-scoped, so "configure at connect time" is a one-call contract).
 
 import ast
 
-from tests._job_harnesses import make_job_store
-
 from app.crawl.result_store import CrawlResultStore
+from tests._job_harnesses import make_job_store
 from tests.chokepoint_walks import (
     app_trees,
     attribute_calls,

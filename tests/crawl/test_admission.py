@@ -4,11 +4,6 @@ import asyncio
 import time
 
 import pytest
-from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
-from tests._policy_factories import admit
-from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
-from tests._scheduler_doubles import FakeScheduler as _Scheduler
-from tests._timing_harnesses import recorder
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -39,6 +34,11 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
+from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
+from tests._policy_factories import admit
+from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
+from tests._scheduler_doubles import FakeScheduler as _Scheduler
+from tests._timing_harnesses import recorder
 
 
 class TestReadinessState:

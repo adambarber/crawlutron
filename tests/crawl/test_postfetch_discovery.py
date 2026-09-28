@@ -8,13 +8,12 @@ strategy result builders. The post-fetch block must move to
 
 import asyncio
 
-from tests._assertions import install_to_thread_spy
-from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
-from tests._policy_factories import http_strategy_policy
-
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
 from app.validation import HostPolicy
+from tests._assertions import install_to_thread_spy
+from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy, make_fetch
+from tests._policy_factories import http_strategy_policy
 
 HTML = (
     "<html><head><title>T</title></head><body>"

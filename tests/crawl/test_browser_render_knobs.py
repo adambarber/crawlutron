@@ -8,11 +8,11 @@ defaults. Ready-state/challenge behavior is confirmed and stays untouched.
 import tempfile
 
 import pytest
+
+from app.crawl.strategies.browser import BrowserRenderer
 from tests._assertions import set_optional_env
 from tests._browser_doubles import ScriptedPage
 from tests._policy_factories import BOOL_ENV_CASES
-
-from app.crawl.strategies.browser import BrowserRenderer
 
 
 def _settings(**overrides):

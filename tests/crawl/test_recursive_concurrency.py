@@ -7,10 +7,9 @@ no rate limiting).
 
 from urllib.parse import urlparse
 
-from tests._fetcher_factories import concurrent_fetcher
-
 from app.crawl.engine import crawl_request
 from app.settings import CrawlerSettings
+from tests._fetcher_factories import concurrent_fetcher
 
 
 def _page_html(path: str) -> str:

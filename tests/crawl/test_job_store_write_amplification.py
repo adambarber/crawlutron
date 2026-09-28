@@ -20,9 +20,9 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 import pytest
-from tests._job_harnesses import make_crawled_job_store, make_job_store
 
 from app.crawl.job_store import CrawlJobState, JobStore
+from tests._job_harnesses import make_crawled_job_store, make_job_store
 
 _BODY = "x" * 2000
 

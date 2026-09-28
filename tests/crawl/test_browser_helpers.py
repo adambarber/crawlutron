@@ -1,9 +1,8 @@
 """Real tests for browser.py logic (no browser; inject failing factories)."""
 
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
 def _raise_timeout(**kwargs: object):

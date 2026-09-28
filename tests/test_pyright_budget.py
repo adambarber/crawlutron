@@ -43,7 +43,14 @@ from collections.abc import Iterator
 from functools import cache
 
 import pytest
-from tests.chokepoint_walks import app_trees, assert_fires_once, assert_stays_clean, assignments, nodes_of_type
+
+from tests.chokepoint_walks import (
+    app_trees,
+    assert_fires_once,
+    assert_stays_clean,
+    assignments,
+    nodes_of_type,
+)
 
 SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _THIS_MODULE = sys.modules[__name__]

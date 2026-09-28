@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from tests._fetcher_factories import make_html_fetcher
-from tests._policy_factories import crawl_policy
 
 from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
@@ -16,6 +14,8 @@ from app.crawl.robots import (
     robots_cache,
 )
 from app.validation import HostPolicy
+from tests._fetcher_factories import make_html_fetcher
+from tests._policy_factories import crawl_policy
 
 
 def _policy(*, respect_robots: bool = True) -> dict:

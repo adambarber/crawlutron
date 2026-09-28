@@ -11,7 +11,6 @@ import json
 from unittest import mock
 
 import pytest
-from tests._assertions import one_search_result, provider_results
 
 from app.search.providers import (
     BraveProvider,
@@ -26,6 +25,7 @@ from app.search.providers import (
     get_search_provider,
 )
 from app.validation import HostPolicy
+from tests._assertions import one_search_result, provider_results
 
 
 def _collect(items):

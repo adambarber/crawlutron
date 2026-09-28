@@ -38,11 +38,10 @@ from collections.abc import Callable, Container
 from contextlib import contextmanager
 from typing import Any
 
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
-from tests._result_builders import _canned_result
-
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
+from tests._result_builders import _canned_result
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
 #: one guards waits for a task the SAME loop has already scheduled, and such a

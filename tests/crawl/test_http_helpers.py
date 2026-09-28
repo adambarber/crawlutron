@@ -4,24 +4,6 @@ import asyncio
 import gzip
 
 import pytest
-from tests._assertions import assert_result_failed, assert_result_success
-from tests._extraction_helpers import _extract_discovered_links
-from tests._fetcher_factories import (
-    make_fetch,
-    ok_fetcher,
-    raise_fetcher,
-    routed_fetcher,
-    run_chain,
-    scripted_fetcher,
-    strategy_request,
-)
-from tests._http_test_helpers import (
-    HTTP_CFFI_IMPERSONATE,
-    _decode_body,
-    _quality_score,
-    decompress_body,
-)
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
 
 from app.api.render import _render_options
 from app.constants import (
@@ -66,6 +48,24 @@ from app.crawl.strategies.request_profile import (
 from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
+from tests._assertions import assert_result_failed, assert_result_success
+from tests._extraction_helpers import _extract_discovered_links
+from tests._fetcher_factories import (
+    make_fetch,
+    ok_fetcher,
+    raise_fetcher,
+    routed_fetcher,
+    run_chain,
+    scripted_fetcher,
+    strategy_request,
+)
+from tests._http_test_helpers import (
+    HTTP_CFFI_IMPERSONATE,
+    _decode_body,
+    _quality_score,
+    decompress_body,
+)
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
 
 
 class TestValidationHelpers:

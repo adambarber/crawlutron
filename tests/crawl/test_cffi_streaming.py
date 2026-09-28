@@ -4,19 +4,19 @@ import asyncio
 import threading
 
 import pytest
-from tests._fetcher_factories import scripted_fetcher, strategy_request
-from tests._policy_factories import make_base_policy
-from tests._timing_harnesses import await_until
-from tests._transport_doubles import real_cffi_fetch_outcome
 from curl_cffi.requests.exceptions import RequestException
 from curl_cffi.requests.models import STREAM_END
-from tests.helpers.server import spawn_threaded_server
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as http_mod
 from app.constants import HTTP_CFFI_IMPERSONATE
 from app.crawl.strategies.fetchers import impersonating_fetcher
 from app.validation import HostPolicy
+from tests._fetcher_factories import scripted_fetcher, strategy_request
+from tests._policy_factories import make_base_policy
+from tests._timing_harnesses import await_until
+from tests._transport_doubles import real_cffi_fetch_outcome
+from tests.helpers.server import spawn_threaded_server
 
 # The impersonating transport, bound once for this module. It used to be a local
 # wrapper function called from nine places, each re-deciding that "the cffi

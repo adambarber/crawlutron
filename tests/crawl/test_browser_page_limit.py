@@ -7,10 +7,9 @@ tabs and crashes/OOMs the shared Camoufox process.
 import asyncio
 from functools import partial
 
+from app.models import RenderOptions
 from tests._browser_doubles import DEFAULT_PAGE_HTML, ScriptedPage, scripted_renderer
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
-from app.models import RenderOptions
 
 
 async def _track_overlapping_tabs(page, *, tracker):

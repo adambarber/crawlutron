@@ -4,10 +4,10 @@ import threading
 from collections import OrderedDict
 
 import pytest
-from tests._lock_doubles import DelegatingLock
 
 from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies.browser import _BROWSER_COOKIES_MAX, _store_browser_cookies, get_browser_cookies_for
+from tests._lock_doubles import DelegatingLock
 
 
 @pytest.fixture

@@ -8,9 +8,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
-import tests._jscpd_gate as gate
 import pytest
 import yaml
+
+import tests._jscpd_gate as gate
 from tests._executables import BASH, GIT, require_executable
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]

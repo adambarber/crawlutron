@@ -14,6 +14,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.api import job_runner
+from app.api_models import CrawlPolicy
+from app.crawl.job_store import FrontierEntry, JobStatus
+from app.crawl.policy import read_policy
+from app.settings import CrawlerSettings
 from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
@@ -45,13 +52,6 @@ from tests._result_builders import (
     _small_link_graph_results,
 )
 from tests._timing_harnesses import await_until
-from httpx import ASGITransport, AsyncClient
-
-from app.api import job_runner
-from app.api_models import CrawlPolicy
-from app.crawl.job_store import FrontierEntry, JobStatus
-from app.crawl.policy import read_policy
-from app.settings import CrawlerSettings
 
 
 @pytest.fixture(autouse=True)
@@ -692,10 +692,9 @@ class TestJobStateWaitContract:
         matches -- is exactly the implementation that raced a starved box, so
         the harness refuses the job instead of quietly reintroducing it.
         """
+        from app.crawl.job_store import JobStore
         from tests._job_harnesses import _wait_status as wait_status
         from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
-
-        from app.crawl.job_store import JobStore
 
         bare = JobStore(tmp_path / "bare.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
         assert not hasattr(bare, "status_bus")

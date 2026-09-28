@@ -2,15 +2,6 @@
 
 from functools import partial
 
-from tests._assertions import assert_result_success
-from tests._fetcher_factories import (
-    request_fetcher,
-    run_http_strategy,
-    scripted_fetcher,
-    sequenced_fetcher,
-    strategy_request,
-)
-
 from app.constants import EXTRACTION_FULL, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.result_helpers import _crawl_result_from_engine_result
@@ -19,6 +10,14 @@ from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.crawl.strategies.http import _http_strategy_result
 from app.models import CrawlStrategyAttempt
 from app.validation import HostPolicy
+from tests._assertions import assert_result_success
+from tests._fetcher_factories import (
+    request_fetcher,
+    run_http_strategy,
+    scripted_fetcher,
+    sequenced_fetcher,
+    strategy_request,
+)
 
 _default_http_fetcher_with_policy = partial(
     _default_http_fetcher,

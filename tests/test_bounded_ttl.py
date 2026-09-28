@@ -1,8 +1,7 @@
 """BoundedTTLCache contract: lock-inside, TTL, LRU eviction (chokepoint #1)."""
 
-from tests._thread_fanout import run_thread_fanout
-
 from app.bounded_ttl import BoundedTTLCache
+from tests._thread_fanout import run_thread_fanout
 
 
 def _lru_with_a_b():

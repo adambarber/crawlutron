@@ -3,9 +3,6 @@ import inspect
 from typing import Any
 from urllib.parse import urlparse
 
-from tests._browser_doubles import _fake_browser
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY
-
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
@@ -14,6 +11,8 @@ from app.crawl.policy import read_policy
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import HttpFetchResult
 from app.validation import HostPolicy
+from tests._browser_doubles import _fake_browser
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 SCOPE_KEEP_DROP_PAGES = {
     "/": (

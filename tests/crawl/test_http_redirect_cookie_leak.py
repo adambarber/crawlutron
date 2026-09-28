@@ -88,10 +88,9 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     helper's own multi-header guarantee is pinned separately below and passed
     happily while the caller defeated it.
     """
-    from tests.helpers.server import spawn_threaded_server
-
     from app.crawl.strategies import cookie_jar as cookie_mod
     from app.crawl.strategies.cookie_jar import CookieJar
+    from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(_TwoCookieHandler)
     url = f"http://127.0.0.1:{server.server_port}/"

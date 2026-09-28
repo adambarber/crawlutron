@@ -7,8 +7,6 @@ import threading
 from unittest.mock import patch
 
 import pytest
-from tests._fetcher_factories import make_fetch, routed_fetcher
-from tests._policy_factories import crawl_policy
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER
@@ -27,6 +25,8 @@ from app.crawl.robots_parse import (
 from app.crawl.strategies.fetch_policy import _discovery_diagnostics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
+from tests._fetcher_factories import make_fetch, routed_fetcher
+from tests._policy_factories import crawl_policy
 
 
 class TestRobotsCacheLocking:

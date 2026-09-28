@@ -4,6 +4,10 @@ import asyncio
 import time
 
 import pytest
+
+from app.crawl.result_helpers import TerminalResult
+from app.models import CrawlJob, CrawlTask, EngineCrawlResult
+from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._result_builders import make_job, make_result
 from tests._scheduler_doubles import (
     FailingSink,
@@ -14,10 +18,6 @@ from tests._scheduler_doubles import (
     trip_circuit,
 )
 from tests._timing_harnesses import recorder
-
-from app.crawl.result_helpers import TerminalResult
-from app.models import CrawlJob, CrawlTask, EngineCrawlResult
-from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 
 
 def _adaptive_scheduler() -> DomainScheduler:
