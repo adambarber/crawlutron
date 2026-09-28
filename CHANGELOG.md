@@ -341,6 +341,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   exactly-one-of is still enforced: both supplied is rejected, either alone is
   accepted, neither is rejected. Found by jscpd once the trailing suppression
   comments stopped distinguishing the two copies.
+- **Both failure primitives classify and log through one chokepoint**
+  (app/crawl/result_helpers.py, tests/crawl/test_error_disclosure.py):
+  `_engine_result_from_exception` and `_crawl_result_from_exception` are the same
+  operation at two layers -- an `EngineCrawlResult` and the render pipeline's
+  `CrawlResult` -- and each spelled out its own `_logger.warning(..., extra={...})`
+  with the same three keys, one wrapped over six lines and the other on one. A
+  `_classify_and_log` primitive now owns classify-then-log-then-decide-retryable
+  for both, with the event name as a parameter because it is the only thing that
+  should differ between them. The drift was invisible from either side: an
+  operator grepping the failure stream for `error_detail` would have found the
+  engine path, not found it on the render path, and concluded the render path had
+  stopped logging the one field that makes a failure debuggable.
+  `test_both_failure_primitives_log_the_same_server_side_payload` drives both
+  real primitives and compares the two `LogRecord`s' attribute sets to each other
+  rather than to a hand-written key list — a key-list snapshot passes whenever
+  both paths are wrong in the same direction and goes stale the first time
+  someone legitimately adds a field. It also asserts the raw detail is present in
+  the log and absent from each result's wire form, which is the asymmetry those
+  keys exist for. Proven to bite by restoring the pre-extraction shape with one
+  key drifted off the engine path's payload; both records now report
+  `funcName == "_classify_and_log"`.
 - **The pydantic default detector reads both spellings of a field's default**
   (tests/test_pyright_budget.py, app/api_models.py):
   `test_pydantic_defaults_stay_where_a_checker_can_see_them` read only the

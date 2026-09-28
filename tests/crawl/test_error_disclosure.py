@@ -7,6 +7,7 @@ debugging (see app.crawl.strategies.http._http_strategy_result).
 """
 
 import json
+import logging
 import socket
 
 import httpx
@@ -14,7 +15,12 @@ from _fetcher_factories import invoke_http_strategy, run_http_strategy
 from _policy_factories import http_strategy_policy
 
 from app.crawl.decompression import DecompressionTooLargeError
-from app.crawl.result_helpers import _classify_error_code
+from app.crawl.result_helpers import (
+    _classify_error_code,
+    _crawl_result_from_exception,
+    _engine_result_from_exception,
+)
+from app.models import to_dict
 
 
 class _RaisingFetcher:
@@ -70,6 +76,68 @@ async def test_http_strategy_result_hides_arbitrary_exception():
     assert "error_detail" not in res.diagnostics
     serialized = json.dumps(res.diagnostics, default=str)
     assert "/app/secret/path" not in serialized
+
+
+def _record_for(caplog, event):
+    records = [r for r in caplog.records if r.msg == event]
+    assert len(records) == 1, f"expected exactly one {event} record, got {len(records)}"
+    return records[0]
+
+
+def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
+    """The redaction half of this file's contract, asserted where it lives.
+
+    ``_engine_result_from_exception`` and ``_crawl_result_from_exception`` are the
+    same operation at two layers -- an ``EngineCrawlResult`` and the render
+    pipeline's ``CrawlResult`` -- and each used to spell out its own ``extra``
+    dict. Nothing asserted the two agreed, so the drift was invisible from either
+    side: an operator grepging the failure stream for the raw detail would have
+    found the engine path, not found it on the render path, and concluded the
+    render path had stopped logging the detail that makes it debuggable. One
+    classifier-and-logger now serves both, and the event name is the only thing
+    that differs.
+
+    The parity assertion is ``vars()`` of the two records compared to each other,
+    not to a hand-written key list: a snapshot of the key list passes whenever
+    both paths are wrong in the same direction, and goes stale the first time
+    someone legitimately adds a field to the shared payload. Comparing the two
+    records states the property that is actually at stake, and the three keys
+    that carry the redaction are then required by name on both.
+    """
+    caplog.set_level(logging.WARNING)
+
+    engine = _engine_result_from_exception(
+        error=RuntimeError("engine boom /app/engine"),
+        original_url="https://example.com/a",
+        normalized_url="https://example.com/a",
+        strategy="HTTP_DECLARED_CRAWLER",
+    )
+    render = _crawl_result_from_exception(
+        error=RuntimeError("render boom /app/render"),
+        url="https://example.com/b",
+        domain="example.com",
+        strategy="BROWSER_HEADLESS",
+        elapsed_ms=7,
+    )
+
+    engine_record = _record_for(caplog, "strategy_result_error")
+    render_record = _record_for(caplog, "render_result_error")
+    # Same payload shape, from the same call site, differing only in the event.
+    assert vars(engine_record) .keys() == vars(render_record).keys()
+    assert engine_record.funcName == render_record.funcName == "_classify_and_log"
+    # Distinct event names, so the two layers stay tellable apart in the stream.
+    assert {r.msg for r in caplog.records} == {"strategy_result_error", "render_result_error"}
+    # The raw detail is in the log and not on the wire: that asymmetry is the
+    # whole reason the field exists, on both paths.
+    for record, result, expected_strategy in (
+        (engine_record, engine, "HTTP_DECLARED_CRAWLER"),
+        (render_record, render, "BROWSER_HEADLESS"),
+    ):
+        assert {"strategy", "error_code", "error_detail"} <= set(vars(record))
+        assert record.error_detail in {"engine boom /app/engine", "render boom /app/render"}
+        assert record.strategy == expected_strategy
+        assert record.error_code == result.classification
+        assert "/app/" not in json.dumps(to_dict(result), default=str)
 
 
 # H3: one representative exception per branch of _classify_error_code, paired

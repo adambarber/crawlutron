@@ -137,6 +137,49 @@ def _classify_error_code(exc: BaseException) -> Classification:
     return "network_error"
 
 
+def _classify_and_log(
+    error: BaseException,
+    *,
+    event: str,
+    strategy: CrawlStrategyName | None,
+    known_classification: Classification | None = None,
+) -> tuple[Classification, bool]:
+    """Classify one exception, log it once, and return ``(classification, retryable)``.
+
+    The shared head of both failure primitives, because they are the same
+    operation at two layers -- ``_engine_result_from_exception`` builds an
+    ``EngineCrawlResult``, ``_crawl_result_from_exception`` a ``CrawlResult`` --
+    and were each spelling out the log payload themselves. Split, the two
+    ``extra`` dicts could drift: an operator grepping the failure stream would
+    find ``error_detail`` on the engine path and not on the render path, and
+    conclude one of them stops logging. The event name is the only thing that
+    distinguishes them, and it is a parameter precisely because it is the only
+    thing that should.
+
+    ``retryable`` is the taxonomy's verdict, not a comparison against a label
+    spelled out at the call site: a capacity skip is not a dead page, so the
+    URL was never attempted and the frontier can re-queue instead of recording a
+    permanent failure, and the render layer has to answer 503 for a transport
+    blip too or a retrying client is handed a cached permanent failure. Reading
+    it from ``is_transient_classification`` is what stops the two from
+    disagreeing, which is also why a caller cannot pass one in.
+
+    ``known_classification`` is the one case where the failure mode is not
+    derived from the exception type at all (the per-URL wall-clock budget raises
+    bare ``TimeoutError`` but classifies as ``url_budget_exceeded``).
+    """
+    classification = known_classification if known_classification is not None else _classify_error_code(error)
+    _logger.warning(
+        event,
+        extra={
+            "strategy": strategy,
+            "error_code": classification,
+            "error_detail": str(error),
+        },
+    )
+    return classification, is_transient_classification(classification)
+
+
 def _engine_result_from_exception(
     *,
     error: BaseException,
@@ -169,20 +212,15 @@ def _engine_result_from_exception(
     which raises bare ``TimeoutError`` and whose real classification is
     ``url_budget_exceeded``. It must be a taxonomy member.
     """
-    classification = known_classification if known_classification is not None else _classify_error_code(error)
-    elapsed = elapsed_ms if elapsed_ms is not None else 0
-    _logger.warning(
-        "strategy_result_error",
-        extra={
-            "strategy": strategy,
-            "error_code": classification,
-            "error_detail": str(error),
-        },
+    classification, retryable = _classify_and_log(
+        error,
+        event="strategy_result_error",
+        strategy=strategy,
+        known_classification=known_classification,
     )
+    elapsed = elapsed_ms if elapsed_ms is not None else 0
     # A capacity skip is not a dead page: the URL was never attempted, so the
-    # frontier can re-queue rather than record a permanent failure. The verdict
-    # is the taxonomy's, so it cannot disagree with the other three call sites'.
-    retryable = is_transient_classification(classification)
+    # frontier can re-queue rather than record a permanent failure.
     diagnostics: dict = {"retryable": retryable, "error_code": classification}
     # A domain circuit opening is a scheduler capacity decision, not a page
     # failure: callers and dashboards key off this marker to tell "the site is
@@ -345,15 +383,11 @@ def _crawl_result_from_exception(
     ``metadata`` so the render layer can answer 503 for capacity exhaustion and
     the at-least-once frontier layer can re-queue the URL.
     """
-    classification = _classify_error_code(error)
-    _logger.warning(
-        "render_result_error",
-        extra={"strategy": strategy, "error_code": classification, "error_detail": str(error)},
+    classification, retryable = _classify_and_log(
+        error,
+        event="render_result_error",
+        strategy=strategy,
     )
-    # The taxonomy's verdict, not a comparison against the one label this line
-    # originally spelled out: the render layer must answer 503 for a transport
-    # blip too, or a retrying client is handed a cached permanent failure.
-    retryable = is_transient_classification(classification)
     return _terminal_crawl_result(
         url=url,
         status="failed",
