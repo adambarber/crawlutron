@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from itertools import islice
 from typing import Any, NamedTuple, Protocol, TypeAlias
 
@@ -64,22 +64,37 @@ class _BatchContext(NamedTuple):
     metrics: MetricsStore
 
 
-def _pinned_strategy(scheduler: DomainScheduler, task: CrawlTask) -> str | None:
+class _PinProvider(Protocol):
+    """The one scheduler method admission reads.
+
+    ``DomainScheduler`` has always had ``get_pinned_strategy``, and the three
+    admission decisions below were unified behind :func:`_pinned_strategy`
+    precisely so the question was asked in one place. What was left over was the
+    ``getattr`` guard that let a scheduler *without* the hook through -- an
+    escape hatch for a shape the signature already forbade, and one that left
+    every caller's result un-narrowed. Naming the surface rather than the class
+    states the real requirement: anything that can answer the pin lookup, which
+    is the real scheduler and the test double alike.
+    """
+
+    def get_pinned_strategy(self, domain: str) -> str | None: ...
+
+
+def _pinned_strategy(scheduler: _PinProvider, task: CrawlTask) -> str | None:
     """The strategy this task's domain is pinned to, or None when unpinned.
 
-    The one place the scheduler's optional pinning hook is read. Each of the
+    The one place the scheduler's per-domain pinning is read. Each of the
     three admission decisions below needs it and each spelled its own
     getattr-guard -- under two different local names, ``get_pin`` and
     ``get_pinned`` -- so a scheduler without the hook was handled three
     different ways, and a rename had to be caught three times.
     """
-    get_pinned = getattr(scheduler, "get_pinned_strategy", None)
-    return get_pinned(task.domain) if get_pinned is not None else None
+    return scheduler.get_pinned_strategy(task.domain)
 
 
 def _batch_is_http_heavy(
-    scheduler: DomainScheduler,
-    frontier: deque[tuple[int, CrawlTask]],
+    scheduler: _PinProvider,
+    frontier: Sequence[tuple[int, CrawlTask]],
     sample: int,
 ) -> bool:
     if not frontier or sample <= 0:
@@ -96,8 +111,8 @@ def _batch_is_http_heavy(
 
 
 def _count_strategy_tiers(
-    scheduler: DomainScheduler,
-    frontier: deque[tuple[int, CrawlTask]],
+    scheduler: _PinProvider,
+    frontier: Sequence[tuple[int, CrawlTask]],
     count: int,
 ) -> tuple[int, int]:
     http = 0
@@ -114,7 +129,7 @@ def _pop_admitted(
     frontier: deque[tuple[int, CrawlTask]],
     admit_http: int,
     admit_browser: int,
-    scheduler: DomainScheduler,
+    scheduler: _PinProvider,
 ) -> list[_Admitted]:
     if admit_http + admit_browser == 0:
         return []

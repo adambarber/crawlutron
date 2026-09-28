@@ -18,6 +18,7 @@ produce a policy no caller could -- which is why a suite could stay green while
 the production read edge answered a different question than the test's did.
 """
 
+import pathlib
 from typing import Any
 
 from app.api_models import CrawlPolicy
@@ -278,12 +279,18 @@ def deployment_tier(**overrides: str) -> PolicyTier:
     return PolicyTier.from_settings(CrawlerSettings.from_mapping(overrides))
 
 
-def job_store(db_path: str, *, policy: HostPolicy | None = None, tier: PolicyTier | None = None) -> JobStore:
+def job_store(
+    db_path: str | pathlib.Path, *, policy: HostPolicy | None = None, tier: PolicyTier | None = None
+) -> JobStore:
     """A ``JobStore`` bound to a test deployment.
 
     Every argument a test does not pass is the one it did not mean to vary, which
     is why the unrestricted host policy is the default here rather than repeated
     at each of the two dozen sites that construct a store.
+
+    ``str | Path`` because that is what ``JobStore`` takes: a test that hands it
+    a ``tmp_path`` was always right, and the narrower annotation here was the
+    only thing rejecting it.
     """
     return JobStore(
         db_path,

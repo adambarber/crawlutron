@@ -1,6 +1,7 @@
 """Output formats: field projection, CSV injection neutralization and envelope edges."""
 
 import json
+from typing import Any
 
 import pytest
 
@@ -12,11 +13,14 @@ from app.output_formats import (
 
 # The two result shapes the serialization table is built from. Module level so
 # the table reads as formats-over-bodies rather than as four bodies spelling
-# the same result four times.
-_TEXT_RESULT = [{"url": "http://x/", "text": "content"}]
-_MARKDOWN_RESULT = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
+# the same result four times. `Any` is the value type, not the container: each
+# body is one job's serialized fields, and `serialize_results` takes exactly
+# `list[dict[str, Any]]`, so leaving it unannotated only let mypy join the two
+# heterogeneous dicts down to `list[object]` and reject the call.
+_TEXT_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "text": "content"}]
+_MARKDOWN_RESULT: list[dict[str, Any]] = [{"url": "http://x/", "markdown": "# Title\n\nContent"}]
 
-SAMPLE = [
+SAMPLE: list[dict[str, Any]] = [
     {
         "original_url": "http://a.example/",
         "final_url": "http://a.example/",
