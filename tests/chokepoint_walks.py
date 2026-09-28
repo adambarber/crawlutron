@@ -11,7 +11,7 @@ test that otherwise invites the exemptions and labels to drift.
 
 ONE traversal, and it is executed once. That is the part this module owns, and
 it was the part it did not do: the helpers re-globbed, re-read and re-parsed all
-105 app/ modules on every call, so one tests/test_safety_invariants.py run paid
+105 app/ modules on every call, so one tests/invariants/ run paid
 for the same traversal about 44 times over. Measured per traversal: 0.0018s to
 glob and 0.1121s to read and parse 105 modules, so 0.114s each, and 5.4s of that
 file's run (interleaved before/after: 47.0s -> 41.6s) plus 25.5s of a full sweep
@@ -34,7 +34,7 @@ seven detectors left slow after the first one were slow because of it: they were
 walking the same tree forty times over, not because their own analysis was
 expensive. What is removed is the repeated walk, never the analysis -- the
 detectors' bodies are unchanged, and the receipt for that is
-``tests/test_safety_invariants.py``, which compares every detector's offender
+``tests/invariants/``, which compares every detector's offender
 set before and after and finds them identical.
 
 Keeping this pure-stdlib means the static invariant tests do not pay the
@@ -300,6 +300,22 @@ def call_leaf_name(call: ast.Call) -> str:
     how one of them ended up comparing against ``None``.
     """
     return getattr(call.func, "id", None) or getattr(call.func, "attr", None) or ""
+
+
+def bare_callee(node: ast.AST) -> str | None:
+    """The bare function name ``node`` calls, or None when it is not such a call.
+
+    ``int(x)``, ``uuid4()`` and ``_persist(...)`` are spelled
+    ``ast.Call(func=ast.Name)``. A detector that wants only those has to test the
+    shape itself, and detectors kept testing it themselves: the ``isinstance``
+    pair this replaces was written out separately by each one, which is how the
+    jscpd gate came to flag the same five lines in two files. Unlike
+    :func:`call_leaf_name` this does not fall back to an attribute callee, so
+    ``obj.int(x)`` is not a match.
+    """
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id
+    return None
 
 
 def calls_named_leaf(tree: ast.AST, names: frozenset[str] | set[str]) -> Iterator[ast.Call]:

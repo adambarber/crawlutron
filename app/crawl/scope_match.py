@@ -5,7 +5,7 @@ caller-supplied scope regex per URL. The identical "bounded match, fail closed
 on timeout" wrapper lived in two files, where a future fix (a new caught
 exception, an inverted fail direction) applied to one would silently leave the
 other on the stale contract. It now lives here once; both import it. ``tests/
-test_safety_invariants.py`` asserts exactly one definition remains.
+test_url_doors.py`` asserts exactly one definition remains.
 """
 
 from __future__ import annotations

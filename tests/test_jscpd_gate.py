@@ -227,7 +227,7 @@ def _valid_pair() -> dict:
         "first": {"path": "app/new.py", "start": 10, "end": 20},
         "second": {"path": "app/other.py", "start": 30, "end": 40},
         "reason": "intentional",
-        "guard": "tests/test_safety_invariants.py::test_classification_literal_covers_the_enum_exactly",
+        "guard": "tests/invariants/test_taxonomy.py::test_classification_literal_covers_the_enum_exactly",
         "fragment_sha256": hashlib.sha256(b"duplicate").hexdigest(),
     }
 
@@ -471,7 +471,7 @@ def test_missing_sanctioned_clone_fails(monkeypatch, tmp_path) -> None:
     ("field", "value"),
     [
         ("reason", " "),
-        ("guard", "tests/test_safety_invariants.py::test_does_not_exist"),
+        ("guard", "tests/invariants/test_taxonomy.py::test_does_not_exist"),
         ("profiles", ["all"]),
     ],
 )
@@ -747,7 +747,7 @@ def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatc
     unlink them in a `finally`, which made the production tree a directory that
     moves while a suite runs: every concurrent walk of `app/` became a
     list-then-read race, and with 6 concurrent copies of this file against 6
-    concurrent copies of tests/test_safety_invariants.py, 10 tests died with
+    concurrent copies of tests/invariants/, 10 tests died with
     `FileNotFoundError: .../app/crawl/migrations/zz_probe_clone.py` -- the
     tree-wide chokepoint detectors among them, which then reported nothing for
     the whole run while looking green. The glob under test is about path SHAPE,

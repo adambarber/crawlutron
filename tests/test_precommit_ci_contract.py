@@ -482,7 +482,7 @@ def test_no_ci_job_reruns_a_precommit_hook_command() -> None:
         "python -m mypy",
         "python tests/_jscpd_gate.py",
         "tests/test_pyright_budget.py",
-        "tests/test_safety_invariants.py",
+        "tests/invariants/",
     }
     assert_no_hook_command_rerun(WORKFLOW_PATH.read_text(encoding="utf-8"), hook_tools)
 
@@ -538,7 +538,7 @@ GATE_TOOL_PATTERNS = (
     r"-m\s+mypy\b",
     r"_jscpd_gate\.py\b",
     r"test_pyright_budget\.py\b",
-    r"test_safety_invariants\.py\b",
+    r"tests/invariants/\b",
 )
 
 

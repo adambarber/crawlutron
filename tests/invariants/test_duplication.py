@@ -1,0 +1,847 @@
+"""Copy-paste is a defect class here, not a style choice.
+
+The review that produced this file found the same logic re-implemented in a
+second place, where it then drifted. Each check names one family of copies
+and fails when the second one appears -- in app/ or in the tests themselves."""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import io
+import pathlib
+import tokenize
+from collections.abc import Iterable
+from pathlib import Path
+
+from tests.chokepoint_walks import (
+    REPO_ROOT,
+    SANCTIONED,
+    TESTS_DIR,
+    app_offenders,
+    app_python_files,
+    app_trees,
+    assert_detector,
+    assert_fires_once,
+    assert_stays_clean,
+    calls_named,
+    functions,
+    nodes_of,
+    nodes_of_type,
+    offender_at,
+    relative_posix,
+    resolved_expr_name,
+    trees_excluding,
+)
+from tests.invariants._shared import _enclosing_defs, assert_trees_clean
+
+# ---------------------------------------------------------------------------
+# Search-provider result normalization (jscpd #4 family)
+# ---------------------------------------------------------------------------
+
+
+def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag the keyed-provider dedupe loop re-inlined outside the collector.
+
+    The exact copy-paste shape is ``seen: set`` + ``isinstance(item, dict)``
+    guard + ``SearchResult`` construction in one function. DuckDuckGo's
+    provider legitimately keeps a separate lxml node-walk: it has no dict
+    guard, so the sink never fires on it.
+    """
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) or node.name == "_collect_results":
+            continue
+        subs = list(nodes_of(node))
+        assigns_seen = any(
+            isinstance(s, ast.AnnAssign) and getattr(s.target, "id", "") == "seen" for s in subs
+        )
+        builds_result = any(
+            isinstance(s, ast.Call) and getattr(s.func, "id", "") == "SearchResult" for s in subs
+        )
+        guards_dict = any(
+            isinstance(s, ast.Call)
+            and getattr(s.func, "id", "") == "isinstance"
+            and len(s.args) >= 2
+            and getattr(s.args[1], "id", "") == "dict"
+            for s in subs
+        )
+        if assigns_seen and builds_result and guards_dict:
+            offenders.append(offender_at(path, node, "dedupe loop re-inlined outside _collect_results"))
+    return offenders
+
+
+def test_no_provider_dedupe_loop_reinlines():
+    """One normalize/dedupe/clip contract for all keyed providers."""
+    assert_trees_clean(
+        _provider_loop_reinlines,
+        "Use app.search.providers._collect_results",
+        trees=app_trees(),
+    )
+
+
+def test_provider_loop_detector_bites():
+    """The three-provider copy fires; the DDG lxml-walk shape stays clean."""
+    assert_detector(
+        _provider_loop_reinlines,
+        path=REPO_ROOT / "app" / "search" / "_synthetic.py",
+        fires={
+            "async def search(self, query, limit, timeout_seconds):\n"
+            "    results = []\n"
+            "    seen: set[str] = set()\n"
+            "    for item in payload.get('results') or []:\n"
+            "        if not isinstance(item, dict):\n"
+            "            continue\n"
+            "        results.append(SearchResult(url=item.get('url')))\n"
+            "    return results\n": "dedupe loop re-inlined outside _collect_results",
+        },
+        # DDG walks lxml nodes instead of provider dicts, so it has no dict guard
+        # and the sink never reaches it -- the scope boundary is the whole reason
+        # one collector can be mandatory for keyed providers and irrelevant here.
+        clean=(
+            "async def search(self, query, limit, timeout_seconds):\n"
+            "    results = []\n"
+            "    seen: set[str] = set()\n"
+            "    for node in tree.xpath('//div'):\n"
+            "        href = node.get('href')\n"
+            "        results.append(SearchResult(url=href))\n"
+            "    return results\n",
+        ),
+    )
+
+
+# The names of the one selector contract, and the single parameter that carries
+# them; see ``app/crawl/extraction.py`` for why they are one value rather than
+# two parameters on three signatures.
+_SELECTOR_PARAMS = ("css_selector", "xpath")
+
+
+#: The single parameter that carries the pair, and therefore the shape a
+#: narrowing function is expected to have.
+_SELECTOR_CARRIER_PARAM = "selectors"
+
+
+#: The one place the two names are spelled: the ``Selectors`` dataclass. Its
+#: generated ``__init__`` is what the sweep sees, so that is the name checked.
+_SELECTOR_CARRIER_DECLARANT = "__init__"
+
+
+#: The content cache key legitimately declares both names: it does not narrow a
+#: caller's request, it keys one, and a key built from half the narrowing inputs
+#: is a different key. Named rather than inferred from the parameter names,
+#: because a rule that infers is a rule that stops applying when the code moves.
+_SELECTOR_KEY_BUILDER = "_content_cache_key"
+
+
+def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A narrowing extractor carries the pair in one value, never as two names.
+
+    The rule used to be "take both names or neither", which forbade the defect
+    by counting parameters. It could catch a function declaring one, and it
+    could say nothing about a function declaring both and then honouring only
+    one. It was also the *reason* the pair was spelled four times -- three
+    signatures plus the mapping that fed them -- because satisfying a parameter
+    rule is a spelling, and a spelling cannot be shared between entry points.
+
+    :class:`app.crawl.extraction.Selectors` replaced the spelling, so the rule
+    inverts: a function narrows by taking ONE ``selectors`` value, and nothing
+    outside the carrier declares the names. That is stronger in the direction
+    that matters -- there is no longer any signature in which passing one
+    selector is expressible -- and it is what stops a future fourth extractor
+    from reintroducing the pair as parameters, which a rule checking only "both
+    or neither" would have waved through.
+    """
+    offenders: list[str] = []
+    for node in functions(tree):
+        params = node.args
+        positional = [arg.arg for arg in (*params.posonlyargs, *params.args)]
+        names = [*positional, *(arg.arg for arg in params.kwonlyargs)]
+        declared = [name for name in names if name in _SELECTOR_PARAMS]
+        if not declared or node.name in (_SELECTOR_CARRIER_DECLARANT, _SELECTOR_KEY_BUILDER):
+            continue
+        offenders.append(
+            offender_at(
+                path,
+                node,
+                f"{node.name} declares {declared} instead of "
+                f"carrying the pair in one {_SELECTOR_CARRIER_PARAM!r} value",
+            )
+        )
+    return offenders
+
+
+def test_the_selector_pair_is_one_contract():
+    """A narrowing extractor carries the pair in one value, never as two names."""
+    assert_trees_clean(
+        _selector_contract_offenders,
+        "a narrowing function must take one `selectors` value carrying both, and"
+        " must not declare css_selector/xpath as parameters of its own; the pair is"
+        " one contract and half of it is a request that cannot be honoured",
+    )
+
+
+def test_selector_contract_detector_bites():
+    """A re-spelled pair fires, a lone name fires, the real shape passes."""
+    assert_fires_once(
+        _selector_contract_offenders,
+        {
+            "def _extract_html(html, url, css_selector=None, xpath=None)"
+            " -> ExtractedContent:\n    ...\n": "declares ['css_selector', 'xpath'] instead of carrying",
+            "def _narrow(html, css_selector=None) -> ExtractedContent:\n"
+            "    ...\n": "declares ['css_selector'] instead of carrying",
+        },
+        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _selector_contract_offenders,
+        (
+            # The carrier itself: the one place the two names are spelled.
+            "class Selectors:\n    css: str | None = None\n    xpath: str | None = None\n",
+            # An extractor carrying the pair as the one value.
+            "def _extract_html(html, url, selectors=None) -> ExtractedContent:\n    ...\n",
+            # A key builder legitimately requires both: it keys a request rather
+            # than narrowing one.
+            "def _content_cache_key(url, strategy, headers, extraction, css_selector, xpath):\n    ...\n",
+            # A function that takes no selector is somebody else's business.
+            "def _extract_document(body, url) -> ExtractedContent:\n    ...\n",
+        ),
+        REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+    )
+
+
+def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A keyed provider supplies a request and a payload hook, not the flow.
+
+    The normalize/dedupe/clip contract above is only half the shared flow. The
+    other half -- issue the request, refuse a non-200, hand the result list to
+    the collector -- used to be spelled once per provider, and the two POST
+    bodies jscpd reported were those spellings: identical but for the endpoint
+    and the payload lambda, so the only part that genuinely varied was the part
+    left as a hook. This says the hooks are mandatory and the flow is not
+    writable, which is what makes a fourth provider a subclass with two methods
+    instead of a fourth copy of the non-200 check.
+
+    The base is matched on the resolved name's last segment because
+    ``_ApiKeyProvider`` is module-private: inside ``app/search/providers.py`` it
+    is a bare name with no import to resolve, and outside it is only ever
+    reachable through that one import.
+    """
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.ClassDef):
+        if not any(
+            resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "_ApiKeyProvider" for base in node.bases
+        ):
+            continue
+        defined = {
+            child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for hook in ("_request", "_items_of"):
+            if hook not in defined:
+                offenders.append(offender_at(path, node, f"{node.name} does not define {hook}()"))
+        if "search" in defined:
+            offenders.append(
+                offender_at(path, node, f"{node.name} re-spells the shared provider flow in search()")
+            )
+    return offenders
+
+
+def test_keyed_providers_inherit_the_shared_response_flow():
+    """One flow for the keyed providers: request and payload hook per subclass."""
+    assert_trees_clean(
+        _keyed_provider_offenders,
+        "a keyed search provider must supply _request() and _items_of() and inherit"
+        " _ApiKeyProvider.search, so the non-200 check cannot be re-spelled or dropped",
+    )
+
+
+def test_keyed_provider_flow_detector_bites():
+    """The re-spelled flow fires, the incomplete subclass fires, the hooks pass.
+
+    The first shape is what the two POST providers did: the whole flow written
+    per provider, differing only in the endpoint and the payload lambda. The
+    second is the quieter failure -- a provider that inherits the flow and
+    defines only one of the two hooks, which reaches ``NotImplementedError`` on
+    the first query instead of at import. The third is the shape the class is
+    for.
+    """
+    assert_fires_once(
+        _keyed_provider_offenders,
+        {
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class SerperProvider(_ApiKeyProvider):\n"
+            "    name = 'serper'\n"
+            "    def _items_of(self, payload):\n"
+            "        return payload.get('organic')\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n"
+            "    async def search(self, query, limit, timeout_seconds):\n"
+            "        status, body = await self._request(query, limit, timeout_seconds)\n"
+            "        return self._results(status, body, lambda p: p.get('organic'), url_key='link',\n"
+            "            title_key='title', description_key='snippet')\n":
+            "re-spells the shared provider flow",
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class TavilyProvider(_ApiKeyProvider):\n"
+            "    name = 'tavily'\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n":
+            "does not define _items_of()",
+        },
+        REPO_ROOT / "app" / "search" / "_synthetic.py",
+    )
+    assert_stays_clean(
+        _keyed_provider_offenders,
+        (
+            "class TavilyProvider(_ApiKeyProvider):\n"
+            "    name = 'tavily'\n"
+            "    _url_key = 'url'\n"
+            "    def _items_of(self, payload):\n"
+            "        return payload.get('results')\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n",
+            # A provider that does not inherit the keyed flow (DuckDuckGo) is not
+            # this guard's business; the loop guard above owns its shape.
+            "class DuckDuckGoProvider:\n"
+            "    name = 'duckduckgo'\n"
+            "    async def search(self, query, limit, timeout_seconds):\n"
+            "        return []\n",
+        ),
+        REPO_ROOT / "app" / "search" / "_synthetic.py",
+    )
+
+
+# ---------------------------------------------------------------------------
+# robots.txt scanning (jscpd #5 family)
+# ---------------------------------------------------------------------------
+
+_ROBOTS_SCANNER_SANCTIONED = "iter_robots_fields"
+
+
+def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """One line-walk for every robots consumer.
+
+    Sink: a function doing the ``lstrip(BOM) + splitlines()`` scan. It lived
+    three times (crawl-delay, rules, sitemaps) and drifted on the empty-value
+    gate; the tokenizer in app/crawl/robots_parse.py is now the only one.
+    """
+    offenders: list[str] = []
+    for node in functions(tree):
+        if node.name == _ROBOTS_SCANNER_SANCTIONED:
+            continue
+        has_bom_strip = any(
+            isinstance(s, ast.Call)
+            and getattr(s.func, "attr", "") == "lstrip"
+            and s.args
+            and isinstance(s.args[0], ast.Constant)
+            and s.args[0].value in ("﻿", "\ufeff")
+            for s in nodes_of(node)
+        )
+        has_split = any(
+            isinstance(s, ast.Call) and getattr(s.func, "attr", "") == "splitlines" for s in nodes_of(node)
+        )
+        if has_bom_strip and has_split:
+            offenders.append(offender_at(path, node, f"{node.name} re-rolls the robots line-scanner"))
+    return offenders
+
+
+def test_robots_line_scanner_lives_in_one_place():
+    """Every robots consumer walks lines through the shared tokenizer."""
+    assert_trees_clean(
+        _robots_scanner_offenders,
+        "app/crawl/robots_parse.iter_robots_fields is the single scanner",
+        trees=app_trees(),
+    )
+
+
+def test_robots_scanner_detector_bites():
+    assert_detector(
+        _robots_scanner_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            "def parse_robots_rules(text):\n"
+            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+            "        yield raw\n": "parse_robots_rules re-rolls the robots line-scanner",
+        },
+        clean=(
+            "def iter_robots_fields(text):\n"
+            "    for raw in text.lstrip('\\ufeff').splitlines():\n"
+            "        yield raw.strip()\n",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test-fake construction (jscpd #6: sanctioned builders over hand-built fakes)
+# ---------------------------------------------------------------------------
+
+_FAKE_BUILDER_SANCTIONED = frozenset({"_fetcher_factories.py"})
+
+
+def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a test file hand-building a model the fetcher factory already fabricates.
+
+    HttpFetchResult's field set is the crawl contract; a fixture that spells
+    it out by hand silently diverges when the contract grows (the exact
+    drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
+    """
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Call):
+        if getattr(node.func, "id", "") == "HttpFetchResult":
+            offenders.append(
+                offender_at(path, node, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
+            )
+    return offenders
+
+
+def test_tests_do_not_hand_build_http_fetch_results():
+    """Every fetch fake comes from the one sanctioned builder."""
+    assert_trees_clean(
+        _fetcher_factory_offenders,
+        "Use _fetcher_factories.make_fetch()",
+        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
+    )
+
+
+def test_fetch_builder_detector_bites():
+    assert_detector(
+        _fetcher_factory_offenders,
+        path=REPO_ROOT / "tests" / "_synthetic.py",
+        fires={"def f():\n    return HttpFetchResult(url='u')\n": "make_fetch"},
+        clean=("def f():\n    return make_fetch(url='u')\n",),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Poll-loop reimplementation (jscpd test-side drift, sibling to the fake
+# builder finding): _assertions.poll_until is the sanctioned predicate poller.
+# A hand-rolled ``while True`` poller that awaits ``asyncio.wait_for`` without
+# a ``pytest.fail`` termination silently returns False on timeout, diverging
+# from the one that names the failing condition. Flag the shape.
+# ---------------------------------------------------------------------------
+
+
+def _call_node_names(node: ast.AST) -> set[str]:
+    """Names of every call target under ``node`` (e.g. ``pytest.fail``)."""
+    names: set[str] = set()
+    for child in nodes_of(node):
+        if isinstance(child, ast.Call):
+            with contextlib.suppress(Exception):
+                names.add(ast.unparse(child.func))
+    return names
+
+
+def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    offenders: list[str] = []
+    for node in functions(tree):
+        src = ast.dump(node)
+        has_while_true = any(
+            isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in nodes_of(node)
+        )
+        if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
+            continue
+        # The sanctioned _assertions.poll_until terminates with pytest.fail. A
+        # docstring may *claim* a fail; only a real call node counts.
+        if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
+            continue
+        offenders.append(
+            offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")
+        )
+    return offenders
+
+
+def test_tests_do_not_relinline_poll_loop():
+    """One sanctioned poller; tests must not re-roll their own."""
+    assert_trees_clean(
+        _poll_loop_offenders,
+        "Use _testkit.poll_until",
+        trees=trees_excluding(TESTS_DIR, *_FAKE_BUILDER_SANCTIONED),
+    )
+
+
+def test_poll_loop_detector_bites():
+    assert_detector(
+        _poll_loop_offenders,
+        path=REPO_ROOT / "tests" / "_synthetic.py",
+        fires={
+            "async def _poll_until(pred, *, timeout=10.0):\n"
+            "    async def _runner():\n"
+            "        while True:\n"
+            "            v = pred()\n"
+            "            if asyncio.iscoroutine(v):\n"
+            "                v = await v\n"
+            "            if v:\n"
+            "                return True\n"
+            "    return await asyncio.wait_for(_runner(), timeout=timeout)\n": "poll_until",
+        },
+        clean=(
+            "async def poll_until(pred, *, timeout=10.0, message=None):\n"
+            "    async def _runner():\n"
+            "        while True:\n"
+            "            if pred():\n"
+            "                return True\n"
+            "    await asyncio.wait_for(_runner(), timeout=timeout)\n"
+            "    pytest.fail(message)\n",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# dataclass copying: replace, not asdict-and-rebuild
+# ---------------------------------------------------------------------------
+
+# ``asdict`` is a *serialization* primitive: it recurses through the field tree
+# and hands back plain dicts, so a frozen nested dataclass (a CrawlStrategyAttempt)
+# becomes a dict with the same keys. Unpacking that into a constructor call to
+# "copy with one field changed" therefore rebuilds an object whose nested fields
+# no longer match their declared types. The copy compares equal field-for-field,
+# type-checks clean under a lax annotation, and raises AttributeError the first
+# time a consumer reaches for an attribute -- which the render adapter does on
+# its first read, long after the copy was made.
+#
+# The distinction the detector draws is not asdict-allowed-or-banned: genuine
+# serialization is a legitimate use and job_store.to_json() is one. It is
+# *where the result goes*. Unpacked into a constructor call, asdict is always the
+# copy mistake; anything else, it is doing its real job. So the sink is the
+# constructor, and no file needs an exemption to keep using asdict properly.
+
+
+def _is_asdict_call(node: ast.AST) -> bool:
+    """Whether a node calls asdict, under either import spelling.
+
+    ``from dataclasses import asdict`` and ``import dataclasses`` are both in
+    use in this tree, so a detector keyed on one spelling silently stops
+    detecting the moment a module picks the other.
+    """
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Name) and node.func.id == "asdict")
+        or (isinstance(node.func, ast.Attribute) and node.func.attr == "asdict")
+    )
+
+
+def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag unpacking ``asdict(...)`` into a constructor call."""
+    offenders: list[str] = []
+    for call in nodes_of_type(tree, ast.Call):
+        for keyword in call.keywords:
+            if keyword.arg is not None or not isinstance(keyword.value, ast.AST):
+                continue
+            unpacked = [n for n in ast.walk(keyword.value) if _is_asdict_call(n)]
+            if unpacked:
+                offenders.append(
+                    offender_at(
+                        path,
+                        unpacked[0],
+                        "asdict(...) unpacked into a "
+                        "constructor call: the nested dataclasses become dicts and "
+                        "the rebuilt object violates its declared field types -- use dataclasses.replace()",
+                    )
+                )
+                break
+    return offenders
+
+
+def test_asdict_is_never_unpacked_into_a_constructor():
+    """Copying a dataclass with asdict must not survive anywhere in app/."""
+    assert_trees_clean(
+        _asdict_rebuild_offenders,
+        "copy dataclasses with dataclasses.replace(), not asdict(**...)",
+        trees=app_trees(exclude=SANCTIONED),
+    )
+
+
+def test_asdict_rebuild_detector_bites():
+    """The rebuild shape fires; genuine serialization does not."""
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    fires = [
+        "import dataclasses\ndef f(r):\n    return Thing(**{**dataclasses.asdict(r), 'd': 1})\n",
+        "from dataclasses import asdict\ndef f(r):\n    return Thing(**asdict(r))\n",
+    ]
+    for src in fires:
+        offenders = _asdict_rebuild_offenders(ast.parse(src), path)
+        assert len(offenders) == 1 and "dataclasses.replace" in offenders[0], src
+
+    # Serialization keeps asdict: a dict result used as a dict is its real job.
+    clean = [
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    return json.dumps(data)\n",
+        "import dataclasses\ndef f(s):\n    return dataclasses.asdict(s)['results']\n",
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    return "
+        "data\n",
+    ]
+    for src in clean:
+        assert not _asdict_rebuild_offenders(ast.parse(src), path), src
+
+
+# ---------------------------------------------------------------------------
+# JS-endpoint egress door: the filter must not be reinlined
+#
+# ``filter_js_endpoints`` is the single place a scraped JS endpoint survives or
+# is dropped. Both call sites used to carry the inline comprehension
+# (``{**endpoint, "url": clean} for ... if (clean := public_url_or_none(...))
+# is not None``) -- the shape that silently disappears the moment a consumer is
+# added in a hurry. This pins the comprehension to the chokepoint itself.
+# ---------------------------------------------------------------------------
+
+_JS_ENDPOINTS_FILTER_SANCTIONED = frozenset({"validation.py"})
+
+
+def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag the inlined endpoint-filter comprehension outside its chokepoint.
+
+    The reinlined shape is a comprehension whose element spreads an existing
+    dict and rewrites its ``url`` key (``{**endpoint, "url": clean}``) -- a
+    None key in the dict is the ``**`` spread, and the rewritten ``url`` key is
+    what makes it an endpoint filter rather than an ordinary copy.
+    """
+    if path.name == "validation.py":
+        return []
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.ListComp, ast.SetComp, ast.GeneratorExp):
+        elt = node.elt
+        if not isinstance(elt, ast.Dict):
+            continue
+        if any(k is None for k in elt.keys) and any(
+            isinstance(k, ast.Constant) and k.value == "url" for k in elt.keys
+        ):
+            offenders.append(
+                offender_at(path, node, "inlined js_endpoints filter: use validation.filter_js_endpoints")
+            )
+    return offenders
+
+
+def test_js_endpoints_filter_is_not_reinlined():
+    """Scraped JS endpoints are filtered through ``filter_js_endpoints``."""
+    assert_trees_clean(
+        _reinline_js_endpoints_filter_offenders,
+        "route endpoints through filter_js_endpoints",
+        trees=app_trees(exclude=_JS_ENDPOINTS_FILTER_SANCTIONED),
+    )
+
+
+def test_reinline_js_endpoints_detector_bites():
+    """The historical inline shape fires; the chokepoint call stays clean."""
+    bad = ast.parse(
+        "def f(endpoints, base):\n"
+        '    return [{**e, "url": c} for e in endpoints\n'
+        '           if (c := public_url_or_none(e["url"])) is not None]\n'
+    )
+    offenders = _reinline_js_endpoints_filter_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    assert len(offenders) == 1 and "filter_js_endpoints" in offenders[0], offenders
+    good = ast.parse(
+        "def f(endpoints, base):\n    return filter_js_endpoints(endpoints, resolve_against=base)\n"
+    )
+    assert not _reinline_js_endpoints_filter_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
+    # The chokepoint's own comprehension really is the matched shape: the file
+    # exemption is what keeps the real tree clean, not a predicate that misses it.
+    validation = next(((path, tree) for path, tree in app_trees() if path.name == "validation.py"), None)
+    assert validation is not None
+    validation_path, validation_tree = validation
+    assert _reinline_js_endpoints_filter_offenders(validation_tree, validation_path) == []
+    hits = _reinline_js_endpoints_filter_offenders(
+        validation_tree, REPO_ROOT / "app" / "crawl" / "_synthetic.py"
+    )
+    assert len(hits) == 1 and "filter_js_endpoints" in hits[0], hits
+
+
+# --- 4a: the robots matcher compiler is reachable only via its host cache ----
+
+_ROBOTS_COMPILE = "_compile_robots_pattern"
+
+
+_ROBOTS_COMPILE_HOME = "_RobotsPatternCache"
+
+
+def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """``_compile_robots_pattern`` may be called only from ``_RobotsPatternCache.get``.
+
+    The pure pattern translation is the cheap half of the robots matcher; the
+    safety property is that every caller reaches it through the bounded
+    PER-HOST LRU. A second caller reintroduces a process-global matcher cache
+    keyed only on the pattern string -- patterns arrive from remotely-fetched
+    robots.txt, so a hostile site spraying distinct patterns would evict every
+    other site's matchers and control the whole cache (P2-E). The home method
+    is the single sanctioned call site; the module-level wrapper
+    (``_robots_pattern_to_regex``) goes through it too.
+    """
+    offenders: list[str] = []
+    for node in calls_named(tree, _ROBOTS_COMPILE):
+        scopes = _enclosing_defs(node, tree)
+        if _ROBOTS_COMPILE_HOME in scopes and "get" in scopes[: scopes.index(_ROBOTS_COMPILE_HOME) + 1]:
+            continue
+        offenders.append(
+            offender_at(
+                path,
+                node,
+                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through "
+                f"the per-host cache so a hostile robots.txt cannot evict another site's matchers",
+            )
+        )
+    return offenders
+
+
+def test_robots_pattern_compile_lives_behind_the_per_host_cache():
+    offenders = app_offenders(_robots_compile_call_offenders)
+    assert not offenders, ", ".join(offenders)
+
+
+def test_robots_pattern_compile_detector_bites():
+    # A direct caller -- exactly the shape that reintroduces a global,
+    # attacker-keyed matcher cache.
+    bad = ast.parse("def f(pattern):\n    return _compile_robots_pattern(pattern)\n")
+    offenders = list(_robots_compile_call_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
+    assert len(offenders) == 1 and "per-host cache" in offenders[0], offenders
+    # The sanctioned home passes.
+    good = ast.parse(
+        "class _RobotsPatternCache:\n"
+        "    def get(self, host, pattern):\n"
+        "        return _compile_robots_pattern(pattern)\n"
+    )
+    assert not _robots_compile_call_offenders(good, REPO_ROOT / "app" / "_synthetic.py")
+    # A nested helper inside the home class is still inside the home scope.
+    nested = ast.parse(
+        "class _RobotsPatternCache:\n"
+        "    def get(self, host, pattern):\n"
+        "        def build():\n"
+        "            return _compile_robots_pattern(pattern)\n"
+        "        return build()\n"
+    )
+    assert not _robots_compile_call_offenders(nested, REPO_ROOT / "app" / "_synthetic.py")
+    # A same-named method on any OTHER class is not the home.
+    impostor = ast.parse(
+        "class OtherCache:\n    def get(self, pattern):\n        return _compile_robots_pattern(pattern)\n"
+    )
+    assert len(_robots_compile_call_offenders(impostor, REPO_ROOT / "app" / "_synthetic.py")) == 1
+
+
+_COMMENT_CLONE_MIN_LINES = 3
+
+
+# Emitted after every comment-only line, and around indentation: none of them
+# says anything about prose, so only a token that carries code ends a block.
+_COMMENT_TRANSPARENT = frozenset(
+    {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING}
+)
+
+
+def _comment_blocks(source: str) -> list[tuple[int, tuple[str, ...]]]:
+    """``(first line, normalized text)`` for each run of consecutive comment lines.
+
+    ``tokenize`` rather than a ``#`` search, because a ``#`` inside a string is a
+    character and not a comment. A run is consecutive *lines* rather than merely
+    adjacent comment tokens, so a blank line, a statement, or a re-indent between
+    two notes ends the block instead of silently welding unrelated prose into one
+    clone -- and re-welding it is what the re-indent case has to catch, which is
+    why the break is the line gap and not the indentation.
+    """
+    blocks: list[tuple[int, tuple[str, ...]]] = []
+    lines: list[str] = []
+    first_line = 0
+    previous_end = 0
+
+    def flush() -> None:
+        nonlocal lines, first_line
+        if lines:
+            blocks.append((first_line, tuple(lines)))
+            lines = []
+
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.COMMENT:
+            text = " ".join(token.string.lstrip("#").split())
+            if not text:
+                continue
+            if lines and token.start[0] != previous_end + 1:
+                flush()
+            if not lines:
+                first_line = token.start[0]
+            lines.append(text)
+            previous_end = token.end[0]
+        elif token.type not in _COMMENT_TRANSPARENT:
+            flush()
+    flush()
+    return blocks
+
+
+def _duplicated_comment_runs(
+    sources: Iterable[tuple[Path, str]], *, minimum: int = _COMMENT_CLONE_MIN_LINES
+) -> list[str]:
+    """Comment blocks written twice in app/, with every site that repeats them.
+
+    The token floor cannot see this class at all: jscpd matches tokens, so a
+    duplicated comment contributes nothing to a clone it reports, and a
+    six-line WHY note read as zero clones at 4/25. That is what happened -- the
+    same note about the content cache's eviction window sat at both write call
+    sites, each copy carrying a claim about locking, and nothing in the suite or
+    the gate could tell that a later edit to the locking had updated one and left
+    the other asserting something the code no longer did.
+
+    Normalized on whitespace before comparison, so a re-indented copy -- the way
+    these forks actually arrive, by pasting between call sites -- still matches.
+    A block shorter than ``minimum`` is not a WHY worth centralizing, and a
+    two-line threshold would fire on ordinary repeated section rules.
+    """
+    sites: dict[tuple[str, ...], list[tuple[Path, int]]] = {}
+    for path, source in sources:
+        for line, block in _comment_blocks(source):
+            if len(block) < minimum:
+                continue
+            sites.setdefault(block, []).append((path, line))
+    return [
+        " and ".join(f"{relative_posix(path)}:{line}" for path, line in found)
+        + f" carry the same {len(block)}-line comment: {block[0]}"
+        for block, found in sorted(sites.items())
+        if len(found) > 1
+    ]
+
+
+def test_no_comment_block_is_written_twice():
+    """app/ states each multi-line WHY once, not once per call site."""
+    offenders = _duplicated_comment_runs(
+        (path, path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
+    )
+    assert not offenders, "comment blocks written more than once: " + ", ".join(offenders)
+
+
+def test_comment_clone_detector_bites():
+    """A repeated block fires, in one file and across two; distinct blocks do not.
+
+    Hand-rolled rather than :func:`assert_detector`, which parses its sources
+    into modules: a comment is not in the ``ast`` at all, so this is the one
+    detector in the file whose input is the text.
+    """
+    path = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+    repeated = "# first line of the note\n# second line\n# third line\n"
+    other = "# a different note entirely\n# with three lines\n# of its own text\n"
+    detached = "        # first line of the note\n        # second line\n        # third line\n"
+
+    def detect(source: str) -> list[str]:
+        return _duplicated_comment_runs([(path, source)])
+
+    once = detect(f"x = 1\n{repeated}y = 2\n")
+    assert not once, once
+    twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
+    assert (
+        len(twice) == 1
+        and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0]
+    ), twice
+    # Two blocks of the same length but different text are two notes.
+    assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
+    # Two lines is a section rule, not a WHY to centralize.
+    two_lines = "# first line of the note\n# second line\n"
+    assert not detect(f"x = 1\n{two_lines}y = 2\n{two_lines}"), "a two-line rule is below the floor"
+    # A blank line ends a block, so two paragraphs stay two paragraphs instead of
+    # one welded run -- which would match nothing, including its own twin.
+    assert not detect(f"{repeated}\n{other}"), "a blank line must end a comment block"
+    assert [line for line, _ in _comment_blocks(f"{repeated}\n{other}")] == [1, 5]
+    # Identical prose is still a duplicate across a blank line: the rule about
+    # blocks decides what counts as one note, not whether prose may repeat.
+    assert detect(f"{repeated}\n{repeated}"), "identical prose is a duplicate however it is separated"
+    # Normalized on whitespace, so a re-indented copy -- how these forks actually
+    # arrive -- still matches rather than hiding behind the extra spaces.
+    assert detect(f"x = 1\n{repeated}y = 2\n{detached}"), "a re-indented copy is still a clone"
+    # A fork usually arrives by pasting between modules, so the same block in two
+    # different files is one finding, and both sites have to be named.
+    across = _duplicated_comment_runs(
+        [
+            (REPO_ROOT / "app" / "a.py", f"x = 1\n{repeated}"),
+            (REPO_ROOT / "app" / "b.py", f"y = 2\n{repeated}"),
+        ]
+    )
+    assert len(across) == 1 and "app/a.py:2 and app/b.py:2" in across[0], across

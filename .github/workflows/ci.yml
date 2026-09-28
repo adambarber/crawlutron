@@ -57,8 +57,8 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
-      # Includes the project-specific safety predicates (tests/test_safety_invariants.py
-      # and friends): those detectors are the only exit path for the chokepoint
+      # Includes the project-specific safety predicates (tests/invariants/ and
+      # friends): those detectors are the only exit path for the chokepoint
       # rules, and they run inside the default marker set.
       - name: Run pytest (fast)
         run: python3 -m pytest

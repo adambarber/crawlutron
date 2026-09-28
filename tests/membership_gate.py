@@ -181,7 +181,7 @@ def generic_literal_field_offenders(
     is not checked here -- ``error`` has its own provenance story below. Which
     values count as spelled non-members is
     :func:`chokepoint_walks.non_member_literals`, shared with the ``error``
-    sweep and with the detectors in ``test_safety_invariants.py``.
+    sweep and with the detectors in ``tests/invariants/``.
     """
     return [
         offender(

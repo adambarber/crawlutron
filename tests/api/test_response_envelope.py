@@ -7,7 +7,7 @@ the other is dropped by the model rather than rejected: a response field has
 already shipped missing from one endpoint and was caught only by curling the
 live endpoint. The adaptation is now one function
 (``app.api.response_shaping._aunified_response_from_result``) over one envelope
-shape, and the tree-wide guards in ``tests/test_safety_invariants.py`` keep it
+shape, and the tree-wide guards in ``tests/invariants/test_result_shape.py`` keep it
 that way. These tests pin the two properties that made the move worth making.
 """
 

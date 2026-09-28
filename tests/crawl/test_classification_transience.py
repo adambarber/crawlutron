@@ -13,7 +13,7 @@ dropped it from a whole-site crawl.
 
 These tests pin the single source of truth, its coverage over the taxonomy, and
 the classifier that feeds it. The tree-wide ban on new hand-lists is
-``test_safety_invariants.py::test_transience_verdict_has_one_home``.
+``tests/invariants/test_taxonomy.py::test_transience_verdict_has_one_home``.
 """
 
 import socket

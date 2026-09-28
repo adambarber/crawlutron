@@ -10,7 +10,7 @@ import pytest
 
 from app.validation import HOST_POLICY_ENTRY_POINTS
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
-from tests.test_safety_invariants import _module_definition_index
+from tests.invariants._shared import _module_definition_index
 
 _DECISION_NAMES = frozenset(
     {

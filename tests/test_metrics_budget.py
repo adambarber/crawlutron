@@ -235,7 +235,7 @@ def test_metric_collectors_see_the_whole_tree() -> None:
     collector would otherwise turn this module into four permanently-passing
     tests. This pins that the walkers reach real code rather than proving it by
     counting offenders, which is the mistake the zero-observation proof in
-    `test_safety_invariants.py` already made once.
+    `tests/invariants/` already made once.
     """
     total = sum(1 for _ in APP_ROOT.rglob("*.py"))
     assert total > 50, f"expected a real app tree, found {total} files"

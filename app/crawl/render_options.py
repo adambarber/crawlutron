@@ -9,7 +9,7 @@ worker from that path.
 
 ``resolve_render_options`` is now the only place request-side options and
 server defaults merge into a :class:`app.models.RenderOptions`; the AST
-detector in ``tests/test_safety_invariants.py`` fails the build on any new
+detector in ``tests/invariants/test_result_shape.py`` fails the build on any new
 construction site. Callers adapt their own source shape (a render-options
 dict, a crawl policy) into the two mappings the resolver reads.
 

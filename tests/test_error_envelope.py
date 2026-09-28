@@ -4,7 +4,7 @@ The pre-helper state had 13 hand-rolled dict literals across 7 files; three
 silently omitted ``details``, and any future site could drift the key names
 freedom-planting the drift-masking fallback in http_exception_handler. The
 factory is now the single definition; the AST drift detector in
-test_safety_invariants.py keeps it that way.
+tests/invariants/test_result_shape.py keeps it that way.
 """
 
 import asyncio

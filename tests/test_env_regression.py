@@ -21,7 +21,7 @@ single-shape detector):
 
 import ast
 
-from tests.chokepoint_walks import app_trees, nodes_of, offender_at
+from tests.chokepoint_walks import app_trees, bare_callee, nodes_of, nodes_of_type, offender_at
 
 
 def _is_attr_get(node: ast.AST) -> bool:
@@ -101,20 +101,19 @@ def test_no_bare_env_int_or_float_in_app():
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):
         env_aliases = _env_get_aliases(tree)
-        for node in nodes_of(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-                continue
-            if node.func.id not in ("int", "float"):
+        for node in nodes_of_type(tree, ast.Call):
+            callee = bare_callee(node)
+            if callee not in ("int", "float"):
                 continue
             for arg in node.args:
                 if _is_browser_crawler_get(arg):
                     offenders.append(
-                        offender_at(path, node, f"bare {node.func.id} on BROWSER_CRAWLER_* mapping read")
+                        offender_at(path, node, f"bare {callee} on BROWSER_CRAWLER_* mapping read")
                     )
                 elif _is_env_get(arg):
-                    offenders.append(offender_at(path, node, f"bare {node.func.id} on os.environ.get"))
+                    offenders.append(offender_at(path, node, f"bare {callee} on os.environ.get"))
                 elif isinstance(arg, ast.Name) and arg.id in env_aliases:
                     offenders.append(
-                        offender_at(path, node, f"bare {node.func.id} on env-read alias {arg.id!r}")
+                        offender_at(path, node, f"bare {callee} on env-read alias {arg.id!r}")
                     )
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)

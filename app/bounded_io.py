@@ -5,7 +5,7 @@ input differently -- httpx streaming inline, cffi via the queue consumer,
 decompression internally -- and the document extractor held a bare
 ``response.read()`` (round-4 N2). Every body acquisition in strategies/
 must go through one of these helpers; the AST invariant in
-tests/test_safety_invariants.py bans bare ``.read()``/``.content`` access.
+tests/invariants/test_url_doors.py bans bare ``.read()``/``.content`` access.
 """
 
 from __future__ import annotations

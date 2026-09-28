@@ -1,0 +1,1074 @@
+"""Whatever leaves the process is built in exactly one shape.
+
+Response envelopes, error envelopes, job rows, render options, wire models
+and advertised payload keys each have a chokepoint that constructs them.
+A second construction site is a shape that will drift from the model it
+mirrors, so these checks make the second one red."""
+
+from __future__ import annotations
+
+import ast
+import pathlib
+import re
+
+import pytest
+
+from app.api_models import UnifiedCrawlResponse
+from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
+from tests.chokepoint_walks import (
+    REPO_ROOT,
+    SANCTIONED,
+    app_offenders,
+    app_trees,
+    assert_detector,
+    assert_fires_once,
+    assert_stays_clean,
+    call_keyword_values,
+    calls_named,
+    calls_named_leaf,
+    calls_to_any,
+    file_tree,
+    functions,
+    nodes_of_type,
+    offender,
+    offender_at,
+    relative_posix,
+    resolved_call_name,
+    resolved_expr_name,
+)
+from tests.invariants._shared import assert_trees_clean
+
+
+def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag any dict literal shaped like a content-cache envelope.
+
+    Keyed on the *stored shape* -- the key set every cache entry carries --
+    rather than on the two write paths that happened to spell it, so a third
+    writer is caught too. A dict that merely mentions ``expires`` is not an
+    envelope; it has to carry the whole contract.
+    """
+    required = {"expires", "value", "cached_at"}
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Dict):
+        keys = {
+            key.value for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        if required <= keys:
+            offenders.append(offender_at(path, node, "cache-envelope"))
+    return offenders
+
+
+def test_cache_envelope_is_built_by_one_owner():
+    """The content-cache entry envelope has one builder.
+
+    ``set`` and ``aset`` each built the on-disk envelope themselves, which is
+    the cache's *stored contract*: a field added for one write path was absent
+    from the other, so an entry written through it was missing something the
+    reader expects. ``ContentCache._entry_to_store`` is the owner; a new write
+    path has to go through it.
+    """
+    offenders = app_offenders(_cache_envelope_literals, exclude=SANCTIONED | {"content_cache.py"})
+    assert not offenders, "the content-cache envelope is built outside its owner:\n  " + "\n  ".join(
+        offenders
+    )
+
+
+def test_cache_envelope_detector_bites():
+    """The envelope sweep must fire on a hand-rolled envelope elsewhere.
+
+    Without this, an exhausted or renamed sink pattern would report zero
+    offenders and the guard above would pass forever while covering nothing.
+    """
+    # A dict that merely mentions one envelope key is not an envelope, and
+    # flagging it would make the guard something people route around.
+    assert_detector(
+        _cache_envelope_literals,
+        path=REPO_ROOT / "app" / "_synthetic.py",
+        fires={
+            "def write(self, key, value, expires):\n"
+            '    return {"expires": expires, "value": value, "cached_at": expires}\n': "cache-envelope",
+        },
+        clean=('def f(expires, value):\n    return {"expires": expires, "value": value}\n',),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Crawl-response shaping chokepoint (jscpd #1 class)
+# ---------------------------------------------------------------------------
+
+
+def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` construction
+    outside response_shaping — callers must use build_unified_crawl_response so
+    persisted/webhook/REST payloads cannot drift (the #1754 rule, endpoint-wide).
+    ``**stored`` deserialization splats have no explicit results= keyword."""
+    if path.name == "response_shaping.py":
+        return []
+    offenders: list[str] = []
+    for node, _ in call_keyword_values(
+        tree,
+        function_names="UnifiedCrawlResponse",
+        keyword_names="results",
+    ):
+        offenders.append(offender_at(path, node, "explicit UnifiedCrawlResponse(results=...) build"))
+    return offenders
+
+
+def test_crawl_response_built_only_by_shaping_chokepoint():
+    """Every UnifiedCrawlResponse-with-results flows through the shaper."""
+    offenders = app_offenders(_crawl_response_construction_offenders)
+    assert not offenders, "Use app.api.response_shaping.build_unified_crawl_response: " + ", ".join(offenders)
+
+
+def test_crawl_response_chokepoint_detector_bites():
+    """Synthetic bypass fires; **stored deserialization splat stays clean."""
+    assert_detector(
+        _crawl_response_construction_offenders,
+        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
+        fires={
+            "def f(results):\n    return UnifiedCrawlResponse(request_id='r', results=results)\n": (
+                "explicit UnifiedCrawlResponse"
+            )
+        },
+        clean=("def f(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
+    )
+
+
+# ---------------------------------------------------------------------------
+# The same chokepoint, two more edges
+#
+# ``abuild_unified_crawl_response`` is the response builder, but the drift that
+# actually shipped was never in the builder: it was in the ADAPTER -- the two
+# endpoints each read a raw producer envelope and passed four fields by name,
+# and a field added to one and forgotten on the other was dropped by the model
+# without a word. The rules below close both ends of that: the envelope is
+# adapted in one module, and its scalar fields are passed in one function.
+# ---------------------------------------------------------------------------
+
+_ENVELOPE_OWNER_MODULE = "app/api/response_shaping.py"
+
+
+_ENVELOPE_OWNER_FUNCTION = "_response_envelope"
+
+
+_ENVELOPE_BUILDERS = ("abuild_unified_crawl_response", "build_unified_crawl_response")
+
+
+# The only callers permitted to skip the owner's envelope read, each named with
+# the reason it is not the same shape as a wire endpoint's:
+#   app/api/async_crawl_runner.py -- the detached background runner. It answers a
+#     webhook instead of a caller and reads the envelope LENIENTLY
+#     (``result.get("submitted_count")``), because a producer that stopped
+#     stamping a key must fail a job, not raise out of a background task that
+#     has no caller to answer.
+#   app/mcp/tools.py -- the MCP crawl tool, which is the same adaptation as
+#     /v1/crawl and is still spelled out at its own call site. PENDING: it is
+#     outside app/api, so it is named here rather than migrated, and this entry
+#     is what a reviewer should delete once it goes through the owner.
+_ENVELOPE_ADAPTER_EXEMPT = frozenset({"app/api/async_crawl_runner.py", "app/mcp/tools.py"})
+
+
+# Derived from the model, not transcribed: the rule is "every field the wire
+# model requires is passed by one function", so the field set has to come from
+# the model or this guard would check a list that can fall behind it.
+_ENVELOPE_SCALAR_FIELDS = frozenset(UnifiedCrawlResponse.model_fields) - {"results"}
+
+
+def _unsanctioned_envelope_adapter_offenders(tree, path):
+    """Flag a response builder called from outside the shaping owner module."""
+    relative = relative_posix(path)
+    if relative == _ENVELOPE_OWNER_MODULE or relative in _ENVELOPE_ADAPTER_EXEMPT:
+        return []
+    return [
+        offender_at(path, call, f"{call.func.id}() outside {_ENVELOPE_OWNER_MODULE}")
+        for call in calls_to_any(tree, _ENVELOPE_BUILDERS)
+    ]
+
+
+def test_crawl_response_envelope_is_adapted_by_one_owner():
+    """Endpoints read a producer envelope through the shaping owner, not by hand."""
+    assert_trees_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        "adapt a producer envelope with app.api.response_shaping's envelope owner, "
+        "so an envelope field cannot be passed on one path and forgotten on another",
+    )
+
+
+def test_crawl_response_envelope_adapter_detector_bites():
+    """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
+    fires = {
+        "async def f(result):\n"
+        "    return await abuild_unified_crawl_response(result['results'], "
+        "options=EnvelopeOptions(request_id=result['request_id']))\n": "abuild_unified_crawl_response",
+        "def f(results):\n    return build_unified_crawl_response(results)\n": "build_unified_crawl_response",
+    }
+    assert_fires_once(
+        _unsanctioned_envelope_adapter_offenders,
+        fires,
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        (
+            "async def f(result):\n"
+            "    return await _aunified_response_from_result(result, adapt=render_result_to_unified)\n",
+        ),
+        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+    )
+    assert_stays_clean(
+        _unsanctioned_envelope_adapter_offenders,
+        (
+            "async def f(request_id):\n"
+            "    return await abuild_unified_crawl_response([], "
+            "options=EnvelopeOptions(request_id=request_id, success=False))\n",
+        ),
+        REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
+    )
+
+
+def _hand_rolled_envelope_fields_offenders(tree, path):
+    """Flag the unified envelope's scalar fields being passed outside their owner.
+
+    Every one of those fields is REQUIRED by :class:`UnifiedCrawlResponse`, so a
+    second spelling of the list is a second place to forget a field -- and a
+    forgotten field is dropped silently, which is how one shipped missing from
+    one endpoint and was caught only by curling the live endpoint. The
+    ``submitted_count`` fallback that decides what the wire calls a batch's size
+    lives in the same function for the same reason: it used to be written in both
+    builders, and two copies of a fallback is how two paths start disagreeing
+    about a count.
+    """
+    relative = relative_posix(path)
+    offenders: list[str] = []
+    for call in calls_named(tree, "UnifiedCrawlResponse"):
+        if not any(keyword.arg in _ENVELOPE_SCALAR_FIELDS for keyword in call.keywords):
+            continue
+        enclosing = next(
+            (f for f in functions(tree) if f.lineno <= call.lineno <= (f.end_lineno or f.lineno)),
+            None,
+        )
+        if (
+            relative == _ENVELOPE_OWNER_MODULE
+            and getattr(enclosing, "name", None) == _ENVELOPE_OWNER_FUNCTION
+        ):
+            continue
+        offenders.append(
+            offender_at(path, call, f"envelope fields are passed by {_ENVELOPE_OWNER_FUNCTION} only")
+        )
+    return offenders
+
+
+def test_crawl_response_envelope_fields_are_passed_by_one_owner():
+    assert_trees_clean(
+        _hand_rolled_envelope_fields_offenders,
+        "pass the unified envelope's fields in app.api.response_shaping._response_envelope; "
+        "a field the model requires is dropped, not rejected, when a caller forgets it",
+    )
+
+
+def test_crawl_response_envelope_fields_detector_bites():
+    """A second field spelling fires, anywhere; the owner's own build and a
+    ``**stored`` deserialization stay clean."""
+    hand_rolled = (
+        "def build(results, request_id):\n"
+        "    return UnifiedCrawlResponse(results=results, request_id=request_id, success=True, "
+        "submitted_count=len(results), policy_schema_version='v')\n"
+    )
+    assert_fires_once(
+        _hand_rolled_envelope_fields_offenders,
+        {hand_rolled: _ENVELOPE_OWNER_FUNCTION},
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _hand_rolled_envelope_fields_offenders,
+        ("def get_crawl_result(stored):\n    return UnifiedCrawlResponse(**stored)\n",),
+        REPO_ROOT / "app" / "api" / "crawl_endpoint.py",
+    )
+    assert_stays_clean(
+        _hand_rolled_envelope_fields_offenders,
+        (hand_rolled.replace("def build(", f"def {_ENVELOPE_OWNER_FUNCTION}("),),
+        REPO_ROOT / _ENVELOPE_OWNER_MODULE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Job-row accumulator chokepoint (write amplification)
+# ---------------------------------------------------------------------------
+
+
+def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag SQL that reads or writes a dropped ``crawl_jobs`` column.
+
+    ``crawl_jobs`` used to carry ``results`` and ``visited`` as JSON columns, so
+    every batch persist re-serialized the job's entire page history and total
+    write volume grew as the square of the page count (migration 0003). Both are
+    append-only accumulators and now live in their own tables.
+
+    The banned set is read from the manifest rather than written out here, so
+    the detector cannot drift from the schema: the columns in LEGACY_COLUMNS are
+    by definition the ones a current store no longer has. Migrations are exempt
+    because dropping a column is the one operation that must name it.
+    """
+    if "migrations" in path.parts:
+        return []
+    banned = {column.name for column in LEGACY_COLUMNS[StoreSchema.CRAWL_JOBS]}
+    # Word boundaries, because the dropped names are substrings of the live
+    # ones: `results_count` and `visited_size` are output ALIASES of the
+    # accumulator subqueries, and `crawl_job_results` is the table itself.
+    # Underscore is a word character, so none of those can match -- only a
+    # column named exactly the banned word does.
+    pattern = re.compile(r"\b(" + "|".join(sorted(banned)) + r")\b")
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Constant):
+        if not isinstance(node.value, str) or "crawl_jobs" not in node.value:
+            continue
+        named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
+        if named:
+            offenders.append(offender_at(path, node, f"SQL names crawl_jobs accumulator column(s) {named}"))
+    return offenders
+
+
+def test_crawl_jobs_accumulators_are_never_row_columns():
+    """No SQL outside the migrations may name a column the row no longer has."""
+    offenders = app_offenders(_job_row_accumulator_offenders)
+    assert not offenders, (
+        "Append-only accumulators belong in crawl_job_results / crawl_job_visited, "
+        "not on the job row: " + ", ".join(offenders)
+    )
+
+
+def test_job_row_accumulator_detector_bites():
+    """A synthetic wide-row write fires; the accumulator tables and the queue stay clean."""
+    # The live shape: subqueries over the accumulator tables aliased back to
+    # names that CONTAIN the dropped columns. A substring match would reject
+    # this, which is why the detector matches whole words.
+    assert_detector(
+        _job_row_accumulator_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", '
+            '(job.visited,))\n': (
+                "visited"
+            )
+        },
+        clean=(
+            "def f(conn, job):\n"
+            '    conn.execute("UPDATE crawl_jobs SET frontier = ?", (job.frontier,))\n'
+            "    conn.execute('INSERT INTO \"crawl_job_results\" (job_id, seq, payload) VALUES (?, ?, ?)')\n"
+            "    conn.execute('INSERT INTO \"crawl_job_visited\" (job_id, url) VALUES (?, ?)')\n"
+            '    conn.execute("SELECT (SELECT count(*) FROM crawl_job_results r WHERE r.job_id = job.job_id) '
+            'as results_count FROM crawl_jobs job")\n',
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Render-options construction chokepoint (C2/M11)
+# ---------------------------------------------------------------------------
+
+
+def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag ``RenderOptions(...)`` construction outside the resolver (C2/M11).
+
+    The effective render options were once hand-assembled at every entry
+    point and the copies drifted -- the browser strategy hardcoded the
+    capture knobs while policy reads respected the caller elsewhere, and
+    the /v1/render builder silently dropped browser_profile. Only
+    app/crawl/render_options.py may decide the shape; callers map their own
+    source into the resolver's mappings."""
+    if path.name == "render_options.py":
+        return []
+    offenders: list[str] = []
+    for node in calls_named(tree, "RenderOptions"):
+        offenders.append(offender_at(path, node, "RenderOptions(...) built outside resolve_render_options"))
+    return offenders
+
+
+def test_render_options_built_only_by_resolver():
+    """Every effective RenderOptions flows through resolve_render_options."""
+    offenders = app_offenders(_render_options_construction_offenders)
+    assert not offenders, (
+        "Use app.crawl.render_options.resolve_render_options so request-side "
+        "options and server defaults merge in exactly one place: " + ", ".join(offenders)
+    )
+
+
+def test_render_options_chokepoint_detector_bites():
+    """Synthetic bypass fires; the resolver's own construction stays clean."""
+    assert_detector(
+        _render_options_construction_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
+        fires={
+            "def f(policy):\n    return RenderOptions(timeout_seconds=policy['t'], include_html=True)\n": (
+                "built outside resolve_render_options"
+            )
+        },
+    )
+    # The resolver's own construction is the ONE sanctioned build site, and the
+    # exemption is a PATH exemption -- so it has to be proved at the real path. At
+    # a synthetic path the same source fires, which is the whole point: the
+    # exemption is narrow enough to not generalize, and this asserts that.
+    assert_detector(
+        _render_options_construction_offenders,
+        path=REPO_ROOT / "app" / "crawl" / "render_options.py",
+        fires={},
+        clean=("def f(request, defaults):\n    return RenderOptions(**kwargs)\n",),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Error-envelope shape (jscpd #3 class)
+# ---------------------------------------------------------------------------
+
+# app/api/exceptions.py owns the envelope; it is the sanctioned definition
+# (exclude matches by file *name*, matching app_trees' own semantics).
+ENVELOPE_SANCTIONED = SANCTIONED | {"exceptions.py"}
+
+
+def _dict_keys(node: ast.Dict) -> set[str]:
+    return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+
+def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag hand-rolled error envelopes; the factory is the only definition.
+
+    Three shapes: ANY ``HTTPException(...)`` construction (M8: the wire shape
+    may only be built by :func:`http_error`/``browser_pool_unavailable`` -- a
+    bare ``HTTPException(detail="str")`` reaches the handler's fallback and
+    used to be laundered into a fabricated ``http_<status>`` code); a
+    ``HTTPException(detail={...code, message...})`` literal (the pre-factory
+    form); and any dict carrying all three envelope keys anywhere (catches
+    JSONResponse/return-value variants).
+    """
+    offenders = [
+        offender_at(
+            path,
+            call,
+            "HTTPException detail= envelope literal"
+            if any(
+                kw.arg == "detail"
+                and isinstance(kw.value, ast.Dict)
+                and ({"code", "message"} <= _dict_keys(kw.value))
+                for kw in call.keywords
+            )
+            else "bare HTTPException construction",
+        )
+        for call in calls_named_leaf(tree, {"HTTPException"})
+    ]
+    offenders.extend(
+        offender_at(path, node, "error envelope dict literal")
+        for node in nodes_of_type(tree, ast.Dict)
+        if {"code", "message", "details"} <= _dict_keys(node)
+    )
+    return offenders
+
+
+def test_no_hand_rolled_error_envelopes():
+    """Every HTTP error body flows through error_envelope/http_error (#1722)."""
+    assert_trees_clean(
+        _envelope_dict_offenders,
+        "Use app.api.exceptions.http_error/browser_pool_unavailable",
+        trees=app_trees(exclude=ENVELOPE_SANCTIONED),
+    )
+
+
+def test_envelope_detector_bites():
+    """All three drift shapes fire; factory-shaped code stays clean."""
+    # Four offenders from one source: two bare HTTPException builds, one
+    # detail= envelope literal, one three-key dict. Counted exactly, because a
+    # detector that reported one here would be hiding which shapes it still sees.
+    assert_detector(
+        _envelope_dict_offenders,
+        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
+        trips={
+            "raise HTTPException(status_code=404, detail={'code': 'not_found', 'message': 'gone'})\n"
+            "response = {'code': 'pending', 'message': 'm', 'details': {}}\n"
+            "raise HTTPException(status_code=404, detail='plain string')\n"
+            "raise fastapi.HTTPException(status_code=500)\n": 4,
+        },
+        clean=(
+            "from app.api.exceptions import http_error\n"
+            "raise http_error(404, 'not_found', 'gone')\n"
+            "response = build_thing({'code': 1, 'message': 'x'})\n",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Raw exception text never reaches the wire (information disclosure)
+#
+# render.py built the worker-failure result with ``error=str(error)`` from a
+# caught exception, and ``to_dict`` is pure serialization -- so the raw text
+# (DNS names, filesystem paths, secrets) reached the /v1/render body verbatim.
+# ``_terminal_crawl_result`` is the sanctioned construction site and takes an
+# already-classified error; this keeps raw text from drifting back into any
+# error= field of a wire-visible result.
+# ---------------------------------------------------------------------------
+
+_TERMINAL_RESULT_SANCTIONED = frozenset({"result_helpers.py"})
+
+
+_RESULT_ERROR_SINKS = frozenset({"CrawlResult", "_terminal_crawl_result"})
+
+
+_EXCEPTION_NAMES = frozenset({"error", "exc", "exception", "err"})
+
+
+def _is_raw_exception_text(value: ast.expr) -> bool:
+    """True for ``str(exc)``/``repr(exc)`` or an f-string interpolating one."""
+    if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and value.func.id in ("str", "repr"):
+        return True
+    if isinstance(value, ast.JoinedStr):
+        return any(
+            isinstance(part, ast.FormattedValue)
+            and isinstance(part.value, ast.Name)
+            and part.value.id in _EXCEPTION_NAMES
+            for part in value.values
+        )
+    return False
+
+
+def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a wire-visible result built with the raw text of an exception."""
+    offenders: list[str] = []
+    for node in calls_to_any(tree, _RESULT_ERROR_SINKS):
+        for kw in node.keywords:
+            if kw.arg == "error" and _is_raw_exception_text(kw.value):
+                offenders.append(offender_at(path, node, f"{node.func.id}(error=<raw exception text>)"))
+    return offenders
+
+
+def test_no_raw_exception_text_in_result_error_field():
+    """The ``error`` field is a stable classification, never ``str(exc)``."""
+    assert_trees_clean(
+        _raw_exception_error_offenders,
+        "classify via _classify_error_code, never raw exception text",
+        trees=app_trees(exclude=_TERMINAL_RESULT_SANCTIONED),
+    )
+
+
+def test_raw_exception_error_detector_bites():
+    """The leak shape fires on both sinks; the classified shape stays clean."""
+    direct = ast.parse("def f(exc):\n    return CrawlResult(error=str(exc))\n")
+    offenders = _raw_exception_error_offenders(direct, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    assert len(offenders) == 1 and "raw exception text" in offenders[0], offenders
+    via_primitive = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=str(exc))\n")
+    assert _raw_exception_error_offenders(via_primitive, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    fstring = ast.parse("def f(error):\n    return CrawlResult(error=f'failed: {error}')\n")
+    assert _raw_exception_error_offenders(fstring, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    repr_shape = ast.parse("def f(e):\n    return CrawlResult(error=repr(e))\n")
+    assert _raw_exception_error_offenders(repr_shape, REPO_ROOT / "app" / "api" / "_synthetic.py")
+    good = ast.parse("def f(exc):\n    return _terminal_crawl_result(error=_classify_error_code(exc))\n")
+    assert not _raw_exception_error_offenders(good, REPO_ROOT / "app" / "api" / "_synthetic.py")
+
+
+# --- A wire model may not silently drop a domain model's field ---------------
+#
+# app/models.py holds the internal dataclasses and app/api_models.py the pydantic
+# response models. `DiscoveredLink` is declared in both, with the same seven
+# field names, and *nothing* connects the two: response_shaping converts
+# generically by attribute, and a strict pydantic response model DROPS any key
+# it does not declare. So adding a field to the dataclass and forgetting the
+# BaseModel is not a type error and not a test failure -- the field stops
+# existing on the wire, and everything downstream reads a default. That is the
+# CapabilitiesResponse failure mode this project already shipped once, which
+# is why the pair gets a gate rather than a comment asking people to keep two
+# lists in step.
+#
+# Written as a rule over whatever pair exists rather than a hardcoded name, so
+# the next twin is covered without a second edit here.
+
+_DOMAIN_MODEL_MODULE = "app/models.py"
+
+
+_WIRE_MODEL_MODULE = "app/api_models.py"
+
+
+def _is_dataclass(node: ast.ClassDef) -> bool:
+    """True for a ``@dataclass`` class, bare or parameterised."""
+    return any(
+        (isinstance(d, ast.Name) and d.id == "dataclass")
+        or (isinstance(d, ast.Call) and getattr(d.func, "id", None) == "dataclass")
+        for d in node.decorator_list
+    )
+
+
+def _is_pydantic_model(node: ast.ClassDef) -> bool:
+    """True for a class deriving from ``BaseModel``, directly or subscripted."""
+    return any(
+        isinstance(target := (base.value if isinstance(base, ast.Subscript) else base), ast.Name)
+        and target.id == "BaseModel"
+        for base in node.bases
+    )
+
+
+def _declared_fields(node: ast.ClassDef) -> list[str]:
+    return [
+        stmt.target.id
+        for stmt in node.body
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+    ]
+
+
+def _wire_mirror_drift(domain_tree: ast.Module, wire_tree: ast.Module) -> list[str]:
+    """Field names that differ between a domain dataclass and its wire model."""
+    domain = {n.name: n for n in domain_tree.body if isinstance(n, ast.ClassDef) and _is_dataclass(n)}
+    wire = {n.name: n for n in wire_tree.body if isinstance(n, ast.ClassDef) and _is_pydantic_model(n)}
+    drifted: list[str] = []
+    for name in sorted(domain.keys() & wire.keys()):
+        internal = set(_declared_fields(domain[name]))
+        external = set(_declared_fields(wire[name]))
+        drifted.extend(
+            f"{name}.{field_name} exists internally and is dropped on the wire"
+            for field_name in sorted(internal - external)
+        )
+        drifted.extend(
+            f"{name}.{field_name} is declared on the wire and nowhere internally"
+            for field_name in sorted(external - internal)
+        )
+    return drifted
+
+
+def test_wire_models_mirror_every_domain_field():
+    """A domain field cannot disappear between the dataclass and the response model."""
+    domain_path, domain_tree = file_tree(_DOMAIN_MODEL_MODULE)
+    wire_path, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    drifted = _wire_mirror_drift(domain_tree, wire_tree)
+    assert not drifted, (
+        f"A pydantic response model DROPS every key it does not declare, so a field added to "
+        f"a domain dataclass in {domain_path.name} without a twin in {wire_path.name} does not "
+        f"fail loudly -- it quietly stops existing on the wire. Keep the pair in step, or give "
+        f"them separate names and a deliberate converter: " + "; ".join(drifted)
+    )
+
+
+def test_wire_mirror_detector_bites():
+    """A dropped field and a wire-only field both fire; an exact pair stays clean."""
+    domain = ast.parse("@dataclass(frozen=True)\nclass Link:\n    url: str\n    host: str\n    depth: int\n")
+    matching = ast.parse(
+        "from pydantic import BaseModel\nclass Link(BaseModel):\n"
+        "    url: str\n    host: str\n    depth: int\n"
+    )
+    assert not _wire_mirror_drift(domain, matching)
+
+    drifted = _wire_mirror_drift(domain, ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n"))
+    assert len(drifted) == 1, drifted
+    assert "Link.depth" in drifted[0] and "dropped on the wire" in drifted[0], drifted
+
+    drifted = _wire_mirror_drift(
+        domain,
+        ast.parse("class Link(BaseModel):\n    url: str\n    host: str\n    depth: int\n    score: float\n"),
+    )
+    assert len(drifted) == 1, drifted
+    assert "Link.score" in drifted[0] and "nowhere internally" in drifted[0], drifted
+
+    # A bare @dataclass and a subscripted BaseModel[str] base are the same two
+    # decorators spelled the other way round; both must still be matched.
+    assert _wire_mirror_drift(
+        ast.parse("@dataclass\nclass Link:\n    url: str\n    host: str\n    depth: int\n"),
+        ast.parse("class Link(BaseModel[str]):\n    url: str\n    host: str\n"),
+    )
+    # An unrelated name on both sides is not a pair -- a wire-only model and a
+    # domain-only dataclass must not be reported against each other.
+    assert not _wire_mirror_drift(
+        ast.parse("@dataclass\nclass Link:\n    url: str\n"),
+        ast.parse("class Other(BaseModel):\n    url: str\n    host: str\n"),
+    )
+
+
+# --- An advertised payload key may not be dropped by its response model -------
+#
+# The two discovery endpoints build a dict by hand and hand it to FastAPI with a
+# strict `response_model=`. Pydantic DROPS every key the model does not declare,
+# so advertising a new block is not a type error and not a test failure -- the key
+# stops existing on the wire while every test that calls the payload function
+# directly stays green, because those tests never go through the model. This
+# project has shipped that once: `crawl_timing` was advertised and absent from
+# the endpoint, and was caught only by curling the live service.
+#
+# The gate above covers the other twin, a domain dataclass and its response
+# model. This covers the shape that actually shipped the bug: a hand-written dict
+# literal beside a model that is maintained by hand. Both have to be edited for
+# the payload to be correct, and nothing checked that they agreed.
+#
+# The pair is declared as data so adding a third advertised endpoint is one line
+# here, and so the real tree and the bites proof below exercise the same code.
+
+_ADVERTISED_PAYLOADS = (
+    ("app/discovery/capabilities.py", "capabilities_payload", "CapabilitiesResponse"),
+    ("app/discovery/agent_hints.py", "agent_hints_payload", "AgentHintsResponse"),
+)
+
+
+def _advertised_keys(tree: ast.Module, function_name: str) -> set[str]:
+    """Top-level string keys of a payload function's single returned dict.
+
+    Asserts rather than degrading when the shape is not statically readable. A
+    payload assembled across several statements defeats extraction, and quietly
+    reporting "nothing dropped" for exactly the shape this gate cannot see would
+    recreate the defect it exists to catch -- a detector that goes blind without
+    saying so is the gap, not the fix.
+    """
+    function = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == function_name),
+        None,
+    )
+    assert function is not None, f"{function_name} not found; update _ADVERTISED_PAYLOADS"
+    returns = [n for n in ast.walk(function) if isinstance(n, ast.Return)]
+    assert len(returns) == 1, (
+        f"{function_name} must be a single `return {{...}}` so its advertised keys can be "
+        f"read; found {len(returns)} return statements"
+    )
+    payload = returns[0].value
+    assert isinstance(payload, ast.Dict), (
+        f"{function_name} must return a dict literal so its keys can be compared against the "
+        f"response model; got {type(payload).__name__}"
+    )
+    return {k.value for k in payload.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+
+def _undeclared_advertised_keys(
+    payload_tree: ast.Module, wire_tree: ast.Module, function_name: str, model_name: str
+) -> list[str]:
+    """Advertised payload keys the response model does not declare."""
+    model = next((n for n in wire_tree.body if isinstance(n, ast.ClassDef) and n.name == model_name), None)
+    assert model is not None, f"{model_name} not found in {_WIRE_MODEL_MODULE}"
+    declared = set(_declared_fields(model))
+    return [
+        f"advertised key {key!r} is dropped by {model_name}"
+        for key in sorted(_advertised_keys(payload_tree, function_name) - declared)
+    ]
+
+
+@pytest.mark.parametrize(("payload_module", "function_name", "model_name"), _ADVERTISED_PAYLOADS)
+def test_every_advertised_payload_key_is_declared_on_its_response_model(
+    payload_module: str, function_name: str, model_name: str
+):
+    """An advertised key that the response model does not declare is dropped on the wire."""
+    _, payload_tree = file_tree(payload_module)
+    _, wire_tree = file_tree(_WIRE_MODEL_MODULE)
+    dropped = _undeclared_advertised_keys(payload_tree, wire_tree, function_name, model_name)
+    assert not dropped, (
+        f"{function_name} advertises keys that {model_name} does not declare, and "
+        f"response_model={model_name} silently filters every undeclared key -- so they reach "
+        f"the dict-returning tests and never the wire. Add the field to {model_name}: " + "; ".join(dropped)
+    )
+
+
+def test_advertised_payload_detector_bites():
+    """An undeclared advertised key fires; an exact pair stays clean; a blind spot raises."""
+    wire = ast.parse("class Capabilities(BaseModel):\n    service: str\n    crawl_timing: Timing\n")
+    exact = ast.parse("def payload():\n    return {'service': 'x', 'crawl_timing': {}}\n")
+    assert not _undeclared_advertised_keys(exact, wire, "payload", "Capabilities")
+
+    drifted = ast.parse(
+        "def payload():\n    return {'service': 'x', 'crawl_timing': {}, 'limits': {}, 'extra': 1}\n"
+    )
+    reported = _undeclared_advertised_keys(drifted, wire, "payload", "Capabilities")
+    assert len(reported) == 2, reported
+    assert "'extra'" in reported[0] and "dropped by Capabilities" in reported[0], reported
+    assert "'limits'" in reported[1], reported
+
+    # A declared field the payload never sends is not drift in this direction: the
+    # model is the stricter of the two and a required field is caught by FastAPI.
+    assert not _undeclared_advertised_keys(
+        ast.parse("def payload():\n    return {'service': 'x'}\n"), wire, "payload", "Capabilities"
+    )
+
+    # A payload assembled statement by statement defeats static extraction, and
+    # going quiet on that shape would be the very defect this gate exists to stop.
+    assembled = ast.parse("def payload():\n    d = {}\n    d['service'] = 'x'\n    return d\n")
+    with pytest.raises(AssertionError, match="dict literal"):
+        _undeclared_advertised_keys(assembled, wire, "payload", "Capabilities")
+
+
+# --- A result may not spell its own (status, classification) pair -------------
+#
+# app/crawl/result_helpers.py is the chokepoint for building results, and both
+# of its terminal primitives call _enforce_status_classification first. That
+# check is the whole point: it makes a result that asserts a status the taxonomy
+# would re-derive differently for the same label unrepresentable, because the
+# two axes are free parameters and nothing else holds them together.
+#
+# A caller that builds a result itself can sidestep all of it by naming both
+# axes as literals. The pair it writes is legal on the day it is written, which
+# is exactly why nothing reports it, and the day the taxonomy moves a default
+# the result is quietly wrong with no failure anywhere. Deriving one axis from
+# status_for_classification, or copying both off an existing result, keeps the
+# property -- which is what the browser strategy does. Naming both is how the
+# property gets lost.
+
+_RESULT_CONSTRUCTORS = frozenset({"CrawlResult", "EngineCrawlResult"})
+
+
+_RESULT_CHOKEPOINT_MODULE = "app/crawl/result_helpers.py"
+
+
+def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a result built from a hand-written (status, classification) pair."""
+    if relative_posix(path) == _RESULT_CHOKEPOINT_MODULE:
+        return []
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Call):
+        if resolved_call_name(tree, node).rsplit(".", 1)[-1] not in _RESULT_CONSTRUCTORS:
+            continue
+        spelled = {
+            kw.arg: kw.value
+            for kw in node.keywords
+            if kw.arg in ("status", "classification") and isinstance(kw.value, ast.Constant)
+        }
+        if len(spelled) == 2:
+            offenders.append(offender_at(path, node, "hand-written (status, classification) pair"))
+    return offenders
+
+
+def test_results_derive_their_status_from_the_taxonomy():
+    """No result outside the chokepoint spells both taxonomy axes as literals."""
+    offenders = app_offenders(_literal_status_classification_pairs)
+    assert not offenders, (
+        f"Build results through {_RESULT_CHOKEPOINT_MODULE}, or derive one axis with "
+        f"constants.status_for_classification, so _enforce_status_classification can see "
+        f"the pair: " + ", ".join(offenders)
+    )
+
+
+def test_result_status_pair_detector_bites():
+    """A spelled pair fires; deriving either axis stays clean."""
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    fires = {
+        'CrawlResult(url=u, status="success", classification="rendered")\n': "hand-written",
+        'EngineCrawlResult(url=u, status="failed", classification="dns_error")\n': "hand-written",
+        # A qualified call is the same construction.
+        'models.CrawlResult(url=u, status="failed", classification="blocked")\n': "hand-written",
+    }
+    assert_fires_once(_literal_status_classification_pairs, fires, path)
+
+    clean = (
+        # Derived, not spelled -- what the browser strategy does.
+        "CrawlResult(url=u, status=status, classification=classification)\n",
+        "CrawlResult(url=u, status=status_for_classification(label), classification=label)\n",
+        # One axis spelled and one derived still cannot disagree silently.
+        'CrawlResult(url=u, status="failed", classification=label)\n',
+        # The same spelled pair inside the chokepoint module is the definition.
+        'CrawlResult(url=u, status="failed", classification=label)\n',
+    )
+    assert_stays_clean(_literal_status_classification_pairs, clean, REPO_ROOT / _RESULT_CHOKEPOINT_MODULE)
+    assert_stays_clean(_literal_status_classification_pairs, clean[:3], path)
+    # And the chokepoint exemption is keyed on the module, not on a name: a
+    # spelled pair anywhere else still fires even under the same function name.
+    assert _literal_status_classification_pairs(
+        ast.parse('def make():\n    return CrawlResult(url=u, status="failed", classification="blocked")\n'),
+        path,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The content pipeline: one dispatch, one discovery call, one projection
+#
+# The browser and HTTP strategies each carried the same three-way extraction
+# dispatch, the same offloaded post-fetch discovery call, and the same block of
+# discovered-links result fields. All three now live in
+# app/crawl/strategies/content_pipeline.py, and `_discovery_result_fields` is
+# the one place a discovery envelope becomes result fields.
+#
+# The projection was a correctness risk rather than cosmetics: a field threaded
+# into the HTTP result but not the browser one is a divergence between the two
+# answers to the same page, and nothing in the tree can see it -- both results
+# are individually well-formed. So the two sweeps below are tree-wide rather
+# than file-scoped: a guard that only looked at the two modules it was written
+# for would keep passing while a third strategy grew its own copy, which is the
+# same empty-sweep failure the other chokepoint guards in this file were written
+# against.
+# ---------------------------------------------------------------------------
+
+_CONTENT_PIPELINE_OWNER = frozenset({"content_pipeline.py"})
+
+
+# Import-resolved, so an alias cannot slip past the sweep.
+_EXTRACTION_ENTRY_POINTS = frozenset(
+    {
+        "app.crawl.extraction._extract_document",
+        "app.crawl.extraction._extract_html",
+        "app.crawl.extraction.extract_content",
+        "app.crawl.extraction.extract_post_fetch_discovery",
+        "app.crawl.extraction.normalized_extraction",
+    }
+)
+
+
+# The terminal-result builders, not the model: result_helpers constructing
+# EngineCrawlResult is where the discovered-links fields are DEFINED, which is
+# a different thing from a call site spelling them.
+_RESULT_BUILDERS = frozenset(
+    {
+        "_binary_no_text_result",
+        "_engine_result_from_exception",
+        "_failed_engine_result",
+        "_make_engine_result",
+        "_skipped_engine_result",
+        "_terminal_engine_result",
+    }
+)
+
+
+_DISCOVERY_RESULT_FIELDS = frozenset(
+    {"discovered_link_count", "discovered_links", "discovered_links_truncated"}
+)
+
+
+_DISCOVERY_PROJECTION = "_discovery_result_fields"
+
+
+def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag a use of a raw extractor outside the content pipeline.
+
+    Keyed on the *name in load position* rather than on a call: the shape both
+    strategies used was an offloaded extractor, ``asyncio.to_thread(_extract_html,
+    ...)``, where the extractor is an argument rather than a callee, and a
+    call-keyed detector misses exactly that. Keyed on the use rather than the
+    import because binding a name is not the duplication, dispatching on it is.
+
+    ``self._extract_html(page)`` in the browser worker is a method on the
+    renderer, not this function, so it resolves to a different name and is not
+    an offender. A reference *within* extraction.py resolves to the bare name
+    rather than the dotted one, which is how the owner of these functions is
+    left out of its own sweep without being named in it.
+    """
+    offenders: list[str] = []
+    for node in nodes_of_type(tree, ast.Name):
+        if not isinstance(node.ctx, ast.Load):
+            continue
+        name = resolved_expr_name(tree, node)
+        if name in _EXTRACTION_ENTRY_POINTS:
+            offenders.append(
+                offender_at(
+                    path,
+                    node,
+                    f"{name} is dispatched outside "
+                    f"strategies/content_pipeline.py; run the mode chain through _run_extraction",
+                )
+            )
+    return offenders
+
+
+def test_extraction_is_dispatched_by_the_content_pipeline_alone():
+    """The three extraction modes are dispatched in one module, not per strategy."""
+    assert_trees_clean(
+        _extraction_reach_past_offenders,
+        "dispatch extraction through strategies/content_pipeline._run_extraction",
+        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
+    )
+
+
+def test_extraction_reach_past_detector_bites():
+    """A re-spelled dispatch fires, offloaded and aliased; routing through it stays clean."""
+    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+    spelled = ast.parse(
+        "from app.crawl.extraction import _extract_html, normalized_extraction\n"
+        "async def f(decoded, final_url):\n"
+        "    extracted = await asyncio.to_thread(_extract_html, decoded, final_url)\n"
+        "    return normalized_extraction(extracted)\n"
+    )
+    offenders = _extraction_reach_past_offenders(spelled, synthetic)
+    assert len(offenders) == 2, offenders
+    assert all("_run_extraction" in item for item in offenders), offenders
+    aliased = ast.parse(
+        "from app.crawl.extraction import extract_content as _ec\n"
+        "def f(body, content_type, url):\n"
+        "    return _ec(body, content_type, url)\n"
+    )
+    assert _extraction_reach_past_offenders(aliased, synthetic), "an aliased extractor call escaped the sweep"
+    routed = ast.parse(
+        "from app.crawl.strategies.content_pipeline import _run_extraction\n"
+        "async def f(body, final_url):\n"
+        "    return await _run_extraction(extraction='full', content=body, decoded='')\n"
+    )
+    assert not _extraction_reach_past_offenders(routed, synthetic), "the chokepoint call was flagged"
+    # The exemption is not what makes the tree clean: the owner's own calls are
+    # the shape this detector matches.
+    owner = next((path, tree) for path, tree in app_trees() if path.name in _CONTENT_PIPELINE_OWNER)
+    assert owner[0].name == "content_pipeline.py", owner[0]
+    assert _extraction_reach_past_offenders(owner[1], synthetic), "the detector no longer matches the owner"
+
+
+def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """Flag discovered-links result fields spelled at a result-builder call.
+
+    ``**`` spread is the sanctioned shape and is not a keyword, so a strategy
+    that routes the envelope through ``_discovery_result_fields`` reports
+    nothing; a strategy that re-spells one field reports that field.
+    """
+    offenders: list[str] = []
+    for node in calls_to_any(tree, _RESULT_BUILDERS):
+        spelled = sorted({kw.arg for kw in node.keywords if kw.arg in _DISCOVERY_RESULT_FIELDS})
+        if spelled:
+            offenders.append(
+                offender_at(
+                    path,
+                    node,
+                    f"{node.func.id} spells {', '.join(spelled)}; "
+                    f"spread content_pipeline._discovery_result_fields instead",
+                )
+            )
+    return offenders
+
+
+def test_discovered_link_result_fields_come_from_the_pipeline():
+    """A discovery envelope reaches a result through one projection."""
+    assert_trees_clean(
+        _respelled_discovery_result_fields_offenders,
+        "project the discovery envelope through content_pipeline._discovery_result_fields",
+        trees=app_trees(exclude=SANCTIONED | _CONTENT_PIPELINE_OWNER),
+    )
+
+
+def test_discovery_result_field_detector_bites():
+    """A re-spelled projection fires; the spread, and a non-result sink, stay clean."""
+    synthetic = REPO_ROOT / "app" / "crawl" / "strategies" / "_synthetic.py"
+    # The historical shape: the block spelled at the result call.
+    respelled = ast.parse(
+        "def build(post_fetch, error):\n"
+        "    return _make_engine_result(\n"
+        "        discovered_link_count=post_fetch['discovered_link_count'],\n"
+        "        discovered_links=post_fetch['discovered_links'],\n"
+        "        error=error,\n"
+        "    )\n"
+    )
+    offenders = _respelled_discovery_result_fields_offenders(respelled, synthetic)
+    assert len(offenders) == 1, offenders
+    assert "_discovery_result_fields" in offenders[0], offenders
+    spread = ast.parse(
+        "def build(post_fetch, error):\n"
+        "    return _make_engine_result(\n"
+        "        **_discovery_result_fields(post_fetch, classification_evidence=[], error=error),\n"
+        "        next_page_url=post_fetch['next_page_url'],\n"
+        "    )\n"
+    )
+    assert not _respelled_discovery_result_fields_offenders(spread, synthetic), (
+        "the sanctioned spread was flagged"
+    )
+    # A discovered-links field that is not a result field is somebody else's.
+    unrelated = ast.parse(
+        "def count(post_fetch):\n"
+        "    return stats(discovered_link_count=post_fetch['discovered_link_count'])\n"
+    )
+    assert not _respelled_discovery_result_fields_offenders(unrelated, synthetic), (
+        "a non-result sink was flagged"
+    )
+
+
+def test_discovery_result_projection_has_exactly_one_definition():
+    """The projection is one function, so it cannot be forked per strategy.
+
+    Tree-wide for the same reason the sweeps above are: a second definition
+    would satisfy every structural guard above while reintroducing the exact
+    duplication they exist to prevent.
+    """
+    definitions = [
+        offender(path, node.lineno)
+        for path, tree in app_trees(exclude=frozenset())
+        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef)
+        if node.name == _DISCOVERY_PROJECTION
+    ]
+    assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
+    assert "app/crawl/strategies/content_pipeline.py" in definitions[0], definitions
