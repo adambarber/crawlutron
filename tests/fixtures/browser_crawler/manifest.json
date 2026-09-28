@@ -59,7 +59,9 @@
         "document_extract",
         "spacy_entity_development",
         "worcester_city_council_agenda"
-      ]
+      ],
+      "moved_to": "dev-stack:tests/fixtures/municipal/worcester_primegov_city_council_agenda_74977.txt",
+      "moved_reason": "Its only consumers are dev-stack's municipal entity-extractor tests and scripts/entity-extractor.sh, so the corpus lives with them rather than here. The sha256 above still identifies the exact bytes."
     }
   ]
 }
