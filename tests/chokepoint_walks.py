@@ -75,7 +75,9 @@ _NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakre
 # out from _NODES_BY_ROOT because the value's element type depends on the kind,
 # and a mapping whose value type depends on its key is a TypeVar wearing a
 # table.
-_NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]]] = weakref.WeakKeyDictionary()
+_NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
@@ -158,7 +160,9 @@ def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
 
 def attribute_reads(root: ast.AST) -> tuple[ast.Attribute, ...]:
     """Every ``obj.attr`` read. What a rule about member access walks."""
-    return tuple(node for node in _narrow(root, "attribute", ast.Attribute) if isinstance(node, ast.Attribute))
+    return tuple(
+        node for node in _narrow(root, "attribute", ast.Attribute) if isinstance(node, ast.Attribute)
+    )
 
 
 def name_reads(root: ast.AST) -> tuple[ast.Name, ...]:
@@ -173,7 +177,9 @@ def string_literals(root: ast.AST) -> tuple[ast.Constant, ...]:
 
 def subscript_reads(root: ast.AST) -> tuple[ast.Subscript, ...]:
     """Every ``a[b]``. Indexed access, which attribute reads do not see."""
-    return tuple(node for node in _narrow(root, "subscript", ast.Subscript) if isinstance(node, ast.Subscript))
+    return tuple(
+        node for node in _narrow(root, "subscript", ast.Subscript) if isinstance(node, ast.Subscript)
+    )
 
 
 def dict_displays(root: ast.AST) -> tuple[ast.Dict, ...]:
