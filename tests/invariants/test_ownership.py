@@ -16,13 +16,18 @@ from tests.chokepoint_walks import (
     app_trees,
     assert_detector,
     assert_fires_once,
+    call_nodes,
     calls_named_leaf,
     functions,
+    name_reads,
     nodes_of,
-    nodes_of_type,
     offender,
     offender_at,
     relative_posix,
+    subscript_reads,
+    unannotated_writes,
+    unary_ops,
+    with_blocks,
 )
 from tests.invariants._shared import _enclosing_calls, _enclosing_defs, assert_trees_clean
 
@@ -44,7 +49,7 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     offenders: list[str] = []
     lock_names = _threading_lock_bindings(tree)
-    for node in nodes_of_type(tree, ast.With, ast.AsyncWith):
+    for node in with_blocks(tree):
         if isinstance(node, ast.AsyncWith):
             continue  # asyncio.Lock bodies may await by design
         for item in node.items:
@@ -141,7 +146,7 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
         if fn.name not in _CACHE_TWIN_METHODS:
             continue
-        for sub in nodes_of_type(fn, ast.Subscript):
+        for sub in subscript_reads(fn):
             if isinstance(sub.value, ast.Attribute) and sub.value.attr == "_memory_cache":
                 offenders.append(offender_at(path, fn, f"{fn.name}() reads/writes _memory_cache directly"))
                 break
@@ -206,7 +211,7 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
         for child in ast.iter_child_nodes(node):
             parents[child] = node
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         fname = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
         if not _is_locked_helper_name(fname):
             continue
@@ -273,7 +278,7 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         for call in calls_named_leaf(tree, {"uuid4"})
     ] + [
         offender_at(path, node, "uuid hex sliced outside app/crawl/ids.py")
-        for node in nodes_of_type(tree, ast.Subscript)
+        for node in subscript_reads(tree)
         if getattr(node.value, "attr", None) == "hex"
     ]
 
@@ -316,7 +321,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     ):
         if func.name == "set_domain_min_delay":
             continue
-        for node in nodes_of_type(func, ast.Assign, ast.AugAssign):
+        for node in unannotated_writes(func):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if (
@@ -460,7 +465,7 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
             f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; "
             f"use the accessor so the instance stays bound to the running loop",
         )
-        for node in nodes_of_type(tree, ast.Name)
+        for node in name_reads(tree)
         if node.id in _SEMAPHORE_GLOBALS
         and (scopes := _enclosing_defs(node, tree))
         and _SEMAPHORE_ACCESSOR not in scopes
@@ -515,7 +520,7 @@ def _reaps_retired(value: ast.AST) -> bool:
         return False
     for generator in value.generators:
         for condition in generator.ifs:
-            for node in nodes_of_type(condition, ast.UnaryOp):
+            for node in unary_ops(condition):
                 if isinstance(node.op, ast.Not):
                     if _has_retired_attr(node.operand):
                         return True

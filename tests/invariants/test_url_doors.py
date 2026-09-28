@@ -16,13 +16,16 @@ from tests.chokepoint_walks import (
     app_offenders,
     app_trees,
     assert_detector,
+    callable_defs,
+    f_strings,
     functions,
     local_nodes,
     nodes_of,
-    nodes_of_type,
     offender,
     offender_at,
     resolved_call_name,
+    returns,
+    try_blocks,
 )
 from tests.invariants._shared import (
     _SCOPE_COMPILER_NAMES,
@@ -206,7 +209,7 @@ def _scope_matcher_definitions() -> list[str]:
     """
     defs: list[str] = []
     for path, tree in app_trees(exclude=frozenset()):
-        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
+        for node in functions(tree):
             if node.name in {"scope_allows", "_scope_allows"}:
                 defs.append(offender(path, node.lineno))
     return defs
@@ -303,7 +306,7 @@ def test_no_inline_pinned_url_composition():
     """
     offenders: list[str] = []
     for path, tree in app_trees(exclude=frozenset({"safe_url.py", "safe_regex.py"})):
-        for node in nodes_of_type(tree, ast.JoinedStr):
+        for node in f_strings(tree):
             for value in node.values:
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
                     if "pinned_ip" in value.value:
@@ -409,7 +412,7 @@ def _optional_host_policy_offenders(tree, path):
     any nesting depth. ``policy`` and ``host_policy`` are both in scope because
     the rule keys off the annotation, not the name.
     """
-    for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda):
+    for node in callable_defs(tree):
         args = node.args
         positional = [*args.posonlyargs, *args.args]
         defaulted = set()
@@ -516,7 +519,7 @@ def _unchecked_parameter_return_offenders(tree, path) -> list[str]:
         if _CONTAINMENT_CALL not in body_calls:
             continue
         parameters = {arg.arg for arg in (*func.args.args, *func.args.posonlyargs, *func.args.kwonlyargs)}
-        for node in nodes_of_type(func, ast.Return):
+        for node in returns(func):
             if isinstance(node.value, ast.Name) and node.value.id in parameters:
                 offenders.append(
                     f"{path.name}:{node.lineno} {func.name}() returns its own parameter "
@@ -1053,7 +1056,7 @@ _NORMALIZE_OR_NONE_OFFENDERS = frozenset(
 
 def _normalize_or_none_offenders(tree, path):
     """A try/except ValueError around the normalizer outside the chokepoint."""
-    for node in nodes_of_type(tree, ast.Try):
+    for node in try_blocks(tree):
         body_names = {
             getattr(n.func, "id", None) or getattr(n.func, "attr", None)
             for n in nodes_of(node)

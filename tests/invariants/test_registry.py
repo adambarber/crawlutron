@@ -19,11 +19,11 @@ from tests.chokepoint_walks import (
     assert_detector,
     assert_fires_once,
     assert_stays_clean,
+    call_nodes,
     has_method_call,
     local_call_leaf_names,
     local_nodes,
     nodes_of,
-    nodes_of_type,
     offender,
     offender_at,
     relative_posix,
@@ -209,7 +209,7 @@ def _re_dynamic_pattern_offenders(methods: frozenset[str]):
     def detector(tree: ast.AST, path: pathlib.Path) -> list[str]:
         return [
             offender_at(path, node, f"re.{node.func.attr}(<dynamic pattern>)")
-            for node in nodes_of_type(tree, ast.Call)
+            for node in call_nodes(tree)
             if isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
             and node.func.value.id == "re"

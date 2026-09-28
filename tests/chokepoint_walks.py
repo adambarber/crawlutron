@@ -239,6 +239,42 @@ def import_statements(root: ast.AST) -> tuple[ast.Import | ast.ImportFrom, ...]:
     )
 
 
+def plain_imports(root: ast.AST) -> tuple[ast.Import, ...]:
+    """``import x`` only, split from the from-form because the module a tree
+    pulls in is the first part of the alias here, not ``node.module``."""
+    return tuple(node for node in _narrow(root, "plain-import", ast.Import) if isinstance(node, ast.Import))
+
+
+def from_imports(root: ast.AST) -> tuple[ast.ImportFrom, ...]:
+    """``from x import y`` only, the other half of the split above."""
+    return tuple(
+        node for node in _narrow(root, "from-import", ast.ImportFrom) if isinstance(node, ast.ImportFrom)
+    )
+
+
+def unannotated_writes(root: ast.AST) -> tuple[ast.Assign | ast.AugAssign, ...]:
+    """Writes that bind without declaring a type: ``=`` and ``+=``.
+
+    `assignments` covers the three statement forms and yields the target/value
+    triple; this is the pair that leaves out ``ast.AnnAssign``, because a rule
+    about rebinding an existing name wants the writes carrying no annotation.
+    """
+    return tuple(
+        node
+        for node in _narrow(root, "unannotated-write", ast.Assign, ast.AugAssign)
+        if isinstance(node, ast.Assign | ast.AugAssign)
+    )
+
+
+def async_function_defs(root: ast.AST) -> tuple[ast.AsyncFunctionDef, ...]:
+    """Only the ``async def`` half of what `functions` returns together."""
+    return tuple(
+        node
+        for node in _narrow(root, "async-function", ast.AsyncFunctionDef)
+        if isinstance(node, ast.AsyncFunctionDef)
+    )
+
+
 def with_blocks(root: ast.AST) -> tuple[ast.With | ast.AsyncWith, ...]:
     """Every ``with``, in both its sync and async forms."""
     return tuple(

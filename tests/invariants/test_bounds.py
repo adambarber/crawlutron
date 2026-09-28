@@ -21,12 +21,16 @@ from tests.chokepoint_walks import (
     assert_stays_clean,
     assignments,
     attribute_calls,
+    attribute_reads,
+    call_nodes,
+    from_imports,
     functions,
     nodes_of,
-    nodes_of_type,
     offender_at,
+    plain_imports,
     resolved_call_name,
     resolved_expr_name,
+    writes,
 )
 from tests.invariants._shared import assert_trees_clean
 
@@ -189,7 +193,7 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     against a caller reaching for an ``int`` default or ``**kwargs``.
     """
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         if resolved_expr_name(tree, node.func).rsplit(".", 1)[-1] == "getattr":
             continue
         fname = resolved_call_name(tree, node).rsplit(".", 1)[-1]
@@ -272,7 +276,7 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     return (
         [
             offender_at(path, node, f"imports decompression codec '{alias.name}' (bypasses decompress_body)")
-            for node in nodes_of_type(tree, ast.Import)
+            for node in plain_imports(tree)
             for alias in node.names
             if alias.name.split(".")[0] in _DECOMPRESS_CODECS
         ]
@@ -280,7 +284,7 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             offender_at(
                 path, node, f"imports decompression codec from '{node.module}' (bypasses decompress_body)"
             )
-            for node in nodes_of_type(tree, ast.ImportFrom)
+            for node in from_imports(tree)
             if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS
         ]
         + [
@@ -377,7 +381,7 @@ def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
     understood the attribute form would call that tree clean, so the two walks
     are reported separately and both are required.
     """
-    nodes = nodes_of_type(tree, ast.Assign, ast.AnnAssign)
+    nodes = writes(tree)
     bound: set[str] = set()
     destructured: list[ast.AST] = []
     for node, target, value in assignments(nodes):
@@ -391,7 +395,7 @@ def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
         offender_at(path, node, "destructures a discovery response off the tuple") for node in destructured
     ] + [
         offender_at(path, node, "reads a discovery response's header map directly")
-        for node in nodes_of_type(tree, ast.Attribute)
+        for node in attribute_reads(tree)
         if node.attr == "headers" and isinstance(node.value, ast.Name) and node.value.id in bound
     ]
 

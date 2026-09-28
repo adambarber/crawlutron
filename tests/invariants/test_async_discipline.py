@@ -18,11 +18,11 @@ from tests.chokepoint_walks import (
     app_trees,
     assert_fires_once,
     assert_stays_clean,
+    async_function_defs,
     attribute_calls,
     calls_to_any,
     functions,
     nodes_of,
-    nodes_of_type,
     offender_at,
 )
 from tests.invariants._shared import assert_trees_clean
@@ -339,7 +339,7 @@ def _store_receivers(function: ast.AST) -> dict[str, str]:
 def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     sync_methods = _sync_store_methods()
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.AsyncFunctionDef):
+    for node in async_function_defs(tree):
         receivers = _store_receivers(node)
         for inner in nodes_of(node):
             if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)):

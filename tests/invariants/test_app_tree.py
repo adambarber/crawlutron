@@ -15,8 +15,8 @@ from tests.chokepoint_walks import (
     TESTS_DIR,
     app_python_files,
     app_trees,
+    call_nodes,
     nodes_of,
-    nodes_of_type,
     offender_at,
     resolved_expr_name,
     trees_under,
@@ -250,7 +250,7 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     """Report every call in this module that can mutate a path under `app/`."""
     anchors, rooted = _app_path_names(tree)
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         callee = node.func
         if isinstance(callee, ast.Attribute):
             name = callee.attr

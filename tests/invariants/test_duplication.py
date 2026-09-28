@@ -24,10 +24,12 @@ from tests.chokepoint_walks import (
     assert_detector,
     assert_fires_once,
     assert_stays_clean,
+    call_nodes,
     calls_named,
+    class_defs,
+    comprehensions,
     functions,
     nodes_of,
-    nodes_of_type,
     offender_at,
     relative_posix,
     resolved_expr_name,
@@ -227,7 +229,7 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     reachable through that one import.
     """
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.ClassDef):
+    for node in class_defs(tree):
         if not any(
             resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "_ApiKeyProvider" for base in node.bases
         ):
@@ -384,7 +386,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     drift #1797 is about). _fetcher_factories.make_fetch is the sanctioned builder.
     """
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         if getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
                 offender_at(path, node, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
@@ -520,7 +522,7 @@ def _is_asdict_call(node: ast.AST) -> bool:
 def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag unpacking ``asdict(...)`` into a constructor call."""
     offenders: list[str] = []
-    for call in nodes_of_type(tree, ast.Call):
+    for call in call_nodes(tree):
         for keyword in call.keywords:
             if keyword.arg is not None or not isinstance(keyword.value, ast.AST):
                 continue
@@ -594,7 +596,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
     if path.name == "validation.py":
         return []
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.ListComp, ast.SetComp, ast.GeneratorExp):
+    for node in comprehensions(tree):
         elt = node.elt
         if not isinstance(elt, ast.Dict):
             continue

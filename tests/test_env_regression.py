@@ -21,7 +21,7 @@ single-shape detector):
 
 import ast
 
-from tests.chokepoint_walks import app_trees, bare_callee, nodes_of, nodes_of_type, offender_at
+from tests.chokepoint_walks import app_trees, bare_callee, call_nodes, nodes_of, offender_at
 
 
 def _is_attr_get(node: ast.AST) -> bool:
@@ -101,7 +101,7 @@ def test_no_bare_env_int_or_float_in_app():
     offenders = []
     for path, tree in app_trees(exclude=frozenset()):
         env_aliases = _env_get_aliases(tree)
-        for node in nodes_of_type(tree, ast.Call):
+        for node in call_nodes(tree):
             callee = bare_callee(node)
             if callee not in ("int", "float"):
                 continue

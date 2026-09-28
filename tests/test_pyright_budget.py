@@ -51,7 +51,7 @@ from tests.chokepoint_walks import (
     assert_fires_once,
     assert_stays_clean,
     assignments,
-    nodes_of_type,
+    nodes_of,
 )
 
 SERVICE_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -379,7 +379,7 @@ def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | N
     """
     found: list[str] = []
     where = f"{path.name}:" if path is not None else ""
-    for node, target, value in assignments(nodes_of_type(tree, ast.AST)):
+    for node, target, value in assignments(nodes_of(tree)):
         candidates: list[ast.expr] = [value] if isinstance(value, ast.Call) else []
         annotation = node.annotation if isinstance(node, ast.AnnAssign) else None
         candidates.extend(_annotated_field_calls(annotation))

@@ -20,15 +20,21 @@ from tests.chokepoint_walks import (
     app_offenders,
     app_trees,
     assert_detector,
+    attribute_reads,
+    call_nodes,
     calls_to_any,
+    class_defs,
     file_tree,
     functions,
+    name_reads,
     nodes_of,
-    nodes_of_type,
     offender,
     offender_at,
     relative_posix,
     resolved_call_name,
+    string_literals,
+    try_blocks,
+    writes,
 )
 from tests.invariants._shared import (
     _declared_public_symbols,
@@ -50,7 +56,7 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
         return []
     execute_names = {"_execute_crawl", "_real_execute_crawl"}
     builder_names = {"_job_engine_payload"}
-    for node in nodes_of_type(tree, ast.Assign, ast.AnnAssign):
+    for node in writes(tree):
         value = node.value
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         if isinstance(value, ast.Name) and value.id in execute_names:
@@ -129,7 +135,7 @@ def _guarded_node_ids(tree: ast.AST) -> set[int]:
     would open exactly the hole this detector closes.
     """
     guarded: set[int] = set()
-    for node in nodes_of_type(tree, ast.Try):
+    for node in try_blocks(tree):
         if not any(
             isinstance(handler.type, ast.Name) and handler.type.id in {"Exception", "BaseException"}
             for handler in node.handlers
@@ -160,7 +166,7 @@ def _runner_call_name(node: ast.Call) -> str:
 def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     guarded = _guarded_node_ids(tree)
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         name = _runner_call_name(node)
         if name in _STRATEGY_RUNNERS and id(node) not in guarded:
             offenders.append(offender_at(path, node, f"{name} invoked outside a try/except Exception"))
@@ -330,7 +336,7 @@ def _environment_reader_reference(
 
 def _settings_fields() -> set[str]:
     tree = file_tree("app/settings.py")[1]
-    for node in nodes_of_type(tree, ast.ClassDef):
+    for node in class_defs(tree):
         if node.name == "CrawlerSettings":
             return {
                 item.target.id
@@ -366,7 +372,7 @@ def _production_browser_knob_references() -> set[str]:
     fields = _settings_fields()
     field_knobs = {f"BROWSER_CRAWLER_{field.upper()}": field for field in fields}
     for path, tree in app_trees(exclude=frozenset()):
-        for node in nodes_of_type(tree, ast.Constant):
+        for node in string_literals(tree):
             if isinstance(node.value, str) and (not _settings_alias_declaration_constant(path, tree, node)):
                 environment = _environment_reader_reference(
                     tree,
@@ -403,7 +409,7 @@ def _documented_knob_offenders(
 
 def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     references: set[str] = set()
-    for node in nodes_of_type(tree, ast.Constant):
+    for node in string_literals(tree):
         if isinstance(node.value, str):
             environment = _environment_reader_reference(tree, node, ENVIRONMENT_FIELD_ALIASES)
             if environment is not None:
@@ -561,7 +567,7 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
     for node in functions(tree):
         if not node.name.startswith("_handle_"):
             continue
-        for inner in nodes_of_type(node, ast.Call):
+        for inner in call_nodes(node):
             if isinstance(inner.func, ast.Attribute) and inner.func.attr == "model_json_schema":
                 yield offender_at(
                     path,
@@ -672,8 +678,8 @@ def _unproduced_protocol_constants(
     for path, tree in trees:
         if relative_posix(path) == owner:
             continue
-        referenced.update(node.id for node in nodes_of_type(tree, ast.Name))
-        referenced.update(node.attr for node in nodes_of_type(tree, ast.Attribute))
+        referenced.update(node.id for node in name_reads(tree))
+        referenced.update(node.attr for node in attribute_reads(tree))
     lines = _module_level_assignment_lines(owner_tree, declared)
     offenders: list[str] = []
     for name in sorted(declared):

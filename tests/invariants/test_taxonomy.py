@@ -25,9 +25,10 @@ from tests.chokepoint_walks import (
     assignments,
     bare_callee,
     call_keyword_values,
+    call_nodes,
+    functions,
     literal_keyword_membership_offenders,
     nodes_of,
-    nodes_of_type,
     non_member_literals,
     offender_at,
     real_members,
@@ -305,7 +306,7 @@ def _hand_rolled_failed_result_offenders(tree, path):
     """Failed-result construction with a hardcoded classification outside the
     chokepoint and the engine's two config guards (no browser worker / unknown
     strategy -- those have no exception to classify)."""
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         if bare_callee(node) not in ("_failed_engine_result", "_make_engine_result"):
             continue
         status = None
@@ -405,7 +406,7 @@ def test_classifier_lives_in_the_neutral_home():
     in a strategy module (the old site, http.py, forced browser.py to import
     across strategies)."""
     for path, tree in app_trees(exclude=SANCTIONED | _ERROR_CHOKEPOINT_SANCTIONED):
-        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
+        for node in functions(tree):
             if node.name == "_classify_error_code":
                 raise AssertionError(
                     offender_at(path, node, "_classify_error_code defined outside result_helpers")
@@ -1169,7 +1170,7 @@ def test_the_gate_would_have_caught_the_shipped_defect():
 def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Any call to ``_check_literal_fields`` outside its one owning ``__post_init__``."""
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         if resolved_call_name(tree, node) != "app.models._check_literal_fields":
             continue
         owner = _enclosing_class(tree, node)

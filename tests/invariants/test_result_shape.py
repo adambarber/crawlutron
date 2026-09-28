@@ -24,17 +24,20 @@ from tests.chokepoint_walks import (
     assert_fires_once,
     assert_stays_clean,
     call_keyword_values,
+    call_nodes,
     calls_named,
     calls_named_leaf,
     calls_to_any,
+    dict_displays,
     file_tree,
     functions,
-    nodes_of_type,
+    name_reads,
     offender,
     offender_at,
     relative_posix,
     resolved_call_name,
     resolved_expr_name,
+    string_literals,
 )
 from tests.invariants._shared import assert_trees_clean
 
@@ -49,7 +52,7 @@ def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """
     required = {"expires", "value", "cached_at"}
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Dict):
+    for node in dict_displays(tree):
         keys = {
             key.value for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
         }
@@ -319,7 +322,7 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     # column named exactly the banned word does.
     pattern = re.compile(r"\b(" + "|".join(sorted(banned)) + r")\b")
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Constant):
+    for node in string_literals(tree):
         if not isinstance(node.value, str) or "crawl_jobs" not in node.value:
             continue
         named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
@@ -457,7 +460,7 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
     offenders.extend(
         offender_at(path, node, "error envelope dict literal")
-        for node in nodes_of_type(tree, ast.Dict)
+        for node in dict_displays(tree)
         if {"code", "message", "details"} <= _dict_keys(node)
     )
     return offenders
@@ -809,7 +812,7 @@ def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> l
     if relative_posix(path) == _RESULT_CHOKEPOINT_MODULE:
         return []
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Call):
+    for node in call_nodes(tree):
         if resolved_call_name(tree, node).rsplit(".", 1)[-1] not in _RESULT_CONSTRUCTORS:
             continue
         spelled = {
@@ -935,7 +938,7 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
     left out of its own sweep without being named in it.
     """
     offenders: list[str] = []
-    for node in nodes_of_type(tree, ast.Name):
+    for node in name_reads(tree):
         if not isinstance(node.ctx, ast.Load):
             continue
         name = resolved_expr_name(tree, node)
@@ -1067,7 +1070,7 @@ def test_discovery_result_projection_has_exactly_one_definition():
     definitions = [
         offender(path, node.lineno)
         for path, tree in app_trees(exclude=frozenset())
-        for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef)
+        for node in functions(tree)
         if node.name == _DISCOVERY_PROJECTION
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
