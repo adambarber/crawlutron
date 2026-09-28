@@ -49,9 +49,7 @@ import tokenize
 import weakref
 from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
-from typing import Any, TypeVar
-
-_NodeT = TypeVar("_NodeT", bound=ast.AST)
+from typing import Any
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
@@ -73,6 +71,12 @@ SANCTIONED = frozenset({"safe_regex.py"})
 # detector looks, so only identity distinguishes "I already walked this" from
 # "this is a different tree that happens to look the same".
 _NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakref.WeakKeyDictionary()
+
+# The same sequence, narrowed to one node kind, keyed by kind then root. Split
+# out from _NODES_BY_ROOT because the value's element type depends on the kind,
+# and a mapping whose value type depends on its key is a TypeVar wearing a
+# lookup table.
+_NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]]] = weakref.WeakKeyDictionary()
 
 
 def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
@@ -123,28 +127,129 @@ def lineno(node: ast.AST) -> int:
     return line
 
 
-def nodes_of_type(root: ast.AST, *types: type[_NodeT]) -> tuple[_NodeT, ...]:
-    """``nodes_of`` narrowed to `types`, cached alongside it.
+def _narrow(root: ast.AST, kind: str, *types: type[ast.AST]) -> tuple[ast.AST, ...]:
+    """`nodes_of` filtered to `types`, cached under `kind`.
 
-    The narrow walk and the type filter are one decision. Every detector spelled
-    both halves separately -- ``for node in nodes_of(tree): if not isinstance(
-    node, ast.Call): continue`` -- which is why the predicate, not the rule, was
-    what two detectors had in common. One parameterized funnel beats a named
-    selector per node kind: the kinds are unbounded, and a zoo of one-line
-    wrappers is the same sprawl with better ergonomics.
-
-    Generic in the node kind on purpose. The filter is a real narrowing, so
-    returning ``tuple[ast.AST, ...]`` made every caller re-assert what it had
-    just paid this walk to learn: detectors passing the result to a helper typed
-    for one node kind had to ``isinstance`` again or suppress the mismatch, and
-    the type a walk reports is the single most load-bearing fact in the file.
+    Returns ``tuple[ast.AST, ...]`` because one cache cannot carry a different
+    element type per key without a TypeVar. Each public walker below therefore
+    repeats the isinstance test to earn its precise return type. That second
+    test is redundant work and is kept on purpose: it is the check that makes
+    the annotation true rather than asserted, and it costs one isinstance over a
+    tuple that is already built and already walked.
     """
-    key = (root, types)
-    cached = _TYPED_NODES_BY_ROOT.get(key)
-    if cached is None:
-        cached = tuple(node for node in nodes_of(root) if isinstance(node, types))
-        _TYPED_NODES_BY_ROOT[key] = cached
-    return cached
+    by_kind = _NODES_BY_KIND.get(root)
+    if by_kind is None:
+        by_kind = {}
+        _NODES_BY_KIND[root] = by_kind
+    found = by_kind.get(kind)
+    if found is None:
+        found = tuple(node for node in nodes_of(root) if isinstance(node, types))
+        by_kind[kind] = found
+    return found
+
+
+# The narrow walks below are a detector's vocabulary, named for what a rule asks
+# of the tree rather than for the ast class that happens to answer it. Each
+# returns the node kind it filtered to, so a detector reads node.func / node.args
+# / node.value without re-asserting what the walk already proved.
+def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
+    """Every call in `root`, in walk order. The busiest walk in the suite."""
+    return tuple(node for node in _narrow(root, "call", ast.Call) if isinstance(node, ast.Call))
+
+
+def attribute_reads(root: ast.AST) -> tuple[ast.Attribute, ...]:
+    """Every ``obj.attr`` read. A rule about member access walks these."""
+    return tuple(node for node in _narrow(root, "attribute", ast.Attribute) if isinstance(node, ast.Attribute))
+
+
+def name_reads(root: ast.AST) -> tuple[ast.Name, ...]:
+    """Every bare name reference. What a rule about identifier use walks."""
+    return tuple(node for node in _narrow(root, "name", ast.Name) if isinstance(node, ast.Name))
+
+
+def string_literals(root: ast.AST) -> tuple[ast.Constant, ...]:
+    """Every ``ast.Constant``: string, number, bool and ``None`` alike."""
+    return tuple(node for node in _narrow(root, "constant", ast.Constant) if isinstance(node, ast.Constant))
+
+
+def subscript_reads(root: ast.AST) -> tuple[ast.Subscript, ...]:
+    """Every ``a[b]``. Indexed access, which attribute reads do not cover."""
+    return tuple(node for node in _narrow(root, "subscript", ast.Subscript) if isinstance(node, ast.Subscript))
+
+
+def dict_displays(root: ast.AST) -> tuple[ast.Dict, ...]:
+    """Every ``{...}`` dict display, as opposed to a comprehension."""
+    return tuple(node for node in _narrow(root, "dict", ast.Dict) if isinstance(node, ast.Dict))
+
+
+def class_defs(root: ast.AST) -> tuple[ast.ClassDef, ...]:
+    """Every class definition."""
+    return tuple(node for node in _narrow(root, "class", ast.ClassDef) if isinstance(node, ast.ClassDef))
+
+
+def try_blocks(root: ast.AST) -> tuple[ast.Try, ...]:
+    """Every ``try`` statement -- not ``TryStar``, whose handlers differ."""
+    return tuple(node for node in _narrow(root, "try", ast.Try) if isinstance(node, ast.Try))
+
+
+def returns(root: ast.AST) -> tuple[ast.Return, ...]:
+    """Every ``return``. What a rule about a function's exit walks."""
+    return tuple(node for node in _narrow(root, "return", ast.Return) if isinstance(node, ast.Return))
+
+
+def unary_ops(root: ast.AST) -> tuple[ast.UnaryOp, ...]:
+    """Every unary expression: ``not x``, ``-x``, ``~x``."""
+    return tuple(node for node in _narrow(root, "unary", ast.UnaryOp) if isinstance(node, ast.UnaryOp))
+
+
+def f_strings(root: ast.AST) -> tuple[ast.JoinedStr, ...]:
+    """Every f-string, as one node however many holes it interpolates."""
+    return tuple(node for node in _narrow(root, "fstring", ast.JoinedStr) if isinstance(node, ast.JoinedStr))
+
+
+def callable_defs(root: ast.AST) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda, ...]:
+    """Everything a rule can call by name: both def forms and lambdas."""
+    return tuple(
+        node
+        for node in _narrow(root, "callable", ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda)
+    )
+
+
+def writes(root: ast.AST) -> tuple[ast.Assign | ast.AnnAssign | ast.AugAssign, ...]:
+    """Every statement that binds a name. `assignments` turns these into triples."""
+    return tuple(
+        node
+        for node in _narrow(root, "write", ast.Assign, ast.AnnAssign, ast.AugAssign)
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign)
+    )
+
+
+def import_statements(root: ast.AST) -> tuple[ast.Import | ast.ImportFrom, ...]:
+    """Every import, plain and from-form alike, in walk order."""
+    return tuple(
+        node
+        for node in _narrow(root, "import", ast.Import, ast.ImportFrom)
+        if isinstance(node, ast.Import | ast.ImportFrom)
+    )
+
+
+def with_blocks(root: ast.AST) -> tuple[ast.With | ast.AsyncWith, ...]:
+    """Every ``with``, in both its sync and async forms."""
+    return tuple(
+        node
+        for node in _narrow(root, "with", ast.With, ast.AsyncWith)
+        if isinstance(node, ast.With | ast.AsyncWith)
+    )
+
+
+def comprehensions(root: ast.AST) -> tuple[ast.ListComp | ast.SetComp | ast.GeneratorExp, ...]:
+    """The comprehensions that do not build a dict."""
+    return tuple(
+        node
+        for node in _narrow(root, "comprehension", ast.ListComp, ast.SetComp, ast.GeneratorExp)
+        if isinstance(node, ast.ListComp | ast.SetComp | ast.GeneratorExp)
+    )
 
 
 def assignments(nodes: Iterable[ast.AST]) -> Iterator[tuple[ast.AST, ast.expr, ast.expr | None]]:
@@ -192,14 +297,12 @@ def functions(root: ast.AST) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ..
     that each opened with an ``isinstance`` guard to drop it. Zero of them used
     it, so the lie only ever cost the guard.
     """
-    return nodes_of_type(root, ast.FunctionDef, ast.AsyncFunctionDef)
+    return tuple(
+        node
+        for node in _narrow(root, "function", ast.FunctionDef, ast.AsyncFunctionDef)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    )
 
-
-# The value is `Any`-typed on purpose. A read is only ever paired with the
-# `types` that produced it, and the filter in `nodes_of_type` is a real
-# narrowing, so the generic return is sound; `Any` is how that is expressed
-# without a `cast` asserting the same thing less visibly on every read.
-_TYPED_NODES_BY_ROOT: dict[tuple[ast.AST, tuple[type, ...]], tuple[Any, ...]] = {}
 
 _STRUCTURAL_TOKENS = frozenset(
     {
