@@ -159,6 +159,19 @@ class ContentCache:
         Runs in O(overflow) unlinks with no directory glob/stat, unlike the
         previous implementation that listed and stat() every cache file on each
         write (#5).
+
+        Callers invoke this OUTSIDE ``self._lock``, so this method takes the
+        lock itself. That leaves a window between the caller's write section
+        ending and this method acquiring the lock, in which a concurrent thread
+        can read the just-written entry and find the index over budget --
+        ``_over_limits`` reports True for a moment. That is benign: the entry is
+        valid and consistent, and only the eviction is one step behind.
+
+        The window is described here rather than at the write call sites because
+        it is this method's acquisition that closes it, and two copies of the
+        note were previously being kept in step by hand -- and had already
+        drifted into describing a lock release that never happens (``_lock`` is
+        not reentrant, so a caller holding it here would deadlock).
         """
         doomed: list[tuple[str | None, Path]] = []
         with self._lock:
@@ -383,12 +396,6 @@ class ContentCache:
             # Mirror small values into the in-memory value cache (#7), under
             # the same gate + count cap as every other mirror write.
             self._remember_memory_locked(key, value, expires, len(data))
-        # Enforce count + byte limits after write, using the in-memory index
-        # (no glob). NOTE: this call briefly releases ``self._lock`` between
-        # the write and the eviction (re-acquired inside ``_enforce_limits``).
-        # During that window another thread can read the just-written entry
-        # and observe an over-sized index. This is benign — the entry is
-        # valid and consistent; only the eviction is one step behind.
         self._enforce_limits()
 
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
@@ -442,12 +449,6 @@ class ContentCache:
             self._index_total_bytes += size - old_size
             # Mirror only after the write commits, under the shared gate.
             self._remember_memory_locked(key, value, expires, size)
-        # Enforce count + byte limits after write, using the in-memory index
-        # (no glob). NOTE: this call briefly releases ``self._lock`` between
-        # the write and the eviction (re-acquired inside ``_enforce_limits``).
-        # During that window another thread can read the just-written entry
-        # and observe an over-sized index. This is benign — the entry is
-        # valid and consistent; only the eviction is one step behind.
         self._enforce_limits()
 
     def _write_data(self, path: Path, data: str) -> None:

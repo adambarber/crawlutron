@@ -12,8 +12,10 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import io
 import pathlib
 import re
+import tokenize
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from pathlib import Path
@@ -9922,3 +9924,134 @@ def test_meta_key_reason_detector_bites():
         ),
         path=REPO_ROOT / "app" / "mcp" / "protocol.py",
     )
+
+
+_COMMENT_CLONE_MIN_LINES = 3
+# Emitted after every comment-only line, and around indentation: none of them
+# says anything about prose, so only a token that carries code ends a block.
+_COMMENT_TRANSPARENT = frozenset(
+    {tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER, tokenize.ENCODING}
+)
+
+
+def _comment_blocks(source: str) -> list[tuple[int, tuple[str, ...]]]:
+    """``(first line, normalized text)`` for each run of consecutive comment lines.
+
+    ``tokenize`` rather than a ``#`` search, because a ``#`` inside a string is a
+    character and not a comment. A run is consecutive *lines* rather than merely
+    adjacent comment tokens, so a blank line, a statement, or a re-indent between
+    two notes ends the block instead of silently welding unrelated prose into one
+    clone -- and re-welding it is what the re-indent case has to catch, which is
+    why the break is the line gap and not the indentation.
+    """
+    blocks: list[tuple[int, tuple[str, ...]]] = []
+    lines: list[str] = []
+    first_line = 0
+    previous_end = 0
+
+    def flush() -> None:
+        nonlocal lines, first_line
+        if lines:
+            blocks.append((first_line, tuple(lines)))
+            lines = []
+
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.COMMENT:
+            text = " ".join(token.string.lstrip("#").split())
+            if not text:
+                continue
+            if lines and token.start[0] != previous_end + 1:
+                flush()
+            if not lines:
+                first_line = token.start[0]
+            lines.append(text)
+            previous_end = token.end[0]
+        elif token.type not in _COMMENT_TRANSPARENT:
+            flush()
+    flush()
+    return blocks
+
+
+def _duplicated_comment_runs(
+    sources: Iterable[tuple[Path, str]], *, minimum: int = _COMMENT_CLONE_MIN_LINES
+) -> list[str]:
+    """Comment blocks written twice in app/, with every site that repeats them.
+
+    The token floor cannot see this class at all: jscpd matches tokens, so a
+    duplicated comment contributes nothing to a clone it reports, and a
+    six-line WHY note read as zero clones at 4/25. That is what happened -- the
+    same note about the content cache's eviction window sat at both write call
+    sites, each copy carrying a claim about locking, and nothing in the suite or
+    the gate could tell that a later edit to the locking had updated one and left
+    the other asserting something the code no longer did.
+
+    Normalized on whitespace before comparison, so a re-indented copy -- the way
+    these forks actually arrive, by pasting between call sites -- still matches.
+    A block shorter than ``minimum`` is not a WHY worth centralizing, and a
+    two-line threshold would fire on ordinary repeated section rules.
+    """
+    sites: dict[tuple[str, ...], list[tuple[Path, int]]] = {}
+    for path, source in sources:
+        for line, block in _comment_blocks(source):
+            if len(block) < minimum:
+                continue
+            sites.setdefault(block, []).append((path, line))
+    return [
+        " and ".join(f"{relative_posix(path)}:{line}" for path, line in found)
+        + f" carry the same {len(block)}-line comment: {block[0]}"
+        for block, found in sorted(sites.items())
+        if len(found) > 1
+    ]
+
+
+def test_no_comment_block_is_written_twice():
+    """app/ states each multi-line WHY once, not once per call site."""
+    offenders = _duplicated_comment_runs(
+        (path, path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
+    )
+    assert not offenders, "comment blocks written more than once: " + ", ".join(offenders)
+
+
+def test_comment_clone_detector_bites():
+    """A repeated block fires, in one file and across two; distinct blocks do not.
+
+    Hand-rolled rather than :func:`assert_detector`, which parses its sources
+    into modules: a comment is not in the ``ast`` at all, so this is the one
+    detector in the file whose input is the text.
+    """
+    path = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+    repeated = "# first line of the note\n# second line\n# third line\n"
+    other = "# a different note entirely\n# with three lines\n# of its own text\n"
+    detached = "        # first line of the note\n        # second line\n        # third line\n"
+
+    def detect(source: str) -> list[str]:
+        return _duplicated_comment_runs([(path, source)])
+
+    once = detect(f"x = 1\n{repeated}y = 2\n")
+    assert not once, once
+    twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
+    assert len(twice) == 1 and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0], twice
+    # Two blocks of the same length but different text are two notes.
+    assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
+    # Two lines is a section rule, not a WHY to centralize.
+    two_lines = "# first line of the note\n# second line\n"
+    assert not detect(f"x = 1\n{two_lines}y = 2\n{two_lines}"), "a two-line rule is below the floor"
+    # A blank line ends a block, so two paragraphs stay two paragraphs instead of
+    # one welded run -- which would match nothing, including its own twin.
+    assert not detect(f"{repeated}\n{other}"), "a blank line must end a comment block"
+    assert [line for line, _ in _comment_blocks(f"{repeated}\n{other}")] == [1, 5]
+    # Identical prose is still a duplicate across a blank line: the rule about
+    # blocks decides what counts as one note, not whether prose may repeat.
+    assert detect(f"{repeated}\n{repeated}"), "identical prose is a duplicate however it is separated"
+    # Normalized on whitespace, so a re-indented copy -- how these forks actually
+    # arrive -- still matches rather than hiding behind the extra spaces.
+    assert detect(f"x = 1\n{repeated}y = 2\n{detached}"), "a re-indented copy is still a clone"
+    # A fork usually arrives by pasting between modules, so the same block in two
+    # different files is one finding, and both sites have to be named.
+    across = _duplicated_comment_runs(
+        [
+            (REPO_ROOT / "app" / "a.py", f"x = 1\n{repeated}"),
+            (REPO_ROOT / "app" / "b.py", f"y = 2\n{repeated}"),
+        ]
+    )
+    assert len(across) == 1 and "app/a.py:2 and app/b.py:2" in across[0], across
