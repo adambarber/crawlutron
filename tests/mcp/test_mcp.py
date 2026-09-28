@@ -150,6 +150,37 @@ class TestRequestMetadataValidation:
             code=-32602,
         )
 
+    @pytest.mark.parametrize(
+        ("key", "label", "wrong_type"),
+        [
+            ("io.modelcontextprotocol/protocolVersion", "a string", 7),
+            ("io.modelcontextprotocol/clientCapabilities", "an object", "nope"),
+        ],
+    )
+    async def test_meta_key_rejection_separates_absent_from_wrong_type(
+        self, async_client, key, label, wrong_type
+    ):
+        # Telling a client that forgot the key from one that sent the wrong
+        # shape is the whole point of the reason string, and it was asserted by
+        # no test and spelled out once per key in the validator -- so one of the
+        # two arms could have stopped distinguishing them, or stopped agreeing
+        # with the other, with the suite green.
+        cases = (
+            ("delete", f"Missing required _meta key: {key}"),
+            (wrong_type, f"Invalid _meta key (must be {label}): {key}"),
+        )
+        for value, reason in cases:
+            body = _body("server/discover")
+            if value == "delete":
+                del body["params"]["_meta"][key]
+            else:
+                body["params"]["_meta"][key] = value
+            resp = await _mcp(async_client, body)
+            assert resp.status_code == 400, resp.text
+            error = resp.json()["error"]
+            assert error["code"] == -32602, resp.text
+            assert error["message"] == reason, resp.text
+
     async def test_missing_mcp_method_header_rejected(self, async_client):
         await _assert_header_mismatch(
             async_client, body=_body("server/discover"), headers={"Mcp-Method": None}

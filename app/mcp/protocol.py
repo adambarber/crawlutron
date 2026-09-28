@@ -64,6 +64,40 @@ def error_response(
     return payload
 
 
+def _require_meta_key(
+    meta: dict[str, Any], key: str, expected: type[Any], label: str, request_id: int | str
+) -> Any:
+    """Return ``meta[key]``, or reject with the reason naming what was wrong.
+
+    Absent and wrong-typed are reported as different failures (N-6) because they
+    are different mistakes: a client that never sent the key has to send it, and
+    one that sent the wrong shape has to fix it. Collapsing the two into one
+    message leaves a client unable to act on the correction.
+
+    One function for both required keys rather than the check spelled out per
+    key, because the two reasons and the error wrapped around them have to agree
+    across keys. When each key owned the sentence, either could stop
+    distinguishing the cases, or stop matching the other, with nothing failing.
+
+    ``label`` is the type as the spec names it -- "a string", "an object" -- and
+    not the Python class, because this string goes on the wire and
+    ``must be dict`` is not what a client author is shown.
+    """
+    value = meta.get(key)
+    if not isinstance(value, expected):
+        raise ProtocolValidationError(
+            400,
+            error_response(
+                request_id,
+                INVALID_PARAMS,
+                f"Missing required _meta key: {key}"
+                if key not in meta
+                else f"Invalid _meta key (must be {label}): {key}",
+            ),
+        )
+    return value
+
+
 def validate_meta(params: dict[str, Any] | None, request_id: int | str) -> None:
     """Reject requests missing the per-request metadata this revision requires.
 
@@ -82,37 +116,11 @@ def validate_meta(params: dict[str, Any] | None, request_id: int | str) -> None:
                 "io.modelcontextprotocol/protocolVersion and clientCapabilities",
             ),
         )
-    version = meta.get(META_PROTOCOL_VERSION)
-    if not isinstance(version, str):
-        # Missing and wrong-type are different caller errors (N-6): say which.
-        reason = (
-            f"Missing required _meta key: {META_PROTOCOL_VERSION}"
-            if META_PROTOCOL_VERSION not in meta
-            else f"Invalid _meta key (must be a string): {META_PROTOCOL_VERSION}"
-        )
-        raise ProtocolValidationError(
-            400,
-            error_response(
-                request_id,
-                INVALID_PARAMS,
-                reason,
-            ),
-        )
-    capabilities = meta.get(META_CLIENT_CAPABILITIES)
-    if not isinstance(capabilities, dict):
-        reason = (
-            f"Missing required _meta key: {META_CLIENT_CAPABILITIES}"
-            if META_CLIENT_CAPABILITIES not in meta
-            else f"Invalid _meta key (must be an object): {META_CLIENT_CAPABILITIES}"
-        )
-        raise ProtocolValidationError(
-            400,
-            error_response(
-                request_id,
-                INVALID_PARAMS,
-                reason,
-            ),
-        )
+    # Both are checked for presence and shape here. Neither value is returned:
+    # the router re-reads the version to compare it against the header, so
+    # handing it back would be a second spelling of what the caller already has.
+    _require_meta_key(meta, META_PROTOCOL_VERSION, str, "a string", request_id)
+    _require_meta_key(meta, META_CLIENT_CAPABILITIES, dict, "an object", request_id)
 
 
 def decode_header_value(value: str) -> str:

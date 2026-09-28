@@ -9854,3 +9854,71 @@ def test_cycle_guard_detector_bites():
         REPO_ROOT / "app" / "models.py",
         owner="different_owner",
     ), "a guard call must fire when the sanctioned owner is renamed"
+
+
+_META_REASON_OWNER = "_require_meta_key"
+_META_WRONG_TYPE_FRAGMENT = "Invalid _meta key (must be "
+
+
+def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_REASON_OWNER) -> list[str]:
+    """The wrong-type half of the ``_meta`` key rejection authored outside its owner.
+
+    ``validate_meta`` checked two required ``_meta`` keys and, for each, spelled
+    out the same two-part reason -- absent versus wrong type -- and raised the
+    same error around it. The distinction is the caller's only way to learn it
+    forgot a key rather than sent the wrong shape, so it is a contract, and a
+    duplicated one can drift in both directions at once: the two arms can stop
+    agreeing on wording, or one can stop distinguishing the two cases at all,
+    with the suite green either way.
+
+    Matching the *literal* rather than the shape is deliberate. A second arm that
+    built the same sentence a different way -- an f-string split across lines, a
+    helper, a new noun -- would be precisely the drift, and a test that recognised
+    the shape would wave it through. The rule is that the sentence is authored
+    once, in the function both keys check through.
+    """
+    def is_reason(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and _META_WRONG_TYPE_FRAGMENT in node.value
+        )
+
+    return [
+        offender(path, node.lineno, f"the _meta key reason is authored in {enclosing!r}, not {owner}()")
+        for node, enclosing in _enclosing_nodes(tree, is_reason)
+        if enclosing != owner
+    ]
+
+
+def test_the_meta_key_rejection_reason_is_authored_once():
+    """app/mcp/protocol.py spells the wrong-type _meta reason in one function."""
+    offenders = app_offenders(_meta_key_reason_offenders)
+    assert not offenders, "the _meta key rejection reason is authored more than once: " + ", ".join(offenders)
+
+
+def test_meta_key_reason_detector_bites():
+    """A second authoring of the sentence fires; the one in the owner stays clean."""
+    assert_detector(
+        _meta_key_reason_offenders,
+        path=REPO_ROOT / "app" / "mcp" / "protocol.py",
+        fires={
+            "def validate_meta(meta, request_id):\n"
+            f'    reason = f"{{key}} "\n'
+            f'    reason += "{_META_WRONG_TYPE_FRAGMENT}{{key}})"\n': "authored in 'validate_meta'",
+            f'WHY = "{_META_WRONG_TYPE_FRAGMENT}protocolVersion)"\n': "authored in '<module>'",
+        },
+        clean=(
+            f"def {_META_REASON_OWNER}(meta, key, expected, label, request_id):\n"
+            f'    return f"{_META_WRONG_TYPE_FRAGMENT}{{label}}): {{key}})"\n',
+        ),
+    )
+    # Unrelated reasons are not the contract, so they must not be swept up with it.
+    assert_stays_clean(
+        _meta_key_reason_offenders,
+        clean=(
+            'def validate_meta(meta):\n    raise ProtocolValidationError("Missing _meta block")\n',
+            'def validate_meta(meta):\n    reason = f"Missing required _meta key: {key}"\n',
+        ),
+        path=REPO_ROOT / "app" / "mcp" / "protocol.py",
+    )
