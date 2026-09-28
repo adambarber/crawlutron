@@ -525,7 +525,7 @@ class TestBatchIsHttpHeavy:
 # ---------------------------------------------------------------------------
 # Dispatcher wiring: apply http_scale_factor for HTTP-heavy batches.
 # ---------------------------------------------------------------------------
-class PinnedGate:
+class PinnedGate(ResourceGate):
     """A ResourceGate with fixed scales and fixed ratios, recording consultations.
 
     What the two admission questions have in common: WHICH scale the dispatcher
@@ -533,6 +533,21 @@ class PinnedGate:
     answers both, so a test pins the scales without the ratios and vice versa,
     and a gate method a test starts needing is one method here rather than a
     second double.
+
+    Subclasses ResourceGate rather than re-implementing its shape. The double is
+    handed to the production dispatchers, which are typed for ResourceGate, so a
+    stand-in that merely *looks* like one leaves that boundary unchecked -- rename
+    a real method and every test here keeps passing while the dispatcher stops
+    consulting the double at all, and the tests would still assert that the
+    double recorded its calls, just on a gate nobody asked. Inheriting puts the
+    double under the same signature the production code is compiled against.
+
+    ``ResourceGate.__init__`` is deliberately not called: it builds live
+    MemoryGate/CpuGate objects that read the host's cgroup, which is the I/O the
+    double exists to avoid, and pinned ratios are the point anyway. The
+    consequence is that this instance is initialised only as far as these five
+    methods reach, so an inherited method that touches unbuilt state fails loudly
+    instead of returning a real measurement the test never pinned.
     """
 
     def __init__(self, *, batch=1.0, http=1.0, mem=0.0, cpu=0.0):
