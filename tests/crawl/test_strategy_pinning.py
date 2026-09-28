@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.api_models import CrawlStrategy
 from app.constants import (
     BROWSER_HEADLESS,
     HTTP_CFFI_IMPERSONATE,
@@ -10,7 +11,16 @@ from app.constants import (
 from app.crawl.strategy_chain import _starting_strategies
 from app.scheduler import DomainScheduler
 
-LADDER = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE, BROWSER_HEADLESS]
+# The policy ladder as the enum members `_starting_strategies` validates, not as
+# the bare name strings. It takes `Iterable[CrawlStrategy]` because it calls
+# `CrawlStrategy(member)` on each entry to reject anything the policy could not
+# name; handing it strings worked only because the enum is a StrEnum, and the
+# validation it performs is the thing under test here.
+LADDER: list[CrawlStrategy] = [
+    CrawlStrategy(HTTP_DECLARED_CRAWLER),
+    CrawlStrategy(HTTP_CFFI_IMPERSONATE),
+    CrawlStrategy(BROWSER_HEADLESS),
+]
 
 
 def _scheduler() -> DomainScheduler:
@@ -73,7 +83,7 @@ class TestExecuteCrawlChainPinning:
         scheduler = _scheduler()
         scheduler.set_pinned_strategy("example.com", BROWSER_HEADLESS)
         # Policy without browser (e.g., HTTP-only job)
-        http_only = [HTTP_DECLARED_CRAWLER, HTTP_CFFI_IMPERSONATE]
+        http_only = [CrawlStrategy(HTTP_DECLARED_CRAWLER), CrawlStrategy(HTTP_CFFI_IMPERSONATE)]
         assert _starting_strategies(http_only, scheduler, "example.com") == http_only
 
     def test_no_scheduler_starts_at_beginning(self) -> None:

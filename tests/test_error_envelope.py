@@ -9,12 +9,23 @@ tests/invariants/test_result_shape.py keeps it that way.
 
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.api.exceptions import error_envelope, http_error
+
+
+def _bare_request() -> Request:
+    """The smallest scope a Starlette ``Request`` can be built from.
+
+    ``http_exception_handler`` never reads its request argument, so the tests
+    used to hand it a ``SimpleNamespace``. That is a stand-in for a type the
+    handler is registered to receive; building a real one costs four keys and
+    keeps the double from being the only path that shape is ever seen on.
+    """
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b""})
 
 
 class TestErrorEnvelope:
@@ -45,8 +56,8 @@ class TestErrorEnvelope:
         from app.api.exceptions import http_exception_handler
 
         exc = http_error(503, "browser_pool_unavailable", "pool is down")
-        response = asyncio.run(http_exception_handler(SimpleNamespace(), exc))
-        assert json.loads(response.body) == {
+        response = asyncio.run(http_exception_handler(_bare_request(), exc))
+        assert json.loads(bytes(response.body)) == {
             "code": "browser_pool_unavailable",
             "message": "pool is down",
             "details": {},
@@ -66,7 +77,15 @@ class TestErrorEnvelope:
             "details": {},
         }
         override = browser_pool_unavailable("exhausted: 4/4")
-        assert override.detail["message"] == "exhausted: 4/4"
+        # Compared whole rather than indexed into: `HTTPException.detail` is
+        # annotated `str` upstream, but #1722 makes it the envelope dict, and
+        # asserting the full shape is this file's own convention -- the point is
+        # that an override changes one key and leaves the other two alone.
+        assert override.detail == {
+            "code": "browser_pool_unavailable",
+            "message": "exhausted: 4/4",
+            "details": {},
+        }
 
 
 class TestEnvelopeFromDetail:
@@ -106,9 +125,9 @@ class TestEnvelopeFromDetail:
         from app.api.exceptions import MALFORMED_DETAIL_CODE, http_exception_handler
 
         exc = HTTPException(status_code=418, detail="I'm a teapot")
-        response = asyncio.run(http_exception_handler(SimpleNamespace(), exc))
+        response = asyncio.run(http_exception_handler(_bare_request(), exc))
         assert response.status_code == 418
-        assert json.loads(response.body) == {
+        assert json.loads(bytes(response.body)) == {
             "code": MALFORMED_DETAIL_CODE,
             "message": "Request failed",
             "details": {"status_code": 418},
