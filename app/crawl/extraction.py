@@ -43,6 +43,9 @@ from urllib.parse import urljoin, urlparse
 # be absent.
 from lxml import etree
 from lxml.etree import ParserError
+from markdownify import markdownify as html_to_md
+from markitdown import MarkItDown
+from trafilatura import extract as _trafilatura_extract
 
 from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
@@ -242,13 +245,8 @@ def _markitdown_extract(body: bytes) -> str | None:
 
     Test hooks are NOT read here: the parent snapshots them per task and the
     worker honors the shipped message, so persistent workers never observe
-    stale env. The MarkItDown import stays in the worker's sys.modules after
-    the first real task -- once per worker lifetime, not per document.
+    stale env.
     """
-    try:
-        from markitdown import MarkItDown
-    except ImportError:
-        return None
     res = MarkItDown().convert_stream(io.BytesIO(body))
     return res.text_content if res is not None else None
 
@@ -597,8 +595,6 @@ def extract_content(
 def _html_to_markdown(html_fragment: str) -> tuple[str | None, str | None]:
     """Convert a raw HTML fragment to ``(text, markdown)`` for DOM targeting."""
     try:
-        from markdownify import markdownify as html_to_md
-
         md = html_to_md(html_fragment) or None
     except Exception:
         md = None
@@ -747,10 +743,8 @@ def _extract_html(
     if selectors:
         return _extract_selected(html, url, selectors=selectors)
     try:
-        import trafilatura
-
         with _suppress_trafilatura_chatter():
-            md = trafilatura.extract(
+            md = _trafilatura_extract(
                 html,
                 url=url,
                 output_format="markdown",
@@ -767,8 +761,6 @@ def _extract_html(
         # Fallback to markdownify before the plain-text extractor so that
         # pages Trafilatura refuses still become usable Markdown.
         try:
-            from markdownify import markdownify as html_to_md
-
             md = html_to_md(html) or None
         except Exception:
             md = None
