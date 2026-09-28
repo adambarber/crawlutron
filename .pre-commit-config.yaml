@@ -128,17 +128,21 @@ repos:
       # every root is held to is the one that cannot be quietly relaxed for the
       # tree it is inconvenient in.
       #
-      # The floor is 4 lines / 25 tokens, which is where the last two pairs live.
-      # Both are DECLARED in jscpd-expectations.json rather than hidden above the
-      # floor, because they are not drift at all: each is two spellings that a
-      # machine-checked guard exists to compare, so the tree holds the copy on
-      # purpose and the guard is what makes the copy safe. The baseline pins each
-      # fragment by content hash and names the guard, so editing either side turns
-      # the entry into an unsanctioned clone and sends the change back through
-      # review instead of leaving a stale approval behind. Holding the floor above
-      # them instead would have bought a tidy list at the cost of never seeing a
-      # 25-38 token clone anywhere, which is the band most real duplication in
-      # this tree actually measured at.
+      # The floor is 4 lines / 25 tokens, and at that floor both trees report
+      # zero pairs, so jscpd-expectations.json is empty. The file is the
+      # mechanism that would carry any pair that does appear, and it is
+      # deliberately empty rather than unused: an entry pins its fragment by
+      # content hash and names the guard test that compares the two sides, so a
+      # pair is carried on purpose instead of discovered by accident, and editing
+      # either side turns the entry into an unsanctioned clone and sends the
+      # change back through review. The contract runs both ways -- a declared
+      # pair whose fragment is gone also fails -- so the baseline cannot keep a
+      # stale approval alive after the duplication it approved has been deleted.
+      #
+      # Declaring such a pair below the floor was preferred to raising the floor
+      # past it. Raising it would have bought a tidy list at the cost of never
+      # seeing a 25-38 token clone anywhere, which is the band most real
+      # duplication in this tree actually measured at.
       # Each root is still scanned by its own jscpd invocation, because jscpd's
       # reported names are relative to the scan root. Zero tolerance; the number
       # ratchets down, not up.
