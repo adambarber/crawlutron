@@ -462,9 +462,7 @@ _EXTRACTION_SELECTOR_SENTINEL = _SelectorTimedOut()
 _SelectorResult = TypeVar("_SelectorResult")
 
 
-def _eval_selector(
-    fn: Callable[[], _SelectorResult], timeout: float
-) -> _SelectorResult | _SelectorTimedOut:
+def _eval_selector(fn: Callable[[], _SelectorResult], timeout: float) -> _SelectorResult | _SelectorTimedOut:
     """Run a selector evaluation in a worker thread so it cannot hang a request.
 
     Returns the callable's result, or ``_EXTRACTION_SELECTOR_SENTINEL`` if it
@@ -1160,9 +1158,7 @@ def extract_post_fetch_discovery(
     """
     tree = _parse_html_tree(html) if html and (include_diagnostics or include_links) else None
     diagnostics = (
-        _html_diagnostics(html, final_url, host_policy=host_policy, tree=tree)
-        if include_diagnostics
-        else {}
+        _html_diagnostics(html, final_url, host_policy=host_policy, tree=tree) if include_diagnostics else {}
     )
     if include_links:
         discovered_links, discovered_link_count, discovered_links_truncated = _extract_discovered_links(

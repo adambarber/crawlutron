@@ -15,6 +15,7 @@ from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _robots_allows, _robots_pattern_to_regex, crawl_request
+from app.crawl.policy import read_policy
 from app.crawl.robots import robots_allows
 from app.crawl.robots_parse import (
     iter_robots_fields,
@@ -520,7 +521,9 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
     return await _discovery_diagnostics(
         normalized_url="https://x.test/p",
         html="<html></html>",
-        policy={"discovery": {"robots": True, "sitemaps": True}, "limits": {"timeout_seconds": 10}},
+        policy=read_policy(
+            {"discovery": {"robots": True, "sitemaps": True}, "limits": {"timeout_seconds": 10}}
+        ),
         headers={},
         http_fetcher=_fake_fetcher(calls),
         engine_robots_sitemaps=engine_robots_sitemaps,

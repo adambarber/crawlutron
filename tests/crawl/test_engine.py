@@ -16,24 +16,27 @@ from _fetcher_factories import (
 )
 from _policy_factories import http_strategy_policy
 
+from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
 from app.crawl.engine import _payload_policy
+from app.crawl.policy import read_policy
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import CrawlResult, to_dict
 from app.scheduler import DomainScheduler
 
 
-def http_policy(*strategies: str, extraction: str = "full", **extra) -> dict:
+def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPolicy:
     """The HTTP strategy's policy with a different strategy list or one more key.
 
     Derived from the shared policy factory rather than re-spelled: the limits and
     the empty header mappings are that factory's to state, and a test says only
     the part it is changing.
     """
-    policy = http_strategy_policy(extraction=extraction)
+    raw = http_strategy_policy(extraction=extraction).model_dump()
     if strategies:
-        policy["strategies"] = list(strategies)
-    return {**policy, **extra}
+        raw["strategies"] = list(strategies)
+    raw.update(extra)
+    return read_policy(raw)
 
 
 class TestEngineCrawlRequest:
@@ -93,7 +96,8 @@ def test_seed_freshness_uses_real_default_strategies():
     """L5b: without an explicit strategies list, freshness must probe the
     real default chain -- not the placeholder ["HTTP"], whose cache keys
     can never match anything actually stored."""
-    from app.constants import DEFAULT_EXTRACTION, HTTP_DECLARED_CRAWLER
+    from app.api_models import CrawlExtractionMethod
+    from app.constants import HTTP_DECLARED_CRAWLER
     from app.crawl.engine import _parse_lastmod, _seed_is_fresh
     from app.crawl.strategies.content_cache_key import _content_cache_key
     from app.crawl.strategies.request_profile import _headers_for_strategy
@@ -104,8 +108,8 @@ def test_seed_freshness_uses_real_default_strategies():
     expected_key = _content_cache_key(
         url,
         HTTP_DECLARED_CRAWLER,
-        _headers_for_strategy(HTTP_DECLARED_CRAWLER, policy, url),
-        DEFAULT_EXTRACTION,
+        _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), url),
+        CrawlExtractionMethod.FULL,
         None,
         None,
     )
@@ -115,7 +119,7 @@ def test_seed_freshness_uses_real_default_strategies():
         def cached_at_of(self, key):
             return cached_at if key == expected_key else None
 
-    assert _seed_is_fresh(url, "2024-01-01", _StubCache(), policy) is True
+    assert _seed_is_fresh(url, "2024-01-01", _StubCache(), read_policy(policy)) is True
 
 
 class TestCrawlRequestWebhook:
@@ -277,15 +281,15 @@ class TestEngineChainEdges:
         from app.crawl.strategies.content_cache_key import _effective_max_content_length
 
         # Explicit value always wins.
-        assert _effective_max_content_length({"max_content_length_bytes": 123}) == 123
+        assert _effective_max_content_length(CrawlPolicyLimits(max_content_length_bytes=123)) == 123
         # Default concurrency (4) -> unchanged 10 MiB default.
-        assert _effective_max_content_length({}) == DEFAULT_MAX_CONTENT_LENGTH_BYTES
+        assert _effective_max_content_length(CrawlPolicyLimits()) == DEFAULT_MAX_CONTENT_LENGTH_BYTES
         # High concurrency shrinks the cap.
-        small = _effective_max_content_length({}, global_concurrency=400)
+        small = _effective_max_content_length(CrawlPolicyLimits(), global_concurrency=400)
         assert small < DEFAULT_MAX_CONTENT_LENGTH_BYTES
         # Floor is respected even at absurd concurrency.
         assert small >= 256 * 1024
-        assert _effective_max_content_length({}, global_concurrency=100000) == 256 * 1024
+        assert _effective_max_content_length(CrawlPolicyLimits(), global_concurrency=100000) == 256 * 1024
 
     async def test_include_html_false_drops_html(self):
         """When include_html is False the raw HTML is not retained in the result."""

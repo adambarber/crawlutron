@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.api_models import CrawlPolicy
 from app.constants import (
-    DEFAULT_EXTRACTION,
     EXTRACTION_METHOD_DOM_TEXT,
 )
 from app.crawl.render_options import resolve_render_options
@@ -31,16 +31,16 @@ from app.models import (
 from app.validation import HostPolicy, registrable_domain
 
 
-def _browser_options(policy: dict[str, Any]) -> RenderOptions:
+def _browser_options(policy: CrawlPolicy) -> RenderOptions:
     return resolve_render_options(
         None,
         {
-            "timeout_seconds": policy["limits"]["timeout_seconds"],
-            "max_retries": policy["limits"]["max_retries"],
+            "timeout_seconds": policy.limits.timeout_seconds,
+            "max_retries": policy.limits.max_retries,
             "respect_robots": True,
             "include_html": True,
             "include_text": True,
-            "browser_profile": policy.get("browser_profile") or {},
+            "browser_profile": policy.browser_profile,
         },
     )
 
@@ -58,7 +58,7 @@ def _browser_job(normalized_url: str, options: RenderOptions, host_policy: HostP
 async def _extract_browser_content(
     content: str | None,
     result: Any,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
 ) -> _ExtractedContent:
     if not content:
         return _ExtractedContent(
@@ -67,7 +67,7 @@ async def _extract_browser_content(
             extraction_method=result.metadata.get("extraction_method") or EXTRACTION_METHOD_DOM_TEXT,
         )
     return await _run_extraction(
-        extraction=policy.get("extraction", DEFAULT_EXTRACTION),
+        extraction=policy.extraction,
         content=content,
         decoded=content,
         content_type=None,
@@ -82,17 +82,15 @@ async def _extract_browser_content(
 
 async def _discover_browser_content(
     result: Any,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
     return await _discover_after_fetch(
         html=result.html,
         final_url=result.final_url,
         js_base_url=result.final_url,
-        max_links=policy["limits"]["max_discovered_links"],
-        include_diagnostics=True,
-        include_links=result.status == "success",
-        include_js_endpoints=True,
+        status=result.status,
+        policy=policy,
         host_policy=host_policy,
     )
 
@@ -100,12 +98,12 @@ async def _discover_browser_content(
 def _browser_diagnostics(
     result: Any,
     content: _ExtractedContent,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     host_policy: HostPolicy,
     post_fetch: dict[str, Any],
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {
-        "browser_profile": policy.get("browser_profile") or {},
+        "browser_profile": policy.browser_profile,
         "runtime": {"elapsed_ms": result.elapsed_ms, "final_url": result.final_url},
         "content_metrics": {
             "visible_text_length": len(content.text.strip()),
@@ -173,7 +171,8 @@ async def browser_strategy_result(
     browser_worker: CrawlWorker,
 ) -> EngineCrawlResult:
     result = await call_worker(
-        browser_worker, _browser_job(request.normalized_url, _browser_options(request.policy), request.host_policy)
+        browser_worker,
+        _browser_job(request.normalized_url, _browser_options(request.policy), request.host_policy),
     )
     content = result.html if result.html else result.text
     extracted = await _extract_browser_content(content, result, request.policy)

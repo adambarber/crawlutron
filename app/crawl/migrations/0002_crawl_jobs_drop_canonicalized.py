@@ -15,9 +15,7 @@ def rollback_step(conn) -> None:
     cursor = conn.cursor()
     columns = {column.name for column in table_columns(conn, "crawl_jobs")}
     if "canonicalized" not in columns:
-        cursor.execute(
-            'ALTER TABLE "crawl_jobs" ADD COLUMN "canonicalized" INTEGER NOT NULL DEFAULT 0'
-        )
+        cursor.execute('ALTER TABLE "crawl_jobs" ADD COLUMN "canonicalized" INTEGER NOT NULL DEFAULT 0')
 
 
 steps = [step(apply_step, rollback_step)]

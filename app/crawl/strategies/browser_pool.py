@@ -27,7 +27,6 @@ from app.settings import CrawlerSettings
 logger = logging.getLogger(__name__)
 
 
-
 # Default bound for BrowserPool.acquire (M12). Renders carry their own
 # per-URL budget on top; this only stops a leaked renderer from hanging
 # waiters forever with no diagnostics.

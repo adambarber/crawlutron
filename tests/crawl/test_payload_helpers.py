@@ -3,6 +3,7 @@
 import pytest
 
 from app.crawl.payload_helpers import _payload_policy
+from app.crawl.policy import PolicyTier
 from app.settings import CrawlerSettings
 
 
@@ -17,18 +18,18 @@ def _normalized_policy(**policy) -> dict:
     """
     return _payload_policy(
         {"url": "https://example.com/", "policy": policy},
-        CrawlerSettings.from_mapping({}),
+        PolicyTier.model_defaults(),
     )
 
 
 class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_rps_survives_normalization(self):
         policy = _normalized_policy(limits={"max_rps": 2.5})
-        assert policy["limits"]["max_rps"] == 2.5
+        assert policy.limits.max_rps == 2.5
 
     def test_max_rps_default_is_zero(self):
         policy = _normalized_policy()
-        assert policy["limits"]["max_rps"] == 0.0
+        assert policy.limits.max_rps == 0.0
 
     def test_max_rps_out_of_range_rejected(self):
         # CrawlPolicyLimits bounds max_rps to [0, 100]; out-of-range requests
@@ -38,7 +39,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
 
     def test_max_content_length_bytes_survives_normalization(self):
         policy = _normalized_policy(limits={"max_content_length_bytes": 1024})
-        assert policy["limits"]["max_content_length_bytes"] == 1024
+        assert policy.limits.max_content_length_bytes == 1024
 
     def test_max_content_length_above_ceiling_rejected(self):
         # An explicit cap must not be a caller-controlled RAM/decompression
@@ -53,7 +54,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         from app.constants import MAX_CONTENT_LENGTH_BYTES
 
         policy = _normalized_policy(limits={"max_content_length_bytes": MAX_CONTENT_LENGTH_BYTES})
-        assert policy["limits"]["max_content_length_bytes"] == MAX_CONTENT_LENGTH_BYTES
+        assert policy.limits.max_content_length_bytes == MAX_CONTENT_LENGTH_BYTES
 
     def test_max_content_length_above_ceiling_is_a_validation_error(self):
         # The pydantic boundary must 422 oversized caps (le= on the model).
@@ -70,7 +71,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
         # concurrency-scaled RAM budget in _effective_max_content_length
         # keeps working. Only an explicit value overrides it.
         policy = _normalized_policy()
-        assert policy["limits"]["max_content_length_bytes"] == 0
+        assert policy.limits.max_content_length_bytes == 0
 
 
 class TestPydanticDefaultPreservesRamScaling:
@@ -100,9 +101,9 @@ class TestPydanticDefaultPreservesRamScaling:
         )
         policy = _payload_policy(
             request.model_dump(exclude_none=True),
-            CrawlerSettings.from_mapping({}),
+            PolicyTier.model_defaults(),
         )
-        assert policy["limits"]["max_content_length_bytes"] == 4096
+        assert policy.limits.max_content_length_bytes == 4096
 
 
 class TestMaxContentLengthBytesActuallyEnforced:
@@ -111,7 +112,6 @@ class TestMaxContentLengthBytesActuallyEnforced:
         # and the fetcher fails the page with HTTP 413.
         from app.constants import HTTP_DECLARED_CRAWLER
         from app.crawl.engine import crawl_request
-        from app.settings import CrawlerSettings
 
         monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
         settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS": "1"})
@@ -135,15 +135,12 @@ class TestPayloadHelpersEdges:
 
     def test_payload_policy_invalid_limits(self):
         from app.crawl.payload_helpers import _payload_policy
-        from app.settings import CrawlerSettings
 
         with pytest.raises(ValueError) as cm:
-            _payload_policy({"policy": {"limits": "not a dict"}}, CrawlerSettings.from_mapping())
+            _payload_policy({"policy": {"limits": "not a dict"}}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
         with pytest.raises(ValueError) as cm:
-            _payload_policy(
-                {"policy": {"limits": {"max_depth": "not an int"}}}, CrawlerSettings.from_mapping()
-            )
+            _payload_policy({"policy": {"limits": {"max_depth": "not an int"}}}, PolicyTier.model_defaults())
         assert str(cm.value) == "invalid_policy_limits"
 
 
@@ -171,7 +168,7 @@ class TestExplicitEmptyStrategiesIsRejectedNotDefaulted:
         """Rejection must not cost the documented default."""
         from app.constants import DEFAULT_STRATEGIES
 
-        assert _normalized_policy()["strategies"] == DEFAULT_STRATEGIES
+        assert [s.value for s in _normalized_policy().strategies] == DEFAULT_STRATEGIES
 
     def test_a_non_list_strategies_is_still_rejected(self):
         with pytest.raises(ValueError, match="invalid_policy_strategies"):

@@ -7,6 +7,8 @@ from _policy_factories import http_strategy_policy
 from _transport_doubles import join_or_kill
 from helpers.server import _Handler, spawn_threaded_server
 
+from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+
 
 def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
     """Subprocess body for the cffi smoke test (must be module-level to pickle)."""
@@ -160,10 +162,17 @@ async def test_http_strategy_rejects_non_mapping_request_profile():
     async def fetcher(*args, **kwargs):
         raise AssertionError("fetcher must not run for an invalid request profile")
 
+    # The rejecting edge, not ``read_policy``: a wire payload is validated by
+    # ``validate_wire_policy``, and ``read_policy`` is total by contract -- it
+    # repairs a bad field with its default and never raises. Asking the total
+    # edge to reject is asking it to break its own contract, and the answer
+    # would prove nothing about what a caller is told.
     for profile in ("hello", ["hello"]):
-        policy = http_strategy_policy()
-        policy["request_profile"] = profile
         with pytest.raises(ValueError, match="^invalid_policy_profile$"):
+            policy = validate_wire_policy(
+                {**http_strategy_policy().model_dump(), "request_profile": profile},
+                PolicyTier.model_defaults(),
+            )
             await run_http_strategy(
                 url="http://profile.example/",
                 policy=policy,
@@ -211,17 +220,21 @@ async def test_stateful_request_profile_is_resolved_once_for_headers_and_diagnos
 
     fetcher = request_fetcher(respond)
 
-    policy = http_strategy_policy()
-    policy["request_profile"] = profile
+    policy = read_policy({**http_strategy_policy().model_dump(), "request_profile": profile})
     result = await run_http_strategy(
         url="http://profile.example/",
         policy=policy,
         http_fetcher=fetcher,
     )
 
+    # One snapshot, taken at the read edge. If anything re-read the profile the
+    # StatefulProfile would answer "generic_crawler" the second time, and the
+    # headers would disagree with the diagnostics -- which is the defect this
+    # profile was built to make visible.
     assert result.diagnostics["request_profile"] == {
         "user_agent_family": "desktop_chrome",
         "cookie_jar": "none",
     }
+    assert "generic_crawler" not in captured_headers["User-Agent"]
     assert "Cookie" not in captured_headers
     assert profile.snapshot == 1

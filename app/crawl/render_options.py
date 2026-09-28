@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from app.api_models import CrawlPolicy
 from app.models import RenderOptions
 
 
@@ -76,18 +77,15 @@ def resolve_render_options(
     return RenderOptions(**kwargs)
 
 
-def policy_wants_html(policy: Mapping[str, Any]) -> bool:
+def policy_wants_html(policy: CrawlPolicy) -> bool:
     """The caller's payload knob for a crawl policy: keep raw HTML or strip it.
 
-    The one reading of ``policy["browser_profile"]["include_html"]`` allowed
+    The one reading of ``policy.browser_profile["include_html"]`` allowed
     outside this module; strip sites (engine spill, HTTP strategy) call this
     instead of re-deriving the expression, which is how "who owns this
     knob" drifted per call site in the first place.
     """
-    profile = policy.get("browser_profile")
-    if not isinstance(profile, dict):
-        return True
-    return bool(profile.get("include_html", True))
+    return bool(policy.browser_profile.get("include_html", True))
 
 
 __all__ = ["resolve_render_options", "policy_wants_html"]

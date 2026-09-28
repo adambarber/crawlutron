@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 _DEFAULT_HTTP_CLIENT: httpx.AsyncClient | None = None
 _HTTP_CLIENT_INIT_LOCK = threading.Lock()
 
+
 def _default_settings() -> CrawlerSettings:
     """Get default crawler settings for HTTP client configuration."""
     from app.settings import CrawlerSettings
@@ -137,9 +138,7 @@ def _queue_superseded_close(old_client: Any) -> Any | None:
     return stale_to_release
 
 
-def _release_dropped_client(
-    stale_to_release: Any, *, is_closed: Callable[[Any], bool] | None = None
-) -> None:
+def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any], bool] | None = None) -> None:
     """Best-effort release of a client the cap had to displace.
 
     Runs outside ``_PENDING_CLIENT_CLOSE_LOCK`` so a potentially slow

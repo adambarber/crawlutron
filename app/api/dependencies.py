@@ -24,10 +24,11 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from app.crawl.job_store import JobStore
+from app.crawl.result_store import CrawlResultStore
 from app.settings import CrawlerSettings
 
 
-def get_settings(request: Request):
+def get_settings(request: Request) -> CrawlerSettings:
     """FastAPI dependency: return the active :class:`CrawlerSettings` instance."""
     return request.app.state.crawler_settings
 
@@ -37,23 +38,41 @@ def get_shutdown_event(request: Request) -> asyncio.Event:
     return request.app.state.shutdown_event
 
 
-def get_job_store(request: Request):
+def get_job_store(request: Request) -> JobStore:
     """FastAPI dependency: return the :class:`JobStore` for the running app."""
     return request.app.state.job_store
 
 
-def get_result_store(request: Request):
-    """FastAPI dependency: return the :class:`ResultStore` for the running app."""
+def get_result_store(request: Request) -> CrawlResultStore:
+    """FastAPI dependency: return the :class:`CrawlResultStore` for the running app."""
     return request.app.state.result_store
 
 
 # One declaration per provider: the annotation an endpoint parameter carries.
 # ``Annotated`` rather than a default value, so the dependency is a declared
 # part of the signature instead of an invisible default a reader has to notice.
+#
+# The providers above declare their return types, and that is load-bearing
+# rather than decoration. These aliases are what an endpoint parameter
+# annotates with, so an unannotated provider makes the alias -- and every
+# endpoint it reaches -- carry ``Any``: the type checker then cannot see what
+# crosses the boundary at all, which is how a ``CrawlerSettings`` was handed
+# to a parameter declaring a ``PolicyTier`` and stayed invisible in a green
+# mypy run. The declaration lives here, once, at the single place state enters
+# the request.
 SettingsDep = Annotated[CrawlerSettings, Depends(get_settings)]
 ShutdownEventDep = Annotated[asyncio.Event, Depends(get_shutdown_event)]
 JobStoreDep = Annotated[JobStore, Depends(get_job_store)]
+ResultStoreDep = Annotated[CrawlResultStore, Depends(get_result_store)]
 
 
-__all__ = ["JobStoreDep", "SettingsDep", "ShutdownEventDep", "get_job_store", "get_result_store",
-           "get_settings", "get_shutdown_event"]
+__all__ = [
+    "JobStoreDep",
+    "ResultStoreDep",
+    "SettingsDep",
+    "ShutdownEventDep",
+    "get_job_store",
+    "get_result_store",
+    "get_settings",
+    "get_shutdown_event",
+]

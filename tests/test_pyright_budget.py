@@ -342,8 +342,12 @@ def test_pydantic_default_visibility_detector_bites() -> None:
         "class M(BaseModel):\n"
         '    robots: bool = Field(default=True, description="Honor robots.txt.")\n'
     )
-    assert_fires_once(_positional_field_default_offenders, {positional: "looks required"}, pathlib.Path("bites.py"))
-    assert_fires_once(_positional_field_default_offenders, {keyword: "looks required"}, pathlib.Path("bites.py"))
+    assert_fires_once(
+        _positional_field_default_offenders, {positional: "looks required"}, pathlib.Path("bites.py")
+    )
+    assert_fires_once(
+        _positional_field_default_offenders, {keyword: "looks required"}, pathlib.Path("bites.py")
+    )
     assert_stays_clean(
         _positional_field_default_offenders,
         (

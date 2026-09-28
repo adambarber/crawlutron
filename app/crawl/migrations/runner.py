@@ -97,9 +97,7 @@ def _require_current_schema(conn: sqlite3.Connection, schema: StoreSchema) -> No
     table = CURRENT_SCHEMAS[schema]
     drift = schema_drift(conn, table, schema)
     if drift:
-        raise LegacySchemaMismatch(
-            f"{table.name} does not match the declared schema: {'; '.join(drift)}"
-        )
+        raise LegacySchemaMismatch(f"{table.name} does not match the declared schema: {'; '.join(drift)}")
 
 
 def migrate_store(
@@ -119,9 +117,7 @@ def migrate_store(
             if not target_was_applied and _table_exists(backend.connection, selected):
                 _require_stampable_schema(backend.connection, selected)
                 initial = next(
-                    migration
-                    for migration in migrations
-                    if migration.id == MIGRATION_SEQUENCES[selected][0]
+                    migration for migration in migrations if migration.id == MIGRATION_SEQUENCES[selected][0]
                 )
                 backend.mark_migrations([initial])
                 remaining = backend.to_apply(migrations)
@@ -138,9 +134,7 @@ def stamp_store(db_path: str | Path, schema: StoreSchema | str) -> str:
     migrations = _migrations(selected)
     with _locked_backend(db_path) as backend:
         if not _table_exists(backend.connection, selected):
-            raise LegacySchemaMismatch(
-                f"cannot stamp missing table {CURRENT_SCHEMAS[selected].name}"
-            )
+            raise LegacySchemaMismatch(f"cannot stamp missing table {CURRENT_SCHEMAS[selected].name}")
         _require_stampable_schema(backend.connection, selected)
         pending = backend.to_apply(migrations)
         if not schema_drift(backend.connection, CURRENT_SCHEMAS[selected]):

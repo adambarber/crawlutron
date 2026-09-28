@@ -54,8 +54,7 @@ class SharedCookieStore(CoordinationStore):
         now = time.time()
         with self._lock:
             row = self._conn.execute(
-                "SELECT payload FROM coordination_cookies "
-                "WHERE namespace = ? AND host = ?",
+                "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                 (namespace or "", host),
             ).fetchone()
             if row is None:
@@ -63,8 +62,7 @@ class SharedCookieStore(CoordinationStore):
             # A read refreshes recency, so a host that is being crawled
             # survives the next eviction instead of the oldest-unread slot.
             self._conn.execute(
-                "UPDATE coordination_cookies SET touched_at = ? "
-                "WHERE namespace = ? AND host = ?",
+                "UPDATE coordination_cookies SET touched_at = ? WHERE namespace = ? AND host = ?",
                 (now, namespace or "", host),
             )
             self._conn.commit()
@@ -83,8 +81,7 @@ class SharedCookieStore(CoordinationStore):
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 row = self._conn.execute(
-                    "SELECT payload FROM coordination_cookies "
-                    "WHERE namespace = ? AND host = ?",
+                    "SELECT payload FROM coordination_cookies WHERE namespace = ? AND host = ?",
                     key,
                 ).fetchone()
                 merged = {**self._decode(row[0]), **cookies} if row else dict(cookies)
@@ -109,9 +106,7 @@ class SharedCookieStore(CoordinationStore):
         """Clear one namespace, or every slot when ``namespace`` is empty."""
         with self._lock:
             if namespace:
-                self._conn.execute(
-                    "DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,)
-                )
+                self._conn.execute("DELETE FROM coordination_cookies WHERE namespace = ?", (namespace,))
             else:
                 self._conn.execute("DELETE FROM coordination_cookies")
             self._conn.commit()
@@ -119,13 +114,8 @@ class SharedCookieStore(CoordinationStore):
     def all_slots(self) -> dict[tuple[str, str], dict[str, str]]:
         """Every stored slot, for the import/export path."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT namespace, host, payload FROM coordination_cookies"
-            ).fetchall()
-        return {
-            (str(namespace), str(host)): self._decode(payload)
-            for namespace, host, payload in rows
-        }
+            rows = self._conn.execute("SELECT namespace, host, payload FROM coordination_cookies").fetchall()
+        return {(str(namespace), str(host)): self._decode(payload) for namespace, host, payload in rows}
 
     @staticmethod
     def _decode(payload: str) -> dict[str, str]:

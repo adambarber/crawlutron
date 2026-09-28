@@ -26,35 +26,6 @@ _default_http_fetcher_with_policy = partial(
 )
 
 
-async def _run(*, url, strategy=HTTP_DECLARED_CRAWLER, policy, http_fetcher, **kwargs):
-    """Drive the real ``_http_strategy_result`` for one page.
-
-    The page identity is one argument here rather than five, so a test that
-    means to crawl ``/a`` and asserts against ``/b`` cannot be written by
-    misspelling one of five same-shaped parameters -- and the sixteen tests
-    below share this instead of each rebuilding the record.
-    """
-    return await _http_strategy_result(
-        request=strategy_request(url, policy, strategy),
-        http_fetcher=http_fetcher,
-        **kwargs,
-    )
-
-
-def _html_fetcher(html: str):
-    """An async fetcher that serves a fixed HTML body for any URL."""
-    return scripted_fetcher(status=200, ctype="text/html", body=html.encode("utf-8"))
-
-
-def _run_kwargs(fetcher):
-    return dict(
-        url="http://x.test/",
-        http_fetcher=fetcher,
-        cache=HttpCache(),
-        content_cache=None,
-    )
-
-
 def http_policy(**overrides):
     policy = {
         "strategies": [HTTP_DECLARED_CRAWLER],
@@ -75,6 +46,51 @@ def http_policy(**overrides):
     return policy
 
 
+async def _run(
+    *,
+    url,
+    strategy=HTTP_DECLARED_CRAWLER,
+    policy: dict | None = None,
+    http_fetcher=_default_http_fetcher_with_policy,
+    **kwargs,
+):
+    """Drive the real ``_http_strategy_result`` for one page.
+
+    The page identity is one argument here rather than five, so a test that
+    means to crawl ``/a`` and asserts against ``/b`` cannot be written by
+    misspelling one of five same-shaped parameters -- and the sixteen tests
+    below share this instead of each rebuilding the record.
+
+    The strategy, the policy and the fetcher default to the one combination
+    that means "the declared HTTP strategy, a default policy, the fetcher that
+    carries that policy", because they are a single choice rather than three:
+    every caller that spelled all three was reaching for the same transport, and
+    spelling the triple fifteen times is how one of them ends up keeping a stale
+    default while the other fourteen are correct. A test that means a different
+    transport passes the argument; it does not restate the two it did not mean
+    to change.
+    """
+    return await _http_strategy_result(
+        request=strategy_request(url, http_policy() if policy is None else policy, strategy),
+        http_fetcher=http_fetcher,
+        **kwargs,
+    )
+
+
+def _html_fetcher(html: str):
+    """An async fetcher that serves a fixed HTML body for any URL."""
+    return scripted_fetcher(status=200, ctype="text/html", body=html.encode("utf-8"))
+
+
+def _run_kwargs(fetcher):
+    return dict(
+        url="http://x.test/",
+        http_fetcher=fetcher,
+        cache=HttpCache(),
+        content_cache=None,
+    )
+
+
 class TestHttpStrategy:
     async def test_discovery_fetch_omits_page_conditional_headers(self):
         # #1-fix: If-None-Match / If-Modified-Since belong to the HTML page
@@ -93,7 +109,6 @@ class TestHttpStrategy:
         await _run(
             policy=http_policy(discovery={"robots": True}),
             url="http://x.test/",
-            strategy=HTTP_DECLARED_CRAWLER,
             http_fetcher=fetcher,
             cache=cache,
             content_cache=None,
@@ -126,9 +141,6 @@ class TestHttpStrategy:
         # paying an HTML parse per page nobody consumes.
         result = await _run(
             url=f"{base_url}/",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert_result_success(result)
         assert "Example Org" in (result.text or "")
@@ -141,9 +153,6 @@ class TestHttpStrategy:
     async def test_http_strategy_404_classified_not_found(self, base_url):
         result = await _run(
             url=f"{base_url}/missing",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert result.status == "failed"
         assert result.classification == "not_found"
@@ -152,9 +161,6 @@ class TestHttpStrategy:
     async def test_http_strategy_access_denied_page_blocked(self, base_url):
         result = await _run(
             url=f"{base_url}/blocked",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert result.classification == "access_denied"
         assert result.status == "blocked"
@@ -165,9 +171,6 @@ class TestHttpStrategy:
         cache.store(url, {"etag": "v1"})
         result = await _run(
             url=url,
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
             cache=cache,
         )
         assert result.classification == "not_modified"
@@ -177,9 +180,6 @@ class TestHttpStrategy:
     async def test_http_csv_document_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample.csv",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert "Alice" in (result.markdown or "")
         assert "|" in (result.markdown or "")
@@ -187,18 +187,12 @@ class TestHttpStrategy:
     async def test_http_json_document_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample.json",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert '"a":1' in (result.markdown or "")
 
     async def test_http_pdf_table_preserved_via_http(self, base_url):
         result = await _run(
             url=f"{base_url}/sample_table.pdf",
-            strategy=HTTP_DECLARED_CRAWLER,
-            policy=http_policy(),
-            http_fetcher=_default_http_fetcher_with_policy,
         )
         assert "Name" in (result.markdown or "")
         assert "Department" in (result.markdown or "")
@@ -333,7 +327,7 @@ async def test_a_binary_body_result_keeps_its_attempt_type_for_the_render_adapte
 
     binary_fetcher = scripted_fetcher(status=200, ctype="application/octet-stream", body=archive)
 
-    result = await _run(policy=http_policy(), **_run_kwargs(binary_fetcher))
+    result = await _run(**_run_kwargs(binary_fetcher))
 
     # The binary no-text terminal result: not an error, and not a render.
     assert result.classification == "binary_no_text"

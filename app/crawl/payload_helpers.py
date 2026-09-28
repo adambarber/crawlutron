@@ -8,24 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.api_models import POLICY_SCHEMA_VERSION
-from app.constants import (
-    DEFAULT_CHALLENGE_WAIT_SECONDS,
-    DEFAULT_EXTRACTION,
-    DEFAULT_MAX_DISCOVERED_LINKS,
-    DEFAULT_STRATEGIES,
-    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
-    MAX_CONTENT_LENGTH_BYTES,
-    MAX_RATE_LIMIT_RPS,
-    SUPPORTED_EXTRACTIONS,
-    SUPPORTED_STRATEGIES,
+from app.api_models import (
+    CrawlPolicy,
 )
-from app.crawl.credentials import authorization_value as _authorization_value
-from app.crawl.credentials import origin_of
-from app.settings import CrawlerSettings
+from app.crawl.policy import PolicyTier, validate_wire_policy
 from app.validation import HostPolicy, normalize_public_http_url
-
-SUPPORTED_EXTRACTION_METHODS = set(SUPPORTED_EXTRACTIONS)
 
 
 def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
@@ -36,11 +23,6 @@ def _validated_url(url: str, *, host_policy: HostPolicy) -> str:
         if reason in {"unsupported_scheme", "invalid_url"}:
             reason = "invalid_url"
         raise ValueError(reason) from error
-
-
-# Bounded default for max_pages. A missing or zero value must NOT mean
-# "unlimited" (F4) - it falls back to this sane cap instead.
-DEFAULT_MAX_PAGES = 100
 
 
 def _payload_urls(payload: dict[str, Any], *, host_policy: HostPolicy) -> list[str]:
@@ -106,104 +88,26 @@ def checked_payload_urls(
     return urls
 
 
-def _payload_policy(payload: dict[str, Any], settings: CrawlerSettings) -> dict[str, Any]:
-    policy = payload.get("policy") or {}
-    if not isinstance(policy, dict):
-        raise ValueError("invalid_policy")
-    limits = policy.get("limits") or {}
-    if not isinstance(limits, dict):
-        raise ValueError("invalid_policy_limits")
-    headers = policy.get("headers") or {}
-    if not isinstance(headers, dict):
-        raise ValueError("invalid_policy_headers")
-    # Two-arg get, not `or`: an absent key means "use the default chain", but an
-    # explicitly empty one is a caller mistake that the check below rejects.
-    # With `or`, [] was replaced by the default before the guard could see it,
-    # making that guard dead -- and silently handing a caller the whole chain,
-    # browser included, when they had asked for none of it.
-    strategies = policy.get("strategies", DEFAULT_STRATEGIES)
-    if (
-        not isinstance(strategies, list)
-        or not all(isinstance(strategy, str) for strategy in strategies)
-        or not strategies
-    ):
-        raise ValueError("invalid_policy_strategies")
-    if any(strategy not in SUPPORTED_STRATEGIES for strategy in strategies):
-        raise ValueError("invalid_policy_strategy")
-    extraction = policy.get("extraction") or DEFAULT_EXTRACTION
-    if extraction not in SUPPORTED_EXTRACTION_METHODS:
-        raise ValueError("invalid_policy_extraction")
-    request_profile = policy.get("request_profile") or {}
-    browser_profile = policy.get("browser_profile") or {}
-    discovery = policy.get("discovery") or {}
-    credentials = policy.get("credentials") or {}
-    if (
-        not isinstance(request_profile, dict)
-        or not isinstance(browser_profile, dict)
-        or not isinstance(discovery, dict)
-        or not isinstance(credentials, dict)
-    ):
-        raise ValueError("invalid_policy_profile")
-    try:
-        max_depth = max(0, min(20, int(limits.get("max_depth", 0))))
-        # F4: a missing/zero max_pages must be bounded, never "unlimited".
-        # Any positive request is clamped to [1, 2000].
-        requested_pages = int(limits.get("max_pages", 0))
-        if requested_pages <= 0:
-            max_pages = DEFAULT_MAX_PAGES
-        else:
-            max_pages = max(1, min(2000, requested_pages))
-        respect_robots = bool(limits.get("respect_robots", True))
-        max_rps = float(limits.get("max_rps", 0.0) or 0.0)
-        if not 0.0 <= max_rps <= MAX_RATE_LIMIT_RPS:
-            raise ValueError("invalid_policy_limits")
-        max_content_length_bytes = int(limits.get("max_content_length_bytes", 0) or 0)
-        if not 0 <= max_content_length_bytes <= MAX_CONTENT_LENGTH_BYTES:
-            raise ValueError("invalid_policy_limits")
-    except (TypeError, ValueError):
-        raise ValueError("invalid_policy_limits") from None
-    normalized_credentials: dict[str, dict[str, Any]] = {}
-    for key, credential in credentials.items():
-        # Job-replay boundary: keys arrive as stored text, so canonicalize
-        # here (the wire layer rejected non-canonical keys; this is
-        # idempotent on those). Shape errors are rejected, never dropped.
-        if not isinstance(credential, dict):
-            raise ValueError("invalid_policy_credentials")
-        try:
-            origin = origin_of(str(key))
-            _authorization_value(credential)  # shape validation, value unused
-        except ValueError:
-            raise ValueError("invalid_policy_credentials") from None
-        normalized_credentials[origin] = dict(credential)
-    return {
-        "schema_version": str(policy.get("schema_version", POLICY_SCHEMA_VERSION)),
-        "strategies": strategies,
-        "extraction": extraction,
-        "scope_regex": policy.get("scope_regex"),
-        "css_selector": policy.get("css_selector"),
-        "xpath": policy.get("xpath"),
-        "limits": {
-            "timeout_seconds": int(limits.get("timeout_seconds", settings.default_timeout_seconds)),
-            "max_retries": int(limits.get("max_retries", settings.default_max_retries)),
-            "challenge_wait_seconds": int(
-                limits.get("challenge_wait_seconds", DEFAULT_CHALLENGE_WAIT_SECONDS)
-            ),
-            "max_discovered_links": int(limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS)),
-            "respect_robots": respect_robots,
-            "max_depth": max_depth,
-            "max_pages": max_pages,
-            "max_rps": max_rps,
-            "max_content_length_bytes": max_content_length_bytes,
-            "total_url_budget_seconds": max(
-                0.1, min(900, float(limits.get("total_url_budget_seconds", DEFAULT_TOTAL_URL_BUDGET_SECONDS)))
-            ),
-        },
-        "headers": {str(key): str(value) for key, value in headers.items()},
-        "credentials": normalized_credentials,
-        "request_profile": dict(request_profile),
-        "browser_profile": dict(browser_profile),
-        "discovery": {str(key): bool(value) for key, value in discovery.items()},
-    }
+def _payload_policy(payload: dict[str, Any], tier: PolicyTier) -> CrawlPolicy:
+    """Validate a wire policy into the model every decision site reads.
+
+    The ``invalid_policy_*`` codes this raises are derived from where the model
+    reports the error, in :func:`app.crawl.policy.validate_wire_policy`, rather
+    than spelled out here -- the hand-spelled version that used to live in this
+    function had already begun to read ``limits`` three different ways and to
+    enforce bounds the model did not declare.
+
+    How a caller sees a rejection is not decided here either, and the honest
+    description is that it differs by edge. Over HTTP, FastAPI validates
+    ``CrawlRequest.policy`` as this model *before* the handler runs, so a
+    rejected policy arrives as a 422 ``validation_error`` carrying pydantic's
+    own ``loc``-tagged message and never reaches this function -- which makes
+    the per-field codes unreachable on that path, not merely unused. MCP
+    surfaces the bare code string. A direct ``crawl_request`` caller gets the
+    ``ValueError``. Three shapes for one bad input, each owned by the edge that
+    produced it.
+    """
+    return validate_wire_policy(payload.get("policy") or {}, tier)
 
 
-__all__ = ["DEFAULT_MAX_PAGES", "SUPPORTED_EXTRACTION_METHODS", "checked_payload_urls"]
+__all__ = ["checked_payload_urls"]

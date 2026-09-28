@@ -25,6 +25,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any
 
+from app.api_models import CrawlExtractionMethod, CrawlPolicy
 from app.constants import (
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_DOCUMENT,
@@ -39,6 +40,7 @@ from app.crawl.extraction import (
     extract_post_fetch_discovery,
     normalized_extraction,
 )
+from app.crawl.policy import discovery_flags
 from app.models import CrawlError
 from app.validation import HostPolicy, filter_js_endpoints
 
@@ -59,12 +61,12 @@ class _ExtractedContent:
 
 async def _run_extraction(
     *,
-    extraction: str,
+    extraction: CrawlExtractionMethod,
     content: str | bytes,
     decoded: str,
     content_type: str | None,
     final_url: str,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     default_method: str,
     html: bool,
 ) -> _ExtractedContent:
@@ -91,7 +93,7 @@ async def _run_extraction(
     body/text mode, whose name depends on how the body was obtained (HTML vs
     decoded body vs browser render).
     """
-    selectors = Selectors(css=policy.get("css_selector"), xpath=policy.get("xpath"))
+    selectors = Selectors(css=policy.css_selector, xpath=policy.xpath)
     if extraction == EXTRACTION_DOCUMENT:
         # The document extractor is typed for bytes; a browser render has text.
         payload = content.encode("utf-8", "replace") if isinstance(content, str) else content
@@ -115,10 +117,8 @@ async def _discover_after_fetch(
     html: str | None,
     final_url: str,
     js_base_url: str | None,
-    max_links: int,
-    include_diagnostics: bool,
-    include_links: bool,
-    include_js_endpoints: bool,
+    status: str,
+    policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
     """The post-fetch discovery envelope, parsed off the event loop.
@@ -128,16 +128,33 @@ async def _discover_after_fetch(
     parse happens at all. ``include_metadata`` is not a switch: the page
     metadata rides the tree this call already parsed, and the result's
     ``llm_metadata`` field is fed from here by both strategies.
+
+    The switches are derived from the policy here rather than taken as
+    arguments, which is the point of the signature. They used to be passed in,
+    and the two strategies passed different answers for one policy: the browser
+    path asked for links, diagnostics and JS endpoints unconditionally while
+    the HTTP path asked for them only when a discovery channel was on or the
+    call had a depth to spend. So the same policy discovered links on a
+    browser-rendered page and not on an HTTP-fetched one, and the divergence
+    was invisible in both results -- each was individually well-formed. A
+    caller cannot pass a wrong combination here because there is no wrong one
+    to pass.
     """
+    flags = discovery_flags(policy)
+    discovery_block = any(flags)
+    # A depth to spend is a reason to look for links even with no discovery
+    # channel on: a whole-site job is unbounded, and the links it follows are
+    # the whole reason it exists.
+    want_links = discovery_block or policy.limits.max_depth > 0
     return await asyncio.to_thread(
         extract_post_fetch_discovery,
         html,
         final_url,
         js_base_url=js_base_url,
-        max_links=max_links,
-        include_diagnostics=include_diagnostics,
-        include_links=include_links,
-        include_js_endpoints=include_js_endpoints,
+        max_links=policy.limits.max_discovered_links,
+        include_diagnostics=discovery_block,
+        include_links=status == "success" and want_links,
+        include_js_endpoints=discovery_block,
         include_metadata=True,
         host_policy=host_policy,
     )

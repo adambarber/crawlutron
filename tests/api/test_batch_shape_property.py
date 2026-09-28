@@ -16,6 +16,7 @@ import random
 from typing import Any
 
 from app.api.response_shaping import (
+    EnvelopeOptions,
     _shape_all,
     abuild_unified_crawl_response,
     build_unified_crawl_response,
@@ -173,14 +174,16 @@ class TestBatchShapeProperty:
         for seed in SEEDS:
             rng = random.Random(1000 + seed)
             batch, expected, _ = _random_batch(rng)
-            response = build_unified_crawl_response(batch, request_id=f"r{seed}")
+            response = build_unified_crawl_response(batch, options=EnvelopeOptions(request_id=f"r{seed}"))
             _check_shaped(response.results, expected)
 
     async def test_async_builder_survives_the_same_batches(self):
         for seed in SEEDS:
             rng = random.Random(2000 + seed)
             batch, expected, _ = _random_batch(rng)
-            response = await abuild_unified_crawl_response(batch, request_id=f"r{seed}")
+            response = await abuild_unified_crawl_response(
+                batch, options=EnvelopeOptions(request_id=f"r{seed}")
+            )
             _check_shaped(response.results, expected)
 
     async def test_adapter_batch_survives_and_keeps_render_classifications(self):
@@ -199,7 +202,7 @@ class TestBatchShapeProperty:
             shaped = _shape_all(batch, adapt=render_result_to_unified)
             _check_shaped(shaped, expected)
             response = await abuild_unified_crawl_response(
-                batch, request_id=f"a{seed}", adapt=render_result_to_unified
+                batch, adapt=render_result_to_unified, options=EnvelopeOptions(request_id=f"a{seed}")
             )
             _check_shaped(response.results, expected)
 

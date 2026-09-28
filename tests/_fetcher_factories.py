@@ -10,6 +10,7 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLE
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
+from app.crawl.policy import read_policy
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import HttpFetchResult
 from app.validation import HostPolicy
@@ -118,7 +119,11 @@ def site_fetcher(pages: dict[str, Any]):
         if entry is None:
             return {"status": 404, "body": b"<html></html>", "ctype": "text/html"}
         status, body, ctype = entry
-        return {"status": status, "body": body.encode("utf-8") if isinstance(body, str) else body, "ctype": ctype}
+        return {
+            "status": status,
+            "body": body.encode("utf-8") if isinstance(body, str) else body,
+            "ctype": ctype,
+        }
 
     return fetcher_double(answer)
 
@@ -160,7 +165,9 @@ def scripted_fetcher(*, status=200, body=b"", headers=None, ctype="text/html; ch
     included), which is what a test about a header or a content-encoding needs;
     otherwise ``ctype`` supplies the content type and nothing else is sent.
     """
-    return fetcher_double(lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype})
+    return fetcher_double(
+        lambda url, *_: {"status": status, "body": body, "headers": headers, "ctype": ctype}
+    )
 
 
 def failing_fetcher(error: BaseException | type[BaseException] | None = None, calls: list | None = None):
@@ -301,7 +308,9 @@ def tap_fetcher(inner, calls: list | None = None):
     functions: this one owns the list, the wrapped one owns the response --
     which may be sync or async, since :func:`fetcher_double` awaits either.
     """
-    return fetcher_double(lambda url, sent_headers, timeout, cap: inner(url, sent_headers, timeout, cap), calls)
+    return fetcher_double(
+        lambda url, sent_headers, timeout, cap: inner(url, sent_headers, timeout, cap), calls
+    )
 
 
 def concurrent_fetcher(
@@ -477,10 +486,7 @@ def site_linking_to(*paths: str, bodies: dict[str, str] | None = None) -> dict[s
     links = "".join(f'<a href="{path}">{path.strip("/") or path}</a>' for path in paths)
     return {
         "/": (200, f"<html><body>{links}</body></html>", "text/html"),
-        **{
-            path: (200, bodies.get(path, f"<html>{path.strip('/')}</html>"), "text/html")
-            for path in paths
-        },
+        **{path: (200, bodies.get(path, f"<html>{path.strip('/')}</html>"), "text/html") for path in paths},
     }
 
 
@@ -599,7 +605,7 @@ async def run_chain(
     return await execute_crawl_chain(
         original_url=url,
         normalized_url=url,
-        policy=policy,
+        policy=read_policy(policy),
         http_fetcher=fetcher,
         cffi_fetcher=fetcher if cffi_fetcher is None else cffi_fetcher,
         browser_worker=browser_worker,
@@ -617,9 +623,7 @@ async def run_cached_twice(url: str, policy: dict[str, Any], fetcher: Any, cache
     second result is the interesting one and the arrangement is not.
     """
     results = [
-        await run_http_strategy(
-            url, policy, fetcher, cache=cache, content_cache=content_cache
-        )
+        await run_http_strategy(url, policy, fetcher, cache=cache, content_cache=content_cache)
         for _ in range(2)
     ]
     return results[0], results[1]
@@ -665,6 +669,7 @@ def _spawn_fetch(fn):
     finally:
         server.stop()
 
+
 def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
@@ -678,10 +683,9 @@ def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> Strateg
         original_url=url,
         normalized_url=url,
         strategy=strategy,
-        policy=policy,
+        policy=read_policy(policy),
         host_policy=HostPolicy.unrestricted(),
     )
-
 
 
 async def run_http_strategy(

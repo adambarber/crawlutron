@@ -120,8 +120,8 @@ class TestRevalidationFetchesOnce:
 
         async def _crawl():
             result = await run_http_strategy(
-            url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
-        )
+                url=url, policy=self._policy(), http_fetcher=fetcher, cache=cache, content_cache=content_cache
+            )
             assert result.status == "success"
             return result
 

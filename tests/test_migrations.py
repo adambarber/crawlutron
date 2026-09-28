@@ -8,7 +8,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from _policy_factories import job_store
 
+from app.api_models import CrawlPolicy
 from app.crawl.coordination_cookies import SharedCookieStore
 from app.crawl.coordination_counters import CoordinationCounters
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
@@ -26,7 +28,6 @@ from app.crawl.migrations import (
 )
 from app.crawl.migrations.runner import LegacySchemaMismatch
 from app.crawl.result_store import CrawlResultStore
-from app.validation import HostPolicy
 
 _BOOKKEEPING_TABLES = {"_yoyo_log", "_yoyo_migration", "_yoyo_version", "yoyo_lock"}
 
@@ -35,7 +36,7 @@ def _open_store(
     schema: StoreSchema, db_path: Path
 ) -> JobStore | CrawlResultStore | CoordinationCounters | SharedCookieStore:
     if schema is StoreSchema.CRAWL_JOBS:
-        return JobStore(db_path, policy=HostPolicy.unrestricted())
+        return job_store(db_path)
     if schema is StoreSchema.RESULTS:
         return CrawlResultStore(db_path)
     if schema is StoreSchema.COORDINATION_COUNTERS:
@@ -86,7 +87,7 @@ def _stamped_legacy_job(db_path: Path) -> tuple[JobStore, CrawlJobState | None]:
     only thing that said what they were actually asserting.
     """
     _create_legacy_database(db_path, StoreSchema.CRAWL_JOBS)
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     return store, store.load("legacy-job")
 
 
@@ -115,7 +116,7 @@ def _assert_reopen_refused(db_path: Path, ddl: str, match: str) -> None:
     conn.commit()
     conn.close()
     with pytest.raises(Exception, match=match):
-        JobStore(db_path, policy=HostPolicy.unrestricted())
+        job_store(db_path)
 
 
 def _create_legacy_database(db_path: Path, schema: StoreSchema) -> None:
@@ -276,7 +277,7 @@ def test_explicit_stamp_docstring_describes_satisfied_migrations():
 )
 def test_store_rejects_out_of_band_column_drift(tmp_path, changed_column):
     db_path = tmp_path / f"drift-{changed_column.name}.db"
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     store.close()
     _rewrite_store_table(
         db_path,
@@ -284,18 +285,18 @@ def test_store_rejects_out_of_band_column_drift(tmp_path, changed_column):
     )
 
     with pytest.raises(LegacySchemaMismatch, match=changed_column.name):
-        JobStore(db_path, policy=HostPolicy.unrestricted())
+        job_store(db_path)
 
 
 def test_store_accepts_reordered_columns_at_startup(tmp_path):
     db_path = tmp_path / "reordered.db"
     table = CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     store.close()
     reordered = replace(table, columns=tuple(reversed(table.columns)))
     _rewrite_store_table(db_path, reordered)
 
-    reopened = JobStore(db_path, policy=HostPolicy.unrestricted())
+    reopened = job_store(db_path)
     reopened.close()
     conn = sqlite3.connect(db_path)
     actual = _column_names(conn, "crawl_jobs")
@@ -320,7 +321,7 @@ def test_legacy_result_database_is_stamped_without_losing_rows_or_columns(tmp_pa
 
 def test_missing_migration_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "missing-column.db"
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     store.close()
     _assert_reopen_refused(
         db_path, "ALTER TABLE crawl_jobs DROP COLUMN transient_retries", match="transient_retries"
@@ -329,14 +330,14 @@ def test_missing_migration_column_is_refused_when_store_reopens(tmp_path):
 
 def test_out_of_band_extra_column_is_refused_when_store_reopens(tmp_path):
     db_path = tmp_path / "extra-column.db"
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     store.close()
     _assert_reopen_refused(db_path, "ALTER TABLE crawl_jobs ADD COLUMN unexpected TEXT", match="unexpected")
 
 
 def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):
     db_path = tmp_path / "changed-default.db"
-    store = JobStore(db_path, policy=HostPolicy.unrestricted())
+    store = job_store(db_path)
     store.close()
     conn = sqlite3.connect(db_path)
     changed_schema = create_table_sql(CURRENT_SCHEMAS[StoreSchema.CRAWL_JOBS]).replace(
@@ -354,21 +355,21 @@ def test_out_of_band_changed_default_is_detected_as_drift(tmp_path):
 
 
 def test_migration_bookkeeping_never_leaks_into_store_payloads(tmp_path):
-    job_store = JobStore(tmp_path / "jobs.db", policy=HostPolicy.unrestricted())
+    store = job_store(tmp_path / "jobs.db")
     result_store = CrawlResultStore(tmp_path / "results.db")
-    job = job_store.create("https://example.test", {})
+    job = store.create("https://example.test", CrawlPolicy())
     job.results = [{"url": "https://example.test", "status": "success"}]
-    job_store.save(job)
+    store.save(job)
     result_store.put("request-1", {"request_id": "request-1", "results": []})
 
-    jobs = job_store.list_jobs()
+    jobs = store.list_jobs()
     result = result_store.get("request-1")
     wire_payload = json.dumps({"jobs": jobs, "result": result}, sort_keys=True)
 
     assert jobs[0]["results_count"] == 1
     for table_name in _BOOKKEEPING_TABLES:
         assert table_name not in wire_payload
-    job_store.close()
+    store.close()
     result_store.close()
 
 

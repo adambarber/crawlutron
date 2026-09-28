@@ -77,7 +77,7 @@ BLOCK_LENGTH = 40
 # smaller first.
 _BUDGETS = {
     "function length": 39,
-    "abc size": 6,
+    "abc size": 5,
     "class length": 3,
     "block length": 13,
 }
@@ -265,9 +265,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     the loop below read as "no budget at this revision" -- a silently weakened
     history, not a failing one.
     """
-    return subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
-    )
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=False)
 
 
 def test_metric_budgets_have_never_risen() -> None:

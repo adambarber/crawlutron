@@ -507,6 +507,7 @@ def _released_on_a_live_loop(client, what: str) -> bool:
     ``what`` names the client in the failure message; "the teardown never ran"
     in a 1200-test run does not say which kind failed.
     """
+
     async def _scenario():
         http_mod._release_dropped_client(client)
         await await_until(lambda: client.closed, f"{what}'s teardown never ran on a live loop")

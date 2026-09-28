@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
@@ -271,9 +272,29 @@ def frontier_link_url(
     return str(validated) if validated is not None else None
 
 
+@dataclass(frozen=True, slots=True)
+class EnvelopeOptions:
+    """The scalar fields a response envelope carries, beside its shaped results.
+
+    One record rather than four keyword parameters on each of two builders: the
+    parameters were the reason the sync and async signatures were a six-line
+    identical fragment, and a twin signature is a contract that has to be edited
+    twice. The fields stay named and explicit -- a misspelled or unpassed
+    envelope field is a field the response silently lacks, because
+    ``UnifiedCrawlResponse`` drops one rather than raising -- so this is a place
+    to add a field, not a ``**options`` bag that would take any.
+    """
+
+    request_id: str = ""
+    policy_schema_version: str = ""
+    success: bool = True
+    submitted_count: int | None = None
+
+
 def _response_envelope(
-    shaped: list[UnifiedCrawlResult], result_count: int, request_id: str, policy_schema_version: str,
-    success: bool, submitted_count: int | None,
+    shaped: list[UnifiedCrawlResult],
+    result_count: int,
+    options: EnvelopeOptions,
 ) -> UnifiedCrawlResponse:
     """The one construction of the response envelope: shaped results plus every scalar field.
 
@@ -294,26 +315,26 @@ def _response_envelope(
     dropped item silently change a number the response claims was submitted.
     """
     return UnifiedCrawlResponse(
-        results=shaped, request_id=request_id, policy_schema_version=policy_schema_version, success=success,
-        submitted_count=result_count if submitted_count is None else submitted_count,
+        results=shaped,
+        request_id=options.request_id,
+        policy_schema_version=options.policy_schema_version,
+        success=options.success,
+        submitted_count=(result_count if options.submitted_count is None else options.submitted_count),
     )
 
 
 def build_unified_crawl_response(
-    results: list[dict[str, Any]], *, request_id: str = "", policy_schema_version: str = "",
-    success: bool = True, submitted_count: int | None = None,
+    results: list[dict[str, Any]],
+    *,
+    options: EnvelopeOptions | None = None,
 ) -> UnifiedCrawlResponse:
     """Build the unified crawl response from a list of engine-result dicts.
 
     The async twin below is the same contract with the shaping off the event
-    loop; both take the same envelope options and both hand them to
-    :func:`_response_envelope`, so the response they build is decided in one
-    place. The options are named rather than ``**options`` on both: a misspelled
-    or unpassed envelope field is a field the response silently lacks.
+    loop; both hand their options to :func:`_response_envelope`, so the response
+    they build is decided in one place.
     """
-    return _response_envelope(
-        _shape_all(results), len(results), request_id, policy_schema_version, success, submitted_count
-    )
+    return _response_envelope(_shape_all(results), len(results), options or EnvelopeOptions())
 
 
 def _shape_all(
@@ -393,8 +414,9 @@ def _failed_unified_result(item: Any) -> UnifiedCrawlResult:
 
 
 async def abuild_unified_crawl_response(
-    results: list[dict[str, Any]], *, request_id: str = "", policy_schema_version: str = "",
-    success: bool = True, submitted_count: int | None = None,
+    results: list[dict[str, Any]],
+    *,
+    options: EnvelopeOptions | None = None,
     adapt: Callable[[dict[str, Any]], UnifiedCrawlResult] | None = None,
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
@@ -409,7 +431,7 @@ async def abuild_unified_crawl_response(
     rejects degrades instead of failing the response.
     """
     shaped = await asyncio.to_thread(_shape_all, results, adapt=adapt) if results else []
-    return _response_envelope(shaped, len(results), request_id, policy_schema_version, success, submitted_count)
+    return _response_envelope(shaped, len(results), options or EnvelopeOptions())
 
 
 async def _aunified_response_from_result(
@@ -432,11 +454,23 @@ async def _aunified_response_from_result(
     """
     return await abuild_unified_crawl_response(
         result.get("results", []),
-        request_id=result["request_id"],
-        submitted_count=result["submitted_count"],
-        policy_schema_version=result["policy_schema_version"],
+        options=EnvelopeOptions(
+            request_id=result["request_id"],
+            submitted_count=result["submitted_count"],
+            policy_schema_version=result["policy_schema_version"],
+        ),
         adapt=adapt,
     )
 
 
-__all__ = ["aformat_crawl_item", "abuild_unified_result", "abuild_unified_crawl_response", "format_crawl_item", "build_unified_result", "render_result_to_unified", "frontier_link_url", "build_unified_crawl_response"]
+__all__ = [
+    "aformat_crawl_item",
+    "abuild_unified_result",
+    "abuild_unified_crawl_response",
+    "format_crawl_item",
+    "build_unified_result",
+    "render_result_to_unified",
+    "frontier_link_url",
+    "build_unified_crawl_response",
+    "EnvelopeOptions",
+]

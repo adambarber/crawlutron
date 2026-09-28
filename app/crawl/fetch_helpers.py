@@ -185,8 +185,8 @@ async def _fetch_text(
 #
 # The lock lives inside the chokepoint, so call sites can never forget it
 # (the class of bug that produced the robots-cache and DNS-cache races).
-_SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = BoundedTTLCache(
-    max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS
+_SITEMAP_CACHE: BoundedTTLCache[tuple[str, HostPolicy], tuple[list, str | None, str | None]] = (
+    BoundedTTLCache(max_entries=SITEMAP_CACHE_MAX_ENTRIES, ttl=SITEMAP_CACHE_TTL_SECONDS)
 )
 
 

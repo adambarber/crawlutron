@@ -35,8 +35,9 @@ class TestCffiImpersonateStrategy:
         cffi_fetcher = scripted_fetcher(
             status=200, ctype="text/html", body=b"<html><body>content</body></html>"
         )
-        policy = make_base_policy(strategies=[HTTP_CFFI_IMPERSONATE])
-        policy["extraction"] = "full"
+        policy = make_base_policy(strategies=[HTTP_CFFI_IMPERSONATE]).model_copy(
+            update={"extraction": "full"}
+        )
 
         result = await _http_strategy_result(
             request=strategy_request("http://x/", policy, HTTP_CFFI_IMPERSONATE),

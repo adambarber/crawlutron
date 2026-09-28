@@ -260,7 +260,11 @@ class TestShapeAllGuardsPerItem:
     """
 
     async def test_one_bad_item_does_not_fail_the_batch(self):
-        from app.api.response_shaping import abuild_unified_crawl_response, build_unified_result
+        from app.api.response_shaping import (
+            EnvelopeOptions,
+            abuild_unified_crawl_response,
+            build_unified_result,
+        )
 
         good = _budget_item()
         bad = {**good, "status": "not-a-real-status"}
@@ -271,7 +275,9 @@ class TestShapeAllGuardsPerItem:
         except Exception:
             pass
 
-        response = await abuild_unified_crawl_response([good, bad], request_id="r", submitted_count=2)
+        response = await abuild_unified_crawl_response(
+            [good, bad], options=EnvelopeOptions(request_id="r", submitted_count=2)
+        )
         assert len(response.results) == 2
         assert response.results[0].classification == "url_budget_exceeded"
         assert response.results[1].status == "failed"

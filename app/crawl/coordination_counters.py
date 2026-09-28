@@ -73,9 +73,7 @@ class CoordinationCounters(CoordinationStore):
     def snapshot(self) -> dict[str, float]:
         """Every recorded name and total, for the aggregating read path."""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT name, value FROM coordination_counters"
-            ).fetchall()
+            rows = self._conn.execute("SELECT name, value FROM coordination_counters").fetchall()
         return {str(name): float(value) for name, value in rows}
 
     def reset(self) -> None:

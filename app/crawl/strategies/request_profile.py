@@ -14,20 +14,12 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
 from app.crawl import decompression
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
-
-
-def _validated_request_profile(policy: Mapping[str, Any]) -> dict[str, Any]:
-    value = policy.get("request_profile")
-    if value is None:
-        return {}
-    if not isinstance(value, Mapping):
-        raise ValueError("invalid_policy_profile")
-    return dict(value)
 
 
 def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
@@ -171,12 +163,12 @@ def _accept_encoding() -> str:
 
 def _headers_for_strategy(
     strategy: str,
-    policy: Mapping[str, Any],
+    policy: CrawlPolicy,
     url: str,
     *,
     profile: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
-    resolved_profile = profile if profile is not None else _validated_request_profile(policy)
+    resolved_profile = profile if profile is not None else policy.request_profile
     headers = {
         "User-Agent": DEFAULT_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -233,9 +225,9 @@ def _headers_for_strategy(
     cookie_header = _cookie_header_for_url(resolved_profile, url)
     if cookie_header:
         headers["Cookie"] = cookie_header
-    headers.update(policy["headers"])
+    headers.update(policy.headers)
     # Origin-scoped credentials last: the value is attached only when this
     # exact URL's origin holds one, and the redirect loop's Fix-3 scrub
     # strips it on any cross-host hop (same chokepoint as cookies).
-    _apply_credentials(headers, url, policy.get("credentials") or {})
+    _apply_credentials(headers, url, policy.credentials)
     return headers

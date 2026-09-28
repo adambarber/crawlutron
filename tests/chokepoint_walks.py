@@ -660,6 +660,25 @@ def offender(path: pathlib.Path, lineno: int, detail: str = "") -> str:
     return f"{label} {detail}".strip()
 
 
+def offender_at(path: pathlib.Path, node: ast.AST, *detail: str) -> str:
+    """``offender`` reading the line number off the node, from message parts.
+
+    Every detector in the tree ends by appending one of these, and the
+    three-argument ``offender(path, node.lineno, ...)`` spelling makes the call
+    wrap as soon as the message is longer than the line budget -- so the shape
+    that is *most* common (a message explaining why the shape is wrong) is
+    exactly the shape that stops being one line, and a wrapped detector is a
+    seven-line block that duplicates every other wrapped detector. jscpd
+    reported twelve of them as clones, which is the same fact this exists to
+    stop: the duplication was the wrapping, not the logic.
+
+    Taking the parts separately and joining them here keeps the append on one
+    line at any message length, and ``offender`` stays the one place the label
+    is formatted.
+    """
+    return offender(path, node.lineno, "".join(detail))
+
+
 def _static_string(expr: ast.AST, bindings: dict[str, str]) -> str | None:
     if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
         return expr.value

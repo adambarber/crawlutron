@@ -84,7 +84,9 @@ class ToolSpec:
     def input_schema(self) -> dict[str, Any]:
         """The request model's own JSON schema, less the unsupported fields."""
         schema = self.request_model.model_json_schema()
-        properties = {k: v for k, v in schema.get("properties", {}).items() if k not in self.unsupported_fields}
+        properties = {
+            k: v for k, v in schema.get("properties", {}).items() if k not in self.unsupported_fields
+        }
         required = [k for k in schema.get("required", []) if k not in self.unsupported_fields]
         return {
             **{k: v for k, v in schema.items() if k not in ("properties", "required")},

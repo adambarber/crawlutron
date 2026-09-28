@@ -78,6 +78,10 @@ class TestMultiWorkerInvariants:
 
         assert DATABASE_PATH.endswith("/crawler.db")
         source = read_main_source()
+        # The constructors, not the module-level bindings: ``job_store`` is a
+        # name the module assigns, and a token of ``job_store(`` would have
+        # passed against a helper that no longer exists and failed against the
+        # assignment that does.
         for ctor in ("JobStore(", "CrawlResultStore(", "CoordinationCounters(", "SharedCookieStore("):
             assert ctor in source, ctor
             line = next(ln for ln in source.splitlines() if ctor in ln)

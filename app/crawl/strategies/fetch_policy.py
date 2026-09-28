@@ -12,8 +12,10 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, DISCOVERY_BODY_MAX_BYTES
 from app.crawl.decompression import decompress_body as _decompress_body
+from app.crawl.policy import discovery_flags
 from app.crawl.result_helpers import _classify_error_code
 from app.crawl.strategies.body_decode import _decode_body
 from app.models import HttpFetcher
@@ -141,15 +143,15 @@ async def _discovery_diagnostics(
     *,
     normalized_url: str,
     html: str | None,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     host_policy: HostPolicy,
     headers: dict[str, str],
     http_fetcher: Any,
     engine_robots_sitemaps: list[str] | None,
     robots_evaluated: bool,
 ) -> dict[str, Any]:
-    discovery = policy.get("discovery") or {}
-    limits = policy.get("limits", {})
+    flags = discovery_flags(policy)
+    limits = policy.limits
     diagnostics: dict[str, Any] = {}
     safe_source = public_url_or_none(normalized_url, policy=host_policy)
     if safe_source is None:
@@ -172,12 +174,12 @@ async def _discovery_diagnostics(
         diagnostics["robots"] = _robots_diagnostics(
             "cached", sitemaps=robots_sitemaps, reused_from_engine=True
         )
-    elif discovery.get("robots"):
+    elif flags.robots:
         robots_url = public_url_or_none(urljoin(origin, "/robots.txt"), policy=host_policy)
         if robots_url is None:
             return diagnostics
         try:
-            robots_response = http_fetcher(robots_url, headers, limits.get("timeout_seconds", 10))
+            robots_response = http_fetcher(robots_url, headers, limits.timeout_seconds)
             if inspect.iscoroutine(robots_response):
                 robots_response = await robots_response
             robots_headers = {key.lower(): value for key, value in robots_response.headers.items()}
@@ -216,7 +218,7 @@ async def _discovery_diagnostics(
                 "evaluated", url=robots_url, error=_classify_error_code(error)
             )
     sitemap_urls: list[str] = []
-    if discovery.get("sitemaps"):
+    if flags.sitemaps:
         candidate_sitemaps = robots_sitemaps or ["/sitemap.xml"]
         from app.crawl.fetch_helpers import fetch_sitemap_urls
 
@@ -226,7 +228,7 @@ async def _discovery_diagnostics(
                 found_locs = await fetch_sitemap_urls(
                     http_fetcher,
                     sitemap_url,
-                    limits.get("timeout_seconds", 10),
+                    limits.timeout_seconds,
                     host_policy=host_policy,
                 )
                 for loc, lastmod in found_locs:
@@ -243,7 +245,7 @@ async def _discovery_diagnostics(
             except Exception:
                 continue
     feeds: list[str] = []
-    if discovery.get("feeds"):
+    if flags.feeds:
         for match in re.finditer(
             r"<link\b[^>]*rel=['\"][^'\"]*alternate[^'\"]*['\"][^>]*>", html or "", flags=re.IGNORECASE
         ):

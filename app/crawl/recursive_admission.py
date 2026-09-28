@@ -125,7 +125,9 @@ def _pop_admitted(
     browser_tasks: list[_Admitted] = []
     for item in taken:
         _depth, task = item
-        (browser_tasks if _pinned_strategy(scheduler, task) in BROWSER_STRATEGIES else http_tasks).append(item)
+        (browser_tasks if _pinned_strategy(scheduler, task) in BROWSER_STRATEGIES else http_tasks).append(
+            item
+        )
     selected = http_tasks[:admit_http] + browser_tasks[:admit_browser]
     excess = http_tasks[admit_http:] + browser_tasks[admit_browser:]
     for item in reversed(excess):

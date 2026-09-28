@@ -20,10 +20,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
-from app.constants import (
-    DEFAULT_EXTRACTION,
-    DEFAULT_STRATEGIES,
-)
+from app.api_models import CrawlPolicy
 from app.crawl import robots as _robots_policy
 from app.resource_pressure import ResourceGate
 
@@ -47,6 +44,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import _fetch_and_decode
 from app.crawl.payload_helpers import _payload_policy, checked_payload_urls
+from app.crawl.policy import PolicyTier
 from app.crawl.request_pipeline import _PipelineDependencies, _PipelineState, run_crawl_request
 from app.crawl.strategies.fetchers import _default_http_fetcher, impersonating_fetcher
 from app.models import (
@@ -80,12 +78,6 @@ def _get_shared_content_cache() -> ContentCache:
             default_ttl=settings.cache_ttl_seconds,
         )
     return _SHARED_CONTENT_CACHE
-
-
-
-
-
-
 
 
 def _purge_robots_cache(now: float | None = None) -> int:
@@ -135,7 +127,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     return ts
 
 
-def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: dict[str, Any]) -> bool:
+def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
     re-fetching it (#3).
@@ -145,9 +137,9 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
     lastmod_ts = _parse_lastmod(lastmod)
     if lastmod_ts is None:
         return False
-    extraction = policy.get("extraction") or DEFAULT_EXTRACTION
-    css = policy.get("css_selector")
-    xp = policy.get("xpath")
+    extraction = policy.extraction
+    css = policy.css_selector
+    xp = policy.xpath
     # Lazy import avoids a module cycle (engine <-> http).
     from app.crawl.strategies.content_cache_key import _content_cache_key
     from app.crawl.strategies.request_profile import _headers_for_strategy
@@ -155,7 +147,7 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
     # Default to the real strategy chain (L5): the old ["HTTP"] placeholder
     # is not a strategy, so its cache keys could never match stored entries
     # and freshness was never detected through this path.
-    for strategy in policy.get("strategies", DEFAULT_STRATEGIES):
+    for strategy in policy.strategies:
         key = _content_cache_key(
             url,
             strategy,
@@ -173,7 +165,7 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: di
 def _stale_seeds(
     candidates: Iterable[tuple[str, str | None]],
     content_cache: Any,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
 ) -> set[str]:
     """Batch the sitemap freshness filter (call from a worker thread).
 
@@ -397,11 +389,11 @@ class _ResultSpill:
                 pass
 
 
-def _set_cookie_namespace(policy: dict[str, Any]):
+def _set_cookie_namespace(policy: CrawlPolicy):
     from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
     from app.crawl.strategies.request_profile import cookie_namespace_for
 
-    return _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.get("request_profile") or {}))
+    return _COOKIE_NAMESPACE.set(cookie_namespace_for(policy.request_profile))
 
 
 def _reset_cookie_namespace(token: Any) -> None:
@@ -435,7 +427,7 @@ async def crawl_request(
         urls=urls,
         host_policy=host_policy,
     )
-    policy = _payload_policy(payload, active_settings)
+    policy = _payload_policy(payload, PolicyTier.from_settings(active_settings))
     fetcher = http_fetcher or partial(_default_http_fetcher, policy=host_policy)
     # The transport preference is a BINDING of the one fetcher, not a second
     # entry point: the impersonating strategy gets the same callable with the
@@ -450,15 +442,28 @@ async def crawl_request(
     _cookie_token = _set_cookie_namespace(policy)
     try:
         state = _PipelineState(
-            payload=payload, settings=active_settings, urls=urls, policy=policy,
-            fetcher=fetcher, cffi=cffi, host_policy=host_policy, shutdown_event=shutdown_event,
-            browser_worker=browser_worker, cache=cache, content_cache=content_cache,
-            webhook_url=webhook_url, spill_path=spill_path,
+            payload=payload,
+            settings=active_settings,
+            urls=urls,
+            policy=policy,
+            fetcher=fetcher,
+            cffi=cffi,
+            host_policy=host_policy,
+            shutdown_event=shutdown_event,
+            browser_worker=browser_worker,
+            cache=cache,
+            content_cache=content_cache,
+            webhook_url=webhook_url,
+            spill_path=spill_path,
             dependencies=_PipelineDependencies(
-                get_content_cache=_get_shared_content_cache, make_spill=_ResultSpill,
-                compile_scope_regex_safe=compile_scope_pattern, stale_seeds=_stale_seeds,
-                fetch_and_decode=_fetch_and_decode, default_fetch_and_decode=_DEFAULT_FETCH_AND_DECODE,
-                shared_http_cache=_SHARED_HTTP_CACHE, resource_gate=_resource_gate,
+                get_content_cache=_get_shared_content_cache,
+                make_spill=_ResultSpill,
+                compile_scope_regex_safe=compile_scope_pattern,
+                stale_seeds=_stale_seeds,
+                fetch_and_decode=_fetch_and_decode,
+                default_fetch_and_decode=_DEFAULT_FETCH_AND_DECODE,
+                shared_http_cache=_SHARED_HTTP_CACHE,
+                resource_gate=_resource_gate,
             ),
         )
         return await run_crawl_request(state)

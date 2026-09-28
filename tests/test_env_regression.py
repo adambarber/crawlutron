@@ -21,7 +21,7 @@ single-shape detector):
 
 import ast
 
-from chokepoint_walks import app_trees, nodes_of, offender
+from chokepoint_walks import app_trees, nodes_of, offender_at
 
 
 def _is_attr_get(node: ast.AST) -> bool:
@@ -109,16 +109,12 @@ def test_no_bare_env_int_or_float_in_app():
             for arg in node.args:
                 if _is_browser_crawler_get(arg):
                     offenders.append(
-                        offender(
-                            path,
-                            node.lineno,
-                            f"bare {node.func.id} on BROWSER_CRAWLER_* mapping read",
-                        )
+                        offender_at(path, node, f"bare {node.func.id} on BROWSER_CRAWLER_* mapping read")
                     )
                 elif _is_env_get(arg):
-                    offenders.append(offender(path, node.lineno, f"bare {node.func.id} on os.environ.get"))
+                    offenders.append(offender_at(path, node, f"bare {node.func.id} on os.environ.get"))
                 elif isinstance(arg, ast.Name) and arg.id in env_aliases:
                     offenders.append(
-                        offender(path, node.lineno, f"bare {node.func.id} on env-read alias {arg.id!r}")
+                        offender_at(path, node, f"bare {node.func.id} on env-read alias {arg.id!r}")
                     )
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)

@@ -11,9 +11,11 @@ from functools import partial
 from typing import Any, TypeVar
 from urllib.parse import urljoin, urlparse
 
+from app.api_models import CrawlExtractionMethod, CrawlPolicy
 from app.constants import is_analytics_host, is_document_url
 from app.crawl.fetch_helpers import _fetch_and_decode, fetch_sitemap_urls
-from app.crawl.job_store import FrontierEntry, job_max_pages, normalized_policy, policy_limits
+from app.crawl.job_store import FrontierEntry, job_max_pages
+from app.crawl.policy import PolicyTier, discovery_flags, read_policy
 from app.crawl.robots import load_robots_rules, robots_allows, robots_origin
 from app.crawl.scope_match import scope_allows
 from app.crawl.strategies.fetchers import _default_http_fetcher
@@ -37,15 +39,6 @@ _ROBOTS_ADMISSION_CHUNK_SIZE = 16
 
 def canonical_page_identity(url: str, *, host_policy: HostPolicy) -> NormalizedUrl | None:
     return safe_public_url_or_none(url, policy=host_policy)
-
-
-def _bounded_int(value: Any, *, default: int = 0) -> int:
-    if isinstance(value, bool):
-        return default
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def remaining_page_capacity(admitted_count: int, max_pages: int) -> int | None:
@@ -187,7 +180,11 @@ def _link_values(link: Any) -> tuple[str, str, str | None] | None:
         host = getattr(link, "host", None)
     if not isinstance(normalized, str) or not normalized:
         return None
-    return normalized, original if isinstance(original, str) else normalized, host if isinstance(host, str) else None
+    return (
+        normalized,
+        original if isinstance(original, str) else normalized,
+        host if isinstance(host, str) else None,
+    )
 
 
 async def admit_discovered_links(
@@ -307,26 +304,10 @@ async def admit_discovered_links(
     )
 
 
-def _per_request_timeout(limits: dict[str, Any], settings: Any) -> int:
-    """The per-request timeout for this crawl, in whole seconds, at least one.
-
-    The floor of one second is not cosmetic: a zero or negative budget would make
-    every bounded wait in the admission path fire immediately, and the crawl would
-    report every page as timed out rather than as refused -- a policy that looks
-    like it works and returns nothing.
-
-    Two callers read the same number out of two different places: the robots
-    fetch (which reads the *normalized* policy) and the engine context (which
-    reads the already-normalized limits). Stated twice it is how those two
-    disagreed about what one crawl's timeout was.
-    """
-    return max(1, _bounded_int(limits.get("timeout_seconds"), default=int(getattr(settings, "default_timeout_seconds", 30))))
-
-
 class RobotsGate:
-    def __init__(self, policy: Any, settings: Any, host_policy: HostPolicy) -> None:
+    def __init__(self, policy: CrawlPolicy, host_policy: HostPolicy) -> None:
         self._host_policy = host_policy
-        self._timeout_seconds = _per_request_timeout(policy_limits(policy), settings)
+        self._timeout_seconds = policy.limits.timeout_seconds
 
     async def _rules(self, url: str) -> tuple[list[tuple[bool, str]], float | None]:
         rules, _sitemaps, delay = await load_robots_rules(
@@ -351,7 +332,7 @@ class RobotsGate:
 
 @dataclass
 class JobAdmissionContext:
-    policy: dict[str, Any]
+    policy: CrawlPolicy
     host_policy: HostPolicy
     max_depth: int
     max_pages: int
@@ -369,33 +350,40 @@ class JobAdmissionContext:
         self.delayed_hosts.add(domain.lower())
 
     @classmethod
-    def create(cls, policy: Any, settings: Any) -> JobAdmissionContext:
-        normalized = normalized_policy(policy)
-        limits = policy_limits(normalized)
+    def create(cls, policy: Any, tier: PolicyTier, settings: Any) -> JobAdmissionContext:
+        """The admission gate's own view of a policy.
+
+        ``tier`` and ``settings`` are separate because they answer different
+        questions: the tier is what an omitted limit means for this deployment,
+        and ``settings`` is the scheduler's own configuration. Passing settings
+        where a tier belongs is what let the job path resolve its limits with
+        the model defaults while ``/v1/crawl`` used the operator tier.
+        """
+        normalized = read_policy(policy, tier)
+        limits = normalized.limits
         host_policy = HostPolicy.from_settings(settings)
-        robots = RobotsGate(normalized, settings, host_policy)
+        robots = RobotsGate(normalized, host_policy)
         scheduler = DomainScheduler(
             global_limit=max(1, int(getattr(settings, "global_concurrency", 4))),
             per_domain_limit=max(1, int(getattr(settings, "per_domain_concurrency", 2))),
             delay_seconds=max(0.0, float(getattr(settings, "per_domain_delay_ms", 500)) / 1000),
-            max_rps=float(limits.get("max_rps", 0) or 0),
+            max_rps=limits.max_rps,
             adaptive=bool(getattr(settings, "adaptive_throttling", True)),
             adaptive_min_delay=float(getattr(settings, "adaptive_min_delay", 0.5)),
             adaptive_max_delay=float(getattr(settings, "adaptive_max_delay", 30.0)),
             adaptive_latency_factor=float(getattr(settings, "adaptive_latency_factor", 1.0)),
         )
-        discovery = normalized.get("discovery")
-        discovery_map = discovery if isinstance(discovery, dict) else {}
+        discovery = discovery_flags(normalized)
         return cls(
             policy=normalized,
             host_policy=host_policy,
-            max_depth=max(0, _bounded_int(limits.get("max_depth"))),
-            max_pages=max(0, _bounded_int(limits.get("max_pages"))),
-            scope_pattern=compile_scope_pattern(normalized.get("scope_regex")),
-            want_document_bodies=normalized.get("extraction") == "document",
-            respect_robots=bool(limits.get("respect_robots", True)),
-            seed_sitemaps=bool(discovery_map.get("sitemaps", False)),
-            timeout_seconds=_per_request_timeout(limits, settings),
+            max_depth=limits.max_depth,
+            max_pages=limits.max_pages,
+            scope_pattern=compile_scope_pattern(normalized.scope_regex),
+            want_document_bodies=normalized.extraction is CrawlExtractionMethod.DOCUMENT,
+            respect_robots=limits.respect_robots,
+            seed_sitemaps=discovery.sitemaps,
+            timeout_seconds=limits.timeout_seconds,
             robots=robots,
             scheduler=scheduler,
         )
@@ -410,9 +398,7 @@ def admitted_page_identities(job: Any, *, host_policy: HostPolicy) -> set[str]:
     canonicalization pass on every batch's hot path.
     """
     identities: set[str] = set()
-    values = set(job.visited) | {entry.url for entry in job.in_flight} | {
-        entry.url for entry in job.frontier
-    }
+    values = set(job.visited) | {entry.url for entry in job.in_flight} | {entry.url for entry in job.frontier}
     for value in values:
         if isinstance(value, str) and value:
             identities.add(str(canonical_page_identity(value, host_policy=host_policy) or value))
@@ -546,9 +532,28 @@ async def fetch_job_sitemap_candidates(root_url: str, context: JobAdmissionConte
         context.timeout_seconds,
         host_policy=context.host_policy,
     )
-    return sorted(
-        {urljoin(sitemap_url, url) for url, _lastmod in found if isinstance(url, str)}
-    )
+    return sorted({urljoin(sitemap_url, url) for url, _lastmod in found if isinstance(url, str)})
 
 
-__all__ = ["AdmittedLink", "AdmissionOutcome", "CommitCrawlDelay", "JobAdmissionContext", "RobotsAllows", "RobotsCrawlDelay", "RobotsGate", "T", "admit_discovered_links", "admit_job_links", "admitted_page_identities", "canonical_page_identity", "compile_scope_pattern", "fetch_job_sitemap_candidates", "gather_robots_decisions", "normalize_sitemap_candidates", "record_cap_overcommitted", "record_cap_truncated", "remaining_page_capacity", "requeue_admitted_pages"]
+__all__ = [
+    "AdmittedLink",
+    "AdmissionOutcome",
+    "CommitCrawlDelay",
+    "JobAdmissionContext",
+    "RobotsAllows",
+    "RobotsCrawlDelay",
+    "RobotsGate",
+    "T",
+    "admit_discovered_links",
+    "admit_job_links",
+    "admitted_page_identities",
+    "canonical_page_identity",
+    "compile_scope_pattern",
+    "fetch_job_sitemap_candidates",
+    "gather_robots_decisions",
+    "normalize_sitemap_candidates",
+    "record_cap_overcommitted",
+    "record_cap_truncated",
+    "remaining_page_capacity",
+    "requeue_admitted_pages",
+]

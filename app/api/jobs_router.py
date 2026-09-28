@@ -63,7 +63,7 @@ async def create_job(
             settings.max_batch_size,
             host_policy=host_policy,
         )
-        job = await job_store.acreate(checked[0], payload.policy.model_dump())
+        job = await job_store.acreate(checked[0], payload.policy)
     except ValueError as error:
         raise validation_http_error(error) from error
     job_runner.start_job(job.job_id, job_store, settings, shutdown_event)

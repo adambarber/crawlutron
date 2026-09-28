@@ -14,6 +14,7 @@ from typing import Any
 from app.api.exceptions import browser_pool_unavailable
 from app.constants import BROWSER_STRATEGIES
 from app.crawl.engine import crawl_request
+from app.crawl.policy import read_policy
 from app.crawl.strategies.browser_pool import PooledBrowserWorker, get_browser_pool
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
@@ -26,13 +27,22 @@ def _request_needs_browser(payload_dict: dict) -> bool:
     actually need the browser pool, so HTTP-only crawls can succeed during
     lifespan startup or after a pool-init failure (adversarial review
     F-browser-pool-none).
+
+    The chain is read through ``read_policy`` rather than ``payload["policy"]
+    .get("strategies")`` because the job path puts a ``CrawlPolicy`` in that slot
+    and the crawl path puts a dict. Reading the dict shape made ``.get`` raise
+    ``AttributeError`` on the model, and the old handler swallowed it into
+    ``False`` -- so the guard silently stopped guarding on exactly the path it
+    exists for: a whole-site job with the pool down burned its HTTP strategies,
+    recorded ``browser_worker_unavailable`` per URL, and completed as a
+    partially-failed job instead of being refused. ``read_policy`` is total, so
+    there is no exception to swallow here at all, and an absent policy answers
+    with the declared default chain -- which does include browser strategies,
+    so "no policy given" correctly means "the browser pool is needed".
     """
-    try:
-        policy = payload_dict.get("policy") or {}
-        strategies = policy.get("strategies") or []
-    except (AttributeError, TypeError):
-        return False
-    return any(strategy in BROWSER_STRATEGIES for strategy in strategies)
+    return any(
+        strategy in BROWSER_STRATEGIES for strategy in read_policy(payload_dict.get("policy")).strategies
+    )
 
 
 async def execute_crawl(

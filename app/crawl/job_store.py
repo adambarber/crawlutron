@@ -13,14 +13,18 @@ import logging
 import sqlite3
 import threading
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.api_models import CrawlPolicy
 from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
+from app.crawl.policy import PolicyTier, read_policy
+from app.crawl.policy import stored_policy as _stored_policy
 from app.crawl.sqlite_store import connect_store
 from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
 
@@ -95,36 +99,26 @@ def _canonical_or_raw(url: str, host_policy: HostPolicy) -> str:
     return _canonical_cached(url, host_policy)
 
 
-def normalized_policy(policy: Any) -> dict[str, Any]:
-    if not isinstance(policy, dict):
-        return {}
-    normalized = dict(policy)
-    if "limits" in normalized and not isinstance(normalized["limits"], dict):
-        normalized["limits"] = {}
-    return normalized
+# A persisted row is ``json.loads`` of a TEXT column, so its collections are
+# whatever some earlier writer persisted: possibly absent, possibly a bare
+# string, possibly a list of dicts, possibly corrupt. ``object`` -- not ``Any``
+# -- is the honest annotation, and it is load-bearing rather than cosmetic: with
+# ``Any`` the isinstance narrowing below is invisible to a type checker, so a
+# change to the persisted shape would type-check and then misbehave at runtime.
+_PersistedJSON = object
 
 
-def policy_limits(policy: Any) -> dict[str, Any]:
-    limits = normalized_policy(policy).get("limits")
-    return dict(limits) if isinstance(limits, dict) else {}
+# The read edge is :func:`app.crawl.policy.read_policy` and it has exactly one
+# name. This module used to export ``normalized_policy`` as its own copy of that
+# function, which made the shared read edge a two-home surface: importers picked
+# up whichever spelling their file already imported, and a future change to the
+# repair rules had two definitions to keep in step. The three limit readers
+# below stay here because job-path callers read a single bound at a time and
+# spelling the hop keeps that legible.
 
 
-def _policy_int(policy: Any, name: str) -> int:
-    value = policy_limits(policy).get(name)
-    if isinstance(value, bool):
-        return 0
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def job_max_depth(policy: Any) -> int:
-    return _policy_int(policy, "max_depth")
-
-
-def job_max_pages(policy: Any) -> int:
-    return _policy_int(policy, "max_pages")
+def job_max_pages(policy: Any, tier: PolicyTier | None = None) -> int:
+    return read_policy(policy, tier).limits.max_pages
 
 
 def _entry_depth(value: Any, fallback: int) -> int:
@@ -149,10 +143,10 @@ def _entry_payload(entry: Any) -> Any:
 
 
 def normalize_frontier(
-    values: Any,
+    values: _PersistedJSON,
     *,
     root_url: str,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     host_policy: HostPolicy,
 ) -> list[FrontierEntry]:
     """Coerce persisted/runner-supplied frontier values into ``FrontierEntry`` records.
@@ -169,12 +163,12 @@ def normalize_frontier(
     if not isinstance(values, (list, tuple)):
         return []
     canonical_root = _canonical_or_raw(root_url, host_policy)
-    legacy_depth = job_max_depth(policy)
+    legacy_depth = policy.limits.max_depth
     entries: dict[str, FrontierEntry] = {}
     order: list[str] = []
     for value in values:
-        raw_url: Any
-        depth: Any
+        raw_url: object
+        depth: object
         if isinstance(value, FrontierEntry):
             raw_url = value.url
             depth = value.depth
@@ -201,36 +195,35 @@ def normalize_frontier(
 def normalize_job_collections(
     *,
     root_url: str,
-    policy: dict[str, Any],
-    visited: Any,
-    frontier: Any,
-    in_flight: Any,
+    policy: CrawlPolicy,
+    visited: _PersistedJSON,
+    frontier: _PersistedJSON,
+    in_flight: _PersistedJSON,
     host_policy: HostPolicy,
 ) -> tuple[set[str], list[FrontierEntry], list[FrontierEntry]]:
     canonical_root = _canonical_or_raw(root_url, host_policy)
-    normalized_policy_value = normalized_policy(policy)
     if isinstance(visited, str):
         visited_values = [visited]
+    elif isinstance(visited, Iterable):
+        visited_values = list(visited)
     else:
-        try:
-            visited_values = list(visited or [])
-        except TypeError:
-            visited_values = []
+        # A persisted column that is not a sequence of URLs is not a crash
+        # worth raising: the job loses its visited history, and the frontier
+        # below still bounds what it will fetch.
+        visited_values = []
     normalized_visited = {
-        _canonical_or_raw(url, host_policy)
-        for url in visited_values
-        if isinstance(url, str) and url
+        _canonical_or_raw(url, host_policy) for url in visited_values if isinstance(url, str) and url
     }
     normalized_frontier = normalize_frontier(
         frontier,
         root_url=canonical_root,
-        policy=normalized_policy_value,
+        policy=policy,
         host_policy=host_policy,
     )
     normalized_in_flight = normalize_frontier(
         in_flight,
         root_url=canonical_root,
-        policy=normalized_policy_value,
+        policy=policy,
         host_policy=host_policy,
     )
     frontier_by_url = {entry.url: entry for entry in normalized_frontier}
@@ -308,6 +301,13 @@ class CrawlJobState:
     error: str | None = None
     stats: dict[str, int] = field(default_factory=_default_stats)
     host_policy: HostPolicy = field(default_factory=HostPolicy.unrestricted, repr=False, compare=False)
+    # Which deployment wrote this row, so re-resolving its policy means the same
+    # thing here as it did on the read that loaded it. Held on the row rather
+    # than passed to each read because a job row outlives the request that
+    # created it: threading the tier through every read site is how every one of
+    # them ended up passing nothing, and a stored policy that omitted a limit
+    # then resolved to the model default instead of the operator's.
+    tier: PolicyTier = field(default_factory=PolicyTier.model_defaults, repr=False, compare=False)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize to JSON-serializable dict.
@@ -321,6 +321,7 @@ class CrawlJobState:
         normalize_job_state(self)
         data = asdict(self)
         data.pop("host_policy", None)
+        data.pop("tier", None)
         data["frontier"] = [_entry_payload(entry) for entry in self.frontier]
         data["in_flight"] = [_entry_payload(entry) for entry in self.in_flight]
         data["visited"] = sorted(self.visited)
@@ -330,7 +331,7 @@ class CrawlJobState:
         return data
 
     @classmethod
-    def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy) -> CrawlJobState:
+    def from_json(cls, data: dict[str, Any], *, host_policy: HostPolicy, tier: PolicyTier) -> CrawlJobState:
         """Deserialize from JSON dict.
 
         The read boundary always normalizes: canonical identity, cross-list
@@ -348,15 +349,13 @@ class CrawlJobState:
         """
         status = data.get("status", JobStatus.PENDING.value)
         kind = data.get("kind", JobKind.WHOLE_SITE.value)
-        policy = normalized_policy(data.get("policy"))
+        policy = read_policy(data.get("policy"), tier)
         root_url = str(data.get("root_url") or "")
         root_url = _canonical_or_raw(root_url, host_policy)
         visited_raw = data.get("visited", [])
         if isinstance(visited_raw, list):
             visited = {
-                _canonical_or_raw(url, host_policy)
-                for url in visited_raw
-                if isinstance(url, str) and url
+                _canonical_or_raw(url, host_policy) for url in visited_raw if isinstance(url, str) and url
             }
         else:
             visited = set()
@@ -375,7 +374,7 @@ class CrawlJobState:
             job_id=str(data.get("job_id") or ""),
             kind=JobKind(kind),
             root_url=root_url,
-            policy=policy,
+            policy=_stored_policy(policy),
             status=JobStatus(status),
             frontier=normalize_frontier(
                 data.get("frontier", []),
@@ -397,6 +396,7 @@ class CrawlJobState:
             error=data.get("error") if isinstance(data.get("error"), str) else None,
             stats=_normalized_stats(data.get("stats", {})),
             host_policy=host_policy,
+            tier=tier,
         )
         # Full normalization pass on every read. from_json establishes the
         # identity, and this re-derives it over the assembled collections
@@ -408,7 +408,7 @@ class CrawlJobState:
 
 def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
     root_url = _canonical_or_raw(job.root_url, job.host_policy)
-    policy = normalized_policy(job.policy)
+    policy = read_policy(job.policy, job.tier)
     visited, frontier, in_flight = normalize_job_collections(
         root_url=root_url,
         policy=policy,
@@ -428,7 +428,7 @@ def normalize_job_state(job: CrawlJobState) -> CrawlJobState:
         identity = _canonical_or_raw(url, job.host_policy)
         transient_retries[identity] = max(transient_retries.get(identity, 0), value)
     job.root_url = root_url
-    job.policy = policy
+    job.policy = _stored_policy(policy)
     job.visited = visited
     job.frontier = frontier
     job.in_flight = in_flight
@@ -621,11 +621,7 @@ class JobAccumulators:
             return
         self._conn.executemany(
             'INSERT OR IGNORE INTO "crawl_job_results" (job_id, seq, payload) VALUES (?, ?, ?)',
-            (
-                (job_id, seq, _json(result))
-                for seq, result in enumerate(results)
-                if seq >= persisted
-            ),
+            ((job_id, seq, _json(result)) for seq, result in enumerate(results) if seq >= persisted),
         )
 
     def _append_visited(self, job: CrawlJobState) -> None:
@@ -649,6 +645,43 @@ class JobAccumulators:
         )
 
 
+def _create_job(
+    store: JobStore,
+    job_id: str,
+    kind: JobKind,
+    root_url: str,
+    policy: CrawlPolicy,
+    frontier: list[FrontierEntry] | None = None,
+) -> CrawlJobState:
+    """The one place a job is born, for both kinds, and the one place it is written.
+
+    The two kinds used to be built by two nearly-identical blocks inside the
+    store, and one of them had already drifted: ``create_single_shot`` carried
+    the store's ``host_policy`` but not its ``tier``, so every limit on a
+    single-shot job resolved against the model's defaults while a whole-site
+    job on the same store resolved against the deployment's. Same request, same
+    answer, two numbers.
+
+    A module function rather than a method so the class holds only the two
+    one-line calls into it: the row's content and the locked write are one
+    decision, and splitting them across the boundary is what let the two kinds
+    disagree.
+    """
+    job = CrawlJobState(
+        job_id=job_id,
+        kind=kind,
+        root_url=root_url,
+        policy=_stored_policy(policy),
+        status=JobStatus.PENDING,
+        frontier=frontier or [],
+        host_policy=store._host_policy,
+        tier=store.tier,
+    )
+    with store._lock:
+        store._persist(job)
+    return job
+
+
 class JobStore:
     """SQLite-backed store for crawl job states.
 
@@ -658,9 +691,15 @@ class JobStore:
     every connection use, so a twin never races a direct sync call).
     """
 
-    def __init__(self, db_path: str | Path, *, policy: HostPolicy):
+    def __init__(self, db_path: str | Path, *, policy: HostPolicy, tier: PolicyTier):
         self.db_path = Path(db_path)
         self._host_policy = policy
+        # The deployment's operator tier, required rather than defaulted: it is
+        # what makes a stored row that omitted a limit resolve to the same
+        # number the API path would have used, and an optional argument here was
+        # how the job path silently started answering with the model defaults
+        # instead.
+        self.tier = tier
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # Durability/concurrency settings come from the shared store
         # chokepoint (busy_timeout + WAL; M1 confinement invariant).
@@ -698,40 +737,31 @@ class JobStore:
                 "transient_retries": json.loads(row["transient_retries"]),
             },
             host_policy=self._host_policy,
+            tier=self.tier,
         )
 
-    def create(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
+    def create(self, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
-        job_id = new_job_id()
         canonical_root = str(normalize_public_http_url(root_url, policy=self._host_policy))
-        normalized = normalized_policy(policy)
-        job = CrawlJobState(
-            job_id=job_id,
-            kind=JobKind.WHOLE_SITE,
-            root_url=canonical_root,
-            policy=normalized,
-            status=JobStatus.PENDING,
+        return _create_job(
+            self,
+            new_job_id(),
+            JobKind.WHOLE_SITE,
+            canonical_root,
+            read_policy(policy, self.tier),
             frontier=[FrontierEntry(url=canonical_root, depth=0)],
-            host_policy=self._host_policy,
         )
-        with self._lock:
-            self._persist(job)
-        return job
 
-    def create_single_shot(self, job_id: str, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
+    def create_single_shot(self, job_id: str, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
         """Create a new single-shot async crawl job with the given job_id (request_id)."""
-        job = CrawlJobState(
-            job_id=job_id,
-            kind=JobKind.SINGLE_SHOT,
-            root_url=str(normalize_public_http_url(root_url, policy=self._host_policy)),
-            policy=normalized_policy(policy),
-            status=JobStatus.PENDING,
-            host_policy=self._host_policy,
+        return _create_job(
+            self,
+            job_id,
+            JobKind.SINGLE_SHOT,
+            str(normalize_public_http_url(root_url, policy=self._host_policy)),
+            read_policy(policy, self.tier),
         )
-        with self._lock:
-            self._persist(job)
-        return job
 
     def save(self, job: CrawlJobState) -> None:
         """Persist job DATA to SQLite (thread-safe).
@@ -748,10 +778,10 @@ class JobStore:
     async def asave(self, job: CrawlJobState) -> None:
         await asyncio.to_thread(self.save, job)
 
-    async def acreate(self, root_url: str, policy: dict[str, Any]) -> CrawlJobState:
+    async def acreate(self, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
         return await asyncio.to_thread(self.create, root_url, policy)
 
-    async def acreate_single_shot(self, job_id: str, root_url: str, policy: dict[str, Any]):
+    async def acreate_single_shot(self, job_id: str, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
         return await asyncio.to_thread(self.create_single_shot, job_id, root_url, policy)
 
     async def aset_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
@@ -858,9 +888,7 @@ class JobStore:
         """Every job's status view, newest first."""
         with self._lock:
             counts = self._accumulators.counts_by_job()
-            rows = self._conn.execute(
-                _JOB_STATUS_PROJECTION + " ORDER BY created_at DESC"
-            ).fetchall()
+            rows = self._conn.execute(_JOB_STATUS_PROJECTION + " ORDER BY created_at DESC").fetchall()
         return [_status_row(r, *counts.get(r["job_id"], (0, 0))) for r in rows]
 
     def status_row(self, job_id: str) -> dict[str, Any] | None:
@@ -873,9 +901,7 @@ class JobStore:
         client polls while its crawl runs.
         """
         with self._lock:
-            row = self._conn.execute(
-                _JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)
-            ).fetchone()
+            row = self._conn.execute(_JOB_STATUS_PROJECTION + " WHERE job_id = ?", (job_id,)).fetchone()
             if row is None:
                 return None
             visited, results = self._accumulators.counts_for(job_id)
@@ -889,9 +915,7 @@ class JobStore:
         so anything that reads the row to answer it is doing more than asked.
         """
         with self._lock:
-            row = self._conn.execute(
-                "SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT 1 FROM crawl_jobs WHERE job_id = ?", (job_id,)).fetchone()
         return row is not None
 
     def close(self) -> None:

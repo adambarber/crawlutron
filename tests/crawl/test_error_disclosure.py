@@ -156,15 +156,18 @@ class TestFailureDiagnosticsRedaction:
 
     async def test_failure_diagnostics_redact_request_profile(self, monkeypatch):
 
-        policy = http_strategy_policy()
         # Seed the profile with exactly the sensitive fields the leak exposes.
-        policy["request_profile"] = {
-            "user_agent_family": "chrome",
-            "cookie_jar": "session-jar",
-            "cookies": {"session": "SECRET-TOKEN", "csrf": "abc"},
-            "fingerprint_seed": 12345,
-            "cookie_namespace": "tenant-secret",
-        }
+        policy = http_strategy_policy().model_copy(
+            update={
+                "request_profile": {
+                    "user_agent_family": "chrome",
+                    "cookie_jar": "session-jar",
+                    "cookies": {"session": "SECRET-TOKEN", "csrf": "abc"},
+                    "fingerprint_seed": 12345,
+                    "cookie_namespace": "tenant-secret",
+                }
+            }
+        )
 
         def raising_resp(url):
             raise ConnectionError("connection refused")

@@ -12,10 +12,13 @@ from app.constants import (
     DEFAULT_LAZY_SCROLL_STEPS,
     DEFAULT_MAX_BROWSER_RENDERS,
     DEFAULT_MAX_CONCURRENT_PAGES,
+    DEFAULT_MAX_RETRIES,
+    MAX_HTTP_TIMEOUT_SECONDS,
+    MAX_RETRIES,
 )
 from app.memory_pressure import read_memory_stats
 from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
-from app.validation import get_mapping_float, get_mapping_int, parse_bool_value
+from app.validation import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 
 # Connection-pool sizing (T7): bind the HTTP pool to the SAME RAM-derived HTTP
 # concurrency the weighted admission allows, so the two can never diverge as RAM
@@ -63,7 +66,7 @@ class CrawlerSettings:
     per_domain_delay_ms: int = 500
     max_batch_size: int = 50
     default_timeout_seconds: int = 30
-    default_max_retries: int = 2
+    default_max_retries: int = DEFAULT_MAX_RETRIES
     respect_robots: bool = True
     allowed_hosts: str = ""
     denied_hosts: str = ""
@@ -145,10 +148,32 @@ class CrawlerSettings:
             ),
             max_batch_size=get_mapping_int(source, "BROWSER_CRAWLER_MAX_BATCH_SIZE", cls.max_batch_size),
             default_timeout_seconds=get_mapping_int(
-                source, "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS", cls.default_timeout_seconds
+                source,
+                "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS",
+                cls.default_timeout_seconds,
+                # Bounded by the same declaration the policy is validated
+                # against, so an operator config cannot install a per-request
+                # default that every crawl would then be rejected for. Out of
+                # range is REJECTED here, loudly, rather than clamped into a
+                # number nobody configured: the comment used to promise that and
+                # the code silently clamped.
+                lo=1,
+                hi=MAX_HTTP_TIMEOUT_SECONDS,
+                validate=in_range(1, MAX_HTTP_TIMEOUT_SECONDS),
+                validate_event="operator_timeout_out_of_range",
             ),
             default_max_retries=get_mapping_int(
-                source, "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES", cls.default_max_retries
+                source,
+                "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES",
+                cls.default_max_retries,
+                # The deployment's ceiling, not the per-job one: this default
+                # applies to every caller, so it is capped at MAX_RETRIES and an
+                # operator asking for more is told so rather than handed a
+                # different number than they configured.
+                lo=0,
+                hi=MAX_RETRIES,
+                validate=in_range(0, MAX_RETRIES),
+                validate_event="operator_max_retries_out_of_range",
             ),
             respect_robots=parse_bool_value(
                 source.get("BROWSER_CRAWLER_RESPECT_ROBOTS"),
@@ -158,9 +183,7 @@ class CrawlerSettings:
             allowed_hosts=source.get("BROWSER_CRAWLER_ALLOWED_HOSTS", cls.allowed_hosts),
             denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
             log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),
-            log_file_path=source.get(
-                ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path
-            ),
+            log_file_path=source.get(ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path),
             log_file_max_bytes=get_mapping_int(
                 source,
                 ENVIRONMENT_FIELD_ALIASES["log_file_max_bytes"],

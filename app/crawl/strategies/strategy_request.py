@@ -7,8 +7,8 @@ construct crawl results.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
+from app.api_models import CrawlPolicy
 from app.models import CrawlStrategyName
 from app.validation import HostPolicy
 
@@ -31,7 +31,7 @@ class StrategyRequest:
     original_url: str
     normalized_url: str
     strategy: CrawlStrategyName
-    policy: dict[str, Any]
+    policy: CrawlPolicy
     host_policy: HostPolicy
 
 

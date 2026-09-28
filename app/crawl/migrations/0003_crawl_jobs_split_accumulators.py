@@ -62,8 +62,7 @@ def _create_missing(conn) -> None:
     in fact exactly the shape this migration produces.
     """
     existing = {
-        str(row[0])
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     }
     for statement, schema in _CREATE:
         if schema.name not in existing:

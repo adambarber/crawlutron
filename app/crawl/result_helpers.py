@@ -44,8 +44,7 @@ def _enforce_status_classification(classification: Classification, status: Resul
     """
     if not status_agrees_with_classification(classification, status):
         raise ValueError(
-            f"status {status!r} disagrees with the taxonomy status for "
-            f"classification {classification!r}"
+            f"status {status!r} disagrees with the taxonomy status for classification {classification!r}"
         )
 
 
@@ -197,7 +196,7 @@ def _engine_result_from_exception(
     if extra_diagnostics:
         diagnostics.update(extra_diagnostics)
     return _failed_engine_result(
-    TerminalResult(
+        TerminalResult(
             original_url=original_url,
             normalized_url=normalized_url,
             strategy=strategy,
@@ -206,7 +205,8 @@ def _engine_result_from_exception(
             diagnostics=diagnostics,
             http_status=None,
             attempt_elapsed_ms=elapsed,
-))
+        )
+    )
 
 
 def _failed_result_for(

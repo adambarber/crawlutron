@@ -9,14 +9,23 @@ change lands in only one of them, and the copy is the one the test runs.
 
 ``_CRAWL_LIMITS`` and ``_STRATEGY_LIMITS`` are the two profiles, named so the
 factories below differ only in what is actually different about them, and every
-factory hands out a fresh copy because callers are told to mutate the policy
-they are given.
+factory hands out a fresh value because callers are told to derive their own
+from the policy they are given.
+
+The factories return the model, not the wire mapping, because that is what every
+function they feed now takes. A test that built the dict itself had a way to
+produce a policy no caller could -- which is why a suite could stay green while
+the production read edge answered a different question than the test's did.
 """
 
 from typing import Any
 
+from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.crawl.admission import admit_discovered_links
+from app.crawl.job_store import JobStore
+from app.crawl.policy import PolicyTier, read_policy
+from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 UNRESTRICTED_HOST_POLICY = HostPolicy.unrestricted()
@@ -47,41 +56,56 @@ _CRAWL_LIMITS = {"timeout_seconds": 5, "max_retries": 0, "max_discovered_links":
 _STRATEGY_LIMITS = {"timeout_seconds": 10, "max_retries": 0, "max_discovered_links": 50}
 
 
-def make_base_policy(strategies=None) -> dict:
-    return {
-        "schema_version": "2026-06-23",
-        "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
-        "limits": dict(_CRAWL_LIMITS),
-        "headers": {},
-        "request_profile": {},
-        "browser_profile": {},
-        "discovery": {},
-    }
+def make_base_policy(strategies=None) -> CrawlPolicy:
+    return read_policy(
+        {
+            "schema_version": "2026-06-23",
+            "strategies": list(strategies) if strategies is not None else [HTTP_DECLARED_CRAWLER],
+            "limits": dict(_CRAWL_LIMITS),
+            "headers": {},
+            "request_profile": {},
+            "browser_profile": {},
+            "discovery": {},
+        }
+    )
 
 
-def _policy(extra=None):
+def _policy(extra=None) -> CrawlPolicy:
     """The strategy-level policy, with an optional override merged over it.
 
     Carries no ``strategies`` on purpose: the strategy-level tests want the
     default ladder to climb, and a pinned strategy here would answer a question
     the ladder is what the caller is actually testing.
     """
-    policy = {
+    policy: dict[str, Any] = {
         "request_profile": {},
         "headers": {},
         "limits": dict(_STRATEGY_LIMITS),
     }
     if extra:
         policy.update(extra)
-    return policy
+    return read_policy(policy)
 
 
-def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = None) -> dict:
-    policy: dict[str, Any] = make_base_policy()
+def http_strategy_policy(*, extraction: str = "full", discovery: bool | None = None) -> CrawlPolicy:
+    """A crawl policy for the HTTP/browser strategy tests, with discovery optional.
+
+    ``discovery=True`` means the channels are ON, and says so by turning them
+    on. It used to write ``{"robots": False, "sitemaps": False, "feeds":
+    False}`` and rely on the block being *present*: a non-empty mapping is
+    truthy, so ``bool(policy["discovery"] or {})`` read an all-off block as
+    "discovery requested". That was true of the old reader and false of the
+    model, and the model won -- ``DiscoveryConfig`` defaults every channel
+    off and the consumer asks ``any(flags)``, so the same policy discovered
+    links on the browser path and not on the HTTP one. Post-fetch link
+    discovery is also gated on a depth to spend, which this factory's base
+    limits leave at 0, so an all-off block meant no links at all.
+    """
+    policy = make_base_policy().model_dump()
     policy["extraction"] = extraction
     if discovery is not None:
-        policy["discovery"] = {"links": True} if discovery else {}
-    return policy
+        policy["discovery"] = {channel: discovery for channel in ("robots", "sitemaps", "feeds")}
+    return read_policy(policy)
 
 
 async def _robots_allow_all(url: str) -> bool:
@@ -177,7 +201,12 @@ def crawl_limits(*, respect_robots: bool | None = None, **over) -> dict:
 
 
 def crawl_policy(
-    strategies=None, *, limits: dict | None = None, discovery: dict | None = None, scope_regex: str | None = None
+    strategies=None,
+    *,
+    limits: dict | None = None,
+    discovery: dict | None = None,
+    scope_regex: str | None = None,
+    extraction: str | None = None,
 ) -> dict:
     """A crawl policy carrying strategies, limits, and the named extra blocks.
 
@@ -199,4 +228,37 @@ def crawl_policy(
         policy["discovery"] = discovery
     if scope_regex is not None:
         policy["scope_regex"] = scope_regex
+    if extraction is not None:
+        policy["extraction"] = extraction
     return policy
+
+
+def deployment_tier(**overrides: str) -> PolicyTier:
+    """The operator tier a test deployment runs with.
+
+    ``tier`` is a required argument to ``JobStore`` because a store that cannot
+    say which deployment it belongs to resolves a stored row's omitted limits to
+    the model defaults instead of the operator's -- and every job-path read used
+    to make exactly that substitution, so ``/v1/crawl`` and ``/v1/jobs`` answered
+    with different timeouts from the same configuration. Required at the store
+    is how "forgot to pass the deployment" stopped being expressible; this is
+    the one place a test says what its deployment is.
+
+    Defaults to the model defaults (an empty mapping), so a test that does not
+    care about the tier reads as a test about the thing it does care about.
+    """
+    return PolicyTier.from_settings(CrawlerSettings.from_mapping(overrides))
+
+
+def job_store(db_path: str, *, policy: HostPolicy | None = None, tier: PolicyTier | None = None) -> JobStore:
+    """A ``JobStore`` bound to a test deployment.
+
+    Every argument a test does not pass is the one it did not mean to vary, which
+    is why the unrestricted host policy is the default here rather than repeated
+    at each of the two dozen sites that construct a store.
+    """
+    return JobStore(
+        db_path,
+        policy=policy if policy is not None else UNRESTRICTED_HOST_POLICY,
+        tier=tier if tier is not None else deployment_tier(),
+    )

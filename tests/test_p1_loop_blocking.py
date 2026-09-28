@@ -22,6 +22,7 @@ from _timing_harnesses import HANG_GUARD_SECONDS
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
+from app.api_models import CrawlPolicy
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _ResultSpill
 from app.crawl.job_store import JobStatus
@@ -320,7 +321,7 @@ class TestJobRunnerSavesOffTheEventLoop:
 
     async def test_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
         store = make_job_store(str(tmp_path))
-        job = store.create("http://example.com/", {})
+        job = store.create("http://example.com/", CrawlPolicy())
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking save

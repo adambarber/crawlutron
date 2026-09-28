@@ -43,14 +43,13 @@ from app.crawl.admission import (
     canonical_page_identity,
     fetch_job_sitemap_candidates,
     job_max_pages,
-    normalized_policy,
-    policy_limits,
     record_cap_overcommitted,
     record_cap_truncated,
     remaining_page_capacity,
     requeue_admitted_pages,
 )
 from app.crawl.job_store import FrontierEntry, JobKind, JobStatus, JobStore, normalize_job_state
+from app.crawl.policy import read_policy
 from app.models import Classification, CrawlResult, CrawlTask
 
 logger = logging.getLogger(__name__)
@@ -114,9 +113,7 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
         if summary.get("status") == JobStatus.RUNNING.value:
             # Control-plane CAS: rewind RUNNING -> PENDING without rewriting
             # the row's data (H3: save() no longer carries status anyway).
-            if await job_store.aset_status(
-                summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING
-            ):
+            if await job_store.aset_status(summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING):
                 recovered += 1
     return recovered
 
@@ -148,7 +145,7 @@ async def recover_and_start_pending_jobs(
 
 def _pop_frontier(job: Any) -> list[FrontierEntry]:
     normalize_job_state(job)
-    max_pages = job_max_pages(job.policy)
+    max_pages = job_max_pages(job.policy, job.tier)
     if job.in_flight:
         fixed = {
             canonical_page_identity(url, host_policy=job.host_policy) or url
@@ -181,10 +178,11 @@ def _job_engine_payload(job: Any, batch: Sequence[FrontierEntry]) -> dict[str, A
     batch. Two owners of one property was the defect, so engine recursion is off.
     """
     urls = [entry.url for entry in batch]
-    policy = normalized_policy(job.policy)
-    limits = policy_limits(policy)
-    limits["max_depth"] = 0
-    policy["limits"] = limits
+    policy = read_policy(job.policy, job.tier)
+    # model_copy is safe here specifically because max_depth=0 is a value the
+    # model declares and this line is ours, not a caller's: a single engine
+    # batch is one page deep by definition.
+    policy = policy.model_copy(update={"limits": policy.limits.model_copy(update={"max_depth": 0})})
     return {
         "urls": urls,
         "policy": policy,
@@ -266,7 +264,7 @@ async def _run_job(
     await job_store.asave(job)
 
     try:
-        context = JobAdmissionContext.create(job.policy, settings)
+        context = JobAdmissionContext.create(job.policy, job.tier, settings)
         if context.max_depth > 0 and context.seed_sitemaps:
             await _seed_job_sitemaps(job, context)
             await job_store.asave(job)
@@ -278,17 +276,13 @@ async def _run_job(
             if job.status in {JobStatus.PAUSED, JobStatus.CANCELLED}:
                 return
             if shutdown_event.is_set():
-                await job_store.aset_status(
-                    job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING
-                )
+                await job_store.aset_status(job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
                 return
 
             batch = _pop_frontier(job)
             if not batch:
                 await job_store.asave(job)
-                await job_store.aset_status(
-                    job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
-                )
+                await job_store.aset_status(job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
                 return
             if not job.in_flight:
                 job.in_flight = list(batch)
@@ -335,10 +329,8 @@ async def _run_job(
                 job.in_flight = [
                     pending
                     for pending in job.in_flight
-                    if (
-                        canonical_page_identity(pending.url, host_policy=context.host_policy)
-                        or pending.url
-                    ) != identity
+                    if (canonical_page_identity(pending.url, host_policy=context.host_policy) or pending.url)
+                    != identity
                 ]
                 item = resolved.get(identity)
                 if item is None:
@@ -374,9 +366,7 @@ async def _run_job(
                     # which is the coupling that let the two drift), so the
                     # runner uses it rather than inventing a second shape.
                     job.results.append(
-                        _failed_unified_result(
-                            {"normalized_url": identity, "original_url": url}
-                        ).model_dump()
+                        _failed_unified_result({"normalized_url": identity, "original_url": url}).model_dump()
                     )
                     failed += 1
                     continue
@@ -400,9 +390,7 @@ async def _run_job(
                     source_depth=entry.depth,
                     context=context,
                 )
-                job.stats["total_discovered"] = (
-                    job.stats.get("total_discovered", 0) + admitted.accepted
-                )
+                job.stats["total_discovered"] = job.stats.get("total_discovered", 0) + admitted.accepted
             job.stats["total_crawled"] = len(job.visited)
             if failed:
                 job.stats["total_failed"] = job.stats.get("total_failed", 0) + failed
@@ -416,7 +404,6 @@ async def _run_job(
             job.error = str(exc)
             await job_store.asave(job)
             await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
-
 
 
 def start_job(

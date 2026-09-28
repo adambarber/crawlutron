@@ -33,7 +33,7 @@ from _job_harnesses import (
     make_crawled_job_store,
     make_job_store,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 from _result_builders import _canned_result
 from httpx import ASGITransport, AsyncClient
 
@@ -115,7 +115,7 @@ class LoopGuardResultStore(CrawlResultStore):
 
 @pytest.fixture
 def loop_guard_store(tmp_path) -> LoopGuardJobStore:
-    return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY)
+    return LoopGuardJobStore(tmp_path / "jobs.db", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
 
 
 @pytest.fixture
@@ -382,7 +382,7 @@ def test_the_guard_itself_bites():
     """
 
     async def call_the_sync_surface() -> None:
-        store = LoopGuardJobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
+        store = LoopGuardJobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
         store.list_jobs()
 
     with pytest.raises(AssertionError, match="JobStore.list_jobs ran on the event loop"):

@@ -28,10 +28,13 @@ from app.api.response_shaping import _aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
-from app.crawl.job_store import JobKind
+from app.crawl.job_store import JobKind, JobStore
 from app.crawl.payload_helpers import checked_payload_urls
+from app.crawl.policy import read_policy
+from app.crawl.result_store import CrawlResultStore
 from app.metrics import get_metrics
 from app.output_formats import serialize_results
+from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
@@ -71,10 +74,10 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
 async def crawl(
     payload: CrawlRequest,
     background_tasks: BackgroundTasks,
-    settings,
-    job_store,
-    result_store,
-    shutdown_event,
+    settings: CrawlerSettings,
+    job_store: JobStore,
+    result_store: CrawlResultStore,
+    shutdown_event: asyncio.Event,
     request: Request | None = None,
 ) -> Any:
     """Execute a policy-driven crawl (sync or async webhook mode)."""
@@ -106,7 +109,15 @@ async def crawl(
             if webhook_url:
                 await validate_webhook_url_async(webhook_url, host_policy=host_policy)
             request_id = new_request_id()
-            await job_store.acreate_single_shot(request_id, checked[0], payload_dict)
+            # The store's tier, not ``settings``: this policy is about to be
+            # written into that store, and a row is read back with the tier the
+            # store holds. Deriving a tier here from the same settings the
+            # store was built from is right by accident and wrong the moment
+            # they differ -- and then the policy the caller submitted and the
+            # one the job later runs disagree about every limit it omitted.
+            await job_store.acreate_single_shot(
+                request_id, checked[0], read_policy(payload_dict.get("policy"), job_store.tier)
+            )
             from app.api.async_crawl_runner import run_async_crawl
 
             background_tasks.add_task(

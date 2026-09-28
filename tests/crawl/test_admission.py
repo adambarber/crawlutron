@@ -15,6 +15,7 @@ from app.constants import (
     HTTP_DECLARED_CRAWLER,
 )
 from app.crawl.payload_helpers import _payload_policy
+from app.crawl.policy import PolicyTier
 from app.crawl.recursive_admission import _batch_is_http_heavy
 from app.health.readiness import ReadinessState
 from app.memory_pressure import (
@@ -38,7 +39,6 @@ from app.resource_pressure import (
     read_cpu_quota,
     read_cpu_usage_seconds,
 )
-from app.settings import CrawlerSettings
 
 
 class TestReadinessState:
@@ -674,30 +674,34 @@ class TestHttpScaleEscapesMemory:
 
 
 async def test_max_pages_default_is_bounded_not_unlimited():
-    settings = CrawlerSettings()
-    policy = _payload_policy({"url": "http://example.com/", "policy": {}}, settings)
+    policy = _payload_policy({"url": "http://example.com/", "policy": {}}, PolicyTier.model_defaults())
     # DEFAULT_MAX_PAGES, not 0/"unlimited" (F4).
-    assert policy["limits"]["max_pages"] == 100
+    assert policy.limits.max_pages == 100
 
 
 async def test_max_pages_zero_falls_back_to_default():
-    settings = CrawlerSettings()
-    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, settings)
-    assert policy["limits"]["max_pages"] == 100
-
-
-async def test_max_pages_clamped_to_upper_bound():
-    settings = CrawlerSettings()
     policy = _payload_policy(
-        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}}, settings
+        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 0}}}, PolicyTier.model_defaults()
     )
-    assert policy["limits"]["max_pages"] == 2000
+    assert policy.limits.max_pages == 100
+
+
+async def test_max_pages_above_upper_bound_is_rejected_not_clamped():
+    # The model declares le=2000. This used to clamp, which meant the wire value
+    # and the effective behaviour described different contracts; a rejection says
+    # the same thing in both places.
+    with pytest.raises(ValueError, match="invalid_policy_limits"):
+        _payload_policy(
+            {"url": "http://example.com/", "policy": {"limits": {"max_pages": 99999}}},
+            PolicyTier.model_defaults(),
+        )
 
 
 async def test_max_pages_positive_preserved():
-    settings = CrawlerSettings()
-    policy = _payload_policy({"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, settings)
-    assert policy["limits"]["max_pages"] == 7
+    policy = _payload_policy(
+        {"url": "http://example.com/", "policy": {"limits": {"max_pages": 7}}}, PolicyTier.model_defaults()
+    )
+    assert policy.limits.max_pages == 7
 
 
 async def test_max_pages_zero_bounded_at_engine():

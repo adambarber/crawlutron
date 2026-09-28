@@ -74,7 +74,6 @@ SUPPORTED_EXTRACTIONS: list[str] = [
     EXTRACTION_DOCUMENT,
     EXTRACTION_DOM,
 ]
-DEFAULT_EXTRACTION: str = EXTRACTION_FULL
 
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
@@ -520,8 +519,28 @@ DISCOVERY_BODY_MAX_BYTES: int = 8 * 1024 * 1024
 
 # Per-strategy timeout / retry budgets.
 DEFAULT_HTTP_TIMEOUT_SECONDS: int = 30
-DEFAULT_MAX_RETRIES: int = 2
+# The caller's ceiling on a per-strategy timeout. Declared here so the model's
+# `le` and the deployment default's bound are one number: the settings comment
+# claimed they were "the same declaration" while the deployment side was a
+# literal `hi=120`, which is exactly the pair that drifts.
+MAX_HTTP_TIMEOUT_SECONDS: int = 120
+
+# Three retry numbers, three authorities, deliberately not interchangeable:
+#   * DEFAULT_MAX_RETRIES -- what a job gets when nobody states a limit.
+#   * MAX_RETRIES -- the most an OPERATOR may install as the deployment-wide
+#     default. The deployment is a blast radius shared by every caller, so it is
+#     capped tightly and out-of-range is rejected rather than quietly rewritten.
+#   * MAX_JOB_MAX_RETRIES -- the most ONE job's caller may ask for. Higher than
+#     the deployment ceiling on purpose: a client that knows its target is
+#     flaky may spend more retries on that one job, without the operator having
+#     to open the deployment up for everyone.
+# DEFAULT and the deployment ceiling coincide at 5 today. They are separate
+# constants because "we default to 5" and "no deployment may exceed 5" are
+# different decisions, and collapsing them would make loosening one silently
+# loosen the other.
+DEFAULT_MAX_RETRIES: int = 5
 MAX_RETRIES: int = 5
+MAX_JOB_MAX_RETRIES: int = 10
 
 # Durable whole-site retry cap: how many times a frontier batch may hand a URL to
 # the engine when it fails for a TRANSIENT reason (network/dns/tls/timeout/browser

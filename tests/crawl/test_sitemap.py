@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 from _assertions import install_to_thread_spy
 from _fetcher_factories import (
@@ -16,6 +17,7 @@ from _policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
 from app.crawl.fetch_helpers import _SITEMAP_CACHE, fetch_sitemap_urls
+from app.crawl.policy import read_policy
 from app.crawl.strategies.content_cache_key import _content_cache_key
 from app.crawl.strategies.request_profile import _headers_for_strategy
 from app.map import build_site_map
@@ -218,11 +220,17 @@ async def test_index_children_recurse_without_lastmod():
     assert ("http://x.test/p", "2024-03-03") in urls
 
 
-def _policy(extra=None):
-    p = {"strategies": ["HTTP"], "extraction": "trafilara", "headers": {}}
-    if extra:
-        p.update(extra)
-    return p
+def _policy(extra=None, *, extraction=None):
+    """The sitemap suite's policy, as a validated model.
+
+    It comes back as a model because the sitemap seeding cache keys off
+    ``policy.strategies``/``extraction``/``css_selector``/``xpath`` -- reading
+    those off a dict is the shape confusion the shared factories exist to
+    remove, and ``read_policy`` passes an already-built model straight through,
+    so one spelling serves both the key builder and the engine.
+    """
+    base = {"extraction": extraction} if extraction else {}
+    return read_policy(crawl_policy(["HTTP_DECLARED_CRAWLER"], **{**base, **(extra or {})}))
 
 
 def test_parse_lastmod_variants():
@@ -238,18 +246,18 @@ def _cache_with_fresh(tmp_path, url, lastmod, policy):
     """Seed the content cache so ``url`` is fresh as of ``lastmod``.
 
     The key must match what sitemap seeding looks up, so the caller passes the
-    exact policy the engine derives (unit tests use ``_policy_test_sitemap_seed_batch()`` directly; the
+    exact policy the engine derives (unit tests use ``_POLICY_SEED_BATCH()`` directly; the
     integration test derives it via ``_payload_policy``).
     """
     cache = ContentCache(str(tmp_path), clock=lambda: 1_700_000_000.0)
-    strategy = policy.get("strategies") or ["HTTP_DECLARED_CRAWLER"]
+    strategy = list(policy.strategies) or ["HTTP_DECLARED_CRAWLER"]
     key = _content_cache_key(
         url,
         strategy[0],
-        _headers_for_strategy(strategy[0], policy, url),
-        policy.get("extraction"),
-        policy.get("css_selector"),
-        policy.get("xpath"),
+        _headers_for_strategy(strategy[0], read_policy(policy), url),
+        policy.extraction,
+        policy.css_selector,
+        policy.xpath,
     )
     cache.set(key, {"html": "<html>cached</html>"})
     return cache
@@ -276,12 +284,12 @@ def test_seed_is_fresh_requires_cache():
 _CRAWL_URL = "http://seed-batch.test/"
 
 
-def _policy_test_sitemap_seed_batch():
-    return {
-        "strategies": ["HTTP_DECLARED_CRAWLER"],
-        "extraction": "trafilatura",
-        "headers": {},
-    }
+# The sitemap seed-batch policy: same chain, HTML main-text extraction only.
+# It was a second name for ``_policy`` -- the same policy dict with one field
+# changed -- and the two disagreed about shape: this one returned a mapping
+# while ``_cache_with_fresh`` reads ``policy.strategies`` off its argument, so
+# every caller of this one had to know which kind it was being handed.
+_POLICY_SEED_BATCH = partial(_policy, extraction="trafilatura")
 
 
 class TestStaleSeedBatch:
@@ -290,13 +298,13 @@ class TestStaleSeedBatch:
         fresh (the same verdicts the per-URL helper produced before T7)."""
         fresh = "http://seed-batch.test/fresh"
         stale = "http://seed-batch.test/stale"
-        cache = _cache_with_fresh(tmp_path, fresh, "2020-01-01T00:00:00Z", _policy_test_sitemap_seed_batch())
-        policy = _policy_test_sitemap_seed_batch()
+        cache = _cache_with_fresh(tmp_path, fresh, "2020-01-01T00:00:00Z", _POLICY_SEED_BATCH())
+        policy = _POLICY_SEED_BATCH()
 
         stale_set = _stale_seeds(
             [(fresh, "2020-01-01T00:00:00Z"), (stale, "2025-01-01T00:00:00Z")],
             cache,
-            policy,
+            read_policy(policy),
         )
         assert stale_set == {fresh}
 
@@ -304,15 +312,13 @@ class TestStaleSeedBatch:
         """A cache read error must never cause a seed to be skipped: an
         unreadable/expired entry is treated as NOT fresh so the URL is still
         crawled."""
-        cache = _cache_with_fresh(
-            tmp_path, "http://seed-batch.test/ok", "2020-01-01", _policy_test_sitemap_seed_batch()
-        )
-        policy = _policy_test_sitemap_seed_batch()
+        cache = _cache_with_fresh(tmp_path, "http://seed-batch.test/ok", "2020-01-01", _POLICY_SEED_BATCH())
+        policy = _POLICY_SEED_BATCH()
 
         stale_set = _stale_seeds(
             [("http://seed-batch.test/never-cached", "2020-01-01"), (None, "2020-01-01")],
             cache,
-            policy,
+            read_policy(policy),
         )
         assert stale_set == set()
 
@@ -331,9 +337,9 @@ class TestSeedingIsOffLoop:
         }
 
         from app.crawl.payload_helpers import _payload_policy
-        from app.settings import CrawlerSettings
+        from app.crawl.policy import PolicyTier
 
-        derived = _payload_policy(payload, CrawlerSettings.from_mapping())
+        derived = _payload_policy(payload, PolicyTier.model_defaults())
         cache = _cache_with_fresh(tmp_path, fresh_url, "2020-01-01T00:00:00Z", derived)
         fetched: list[str] = []
 
@@ -496,4 +502,4 @@ def test_far_future_lastmod_never_skips_a_cached_seed():
         def cached_at_of(self, key):
             raise AssertionError("far-future lastmod must short-circuit before any disk read")
 
-    assert _seed_is_fresh("http://x.test/p", _iso_offset(86400 * 30), _Cache(), {}) is False
+    assert _seed_is_fresh("http://x.test/p", _iso_offset(86400 * 30), _Cache(), read_policy({})) is False

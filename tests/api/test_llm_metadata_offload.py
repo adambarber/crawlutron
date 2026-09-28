@@ -11,6 +11,7 @@ import pytest
 from _assertions import install_to_thread_spy
 
 from app.api.response_shaping import (
+    EnvelopeOptions,
     abuild_unified_crawl_response,
     abuild_unified_result,
     aformat_crawl_item,
@@ -89,8 +90,12 @@ async def test_abuild_unified_crawl_response_matches_sync():
             "final_url": "http://example.com/csv",
         },
     ]
-    sync = build_unified_crawl_response(items, request_id="r", policy_schema_version="v")
-    async_ = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
+    sync = build_unified_crawl_response(
+        items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
+    )
+    async_ = await abuild_unified_crawl_response(
+        items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
+    )
     assert async_.model_dump() == sync.model_dump()
 
 
@@ -105,8 +110,12 @@ async def test_sync_and_async_envelope_builders_agree_on_the_submitted_count(sub
     wire bug, not a cosmetic one.
     """
     items = [_html_item(0), _html_item(1)]
-    sync = build_unified_crawl_response(items, request_id="r", submitted_count=submitted)
-    async_ = await abuild_unified_crawl_response(items, request_id="r", submitted_count=submitted)
+    sync = build_unified_crawl_response(
+        items, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
+    )
+    async_ = await abuild_unified_crawl_response(
+        items, options=EnvelopeOptions(request_id="r", submitted_count=submitted)
+    )
     assert async_.model_dump() == sync.model_dump()
     # None means "the caller could not say", which the wire answers as the
     # batch it is reporting; anything else is the caller's number verbatim,
@@ -122,7 +131,7 @@ async def test_abuild_unified_result_single_item_matches_sync():
 
 
 async def test_async_response_empty_results():
-    resp = await abuild_unified_crawl_response([], request_id="r")
+    resp = await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id="r"))
     assert resp.results == []
     assert resp.request_id == "r"
 
@@ -137,7 +146,9 @@ async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatc
     """
     items = [_html_item(i) for i in range(4)]
     offloaded = install_to_thread_spy(monkeypatch)
-    resp = await abuild_unified_crawl_response(items, request_id="r", policy_schema_version="v")
+    resp = await abuild_unified_crawl_response(
+        items, options=EnvelopeOptions(request_id="r", policy_schema_version="v")
+    )
     assert len(resp.results) == len(items)
     assert len(offloaded) == 1, f"expected one batched offload, got {len(offloaded)}"
 
@@ -145,6 +156,6 @@ async def test_abuild_unified_crawl_response_batches_into_one_offload(monkeypatc
 async def test_abuild_batches_offload_for_empty_results(monkeypatch):
     """An empty batch offloads nothing and still answers the empty response."""
     offloaded = install_to_thread_spy(monkeypatch)
-    resp = await abuild_unified_crawl_response([], request_id="r")
+    resp = await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id="r"))
     assert resp.results == []
     assert len(offloaded) <= 1, f"empty batch must not fan out: {len(offloaded)}"

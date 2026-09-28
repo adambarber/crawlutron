@@ -38,9 +38,10 @@ from collections.abc import Callable, Container
 from contextlib import contextmanager
 from typing import Any
 
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY, job_store
 from _result_builders import _canned_result
 
+from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
@@ -154,7 +155,7 @@ def _instrument_status_bus(store: JobStore) -> JobStore:
 
 def make_job_store(tmpdir: str) -> JobStore:
     db_path = pathlib.Path(tmpdir) / "jobs.db"
-    return _instrument_status_bus(JobStore(db_path, policy=UNRESTRICTED_HOST_POLICY))
+    return _instrument_status_bus(job_store(db_path, policy=UNRESTRICTED_HOST_POLICY))
 
 
 @contextmanager
@@ -179,7 +180,7 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
     twice is a clone rather than a coincidence.
     """
     store = make_job_store(tmpdir)
-    job = store.create("http://example.test/a", {})
+    job = store.create("http://example.test/a", CrawlPolicy())
     job.visited = [f"http://example.test/p/{i}" for i in range(pages)]
     job.results = [{"url": url, "status": "success"} for url in job.visited]
     store.save(job)

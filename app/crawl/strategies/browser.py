@@ -721,9 +721,7 @@ class BrowserRenderer:
             # Browser action chains (#10): run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
             if actions:
-                await self._run_action_chain(
-                    page, actions, url=url, budget_seconds=navigation_timeout
-                )
+                await self._run_action_chain(page, actions, url=url, budget_seconds=navigation_timeout)
 
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
             await self._lazy_load_scroll(page, options.browser_profile)
@@ -837,9 +835,7 @@ class BrowserRenderer:
             await self._perform_action_chain(page, actions, url=url)
             return
         try:
-            await asyncio.wait_for(
-                self._perform_action_chain(page, actions, url=url), timeout=budget_seconds
-            )
+            await asyncio.wait_for(self._perform_action_chain(page, actions, url=url), timeout=budget_seconds)
         except TimeoutError:
             logger.warning(
                 "browser_action_chain_budget_exhausted",
@@ -1278,4 +1274,3 @@ class BrowserRenderer:
 
     def _looks_like_pdf(self, url: str) -> bool:
         return url.split("?", 1)[0].lower().endswith(".pdf")
-

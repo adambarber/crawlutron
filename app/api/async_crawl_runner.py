@@ -23,7 +23,7 @@ import logging
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl
-from app.api.response_shaping import abuild_unified_crawl_response
+from app.api.response_shaping import EnvelopeOptions, abuild_unified_crawl_response
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
@@ -103,9 +103,7 @@ async def run_async_crawl(
         return
     # Claim RUNNING on the control plane (H3: status moves only via CAS;
     # a lost claim means the row was deleted or already transitioned).
-    claimed = await job_store.aset_status(
-        request_id, JobStatus.RUNNING, expected=JobStatus.PENDING
-    )
+    claimed = await job_store.aset_status(request_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     if not claimed:
         logger.error("async_crawl_claim_lost", extra={"request_id": request_id})
         return
@@ -122,9 +120,11 @@ async def run_async_crawl(
             get_metrics().observe_crawl(results=result.get("results", []))
             response_model = await abuild_unified_crawl_response(
                 result.get("results", []),
-                request_id=request_id,
-                submitted_count=result.get("submitted_count"),
-                policy_schema_version=result.get("policy_schema_version", ""),
+                options=EnvelopeOptions(
+                    request_id=request_id,
+                    submitted_count=result.get("submitted_count"),
+                    policy_schema_version=result.get("policy_schema_version", ""),
+                ),
             )
             response_payload = response_model.model_dump()
 
@@ -149,9 +149,7 @@ async def run_async_crawl(
                 "total_failed": failed,
             }
             await job_store.asave(job)
-            await job_store.aset_status(
-                request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
-            )
+            await job_store.aset_status(request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
 
             # Also store in result_store for backward compat (sync path reads from here)
             try:
@@ -180,7 +178,7 @@ async def run_async_crawl(
             try:
                 error_payload = (
                     await abuild_unified_crawl_response(
-                        [], request_id=request_id, success=False
+                        [], options=EnvelopeOptions(request_id=request_id, success=False)
                     )
                 ).model_dump()
                 from app.api.webhooks import post_webhook

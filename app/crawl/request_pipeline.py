@@ -8,12 +8,9 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from app.api_models import POLICY_SCHEMA_VERSION
+from app.api_models import POLICY_SCHEMA_VERSION, CrawlExtractionMethod, CrawlPolicy
 from app.constants import (
-    DEFAULT_EXTRACTION,
-    DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
-    EXTRACTION_DOCUMENT,
 )
 from app.crawl import robots as robots_policy
 from app.crawl.admission import gather_robots_decisions, normalize_sitemap_candidates
@@ -21,6 +18,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.ids import new_request_id
+from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import TerminalResult, _engine_result_from_exception, _skipped_engine_result
@@ -46,7 +44,7 @@ class _PipelineDependencies:
     get_content_cache: Callable[[], ContentCache]
     make_spill: Callable[[str | None], Any]
     compile_scope_regex_safe: Callable[[str | None], BoundedPattern | None]
-    stale_seeds: Callable[[Iterable[tuple[str, str | None]], Any, dict[str, Any]], set[str]]
+    stale_seeds: Callable[[Iterable[tuple[str, str | None]], Any, CrawlPolicy], set[str]]
     fetch_and_decode: Callable[..., Any]
     default_fetch_and_decode: Callable[..., Any]
     shared_http_cache: HttpCache
@@ -58,7 +56,7 @@ class _PipelineState:
     payload: dict[str, Any]
     settings: CrawlerSettings
     urls: list[str]
-    policy: dict[str, Any]
+    policy: CrawlPolicy
     fetcher: Any
     cffi: Any
     host_policy: HostPolicy
@@ -78,7 +76,7 @@ class _PipelineState:
     include_html: bool = True
     want_document_bodies: bool = False
     scope_pattern: BoundedPattern | None = None
-    discovery: dict[str, Any] = field(default_factory=dict)
+    discovery: DiscoveryFlags = DiscoveryFlags(False, False, False)
     spill: Any = None
 
 
@@ -102,12 +100,12 @@ def _build_jobs(state: _PipelineState) -> list[CrawlTask]:
 
 
 def _build_scheduler(state: _PipelineState) -> DomainScheduler:
-    limits = state.policy.get("limits", {})
+    limits = state.policy.limits
     return DomainScheduler(
         global_limit=RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER,
         per_domain_limit=state.settings.per_domain_concurrency,
         delay_seconds=state.settings.per_domain_delay_ms / 1000,
-        max_rps=float(limits.get("max_rps", 0) or 0),
+        max_rps=limits.max_rps,
         adaptive=state.settings.adaptive_throttling,
         adaptive_min_delay=state.settings.adaptive_min_delay,
         adaptive_max_delay=state.settings.adaptive_max_delay,
@@ -146,10 +144,7 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
             policy=state.host_policy,
         )
     )
-    budget = float(
-        (state.policy.get("limits") or {}).get("total_url_budget_seconds")
-        or DEFAULT_TOTAL_URL_BUDGET_SECONDS
-    )
+    budget = state.policy.limits.total_url_budget_seconds
     try:
         result = await asyncio.wait_for(
             execute_crawl_chain(
@@ -162,11 +157,7 @@ async def _run_job(state: _PipelineState, job: CrawlTask) -> tuple[int, EngineCr
                 global_concurrency=state.settings.global_concurrency,
                 cache=state.cache or state.dependencies.shared_http_cache,
                 content_cache=state.content_cache
-                or (
-                    state.dependencies.get_content_cache()
-                    if state.settings.content_cache_enabled
-                    else None
-                ),
+                or (state.dependencies.get_content_cache() if state.settings.content_cache_enabled else None),
                 scheduler=state.scheduler,
                 domain=job.domain,
                 robots_sitemaps=robots_sitemaps,
@@ -191,7 +182,7 @@ async def _load_robots(state: _PipelineState, target_url: str):
     return await robots_policy.load_robots_rules(
         robots_policy.robots_origin(target_url, policy=state.host_policy),
         state.fetcher,
-        state.policy["limits"]["timeout_seconds"],
+        state.policy.limits.timeout_seconds,
         fetch_and_decode=(
             state.dependencies.fetch_and_decode
             if state.dependencies.fetch_and_decode is not state.dependencies.default_fetch_and_decode
@@ -213,14 +204,15 @@ async def _robots_delay(state: _PipelineState, target_url: str) -> float | None:
 
 def _robots_disallowed(state: _PipelineState, job: CrawlTask) -> EngineCrawlResult:
     return _skipped_engine_result(
-    TerminalResult(
+        TerminalResult(
             original_url=job.original_url,
             normalized_url=job.normalized_url,
             strategy=None,
             classification="robots_disallowed",
             error="robots_txt_disallowed",
             diagnostics={"robots": {"allowed": False}},
-))
+        )
+    )
 
 
 async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[NormalizedUrl]:
@@ -230,7 +222,7 @@ async def _seeds_for_job(state: _PipelineState, job: CrawlTask) -> list[Normaliz
     found = await fetch_sitemap_urls(
         state.fetcher,
         sitemap_url,
-        state.policy["limits"]["timeout_seconds"],
+        state.policy.limits.timeout_seconds,
         host_policy=state.host_policy,
     )
     candidates = normalize_sitemap_candidates(
@@ -328,7 +320,7 @@ async def _run_recursive(state: _PipelineState) -> None:
         want_document_bodies=state.want_document_bodies,
         scope_pattern=state.scope_pattern,
         global_concurrency=state.settings.global_concurrency,
-        seed_sitemaps=bool(state.discovery.get("sitemaps")),
+        seed_sitemaps=state.discovery.sitemaps,
         resource_gate=state.dependencies.resource_gate,
         admission=admission,
         host_policy=state.host_policy,
@@ -351,14 +343,14 @@ async def _run(state: _PipelineState) -> dict[str, Any]:
     state.jobs = _build_jobs(state)
     state.scheduler = _build_scheduler(state)
     state.validators_by_url = _build_validators(state)
-    limits = state.policy["limits"]
-    state.max_depth = int(limits.get("max_depth") or 0)
-    state.max_pages = int(limits.get("max_pages") or 0)
-    state.respect_robots = bool(limits.get("respect_robots"))
+    limits = state.policy.limits
+    state.max_depth = limits.max_depth
+    state.max_pages = limits.max_pages
+    state.respect_robots = limits.respect_robots
     state.include_html = policy_wants_html(state.policy)
-    state.discovery = state.policy.get("discovery") or {}
-    state.scope_pattern = state.dependencies.compile_scope_regex_safe(state.policy.get("scope_regex"))
-    state.want_document_bodies = state.policy.get("extraction", DEFAULT_EXTRACTION) == EXTRACTION_DOCUMENT
+    state.discovery = discovery_flags(state.policy)
+    state.scope_pattern = state.dependencies.compile_scope_regex_safe(state.policy.scope_regex)
+    state.want_document_bodies = state.policy.extraction is CrawlExtractionMethod.DOCUMENT
     state.spill = state.dependencies.make_spill(state.spill_path)
     if state.max_depth > 0:
         await _run_recursive(state)

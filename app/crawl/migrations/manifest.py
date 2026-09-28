@@ -166,9 +166,7 @@ MIGRATION_SEQUENCES = {
     StoreSchema.COORDINATION_COOKIES: ("0001_coordination_cookies_initial",),
 }
 
-MIGRATION_IDS = {
-    schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()
-}
+MIGRATION_IDS = {schema: sequence[-1] for schema, sequence in MIGRATION_SEQUENCES.items()}
 
 
 def _quote_identifier(value: str) -> str:
@@ -289,9 +287,7 @@ def schema_drift(
     return drift
 
 
-def _companion_drift(
-    conn: sqlite3.Connection, store_schema: StoreSchema
-) -> tuple[str, ...]:
+def _companion_drift(conn: sqlite3.Connection, store_schema: StoreSchema) -> tuple[str, ...]:
     """Check the tables a store schema owns beyond its own primary table.
 
     Absent companions are not drift at that point in the chain: before

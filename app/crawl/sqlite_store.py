@@ -131,10 +131,7 @@ def table_indexes(conn: sqlite3.Connection, table: str) -> tuple[IndexInfo, ...]
     indexes: list[IndexInfo] = []
     for row in conn.execute(f"PRAGMA index_list({table})"):
         index_name = _validated_identifier(str(row[1]))
-        columns = tuple(
-            str(index_row[2])
-            for index_row in conn.execute(f"PRAGMA index_info({index_name})")
-        )
+        columns = tuple(str(index_row[2]) for index_row in conn.execute(f"PRAGMA index_info({index_name})"))
         indexes.append(
             IndexInfo(
                 name=index_name,
@@ -147,4 +144,12 @@ def table_indexes(conn: sqlite3.Connection, table: str) -> tuple[IndexInfo, ...]
     return tuple(indexes)
 
 
-__all__ = ["ColumnInfo", "IndexInfo", "configure_store_connection", "connect_store", "table_columns", "table_has_column", "table_indexes"]
+__all__ = [
+    "ColumnInfo",
+    "IndexInfo",
+    "configure_store_connection",
+    "connect_store",
+    "table_columns",
+    "table_has_column",
+    "table_indexes",
+]

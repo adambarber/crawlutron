@@ -17,6 +17,7 @@ from _job_harnesses import post_render_with_pool
 from _policy_factories import crawl_policy
 from helpers.server import WEBHOOK_RECEIVED
 
+from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
 from app.main import app
 
@@ -100,7 +101,9 @@ class TestCrawlApi(_AsgiEndpointTests):
         assert f"{self.base}/page2" in diagnostics["discovery"]["sitemap_urls"]
 
     async def test_v1_crawl_404_is_classified_not_found(self):
-        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][0]
+        result = (await completed_crawl(self.client, make_crawl_payload(f"{self.base}/missing")))["results"][
+            0
+        ]
         assert_result_failed(result, "not_found")
 
     async def test_v1_crawl_rejects_payload_without_url(self):
@@ -287,9 +290,7 @@ class TestDiscoveryAndRenderApi:
                     )
 
         monkeypatch.setattr(render_endpoint, "PooledBrowserWorker", _ExhaustedWorker)
-        assert_pool_unavailable(
-            await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x")
-        )
+        assert_pool_unavailable(await post_render_with_pool(self.client, object(), "http://127.0.0.1:1/x"))
 
     async def test_v1_render_worker_exception_returns_shaped_failure_not_500(self, monkeypatch):
         # A render worker that raises a plain Exception (not pool exhaustion)
@@ -541,7 +542,7 @@ class TestJobApi(_AsgiEndpointTests):
         """Seed a persisted row directly; create_endpoint refuses (H5)."""
         from app.main import job_store
 
-        job = job_store.create(root_url, {})
+        job = job_store.create(root_url, CrawlPolicy())
         return job.job_id
 
     async def test_v1_jobs_create_runs_and_list_get(self):

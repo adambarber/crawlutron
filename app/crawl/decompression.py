@@ -10,9 +10,7 @@ from typing import Protocol, cast
 class _BoundedDecompressor(Protocol):
     """The brotlicffi-style API: one call, bounded by an explicit output cap."""
 
-    def decompress(
-        self, data: bytes | bytearray | memoryview[int], max_length: int, /
-    ) -> bytes: ...
+    def decompress(self, data: bytes | bytearray | memoryview[int], max_length: int, /) -> bytes: ...
 
 
 class _StreamingDecompressor(Protocol):
@@ -99,9 +97,7 @@ def decompress_body(
 
     if "gzip" in encoding or "deflate" in encoding:
         return _decompress_bounded(
-            lambda: zlib.decompressobj(16 + zlib.MAX_WBITS)
-            if "gzip" in encoding
-            else zlib.decompressobj(),
+            lambda: zlib.decompressobj(16 + zlib.MAX_WBITS) if "gzip" in encoding else zlib.decompressobj(),
             _passthrough(body),
             max_output_bytes,
             allow_concatenated="gzip" in encoding,
@@ -142,9 +138,7 @@ def _brotli_available() -> bool:
     return brotli is not None
 
 
-def _decompress_brotli(
-    body: bytes | bytearray | memoryview[int], max_output_bytes: int
-) -> bytes | bytearray:
+def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_bytes: int) -> bytes | bytearray:
     """Decode a brotli body within a cap or raise a typed error.
 
     The two brotli APIs are incompatible: brotlicffi exposes

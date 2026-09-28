@@ -7,9 +7,12 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 from _job_harnesses import make_job_store, raw_job_row, write_row_policy
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from _policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier, job_store
 
-from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
+from app.api_models import CrawlPolicy
+from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus
+from app.crawl.policy import read_policy
+from app.settings import CrawlerSettings
 
 
 def test_jobstore_create_and_load(job_store):
@@ -30,7 +33,7 @@ def test_jobstore_create_and_load(job_store):
 
 
 def test_jobstore_save_updates_state(job_store):
-    job = job_store.create("http://example.com/", {})
+    job = job_store.create("http://example.com/", CrawlPolicy())
     job.frontier = ["http://example.com/page2"]
     job.visited = {"http://example.com/"}
     job.results = [{"url": "http://example.com/", "status": "success"}]
@@ -50,8 +53,8 @@ def test_jobstore_save_updates_state(job_store):
 
 
 def test_jobstore_list_jobs(job_store):
-    job1 = job_store.create("http://site1.com/", {})
-    job2 = job_store.create("http://site2.com/", {})
+    job1 = job_store.create("http://site1.com/", CrawlPolicy())
+    job2 = job_store.create("http://site2.com/", CrawlPolicy())
     job_store.set_status(job2.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     job_store.save(job2)
 
@@ -65,7 +68,7 @@ def test_jobstore_list_jobs(job_store):
 
 
 def test_jobstore_delete(job_store):
-    job = job_store.create("http://example.com/", {})
+    job = job_store.create("http://example.com/", CrawlPolicy())
     assert job_store.delete(job.job_id) is True
     assert job_store.load(job.job_id) is None
     assert job_store.delete(job.job_id) is False  # already deleted
@@ -92,7 +95,7 @@ def test_crawljobstate_serialization():
     assert json_data["status"] == "running"
     assert set(json_data["visited"]) == {"http://example.com"}
 
-    loaded = CrawlJobState.from_json(json_data, host_policy=UNRESTRICTED_HOST_POLICY)
+    loaded = CrawlJobState.from_json(json_data, host_policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier())
     assert loaded.job_id == "test123"
     assert loaded.status == JobStatus.RUNNING
     assert loaded.frontier == [
@@ -105,7 +108,7 @@ def test_crawljobstate_serialization():
 
 def test_create_returns_full_uuid_hex():
     """HIGH #9: job IDs must not be short brute-forceable suffixes."""
-    store = JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
+    store = job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
     job = store.create("https://example.com/", {"limits": {}})
     assert len(job.job_id) == 32
     assert all(c in "0123456789abcdef" for c in job.job_id)
@@ -115,7 +118,7 @@ def test_create_returns_full_uuid_hex():
 
 
 def test_ids_are_unique():
-    store = JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
+    store = job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
     ids = {store.create("https://example.com/", {"limits": {}}).job_id for _ in range(50)}
     assert len(ids) == 50
 
@@ -123,14 +126,14 @@ def test_ids_are_unique():
 class TestJobStoreLifecycle:
     def test_job_store_update(self, tmp_path):
         store = make_job_store(tmp_path)
-        job = store.create("http://example.com/", {})
+        job = store.create("http://example.com/", CrawlPolicy())
         store.save(job)
         updated = store.load(job.job_id)
         assert (updated) is not None
 
     def test_job_store_delete(self, tmp_path):
         store = make_job_store(tmp_path)
-        job = store.create("http://example.com/", {})
+        job = store.create("http://example.com/", CrawlPolicy())
         deleted = store.delete(job.job_id)
         assert deleted
         assert (store.load(job.job_id)) is None
@@ -145,7 +148,7 @@ class TestJobStoreCorruptRow:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = make_job_store(tmpdir)
-            job = store.create("http://example.com/", {})
+            job = store.create("http://example.com/", CrawlPolicy())
             # Corrupt the policy JSON in the database
             import sqlite3
 
@@ -160,7 +163,7 @@ class TestJobStoreCorruptRow:
 
 def _store(tmp_path=None):
     # Use in-memory SQLite to avoid disk I/O and lock contention (speed).
-    return JobStore(":memory:", policy=UNRESTRICTED_HOST_POLICY)
+    return job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
 
 
 def test_jobstore_has_concurrency_guard():
@@ -183,7 +186,7 @@ def test_jobstore_concurrent_writes_do_not_raise_locked():
 
     def worker(i):
         try:
-            job = store.create(f"http://example.com/{i}", {})
+            job = store.create(f"http://example.com/{i}", CrawlPolicy())
             store.save(job)
             store.load(job.job_id)
             store.delete(job.job_id)
@@ -300,25 +303,54 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
 
 def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
     store = make_job_store(tmp_path)
-    job = store.create("HTTPS://Example.test:443/", {})
+    job = store.create("HTTPS://Example.test:443/", CrawlPolicy())
     loaded = store.load(job.job_id)
 
     assert loaded.root_url == "https://example.test"
     assert loaded.frontier == [FrontierEntry(url="https://example.test", depth=0)]
 
 
-def test_load_sanitizes_non_dict_policy_and_limits(tmp_path):
+def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):
+    """A stored policy that cannot be read must not become a permissive one.
+
+    This used to assert the opposite: a corrupt row sanitized to ``{}``, and
+    ``{}`` read as ``respect_robots=False`` -- a whole-site job silently
+    ignoring robots.txt, and ``max_depth``/``max_pages`` reading as 0. The
+    sanitizer was the detection gap: it looked like a safety measure and was
+    the mechanism. Unreadable now means the model's own defaults, and the
+    assertion that matters is the protection, not the shape.
+    """
     store = make_job_store(tmp_path)
-    for policy_json, expected in (
-        ('["corrupt"]', {}),
-        ('{"limits":"corrupt","scope_regex":null}', {"limits": {}, "scope_regex": None}),
-    ):
-        job = store.create("https://example.test/root", {})
+    for policy_json in ('["corrupt"]', '{"limits":"corrupt","scope_regex":null}', '"not even a mapping"'):
+        job = store.create("https://example.test/root", CrawlPolicy())
         write_row_policy(store, job.job_id, policy_json)
 
         loaded = store.load(job.job_id)
+        limits = read_policy(loaded.policy).limits
 
-        assert loaded.policy == expected
+        assert limits.respect_robots is True, policy_json
+        assert limits.timeout_seconds == CrawlerSettings.from_mapping({}).default_timeout_seconds
+
+
+def test_load_honors_an_explicitly_disabled_robots_limit(tmp_path):
+    """A readable policy that opts out of robots.txt must keep opting out.
+
+    The sibling of the unreadable-policy test, and it exists because that one
+    was written to cover both cases at once -- which asserted that an explicit
+    ``respect_robots: false`` resolved to ``True``. Resolution to defaults is
+    what unreadable input gets; a caller's stated choice is a different
+    decision, and silently upgrading it to the protection would make the
+    opt-out untestable. The protection is asserted where it belongs: on
+    unreadable input.
+    """
+    store = make_job_store(tmp_path)
+    job = store.create("https://example.test/root", CrawlPolicy())
+    write_row_policy(store, job.job_id, '{"limits":{"respect_robots":false}}')
+
+    limits = read_policy(store.load(job.job_id).policy).limits
+
+    assert limits.respect_robots is False
+    assert limits.timeout_seconds == CrawlerSettings.from_mapping({}).default_timeout_seconds
 
 
 def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
@@ -330,7 +362,9 @@ def test_normalize_frontier_keeps_shallowest_duplicate_depth(tmp_path):
     ]
     job_store_data = job.to_json()
 
-    loaded = CrawlJobState.from_json(job_store_data, host_policy=UNRESTRICTED_HOST_POLICY)
+    loaded = CrawlJobState.from_json(
+        job_store_data, host_policy=UNRESTRICTED_HOST_POLICY, tier=deployment_tier()
+    )
 
     assert loaded.frontier == [FrontierEntry("https://example.test/child", 1)]
 
@@ -347,6 +381,7 @@ def test_cross_list_duplicate_keeps_shallowest_depth():
             "in_flight": [{"url": "https://example.test/child", "depth": 3}],
         },
         host_policy=UNRESTRICTED_HOST_POLICY,
+        tier=deployment_tier(),
     )
 
     assert loaded.frontier == []

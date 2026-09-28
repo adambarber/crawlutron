@@ -14,9 +14,9 @@ from _recursive_harnesses import drive_recursive_crawl
 from _recursive_harnesses import make_crawl_task as _make_job
 from _result_builders import make_engine_result
 
+from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
 from app.models import DiscoveredLink
-from app.settings import CrawlerSettings
 
 
 @asynccontextmanager
@@ -235,11 +235,7 @@ async def test_cold_robots_gate_coalesces_same_origin_fetches(monkeypatch):
         return "User-agent: *\nDisallow:\n", 200
 
     monkeypatch.setattr("app.crawl.admission._fetch_and_decode", fetch_robots)
-    gate = RobotsGate(
-        {},
-        CrawlerSettings.from_mapping({}),
-        UNRESTRICTED_HOST_POLICY,
-    )
+    gate = RobotsGate(CrawlPolicy(), UNRESTRICTED_HOST_POLICY)
     decisions = await asyncio.gather(
         *(gate.allows(f"https://example.test/page-{index}") for index in range(5))
     )

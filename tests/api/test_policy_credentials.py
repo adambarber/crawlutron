@@ -15,15 +15,15 @@ import pytest
 
 from app.api_models import CrawlPolicy, Credential
 from app.crawl.payload_helpers import _payload_policy
+from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.request_profile import _apply_credentials
-from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 #: The settings a payload-policy test runs against: the defaults with nothing
 #: overridden. A module constant rather than a factory because it is immutable
 #: and identical at every call site -- an environment default leaking in here
 #: would be a second variable in a test about credential keying.
-DEFAULT_SETTINGS = CrawlerSettings.from_mapping({})
+MODEL_DEFAULTS_TIER = PolicyTier.model_defaults()
 
 
 class TestWireModel:
@@ -48,9 +48,12 @@ class TestWireModel:
 
 class TestApplyCredentials:
     def _credentials(self):
+        # Credential models, not raw mappings: production hands
+        # apply_credentials the validated model, and a test that passed
+        # mappings was exercising a shape the header path no longer has.
         return {
-            "https://private.example": {"kind": "bearer", "token": "tok"},
-            "http://legacy.example:8080": {"kind": "basic", "username": "u", "password": "p"},
+            "https://private.example": Credential(kind="bearer", token="tok"),
+            "http://legacy.example:8080": Credential(kind="basic", username="u", password="p"),
         }
 
     def test_matching_origin_gets_authorization(self):
@@ -100,9 +103,13 @@ class TestApplyCredentials:
             "request_profile": {},
             "credentials": self._credentials(),
         }
-        scoped = _headers_for_strategy("http_declared_crawler", policy, "https://private.example/docs")
+        scoped = _headers_for_strategy(
+            "http_declared_crawler", read_policy(policy), "https://private.example/docs"
+        )
         assert scoped["Authorization"] == "Bearer tok"
-        plain = _headers_for_strategy("http_declared_crawler", policy, "https://public.example/docs")
+        plain = _headers_for_strategy(
+            "http_declared_crawler", read_policy(policy), "https://public.example/docs"
+        )
         assert "Authorization" not in plain
 
 
@@ -110,12 +117,13 @@ class TestPayloadPolicy:
     def test_keys_canonicalize_to_origin_form(self):
         policy = _payload_policy(
             {"policy": {"credentials": {"HTTPS://Private.Example:443/": {"kind": "bearer", "token": "t"}}}},
-            DEFAULT_SETTINGS,
+            MODEL_DEFAULTS_TIER,
         )
-        assert policy["credentials"] == {"https://private.example": {"kind": "bearer", "token": "t"}}
+        assert list(policy.credentials) == ["https://private.example"]
+        assert policy.credentials["https://private.example"].token == "t"
 
     def test_malformed_credential_is_rejected_not_dropped(self):
         with pytest.raises(ValueError, match="credentials"):
             _payload_policy(
-                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, DEFAULT_SETTINGS
+                {"policy": {"credentials": {"https://a.example": {"kind": "carrier"}}}}, MODEL_DEFAULTS_TIER
             )

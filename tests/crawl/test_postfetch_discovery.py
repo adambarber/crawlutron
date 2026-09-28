@@ -13,6 +13,7 @@ from _fetcher_factories import invoke_browser_strategy, invoke_http_strategy, ma
 from _policy_factories import http_strategy_policy
 
 from app.crawl.extraction import extract_post_fetch_discovery
+from app.crawl.policy import read_policy
 from app.validation import HostPolicy
 
 HTML = (
@@ -153,7 +154,7 @@ async def test_discovery_feeds_are_policy_filtered():
     result = await _discovery_diagnostics(
         normalized_url="https://allowed.test/page",
         html=html,
-        policy={"discovery": {"feeds": True}},
+        policy=read_policy({"discovery": {"feeds": True}}),
         host_policy=HostPolicy.from_strings("allowed.test", "blocked.test"),
         headers={},
         http_fetcher=lambda *args: None,

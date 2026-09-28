@@ -8,7 +8,7 @@ import sys
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from importlib import import_module
 from typing import Protocol, TypeVar, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -84,7 +84,22 @@ class HostPolicy:
 
 
 HOST_POLICY_ENTRY_POINTS = (
-    "app/api/crawl_endpoint.py:crawl", "app/api/crawl_executor.py:execute_crawl", "app/api/jobs_router.py:create_job", "app/api/map_endpoint.py:map_site", "app/api/render.py:render_request", "app/api/async_crawl_runner.py:run_async_crawl", "app/api/response_shaping.py:frontier_link_url", "app/api/webhooks.py:post_webhook", "app/api/webhooks.py:deliver_pinned_webhook", "app/mcp/tools.py:_handle_crawl", "app/mcp/tools.py:_handle_map", "app/mcp/tools.py:_handle_render", "app/mcp/tools.py:_handle_search")
+    "app/api/crawl_endpoint.py:crawl",
+    "app/api/crawl_executor.py:execute_crawl",
+    "app/api/jobs_router.py:create_job",
+    "app/api/map_endpoint.py:map_site",
+    "app/api/render.py:render_request",
+    "app/api/async_crawl_runner.py:run_async_crawl",
+    "app/api/response_shaping.py:frontier_link_url",
+    "app/api/webhooks.py:post_webhook",
+    "app/api/webhooks.py:deliver_pinned_webhook",
+    "app/mcp/tools.py:_handle_crawl",
+    "app/mcp/tools.py:_handle_map",
+    "app/mcp/tools.py:_handle_render",
+    "app/mcp/tools.py:_handle_search",
+)
+
+
 def _host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     normalized = _normalize_policy_host(host)
     if any(normalized == entry or normalized.endswith(f".{entry}") for entry in policy.denied_hosts):
@@ -397,6 +412,26 @@ def _finite_or_none(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def in_range(lo: T, hi: T) -> Callable[[T], T | None]:
+    """A validator that refuses a value outside ``[lo, hi]`` instead of clamping it.
+
+    ``_mapping_number``'s own ``lo``/``hi`` clamp, which is right for a tuning
+    knob and wrong for a value that is part of a contract: a deployment whose
+    ``DEFAULT_MAX_RETRIES`` asks for 9 and silently gets 5 cannot tell anyone,
+    and the code that clamped is a chokepoint, so the whole deployment is
+    affected. Fed to ``validate=`` this warns and returns the fallback, so the
+    misconfiguration is visible at startup instead of at request time.
+
+    The clamp stays for the caller's own fallback value; this guards only what
+    the environment said.
+    """
+
+    def within(value: T) -> T | None:
+        return value if lo <= value <= hi else None
+
+    return within
+
+
 def _mapping_number(
     mapping: Mapping[str, str],
     name: str,
@@ -438,12 +473,38 @@ def _mapping_number(
 
 
 def get_mapping_int(
-    mapping: Mapping[str, str], name: str, default: int, *, lo: int | None = None, hi: int | None = None
+    mapping: Mapping[str, str],
+    name: str,
+    default: int,
+    *,
+    lo: int | None = None,
+    hi: int | None = None,
+    validate: Callable[[int], int | None] | None = None,
+    validate_event: str | None = None,
 ) -> int:
-    """Mapping face of :func:`get_env_int`; identical never-raise contract.
+    """Read an integer from a mapping, or from the environment; never crash,
+    always return an int.
 
+    Both faces are ONE function: :func:`get_env_int` is this function bound
+    to ``os.environ``. The mapping form is the real ``def`` because
     ``CrawlerSettings.from_mapping`` reads a mapping (os.environ in prod, a
-    dict in tests), so the chokepoint must serve both faces from one core.
+    dict in tests), and the env form used to be a second copy of this
+    signature -- a second place to forget an option, where forgetting is
+    silent. (Adding ``validate``/``validate_event`` here is what exposed that
+    restatement: the clone gate caught the parameter list twice.)
+
+    Hardened against every class of bad input (adversarial review: the
+    chokepoint must make the mistake unrepresentable): a typo'd env var or
+    an un-coercible/non-numeric *default* falls back to a bounded int, and
+    the result is always clamped to ``[lo, hi]`` when bounds are given. A
+    string default like ``"0.5"`` can no longer leak a ``str`` into
+    downstream arithmetic.
+
+    ``validate``/``validate_event`` exist here for the same reason they exist on
+    the float face: they are the way a value that is part of a contract gets
+    REJECTED (warned, and replaced by the fallback) rather than clamped into a
+    different number. The int face could not say that before, so every
+    out-of-range integer setting was rewritten in silence.
     """
     return _mapping_number(
         mapping,
@@ -453,13 +514,25 @@ def get_mapping_int(
         invalid_event="invalid_int_env",
         lo=lo,
         hi=hi,
+        validate=validate,
+        validate_event=validate_event,
     )
 
 
 def get_mapping_float(
     mapping: Mapping[str, str], name: str, default: float, *, lo: float | None = None, hi: float | None = None
 ) -> float:
-    """Mapping face of :func:`get_env_float`; identical never-raise contract."""
+    """Read a float from a mapping, or from the environment; never crash,
+    always a finite float.
+
+    Both faces are ONE function: :func:`get_env_float` is this function bound
+    to ``os.environ``, for the reason given on the int face above.
+
+    Rejects non-finite values (``inf``/``nan``) from BOTH the default and the
+    environment: ``float("inf")`` parses cleanly but ``int(limit * inf)``
+    overflows at import, so the value is treated as garbage and the bounded
+    fallback is returned instead.
+    """
     return _mapping_number(
         mapping,
         name,
@@ -531,28 +604,13 @@ def _as_float_default(value, *, name) -> float:
     return result
 
 
-def get_env_int(name: str, default: int, *, lo: int | None = None, hi: int | None = None) -> int:
-    """Read an env var as an int; never crash, always return an int.
-
-    Hardened against every class of bad input (adversarial review: the
-    chokepoint must make the mistake unrepresentable): a typo'd env var or
-    an un-coercible/non-numeric *default* falls back to a bounded int, and
-    the result is always clamped to ``[lo, hi]`` when bounds are given. A
-    string default like ``"0.5"`` can no longer leak a ``str`` into
-    downstream arithmetic.
-    """
-    return get_mapping_int(os.environ, name, default, lo=lo, hi=hi)
-
-
-def get_env_float(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
-    """Read an env var as a float; never crash, always a finite float.
-
-    Rejects non-finite values (``inf``/``nan``) from BOTH the default and the
-    environment: ``float("inf")`` parses cleanly but ``int(limit * inf)``
-    overflows at import, so the value is treated as garbage and the bounded
-    fallback is returned instead.
-    """
-    return get_mapping_float(os.environ, name, default, lo=lo, hi=hi)
+# The env faces are the mapping faces bound to this process's environment,
+# not a second copy of their signatures. An alias is the whole point: the cost
+# is that `get_env_int.__doc__` is the mapping face's docstring (which is
+# where the contract now lives anyway), and the win is that a new option is
+# added in one place. It was two, and the second copy was already stale.
+get_env_int = partial(get_mapping_int, os.environ)
+get_env_float = partial(get_mapping_float, os.environ)
 
 
 def _public_suffix_list():
@@ -685,4 +743,22 @@ def safe_public_url_or_none(raw: str | None, *, policy: HostPolicy) -> Normalize
         return None
 
 
-__all__ = ["HOST_POLICY_ENTRY_POINTS", "HostPolicy", "PRIVATE_HOSTS", "T", "TWO_PART_PUBLIC_SUFFIXES", "filter_js_endpoints", "get_env_float", "get_env_int", "get_mapping_float", "get_mapping_int", "normalize_public_http_url", "parse_bool_env", "parse_bool_value", "public_url_or_none", "registrable_domain", "safe_public_url_or_none"]
+__all__ = [
+    "in_range",
+    "HOST_POLICY_ENTRY_POINTS",
+    "HostPolicy",
+    "PRIVATE_HOSTS",
+    "T",
+    "TWO_PART_PUBLIC_SUFFIXES",
+    "filter_js_endpoints",
+    "get_env_float",
+    "get_env_int",
+    "get_mapping_float",
+    "get_mapping_int",
+    "normalize_public_http_url",
+    "parse_bool_env",
+    "parse_bool_value",
+    "public_url_or_none",
+    "registrable_domain",
+    "safe_public_url_or_none",
+]

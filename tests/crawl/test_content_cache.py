@@ -862,7 +862,9 @@ class TestContentCacheEntryLifecycle:
         """The disk write (json.dumps of a large value) runs in a worker thread."""
         with scoped_cache(default_ttl=60) as cache:
             seen: dict[str, Any] = {}
-            watch_writes(cache, monkeypatch, on_write=lambda path, data: seen.update(thread=threading.current_thread()))
+            watch_writes(
+                cache, monkeypatch, on_write=lambda path, data: seen.update(thread=threading.current_thread())
+            )
             await cache.aset("k2", "y" * 2_000_000)
         assert seen, "write never happened"
         assert seen["thread"] is not threading.current_thread()

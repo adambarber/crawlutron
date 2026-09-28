@@ -9,6 +9,17 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
+from app.constants import (
+    DEFAULT_HTTP_TIMEOUT_SECONDS,
+    DEFAULT_MAX_RETRIES,
+    MAX_HTTP_TIMEOUT_SECONDS,
+    MAX_JOB_MAX_RETRIES,
+    MAX_RETRIES,
+)
+from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
+from app.settings import CrawlerSettings
 from app.validation import get_env_float, get_env_int, parse_bool_env
 
 
@@ -111,3 +122,85 @@ class TestDefaultCoercionNeverBlowsUp:
         monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
         value = get_env_int("BROWSER_CRAWLER_TEST_INT", 4)
         assert type(value) is int
+
+
+class TestDeploymentValuesAreRefusedNotClamped:
+    """A deployment number that is part of a contract must be REFUSED, not rewritten.
+
+    The settings comment used to promise "out of range falls back here, loudly"
+    while the code passed ``lo``/``hi`` and silently clamped: an operator asking
+    for 999 seconds got 120, and a deployment asking for 9 retries got 5, with
+    nothing said at either value. ``get_mapping_int`` could not refuse anything
+    -- it had no way to express a rejected range, because the float face's
+    ``validate``/``validate_event`` pair was never exposed on the int face.
+
+    The timeout assertions below are deliberately a value that is far out of
+    range, so a refusal (30, the default) is distinguishable from a clamp
+    (120, the ceiling). Asserting against the ceiling would pass under either
+    behaviour and so would prove nothing.
+    """
+
+    def test_out_of_ceiling_timeout_yields_the_default_not_the_ceiling(self):
+        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "999"})
+        assert settings.default_timeout_seconds == DEFAULT_HTTP_TIMEOUT_SECONDS  # 30, not 120
+        assert settings.default_timeout_seconds != MAX_HTTP_TIMEOUT_SECONDS
+
+    def test_out_of_ceiling_retries_yields_the_default(self):
+        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "9"})
+        assert settings.default_max_retries == DEFAULT_MAX_RETRIES
+
+    def test_in_ceiling_retry_default_is_honoured(self):
+        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "3"})
+        assert settings.default_max_retries == 3
+
+    def test_the_refusal_is_logged_with_the_value_that_was_refused(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="app.validation"):
+            CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "9"})
+        refused = [r for r in caplog.records if r.message == "operator_max_retries_out_of_range"]
+        assert refused, "a refused deployment value must be visible at startup"
+        assert refused[0].env_value == "9"
+
+
+class TestRetryAuthorityIsPerJob:
+    """The two retry ceilings are different authorities and must not be one number.
+
+    Ruling: a deployment's default is capped at MAX_RETRIES (its blast radius is
+    every caller), while ONE job's caller may ask for anything up to
+    MAX_JOB_MAX_RETRIES. Reading the model's bound when resolving the tier made
+    the deployment's own limit depend on the caller's ceiling, so the two could
+    not be set independently at all.
+    """
+
+    @pytest.mark.parametrize("requested", [0, 1, 5, 9, 10])
+    def test_caller_retry_count_is_bounded_per_job(self, requested):
+        assert (
+            validate_wire_policy(
+                {"limits": {"max_retries": requested}}, PolicyTier.model_defaults()
+            ).limits.max_retries
+            == requested
+        )
+
+    @pytest.mark.parametrize("requested", [11, 99])
+    def test_a_caller_beyond_the_per_job_ceiling_is_rejected(self, requested):
+        with pytest.raises(ValueError):
+            validate_wire_policy({"limits": {"max_retries": requested}}, PolicyTier.model_defaults())
+
+    def test_an_omitted_limit_resolves_to_the_deployment_default(self):
+        # One number for "nobody said": the model's own default and the
+        # deployment's must not be able to disagree, or an omitted limit
+        # answers differently depending on which read edge resolved it.
+        assert read_policy({}).limits.max_retries == DEFAULT_MAX_RETRIES
+        assert PolicyTier.model_defaults().max_retries == DEFAULT_MAX_RETRIES
+        assert CrawlerSettings.from_mapping({}).default_max_retries == DEFAULT_MAX_RETRIES
+
+    def test_the_deployment_retry_ceiling_is_requestable(self):
+        """The invariant ``_within_bounds`` used to enforce at runtime.
+
+        If the deployment ceiling ever rose above the per-job ceiling, the
+        deployment's default would be a value no caller could legally ask for --
+        a hole in the model's per-request bound. A runtime clamp could hide that
+        by quietly repairing it; a standing check states it.
+        """
+        assert MAX_RETRIES <= MAX_JOB_MAX_RETRIES
+        assert DEFAULT_MAX_RETRIES <= MAX_JOB_MAX_RETRIES
+        assert 0 <= MAX_RETRIES <= MAX_JOB_MAX_RETRIES

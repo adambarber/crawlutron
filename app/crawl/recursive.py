@@ -98,8 +98,6 @@ RECURSIVE_RAMP_MAX: int = 128
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
 
 
-
-
 async def _spill_write(spill: Any, index: int, result: Any) -> None:
     """Write a result to ``spill`` if present, tolerating sync or async ``write``.
 
@@ -112,8 +110,6 @@ async def _spill_write(spill: Any, index: int, result: Any) -> None:
     res = spill.write(index, result)
     if inspect.isawaitable(res):
         await res
-
-
 
 
 @dataclass
@@ -182,8 +178,6 @@ async def _seed_recursive_frontier(
         )
         frontier.append((0, task))
         state.next_index += 1
-
-
 
 
 async def _crawl_recursive_batch(

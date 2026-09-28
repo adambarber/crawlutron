@@ -347,10 +347,6 @@ class ResourceGate:
     def cpu_ratio(self) -> float:
         return self.cpu._usage_ratio()
 
-    def loop_lag(self) -> float:
-        """Current measured event-loop lag in seconds (0.0 when probe disabled)."""
-        return self._lag_probe.get()
-
     def close(self) -> None:
         """Stop the optional loop-lag probe (call on shutdown)."""
         self._lag_probe.stop()

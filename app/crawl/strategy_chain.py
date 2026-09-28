@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, cast, get_args
 
+from app.api_models import CrawlPolicy, CrawlStrategy
 from app.constants import (
     BROWSER_BLOCKED_CLASSIFICATIONS,
     BROWSER_STRATEGIES,
@@ -35,7 +37,7 @@ BLOCKED_CLASSIFICATIONS = HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIF
 class _ChainContext:
     original_url: str
     normalized_url: str
-    policy: dict[str, Any]
+    policy: CrawlPolicy
     http_fetcher: HttpFetcher
     cffi_fetcher: HttpFetcher
     browser_worker: CrawlWorker | None
@@ -72,8 +74,25 @@ class _ChainState:
     cffi_retry_done: bool = False
 
 
+def _assert_strategy_names_agree() -> None:
+    """The enum and the alias are two declarations of one set of names.
+
+    They have to agree, because the ladder narrows one into the other, and
+    nothing in either declaration would notice if a fifth enum member appeared
+    without a matching alias entry: it would type-check, and then reach a
+    strategy the chain does not handle. Cheap at import, so it is cheap here.
+    """
+    enum_names = {member.value for member in CrawlStrategy}
+    alias_names = set(get_args(CrawlStrategyName))
+    if enum_names != alias_names:
+        raise RuntimeError(f"strategy name drift: enum {sorted(enum_names)} != alias {sorted(alias_names)}")
+
+
+_assert_strategy_names_agree()
+
+
 def _starting_strategies(
-    strategies: list[CrawlStrategyName],
+    strategies: Iterable[CrawlStrategy],
     scheduler: DomainScheduler | None,
     domain: str,
 ) -> list[CrawlStrategyName]:
@@ -85,7 +104,26 @@ def _starting_strategies(
     copy of the slice that gets written instead stops being what production
     does, which is how a pinning regression ships with pinning tests green.
     """
-    ladder = list(strategies)
+    # The policy holds the enum; the chain's currency is the name alias. Python
+    # cannot derive one static Literal from a runtime enum, so this narrowing is
+    # asserted rather than derived -- and _assert_strategy_names_agree() below
+    # is what makes asserting it honest.
+    #
+    # The conversion is a defence, not a validation: ``CrawlStrategyName`` is a
+    # Literal, so the read edge has already rejected a member that is not a
+    # strategy, and only an unvalidated escape (``model_copy(update=...)``)
+    # can put one here. When it does, the raise names the field and the member
+    # rather than repeating pydantic's value-only complaint, so a caller
+    # holding a dict-shaped policy learns WHICH field to fix -- the same
+    # contract every other policy rejection in this module answers with.
+    ladder: list[CrawlStrategyName] = []
+    for member in strategies:
+        try:
+            ladder.append(cast("CrawlStrategyName", CrawlStrategy(member).value))
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid_policy_strategies: .strategy={member!r} is not a CrawlStrategy"
+            ) from exc
     if scheduler is None:
         return ladder
     pinned = scheduler.get_pinned_strategy(domain)
@@ -138,7 +176,7 @@ class _ChainRun:
             )
         )
 
-    def with_policy(self, policy: dict[str, Any]) -> _ChainRun:
+    def with_policy(self, policy: CrawlPolicy) -> _ChainRun:
         """This same run re-pointed at another policy, carrying the same state.
 
         The cffi cookie retry is a ladder step like any other, so it continues
@@ -168,7 +206,7 @@ class _ChainRun:
                 classification="browser_crash",
                 error="browser_worker_unavailable",
                 diagnostics={
-                    "browser_profile": context.policy.get("browser_profile") or {},
+                    "browser_profile": context.policy.browser_profile,
                     "runtime": {"error": "browser_worker_unavailable"},
                 },
             )
@@ -214,10 +252,11 @@ class _ChainRun:
         cookie_header = get_browser_cookies_for(registrable_domain(self.context.original_url))
         if not cookie_header:
             return None
-        retry_policy = dict(self.context.policy)
-        retry_headers = dict(retry_policy.get("headers") or {})
-        retry_headers["Cookie"] = cookie_header
-        retry_policy["headers"] = retry_headers
+        # model_copy, not a dict round-trip: the only thing changing is one
+        # header, and headers is dict[str, str] built from validated values plus
+        # this cookie, so there is nothing here for validation to catch.
+        retry_headers = {**self.context.policy.headers, "Cookie": cookie_header}
+        retry_policy = self.context.policy.model_copy(update={"headers": retry_headers})
         retry_result = await self.with_policy(retry_policy).execute(HTTP_CFFI_IMPERSONATE)
         state.attempts.extend(retry_result.attempted_strategies)
         if retry_result.status == "success" and retry_result.quality_score > 0:
@@ -263,12 +302,11 @@ def _is_usable(result: EngineCrawlResult) -> bool:
     )
 
 
-
 async def execute_crawl_chain(
     *,
     original_url: str,
     normalized_url: str,
-    policy: dict[str, Any],
+    policy: CrawlPolicy,
     http_fetcher: HttpFetcher,
     cffi_fetcher: HttpFetcher,
     browser_worker: CrawlWorker | None,
@@ -298,7 +336,7 @@ async def execute_crawl_chain(
         global_concurrency=global_concurrency,
     )
     run = _ChainRun(context, _ChainState(attempts=[]))
-    for strategy in _starting_strategies(context.policy["strategies"], context.scheduler, context.domain):
+    for strategy in _starting_strategies(context.policy.strategies, context.scheduler, context.domain):
         result = await run.execute(strategy)
         run.record(strategy, result)
         if result.classification in BLOCKED_CLASSIFICATIONS:

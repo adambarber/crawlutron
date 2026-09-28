@@ -3,8 +3,11 @@
 One module owns the two decisions that must never disagree:
 
 - ``origin_of``: the canonical origin form. Credential KEYS are validated
-  against it (``origin_of(key) == key``), job-row policies are normalized
-  through it, and every request looks up with it -- one rule, one site.
+  against it (``origin_of(key) == key``, rejection and never silent
+  normalization -- a path-, query- or userinfo-bearing key can never match the
+  per-hop lookup, so accepting one would let a caller believe the credential
+  was scoped narrower than it applies), and every request looks up with it --
+  one rule, one site.
 - ``authorization_value``: the only place a credential becomes an
   ``Authorization`` header value.
 
@@ -19,8 +22,9 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
-from typing import Any
 from urllib.parse import urlsplit
+
+from app.api_models import Credential
 
 __all__ = ["apply_credentials", "authorization_value", "origin_of"]
 
@@ -47,28 +51,25 @@ def origin_of(url: str) -> str:
     return f"{scheme}://{host}" if port is None else f"{scheme}://{host}:{port}"
 
 
-def authorization_value(credential: Mapping[str, Any]) -> str:
-    """The single wire shape for a validated credential mapping."""
-    kind = credential.get("kind")
-    if kind == "bearer":
-        token = credential.get("token")
-        if not isinstance(token, str) or not token:
-            raise ValueError("bearer credential requires a token")
-        return f"Bearer {token}"
-    if kind == "basic":
-        username = credential.get("username")
-        password = credential.get("password")
-        if not isinstance(username, str) or not isinstance(password, str):
-            raise ValueError("basic credential requires username and password")
-        raw = f"{username}:{password}".encode()
-        return f"Basic {base64.b64encode(raw).decode()}"
-    raise ValueError("credential kind must be bearer or basic")
+def authorization_value(credential: Credential) -> str:
+    """The single wire shape for a validated credential.
+
+    Pure projection: whether a credential can produce a header at all is
+    decided by ``Credential``'s own validator at the read edge, so this cannot
+    be the place a policy is found to be unusable. It used to be, which meant a
+    bearer credential with no token passed policy validation and then raised
+    here, three layers down, on the first request that used it.
+    """
+    if credential.kind == "bearer":
+        return f"Bearer {credential.token}"
+    raw = f"{credential.username}:{credential.password}".encode()
+    return f"Basic {base64.b64encode(raw).decode()}"
 
 
 def apply_credentials(
     headers: dict[str, str],
     url: str,
-    credentials: Mapping[str, Mapping[str, Any]],
+    credentials: Mapping[str, Credential],
 ) -> dict[str, str]:
     """Attach the Authorization header iff ``url``'s origin holds one.
 

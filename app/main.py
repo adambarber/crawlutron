@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 # ``app/logging_config.py``; integration deployments that want richer
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
+from app.crawl.policy import PolicyTier
 from app.logging_config import configure_service_logging
 from app.validation import HostPolicy, get_env_float, get_env_int
 
@@ -93,6 +94,7 @@ DATABASE_PATH = settings.cache_dir + "/crawler.db"
 job_store = JobStore(
     DATABASE_PATH,
     policy=HostPolicy.from_settings(settings),
+    tier=PolicyTier.from_settings(settings),
 )
 
 # Completed single-request crawl results (fixes the dead status_url promise and
@@ -126,7 +128,6 @@ logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
 if FastAPI is not None:
-
     # Declared once here so both this branch and the ``else`` below agree on
     # the type: FastAPI is optional at import time, so the module-level app is
     # ``FastAPI | None`` by construction, not ``FastAPI`` that happens to be

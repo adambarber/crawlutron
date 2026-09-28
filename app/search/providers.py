@@ -226,7 +226,9 @@ class _ApiKeyProvider:
         """The raw result list inside a parsed payload. Subclass hook."""
         raise NotImplementedError
 
-    def _results(self, status: int, body: str, items_of: Callable[[dict[str, Any]], object]) -> list[SearchResult]:
+    def _results(
+        self, status: int, body: str, items_of: Callable[[dict[str, Any]], object]
+    ) -> list[SearchResult]:
         """The keyed-provider response contract, in one place.
 
         The three field names are read off the instance rather than passed in:

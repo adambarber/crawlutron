@@ -46,7 +46,9 @@ def record_crawl_completion(
 
 @contextmanager
 def request_gate(
-    event: str, *, logger: logging.Logger,
+    event: str,
+    *,
+    logger: logging.Logger,
     reject: Callable[[ValueError], HTTPException] = validation_http_error,
 ) -> Iterator[None]:
     """Admit one readiness-tracked request and own everything that must happen to it.

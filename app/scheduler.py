@@ -46,6 +46,8 @@ class ScheduledJob(Protocol):
 
 
 _Job = TypeVar("_Job", bound=ScheduledJob)
+
+
 class SchedulerResult(Protocol):
     """What the domain scheduler reads off a worker's result.
 
@@ -380,6 +382,7 @@ class DomainScheduler:
         # (recursive frontier expansion). With on_result set, results are spilled
         # per-job and never accumulated here, bounding batch RAM (#3.1).
         results: dict[int, _Result] = {}
+
         # ``on_result`` and the returned mapping are mutually exclusive delivery
         # channels (spill-to-disk vs. in-memory). The single sink below keeps
         # that invariant in one place: narrowing ``dict | None`` inside the

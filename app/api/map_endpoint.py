@@ -10,7 +10,7 @@ import time
 
 from app.api.crawl_executor import execute_crawl
 from app.api.main_helpers import record_crawl_completion, request_gate
-from app.api_models import MapRequest
+from app.api_models import DiscoveryConfig, MapRequest
 from app.constants import MAX_DISCOVERED_LINKS
 from app.map import build_site_map
 from app.settings import CrawlerSettings
@@ -26,17 +26,23 @@ async def map_site(
 ) -> dict:
     """Map ``payload.root_url`` to its discovered-link frontier."""
     with request_gate("map_request_rejected", logger=logger):
+        # Mapping is a discovery operation, so the caller's discovery block is
+        # overridden rather than honoured -- expressed on the model, not on the
+        # dumped dict. The dict was the last place a policy was still mutated
+        # key-by-key, and it only worked because ``execute_crawl`` reads through
+        # the shared read edge; building the override on the model means the
+        # engine receives a value pydantic itself validated, and there is no
+        # second spelling of "map forces discovery" left to drift.
+        policy = payload.policy.model_copy(
+            update={
+                "discovery": DiscoveryConfig(robots=True, sitemaps=True, feeds=True),
+                "limits": payload.policy.limits.model_copy(
+                    update={"max_discovered_links": MAX_DISCOVERED_LINKS}
+                ),
+            }
+        )
         payload_dict = payload.model_dump(exclude_none=True)
-        # Mapping is a discovery operation; force discovery on regardless of caller input.
-        policy = payload_dict.setdefault("policy", {})
-        disc = dict(policy.get("discovery") or {})
-        disc["robots"] = True
-        disc["sitemaps"] = True
-        disc["feeds"] = True
-        policy["discovery"] = disc
-        limits = dict(policy.get("limits") or {})
-        limits.setdefault("max_discovered_links", MAX_DISCOVERED_LINKS)
-        policy["limits"] = limits
+        payload_dict["policy"] = policy
         _crawl_started = time.monotonic()
         active_settings = settings or CrawlerSettings.from_mapping()
         result = await execute_crawl(

@@ -7,8 +7,8 @@ It must not fetch, decode, extract, or construct crawl results.
 from __future__ import annotations
 
 import json
-from typing import Any
 
+from app.api_models import CrawlPolicyLimits
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.content_cache import ContentCache
 from app.validation import get_env_int
@@ -66,7 +66,7 @@ def _default_global_concurrency() -> int:
         return 4
 
 
-def _effective_max_content_length(limits: dict[str, Any], global_concurrency: int | None = None) -> int:
+def _effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: int | None = None) -> int:
     """Per-page body cap, scaled down as concurrency rises (adversarial perf #2.1).
 
     An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
@@ -74,9 +74,10 @@ def _effective_max_content_length(limits: dict[str, Any], global_concurrency: in
     set stays within budget even when hundreds of pages run concurrently. At the
     default concurrency (4) this resolves to the unchanged 10 MiB default.
     """
-    explicit = limits.get("max_content_length_bytes")
-    if isinstance(explicit, (int, float)) and explicit > 0:
-        return int(explicit)
+    # A model-bound int, so no re-validation: 0 and None both mean "no explicit
+    # cap", and the model's le is the same ceiling this used to clamp to.
+    if limits.max_content_length_bytes:
+        return limits.max_content_length_bytes
     conc = global_concurrency or _default_global_concurrency()
     scaled = min(
         DEFAULT_MAX_CONTENT_LENGTH_BYTES,

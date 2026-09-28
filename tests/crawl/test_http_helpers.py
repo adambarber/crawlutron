@@ -50,6 +50,7 @@ from app.crawl.extraction import (
     _FrameCollector,
 )
 from app.crawl.payload_helpers import _payload_urls
+from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.fetch_policy import (
     _fetch_with_retries,
     _looks_like_binary_body,
@@ -119,7 +120,7 @@ class TestValidationHelpers:
             _render_options({"options": "bad"}, CrawlerSettings.from_mapping())
 
     def test_payload_policy_errors(self) -> None:
-        s = CrawlerSettings.from_mapping()
+        tier = PolicyTier.model_defaults()
         cases = [
             ({"policy": "x"}, "invalid_policy"),
             ({"policy": {"limits": "x"}}, "invalid_policy_limits"),
@@ -130,7 +131,7 @@ class TestValidationHelpers:
         ]
         for payload, expected in cases:
             with pytest.raises(ValueError, match=rf"^{expected}$"):
-                _payload_policy(payload, s)
+                _payload_policy(payload, tier)
 
     def test_retry_after_seconds_invalid(self) -> None:
         assert _retry_after_seconds({"retry-after": "notanint"}) is None
@@ -141,12 +142,12 @@ class TestValidationHelpers:
 class TestHeaderHelpers:
     def test_mobile_safari_user_agent(self) -> None:
         policy = {"request_profile": {"user_agent_family": "mobile_safari"}, "headers": {}}
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, policy, "http://x/")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy(policy), "http://x/")
         assert "iPhone" in headers["User-Agent"]
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
         monkeypatch.setenv("BROWSER_CRAWLER_USER_AGENT", "crawler-test/1")
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://x/")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://x/")
         assert headers["User-Agent"] == "crawler-test/1"
 
     def test_cookie_header_invalid_structures(self) -> None:
@@ -310,9 +311,13 @@ async def _run_http_result(
             )
         )
 
-    pol = make_base_policy()
-    if policy:
-        pol.update(policy)
+    # A policy partial merges as a raw dict and is read once, the way the wire
+    # merges it. Mutating the model in place is not an option now that
+    # ``make_base_policy`` returns a validated CrawlPolicy: there is no
+    # re-validation on a mutated field, so an override could leave the policy
+    # holding a value its own bounds would have rejected.
+    base = make_base_policy()
+    pol = read_policy({**base.model_dump(), **policy}) if policy else base
     return await _http_strategy_result(
         request=strategy_request("http://example.com/", pol, strategy),
         http_fetcher=fetcher,
@@ -425,7 +430,8 @@ class TestExecuteCrawlChain:
         # reach a result and callers see a ValueError naming the field.
         with pytest.raises(ValueError, match=r"\.strategy="):
             await run_chain(
-                fetcher=ok_fetcher, policy=dict(make_base_policy(), strategies=["NOT_A_STRATEGY"])
+                fetcher=ok_fetcher,
+                policy=make_base_policy().model_copy(update={"strategies": ["NOT_A_STRATEGY"]}),
             )
 
 
@@ -498,8 +504,10 @@ class TestCrawlRequest:
 
         spy_fetcher = routed_fetcher({}, calls=fetched, default={})
 
-        policy = make_base_policy()
-        policy["limits"] = {**policy.get("limits", {}), "respect_robots": False}
+        base = make_base_policy()
+        policy = read_policy(
+            {**base.model_dump(), "limits": {**base.limits.model_dump(), "respect_robots": False}}
+        )
         result = await crawl_request(
             {"urls": ["http://example.com/a", "http://example.com/a/?utm_source=tw"], "policy": policy},
             urls=["http://example.com/a"],
@@ -612,19 +620,23 @@ class TestFingerprintInjectionRotation:
     def test_fingerprint_rotation_changes_accept_language_per_domain(self):
         base = {"request_profile": {"fingerprint_rotation": True}, "headers": {}}
         langs = {
-            d: _headers_for_strategy("HTTP_DECLARED_CRAWLER", base, f"http://{d}/")["Accept-Language"]
+            d: _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), f"http://{d}/")[
+                "Accept-Language"
+            ]
             for d in ("a.com", "b.com", "c.com", "d.com", "e.com")
         }
         # across 5 distinct hosts the built-in pool (size 5) yields variety
         assert len(set(langs.values())) > 1
         # same host is stable
-        again = _headers_for_strategy("HTTP_DECLARED_CRAWLER", base, "http://a.com/")["Accept-Language"]
+        again = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(base), "http://a.com/")[
+            "Accept-Language"
+        ]
         assert again == langs["a.com"]
 
     def test_default_request_has_no_fingerprint_rotation(self):
         headers = _headers_for_strategy(
             "HTTP_DECLARED_CRAWLER",
-            {"request_profile": {}, "headers": {}},
+            read_policy({"request_profile": {}, "headers": {}}),
             "http://x/",
         )
         assert headers["Accept-Language"] == "en-US,en;q=0.9"
@@ -632,14 +644,14 @@ class TestFingerprintInjectionRotation:
 
     def test_fingerprint_injected_user_agent_lands_in_headers(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1", "Rotated-UA-2"]}, "headers": {}}
-        h1 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://a.com/")
-        h2 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://b.com/")
+        h1 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
+        h2 = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://b.com/")
         assert h1["User-Agent"] == "Rotated-UA-1"
         assert h2["User-Agent"] == "Rotated-UA-2"
 
     def test_explicit_headers_still_override_fingerprint(self):
         profile = {"request_profile": {"user_agents": ["Rotated-UA-1"]}, "headers": {"User-Agent": "forced"}}
-        h = _headers_for_strategy("HTTP_DECLARED_CRAWLER", profile, "http://a.com/")
+        h = _headers_for_strategy("HTTP_DECLARED_CRAWLER", read_policy(profile), "http://a.com/")
         assert h["User-Agent"] == "forced"
 
 
@@ -670,7 +682,7 @@ class TestFetchHelpersEdges:
     def test_headers_cffi_impersonate(self):
         headers = _headers_for_strategy(
             HTTP_CFFI_IMPERSONATE,
-            {"request_profile": {}, "headers": {}},
+            read_policy({"request_profile": {}, "headers": {}}),
             "http://e.com/",
         )
         assert "User-Agent" in headers
@@ -682,7 +694,12 @@ class TestFetchHelpersEdges:
     def test_headers_cookie_added(self):
         headers = _headers_for_strategy(
             HTTP_DECLARED_CRAWLER,
-            {"request_profile": {"cookie_jar": "per_host", "cookies": {"e.com": {"a": "1"}}}, "headers": {}},
+            read_policy(
+                {
+                    "request_profile": {"cookie_jar": "per_host", "cookies": {"e.com": {"a": "1"}}},
+                    "headers": {},
+                }
+            ),
             "http://e.com/",
         )
         assert headers.get("Cookie") == "a=1"
@@ -733,14 +750,14 @@ class TestAcceptEncodingAdvertisesOnlyWhatWeCanDecode:
 
         if not _brotli_available():
             pytest.skip("brotli is not installed in this environment")
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://e.com/")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
         assert "br" in headers["Accept-Encoding"]
 
     def test_br_is_dropped_when_the_decoder_is_missing(self, monkeypatch):
         import app.crawl.decompression as decompression
 
         monkeypatch.setattr(decompression, "_brotli_available", lambda: False)
-        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, {"headers": {}}, "http://e.com/")
+        headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://e.com/")
         advertised = headers["Accept-Encoding"]
         assert "br" not in advertised
         # The encodings zlib always provides are unaffected.

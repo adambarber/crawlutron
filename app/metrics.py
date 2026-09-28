@@ -103,11 +103,7 @@ class MetricsStore:
 
     def _labelled(self, prefix: str) -> dict[str, float]:
         source = self._counters.snapshot() if self._counters is not None else self._local
-        return {
-            key[len(prefix) :]: value
-            for key, value in source.items()
-            if key.startswith(prefix)
-        }
+        return {key[len(prefix) :]: value for key, value in source.items() if key.startswith(prefix)}
 
     @property
     def crawl_requests_total(self) -> float:
@@ -289,21 +285,15 @@ def _exposition(store: MetricsStore) -> str:
     counter("crawler_crawl_results_total", store.crawl_results_total, "Total crawl results produced.")
     counter("crawler_crawl_success_total", store.crawl_success_total, "Total successful crawl results.")
     counter("crawler_crawl_failure_total", store.crawl_failure_total, "Total failed crawl results.")
-    counter(
-        "crawler_crawl_errors_total", store.crawl_errors_total, "Total rejected/invalid crawl requests."
-    )
+    counter("crawler_crawl_errors_total", store.crawl_errors_total, "Total rejected/invalid crawl requests.")
     counter(
         "crawler_search_requests_total", store.search_requests_total, "Total web search requests received."
     )
-    counter(
-        "crawler_search_results_total", store.search_results_total, "Total web search results returned."
-    )
+    counter("crawler_search_results_total", store.search_results_total, "Total web search results returned.")
     counter("crawler_search_errors_total", store.search_errors_total, "Total failed web search requests.")
     for provider, count in sorted(store.search_provider_counts.items()):
         lines.append(f'crawler_search_results_total{{provider="{provider}"}} {count}')
-    lines.append(
-        "# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds)."
-    )
+    lines.append("# HELP crawler_search_seconds_total Total wall-clock time spent on web searches (seconds).")
     lines.append("# TYPE crawler_search_seconds_total counter")
     lines.append(f"crawler_search_seconds_total {store.search_total_elapsed_ms / 1000.0:.3f}")
     lines.append("# HELP crawler_crawl_seconds_total Total wall-clock time spent crawling (seconds).")

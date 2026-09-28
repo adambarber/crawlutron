@@ -48,6 +48,7 @@ from chokepoint_walks import (
     nodes_of_type,
     non_member_literals,
     offender,
+    offender_at,
     real_members,
     relative_posix,
     resolved_call_name,
@@ -540,7 +541,61 @@ __all__ = [
 # the DNS resolver is a single off-loop chokepoint, and one extraction HTML-ness
 # predicate replaces two. Lower this when code is removed, never raise it to make
 # a run pass -- the number is a ceiling on growth, not a target.
-_APP_TREE_CODE_LINE_BUDGET = 14_888
+#
+# RAISED to 15,159 from 14,888 (+271) for the crawl-policy read edge, recorded in
+# the same terms as the purchases above. What the lines buy, and what they
+# removed, measured per file:
+#   * `crawl/policy.py` (+158, new module) is the single read edge. It replaces
+#     a hand-rolled validator that read `limits` three different ways inside one
+#     file and enforced bounds the model never declared, and it ends the
+#     two-home arrangement where `job_store.normalized_policy` and
+#     `policy.read_policy` were the same function under two names -- so a
+#     change to the repair rules had two definitions to keep in step. It is
+#     also what a stored row is read with, which is what stopped a job whose
+#     policy could not be read from silently resolving `respect_robots` to
+#     False and skipping robots rules entirely.
+#   * `api_models.py` (+163) states each field's default in a form a type
+#     checker can see. `Field(None, description=...)` declares a default that
+#     pyright reports as REQUIRED, so every consumer that read the model
+#     through a `dict[str, Any]` payload got None for a field that had a
+#     default -- `PageMetadata.title` on the render path -- and the checker
+#     that could have said so could not. The same block now rejects a
+#     non-`headers` field with the field named, and canonicalizes a credential
+#     origin, both of which were silent before.
+#   * Against that: `crawl/payload_helpers.py` is down 95 (the hand-rolled
+#     validator is deleted; the model enforces it), `crawl/job_store.py` is down
+#     11 (one job-construction path instead of two, and the async twins'
+#     duplication measured against a `class length` ceiling), and
+#     `crawl/strategies/http.py` is down 6.
+# The migration is not finished: the ceiling goes back DOWN as the remaining
+# `dict`-shaped reads become model reads. This raise buys the typed edge, not a
+# larger tree.
+#
+# RAISED to 15,164 (+5) for a REFUSAL mechanism the env chokepoint could not
+# previously express, and NOT as part of the migration above. Three retry
+# numbers became three authorities (what a job gets, what a deployment may
+# install, what one caller may ask for), which means a deployment value can now
+# be out of contract in a way it could not before. `get_mapping_int` clamped
+# such a value: an operator configuring 9 retries got 5 and configuring 999
+# seconds got 120, silently, while the code's own comment promised "falls back
+# here, loudly". The int face never exposed the float face's
+# `validate`/`validate_event` pair, so "refuse and warn" was inexpressible and
+# clamping was the only option. These 5 lines are that pair plus the range
+# predicate it consumes; a deployment misconfiguration is now visible at startup
+# instead of being rewritten at request time by one chokepoint for every caller.
+# The same pass DELETED 19 lines of verified-dead code to pay for most of it:
+# `ResourceGate.loop_lag`, `safe_regex.search_bounded`,
+# `CrawlPolicyLimits`-shadowing `_bounded_int`, `job_store.policy_limits`,
+# `job_store.job_max_depth`, and `SUPPORTED_EXTRACTION_METHODS` (all
+# definition-and-`__all__` only, zero references in app/, tests/ and docs/). A
+# definition-only AST sweep of app/ found 8 further candidates, all false
+# positives -- FastAPI route handlers and pydantic `@model_validator` hooks,
+# which the framework calls by identity rather than by name -- so there is no
+# further dead code here to pay with.
+# The reduction obligation recorded above is NOT discharged by this raise and
+# two raises inside one session is itself the signal: the next change in this
+# stream has to come down with real removals, not a third argument.
+_APP_TREE_CODE_LINE_BUDGET = 15_164
 
 
 def assert_trees_clean(
@@ -630,13 +685,10 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             if keyword.arg not in weights:
                 continue
             offenders.append(
-                offender(
+                offender_at(
                     path,
-                    node.lineno,
-                    f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...)"
-                    " spells a sizing weight directly; pass a"
-                    " resource_pressure.TaskRamBudget so the policy is built from the"
-                    " same weights it reports",
+                    node,
+                    f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...) spells a sizing weight directly; pass a resource_pressure.TaskRamBudget so the policy is built from the same weights it reports",
                 )
             )
     return offenders
@@ -716,19 +768,47 @@ def test_code_line_count_charges_code_and_not_prose():
 # chokepoint's public surface is the contract, not sprawl -- two symbols that
 # only exist to be the one place input gets capped is the module doing its job,
 # and a narrower budget would have pushed the cap back out to a second home.
+#
+# app/api/response_shaping.py RAISED to (9, 8) for the same reason: `EnvelopeOptions`
+# is the one record the sync and async envelope builders both take, and it exists
+# because the two builders each restated the same six optional parameters in
+# their signatures -- six more places to add an option and forget one, and jscpd
+# was holding the pair as a same-file clone. Folding them into a record is what
+# made the builders agree by construction; a narrower budget would push the
+# options back out into two hand-maintained lists.
+#
+# app/validation.py RAISED to (17, 11) for `in_range`. The int face of the env
+# chokepoint could not REFUSE an out-of-range value -- only clamp it -- because
+# the `validate`/`validate_event` pair that says "warn and use the fallback"
+# existed on the float face and had never been exposed on the int face. So an
+# operator who configured a deployment value outside its contract got a
+# different number in silence, while the code's own comment promised "falls back
+# here, loudly". `in_range` is the predicate that pair consumes; it is the
+# module's job because a range is a validation fact and a second copy of it in
+# settings.py is what the drifted literal `hi=120` already was once. Declared in
+# `__all__` rather than left module-private, because a private name imported
+# across a module boundary is a public name with a lie on it.
+#
+# The entry-point half then DROPPED 13 -> 11, and that is the more interesting
+# half: `get_env_int`/`get_env_float` are no longer second copies of the
+# mapping faces' signatures, they are the mapping faces bound to `os.environ`.
+# Adding `validate`/`validate_event` to one face had pushed the other face's
+# restated parameter list past the clone gate, which is the gate correctly
+# catching a signature that was maintained in two places. Two faces of one
+# chokepoint should be one declaration, not two.
 _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/admission.py": (20, 14),
-    "app/validation.py": (16, 12),
-    "app/api/response_shaping.py": (8, 8),
+    "app/validation.py": (17, 11),
+    "app/api/response_shaping.py": (9, 8),
     "app/crawl/sqlite_store.py": (7, 5),
-    "app/safe_regex.py": (8, 3),
+    "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (13, 4),
     "app/bounded_io.py": (5, 3),
     "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
     "app/safe_url.py": (1, 1),
-    "app/crawl/payload_helpers.py": (3, 1),
+    "app/crawl/payload_helpers.py": (1, 1),
     "app/crawl/result_helpers.py": (1, 0),
     "app/crawl/strategies/fetch_policy.py": (0, 0),
 }
@@ -871,7 +951,7 @@ def _re_dynamic_pattern_offenders(methods: frozenset[str]):
 
     def detector(tree: ast.AST, path: pathlib.Path) -> list[str]:
         return [
-            offender(path, node.lineno, f"re.{node.func.attr}(<dynamic pattern>)")
+            offender_at(path, node, f"re.{node.func.attr}(<dynamic pattern>)")
             for node in nodes_of_type(tree, ast.Call)
             if isinstance(node.func, ast.Attribute)
             and isinstance(node.func.value, ast.Name)
@@ -1054,7 +1134,7 @@ def _hand_rolled_redirect_hops(tree: ast.AST, path: pathlib.Path) -> list[str]:
             for n in nodes_of(func)
         )
         if not uses_chokepoint:
-            offenders.append(offender(path, func.lineno, f"{func.name}()"))
+            offenders.append(offender_at(path, func, f"{func.name}()"))
     return offenders
 
 
@@ -1102,10 +1182,8 @@ def _raw_batch_dedup_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         )
         if not canonicalizes:
             offenders.append(
-                offender(
-                    path,
-                    func.lineno,
-                    f"{func.name}() dedups a batch with dict.fromkeys, not the canonicalizer",
+                offender_at(
+                    path, func, f"{func.name}() dedups a batch with dict.fromkeys, not the canonicalizer"
                 )
             )
     return offenders
@@ -1150,9 +1228,9 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
         )
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "read":
             if not node.args and not node.keywords and _is_response_like(recv):
-                offenders.append(offender(path, node.lineno, ".read()"))
+                offenders.append(offender_at(path, node, ".read()"))
         elif isinstance(node, ast.Attribute) and node.attr == "content" and _is_response_like(node.value):
-            offenders.append(offender(path, node.lineno, ".content"))
+            offenders.append(offender_at(path, node, ".content"))
     return offenders
 
 
@@ -1215,7 +1293,7 @@ def _html_input_cap_name(target: ast.expr, value: ast.expr | None) -> str | None
 def _local_html_input_caps(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a module that declares its own HTML input byte cap."""
     return [
-        offender(path, node.lineno, name)
+        offender_at(path, node, name)
         for node, target, value in assignments(nodes_of(tree))
         if (name := _html_input_cap_name(target, value)) is not None
     ]
@@ -1236,7 +1314,7 @@ def _cache_envelope_literals(tree: ast.AST, path: pathlib.Path) -> list[str]:
             key.value for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
         }
         if required <= keys:
-            offenders.append(offender(path, node.lineno, "cache-envelope"))
+            offenders.append(offender_at(path, node, "cache-envelope"))
     return offenders
 
 
@@ -1292,7 +1370,7 @@ def _inline_extraction_normalizations(tree: ast.AST, path: pathlib.Path) -> list
         if not (isinstance(left, ast.Attribute) and left.attr == "text"):
             continue
         if isinstance(right, ast.Constant) and right.value == "":
-            offenders.append(offender(path, node.lineno, "extraction-text-normalization"))
+            offenders.append(offender_at(path, node, "extraction-text-normalization"))
     return offenders
 
 
@@ -1415,12 +1493,12 @@ def test_no_pinned_url_leaks_into_final_url():
             if isinstance(node, ast.Assign):
                 targets = [t.id for t in node.targets if isinstance(t, ast.Name) and t.id == "final_url"]
                 if targets and _is_response_url(node.value):
-                    offenders.append(offender(path, node.lineno, "final_url = str(response.url)"))
+                    offenders.append(offender_at(path, node, "final_url = str(response.url)"))
             # HttpFetchResult(final_url=str(response.url))  (keyword)
             elif isinstance(node, ast.Call):
                 for kw in node.keywords:
                     if kw.arg == "final_url" and _is_response_url(kw.value):
-                        offenders.append(offender(path, node.lineno, "final_url=str(response.url)"))
+                        offenders.append(offender_at(path, node, "final_url=str(response.url)"))
     assert not offenders, "pinned URL leaked into final_url: " + ", ".join(offenders)
 
 
@@ -1458,7 +1536,7 @@ def _unpinned_safe_url_parses(tree, path):
         ):
             continue
         if not any(kw.arg == "pin" for kw in node.keywords):
-            offenders.append(offender(path, node.lineno, "SafeUrl.parse(...) must pass pin=True"))
+            offenders.append(offender_at(path, node, "SafeUrl.parse(...) must pass pin=True"))
     return offenders
 
 
@@ -1482,17 +1560,17 @@ def test_no_inline_pinned_url_composition():
             for value in node.values:
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
                     if "pinned_ip" in value.value:
-                        offenders.append(offender(path, node.lineno, "f-string with pinned_ip"))
+                        offenders.append(offender_at(path, node, "f-string with pinned_ip"))
                 if isinstance(value, ast.FormattedValue):
                     expr = value.value
                     if isinstance(expr, ast.Attribute) and expr.attr == "pinned_ip":
-                        offenders.append(offender(path, node.lineno, "f-string interpolates .pinned_ip"))
+                        offenders.append(offender_at(path, node, "f-string interpolates .pinned_ip"))
                     if (
                         isinstance(expr, ast.Name)
                         and isinstance(expr.ctx, ast.Load)
                         and "pinned" in expr.id.lower()
                     ):
-                        offenders.append(offender(path, node.lineno, f"f-string interpolates {expr.id}"))
+                        offenders.append(offender_at(path, node, f"f-string interpolates {expr.id}"))
     assert not offenders, "compose pinned URLs via SafeUrl.connect(), never inline:\n" + "\n".join(offenders)
 
 
@@ -1545,7 +1623,7 @@ def _frontier_sink_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             ):
                 for arg in call.args:
                     if _url_key_reads(arg) or (isinstance(arg, ast.Name) and arg.id in tainted):
-                        offenders.append(offender(path, call.lineno, f"raw href into frontier.{f.attr}"))
+                        offenders.append(offender_at(path, call, f"raw href into frontier.{f.attr}"))
     return offenders
 
 
@@ -1599,12 +1677,10 @@ def _optional_host_policy_offenders(tree, path):
                 continue
             annotation = arg.annotation
             if isinstance(annotation, ast.Name) and annotation.id == "HostPolicy":
-                yield offender(
+                yield offender_at(
                     path,
-                    arg.lineno,
-                    f"{getattr(node, 'name', '<lambda>')}: parameter {arg.arg!r} is a "
-                    "HostPolicy and is optional; a caller that omits the SSRF policy gets "
-                    "the default instead of a TypeError",
+                    arg,
+                    f"{getattr(node, 'name', '<lambda>')}: parameter {arg.arg!r} is a HostPolicy and is optional; a caller that omits the SSRF policy gets the default instead of a TypeError",
                 )
 
 
@@ -1676,7 +1752,7 @@ def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
         function_names="UnifiedCrawlResponse",
         keyword_names="results",
     ):
-        offenders.append(offender(path, node.lineno, "explicit UnifiedCrawlResponse(results=...) build"))
+        offenders.append(offender_at(path, node, "explicit UnifiedCrawlResponse(results=...) build"))
     return offenders
 
 
@@ -1738,7 +1814,7 @@ def _unsanctioned_envelope_adapter_offenders(tree, path):
     if relative == _ENVELOPE_OWNER_MODULE or relative in _ENVELOPE_ADAPTER_EXEMPT:
         return []
     return [
-        offender(path, call.lineno, f"{call.func.id}() outside {_ENVELOPE_OWNER_MODULE}")
+        offender_at(path, call, f"{call.func.id}() outside {_ENVELOPE_OWNER_MODULE}")
         for call in calls_to_any(tree, _ENVELOPE_BUILDERS)
     ]
 
@@ -1756,7 +1832,7 @@ def test_crawl_response_envelope_adapter_detector_bites():
     """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
     fires = {
         "async def f(result):\n"
-        "    return await abuild_unified_crawl_response(result['results'], request_id=result['request_id'])\n": "abuild_unified_crawl_response",
+        "    return await abuild_unified_crawl_response(result['results'], options=EnvelopeOptions(request_id=result['request_id']))\n": "abuild_unified_crawl_response",
         "def f(results):\n    return build_unified_crawl_response(results)\n": "build_unified_crawl_response",
     }
     assert_fires_once(
@@ -1776,7 +1852,7 @@ def test_crawl_response_envelope_adapter_detector_bites():
         _unsanctioned_envelope_adapter_offenders,
         (
             "async def f(request_id):\n"
-            "    return await abuild_unified_crawl_response([], request_id=request_id, success=False)\n",
+            "    return await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id=request_id, success=False))\n",
         ),
         REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
     )
@@ -1809,7 +1885,7 @@ def _hand_rolled_envelope_fields_offenders(tree, path):
         ):
             continue
         offenders.append(
-            offender(path, call.lineno, f"envelope fields are passed by {_ENVELOPE_OWNER_FUNCTION} only")
+            offender_at(path, call, f"envelope fields are passed by {_ENVELOPE_OWNER_FUNCTION} only")
         )
     return offenders
 
@@ -1875,7 +1951,7 @@ _READINESS_GATE_EXEMPT = (
 def _unsanctioned_readiness_counter_offenders(tree, path):
     """Flag a direct readiness-slot admit/release outside the gate chokepoint."""
     return [
-        offender(path, call.lineno, f"{callee.attr}() outside app.api.main_helpers.request_gate")
+        offender_at(path, call, f"{callee.attr}() outside app.api.main_helpers.request_gate")
         for call, callee in attribute_calls(tree)
         if callee.attr in {"begin_request", "end_request"}
     ]
@@ -1945,9 +2021,7 @@ def _job_row_accumulator_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
             continue
         named = sorted({match.group(0) for match in pattern.finditer(node.value.lower())})
         if named:
-            offenders.append(
-                offender(path, node.lineno, f"SQL names crawl_jobs accumulator column(s) {named}")
-            )
+            offenders.append(offender_at(path, node, f"SQL names crawl_jobs accumulator column(s) {named}"))
     return offenders
 
 
@@ -2002,9 +2076,7 @@ def _render_options_construction_offenders(tree: ast.AST, path: pathlib.Path) ->
         return []
     offenders: list[str] = []
     for node in calls_named(tree, "RenderOptions"):
-        offenders.append(
-            offender(path, node.lineno, "RenderOptions(...) built outside resolve_render_options")
-        )
+        offenders.append(offender_at(path, node, "RenderOptions(...) built outside resolve_render_options"))
     return offenders
 
 
@@ -2059,9 +2131,7 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             continue
         for sub in nodes_of_type(fn, ast.Subscript):
             if isinstance(sub.value, ast.Attribute) and sub.value.attr == "_memory_cache":
-                offenders.append(
-                    offender(path, fn.lineno, f"{fn.name}() reads/writes _memory_cache directly")
-                )
+                offenders.append(offender_at(path, fn, f"{fn.name}() reads/writes _memory_cache directly"))
                 break
     return offenders
 
@@ -2137,7 +2207,7 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
                 break
             cur = parents.get(cur)
         if not under_lock:
-            offenders.append(offender(path, node.lineno, f"{fname}() called outside a lock context manager"))
+            offenders.append(offender_at(path, node, f"{fname}() called outside a lock context manager"))
     return offenders
 
 
@@ -2192,14 +2262,14 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     JSONResponse/return-value variants).
     """
     offenders = [
-        offender(
+        offender_at(
             path,
-            call.lineno,
+            call,
             "HTTPException detail= envelope literal"
             if any(
                 kw.arg == "detail"
                 and isinstance(kw.value, ast.Dict)
-                and {"code", "message"} <= _dict_keys(kw.value)
+                and ({"code", "message"} <= _dict_keys(kw.value))
                 for kw in call.keywords
             )
             else "bare HTTPException construction",
@@ -2207,7 +2277,7 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         for call in calls_named_leaf(tree, {"HTTPException"})
     ]
     offenders.extend(
-        offender(path, node.lineno, "error envelope dict literal")
+        offender_at(path, node, "error envelope dict literal")
         for node in nodes_of_type(tree, ast.Dict)
         if {"code", "message", "details"} <= _dict_keys(node)
     )
@@ -2277,7 +2347,7 @@ def _provider_loop_reinlines(tree: ast.AST, path: pathlib.Path) -> list[str]:
             for s in subs
         )
         if assigns_seen and builds_result and guards_dict:
-            offenders.append(offender(path, node.lineno, "dedupe loop re-inlined outside _collect_results"))
+            offenders.append(offender_at(path, node, "dedupe loop re-inlined outside _collect_results"))
     return offenders
 
 
@@ -2364,11 +2434,10 @@ def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
         if not declared or node.name in (_SELECTOR_CARRIER_DECLARANT, _SELECTOR_KEY_BUILDER):
             continue
         offenders.append(
-            offender(
+            offender_at(
                 path,
-                node.lineno,
-                f"{node.name} declares {declared} instead of carrying the pair in one"
-                f" {_SELECTOR_CARRIER_PARAM!r} value",
+                node,
+                f"{node.name} declares {declared} instead of carrying the pair in one {_SELECTOR_CARRIER_PARAM!r} value",
             )
         )
     return offenders
@@ -2441,10 +2510,10 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         }
         for hook in ("_request", "_items_of"):
             if hook not in defined:
-                offenders.append(offender(path, node.lineno, f"{node.name} does not define {hook}()"))
+                offenders.append(offender_at(path, node, f"{node.name} does not define {hook}()"))
         if "search" in defined:
             offenders.append(
-                offender(path, node.lineno, f"{node.name} re-spells the shared provider flow in search()")
+                offender_at(path, node, f"{node.name} re-spells the shared provider flow in search()")
             )
     return offenders
 
@@ -2541,7 +2610,7 @@ def _robots_scanner_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             isinstance(s, ast.Call) and getattr(s.func, "attr", "") == "splitlines" for s in nodes_of(node)
         )
         if has_bom_strip and has_split:
-            offenders.append(offender(path, node.lineno, f"{node.name} re-rolls the robots line-scanner"))
+            offenders.append(offender_at(path, node, f"{node.name} re-rolls the robots line-scanner"))
     return offenders
 
 
@@ -2589,9 +2658,7 @@ def _fetcher_factory_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     for node in nodes_of_type(tree, ast.Call):
         if getattr(node.func, "id", "") == "HttpFetchResult":
             offenders.append(
-                offender(
-                    path, node.lineno, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)"
-                )
+                offender_at(path, node, "use _fetcher_factories.make_fetch instead of HttpFetchResult(...)")
             )
     return offenders
 
@@ -2649,7 +2716,7 @@ def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
             continue
         offenders.append(
-            offender(path, node.lineno, "use _testkit.poll_until instead of a hand-rolled poll loop")
+            offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")
         )
     return offenders
 
@@ -2715,7 +2782,7 @@ def _decompress_cap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             continue
         kwargs = {kw.arg for kw in node.keywords if kw.arg}
         if "max_output_bytes" not in kwargs:
-            offenders.append(offender(path, node.lineno, f"{fname}(...) without max_output_bytes"))
+            offenders.append(offender_at(path, node, f"{fname}(...) without max_output_bytes"))
     return offenders
 
 
@@ -2787,28 +2854,22 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     """
     return (
         [
-            offender(
-                path,
-                node.lineno,
-                f"imports decompression codec '{alias.name}' (bypasses decompress_body)",
-            )
+            offender_at(path, node, f"imports decompression codec '{alias.name}' (bypasses decompress_body)")
             for node in nodes_of_type(tree, ast.Import)
             for alias in node.names
             if alias.name.split(".")[0] in _DECOMPRESS_CODECS
         ]
         + [
-            offender(
-                path,
-                node.lineno,
-                f"imports decompression codec from '{node.module}' (bypasses decompress_body)",
+            offender_at(
+                path, node, f"imports decompression codec from '{node.module}' (bypasses decompress_body)"
             )
             for node in nodes_of_type(tree, ast.ImportFrom)
             if (node.module or "").split(".")[0] in _DECOMPRESS_CODECS
         ]
         + [
-            offender(
+            offender_at(
                 path,
-                call.lineno,
+                call,
                 f"calls {call.func.value.id}.{call.func.attr}() directly (bypasses decompress_body)",
             )
             for call, func in attribute_calls(tree)
@@ -2909,10 +2970,9 @@ def _discovery_response_offenders(tree: ast.AST, path: pathlib.Path) -> list[str
         else:
             destructured.append(node)
     return [
-        offender(path, node.lineno, "destructures a discovery response off the tuple")
-        for node in destructured
+        offender_at(path, node, "destructures a discovery response off the tuple") for node in destructured
     ] + [
-        offender(path, node.lineno, "reads a discovery response's header map directly")
+        offender_at(path, node, "reads a discovery response's header map directly")
         for node in nodes_of_type(tree, ast.Attribute)
         if node.attr == "headers" and isinstance(node.value, ast.Name) and node.value.id in bound
     ]
@@ -2969,10 +3029,10 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     or as a bare import" is decided once.
     """
     return [
-        offender(path, call.lineno, "uuid4() minted outside app/crawl/ids.py")
+        offender_at(path, call, "uuid4() minted outside app/crawl/ids.py")
         for call in calls_named_leaf(tree, {"uuid4"})
     ] + [
-        offender(path, node.lineno, "uuid hex sliced outside app/crawl/ids.py")
+        offender_at(path, node, "uuid hex sliced outside app/crawl/ids.py")
         for node in nodes_of_type(tree, ast.Subscript)
         if getattr(node.value, "attr", None) == "hex"
     ]
@@ -3064,9 +3124,7 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
             arg = node.args[0]
             is_derived = _reads_headers(arg) or (isinstance(arg, ast.Name) and arg.id in header_names)
             if is_derived:
-                offenders.append(
-                    offender(path, node.lineno, f"{func.name}() parses a header number unguarded")
-                )
+                offenders.append(offender_at(path, node, f"{func.name}() parses a header number unguarded"))
     return offenders
 
 
@@ -3129,7 +3187,7 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
                     and target.value.attr == "_domain_min_delay"
                 ):
                     offenders.append(
-                        offender(path, node.lineno, f"unbounded write to _domain_min_delay in {func.name}()")
+                        offender_at(path, node, f"unbounded write to _domain_min_delay in {func.name}()")
                     )
     return offenders
 
@@ -3214,11 +3272,10 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
             continue
         if not _consults_transience_verdict(func):
             offenders.append(
-                offender(
+                offender_at(
                     path,
-                    commits[0].lineno,
-                    f"job.visited.add() without a transience gate -- route it through "
-                    f"{_TRANSIENCE_GATE_NAMES[0]}()",
+                    commits[0],
+                    f"job.visited.add() without a transience gate -- route it through {_TRANSIENCE_GATE_NAMES[0]}()",
                 )
             )
     return offenders
@@ -3299,7 +3356,7 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
         where = (
             f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
         )
-        offenders.append(offender(path, node.lineno, f"test_{node.name} is uncollectible -- {where}"))
+        offenders.append(offender_at(path, node, f"test_{node.name} is uncollectible -- {where}"))
     return offenders
 
 
@@ -3789,12 +3846,10 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             unpacked = [n for n in ast.walk(keyword.value) if _is_asdict_call(n)]
             if unpacked:
                 offenders.append(
-                    offender(
+                    offender_at(
                         path,
-                        unpacked[0].lineno,
-                        "asdict(...) unpacked into a constructor call: the nested "
-                        "dataclasses become dicts and the rebuilt object violates its "
-                        "declared field types -- use dataclasses.replace()",
+                        unpacked[0],
+                        "asdict(...) unpacked into a constructor call: the nested dataclasses become dicts and the rebuilt object violates its declared field types -- use dataclasses.replace()",
                     )
                 )
                 break
@@ -3902,11 +3957,7 @@ def _ad_hoc_transience_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     gets -- did not.
     """
     return [
-        offender(
-            path,
-            node.lineno,
-            f"local {name} re-answers the taxonomy's transience verdict",
-        )
+        offender_at(path, node, f"local {name} re-answers the taxonomy's transience verdict")
         for node, target, value in assignments(nodes_of(tree))
         if (name := _transience_verdict_name(target, value)) is not None
     ]
@@ -4018,10 +4069,8 @@ def _hand_rolled_failed_result_offenders(tree, path):
             continue
         if status == "network_error" and _has_error_field(node, "circuit_breaker_open"):
             continue
-        yield offender(
-            path,
-            node.lineno,
-            f"hand-rolled classification={status!r}; route through _engine_result_from_exception",
+        yield offender_at(
+            path, node, f"hand-rolled classification={status!r}; route through _engine_result_from_exception"
         )
 
 
@@ -4066,9 +4115,7 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
             names.extend(e.id for e in t.elts if isinstance(e, ast.Name))
         if not any("BrowserPoolExhaustedError" in n for n in names):
             continue
-        yield offender(
-            path, node.lineno, "catching BrowserPoolExhaustedError; read the classification instead"
-        )
+        yield offender_at(path, node, "catching BrowserPoolExhaustedError; read the classification instead")
 
 
 def test_pool_exhaustion_catch_sites_are_sanctioned():
@@ -4107,7 +4154,7 @@ def test_classifier_lives_in_the_neutral_home():
         for node in nodes_of_type(tree, ast.FunctionDef, ast.AsyncFunctionDef):
             if node.name == "_classify_error_code":
                 raise AssertionError(
-                    offender(path, node.lineno, "_classify_error_code defined outside result_helpers")
+                    offender_at(path, node, "_classify_error_code defined outside result_helpers")
                 )
 
 
@@ -4175,11 +4222,10 @@ def _non_member_classification_offenders(tree, path, *, members=None):
     if members is None:
         members = real_members("CrawlClassification")
     return [
-        offender(
+        offender_at(
             path,
-            node.lineno,
-            f"classification={value!r} is not a CrawlClassification member; "
-            f"add it to the enum (app/constants.py) or route through the classifier",
+            node,
+            f"classification={value!r} is not a CrawlClassification member; add it to the enum (app/constants.py) or route through the classifier",
         )
         for node, _field, value in non_member_literals(
             (node, "classification", value, members)
@@ -4279,11 +4325,10 @@ def _non_member_strategy_offenders(tree, path, *, members=None):
         if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
             continue
         if value.value not in members:
-            yield offender(
+            yield offender_at(
                 path,
-                node.lineno,
-                f"strategy={value.value!r} is not a CrawlStrategy member; "
-                f"pass a real member, or None when no strategy was attempted",
+                node,
+                f"strategy={value.value!r} is not a CrawlStrategy member; pass a real member, or None when no strategy was attempted",
             )
 
 
@@ -4603,9 +4648,7 @@ def _required_host_policy_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
     found: list[str] = []
     for node in functions(tree):
         if _url_return_shapes(node, tree):
-            found.append(
-                offender(path, node.lineno, f"{node.name}() returns URLs without required HostPolicy")
-            )
+            found.append(offender_at(path, node, f"{node.name}() returns URLs without required HostPolicy"))
     return found
 
 
@@ -4653,9 +4696,7 @@ def test_required_host_policy_detector_bites():
         REPO_ROOT / "app" / "_synthetic.py",
     ), "a method validating through self._host_policy read as having no policy"
     with_no_policy = ast.parse(
-        "class JobStore:\n"
-        "    def canonical_root(self, root_url):\n"
-        "        return str(root_url)\n"
+        "class JobStore:\n    def canonical_root(self, root_url):\n        return str(root_url)\n"
     )
     assert _required_host_policy_offenders(
         with_no_policy,
@@ -4826,11 +4867,10 @@ def _normalize_or_none_offenders(tree, path):
                 )
             )
             if is_discard:
-                yield offender(
+                yield offender_at(
                     path,
-                    node.lineno,
-                    "normalize_public_http_url + except ValueError re-inlined; "
-                    "use app.validation.safe_public_url_or_none",
+                    node,
+                    "normalize_public_http_url + except ValueError re-inlined; use app.validation.safe_public_url_or_none",
                 )
 
 
@@ -4911,7 +4951,7 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
         )
         if not uses_filter:
             offenders.append(
-                offender(path, func.lineno, f"{func.name}() returns a urljoin with no egress filter")
+                offender_at(path, func, f"{func.name}() returns a urljoin with no egress filter")
             )
     return offenders
 
@@ -4979,7 +5019,7 @@ def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
     for node in calls_to_any(tree, _RESULT_ERROR_SINKS):
         for kw in node.keywords:
             if kw.arg == "error" and _is_raw_exception_text(kw.value):
-                offenders.append(offender(path, node.lineno, f"{node.func.id}(error=<raw exception text>)"))
+                offenders.append(offender_at(path, node, f"{node.func.id}(error=<raw exception text>)"))
     return offenders
 
 
@@ -5039,7 +5079,7 @@ def _reinline_js_endpoints_filter_offenders(tree: ast.AST, path: pathlib.Path) -
             isinstance(k, ast.Constant) and k.value == "url" for k in elt.keys
         ):
             offenders.append(
-                offender(path, node.lineno, "inlined js_endpoints filter: use validation.filter_js_endpoints")
+                offender_at(path, node, "inlined js_endpoints filter: use validation.filter_js_endpoints")
             )
     return offenders
 
@@ -5135,11 +5175,10 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
         if _ROBOTS_COMPILE_HOME in scopes and "get" in scopes[: scopes.index(_ROBOTS_COMPILE_HOME) + 1]:
             continue
         offenders.append(
-            offender(
+            offender_at(
                 path,
-                node.lineno,
-                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through the"
-                " per-host cache so a hostile robots.txt cannot evict another site's matchers",
+                node,
+                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through the per-host cache so a hostile robots.txt cannot evict another site's matchers",
             )
         )
     return offenders
@@ -5243,11 +5282,10 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
     The module-level declaration has no enclosing function and is exempt.
     """
     return [
-        offender(
+        offender_at(
             path,
-            node.lineno,
-            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the"
-            " instance stays bound to the running loop",
+            node,
+            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the instance stays bound to the running loop",
         )
         for node in nodes_of_type(tree, ast.Name)
         if node.id in _SEMAPHORE_GLOBALS
@@ -5333,11 +5371,10 @@ def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     regression; this detector fails the suite when it goes.
     """
     return [
-        offender(
+        offender_at(
             path,
-            node.lineno,
-            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive"
-            " slot would strand in the pool and inflate the size budget",
+            node,
+            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive slot would strand in the pool and inflate the size budget",
         )
         for node in functions(tree)
         if node.name == _DOC_POOL_ACQUIRER and not _rebuilds_pool_without_retired(node)
@@ -5874,7 +5911,7 @@ def _literal_check_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         owner = _enclosing_class(tree, node)
         if owner is not None and owner.name == "_LiteralChecked":
             continue
-        offenders.append(offender(path, node.lineno, "literal-check-called-outside-its-owner"))
+        offenders.append(offender_at(path, node, "literal-check-called-outside-its-owner"))
     return offenders
 
 
@@ -6148,7 +6185,7 @@ def test_no_existing_double_swallows_failed_result():
             names = {a.arg for a in node.args.args + node.args.kwonlyargs}
             names |= {a.arg for a in node.args.posonlyargs}
             if "failed_result" not in names:
-                offenders.append(offender(path, node.lineno, "run() does not bind failed_result by name"))
+                offenders.append(offender_at(path, node, "run() does not bind failed_result by name"))
     assert not offenders, (
         "the DomainScheduler.run contract requires failed_result; a double that omits it"
         " silently drops the envelope the pipeline supplies: " + "; ".join(offenders)
@@ -6232,7 +6269,7 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
             and payload.func.id in builder_names
         ):
             continue
-        offenders.append(offender(path, node.lineno, "_execute_crawl payload bypasses _job_engine_payload"))
+        offenders.append(offender_at(path, node, "_execute_crawl payload bypasses _job_engine_payload"))
     return offenders
 
 
@@ -6317,7 +6354,7 @@ def _unguarded_strategy_runner_offenders(tree: ast.AST, path: pathlib.Path) -> l
     for node in nodes_of_type(tree, ast.Call):
         name = _runner_call_name(node)
         if name in _STRATEGY_RUNNERS and id(node) not in guarded:
-            offenders.append(offender(path, node.lineno, f"{name} invoked outside a try/except Exception"))
+            offenders.append(offender_at(path, node, f"{name} invoked outside a try/except Exception"))
     return offenders
 
 
@@ -6463,11 +6500,10 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             owner = receivers.get(ast.unparse(inner.func.value))
             if owner is not None and inner.func.attr in sync_methods[owner]:
                 offenders.append(
-                    offender(
+                    offender_at(
                         path,
-                        inner.lineno,
-                        f"{ast.unparse(inner.func.value)}.{inner.func.attr} is synchronous; "
-                        "await the async twin",
+                        inner,
+                        f"{ast.unparse(inner.func.value)}.{inner.func.attr} is synchronous; await the async twin",
                     )
                 )
     return offenders
@@ -6497,11 +6533,10 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         if any(keyword.arg == "budget_seconds" for keyword in node.keywords):
             continue
         offenders.append(
-            offender(
+            offender_at(
                 path,
-                node.lineno,
-                "_run_action_chain runs without a budget, so a wedged action holds the "
-                "browser pool slot for as long as it likes",
+                node,
+                "_run_action_chain runs without a budget, so a wedged action holds the browser pool slot for as long as it likes",
             )
         )
     return offenders
@@ -6592,12 +6627,10 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
                         continue
                     if inner.func.id in {_SINK_PARAM_NAME, _SINK_CLOSURE_NAME}:
                         offenders.append(
-                            offender(
+                            offender_at(
                                 path,
-                                inner.lineno,
-                                f"{inner.func.id}() inside the worker's try: delivery is not a "
-                                "worker step, and a raising sink must not be answered with a "
-                                "failure envelope",
+                                inner,
+                                f"{inner.func.id}() inside the worker's try: delivery is not a worker step, and a raising sink must not be answered with a failure envelope",
                             )
                         )
     return offenders
@@ -6660,12 +6693,12 @@ def _definitions_in(tree: ast.AST, path: pathlib.Path) -> list[str]:
     for node in nodes_of(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             if node.name in _SCOPE_COMPILER_NAMES:
-                found.append(offender(path, node.lineno, f"scope-regex compiler {node.name}"))
+                found.append(offender_at(path, node, f"scope-regex compiler {node.name}"))
         elif isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Name) and target.id == _SCOPE_PATTERN_LENGTH_BOUND
             for target in node.targets
         ):
-            found.append(offender(path, node.lineno, "scope-regex length bound"))
+            found.append(offender_at(path, node, "scope-regex length bound"))
     return found
 
 
@@ -6756,26 +6789,22 @@ def _direct_frontier_growth_offenders(
             continue
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if node.func.attr in growth_methods and _frontier_expression(node.func.value):
-                offenders.append(
-                    offender(path, node.lineno, "direct frontier growth bypasses admit_job_links")
-                )
+                offenders.append(offender_at(path, node, "direct frontier growth bypasses admit_job_links"))
         elif isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             if any(_frontier_expression(target) for target in targets):
-                offenders.append(offender(path, node.lineno, "frontier replacement bypasses admit_job_links"))
+                offenders.append(offender_at(path, node, "frontier replacement bypasses admit_job_links"))
             if isinstance(node, ast.Assign) and isinstance(node.value, ast.Attribute):
                 if _frontier_expression(node.value):
-                    offenders.append(offender(path, node.lineno, "frontier alias bypasses admit_job_links"))
+                    offenders.append(offender_at(path, node, "frontier alias bypasses admit_job_links"))
                 if node.value.attr == "append" and _frontier_expression(node.value.value):
                     offenders.append(
-                        offender(path, node.lineno, "frontier method alias bypasses admit_job_links")
+                        offender_at(path, node, "frontier method alias bypasses admit_job_links")
                     )
         elif isinstance(node, ast.Subscript) and _frontier_expression(node.value):
             parent = parents.get(node)
             if isinstance(parent, ast.Assign | ast.AugAssign | ast.AnnAssign):
-                offenders.append(
-                    offender(path, node.lineno, "frontier slice mutation bypasses admit_job_links")
-                )
+                offenders.append(offender_at(path, node, "frontier slice mutation bypasses admit_job_links"))
     return offenders
 
 
@@ -6856,7 +6885,7 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
     offenders: list[str] = []
     for function, names in function_calls.items():
         if len(names) >= 2:
-            offenders.append(offender(path, function.lineno, "recursive admission filter list is re-inlined"))
+            offenders.append(offender_at(path, function, "recursive admission filter list is re-inlined"))
     return offenders
 
 
@@ -8304,7 +8333,7 @@ def _ddl_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[st
             node.value,
             re.IGNORECASE,
         ):
-            found.append(offender(path, node.lineno, node.value.splitlines()[0]))
+            found.append(offender_at(path, node, node.value.splitlines()[0]))
     return found
 
 
@@ -8567,7 +8596,7 @@ def _app_tree_mutation_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             continue
         if not targets or _tree_role(_path_components(targets[0]) or [], anchors, rooted) != "app":
             continue
-        offenders.append(offender(path, node.lineno, f"mutates the production tree: {ast.unparse(callee)}()"))
+        offenders.append(offender_at(path, node, f"mutates the production tree: {ast.unparse(callee)}()"))
     return offenders
 
 
@@ -8911,11 +8940,11 @@ def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list
     for call, enclosing in _enclosing_calls(tree, "_store_set_cookies"):
         if relative == _COOKIE_TAIL and enclosing == _COOKIE_TAIL_FN:
             continue
-        offenders.append(offender(path, call.lineno, f"_store_set_cookies() outside {_COOKIE_TAIL_FN}()"))
+        offenders.append(offender_at(path, call, f"_store_set_cookies() outside {_COOKIE_TAIL_FN}()"))
     for call, enclosing in _enclosing_calls(tree, "add_cookie_header"):
         if relative == _COOKIE_HELPER and enclosing == _COOKIE_HELPER_FN:
             continue
-        offenders.append(offender(path, call.lineno, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()"))
+        offenders.append(offender_at(path, call, f"add_cookie_header() outside {_COOKIE_HELPER_FN}()"))
     return offenders
 
 
@@ -9210,7 +9239,7 @@ def _literal_status_classification_pairs(tree: ast.AST, path: pathlib.Path) -> l
             if kw.arg in ("status", "classification") and isinstance(kw.value, ast.Constant)
         }
         if len(spelled) == 2:
-            offenders.append(offender(path, node.lineno, "hand-written (status, classification) pair"))
+            offenders.append(offender_at(path, node, "hand-written (status, classification) pair"))
     return offenders
 
 
@@ -9293,12 +9322,10 @@ def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
                 else []
             )
             for target in cleared:
-                yield offender(
+                yield offender_at(
                     path,
-                    inner.lineno,
-                    f"{target.attr} is cleared to None in {node.name}() rather than "
-                    f"{chokepoint}(); route the release through the chokepoint so every "
-                    "exit path clears the same set of fields",
+                    inner,
+                    f"{target.attr} is cleared to None in {node.name}() rather than {chokepoint}(); route the release through the chokepoint so every exit path clears the same set of fields",
                 )
 
 
@@ -9379,12 +9406,10 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
             continue
         named = {kw.arg for kw in node.keywords if kw.arg}
         if "request_model" not in named:
-            yield offender(
+            yield offender_at(
                 path,
-                node.lineno,
-                "ToolSpec registers a tool without a request_model; the inputSchema and the "
-                "call's argument validation are both derived from it, so a tool without one "
-                "has no validated contract",
+                node,
+                "ToolSpec registers a tool without a request_model; the inputSchema and the call's argument validation are both derived from it, so a tool without one has no validated contract",
             )
     # The dispatcher must be the one validating, not the handlers.
     for node in functions(tree):
@@ -9392,11 +9417,10 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
             continue
         for inner in nodes_of_type(node, ast.Call):
             if isinstance(inner.func, ast.Attribute) and inner.func.attr == "model_json_schema":
-                yield offender(
+                yield offender_at(
                     path,
-                    inner.lineno,
-                    f"{node.name}() still derives a schema itself; the schema belongs to "
-                    "ToolSpec.input_schema, derived from the request model",
+                    inner,
+                    f"{node.name}() still derives a schema itself; the schema belongs to ToolSpec.input_schema, derived from the request model",
                 )
 
 
@@ -9508,11 +9532,10 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
         name = resolved_expr_name(tree, node)
         if name in _EXTRACTION_ENTRY_POINTS:
             offenders.append(
-                offender(
+                offender_at(
                     path,
-                    node.lineno,
-                    f"{name} is dispatched outside strategies/content_pipeline.py; "
-                    "run the mode chain through _run_extraction",
+                    node,
+                    f"{name} is dispatched outside strategies/content_pipeline.py; run the mode chain through _run_extraction",
                 )
             )
     return offenders
@@ -9570,11 +9593,10 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
         spelled = sorted({kw.arg for kw in node.keywords if kw.arg in _DISCOVERY_RESULT_FIELDS})
         if spelled:
             offenders.append(
-                offender(
+                offender_at(
                     path,
-                    node.lineno,
-                    f"{node.func.id} spells {', '.join(spelled)}; spread "
-                    "content_pipeline._discovery_result_fields instead",
+                    node,
+                    f"{node.func.id} spells {', '.join(spelled)}; spread content_pipeline._discovery_result_fields instead",
                 )
             )
     return offenders

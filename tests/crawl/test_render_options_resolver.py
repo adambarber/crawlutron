@@ -26,15 +26,25 @@ from _browser_doubles import _fake_browser
 from _fetcher_factories import strategy_request
 
 from app.api.render import _render_options
+from app.crawl.policy import read_policy
 from app.crawl.render_options import policy_wants_html, resolve_render_options
 from app.crawl.strategies.browser_result import browser_strategy_result
 from app.settings import CrawlerSettings
 
 #: The two knobs the resolver reads off settings, set away from the dataclass
 #: defaults so a merge assertion cannot pass by coincidence.
+#:
+#: MAX_RETRIES was 7 here. It is now 4, because 7 is above the deployment
+#: ceiling (``MAX_RETRIES``): a deployment-wide default has the blast radius of
+#: every caller, so it is capped at 5 and an operator asking for 7 is warned and
+#: refused rather than silently handed a different number. 4 is still != the
+#: dataclass default, so the merge assertion keeps its teeth. The per-job value
+#: of 7 is legal and covered by ``test_caller_retry_count_is_bounded_per_job``;
+#: the deployment-side rejection is pinned in
+#: ``test_env_parsing.test_an_out_of_ceiling_deployment_value_is_refused``.
 SETTINGS_OVERRIDES = {
     "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "11",
-    "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "7",
+    "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "4",
 }
 
 
@@ -103,7 +113,10 @@ class TestRenderEndpointConsumesResolver:
     def test_render_options_uses_settings_defaults(self):
         options = _render_options({"options": {}}, _settings())
         assert options.timeout_seconds == 11
-        assert options.max_retries == 7
+        # 4, not 7: 7 is above the deployment's retry ceiling, so it is now
+        # refused there. The per-job equivalent of "7 is a real value" is
+        # test_caller_retry_count_is_bounded_per_job.
+        assert options.max_retries == 4
         assert options.respect_robots is True
         assert options.browser_profile == {}
 
@@ -145,7 +158,7 @@ class TestEngineConsumesResolver:
         )
         options = captured["options"]
         # The caller asked for no HTML in the payload...
-        assert policy_wants_html(policy) is False
+        assert policy_wants_html(read_policy(policy)) is False
         # ...but capture stays pipeline-pinned: the strategy reads the captured
         # HTML into extraction/discovery/diagnostics BEFORE anything strips it,
         # so honoring it here would silently degrade results, not save work.

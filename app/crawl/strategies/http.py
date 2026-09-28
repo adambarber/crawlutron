@@ -11,10 +11,9 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from app.api_models import CrawlExtractionMethod, CrawlPolicy, CrawlPolicyLimits
 from app.classify import classify_page_with_evidence
 from app.constants import (
-    DEFAULT_EXTRACTION,
-    DEFAULT_MAX_DISCOVERED_LINKS,
     EXTRACTION_DOCUMENT,
     EXTRACTION_METHOD_HTTP_BODY,
     EXTRACTION_METHOD_HTTP_HTML,
@@ -26,6 +25,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.document_text import _format_extracted_document_text
 from app.crawl.extraction import _is_html
+from app.crawl.policy import discovery_flags
 from app.crawl.render_options import policy_wants_html
 from app.crawl.result_helpers import (
     _binary_no_text_result,
@@ -55,7 +55,7 @@ class _HttpStrategyContext:
     original_url: str
     normalized_url: str
     strategy: CrawlStrategyName
-    policy: dict[str, Any]
+    policy: CrawlPolicy
     host_policy: HostPolicy
     http_fetcher: Any
     cache: HttpCache | None
@@ -66,13 +66,13 @@ class _HttpStrategyContext:
     started: float
     caller_conditional: dict[str, str] = field(default_factory=dict)
     profile: dict[str, Any] = field(default_factory=dict)
-    limits: dict[str, Any] = field(default_factory=dict)
+    limits: CrawlPolicyLimits = field(default_factory=CrawlPolicyLimits)
     timeout_seconds: int = 10
     max_retries: int = 0
     max_content_length: int = 0
     base_headers: dict[str, str] = field(default_factory=dict)
     request_headers: dict[str, str] = field(default_factory=dict)
-    extraction: str = DEFAULT_EXTRACTION
+    extraction: CrawlExtractionMethod = CrawlExtractionMethod.FULL
     include_html: bool = False
     robots_evaluated: bool = True
     ckey: str | None = None
@@ -205,11 +205,11 @@ def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
         if value:
             ctx.caller_conditional[header] = value
 
-    ctx.profile = request_profile._validated_request_profile(ctx.policy)
-    ctx.limits = ctx.policy.get("limits", {})
-    ctx.robots_evaluated = bool(ctx.limits.get("respect_robots", True))
-    ctx.timeout_seconds = ctx.limits.get("timeout_seconds", 10)
-    ctx.max_retries = ctx.limits.get("max_retries", 0)
+    ctx.profile = ctx.policy.request_profile
+    ctx.limits = ctx.policy.limits
+    ctx.robots_evaluated = ctx.limits.respect_robots
+    ctx.timeout_seconds = ctx.limits.timeout_seconds
+    ctx.max_retries = ctx.limits.max_retries
     ctx.max_content_length = content_cache_key._effective_max_content_length(
         ctx.limits, ctx.global_concurrency
     )
@@ -220,7 +220,7 @@ def _resolve_http_limits(ctx: _HttpStrategyContext) -> None:
     if ctx.cache is not None:
         ctx.request_headers.update(ctx.cache.conditional_headers(ctx.normalized_url))
     ctx.request_headers.update(ctx.caller_conditional)
-    ctx.extraction = ctx.policy.get("extraction", DEFAULT_EXTRACTION)
+    ctx.extraction = ctx.policy.extraction
     ctx.include_html = policy_wants_html(ctx.policy)
 
 
@@ -233,8 +233,8 @@ async def _revalidate_content_cache(ctx: _HttpStrategyContext) -> None:
         ctx.strategy,
         ctx.base_headers,
         ctx.extraction,
-        ctx.policy.get("css_selector"),
-        ctx.policy.get("xpath"),
+        ctx.policy.css_selector,
+        ctx.policy.xpath,
     )
     ctx.ckey = ckey
     cached = await ctx.content_cache.aget(ckey)
@@ -386,9 +386,7 @@ async def _extract_http_phase(ctx: _HttpStrategyContext, resp: _FetchedResponse)
     """
     content_encoding = resp.headers.get("content-encoding", "")
     if content_encoding:
-        decompressed = _decompress_body(
-            resp.body, content_encoding, max_output_bytes=ctx.max_content_length
-        )
+        decompressed = _decompress_body(resp.body, content_encoding, max_output_bytes=ctx.max_content_length)
         strategy_decompression_failed = False
     else:
         decompressed = resp.body
@@ -512,25 +510,26 @@ async def _construct_http_result(
         "runtime": {"elapsed_ms": resp.elapsed_ms, "final_url": resp.final_url},
         "content_metrics": extracted.content_metrics,
     }
-    discovery = ctx.policy.get("discovery") or {}
-    max_depth = int((ctx.policy.get("limits") or {}).get("max_depth") or 0)
-    want_discovery_links = bool(discovery) or max_depth > 0
+    # "Any channel on", not "the block exists". Those were the same test while
+    # every channel defaulted to on; with them off by default, a block whose
+    # channels are all off is exactly the empty mapping the old
+    # `bool(policy.get("discovery") or {})` read as false, and `is not None`
+    # would have started doing discovery work for a caller who asked for none.
     post_fetch = await _discover_after_fetch(
         html=extracted.html,
         final_url=resp.final_url,
         js_base_url=ctx.normalized_url,
-        max_links=ctx.limits.get("max_discovered_links", DEFAULT_MAX_DISCOVERED_LINKS),
-        include_diagnostics=bool(discovery),
-        include_links=status == "success" and want_discovery_links,
-        include_js_endpoints=bool(discovery),
+        status=status,
+        policy=ctx.policy,
         host_policy=ctx.host_policy,
     )
-    if discovery:
+    discovery_block = any(discovery_flags(ctx.policy))
+    if discovery_block:
         diagnostics.update(post_fetch["diagnostics"])
     retry_after = fetch_policy._retry_after_seconds(resp.headers)
     if retry_after is not None:
         diagnostics["cooldown"] = {"retry_after_seconds": retry_after, "scope": "domain"}
-    if discovery:
+    if discovery_block:
         diagnostics.update(
             await fetch_policy._discovery_diagnostics(
                 normalized_url=ctx.normalized_url,
@@ -543,7 +542,7 @@ async def _construct_http_result(
                 http_fetcher=ctx.http_fetcher,
             )
         )
-    if max_depth > 0:
+    if ctx.policy.limits.max_depth > 0:
         discovery_diag = diagnostics.get("discovery")
         if discovery_diag:
             discovery_diag.pop("sitemap_urls", None)

@@ -322,8 +322,12 @@ class _RedirectChain:
         per-transport header lookups that have to agree.
         """
         target = _redirect_target(
-            self.url, self.headers, response.status_code,
-            response.headers.get("location"), self.hops, policy=self.policy,
+            self.url,
+            self.headers,
+            response.status_code,
+            response.headers.get("location"),
+            self.hops,
+            policy=self.policy,
         )
         if target is None:
             return False

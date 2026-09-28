@@ -6,6 +6,7 @@ import pytest
 from _fetcher_factories import make_html_fetcher
 from _policy_factories import crawl_policy
 
+from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate
 from app.crawl.engine import crawl_request
 from app.crawl.robots import (
@@ -14,7 +15,6 @@ from app.crawl.robots import (
     load_robots_rules,
     robots_cache,
 )
-from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 
 
@@ -30,7 +30,7 @@ def _gate() -> RobotsGate:
     every call site, and a test that changed one of them stopped being about
     the robots cache at all.
     """
-    return RobotsGate({}, CrawlerSettings.from_mapping({}), HostPolicy.unrestricted())
+    return RobotsGate(CrawlPolicy(), HostPolicy.unrestricted())
 
 
 async def test_job_fetch_populates_cache_seen_by_engine():
