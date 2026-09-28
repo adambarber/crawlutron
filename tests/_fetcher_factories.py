@@ -7,7 +7,7 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLE
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
-from app.crawl.policy import read_policy
+from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.strategies.strategy_request import StrategyRequest
 from app.models import HttpFetchResult
 from app.validation import HostPolicy
@@ -429,7 +429,7 @@ async def crawled_results(
     *,
     url: str = "http://example.com/",
     limits: dict[str, Any] | None = None,
-    policy: dict[str, Any] | None = None,
+    policy: CrawlPolicy | dict[str, Any] | None = None,
     spill_path: str | None = None,
     content_cache: Any = None,
     calls: list[str] | None = None,
@@ -505,7 +505,7 @@ def cache_with_etag(url: str, etag: str = "v1") -> HttpCache:
 async def crawled_result(
     url: str,
     *,
-    policy: dict[str, Any] | None = None,
+    policy: CrawlPolicy | dict[str, Any] | None = None,
     strategies: list[str] | None = None,
     http_fetcher: Any = None,
     browser_worker: Any = None,
@@ -578,7 +578,7 @@ async def run_chain(
     fetcher: Any = None,
     *,
     cffi_fetcher: Any = None,
-    policy: dict[str, Any],
+    policy: CrawlPolicy | dict[str, Any],
     scheduler: Any = None,
     browser_worker: Any = None,
 ) -> Any:
@@ -614,7 +614,9 @@ async def run_chain(
     )
 
 
-async def run_cached_twice(url: str, policy: dict[str, Any], fetcher: Any, cache: Any, content_cache: Any):
+async def run_cached_twice(
+    url: str, policy: CrawlPolicy | dict[str, Any], fetcher: Any, cache: Any, content_cache: Any
+):
     """The same URL through the HTTP strategy twice, on the same two caches.
 
     The content cache is a claim about the *second* run, so the tests that make
@@ -669,7 +671,7 @@ def _spawn_fetch(fn):
         server.stop()
 
 
-def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> StrategyRequest:
+def strategy_request(url: str, policy: CrawlPolicy | dict[str, Any], strategy: str) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
     One spelling, so a factory cannot pass one page's URL to a result builder
@@ -689,7 +691,7 @@ def strategy_request(url: str, policy: dict[str, Any], strategy: str) -> Strateg
 
 async def run_http_strategy(
     url: str,
-    policy: dict[str, Any],
+    policy: CrawlPolicy | dict[str, Any],
     http_fetcher: Any,
     cache: Any = None,
     content_cache: Any = None,
@@ -713,7 +715,7 @@ async def run_http_strategy(
 async def invoke_http_strategy(
     monkeypatch: Any,
     *,
-    policy: dict[str, Any],
+    policy: CrawlPolicy | dict[str, Any],
     resp: Any,
     dedupe_patch: bool = False,
     global_concurrency: int | None = None,
@@ -739,7 +741,7 @@ async def invoke_http_strategy(
 
 
 async def invoke_browser_strategy(
-    monkeypatch: Any, *, policy: dict[str, Any], html: str, text: str = "Hello world"
+    monkeypatch: Any, *, policy: CrawlPolicy | dict[str, Any], html: str, text: str = "Hello world"
 ) -> Any:
     from app.crawl.strategies.browser_result import browser_strategy_result
 

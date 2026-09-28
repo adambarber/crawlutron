@@ -23,7 +23,7 @@ from typing import Any
 from app.api_models import CrawlPolicy
 from app.crawl.ids import new_job_id
 from app.crawl.migrations import StoreSchema
-from app.crawl.policy import PolicyTier, read_policy
+from app.crawl.policy import PolicyLike, PolicyTier, read_policy
 from app.crawl.policy import stored_policy as _stored_policy
 from app.crawl.sqlite_store import connect_store
 from app.validation import HostPolicy, normalize_public_http_url, safe_public_url_or_none
@@ -740,7 +740,7 @@ class JobStore:
             tier=self.tier,
         )
 
-    def create(self, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
+    def create(self, root_url: str, policy: PolicyLike) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
         # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
         canonical_root = str(normalize_public_http_url(root_url, policy=self._host_policy))
@@ -753,7 +753,7 @@ class JobStore:
             frontier=[FrontierEntry(url=canonical_root, depth=0)],
         )
 
-    def create_single_shot(self, job_id: str, root_url: str, policy: CrawlPolicy) -> CrawlJobState:
+    def create_single_shot(self, job_id: str, root_url: str, policy: PolicyLike) -> CrawlJobState:
         """Create a new single-shot async crawl job with the given job_id (request_id)."""
         return _create_job(
             self,

@@ -286,6 +286,25 @@ def _drop_rejected(raw: dict[str, Any], exc: ValidationError) -> dict[str, Any] 
     return candidate if dropped else None
 
 
+#: What a caller may hand the read edge: a policy that has already been through
+#: :func:`read_policy`, or the raw mapping a request payload still carries.
+#:
+#: :func:`read_policy` is total by design, so its input is not ``CrawlPolicy``
+#: and neither is anything that routes through it. Those edges used to claim
+#: ``CrawlPolicy`` and then call ``read_policy`` on it -- a body that contradicts
+#: its own annotation, invisible to a type checker. Tests found the truth by
+#: passing mappings and being flagged for it, and the fix at each call site was
+#: to widen the annotation until the checker stopped objecting, which is how a
+#: lie survives a type gate.
+#:
+#: Two forms, not ``Any``: ``read_policy`` distinguishes exactly these (a policy
+#: passes through, a mapping is validated and repaired), and naming them keeps
+#: the third case -- a string, a list, a made-up mapping like
+#: ``{"test": "policy"}`` -- an error at the call site instead of a silently
+#: repaired default policy three layers down.
+PolicyLike = CrawlPolicy | dict[str, Any]
+
+
 def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     """Total read edge: any input resolves to a policy, repairing what failed.
 
