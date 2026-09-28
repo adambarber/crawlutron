@@ -71,28 +71,6 @@ class TestPdfTablePreservation:
         assert "|" in md
 
 
-class _FakeHttpResponse:
-    """Minimal urlopen-shaped response (context manager + read + status)."""
-
-    def __init__(self, body: bytes, *, status: int = 200, headers=None):
-        self._body = body
-        self.status = status
-        self.headers = headers or {}
-
-    def read(self, amount: int = -1):
-        # Real urllib responses accept an optional byte count (read_capped
-        # asks for cap+1); mirror that contract.
-        if amount == -1:
-            return self._body
-        return self._body[:amount]
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-
 class TestDocumentRedirectSsrf:
     """H2: a public PDF that redirects to an internal host must not be followed.
 
@@ -109,10 +87,12 @@ class TestDocumentRedirectSsrf:
 
     def _install_fakes(self, monkeypatch, pdf_bytes, redirects):
         import socket
-        import urllib.error
-        import urllib.request
         from urllib.parse import urlparse
 
+        import httpx
+        from _transport_doubles import MockResponse, dispatching_transport_client
+
+        import app.crawl.strategies.http_client_pool as pool_mod
         import app.crawl.strategies.pinned_transport as http_strategy
 
         def fake_resolve_ips(hostname, *, use_cache=True):
@@ -135,31 +115,21 @@ class TestDocumentRedirectSsrf:
         fetched: list[str] = []  # logical host names from the Host header
         connect_urls: list[str] = []  # URLs actually handed to the connection
 
-        def fake_build_opener(*handlers):
-            # Emulate the REAL non-following opener semantics: when
-            # redirect_request returns None, urllib raises HTTPError -- it
-            # never hands back a 30x response object (N2 regression guard).
-            # Dispatch keys on the Host header: the connect URL carries the
-            # pinned IP, so the logical hostname only exists there (H5-B).
-            class _Opener:
-                def open(self, request, timeout=30):
-                    connect_urls.append(request.full_url)
-                    host = request.get_header("Host") or ""
-                    fetched.append(host)
-                    location = redirects.get(f"{host}{urlparse(request.full_url).path}")
-                    if location is not None:
-                        raise urllib.error.HTTPError(
-                            request.full_url,
-                            302,
-                            "Moved",
-                            {"Location": location},
-                            None,
-                        )
-                    return _FakeHttpResponse(pdf_bytes)
+        def handler(request: httpx.Request) -> httpx.Response:
+            connect_urls.append(str(request.url))
+            host = request.headers.get("Host", "")
+            fetched.append(host)
+            location = redirects.get(f"{host}{urlparse(str(request.url)).path}")
+            if location is not None:
+                # httpx hands a 30x back as a response rather than raising, and
+                # the shared chain reads the Location off it -- the opposite of
+                # urllib, where a redirect surfaced as HTTPError. Driving the
+                # real client is what makes that difference observable.
+                return MockResponse(302, {"Location": location})
+            return MockResponse(200, content=pdf_bytes)
 
-            return _Opener()
-
-        monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+        client = dispatching_transport_client(handler)
+        monkeypatch.setattr(pool_mod, "get_async_http_client", lambda: client)
         return fetched, connect_urls
 
     def _drive_extraction(self, monkeypatch, redirects=None, url=None) -> _ExtractionRun:
@@ -198,8 +168,14 @@ class TestDocumentRedirectSsrf:
 
     def test_https_document_connects_by_hostname_not_ip(self, monkeypatch):
         """H5-A: https keeps the hostname (certs carry no IP SANs) -- the
-        pinned IP must never surface in the request URL, or every properly
-        configured site would fail TLS and silently break extraction."""
+        pinned IP must never surface in an https request URL, or every properly
+        configured site would fail TLS and silently break extraction.
+
+        The assertion is about the https HOP, not every hop. The redirect target
+        here is an http URL, so the second hop is pinned like any other http
+        fetch and carries the IP; a blanket "no URL anywhere is an IP" would be
+        asserting the opposite of the pin rule.
+        """
         run = self._drive_extraction(
             monkeypatch,
             {"initial.test/doc.pdf": self.ALLOWED_PATH},
@@ -207,8 +183,10 @@ class TestDocumentRedirectSsrf:
         )
         assert "Alice" in run.markdown
         assert run.connect_urls
-        assert all(urlparse(u).scheme == "https" for u in run.connect_urls)
-        assert all(urlparse(u).hostname != self.PINNED_IP for u in run.connect_urls)
+        https_hop = urlparse(run.connect_urls[0])
+        assert https_hop.scheme == "https"
+        assert https_hop.hostname == "initial.test", "SNI needs the logical hostname"
+        assert https_hop.hostname != self.PINNED_IP, "the pinned IP must not surface in an https URL"
 
     def test_second_hop_dns_rebind_aborts(self, monkeypatch):
         """H5-B: hops 2+ re-validate and re-pin. A hop whose resolution is
@@ -222,6 +200,10 @@ class TestDocumentRedirectSsrf:
             },
         )
         assert run.markdown == ""
+        # The walk did advance exactly one hop before the second was refused.
+        # Without this the assertion below would also hold if nothing had been
+        # fetched at all, which is exactly what a broken walk looks like.
+        assert "hop1.test" in run.fetched
         assert "evil.test" not in run.fetched
 
     def test_relative_redirect_resolves_against_hostname_url(self, monkeypatch):

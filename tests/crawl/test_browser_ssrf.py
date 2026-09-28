@@ -1,6 +1,5 @@
 import socket
 import threading
-import urllib.request
 
 import pytest
 from _assertions import block_private_targets
@@ -30,35 +29,38 @@ from app.crawl.strategies.browser import (
 
 
 async def test_document_extractor_blocks_internal_url(monkeypatch):
-    # F2: the unprotected urllib urlopen must not be pointed at loopback.
+    # F2: the document fetch must refuse a loopback target, and refuse it
+    # loudly -- a refused target is not the same outcome as an empty PDF.
     monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY)
 
 
+class _GateReached(Exception):
+    """Stands in for the SSRF gate to end the walk at the gate itself."""
+
+
 async def test_document_extractor_invokes_ssrf_check(monkeypatch):
+    """The extractor must run the shared SSRF gate before it opens a socket.
+
+    The stub raises rather than returning, which is what keeps the test off the
+    network: without a stubbed transport, proving the gate was reached would mean
+    depending on a real connection to example.com to assert something about a
+    local hook. That the sentinel escapes rather than degrading to empty text is
+    itself the property -- it is the same fail-closed ordering as
+    ``test_document_extractor_blocks_internal_url``, here on the *reachable*
+    path.
+    """
     seen = {}
 
     def fake_check(url):
         seen["url"] = url
+        raise _GateReached
 
     monkeypatch.setattr(http_mod, "_check_ssrf_protection", fake_check)
 
-    class _FakeResp:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def read(self):
-            return b"%PDF-1.4 fake"
-
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _FakeResp())
-
-    # pdfplumber will fail to parse the fake bytes -> returns ""; we only care
-    # that the SSRF gate was invoked with the requested URL.
-    doc_mod._default_document_text_extractor("http://example.com/x.pdf", UNRESTRICTED_HOST_POLICY)
+    with pytest.raises(_GateReached):
+        doc_mod._default_document_text_extractor("http://example.com/x.pdf", UNRESTRICTED_HOST_POLICY)
     assert seen.get("url") == "http://example.com/x.pdf"
 
 

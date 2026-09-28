@@ -116,6 +116,19 @@ def scripted_transport_client(
     return client
 
 
+def dispatching_transport_client(handler) -> httpx.AsyncClient:
+    """A real ``httpx.AsyncClient`` whose transport asks ``handler`` per request.
+
+    :func:`scripted_transport_client` answers from a fixed list, which is the right
+    shape when a test knows its hops up front and the wrong one when the answer
+    depends on where the request went -- a redirect chain, where each ``Location``
+    is only known once the previous hop answered. Everything else is the same: a
+    real client, a real ``httpx.Request``, real ``httpx.Response`` objects with a
+    real streaming body. Only who decides the answer differs.
+    """
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
 def allow_scripted_egress(monkeypatch, ip: str = "1.2.3.4") -> None:
     """Stand the SSRF guard down for a target no resolver could answer for.
 
@@ -276,6 +289,7 @@ __all__ = [
     "CffiFetchOutcome",
     "MockResponse",
     "allow_scripted_egress",
+    "dispatching_transport_client",
     "patch_http_fetcher_transport",
     "real_cffi_fetch_outcome",
     "scripted_transport_client",
