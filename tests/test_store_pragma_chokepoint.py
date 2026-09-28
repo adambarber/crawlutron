@@ -84,8 +84,13 @@ def _mentions_pragma(sql: ast.AST) -> bool:
     return "pragma" in text
 
 
-def _is_identifier_chokepoint(node: ast.AST) -> bool:
-    """Whether an expression is, or is derived from, the allowlist call."""
+def _is_identifier_chokepoint(node: ast.expr) -> bool:
+    """Whether an expression is, or is derived from, the allowlist call.
+
+    Takes the ``ast.expr`` its callers hold and narrows inside: the
+    ``isinstance(node, ast.Call)`` that answered the question was invisible to
+    every caller that went on to read ``node.func``.
+    """
     if not isinstance(node, ast.Call):
         return False
     if not (isinstance(node.func, ast.Name) and node.func.id == "_validated_identifier"):

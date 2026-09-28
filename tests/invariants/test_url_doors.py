@@ -1135,8 +1135,12 @@ def test_normalize_or_none_detector_bites():
 _EGRESS_FILTERS = frozenset({"public_url_or_none", "safe_public_url_or_none"})
 
 
-def _is_urljoin_call(node: ast.AST) -> bool:
-    """True for a plain ``urljoin(...)`` call."""
+def _is_urljoin_call(node: ast.expr) -> bool:
+    """True for a plain ``urljoin(...)`` call.
+
+    Takes the ``ast.expr`` its callers hold (an assignment's value, a return's
+    value) rather than the ``ast.AST`` the walk produced, and narrows inside.
+    """
     return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "urljoin"
 
 

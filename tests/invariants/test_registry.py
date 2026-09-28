@@ -21,6 +21,7 @@ from tests.chokepoint_walks import (
     assert_stays_clean,
     call_nodes,
     has_method_call,
+    lineno,
     local_call_leaf_names,
     local_nodes,
     nodes_of,
@@ -104,7 +105,7 @@ _PUBLIC_SURFACE_PROPERTY = Property(
 )
 
 
-def _owned_public_symbols(tree: ast.AST) -> set[str]:
+def _owned_public_symbols(tree: ast.Module) -> set[str]:
     public: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -120,7 +121,7 @@ def _owned_public_symbols(tree: ast.AST) -> set[str]:
     return public
 
 
-def _entry_point_symbols(tree: ast.AST) -> set[str]:
+def _entry_point_symbols(tree: ast.Module) -> set[str]:
     entry_points: set[str] = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
@@ -1630,7 +1631,7 @@ def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_
         )
 
     return [
-        offender(path, node.lineno, f"the _meta key reason is authored in {enclosing!r}, not {owner}()")
+        offender(path, lineno(node), f"the _meta key reason is authored in {enclosing!r}, not {owner}()")
         for node, enclosing in _enclosing_nodes(tree, is_reason)
         if enclosing != owner
     ]

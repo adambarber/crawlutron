@@ -587,8 +587,8 @@ def spelled_non_member(value: ast.expr, members: Container[str]) -> str | None:
 
 
 def non_member_literals(
-    candidates: Iterable[tuple[ast.AST, str, ast.expr, Container[str]]],
-) -> Iterator[tuple[ast.AST, str, str]]:
+    candidates: Iterable[tuple[ast.Call, str, ast.expr, Container[str]]],
+) -> Iterator[tuple[ast.Call, str, str]]:
     """``(node, field, value, members)`` tuples narrowed to spelled non-members.
 
     The set-valued funnel over :func:`spelled_non_member`, for the detectors that
@@ -597,6 +597,11 @@ def non_member_literals(
     the offending message has to name. Reporting the value rather than the
     expression is deliberate: the message is about the value, and the only thing
     left for the caller to say is why it is wrong there.
+
+    The node is an ``ast.Call`` because every caller feeds it the output of a
+    call-keyword walk, which yields calls. Typing it as ``ast.AST`` widened the
+    node on the way through and cost each caller the callee and the line it went
+    on to read.
     """
     for node, field, value, members in candidates:
         spelled = spelled_non_member(value, members)

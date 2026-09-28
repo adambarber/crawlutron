@@ -46,7 +46,9 @@ from collections.abc import Collection
 
 from tests.chokepoint_walks import (
     attribute_calls,
+    bare_callee,
     call_keyword_arguments,
+    lineno,
     nodes_of,
     non_member_literals,
     offender,
@@ -186,8 +188,8 @@ def generic_literal_field_offenders(
     return [
         offender(
             path,
-            node.lineno,
-            f"{node.func.id}({field}={value!r}) is not a member of the"
+            lineno(node),
+            f"{bare_callee(node)}({field}={value!r}) is not a member of the"
             f" {field} Literal; add it to the taxonomy or pass a member",
         )
         for node, field, value in non_member_literals(
@@ -265,8 +267,8 @@ def wrong_namespace_constant_offenders(
         out.append(
             offender(
                 path,
-                node.lineno,
-                f"{node.func.id}({kw.arg}={value.id}) is a constant from the"
+                lineno(node),
+                f"{bare_callee(node)}({kw.arg}={value.id}) is a constant from the"
                 f" {'/'.join(hit)} namespace, not a {kw.arg}; the value"
                 f" {constants[value.id]!r} collides with a real member, which is"
                 " exactly what makes this invisible to a value check -- pass the"

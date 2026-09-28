@@ -506,7 +506,7 @@ def test_poll_loop_detector_bites():
 # constructor, and no file needs an exemption to keep using asdict properly.
 
 
-def _is_asdict_call(node: ast.AST) -> bool:
+def _is_asdict_call(node: ast.expr) -> bool:
     """Whether a node calls asdict, under either import spelling.
 
     ``from dataclasses import asdict`` and ``import dataclasses`` are both in
@@ -526,7 +526,7 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         for keyword in call.keywords:
             if keyword.arg is not None or not isinstance(keyword.value, ast.AST):
                 continue
-            unpacked = [n for n in ast.walk(keyword.value) if _is_asdict_call(n)]
+            unpacked = [n for n in call_nodes(keyword.value) if _is_asdict_call(n)]
             if unpacked:
                 offenders.append(
                     offender_at(

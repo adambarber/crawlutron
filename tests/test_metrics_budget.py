@@ -105,7 +105,7 @@ class Offender:
         return f"{self.metric}: {self.where} {self.name} ({self.size})"
 
 
-def _span(node: ast.AST, body: list[ast.stmt]) -> int:
+def _span(node: ast.stmt, body: list[ast.stmt]) -> int:
     if not body:
         return 0
     return (body[-1].end_lineno or body[-1].lineno) - node.lineno + 1
