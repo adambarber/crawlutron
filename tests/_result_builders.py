@@ -1,22 +1,31 @@
 from typing import Any
 
 from app.constants import HTTP_DECLARED_CRAWLER
+from app.models import Classification, CrawlError, CrawlStrategyAttempt, CrawlStrategyName, RenderOptions
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
-def make_job(index: int, url: str):
+def make_job(index: int, url: str, *, options: RenderOptions | None = None):
+    """A ``CrawlJob`` carrying the default render options.
+
+    ``CrawlJob.options`` has no default and the renderer reads
+    ``options.max_retries`` off it, so the ``None`` this used to pass was not a
+    value the job could hold -- it only went unnoticed because no test rendered
+    one. The absent baseline is ``RenderOptions()`` itself, every field at its
+    default.
+    """
     from app.models import CrawlJob
 
     return CrawlJob(
         index=index,
         url=url,
         domain=url.split("/")[2],
-        options=None,
+        options=RenderOptions() if options is None else options,
         host_policy=UNRESTRICTED_HOST_POLICY,
     )
 
 
-def engine_result(url: str, classification: str, **overrides: Any):
+def engine_result(url: str, classification: Classification, **overrides: Any):
     """An ``EngineCrawlResult`` for `url`: every optional field absent, plus `overrides`.
 
     The absent baseline is what a result that never got a response looks like --
@@ -62,10 +71,10 @@ def engine_result(url: str, classification: str, **overrides: Any):
 
 def skipped_result(
     url: str,
-    classification: str,
+    classification: Classification,
     *,
-    strategy: str,
-    error: str,
+    strategy: CrawlStrategyName,
+    error: CrawlError,
     normalized_url: str | None = None,
 ):
     """A ``_skipped_engine_result`` for `url`, built through the real primitive.
@@ -93,10 +102,10 @@ def skipped_result(
 def _successful_engine_result(
     url: str,
     *,
-    attempted_strategies: list[Any],
+    attempted_strategies: list[CrawlStrategyAttempt],
     text: str,
     markdown: str | None = None,
-    links: list[Any] | None = None,
+    links: list[dict] | None = None,
 ):
     return engine_result(
         url,
