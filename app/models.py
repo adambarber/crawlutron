@@ -460,14 +460,11 @@ def _to_jsonable(value: Any) -> Any:
 def _entered(value: Any, seen: set[int]) -> set[int] | None:
     """The seen-set to recurse into ``value`` with, or None if it is already on the path.
 
-    Every branch that recurses runs the same two steps: refuse a value already
-    being converted, and put its id on the path so its own children are checked
-    against it. Only mutable containers can take part in a cycle, which is why
-    the primitive types skip this entirely.
-
-    One function rather than three copies of the four lines: a container kind
-    added below could otherwise arrive with the guard half-remembered, and a
-    cyclic graph is a ``RecursionError`` at serialization time -- far from here.
+    Only mutable containers can take part in a reference cycle, which is why the
+    primitive types skip it entirely. :func:`_build_guarded` is its only caller:
+    a container kind added to ``_to_jsonable_impl`` arrives as a new
+    ``isinstance`` arm, and nothing about adding one makes this check mandatory
+    there, so the check belongs on the arm's shared path rather than in each arm.
     """
     oid = id(value)
     if oid in seen:
@@ -475,28 +472,39 @@ def _entered(value: Any, seen: set[int]) -> set[int] | None:
     return seen | {oid}
 
 
+def _build_guarded(value: Any, seen: set[int], build: Callable[[Any, set[int]], Any]) -> Any:
+    """Register ``value`` on the path, then let ``build`` render its children.
+
+    ``build`` is given the value and the descended path set, and is never called
+    for a value already on that path -- that call returns None instead, which is
+    how a cyclic reference is broken rather than followed.
+    """
+    entered = _entered(value, seen)
+    if entered is None:
+        return None
+    return build(value, entered)
+
+
 def _to_jsonable_impl(value: Any, seen: set[int]) -> Any:
-    # Guard against cyclic dataclass graphs (e.g. a DiscoveredLink whose
-    # parent/children point back to an ancestor). Without this, a cycle would
-    # recurse forever and raise RecursionError during result serialization (B2).
-    # Only mutable containers can participate in a reference cycle, so we track
-    # those by id; primitives (str/int/bytes) are returned as-is and must never
-    # be flagged (small strings may be interned and share an id across the tree).
+    # Cyclic graphs (e.g. a DiscoveredLink whose parent/children point back to
+    # an ancestor) recurse forever without a check, and a RecursionError at
+    # serialization time is far from the code that caused it. Every arm below
+    # descends through _build_guarded, so the check cannot be forgotten by a
+    # new one. Primitives skip it: they cannot cycle, and small strings may be
+    # interned and share an id across the tree, so flagging them would truncate
+    # valid results.
     if is_dataclass(value) and not isinstance(value, type):
-        entered = _entered(value, seen)
-        if entered is None:
-            return None
-        return {f.name: _to_jsonable_impl(getattr(value, f.name), entered) for f in fields(value)}
+        return _build_guarded(
+            value,
+            seen,
+            lambda node, path: {f.name: _to_jsonable_impl(getattr(node, f.name), path) for f in fields(node)},
+        )
     if isinstance(value, dict):
-        entered = _entered(value, seen)
-        if entered is None:
-            return None
-        return {k: _to_jsonable_impl(v, entered) for k, v in value.items()}
+        return _build_guarded(
+            value, seen, lambda node, path: {key: _to_jsonable_impl(item, path) for key, item in node.items()}
+        )
     if isinstance(value, (list, tuple)):
-        entered = _entered(value, seen)
-        if entered is None:
-            return None
-        return [_to_jsonable_impl(v, entered) for v in value]
+        return _build_guarded(value, seen, lambda node, path: [_to_jsonable_impl(item, path) for item in node])
     return value
 
 

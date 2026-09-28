@@ -8909,18 +8909,22 @@ _COOKIE_TAIL_FN = "_finish_fetch"
 _COOKIE_HELPER_FN = "_store_set_cookies"
 
 
-def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
-    """``(call, innermost enclosing function name)`` for calls to ``target``.
+def _enclosing_nodes(tree: ast.AST, matches: Callable[[ast.AST], bool]) -> list[tuple[ast.AST, str]]:
+    """``(node, innermost enclosing function name)`` for every node ``matches`` accepts.
 
     ``nodes_of`` yields a flat breadth-first sequence with no parent links, so a
-    detector that needs to know *where* a call sits cannot be built on it. This
-    descends instead, which is affordable: two rules, once per module.
+    detector that needs to know *where* a node sits cannot be built on it. This
+    descends instead, which is affordable: a couple of rules, once per module.
+
+    The name is where a detector reads *ownership* from -- a contract authored in
+    one function rather than three -- and that question applies to any node kind,
+    not only to calls, so the descent takes a predicate instead of a callee name.
     """
-    found: list[tuple[ast.Call, str]] = []
+    found: list[tuple[ast.AST, str]] = []
 
     def visit(node: ast.AST, enclosing: str) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call) and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target:
+            if matches(child):
                 found.append((child, enclosing))
             name = (
                 child.name
@@ -8931,6 +8935,23 @@ def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
 
     visit(tree, "<module>")
     return found
+
+
+def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
+    """``(call, innermost enclosing function name)`` for calls to ``target``.
+
+    The narrowing ``if`` is what types the result as calls rather than nodes; the
+    predicate in :func:`_enclosing_nodes` cannot, because it is a bare callable.
+    """
+    return [
+        (node, enclosing)
+        for node, enclosing in _enclosing_nodes(
+            tree,
+            lambda child: isinstance(child, ast.Call)
+            and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target,
+        )
+        if isinstance(node, ast.Call)
+    ]
 
 
 def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -9771,3 +9792,65 @@ def test_protocol_constant_production_detector_bites():
     for source in (unreadable, None):
         offenders = _unproduced_protocol_constants(source, [(elsewhere, ast.parse(""))])
         assert len(offenders) == 1 and expected in offenders[0], offenders
+
+
+_CYCLE_GUARD_CALL = "_entered"
+_CYCLE_GUARD_OWNER = "_build_guarded"
+
+
+def _cycle_guard_offenders(
+    tree: ast.AST, path: Path, *, call: str = _CYCLE_GUARD_CALL, owner: str = _CYCLE_GUARD_OWNER
+) -> list[str]:
+    """Calls to the cycle guard made from anywhere but the one function that owns it.
+
+    ``_entered`` was single-sourced as a *function* and then inlined back at
+    every use: three container branches each carried the two-step "descend, and
+    give up if already on the path" sequence, so the guard existed in four
+    places. The function's own docstring already claimed the dedup -- "One
+    function rather than three copies of the four lines" -- which made the gap
+    worse, not better: a reader checking that claim would have believed it.
+
+    The hazard is what a *fourth* branch does. Adding a container kind means
+    writing a new ``isinstance`` arm, and the guard is not something the type
+    system requires there. Routing every arm through one helper is what makes
+    the check structural instead of remembered, so the rule under test is
+    positional rather than structural: the guard is consulted in exactly one
+    function in ``app/``, and that function is the one the arms call.
+    """
+    return [
+        offender(path, node.lineno, f"{call}() is called from {enclosing!r}, not {owner}()")
+        for node, enclosing in _enclosing_calls(tree, call)
+        if enclosing != owner
+    ]
+
+
+def test_the_cycle_guard_is_applied_in_exactly_one_place():
+    """app/models.py consults the cycle guard in one function, not once per container arm."""
+    offenders = app_offenders(_cycle_guard_offenders)
+    assert not offenders, "the cycle guard is applied outside its single owner: " + ", ".join(offenders)
+
+
+def test_cycle_guard_detector_bites():
+    """A guard call inlined at an arm fires; the same call in the owner stays clean."""
+    assert_detector(
+        _cycle_guard_offenders,
+        path=REPO_ROOT / "app" / "models.py",
+        fires={
+            "def arm(value, seen):\n"
+            "    entered = _entered(value, seen)\n"
+            "    return entered\n": "is called from 'arm', not _build_guarded()",
+            "entered = _entered(value, seen)\n": "is called from '<module>'",
+        },
+        clean=(
+            f"def {_CYCLE_GUARD_OWNER}(value, seen, build):\n"
+            "    entered = _entered(value, seen)\n"
+            "    return build(value, entered)\n",
+        ),
+    )
+    # An owner by another name is still a second place, so the rule is about
+    # being the one sanctioned function rather than about a literal spelling.
+    assert _cycle_guard_offenders(
+        ast.parse("def other(value, seen):\n    return _entered(value, seen)\n"),
+        REPO_ROOT / "app" / "models.py",
+        owner="different_owner",
+    ), "a guard call must fire when the sanctioned owner is renamed"

@@ -68,3 +68,24 @@ def test_to_dict_handles_cyclic_link_graph():
     json.dumps(d)
     # The cyclic reference is broken (rendered as None) rather than recursing.
     assert d["children"][0]["children"] == [None]
+
+
+def test_to_dict_breaks_a_cyclic_dict_graph():
+    # The dataclass test above breaks its cycle on re-entering a *dataclass*, so
+    # the dict and sequence branches each carried their own copy of the cycle
+    # guard with nothing pinning them. A self-referential mapping is the shape
+    # that exercises the dict branch's guard on its own.
+    node: dict = {"name": "a"}
+    node["self"] = node
+
+    d = to_dict(node)
+    assert d["name"] == "a"
+    assert d["self"] is None
+
+
+def test_to_dict_breaks_a_cyclic_sequence_graph():
+    items: list = []
+    items.append(items)
+
+    d = to_dict({"items": items})
+    assert d == {"items": [None]}
