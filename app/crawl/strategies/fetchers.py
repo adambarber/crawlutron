@@ -12,6 +12,9 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from curl_cffi.requests.exceptions import RequestException
+from curl_cffi.requests.models import STREAM_END
+
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.decompression import decompress_body as _decompress_body
@@ -179,29 +182,20 @@ async def _cffi_fetch(
     SSRF-safe manual redirect handling (F1) and sensitive-header stripping on
     cross-domain redirects (Fix 3).
 
-    Returns ``None`` -- not a result -- when curl_cffi is unavailable or the
-    attempt failed for any transport reason, so the caller decides the
-    fallback. A transport that cannot answer must not answer with an error
-    result: the httpx path is the same page fetched differently, not a
-    different outcome, and a 200 from the fallback is not a failure of the
-    impersonated attempt.
+    Returns ``None`` -- not a result -- when the attempt failed for any
+    transport reason, so the caller decides the fallback. A transport that
+    cannot answer must not answer with an error result: the httpx path is the
+    same page fetched differently, not a different outcome, and a 200 from the
+    fallback is not a failure of the impersonated attempt.
     """
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
     await http_client_pool._drain_pending_client_closes()
-    try:
-        from curl_cffi.requests.exceptions import RequestException
-        from curl_cffi.requests.models import STREAM_END
-    except ImportError:
-        return None
     # Shared session (perf throughput #4): built once per event loop instead of
-    # per request. Unavailable (ImportError at build) -> plain httpx fallback.
-    # NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
+    # per request. NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
     # AsyncClient does not exist; referencing it raises AttributeError
     # and would silently degrade every impersonated fetch to plain httpx.
     client = http_client_pool.get_cffi_session()
-    if client is None:
-        return None
     try:
         started = time.monotonic()
         async for chain, pinned_url, hop_headers in pinned_transport.apinned_hops(

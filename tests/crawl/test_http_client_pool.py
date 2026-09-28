@@ -371,10 +371,14 @@ def test_both_singletons_queue_through_one_shared_implementation(monkeypatch):
 
 
 def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatch):
-    """Boundary: the loop changed and the rebuild itself raises ImportError.
+    """Boundary: the loop changed and the rebuild itself fails.
 
     The session being replaced must not be dropped on the floor with no owner
-    just because building its successor failed.
+    just because building its successor failed. The failure itself propagates:
+    both pooled clients are declared dependencies, so there is no missing-package
+    state to degrade into -- a silent ``None`` here was read by the cffi fetcher
+    as "impersonation unavailable" and downgraded a TLS-fingerprinted fetch to
+    plain httpx while reporting success.
     """
     _first, second = _supersede_without_loop(
         monkeypatch, "_build_cffi_session", "get_cffi_session", _build_cffi_fake
@@ -388,7 +392,8 @@ def test_cffi_session_superseded_by_a_failing_rebuild_is_still_queued(monkeypatc
     async def _on_a_different_live_loop():
         return http_mod.get_cffi_session()
 
-    assert asyncio.run(_on_a_different_live_loop()) is None, "a failed rebuild must yield no session"
+    with pytest.raises(ImportError, match="curl_cffi unavailable"):
+        asyncio.run(_on_a_different_live_loop())
     with http_mod._PENDING_CLIENT_CLOSE_LOCK:
         queued = list(http_mod._PENDING_CLIENT_CLOSE)
     assert second in queued, "a superseded session was dropped when the rebuild failed"

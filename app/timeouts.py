@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import httpx
+
 
 @dataclass(frozen=True)
 class Timeouts:
@@ -37,8 +39,6 @@ class Timeouts:
 
     def as_httpx(self):
         """Render as ``httpx.Timeout`` (all four parameters, always valid)."""
-        import httpx
-
         return httpx.Timeout(
             connect=self.connect,
             read=self.read,

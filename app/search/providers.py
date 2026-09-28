@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from lxml import html as lxml_html
+
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.crawl.strategies.http_client_pool import get_async_http_client
 from app.timeouts import Timeouts
@@ -347,9 +349,12 @@ class DuckDuckGoProvider:
             )
         results: list[SearchResult] = []
         seen: set[str] = set()
+        # The parse is the only thing that can fail here, and it is the only
+        # thing that SHOULD fail here: this import used to sit inside the
+        # `except Exception` below, so a missing lxml was reported to the caller
+        # as "duckduckgo returned unparsable HTML" -- a provider's fault for a
+        # broken local environment. lxml is a declared dependency.
         try:
-            from lxml import html as lxml_html
-
             tree = lxml_html.fromstring(body)
         except Exception:
             raise SearchProviderError("duckduckgo returned unparsable HTML") from None

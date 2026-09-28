@@ -13,6 +13,8 @@ import io
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import pdfplumber
+
 from app.timeouts import Timeouts
 from app.validation import HostPolicy
 
@@ -66,8 +68,6 @@ def _pdf_to_markdown(pdf: Any) -> str:
 
 def _extract_pdf_bytes_to_markdown(pdf_bytes: bytes) -> str:
     """Extract Markdown (text + tables) from raw PDF bytes using pdfplumber."""
-    import pdfplumber
-
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         return _pdf_to_markdown(pdf)
 

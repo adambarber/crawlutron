@@ -32,6 +32,18 @@ from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urljoin, urlparse
 
+# lxml does not mark re-exports, so importing a name that IS present at runtime is
+# reported as a private import; `reportPrivateImportUsage` is off in
+# pyrightconfig.json for that reason. These carried
+# `reportAttributeAccessIssue` suppressions on the theory that lxml ships partial
+# stubs. They suppressed nothing, and `reportUnnecessaryTypeIgnoreComment` (now
+# on) reports them as unnecessary. Imported at the top because lxml is a declared
+# dependency: the two function-local imports these replace each carried a
+# `try/except ImportError` that returned "no content" for a package that cannot
+# be absent.
+from lxml import etree
+from lxml.etree import ParserError
+
 from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
@@ -666,14 +678,6 @@ def _extract_selected(
             return ExtractedContent(None, None)
         if not nodes:
             return ExtractedContent(None, None)
-        # lxml does not mark re-exports, so importing a name that IS present at
-        # runtime is reported as a private import; `reportPrivateImportUsage` is
-        # off in pyrightconfig.json for that reason. This import carried a
-        # `reportAttributeAccessIssue` suppression on the theory that lxml ships
-        # partial stubs. It suppressed nothing, and `reportUnnecessaryTypeIgnoreComment`
-        # (now on) reports it as unnecessary.
-        from lxml import etree
-
         parts: list[str] = []
         for node in nodes:
             if isinstance(node, str):
@@ -868,12 +872,6 @@ def _parse_html_tree(html: str | None):
     Returns ``None`` for empty/invalid input.
     """
     if not html:
-        return None
-    try:
-        # Same re-export reason as the other etree import above.
-        from lxml import etree
-        from lxml.etree import ParserError
-    except ImportError:
         return None
     try:
         return etree.HTML(html)

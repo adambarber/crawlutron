@@ -13,6 +13,7 @@ from collections.abc import Callable
 from http.cookiejar import CookieJar as _StdlibCookieJar
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
+import curl_cffi.requests as cffi_requests
 import httpx
 
 from app.constants import CFFI_IMPERSONATE_TARGET, DEFAULT_USER_AGENT
@@ -381,21 +382,33 @@ class _LoopBoundPooledClient:
             _schedule_client_close(superseded, is_closed=self.is_closed)
 
     def _rebuild(self, settings: CrawlerSettings | None, superseded: Any) -> Any:
-        """Build the replacement, then release the old client. Lock held."""
+        """Build the replacement, then release the old client. Lock held.
+
+        A failed build propagates. Both clients described by this class are
+        declared dependencies (``httpx``, ``curl_cffi``), so there is no
+        "unavailable" state to recover from, and the ``except ImportError:
+        return None`` that used to stand here was worse than useless: it
+        returned a ``None`` that no httpx caller checks -- so a missing
+        mandatory package surfaced as an ``AttributeError`` inside a fetcher
+        rather than an import error at start-up -- while the cffi path read the
+        same ``None`` as "impersonation unavailable" and silently downgraded a
+        TLS-fingerprinted fetch to plain httpx, reporting success.
+
+        The superseded client is still released on the failing path. A rebuild
+        that raised must not leave the client it was replacing with no owner,
+        which is exactly the socket leak this descriptor exists to prevent.
+        """
         if settings is None and self.consults_settings:
             # Deferred env walk: paid only when a client is actually built, so
             # operator pool limits are read fresh at every rebuild.
             settings = _default_settings()
         try:
             built = self.build(settings)
-        except ImportError:
-            # Optional dependency went away: leave the slot empty (callers fall
-            # back to plain httpx) but still release the superseded client, or
-            # it would be dropped with no owner at all.
+        except Exception:
             self._set_current(None)
             if superseded is not None:
                 self._supersede(superseded)
-            return None
+            raise
         self._set_current(built)
         if superseded is not None:
             self._supersede(superseded)
@@ -468,11 +481,8 @@ def _build_cffi_session() -> Any:
     """Build a shared curl_cffi AsyncSession (impersonation fixed, no timeout).
 
     The per-request timeout travels on each ``get()`` call instead of the
-    session so one session serves every policy budget. Raises ImportError
-    when curl_cffi is unavailable (caller falls back to plain httpx).
+    session so one session serves every policy budget.
     """
-    import curl_cffi.requests as cffi_requests
-
     # discard_cookies=True (C2): the session ships a requests-compatible jar
     # that would otherwise absorb every Set-Cookie and replay domain-matching
     # cookies on later requests INDEPENDENTLY of the namespaced
@@ -502,12 +512,16 @@ _CFFI_SESSION_SINGLETON = _LoopBoundPooledClient(
 )
 
 
-def get_cffi_session() -> Any | None:
+def get_cffi_session() -> Any:
     """Return the shared curl_cffi session bound to the current event loop.
 
     Reused while the running loop is unchanged (warm TLS/connection pool),
-    transparently rebuilt when the loop changes. Returns ``None`` when
-    curl_cffi is not installed so callers fall back to plain httpx.
+    transparently rebuilt when the loop changes. A build that fails raises:
+    curl_cffi is a declared dependency, so there is no missing-package state to
+    return ``None`` for. The ``Any`` return is not looseness -- curl_cffi ships
+    partial stubs and the session type is not expressible without them, which is
+    why the impersonation target and cookie-jar discipline around it are
+    enforced by the code that builds it rather than by a signature.
 
     A session superseded by a loop change is tracked in the shared bounded
     pending-close queue and drained by the next fetch on a live loop -- the

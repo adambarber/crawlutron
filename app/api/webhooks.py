@@ -26,6 +26,8 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from app.bounded_io import BodyTooLarge, read_capped_async
 from app.timeouts import Timeouts
 from app.validation import HostPolicy, get_mapping_int
@@ -58,8 +60,6 @@ async def deliver_pinned_webhook(
     path shares the same TOCTOU-safe delivery code (adversarial review
     F-webhook-toctou).
     """
-    import httpx
-
     # Re-parse through the chokepoint (normalize + check + pin in one place)
     # rather than reimplementing urlparse/check/pin inline -- the manual
     # composition is exactly the shape that produced the redirect findings.

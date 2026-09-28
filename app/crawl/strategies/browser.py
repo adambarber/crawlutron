@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     from _typeshed import SupportsKeysAndGetItem
 
+from camoufox.async_api import AsyncCamoufox
+
 from app.classify import classify_page
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
@@ -1259,8 +1261,6 @@ class BrowserRenderer:
 
     def _create_camoufox_browser(self, **kwargs: Any):
         """Factory for AsyncCamoufox browser."""
-        from camoufox.async_api import AsyncCamoufox
-
         return AsyncCamoufox(**kwargs)
 
     def _warmup_urls_from_env(self) -> list[str]:
