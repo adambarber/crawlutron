@@ -666,11 +666,13 @@ def _extract_selected(
             return ExtractedContent(None, None)
         if not nodes:
             return ExtractedContent(None, None)
-        # lxml ships partial stubs: `etree` is absent from the bundled lxml-stubs
-        # even though `from lxml import etree` succeeds on the installed 6.1.3
-        # (verified directly, not assumed). Remove these ignores when lxml's
-        # bundled stubs declare the etree symbol.
-        from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
+        # lxml does not mark re-exports, so importing a name that IS present at
+        # runtime is reported as a private import; `reportPrivateImportUsage` is
+        # off in pyrightconfig.json for that reason. This import carried a
+        # `reportAttributeAccessIssue` suppression on the theory that lxml ships
+        # partial stubs. It suppressed nothing, and `reportUnnecessaryTypeIgnoreComment`
+        # (now on) reports it as unnecessary.
+        from lxml import etree
 
         parts: list[str] = []
         for node in nodes:
@@ -868,8 +870,8 @@ def _parse_html_tree(html: str | None):
     if not html:
         return None
     try:
-        # Same incomplete-stub reason as the other etree import above.
-        from lxml import etree  # pyright: ignore[reportAttributeAccessIssue]
+        # Same re-export reason as the other etree import above.
+        from lxml import etree
         from lxml.etree import ParserError
     except ImportError:
         return None

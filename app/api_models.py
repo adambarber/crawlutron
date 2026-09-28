@@ -32,17 +32,18 @@ from app.constants import (
     CrawlClassification,
 )
 
-# Pydantic v2's `Field(default_factory=...)` and `@model_validator(mode="after")`
-# overloads defeat pyright, which reports six `reportArgumentType` findings here
-# -- four naming the factory, two naming the decorator above the offending field.
-# They are not annotation lies: the factories are the model classes themselves and
-# the validators are the right shape for the hook. Mypy needed
-# `plugins = pydantic.mypy` in mypy.ini for the same reason and is clean.
+# `plugins = pydantic.mypy` in mypy.ini is what lets the declared fail gate read
+# these models; without it every pydantic import resolves as untyped and the gate
+# is blind to all of them.
 #
-# Each of the six carries a per-line `# pyright: ignore[reportArgumentType]` with
-# this reason, rather than turning the rule off in pyrightconfig.json --
-# reportArgumentType is a rule worth having everywhere else, and six documented
-# call sites are cheaper to review than a globally disabled check. Remove them
+# This comment used to carry the opposite claim -- that pydantic's
+# `Field(default_factory=...)` and `@model_validator(mode="after")` overloads
+# defeat pyright, and that six `reportArgumentType` findings here were each
+# suppressed per line with that reason. They suppressed nothing.
+# `reportUnnecessaryTypeIgnoreComment` (now on in pyrightconfig.json) reports
+# every one of them as unnecessary, and a worktree at 7d0aed1 -- the commit that
+# added them -- reports zero `reportArgumentType` findings in this file. The
+# number in the old comment did not match the number of suppressions either.
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
@@ -370,7 +371,7 @@ class CrawlPolicy(BaseModel):
         ),
     ] = CrawlExtractionMethod.FULL
     limits: CrawlPolicyLimits = Field(
-        default_factory=CrawlPolicyLimits,  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
+        default_factory=CrawlPolicyLimits,
         description="Runtime limits applied to the execution plan. Omit to use service defaults from /v1/capabilities; set per request when a host needs a tighter timeout, retry budget, passive challenge wait, or discovered-link cap.",
     )
     headers: dict[str, str] = Field(
@@ -578,17 +579,15 @@ class _SingleUrlSourceRequest(BaseModel):
 
 
 class CrawlRequest(_SingleUrlSourceRequest):
-    url: Annotated[
-        str | None,
-        Field(
-            # inherited from _SingleUrlSourceRequest
-            None,
-            description="Single public HTTP(S) URL to crawl. Use either url or urls.",
-        ),
-    ] = None
+    # `url`, `urls` and the exactly-one-of validator are inherited, not restated.
+    # This model used to redeclare all three, with a comment on the `url`
+    # re-declaration admitting it was inherited -- and the re-declared `Field`
+    # put its default in the first positional slot, the one shape
+    # `test_pydantic_defaults_stay_where_a_checker_can_see_them` exists to ban.
+    # A base class that its own subclass copies is not a base class.
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy,
-        description="Resolved caller-provided policy/execution plan.",  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
+        description="Resolved caller-provided policy/execution plan.",
     )
     validators: dict[str, FetchValidators] = Field(
         default_factory=dict,
@@ -615,10 +614,6 @@ class CrawlRequest(_SingleUrlSourceRequest):
         ),
     ] = None
 
-    @model_validator(mode="after")  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
-    def _require_url_source(self):
-        return _require_exactly_one_url_source(self)
-
 
 class MapRequest(BaseModel):
     """#2 Site-map request: discover the URL frontier for a root URL.
@@ -632,7 +627,7 @@ class MapRequest(BaseModel):
 
     url: str = Field(..., description="Root public HTTP(S) URL to map.")
     policy: CrawlPolicy = Field(
-        default_factory=CrawlPolicy,  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
+        default_factory=CrawlPolicy,
         description="Optional crawl policy for the mapping crawl (strategies, limits, scope_regex). Discovery is always enabled.",
     )
 
@@ -745,14 +740,8 @@ class RenderRequest(_SingleUrlSourceRequest):
 
     model_config = ConfigDict(extra="ignore")
 
-    url: Annotated[
-        str | None,
-        Field(
-            # inherited from _SingleUrlSourceRequest
-            None,
-            description="Single public HTTP(S) URL to render. Use either url or urls.",
-        ),
-    ] = None
+    # `url`, `urls` and the exactly-one-of validator are inherited, not restated --
+    # see the note on CrawlRequest.
     options: Annotated[
         RenderOptionsRequest | None,
         Field(
@@ -1029,7 +1018,7 @@ class JobCreateRequest(BaseModel):
     root_url: str = Field(..., description="Root public HTTP(S) URL; stored canonically at crawl depth 0.")
     policy: CrawlPolicy = Field(
         default_factory=CrawlPolicy,
-        description="Crawl policy (strategies, limits, scope_regex, extraction).",  # pyright: ignore[reportArgumentType] -- pydantic Field(default_factory=...)
+        description="Crawl policy (strategies, limits, scope_regex, extraction).",
     )
 
 

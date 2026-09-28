@@ -204,17 +204,23 @@ class PooledBrowserWorker:
             )
         self._strategy: CrawlStrategyName | None = strategy
 
-    def _configured_strategy(self) -> CrawlStrategyName:  # pyright: ignore[reportReturnType]
+    def _configured_strategy(self) -> CrawlStrategyName:
         if self._strategy is not None:
             return self._strategy
-        # The finding above is a false positive, verified rather than assumed: a
-        # scratch module calling `reveal_type(pool.browser_strategy)` on a
-        # `BrowserPool` parameter reports
-        # `Literal['HTTP_DECLARED_CRAWLER', 'HTTP_CFFI_IMPERSONATE',
-        # 'BROWSER_HEADLESS', 'BROWSER_HEADED_WARMED']` -- exactly this alias.
-        # So the value reaching the return is a declared member and pyright is
-        # mis-resolving `self._pool` at this one site; annotating the constants
-        # `Final[Literal[...]]` did not change it. Remove when it does.
+        # The pool publishes `browser_strategy` as the same `CrawlStrategyName`
+        # alias this returns, so the value reaching the return is a declared
+        # member and there is nothing here for a checker to narrow.
+        #
+        # This line carried a per-line pyright ignore (spelled without its
+        # leading `#` here on purpose -- prose that quotes a suppression
+        # directive IS one, which is how a comment in `app/api_models.py` had
+        # been silently muting a line for as long as it stood there) calling the
+        # finding a false positive, justified by a `reveal_type` probe of the
+        # *property*. The probe was true and said nothing about this function.
+        # What needed fixing was the constructor above, which accepted an HTTP
+        # strategy name and only had it rejected much later by
+        # `CrawlResult.__post_init__`; it validates there now, and the ignore has
+        # had no finding to suppress since.
         return self._pool.browser_strategy
 
     async def __call__(self, job: Any) -> CrawlResult:
