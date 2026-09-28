@@ -49,7 +49,6 @@ import tokenize
 import weakref
 from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
-from typing import Any
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
@@ -75,7 +74,7 @@ _NODES_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, tuple[ast.AST, ...]] = weakre
 # The same sequence, narrowed to one node kind, keyed by kind then root. Split
 # out from _NODES_BY_ROOT because the value's element type depends on the kind,
 # and a mapping whose value type depends on its key is a TypeVar wearing a
-# lookup table.
+# table.
 _NODES_BY_KIND: weakref.WeakKeyDictionary[ast.AST, dict[str, tuple[ast.AST, ...]]] = weakref.WeakKeyDictionary()
 
 
@@ -158,7 +157,7 @@ def call_nodes(root: ast.AST) -> tuple[ast.Call, ...]:
 
 
 def attribute_reads(root: ast.AST) -> tuple[ast.Attribute, ...]:
-    """Every ``obj.attr`` read. A rule about member access walks these."""
+    """Every ``obj.attr`` read. What a rule about member access walks."""
     return tuple(node for node in _narrow(root, "attribute", ast.Attribute) if isinstance(node, ast.Attribute))
 
 
@@ -173,7 +172,7 @@ def string_literals(root: ast.AST) -> tuple[ast.Constant, ...]:
 
 
 def subscript_reads(root: ast.AST) -> tuple[ast.Subscript, ...]:
-    """Every ``a[b]``. Indexed access, which attribute reads do not cover."""
+    """Every ``a[b]``. Indexed access, which attribute reads do not see."""
     return tuple(node for node in _narrow(root, "subscript", ast.Subscript) if isinstance(node, ast.Subscript))
 
 
@@ -429,7 +428,7 @@ def calls_named_leaf(tree: ast.AST, names: frozenset[str] | set[str]) -> Iterato
     one for a chokepoint reached as ``module.name()``. Detectors for the second
     shape each re-derived the leaf name, so this is that derivation, once.
     """
-    for call in nodes_of_type(tree, ast.Call):
+    for call in call_nodes(tree):
         if call_leaf_name(call) in names:
             yield call
 
