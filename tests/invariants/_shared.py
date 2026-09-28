@@ -105,7 +105,7 @@ _SCOPE_COMPILER_NAMES = frozenset({"compile_scope_pattern", "_compile_scope_rege
 _SCOPE_PATTERN_LENGTH_BOUND = "_MAX_SCOPE_PATTERN_LEN"
 
 
-def _declared_public_symbols(tree: ast.AST) -> set[str] | None:
+def _declared_public_symbols(tree: ast.Module) -> set[str] | None:
     declarations = [
         node
         for node in tree.body
@@ -122,6 +122,8 @@ def _declared_public_symbols(tree: ast.AST) -> set[str] | None:
     if len(declarations) != 1:
         return None
     value = declarations[0].value
+    if value is None:
+        return None
     try:
         declared = ast.literal_eval(value)
     except (ValueError, TypeError):
@@ -233,9 +235,9 @@ def _module_name(path: pathlib.Path) -> str:
 
 
 def _module_definition_index(
-    modules: tuple[tuple[pathlib.Path, ast.AST], ...] | None,
-) -> dict[str, list[tuple[pathlib.Path, ast.AST, ast.AST]]]:
-    index: dict[str, list[tuple[pathlib.Path, ast.AST, ast.AST]]] = {}
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]]:
+    index: dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]] = {}
     for path, tree in modules or ():
         module = _module_name(path)
         for node in tree.body:

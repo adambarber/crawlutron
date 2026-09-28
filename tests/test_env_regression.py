@@ -24,27 +24,34 @@ import ast
 from tests.chokepoint_walks import app_trees, bare_callee, call_nodes, nodes_of, offender_at
 
 
-def _is_attr_get(node: ast.AST) -> bool:
-    """True for a ``<anything>.get(...)`` call -- the shape both env faces match on.
+def _get_receiver(call: ast.Call) -> ast.expr | None:
+    """The receiver of a ``<anything>.get(...)`` call, or None if it is not one.
 
-    The two detectors below differ only in what they then require of the
-    receiver and the argument, so the call shape itself is stated once.
+    The call shape both env detectors below match on, stated once. It yields the
+    receiver rather than answering yes/no, because a ``bool`` leaves the caller
+    unable to narrow ``call.func`` and every call site re-spelled the shape after
+    asking the question -- ``_is_attr_get(node) and node.func.value.attr`` could
+    only be read by a type checker that did not exist.
     """
-    return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+    if isinstance(call.func, ast.Attribute) and call.func.attr == "get":
+        return call.func.value
+    return None
 
 
-def _is_env_get(node: ast.AST) -> bool:
+def _is_env_get(node: ast.expr) -> bool:
     """True for ``os.environ.get(...)`` -- the direct env face."""
+    if not isinstance(node, ast.Call):
+        return False
+    receiver = _get_receiver(node)
     return (
-        _is_attr_get(node)
-        and isinstance(node.func.value, ast.Attribute)
-        and node.func.value.attr == "environ"
-        and isinstance(node.func.value.value, ast.Name)
-        and node.func.value.value.id == "os"
+        isinstance(receiver, ast.Attribute)
+        and receiver.attr == "environ"
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == "os"
     )
 
 
-def _is_env_source(node: ast.AST) -> bool:
+def _is_env_source(node: ast.expr) -> bool:
     """Any direct env read: ``os.environ.get(...)``, ``os.getenv(...)``,
     ``os.environ[...]``."""
     if _is_env_get(node):
@@ -86,14 +93,16 @@ def test_env_alias_escape_bites():
     assert _env_get_aliases(subscript) == {"raw"}
 
 
-def _is_browser_crawler_get(node: ast.AST) -> bool:
+def _is_browser_crawler_get(node: ast.expr) -> bool:
     """True for ``<mapping>.get("BROWSER_CRAWLER_...")`` under any alias."""
+    if not isinstance(node, ast.Call) or not node.args:
+        return False
+    first = node.args[0]
     return (
-        _is_attr_get(node)
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[0].value, str)
-        and node.args[0].value.startswith("BROWSER_CRAWLER_")
+        _get_receiver(node) is not None
+        and isinstance(first, ast.Constant)
+        and isinstance(first.value, str)
+        and first.value.startswith("BROWSER_CRAWLER_")
     )
 
 

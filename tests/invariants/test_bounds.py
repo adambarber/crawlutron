@@ -123,7 +123,7 @@ def test_extraction_text_normalization_detector_bites():
         _inline_extraction_normalizations,
         path=REPO_ROOT / "app" / "_synthetic.py",
         fires={'def f(e):\n    return e.text or ""\n': "extraction-text-normalization"},
-        clean={'def f(d):\n    return d.label or ""\n'},
+        clean=('def f(d):\n    return d.label or ""\n',),
     )
 
 
@@ -262,6 +262,19 @@ _DECOMPRESS_CODECS = frozenset({"gzip", "zlib", "brotli"})
 _DECOMPRESS_CODEC_METHODS = frozenset({"decompress", "decompressobj", "GzipFile", "Decompressor"})
 
 
+def _decompress_codec_alias(func: ast.Attribute) -> str | None:
+    """The codec module an ``<alias>.<method>()`` call names, or None.
+
+    Yields the alias rather than answering yes/no: a comprehension's ``if`` clause
+    does not narrow its output expression, so the message below could only read
+    ``func.value.id`` after the guard had already been written out a second time
+    inline.
+    """
+    if isinstance(func.value, ast.Name) and func.value.id in _DECOMPRESS_CODECS:
+        return func.value.id
+    return None
+
+
 def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag raw stdlib decompression (import or call) outside the chokepoint.
 
@@ -291,12 +304,11 @@ def _decompress_bypass_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             offender_at(
                 path,
                 call,
-                f"calls {call.func.value.id}.{call.func.attr}() directly (bypasses decompress_body)",
+                f"calls {name}.{func.attr}() directly (bypasses decompress_body)",
             )
             for call, func in attribute_calls(tree)
-            if isinstance(func.value, ast.Name)
-            and func.value.id in _DECOMPRESS_CODECS
-            and func.attr in _DECOMPRESS_CODEC_METHODS
+            for name in [_decompress_codec_alias(func)]
+            if name is not None and func.attr in _DECOMPRESS_CODEC_METHODS
         ]
     )
 
@@ -437,11 +449,17 @@ def test_discovery_response_detector_bites():
 # ---------------------------------------------------------------------------
 
 
-def _is_int_or_float_call(node: ast.AST) -> bool:
-    return isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"int", "float"}
+def _is_int_or_float_call(call: ast.Call) -> bool:
+    """True for a bare ``int(...)`` / ``float(...)``.
+
+    Takes the ``ast.Call`` so the callers below can read ``call.args`` after the
+    question is answered; a predicate over ``ast.AST`` answering ``bool`` is
+    what made them re-narrow the walk to reach it.
+    """
+    return isinstance(call.func, ast.Name) and call.func.id in {"int", "float"}
 
 
-def _reads_headers(node: ast.AST) -> bool:
+def _reads_headers(node: ast.expr) -> bool:
     """True for ``x.headers.get(...)`` or ``x.headers[...]`` -- a raw header read."""
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
         source = node.func.value
@@ -487,19 +505,19 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
             if isinstance(target, ast.Name)
         }
         guarded = {
-            id(sub)
+            sub
             for node in nodes_of(func)
             if isinstance(node, ast.Try) and _catches_value_error(node)
-            for sub in nodes_of(node)
+            for sub in call_nodes(node)
             if _is_int_or_float_call(sub)
         }
-        for node in nodes_of(func):
-            if not _is_int_or_float_call(node) or id(node) in guarded or not node.args:
+        for call in call_nodes(func):
+            if not _is_int_or_float_call(call) or call in guarded or not call.args:
                 continue
-            arg = node.args[0]
+            arg = call.args[0]
             is_derived = _reads_headers(arg) or (isinstance(arg, ast.Name) and arg.id in header_names)
             if is_derived:
-                offenders.append(offender_at(path, node, f"{func.name}() parses a header number unguarded"))
+                offenders.append(offender_at(path, call, f"{func.name}() parses a header number unguarded"))
     return offenders
 
 
