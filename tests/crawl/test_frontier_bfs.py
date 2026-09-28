@@ -4,7 +4,7 @@ The frontier was a list using O(n) pop(0); it is now a collections.deque with
 O(1) popleft. Behavior (BFS completeness/ordering) must be unchanged.
 """
 
-from _fetcher_factories import crawled_urls
+from tests._fetcher_factories import crawled_urls
 
 
 def _build_hub(n_leaves: int):

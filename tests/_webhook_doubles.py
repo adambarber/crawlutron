@@ -24,7 +24,7 @@ streaming read, the cap, the close on the way out.
 from __future__ import annotations
 
 import httpx
-from _transport_doubles import MockResponse
+from tests._transport_doubles import MockResponse
 
 __all__ = ["record_webhook_delivery"]
 

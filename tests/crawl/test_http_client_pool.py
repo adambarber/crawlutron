@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from _async_harnesses import run_loop_rebind_scenario
-from _timing_harnesses import await_until
+from tests._async_harnesses import run_loop_rebind_scenario
+from tests._timing_harnesses import await_until
 from curl_cffi.requests import AsyncSession
 
 import app.crawl.strategies.http_client_pool as http_mod

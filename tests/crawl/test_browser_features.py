@@ -11,8 +11,8 @@ with nothing red.
 
 import base64
 
-from _browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._browser_doubles import BrowserFakeContextManager, ScriptedPage, scripted_renderer
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.models import RenderOptions
 

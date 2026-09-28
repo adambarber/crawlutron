@@ -22,7 +22,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 import pytest
-from chokepoint_walks import (
+from tests.chokepoint_walks import (
     APP_ROOT,
     REPO_ROOT,
     SANCTIONED,
@@ -58,7 +58,7 @@ from chokepoint_walks import (
     trees_excluding,
     trees_under,
 )
-from property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
+from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
 from app.api_models import UnifiedCrawlResponse
 from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
@@ -3656,7 +3656,7 @@ def _result_primitive_names() -> frozenset[str]:
        above so the three per-field detectors cannot re-acquire the coverage gap
     the generic sweep was written to close.
     """
-    from membership_gate import RESULT_PRIMITIVES
+    from tests.membership_gate import RESULT_PRIMITIVES
 
     return RESULT_PRIMITIVES
 
@@ -5063,7 +5063,7 @@ def test_result_primitives_emit_only_declared_literal_members():
     """Every literal value handed to a result primitive is a member of its
     field's declared ``Literal`` -- the generic, field-axis-closed form of the
     per-field detectors. Tree-wide: a primitive in a new module is covered."""
-    from membership_gate import generic_literal_field_offenders, literal_typed_field_members
+    from tests.membership_gate import generic_literal_field_offenders, literal_typed_field_members
 
     field_members = literal_typed_field_members()
     offenders = app_offenders(generic_literal_field_offenders, field_members=field_members)
@@ -5078,7 +5078,7 @@ def test_generic_membership_detector_bites():
     """The generic detector fires on the historical regression shape, and only
     on it -- the proof that replacing the per-field list with a derived one did
     not silently turn the sweep into a no-op."""
-    from membership_gate import generic_literal_field_offenders, literal_typed_field_members
+    from tests.membership_gate import generic_literal_field_offenders, literal_typed_field_members
 
     members = literal_typed_field_members()
     assert members, "no Literal fields were enumerated; the generic sweep is a no-op"
@@ -5112,7 +5112,7 @@ def test_generic_membership_subsumes_the_per_field_detectors():
     This assert is the property that licenses deleting the per-field list: the
     coverage gap is not a matter of opinion, it is the set difference below.
     """
-    from membership_gate import RESULT_DATACLASS_NAMES, RESULT_PRIMITIVES, literal_typed_field_members
+    from tests.membership_gate import RESULT_DATACLASS_NAMES, RESULT_PRIMITIVES, literal_typed_field_members
 
     members = literal_typed_field_members()
     # The three escaped axes the per-field detectors were written for.
@@ -5154,7 +5154,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     """
     from dataclasses import asdict
 
-    from _result_builders import engine_result
+    from tests._result_builders import engine_result
 
     from app.models import (
         CrawlResult,
@@ -5237,7 +5237,7 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
     """A constant from one taxonomy must not be consumed as a member of
     another. Value membership cannot see this -- the colliding value is what
     made the historical defect invisible."""
-    from membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+    from tests.membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
 
     field_members = literal_typed_field_members()
     offenders = app_offenders(wrong_namespace_constant_offenders, field_members=field_members)
@@ -5251,7 +5251,7 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
 def test_wrong_namespace_detector_bites():
     """The provenance detector fires on the historical shape and admits the
     correct one."""
-    from membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+    from tests.membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
 
     members = literal_typed_field_members()
     bad = ast.parse(
@@ -5287,7 +5287,7 @@ def test_the_membership_gate_rejects_a_non_member_value():
     primitive through a local variable, which no textual detector can see.
     The gate is the structural closure: whatever indirection a value took, it
     must pass the primitive to become a result."""
-    from membership_gate import NonMemberValue, assert_member, assert_optional_member
+    from tests.membership_gate import NonMemberValue, assert_member, assert_optional_member
 
     members = frozenset({"rendered", "site_error"})
     assert_member("rendered", field="classification", members=members, where="_test")
@@ -5308,7 +5308,7 @@ def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot()
     the value at the boundary instead of the text at the call."""
     import asyncio
 
-    from membership_gate import NonMemberValue, field_member_sets
+    from tests.membership_gate import NonMemberValue, field_member_sets
 
     members = field_member_sets()
     classification_members = members["classification"]
@@ -5317,7 +5317,7 @@ def test_the_gate_sees_the_local_variable_indirection_the_ast_detectors_cannot()
         # `classification` is a local whose provenance no AST walk can resolve
         # from the call site alone.
         classification = "totally_made_up"
-        from membership_gate import assert_result_fields
+        from tests.membership_gate import assert_result_fields
 
         assert_result_fields(
             {"classification": classification},
@@ -5338,7 +5338,7 @@ def test_the_gate_would_have_caught_the_shipped_defect():
     the point: the *provenance* AST detector above is what names the defect,
     while the gate is what guarantees no wrong value of ANY provenance crosses.
     Both are needed and neither subsumes the other."""
-    from membership_gate import NonMemberValue, assert_result_fields, field_member_sets
+    from tests.membership_gate import NonMemberValue, assert_result_fields, field_member_sets
 
     members = field_member_sets()
     # A genuinely non-member value through the same local-variable shape.
@@ -5515,7 +5515,7 @@ def test_dynamic_pattern_re_calls_under_any_alias():
     alias cannot rename a dynamic pattern past the chokepoint. This subsumes
     ``test_no_dynamic_pattern_re_calls`` and the call shape of
     ``test_no_bare_re_compile_on_nonliteral``."""
-    from membership_gate import aliased_dynamic_pattern_re_offenders
+    from tests.membership_gate import aliased_dynamic_pattern_re_offenders
 
     offenders = app_offenders(aliased_dynamic_pattern_re_offenders)
     assert not offenders, (
@@ -5525,7 +5525,7 @@ def test_dynamic_pattern_re_calls_under_any_alias():
 
 
 def test_alias_detector_bites():
-    from membership_gate import aliased_dynamic_pattern_re_offenders
+    from tests.membership_gate import aliased_dynamic_pattern_re_offenders
 
     aliased = ast.parse("import re as _re\n\n\ndef f(p):\n    return _re.compile(p)\n")
     hits = aliased_dynamic_pattern_re_offenders(aliased, REPO_ROOT / "app" / "_synthetic.py")
@@ -5548,7 +5548,7 @@ def test_sanctioned_func_calls_under_any_alias():
     extended one alias at a time. This sweep resolves the import binding, so a
     new alias of ``decompress_body`` cannot name its way out of the cap
     requirement the way ``_re`` names its way out of the pattern check."""
-    from membership_gate import aliased_sanctioned_func_offenders
+    from tests.membership_gate import aliased_sanctioned_func_offenders
 
     offenders = app_offenders(aliased_sanctioned_func_offenders)
     assert not offenders, (
@@ -5561,7 +5561,7 @@ def test_sanctioned_func_calls_under_any_alias():
 def test_sanctioned_func_alias_detector_bites():
     """The alias audit fires on a spelling the hand-kept list does not contain,
     and stays silent on the two spellings the existing list already covers."""
-    from membership_gate import aliased_sanctioned_func_offenders
+    from tests.membership_gate import aliased_sanctioned_func_offenders
 
     unknown = ast.parse(
         "from app.crawl.decompression import decompress_body as dec\n\n"
@@ -5590,7 +5590,7 @@ def test_doubles_do_not_accept_and_drop_kwargs():
     is blind to a signature change on the production callable: the
     ``failed_result`` refactor broke 24 tests silently through exactly this
     shape, because the doubles accepted the new kwarg and dropped it."""
-    from membership_gate import swallowing_test_double_offenders
+    from tests.membership_gate import swallowing_test_double_offenders
 
     offenders: list[str] = []
     for path, tree in trees_under(TESTS_DIR):
@@ -5602,7 +5602,7 @@ def test_doubles_do_not_accept_and_drop_kwargs():
 
 
 def test_swallowing_double_detector_bites():
-    from membership_gate import swallowing_test_double_offenders
+    from tests.membership_gate import swallowing_test_double_offenders
 
     drops = ast.parse(
         "class _S:\n"
@@ -5670,7 +5670,7 @@ def test_error_field_values_are_classification_members():
     is a contract leak; this reports it so the missing chokepoint is visible
     rather than latent.
     """
-    from membership_gate import error_field_taxonomy_offenders
+    from tests.membership_gate import error_field_taxonomy_offenders
 
     offenders = app_offenders(error_field_taxonomy_offenders)
     assert not offenders, (
@@ -5681,7 +5681,7 @@ def test_error_field_values_are_classification_members():
 
 def test_error_field_taxonomy_detector_bites():
     """The hunt detector fires on the shipped shape and admits the classified one."""
-    from membership_gate import error_field_taxonomy_offenders
+    from tests.membership_gate import error_field_taxonomy_offenders
 
     bad = ast.parse('def f():\n    return _terminal_crawl_result(url="u", error="worker_failed")\n')
     hits = error_field_taxonomy_offenders(bad, REPO_ROOT / "app" / "_synthetic.py")

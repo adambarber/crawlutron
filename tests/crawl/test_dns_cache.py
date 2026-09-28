@@ -14,7 +14,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from _thread_fanout import run_thread_fanout
+from tests._thread_fanout import run_thread_fanout
 
 from app.crawl.strategies import pinned_transport as http_mod
 

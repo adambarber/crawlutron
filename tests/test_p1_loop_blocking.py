@@ -16,9 +16,9 @@ import threading
 from pathlib import Path
 
 import pytest
-from _fetcher_factories import crawled_results
-from _job_harnesses import make_job_store
-from _timing_harnesses import HANG_GUARD_SECONDS
+from tests._fetcher_factories import crawled_results
+from tests._job_harnesses import make_job_store
+from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 import app.crawl.content_cache as cc
 from app.api.job_runner import _run_job
@@ -370,7 +370,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
     """
 
     async def test_run_async_crawl_save_does_not_block_the_event_loop(self, monkeypatch, tmp_path) -> None:
-        from _job_harnesses import make_job_store
+        from tests._job_harnesses import make_job_store
 
         from app.api.async_crawl_runner import run_async_crawl
         from app.crawl.result_store import CrawlResultStore

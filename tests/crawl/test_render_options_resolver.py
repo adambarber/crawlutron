@@ -22,8 +22,8 @@ here rather than argued per call site:
 from __future__ import annotations
 
 import pytest
-from _browser_doubles import _fake_browser
-from _fetcher_factories import strategy_request
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import strategy_request
 
 from app.api.render import _render_options
 from app.crawl.policy import read_policy

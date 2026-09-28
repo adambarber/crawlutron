@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from _policy_factories import job_store
+from tests._policy_factories import job_store
 
 from app.api_models import CrawlPolicy
 from app.crawl.coordination_cookies import SharedCookieStore

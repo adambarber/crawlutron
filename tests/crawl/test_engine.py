@@ -4,9 +4,9 @@ import time
 import urllib.error
 
 import pytest
-from _assertions import browser_available
-from _browser_doubles import _fake_browser
-from _fetcher_factories import (
+from tests._assertions import browser_available
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import (
     cache_with_etag,
     crawled_result,
     hanging_fetcher,
@@ -14,7 +14,7 @@ from _fetcher_factories import (
     run_chain,
     scripted_fetcher,
 )
-from _policy_factories import http_strategy_policy
+from tests._policy_factories import http_strategy_policy
 
 from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
@@ -41,7 +41,7 @@ def http_policy(*strategies: str, extraction: str = "full", **extra) -> CrawlPol
 
 class TestEngineCrawlRequest:
     async def test_crawl_request_http_success(self, base_url):
-        from _fetcher_factories import crawl_homepage_async
+        from tests._fetcher_factories import crawl_homepage_async
 
         response = await crawl_homepage_async(base_url)
         assert "Example Org" in response["results"][0]["markdown"]

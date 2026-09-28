@@ -2,8 +2,8 @@ import socket
 import threading
 
 import pytest
-from _assertions import block_private_targets
-from _browser_doubles import (
+from tests._assertions import block_private_targets
+from tests._browser_doubles import (
     FakeRequest,
     FakeRoute,
     pinned_page_renderer,
@@ -11,7 +11,7 @@ from _browser_doubles import (
     render_pinned,
     stub_pinned_request,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.strategies.browser as browser_mod
 import app.crawl.strategies.document as doc_mod

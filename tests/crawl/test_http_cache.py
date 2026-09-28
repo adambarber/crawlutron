@@ -1,6 +1,6 @@
 """HTTP fetch cache: batched stores, memory mirror and envelope edges."""
 
-from _thread_fanout import run_thread_fanout
+from tests._thread_fanout import run_thread_fanout
 
 from app.crawl.cache import HttpCache
 

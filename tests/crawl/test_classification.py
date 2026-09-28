@@ -4,8 +4,8 @@ import ast
 import inspect
 
 import pytest
-from _result_builders import skipped_result
-from chokepoint_walks import app_trees, nodes_of
+from tests._result_builders import skipped_result
+from tests.chokepoint_walks import app_trees, nodes_of
 
 from app import constants as app_constants
 from app.api_models import CrawlClassification

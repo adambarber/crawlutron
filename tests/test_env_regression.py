@@ -21,7 +21,7 @@ single-shape detector):
 
 import ast
 
-from chokepoint_walks import app_trees, nodes_of, offender_at
+from tests.chokepoint_walks import app_trees, nodes_of, offender_at
 
 
 def _is_attr_get(node: ast.AST) -> bool:

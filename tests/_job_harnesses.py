@@ -38,8 +38,8 @@ from collections.abc import Callable, Container
 from contextlib import contextmanager
 from typing import Any
 
-from _policy_factories import UNRESTRICTED_HOST_POLICY, job_store
-from _result_builders import _canned_result
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
+from tests._result_builders import _canned_result
 
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore

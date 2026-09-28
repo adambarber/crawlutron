@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from _browser_doubles import _fake_browser
-from _fetcher_factories import make_html_fetcher, routed_fetcher
+from tests._browser_doubles import _fake_browser
+from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 
 import app.crawl.strategies.fetchers as fetchers_mod
 import app.crawl.strategies.http_client_pool as pool_mod

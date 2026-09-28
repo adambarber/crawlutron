@@ -1,6 +1,6 @@
 """Real tests for browser.py logic (no browser; inject failing factories)."""
 
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import RenderOptions

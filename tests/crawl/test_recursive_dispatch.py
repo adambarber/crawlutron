@@ -6,8 +6,8 @@ full engine (the reason the dispatch was extracted from ``crawl_request``).
 """
 
 import pytest
-from _recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
-from _result_builders import engine_result, make_engine_result
+from tests._recursive_harnesses import ContentionFreeGate, drive_recursive_crawl, make_crawl_task
+from tests._result_builders import engine_result, make_engine_result
 
 from app.constants import BROWSER_HEADLESS
 from app.models import CrawlTask, DiscoveredLink

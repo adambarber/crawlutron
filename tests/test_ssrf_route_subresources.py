@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import socket
 
-from _assertions import block_private_targets
-from _browser_doubles import (
+from tests._assertions import block_private_targets
+from tests._browser_doubles import (
     ROUTE_ARG_UNSET,
     FakeRequest,
     FakeRoute,

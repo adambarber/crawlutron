@@ -1,7 +1,7 @@
 """Shared pytest fixtures and path setup for the browser-crawler test suite.
 
-Adds the package root and the ``tests/`` directory to ``sys.path`` once so
-every test file can import :mod:`app` and :mod:`helpers` directly. The
+Puts the service root on ``sys.path`` once so every test file can import
+:mod:`app` and the suite's own helpers (as ``tests.helpers.server``). The
 parent monorepo's ``shared/python`` directory is no longer referenced; the
 equivalent logging helper lives at :mod:`app.logging_config` and is
 importable from the package root.
@@ -20,9 +20,21 @@ import pytest
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the repository root, which is now the service root
 
-for candidate in (str(ROOT), str(HERE)):
-    if Path(candidate).exists() and candidate not in sys.path:
-        sys.path.insert(0, candidate)
+# Only the service root goes on sys.path, and only to make the import base
+# explicit: `tests/__init__.py` makes this suite a package, so pytest's prepend
+# import mode already puts the root there to import `tests.conftest` at all.
+#
+# `tests/` itself is deliberately NOT added. It used to be, so that helpers
+# could be imported bare -- `from _assertions import ...`, `from helpers.server
+# import ...` -- which put two import conventions in one tree and left the name a
+# helper resolved to up to a path side effect rather than to the directory
+# structure. That is what stopped mypy from checking this suite at all: given
+# the same directory it computed a different module name than the one running,
+# and refused the file as "found twice under different module names". Helpers
+# are now imported as `tests._assertions` / `tests.helpers.server`, so the
+# filesystem answers the question for pytest and for mypy alike.
+if ROOT.exists() and str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 # The ``app/validation.py`` production default for
 # ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
@@ -172,7 +184,7 @@ def pytest_collection_modifyitems(config, items):
     Camoufox/Playwright instead of failing mid-suite. When a browser is present
     the marker is left intact so the tests actually execute.
     """
-    from _assertions import browser_available
+    from tests._assertions import browser_available
 
     if browser_available():
         return
@@ -232,7 +244,7 @@ def stub_cffi_fetcher(request, monkeypatch):
 @pytest.fixture(scope="session")
 def test_server():
     """Start a real in-process HTTP server once per test session."""
-    from helpers.server import spawn_server
+    from tests.helpers.server import spawn_server
 
     server = spawn_server()
     yield server
@@ -346,7 +358,7 @@ def recording_worker():
     that drops the ``seen.append`` turns the assertion into a vacuous truth
     over an empty list.
     """
-    from _result_builders import make_engine_result
+    from tests._result_builders import make_engine_result
 
     seen: list[str] = []
 
@@ -360,7 +372,7 @@ def recording_worker():
 @pytest.fixture
 def base_policy():
     """Fresh minimal crawl policy; tests may mutate their copy freely."""
-    from _policy_factories import make_base_policy
+    from tests._policy_factories import make_base_policy
 
     return make_base_policy()
 
@@ -368,7 +380,7 @@ def base_policy():
 @pytest.fixture
 def job_store(tmp_path):
     """JobStore backed by a per-test SQLite db under ``tmp_path``."""
-    from _job_harnesses import make_job_store
+    from tests._job_harnesses import make_job_store
 
     return make_job_store(str(tmp_path))
 
@@ -381,7 +393,7 @@ def _served(handler_cls):
     differ from one that does not, and a leaked handler thread outlives the
     test that started it.
     """
-    from helpers.server import spawn_threaded_server
+    from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(handler_cls)
     try:
@@ -394,7 +406,7 @@ def _served(handler_cls):
 @pytest.fixture
 def counting_server():
     """Real HTTP server serving one cacheable page; counts hits on ``server.hits``."""
-    from helpers.server import CountingHandler
+    from tests.helpers.server import CountingHandler
 
     yield from _served(CountingHandler)
 
@@ -406,7 +418,7 @@ def etag_server():
     Mutate ``helpers.server.EtagHandler.etag`` / ``.body`` to simulate an
     upstream content change.
     """
-    from helpers.server import EtagHandler
+    from tests.helpers.server import EtagHandler
 
     yield from _served(EtagHandler)
 

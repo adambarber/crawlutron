@@ -7,7 +7,7 @@ pytestmark = pytest.mark.browser
 
 import base64
 
-from _assertions import assert_result_success
+from tests._assertions import assert_result_success
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.cache import HttpCache

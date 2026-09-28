@@ -12,8 +12,8 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from _cookie_helpers import cookie_file, read_cookie_file
-from _thread_fanout import run_thread_fanout
+from tests._cookie_helpers import cookie_file, read_cookie_file
+from tests._thread_fanout import run_thread_fanout
 
 from app.crawl.strategies.cookie_jar import CookieJar
 

@@ -13,7 +13,7 @@ from functools import partial
 from typing import Any
 
 import pytest
-from _fetcher_factories import (
+from tests._fetcher_factories import (
     clocked_cache,
     crawled_results,
     make_expiring_cache,
@@ -21,7 +21,7 @@ from _fetcher_factories import (
     run_http_strategy,
     tap_fetcher,
 )
-from helpers.server import EtagHandler
+from tests.helpers.server import EtagHandler
 
 import app.crawl.content_cache as cc
 from app.constants import HTTP_DECLARED_CRAWLER

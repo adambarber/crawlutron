@@ -1,7 +1,7 @@
 from http.server import BaseHTTPRequestHandler
 
-from _fetcher_factories import run_default_http_fetcher
-from _transport_doubles import MockResponse, patch_http_fetcher_transport
+from tests._fetcher_factories import run_default_http_fetcher
+from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
 
@@ -88,7 +88,7 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     helper's own multi-header guarantee is pinned separately below and passed
     happily while the caller defeated it.
     """
-    from helpers.server import spawn_threaded_server
+    from tests.helpers.server import spawn_threaded_server
 
     from app.crawl.strategies import cookie_jar as cookie_mod
     from app.crawl.strategies.cookie_jar import CookieJar

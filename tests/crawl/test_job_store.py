@@ -6,8 +6,8 @@ import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-from _job_harnesses import make_job_store, raw_job_row, write_row_policy
-from _policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier, job_store
+from tests._job_harnesses import make_job_store, raw_job_row, write_row_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier, job_store
 
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus

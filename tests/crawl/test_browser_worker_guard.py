@@ -3,8 +3,8 @@
 from collections import deque
 
 import pytest
-from _assertions import assert_result_failed
-from _policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+from tests._assertions import assert_result_failed
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 from app.constants import BROWSER_HEADLESS
 from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
@@ -104,7 +104,7 @@ class TestTransientRequeue:
         classification was destroyed at the scheduler envelope (AttributeError
         -> network_error) and the re-queue never fired.
         """
-        from _fetcher_factories import run_crawl_async
+        from tests._fetcher_factories import run_crawl_async
 
         from app.crawl.recursive import MAX_TRANSIENT_REQUEUES
         from app.crawl.strategies.browser_pool import PooledBrowserWorker

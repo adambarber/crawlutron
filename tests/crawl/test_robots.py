@@ -7,8 +7,8 @@ import threading
 from unittest.mock import patch
 
 import pytest
-from _fetcher_factories import make_fetch, routed_fetcher
-from _policy_factories import crawl_policy
+from tests._fetcher_factories import make_fetch, routed_fetcher
+from tests._policy_factories import crawl_policy
 
 from app.bounded_ttl import BoundedTTLCache
 from app.constants import HTTP_DECLARED_CRAWLER

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlparse
 
-from _extraction_helpers import (
+from tests._extraction_helpers import (
     _collect_document_item_lines,
     _default_document_text_extractor,
     _document_item_range,
@@ -16,7 +16,7 @@ from _extraction_helpers import (
     _next_non_empty_document_line,
     _should_join_document_paragraph,
 )
-from _fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 
 from app.crawl.strategies.document import (
     _extract_pdf_bytes_to_markdown,
@@ -90,7 +90,7 @@ class TestDocumentRedirectSsrf:
         from urllib.parse import urlparse
 
         import httpx
-        from _transport_doubles import MockResponse, dispatching_transport_client
+        from tests._transport_doubles import MockResponse, dispatching_transport_client
 
         import app.crawl.strategies.http_client_pool as pool_mod
         import app.crawl.strategies.pinned_transport as http_strategy

@@ -4,8 +4,8 @@ import asyncio
 import time
 
 import pytest
-from _result_builders import make_job, make_result
-from _scheduler_doubles import (
+from tests._result_builders import make_job, make_result
+from tests._scheduler_doubles import (
     FailingSink,
     engine_envelope,
     make_scheduler,
@@ -13,7 +13,7 @@ from _scheduler_doubles import (
     run_through,
     trip_circuit,
 )
-from _timing_harnesses import recorder
+from tests._timing_harnesses import recorder
 
 from app.crawl.result_helpers import TerminalResult
 from app.models import CrawlJob, CrawlTask, EngineCrawlResult

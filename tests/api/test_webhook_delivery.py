@@ -10,8 +10,8 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _assertions import block_private_targets, host_resolves_to
-from _webhook_doubles import record_webhook_delivery
+from tests._assertions import block_private_targets, host_resolves_to
+from tests._webhook_doubles import record_webhook_delivery
 
 from app.api.async_crawl_runner import run_async_crawl
 from app.crawl.result_store import CrawlResultStore

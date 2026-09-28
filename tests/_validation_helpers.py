@@ -1,4 +1,4 @@
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.validation import get_env_int, registrable_domain
 from app.validation import normalize_public_http_url as _normalize_public_http_url

@@ -7,7 +7,7 @@ still bounds the body -- rather than letting ``int("abc")`` raise out of the
 fetch and turn one crafted response into that URL's failure.
 """
 
-from _transport_doubles import MockResponse, patch_http_fetcher_transport
+from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.crawl.strategies.pinned_transport import _declared_length_exceeds

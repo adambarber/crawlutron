@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _jscpd_gate as gate
+import tests._jscpd_gate as gate
 
 
 def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:

@@ -3,8 +3,8 @@ import inspect
 from typing import Any
 from urllib.parse import urlparse
 
-from _browser_doubles import _fake_browser
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._browser_doubles import _fake_browser
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLER
 from app.crawl.cache import HttpCache
@@ -661,7 +661,7 @@ def make_seeded_cache(directory: str, *keys: str, value: Any = None, **settings:
 
 
 def _spawn_fetch(fn):
-    from helpers.server import spawn_server
+    from tests.helpers.server import spawn_server
 
     server = spawn_server()
     try:

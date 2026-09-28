@@ -4,9 +4,9 @@ import threading
 import time
 
 import pytest
-from _lifespan_doubles import stub_heavy_teardown
-from _lock_doubles import DelegatingLock
-from _process_doubles import (
+from tests._lifespan_doubles import stub_heavy_teardown
+from tests._lock_doubles import DelegatingLock
+from tests._process_doubles import (
     StubConn,
     StubProc,
     install_unkillable_doc_worker,

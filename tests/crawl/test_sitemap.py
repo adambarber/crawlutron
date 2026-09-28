@@ -4,15 +4,15 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
-from _assertions import install_to_thread_spy
-from _fetcher_factories import (
+from tests._assertions import install_to_thread_spy
+from tests._fetcher_factories import (
     concurrent_fetcher,
     make_fetch,
     request_fetcher,
     routed_fetcher,
     scripted_fetcher,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds

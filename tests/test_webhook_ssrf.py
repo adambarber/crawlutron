@@ -6,8 +6,8 @@ private/loopback address, and the delivery POST must connect to a pinned IP
 """
 
 import pytest
-from _assertions import block_private_targets, host_resolves_to
-from _webhook_doubles import assert_delivered_once, record_webhook_delivery
+from tests._assertions import block_private_targets, host_resolves_to
+from tests._webhook_doubles import assert_delivered_once, record_webhook_delivery
 
 from app.api.webhooks import (
     post_webhook as _post_webhook,

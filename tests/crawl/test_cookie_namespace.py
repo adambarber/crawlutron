@@ -6,7 +6,7 @@ namespace contextvar is set per ``crawl_request`` from
 ``request_profile.cookie_namespace`` so cookies are keyed by tenant.
 """
 
-from _cookie_helpers import cookie_file, read_cookie_file
+from tests._cookie_helpers import cookie_file, read_cookie_file
 
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE, CookieJar
 from app.crawl.strategies.request_profile import cookie_namespace_for

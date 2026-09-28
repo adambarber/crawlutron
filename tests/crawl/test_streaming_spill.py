@@ -13,7 +13,7 @@ import json
 import os
 import tempfile
 
-from _fetcher_factories import crawled_results
+from tests._fetcher_factories import crawled_results
 
 
 def _pages():

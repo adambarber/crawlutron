@@ -6,9 +6,9 @@ inside async functions. Both must go through ``asyncio.to_thread`` like the
 neighboring ``_extract_document``/``extract_content`` calls already do.
 """
 
-from _assertions import install_to_thread_spy
-from _fetcher_factories import invoke_browser_strategy, invoke_http_strategy
-from _policy_factories import http_strategy_policy
+from tests._assertions import install_to_thread_spy
+from tests._fetcher_factories import invoke_browser_strategy, invoke_http_strategy
+from tests._policy_factories import http_strategy_policy
 
 from app.crawl.extraction import _extract_html
 

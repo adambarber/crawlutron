@@ -11,7 +11,7 @@ import json
 from unittest import mock
 
 import pytest
-from _assertions import one_search_result, provider_results
+from tests._assertions import one_search_result, provider_results
 
 from app.search.providers import (
     BraveProvider,
@@ -51,7 +51,7 @@ class TestProviderParsing:
     async def test_tavily_parses_results_and_filters_private_urls(self, fake_provider_http, monkeypatch):
         # The suite defaults to private-targets ON for the loopback fixture
         # server; this test exercises the SSRF hygiene on results, so opt out.
-        from _assertions import block_private_targets
+        from tests._assertions import block_private_targets
 
         block_private_targets(monkeypatch)
         fake_provider_http(
@@ -190,7 +190,7 @@ class TestCollectResults:
         ]
 
     def test_skips_non_dicts_blank_and_private_urls(self, monkeypatch):
-        from _assertions import block_private_targets
+        from tests._assertions import block_private_targets
 
         block_private_targets(monkeypatch)
         items = [

@@ -1,6 +1,6 @@
 from typing import Any
 
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.constants import HTTP_DECLARED_CRAWLER
 

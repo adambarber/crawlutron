@@ -122,7 +122,7 @@ class TestClassifiedFailuresGetTheVerdictThatMatchesThem:
         is ever reverted, this fails."""
         import ast
 
-        from chokepoint_walks import REPO_ROOT, app_python_files
+        from tests.chokepoint_walks import REPO_ROOT, app_python_files
 
         hits: list[str] = []
         for path in app_python_files():

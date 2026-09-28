@@ -8,10 +8,10 @@ import shlex
 import subprocess
 from pathlib import Path
 
-import _jscpd_gate as gate
+import tests._jscpd_gate as gate
 import pytest
 import yaml
-from _executables import BASH, GIT, require_executable
+from tests._executables import BASH, GIT, require_executable
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"

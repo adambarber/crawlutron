@@ -2,10 +2,10 @@ import multiprocessing
 import os
 
 import pytest
-from _fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
-from _policy_factories import http_strategy_policy
-from _transport_doubles import join_or_kill
-from helpers.server import _Handler, spawn_threaded_server
+from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
+from tests._policy_factories import http_strategy_policy
+from tests._transport_doubles import join_or_kill
+from tests.helpers.server import _Handler, spawn_threaded_server
 
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
 

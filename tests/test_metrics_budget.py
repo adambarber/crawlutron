@@ -28,7 +28,7 @@ To see the current work list without failing anything, run this module and read
 the counts, or call the collectors directly from a shell:
 
     python -c "import sys; sys.path[:0]=['tests']; \\
-      import test_metrics_budget as m; m.report()"
+      import tests.test_metrics_budget as m; m.report()"
 
 Thresholds are deliberately aggressive. A ratchet set at the current worst is
 a ratchet that has already failed; these sit low enough that the worst
@@ -48,9 +48,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from _executables import GIT, require_executable
-from _jscpd_sweep import COMPOUND_NODES
-from chokepoint_walks import APP_ROOT, app_trees, nodes_of
+from tests._executables import GIT, require_executable
+from tests._jscpd_sweep import COMPOUND_NODES
+from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
 
 # Every collector in this file reads the same app tree, and `offenders()` is
 # called sixteen times per run (four metrics x the budget test, four x the

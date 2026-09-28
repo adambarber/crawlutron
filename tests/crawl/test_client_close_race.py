@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 
-from _timing_harnesses import await_until
+from tests._timing_harnesses import await_until
 
 from app.crawl.strategies import http_client_pool as http_mod
 

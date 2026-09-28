@@ -1,6 +1,6 @@
 """Result helpers: blocked, binary, failed and skipped engine results."""
 
-from _result_builders import skipped_result
+from tests._result_builders import skipped_result
 
 
 class TestResultHelpersEdges:

@@ -7,7 +7,7 @@ returns a rendered result -- next to the payload the test was actually about.
 The payload is the per-test part; the rest is the arrangement.
 """
 
-from _browser_doubles import _fake_browser
+from tests._browser_doubles import _fake_browser
 
 
 async def render_stub_request(payload: dict, *, worker=None) -> dict:

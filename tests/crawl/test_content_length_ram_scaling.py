@@ -8,8 +8,8 @@ be threaded from the engine's active settings to the call site.
 """
 
 import pytest
-from _fetcher_factories import invoke_http_strategy
-from _policy_factories import http_strategy_policy
+from tests._fetcher_factories import invoke_http_strategy
+from tests._policy_factories import http_strategy_policy
 
 EXPECTED_SCALED = (1024**3) // 512  # RAM budget (1 GiB) / concurrency
 DEFAULT_CAP = 10 * 1024 * 1024

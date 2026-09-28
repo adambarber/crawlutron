@@ -9,8 +9,8 @@
 
 import asyncio
 
-from _browser_doubles import BrowserFakePage, pinned_page_renderer
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 from app.crawl.strategies.browser import _MAX_ACTION_WAIT_SECONDS, BrowserRenderer
 from app.models import RenderOptions

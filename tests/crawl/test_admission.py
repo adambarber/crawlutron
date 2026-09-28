@@ -4,11 +4,11 @@ import asyncio
 import time
 
 import pytest
-from _fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
-from _policy_factories import admit
-from _recursive_harnesses import drive_recursive_crawl, make_crawl_task
-from _scheduler_doubles import FakeScheduler as _Scheduler
-from _timing_harnesses import recorder
+from tests._fetcher_factories import LINKED_PAIR_LIMITS, crawled_results, site_linking_to
+from tests._policy_factories import admit
+from tests._recursive_harnesses import drive_recursive_crawl, make_crawl_task
+from tests._scheduler_doubles import FakeScheduler as _Scheduler
+from tests._timing_harnesses import recorder
 
 from app.constants import (
     BROWSER_HEADLESS,
@@ -561,7 +561,7 @@ class PinnedGate:
 
 
 async def _ok_worker(job):
-    from _result_builders import make_engine_result
+    from tests._result_builders import make_engine_result
 
     return make_engine_result(job.normalized_url)
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from chokepoint_walks import nodes_of
+from tests.chokepoint_walks import nodes_of
 
 from app.api import webhooks as wm
 from app.api_models import CrawlPolicy
@@ -84,7 +84,7 @@ def test_build_job_status_handles_single_shot_jobs(tmp_path):
     case the dataclass could not: a job whose accumulators were genuinely
     never written to.
     """
-    from _job_harnesses import make_job_store
+    from tests._job_harnesses import make_job_store
 
     from app.api.main_helpers import _build_job_status
     from app.api_models import JobStatusResponse

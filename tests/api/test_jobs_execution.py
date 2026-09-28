@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from _job_harnesses import (
+from tests._job_harnesses import (
     ScriptedExecute,
     _create_api_job,
     _make_app,
@@ -33,7 +33,7 @@ from _job_harnesses import (
     submit_blocked_job,
     write_row_policy,
 )
-from _result_builders import (
+from tests._result_builders import (
     GRAPH_CHILD,
     GRAPH_ROOT,
     _canned_result,
@@ -44,7 +44,7 @@ from _result_builders import (
     _scripted_result_map,
     _small_link_graph_results,
 )
-from _timing_harnesses import await_until
+from tests._timing_harnesses import await_until
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
@@ -692,8 +692,8 @@ class TestJobStateWaitContract:
         matches -- is exactly the implementation that raced a starved box, so
         the harness refuses the job instead of quietly reintroducing it.
         """
-        from _job_harnesses import _wait_status as wait_status
-        from _policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
+        from tests._job_harnesses import _wait_status as wait_status
+        from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
 
         from app.crawl.job_store import JobStore
 
@@ -1174,7 +1174,7 @@ class TestEveryVisitedUrlHasAnEnvelope:
     """
 
     async def test_a_url_the_engine_never_answered_still_gets_an_envelope(self, client, job_store):
-        from _job_harnesses import _execution_payload, _execution_urls
+        from tests._job_harnesses import _execution_payload, _execution_urls
 
         async def _execute(payload_dict, *, settings, shutdown_event):
             # Batch 1 submits /a, which discovers /gone; batch 2 submits /gone and

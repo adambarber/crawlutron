@@ -11,8 +11,8 @@ shape, and the tree-wide guards in ``tests/test_safety_invariants.py`` keep it
 that way. These tests pin the two properties that made the move worth making.
 """
 
-from _browser_doubles import _fake_browser
-from _render_producer import render_stub_request
+from tests._browser_doubles import _fake_browser
+from tests._render_producer import render_stub_request
 
 from app.api.response_shaping import _aunified_response_from_result, render_result_to_unified
 from app.api_models import POLICY_SCHEMA_VERSION

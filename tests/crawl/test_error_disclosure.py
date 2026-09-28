@@ -11,8 +11,8 @@ import logging
 import socket
 
 import httpx
-from _fetcher_factories import invoke_http_strategy, run_http_strategy
-from _policy_factories import http_strategy_policy
+from tests._fetcher_factories import invoke_http_strategy, run_http_strategy
+from tests._policy_factories import http_strategy_policy
 
 from app.crawl.decompression import DecompressionTooLargeError
 from app.crawl.result_helpers import (

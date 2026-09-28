@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from _assertions import one_search_result
+from tests._assertions import one_search_result
 
 _PROTOCOL_VERSION = "2026-07-28"
 

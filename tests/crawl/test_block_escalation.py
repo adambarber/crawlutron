@@ -3,8 +3,8 @@ successful result; the engine must try the next strategy in the chain
 (e.g. direct HTTP -> curl_cffi TLS impersonation -> headless browser)."""
 
 import pytest
-from _assertions import assert_result_success
-from _fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
+from tests._assertions import assert_result_success
+from tests._fetcher_factories import run_chain, scripted_fetcher, sequenced_fetcher
 
 from app.constants import (
     HTTP_CFFI_IMPERSONATE,

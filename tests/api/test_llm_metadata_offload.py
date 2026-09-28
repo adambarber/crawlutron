@@ -8,7 +8,7 @@ parse with ``asyncio.to_thread`` via the additive async shaping API.
 import asyncio
 
 import pytest
-from _assertions import install_to_thread_spy
+from tests._assertions import install_to_thread_spy
 
 from app.api.response_shaping import (
     EnvelopeOptions,

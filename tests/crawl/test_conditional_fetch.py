@@ -6,8 +6,8 @@ unchanged page yields a not_modified result without a full body fetch.
 """
 
 import pytest
-from _fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
-from _policy_factories import http_strategy_policy
+from tests._fetcher_factories import request_fetcher, run_http_strategy, scripted_fetcher
+from tests._policy_factories import http_strategy_policy
 from pydantic import ValidationError
 
 from app.api_models import CrawlRequest
@@ -129,7 +129,7 @@ async def test_engine_routes_validators_by_url():
 
 async def test_real_server_conditional_roundtrip(base_url):
     """Full roundtrip vs the real server: fetch -> validator -> revalidate 304."""
-    from _fetcher_factories import run_crawl_async
+    from tests._fetcher_factories import run_crawl_async
 
     url = f"{base_url}/with_etag"
     first = await run_crawl_async({"url": url})

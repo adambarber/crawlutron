@@ -7,7 +7,7 @@
   regardless of strategy.
 """
 
-from _fetcher_factories import site_fetcher, tap_fetcher
+from tests._fetcher_factories import site_fetcher, tap_fetcher
 
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request

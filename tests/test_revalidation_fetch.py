@@ -7,7 +7,7 @@ code previously fell through to a second, unconditional fetch because neither
 round-trips and doubled origin load for one crawl.
 """
 
-from _fetcher_factories import make_fetch, run_http_strategy
+from tests._fetcher_factories import make_fetch, run_http_strategy
 
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache

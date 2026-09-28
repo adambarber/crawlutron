@@ -6,7 +6,7 @@ subsequent navigations) carries the spoofed Host. The render must set it
 for the navigation, then clear it.
 """
 
-from _browser_doubles import ROUTE_ARG_UNSET, render_pinned, run_route_with_pinner
+from tests._browser_doubles import ROUTE_ARG_UNSET, render_pinned, run_route_with_pinner
 
 
 async def test_pinned_host_cleared_after_navigation(monkeypatch):

@@ -12,8 +12,8 @@ instead of only as a flag nobody set.
 
 import httpx
 import pytest
-from _fetcher_factories import run_default_http_fetcher
-from _transport_doubles import MockResponse, scripted_transport_client
+from tests._fetcher_factories import run_default_http_fetcher
+from tests._transport_doubles import MockResponse, scripted_transport_client
 
 from app.crawl.strategies import http_client_pool as pool_mod
 from app.crawl.strategies import pinned_transport as pinned_mod

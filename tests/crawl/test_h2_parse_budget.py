@@ -23,7 +23,7 @@ duplicated parse inside a stage fails here rather than in a perf profile.
 """
 
 import pytest
-from _fetcher_factories import run_http_strategy, scripted_fetcher
+from tests._fetcher_factories import run_http_strategy, scripted_fetcher
 
 from app.crawl import extraction
 

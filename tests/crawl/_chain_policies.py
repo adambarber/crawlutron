@@ -7,7 +7,7 @@ block existed more than once with a chance of drifting, and the copy that
 drifted is the one the test runs.
 """
 
-from _policy_factories import crawl_limits
+from tests._policy_factories import crawl_limits
 
 
 def chain_policy(*strategies: str, discovery: dict | None = None) -> dict:

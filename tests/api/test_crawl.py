@@ -5,17 +5,17 @@ import json
 import time
 
 import pytest
-from _assertions import (
+from tests._assertions import (
     accepted_crawl,
     assert_pool_unavailable,
     assert_result_failed,
     browser_available,
     completed_crawl,
 )
-from _fetcher_factories import make_crawl_payload
-from _job_harnesses import post_render_with_pool
-from _policy_factories import crawl_policy
-from helpers.server import WEBHOOK_RECEIVED
+from tests._fetcher_factories import make_crawl_payload
+from tests._job_harnesses import post_render_with_pool
+from tests._policy_factories import crawl_policy
+from tests.helpers.server import WEBHOOK_RECEIVED
 
 from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER

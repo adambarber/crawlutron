@@ -1,4 +1,4 @@
-from _policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 import app.crawl.extraction as _extraction_module
 from app.crawl.document_text import (

@@ -9,7 +9,7 @@ pathological patterns) and uses the compiled pattern's .search() in the loop.
 
 import re
 
-from _fetcher_factories import (
+from tests._fetcher_factories import (
     LINKED_PAIR_LIMITS,
     crawled_results,
     crawled_urls,

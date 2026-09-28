@@ -4,9 +4,9 @@ import asyncio
 import dataclasses
 import inspect
 
-from _assertions import assert_pool_unavailable, read_main_source
-from _job_harnesses import post_render_with_pool
-from _lifespan_doubles import stub_heavy_teardown
+from tests._assertions import assert_pool_unavailable, read_main_source
+from tests._job_harnesses import post_render_with_pool
+from tests._lifespan_doubles import stub_heavy_teardown
 
 
 class TestMultiWorkerInvariants:

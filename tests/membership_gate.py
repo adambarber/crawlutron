@@ -44,7 +44,7 @@ import pathlib
 import typing
 from collections.abc import Collection
 
-from chokepoint_walks import (
+from tests.chokepoint_walks import (
     attribute_calls,
     call_keyword_arguments,
     nodes_of,

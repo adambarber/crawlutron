@@ -26,15 +26,15 @@ import functools
 import inspect
 
 import pytest
-from _job_harnesses import (
+from tests._job_harnesses import (
     ScriptedExecute,
     _make_app,
     _seed_job,
     make_crawled_job_store,
     make_job_store,
 )
-from _policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
-from _result_builders import _canned_result
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier
+from tests._result_builders import _canned_result
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner

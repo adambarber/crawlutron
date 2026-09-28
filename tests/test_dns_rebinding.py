@@ -10,8 +10,8 @@ from unittest.mock import patch
 from urllib.parse import urlparse
 
 import httpx
-from _assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
-from _transport_doubles import MockResponse, scripted_transport_client
+from tests._assertions import assert_dns_pinning_uses_first_resolution, block_private_targets, host_resolves_to
+from tests._transport_doubles import MockResponse, scripted_transport_client
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.validation import HostPolicy

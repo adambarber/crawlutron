@@ -1,7 +1,7 @@
 """TestServiceRenderRequest coverage tests (split from tests/test_coverage_gaps.py)."""
 
 import pytest
-from _render_producer import render_stub_request
+from tests._render_producer import render_stub_request
 
 
 class TestServiceRenderRequest:

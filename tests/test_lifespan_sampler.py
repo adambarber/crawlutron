@@ -5,7 +5,7 @@ Also the shutdown sequence's own contract: every teardown step is attempted,
 so one pool whose close() raises cannot cost the others theirs.
 """
 
-from _lifespan_doubles import stub_heavy_teardown
+from tests._lifespan_doubles import stub_heavy_teardown
 
 
 def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:

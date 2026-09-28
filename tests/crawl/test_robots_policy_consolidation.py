@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from _fetcher_factories import make_html_fetcher
-from _policy_factories import crawl_policy
+from tests._fetcher_factories import make_html_fetcher
+from tests._policy_factories import crawl_policy
 
 from app.api_models import CrawlPolicy
 from app.crawl.admission import RobotsGate

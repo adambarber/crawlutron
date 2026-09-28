@@ -1,7 +1,7 @@
 import ast
 
 import pytest
-from chokepoint_walks import TESTS_DIR, local_nodes, nodes_of, trees_under
+from tests.chokepoint_walks import TESTS_DIR, local_nodes, nodes_of, trees_under
 
 FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 # A funnel is not always a function: a `multiprocessing.Process` stand-in is a

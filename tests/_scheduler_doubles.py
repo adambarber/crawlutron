@@ -14,7 +14,7 @@ spelling the same callback, the same log capture and the same run call.
 
 from typing import Any
 
-from _result_builders import make_result
+from tests._result_builders import make_result
 
 from app.crawl.result_helpers import _failed_result_for
 from app.models import CrawlJob, EngineCrawlResult

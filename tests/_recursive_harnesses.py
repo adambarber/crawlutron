@@ -37,9 +37,9 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple
 
-from _policy_factories import UNRESTRICTED_HOST_POLICY
-from _result_builders import Spill, make_engine_result
-from _scheduler_doubles import FakeScheduler
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY
+from tests._result_builders import Spill, make_engine_result
+from tests._scheduler_doubles import FakeScheduler
 
 from app.crawl.recursive import run_recursive_crawl
 from app.models import CrawlTask

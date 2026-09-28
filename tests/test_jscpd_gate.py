@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-import _jscpd_gate as gate
+import tests._jscpd_gate as gate
 import pytest
 
 

@@ -20,7 +20,7 @@ import inspect
 from typing import get_args
 
 import pytest
-from chokepoint_walks import app_python_files
+from tests.chokepoint_walks import app_python_files
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
 from app.models import HttpFetchContract, HttpFetcher

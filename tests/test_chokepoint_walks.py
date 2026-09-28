@@ -16,7 +16,7 @@ import ast
 import pathlib
 
 import pytest
-from chokepoint_walks import assert_detector, assert_fires_once, assert_stays_clean
+from tests.chokepoint_walks import assert_detector, assert_fires_once, assert_stays_clean
 
 PATH = pathlib.Path("synthetic.py")
 _SOURCE = "value = 1\n"

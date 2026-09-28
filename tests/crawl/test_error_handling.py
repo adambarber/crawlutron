@@ -10,9 +10,9 @@ from dataclasses import asdict
 
 import httpx
 import pytest
-from _browser_doubles import _fake_browser
+from tests._browser_doubles import _fake_browser
 from _chain_policies import chain_policy
-from _fetcher_factories import failing_fetcher, raise_fetcher, run_chain
+from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
 
 from app.constants import (
     BROWSER_HEADED_WARMED,

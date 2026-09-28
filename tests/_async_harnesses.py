@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from _timing_harnesses import await_until
+from tests._timing_harnesses import await_until
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class CrawlApi:
         that -- so this adds only the origin. A test varies the one key it is
         about and never restates the URL.
         """
-        from _fetcher_factories import make_crawl_payload
+        from tests._fetcher_factories import make_crawl_payload
 
         return make_crawl_payload(f"{self.base}/", **overrides)
 
@@ -54,7 +54,7 @@ class CrawlApi:
 @pytest.fixture
 def crawl_api(async_client, base_url) -> CrawlApi:
     """An ASGI client, the helper server's origin, and a cleared webhook sink."""
-    from helpers.server import WEBHOOK_RECEIVED
+    from tests.helpers.server import WEBHOOK_RECEIVED
 
     WEBHOOK_RECEIVED.clear()
     return CrawlApi(client=async_client, base=base_url)
