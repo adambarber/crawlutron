@@ -160,6 +160,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   spill-GC counterpart for the T5 stamp; the affected tests reset before
   measuring, keeping the memo's production contract (raw-value-keyed, so any
   env change is visible on the next call) intact.
+- **`discovery_flags`' docstring no longer contradicts its own code**
+  (app/crawl/policy.py): it said "each channel inside it defaults to on" and
+  then returned `DiscoveryFlags(False, False, False)`. The code was right —
+  `DiscoveryConfig` declares every channel `= False` and its docstring says so
+  — but the docstring was the surviving half of the inverted-defaults fix, and
+  it was the artifact a reader consults to learn what absence means. Rewritten
+  to say what the function decides: an absent block and an explicit
+  `{"discovery": {}}` are the same policy, because `true` is the only thing that
+  turns a channel on and both mean fetch nothing. The old text also credited
+  the wrong cause, reading the block's optionality as the hazard when
+  optionality is exactly why the equivalence has to be decided in one place.
 
 ### Added
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
@@ -272,6 +283,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`lifespan(None)` smell removed** (app/main.py): the lifespan handler
   is now an `@asynccontextmanager` directly, removing the misleading
   `lifespan=_lifespan(None)` indirection.
+- **The MCP constant registry can no longer claim coverage it lacks**
+  (app/mcp/constants.py, tests/test_safety_invariants.py):
+  `MISSING_REQUIRED_CLIENT_CAPABILITY` and `META_CLIENT_INFO` were declared and
+  read by nothing — the 2026-07-28 spec requires only `protocolVersion` and
+  `clientCapabilities` in `_meta`, so no path ever raised the code or read the
+  key. Deleted. A registry entry with no consumer is an untested list of
+  strings, and an untested error code is worse than an absent one because it
+  reads as coverage. `MCP_PROTOCOL_VERSION` is kept but unexported: it is read,
+  by the `SUPPORTED_PROTOCOL_VERSIONS` list derived from it in the same module,
+  and exporting a name only its own module reads is the claim that was wrong.
+  `test_every_protocol_constant_is_produced` now holds the line — every name in
+  the module's `__all__` must be read somewhere under `app/`, swept tree-wide,
+  and a registry the sweep cannot read is itself a finding.
+- **A type suppression that suppresses nothing is a build failure**
+  (pyrightconfig.json, tests/test_pyright_budget.py): pyright now reports
+  unnecessary ignore comments, and
+  `test_pyright_detects_its_own_suppressions_decaying` asserts the rule is on,
+  because the failure is invisible from the tree — a stale suppression and a
+  working one are the same bytes to every other gate. Eight suppressions were
+  suppressing nothing, each with a comment explaining why it was needed; the
+  five in `app/api_models.py` had never suppressed anything, from the commit
+  that added them onward. One of the eight was not a suppression at all but a
+  prose sentence inside a comment block quoting the literal directive, which
+  pyright honors on that line — so the paragraph had been muting itself.
+- **Pyright no longer speaks for mypy about ignores**
+  (pyrightconfig.json, app/cgroup_sense.py, app/crawl/strategies/http_client_pool.py):
+  `enableTypeIgnoreComments: false`. While pyright honored mypy's `# type:
+  ignore` comments, a suppression that satisfied the fail gate could hide a
+  finding from the checker whose whole job is annotation lies — and did, five
+  times. `_CGROUP_CACHE` was declared `dict[str, tuple[float, object]]` while
+  its only writer stores a stripped string or `None`, so returning it needed a
+  bare `# type: ignore[return-value]` and the function's own contract went
+  unchecked; the value type is now declared, which deletes the suppression and
+  lets both checkers read the code. Mypy keeps its own comments
+  (`warn_unused_ignores` is on in mypy.ini).
+- **Pooled client loop binding has one chokepoint**
+  (app/crawl/strategies/http_client_pool.py): `_bound_loop` was written at four
+  sites — two builders, each with its own no-running-loop branch — and every one
+  carried a bare `# type: ignore[attr-defined]`, because neither `httpx` nor
+  curl_cffi declares the attribute; this module installs it. A `_LoopBound`
+  Protocol, a `_bind_to_running_loop` writer and a `_loop_bound_to` reader
+  replace four suppressions, two inline branches and a defaulted `getattr`. `None`
+  is documented as an answer rather than a failure: a client built outside a loop
+  matches nothing, so the next `get` rebuilds instead of handing out a client
+  this loop cannot use. No behavior change.
+- **Two request models stopped restating a field their base class declares**
+  (app/api_models.py): `CrawlRequest` and `RenderRequest` each subclass
+  `_SingleUrlSourceRequest` — whose docstring says the rule is "attached once"
+  and joining the family is "a base class rather than a copy" — and then each
+  restated `url` with a comment admitting it was inherited, and restated the
+  validator too. **Wire-visible, documentation only:** the `url` field
+  description in the generated OpenAPI schema for both models is now the base's
+  wording (`Single public HTTP(S) URL. Use either url or urls.`) instead of the
+  per-model variant ending "to crawl" / "to render", which is the drift the base
+  class's docstring had already ruled on. Field sets are unchanged and
+  exactly-one-of is still enforced: both supplied is rejected, either alone is
+  accepted, neither is rejected. Found by jscpd once the trailing suppression
+  comments stopped distinguishing the two copies.
+- **The pydantic default detector reads both spellings of a field's default**
+  (tests/test_pyright_budget.py, app/api_models.py):
+  `test_pydantic_defaults_stay_where_a_checker_can_see_them` read only the
+  assignment's value, so it saw `x: T = Field(None, ...)` and was blind to
+  `x: Annotated[T, Field(None, ...)] = None` — the dominant spelling in
+  `app/api_models.py`, and the one both dead `url` re-declarations used. Four
+  fields stated one default twice, in `Field()` and on the assignment; the
+  default now lives on the assignment, once. Declared and OpenAPI schema
+  defaults verified unchanged per model (`''`, `''`, `False`).
 
 ### Round 3 hardening (from REVIEW_ROUND3.md)
 - **Body-size middleware: keep-alive poisoning fixed** (app/main.py):
