@@ -1,25 +1,28 @@
 # Quality gates for browser-crawler.
 #
-# This file lives INSIDE the service on purpose: the service is destined to
-# become its own repository, and its tooling should travel with it. While it is
-# still a subdirectory of the dev-stack parent repo, the parent repo's
-# .git/hooks/pre-commit invokes this config explicitly (`pre-commit run
-# --config docker/browser-crawler/.pre-commit-config.yaml`), so nothing here
-# governs the rest of dev-stack, and nothing in dev-stack governs this service.
+# This file lives INSIDE the service and IS the repository's own
+# `.pre-commit-config.yaml`: the service is now its own repository, so pre-commit
+# discovers it natively at this root and `pre-commit run --all-files` needs no
+# `--config` flag.
 #
-# Entries resolve the service root themselves, so the same config works in both
-# layouts: as `docker/browser-crawler/` inside the parent repo, and as the
-# repository root once the service stands alone. `files:` matches both shapes
-# for the same reason — a hook must not fire on the parent repo's other files.
+# Entries still resolve the service root themselves and still name TWO candidate
+# paths, so this tree also works when it is vendored into a monorepo under
+# `docker/browser-crawler/`. That dual-layout support is kept deliberately rather
+# than deleted after the extraction: it costs one `for` loop over two candidate
+# directories, it is asserted by execution in both layouts, and it is what lets
+# the tree be vendored back without a second edit. In a repository that is only
+# ever one layout it would be dead weight, which is why this paragraph is here.
+# `files:` matches both shapes for the same reason — a hook must not fire on a
+# parent repo's OTHER docker services (e.g. `docker/llm/`).
 #
 # `files:` is a TRIGGER, not a list of inputs. All five hooks are whole-tree
 # with `pass_filenames: false`, so the trigger decides "should this scan run"
 # not "which files this hook reads." A per-file guess drifts: the old pattern
 # listed .py and the gate configs but not `.gitignore`, so the commit that
 # edited `.gitignore` ran zero hooks (commit 6373dce). This trigger matches any
-# file that belongs to this service in either layout — nested under the parent
-# repo as `docker/browser-crawler/*`, or at the repository root once extracted —
-# and excludes the parent repo's OTHER docker services (e.g. `docker/llm/`).
+# file that belongs to this service in either layout — at the repository root,
+# or nested under a parent repo as `docker/browser-crawler/*` — and excludes a
+# parent repo's OTHER docker services.
 #
 # All five hooks share one YAML anchor (`*service_trigger`) so the trigger
 # cannot drift across copies: changing one automatically changes all.

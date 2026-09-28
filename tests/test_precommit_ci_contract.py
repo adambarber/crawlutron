@@ -791,12 +791,11 @@ def _split_gate_entry(entry: str) -> tuple[str, str]:
 def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess.CompletedProcess[str]]:
     """Run a real hook entry against a synthetic repo laid out the named way.
 
-    ``nested`` builds ``<repo>/docker/browser-crawler`` (the service inside the
-    dev-stack parent repo, which is where this file lives today). ``root`` builds
-    the service at the repository root, which is where the extraction -- a file
-    copy -- is going to put it. The helper and the entry are the real files
-    rather than re-typed stand-ins, so a helper that stops doing its job cannot
-    pass this by agreeing with a copy of itself.
+    ``nested`` builds ``<repo>/docker/browser-crawler`` (the service vendored
+    into a parent monorepo). ``root`` builds the service at the repository root,
+    which is the layout this repository is in. The helper and the entry are the
+    real files rather than re-typed stand-ins, so a helper that stops doing its
+    job cannot pass this by agreeing with a copy of itself.
     """
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
     subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)

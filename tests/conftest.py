@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent  # docker/browser-crawler
+ROOT = HERE.parent  # the repository root, which is now the service root
 
 for candidate in (str(ROOT), str(HERE)):
     if Path(candidate).exists() and candidate not in sys.path:

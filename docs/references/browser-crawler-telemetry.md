@@ -76,7 +76,7 @@ endpoints, not a general egress filter.
   a courtesy that also removes log noise.
 - **Migrating to a dedicated repo:** this document, the Dockerfile `ENV` block,
   and the compose `extra_hosts` block are the complete, self-contained guard set
-  — they lift together with the `docker/browser-crawler/` tree.
+  — they lift together with the service tree.
 
 ## Verifying the posture (run after any rebuild)
 

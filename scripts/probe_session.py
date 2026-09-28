@@ -6,7 +6,7 @@ those paths from the script location and ``BROWSER_CRAWLER_*`` env vars so
 the probe runs in any clone of the repository (adversarial review
 F-probe-session-hardcoded-paths).
 
-Run from the docker/browser-crawler directory:
+Run from the repository root:
 
     python3 scripts/probe_session.py
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 # monorepo's ``shared/python`` directory; the equivalent logging helper now
 # lives at ``app.logging_config`` and is reachable from the repo root.
 _HERE = Path(__file__).resolve().parent
-_REPO_ROOT = _HERE.parent  # docker/browser-crawler
+_REPO_ROOT = _HERE.parent  # the repository root, which is now the service root
 
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))

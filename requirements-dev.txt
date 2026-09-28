@@ -1,4 +1,4 @@
-# Development and test dependencies for docker/browser-crawler.
+# Development and test dependencies for browser-crawler.
 # Installed on top of requirements.txt in the `development` Docker stage
 # and in local dev/test workflows. NOT shipped in the production image.
 # (Pin floors chosen to match the current resolved toolchain:

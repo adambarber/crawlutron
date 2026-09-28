@@ -1,8 +1,7 @@
 #!/usr/bin/env zsh
-# Wrapper to run the browser-crawler pytest suite from the project root.
-# Mirrors the dev-stack test.sh entry-point so this group is composable
-# with the rest of the dev-stack lifecycle helpers (no harness knowledge
-# needed at the call site).
+# Run the browser-crawler pytest suite from the repository root.
+# This is the suite's entry point, so a caller needs no harness knowledge:
+# forward any arguments (e.g. -k name) straight to pytest.
 
 set -e -u -o pipefail
 

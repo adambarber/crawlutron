@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.7
-# Build context is the repository root (where this Dockerfile lives).
-# For the legacy dev-stack monorepo where this service lived at
-# ``docker/browser-crawler/``, build with:
-#   docker build -f docker/browser-crawler/Dockerfile docker/browser-crawler
-# or set ``context: ./docker/browser-crawler`` in the parent compose.
+# Build context is this repository's root, where this Dockerfile lives, so the
+# build is `docker build .` (or `docker compose build`) from the repository root
+# with no extra flags. `.dockerignore` is written for that same root: it
+# allowlists the four things the stages below COPY, which holds the build
+# context to ~2.6 MB instead of the whole working tree.
 ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
