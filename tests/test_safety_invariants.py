@@ -10,6 +10,7 @@ turns the build red.
 from __future__ import annotations
 
 import ast
+import contextlib
 import dataclasses
 import inspect
 import io
@@ -39,7 +40,6 @@ from chokepoint_walks import (
     calls_named,
     calls_named_leaf,
     calls_to_any,
-    code_line_count,
     file_tree,
     functions,
     has_method_call,
@@ -79,526 +79,6 @@ __all__ = [
     "trees_under",
 ]
 
-# A hand-maintained per-file table turns every line increase into a request to
-# edit one more exception. Its entries and justifications drift independently of
-# the code, and moving lines between files can satisfy it without reducing the
-# tree. One exact whole-tree ceiling is the ratchet instead: growth must be paid
-# for by shrinkage elsewhere in the same change, and a shrink must lower this
-# integer so the saved capacity cannot be spent later.
-#
-# It was raised exactly ONCE, from 22,065 to 22,074, and that raise is recorded
-# here because the reason is the point: the P1 that forced it was a constructor
-# taking an unvalidated `strategy` that accepted a member of the WRONG domain
-# (`HTTP_DECLARED_CRAWLER` as a browser worker's strategy) and a name outside the
-# enum entirely, which failed only much later inside `CrawlResult.__post_init__`.
-# Nine lines of runtime validation at that chokepoint is the fix, and trimming
-# the comments I had added around it recovered most of the cost first. The
-# original comment claimed the integer had moved only once; it has since moved
-# repeatedly in both directions, and each move is recorded below. The metrics
-# budgets' history-based monotonicity test in tests/test_metrics_budget.py is
-# the pattern for tracking that history.
-#
-# 22,010 -> 21,960: the strategy-raise chokepoint, and with it the dead weight
-# it made redundant -- a "canonicalized" flag whose column migration 0002 had
-# already dropped (the local was hardcoded False, so every branch that read it
-# could only take the one path), the structural canonical-form check nothing
-# called, a robots-cache field assigned and never read, a URL accessor whose
-# only caller was a parameter that ``DomainScheduler.run`` silently ignored, a
-# migration index builder no schema or migration used, and a membership helper
-# the classifier below it had long replaced with a table lookup.
-#
-# 21,960 -> 22,063: RAISED, and this is the second raise, so the "moved exactly
-# once" story is retired rather than restated. The rule the ceiling encodes is
-# "growth must be paid for by shrinkage in the same change" -- and this program
-# paid, on net, in every currency the rule measures: it deleted the 79 lines
-# above plus a second duplicated definition (two scope-regex compilers with
-# differing fail-closed arms and the same length bound under two names), and
-# against that it bought five invariants, each with a tree-wide detector and its
-# own bites proof: a chain-level handler so a raising strategy becomes a failed
-# step; async twins so no store method runs on the event loop; a scheduler whose
-# worker failures and callback failures cannot be confused; pool defaults
-# derived at construction instead of frozen at import; and an action chain under
-# one deadline whose swallowed failures are logged instead of invisible. The
-# metrics budgets moved the same way -- the twins took JobStore past the
-# class-length ceiling, so its docstring and twin one-liners came back down in
-# the same change rather than the budget going up, and the same for the action
-# loop's and the scheduler's blocks. It is +53 against the 22,010 the tree sat
-# at, and the ratchet is the wrong instrument for that trade: an exact ceiling
-# cannot accommodate a program whose entire purpose is adding chokepoints, and
-# the only way to satisfy it was to grind the 5-line jscpd band -- which is ~90%
-# shape coincidence in this codebase (the same-argument signature on two
-# functions, a ``def`` plus docstring, a helper that already delegates) and
-# would have meant inventing abstractions rather than removing duplication. The
-# threshold stays 7 for the same reason. The ratchet resumes biting from here.
-#
-# Measures CODE lines, not file length: comments and docstrings are excluded by
-# ``code_line_count``. The earlier version counted every line in the file, which
-# meant a comment explaining a chokepoint cost exactly as much budget as the
-# chokepoint -- so the gate charged for the prose that makes the next change
-# safe while allowing an equal number of lines of new logic. Three separate
-# raises were spent on documented decisions before that was noticed, and the
-# right response was to fix the instrument rather than argue the next one.
-#
-# Recalibrated on the new measure: app/ holds 14,362 code lines and 7,833 lines
-# of comment, blank and docstring -- the prose the old ceiling was counting was
-# over a third of the tree. A third of an anti-sprawl budget spent on
-# explanation is a budget that is not doing its job.
-#
-# RAISED once, for the transience axis. The code-line cost is the taxonomy's
-# second axis -- a transience verdict on every classification, the one accessor
-# every retry decision routes through, and the four consumers that stopped
-# answering it locally. It is not a net feature: this change deleted three
-# hand-maintained copies of the same question (the browser strategy's
-# TRANSIENT_CLASSIFICATIONS, and the two
-# ``classification == "browser_pool_exhausted"`` retry tests in result_helpers
-# that the render and crawl layers each spelled out by hand), and it fixed the
-# drift the copies had hidden -- dns_error was a declared member with no
-# producer anywhere in app/, while connection_error, the label every transport
-# failure actually gets, was absent from the set the durable job runner used to
-# decide whether to re-queue, so a one-second DNS blip marked the URL visited
-# and dropped it from a whole-site crawl. A tree-wide detector with its own
-# bites proof guards against a fourth local copy.
-#
-# RAISED once more, for one line: the classification table gained an explicit
-# ``DecompressionError`` row. A row is a verdict, and without that row the type
-# had none -- it inherited ``value_error`` from the caller-error catch-all
-# because it happens to subclass ``ValueError``, which reported a corrupt
-# response body as a terminal caller error and marked the URL visited in a
-# durable job instead of retrying. This is the smallest possible expression of
-# that decision: one tuple. It is not a net feature either -- it replaced no
-# prose and added no branch, and the tree-wide gate that makes the table's row
-# ORDER checkable is what stops the next row from being added in a position that
-# silently kills it.
-#
-# LOWERED to 14,361 by removing the robots allow-all shortcut: two lines of code
-# that allowed a path the same robots.txt group had just disallowed.
-#
-# RAISED to 14,372 for the spill ownership registry: eleven lines, and they buy
-# a property the sweep did not have -- it could ask whether a file is still in
-# use before deleting it on age alone. The alternative was to leave a sweep that
-# can delete the reassembled result of a crawl that is still running, on the
-# strength of a docstring arguing the loss was acceptable.
-#
-# RAISED to 14,383 for the pool's retired generation: eleven lines that make a
-# closed renderer impossible to acquire, by draining the idle queue in close and
-# dropping a retired renderer in release. Both halves were needed -- the drain
-# covers what close left queued, the drop covers the holder that returns its
-# renderer afterwards, and either one alone still hands out a closed browser.
-#
-# RAISED to 14,396 for the Accept-Encoding capability check: thirteen lines, of
-# which most is the function that names the question (_accept_encoding). The
-# two-line inline version was tried first and rejected by the abc-size ratchet,
-# which counts offenders and only ever ratchets DOWN -- so a capability
-# decision added to a builder already at the ceiling had to be named rather than
-# appended, and naming it costs the lines it costs. The alternative was leaving
-# the header asking every brotli-capable server for a body this process refuses
-# to decode whenever brotli is not installed.
-#
-# LOWERED to 14,394 by deleting the storage_state escape hatch: two lines that
-# let three literals past the path allowlist.
-#
-# RAISED to 14,407 for total status accounting in the scheduler: the branch used
-# to test membership in a two-element tuple, which silently matched four of the
-# six ResultStatus members against neither arm. The table plus the method that
-# reads it is the price of a verdict existing for every status -- and of being
-# able to prove it, since the tuple had no shape a test could check.
-#
-# RAISED to 14,409 for the job runner naming every URL it visited: two lines.
-# The runner already had a chokepoint for exactly this -- response_shaping's
-# _failed_unified_result, whose docstring says it mirrors the runner -- and
-# was not calling it, so a URL the engine never answered for was counted as
-# failed and then vanished, leaving a job whose results could not account for
-# its own total_crawled.
-#
-# RAISED to 14,418 for the bounded-HTML-input chokepoint: nine lines. Two
-# modules independently declared the same 4 MB cap under two unrelated names
-# (_MAX_HTML_NOISE_INPUT_BYTES, _MAX_LLM_FORMAT_HTML_INPUT_BYTES) and each
-# truncated inline, so raising one cap left the other and the bound no reviewer
-# read was the bound being enforced. The cap and its truncation now live once,
-# in the module whose stated job is being the single audited place input gets
-# capped. Nine lines buy the guarantee that the two policies cannot disagree,
-# and the tree-wide gate in this file keeps the second copy from reappearing.
-# RAISED to 14,413 from 14,418: five re-export aliases deleted from
-# app/crawl/engine.py. ROBOTS_CACHE_MAX_ENTRIES, ROBOTS_CACHE_TTL_SECONDS,
-# ROBOTS_FAILURE_TTL_SECONDS, _ROBOTS_PATTERN_CACHE_PER_HOST and
-# _ROBOTS_PATTERN_CACHE_MAX_HOSTS each rebound a name from app.crawl.robots,
-# so the engine module appeared to own the robots cache configuration and a
-# reader changing a TTL would reasonably have looked there first. Two of the
-# five had no consumer anywhere; a third was imported from robots directly by
-# the test that appeared to need it, and the one genuine consumer (a cache
-# eviction bound in test_robots.py) now imports from the module that defines
-# it. The names are gone, not relocated -- robots.py was always the only home.
-# RAISED to 14,435 from 14,413: the httpx/curl_cffi fetch tails merged into one
-# chokepoint. The two transports each ended a fetch with the same four steps --
-# decompress under a size cap, persist Set-Cookie, lowercase the headers, build
-# the result -- and the copies had already diverged. The httpx path normalised
-# the headers into a dict and handed that to the cookie helper, collapsing a
-# multi-cookie response into one comma-joined entry and knocking the helper off
-# its documented get_list path; the curl_cffi path passed the transport's own
-# multidict and was correct. Both happened to survive only because the jar
-# re-splits a comma-joined value, which this suite separately documents as a
-# corruption risk. fetchers._finish_fetch now owns the tail, both transports
-# call it, and the content encoding is read there rather than by each of them
-# separately. The raise is not deduplication arithmetic -- merging two copies
-# saved fewer lines than a nine-parameter keyword-only signature costs. It is
-# bought deliberately: a safety cap, cookie persistence and header normalisation
-# can no longer be changed in one transport and forgotten in the other, and the
-# two rules at the end of this file stop a third fetch path reopening the door.
-# RAISED to 14,440 from 14,435: five lines to stop job_runner hand-writing a
-# taxonomy pair. Its pace_result built the one CrawlResult in the tree that
-# carries no payload, and wrote status and classification as two literals
-# beside each other. The pair is legal today, which is precisely why nothing
-# reported it: the day the taxonomy moves "rendered" off "success" this result
-# becomes silently wrong and no assertion anywhere is looking at it. Asking
-# status_for_classification instead is the one line that keeps it true, and the
-# other four are the import that makes asking possible. Bought with a
-# tree-wide gate so the next spelled pair is reported at its line.
-# RAISED to 14,458 from 14,440: eighteen lines so a failing close() cannot skip
-# the pools below it. The lifespan teardown ran its five steps bare, so a
-# close() that raised cost every pool after it its teardown -- and the
-# document-extraction workers are the one pool nothing ever touches again, so
-# that skip leaks a markitdown subprocess, its memory and its pipes past the
-# process's own shutdown, which is the exact thing the comment beside that
-# call says the step is there to prevent. Every step is now attempted and the
-# failures are raised together afterwards, so the blast radius widens without
-# the bug going quiet. The regression test drives the real lifespan and the
-# real resource gate; a first draft replaced the gate with a stand-in and broke
-# on startup's start_lag_probe, which is the fake-imitates-the-chokepoint trap
-# the suite already has a standing rule about.
-# RAISED to 14,467 from 14,458: nine lines to give the scheduler one way to
-# read a duration. SchedulerResult declared .status and nothing else, and the
-# estimator dug the rest out with getattr(result, "diagnostics", None) --
-# a member only EngineCrawlResult has. Every /v1/render result is a
-# CrawlResult, which carries elapsed_ms directly and has no diagnostics at
-# all, so the render pipeline's latencies were silently dropped and the
-# adaptive estimator was calibrated on crawl traffic alone while looking
-# correctly fed. elapsed_ms is now a declared member both shapes satisfy:
-# CrawlResult's is the field it always had, EngineCrawlResult's is computed
-# from the diagnostics block first (what the HTTP and browser strategies have
-# always written) and its first attempt as the fallback. The getattr is gone
-# because a member only one implementation carries is a member the generic
-# caller silently skips for the other. This changes estimator inputs on the
-# render path on purpose; the three tests drive both real models, and the one
-# that was red is the render one.
-# RAISED to 14,476 from 14,467: nine lines to make spill ownership a fact the
-# kernel can answer instead of a fact this process happens to be holding. The
-# sweep consults a module-level live set, so it could only protect spills owned
-# by the caller -- a concurrent process's in-flight spill was indistinguishable
-# from one abandoned by a killed run and was unlinked mid-crawl, which deletes
-# the finished crawl's own reassembled result. The temp dir is shared with every
-# other process on the host, so that was the default outcome whenever two
-# processes crawled at once. Ownership is now an exclusive advisory lock held on
-# the spill's own descriptor: the kernel grants it only when no live process
-# holds it and drops it when a process dies, so the sweep still reclaims what
-# killed runs leave behind. The live set, its threading.Lock and the threading
-# import are gone, so this is one mechanism in place of two. The regression test
-# reproduces the cross-process case deterministically by holding the lock on a
-# second open file description -- the kernel state another process creates --
-# and it was red before the change.
-# RAISED to 14,488 from 14,476: twelve lines to make the process count an
-# enforced invariant instead of an unguarded passthrough. BROWSER_CRAWLER_WORKERS
-# is read by the container entrypoint and handed to `uvicorn --workers`, so a
-# value above 1 forks the service into N copies of the browser pool, the httpx
-# and cffi pools, the DNS and extraction executors, the HTTP and robots caches,
-# the cookie jar, the admission gate and the metrics store. Most of that is only
-# wasteful, but the cookie jar loads at startup and rewrites the whole file at
-# shutdown, so with N workers a cookie set in one is invisible in the others and
-# the last shutdown discards what the rest collected -- silent data loss, and
-# the deployment still reports healthy. /metrics compounds it: one worker's
-# counters make the gauges the admission gate tunes from look like a fraction of
-# real load. The audit that produced this counted every module-level singleton
-# in app/ and the cookie jar and metrics store were the two that were wrong
-# rather than merely redundant. Fixing each at its own site would mean a shared
-# metrics backend, a cross-process cookie jar and a coordinated admission
-# controller -- three design decisions, each a program rather than a patch. One
-# startup guard makes the whole class unreachable and names the consequences in
-# the refusal, so an operator reads the failure instead of discovering the data
-# loss. It runs before the browser pool is touched, reads through the never-raise
-# env chokepoint so a typo cannot deny boot, and is inert in both shipped
-# deployments, which pin the value to 1.
-#
-# RAISED to 14,501 from 14,488: a bounded retry around the WAL conversion in the
-# store chokepoint, which is thirteen lines and is a prerequisite for the
-# operator's request to remove the guard above rather than a cost of it. Four
-# spawned processes, six runs, one where three children died 0.000s into
-# `PRAGMA journal_mode=WAL` with "database is locked". The 0.000s is the whole
-# finding: `busy_timeout` is never invoked for a journal-mode change, so every
-# store in the service -- jobs, results, and whatever the multi-worker work
-# adds -- would have failed to open under `uvicorn --workers` on a fresh
-# database. The budget has to outlast a peer's whole migration, not one lock,
-# because the loser waits on the winner's migrate step.
-#
-# RAISED to 14,566 from 14,501: the multi-worker substrate itself. The operator
-# asked for N workers, so the guard at the top of this comment is coming off, and
-# it cannot come off before the stores that were losing data have somewhere to
-# keep their facts. Sixty-five code lines buy one thing: a cross-process counter
-# table, so `/metrics` can sum across workers instead of reporting whichever
-# worker answered the request.
-#
-# The defect was measured, not assumed. Four spawned processes, 200 increments
-# each: a run in six where three children died and 200 updates never landed.
-# `threading.Lock` is invisible outside the process holding it, and that is the
-# whole of it -- a fact kept in the wrong structure, the same shape that had
-# already cost the service the content-cache spill sweep.
-#
-# This is a net investment against the guard rather than sprawl:
-# `assert_single_process_deployment` comes out in the same program, and the
-# ceiling returns to 14_501 or lower when it does.
-#
-# RAISED to 14,715 from 14,566: the cross-process cookie store, the second of
-# the three programs the guard's refusal names. `CookieJar.save_to_file`
-# serialized the whole jar over a JSON file through the atomic-write
-# chokepoint. That makes the write non-truncated and does nothing about a lost
-# update, because the update is replace-everything: each worker loads at
-# startup and saves at shutdown, so the last worker to exit discards every
-# cookie the others collected, and the deployment reports healthy throughout.
-#
-# The store merges the read and the write in one transaction, which is the one
-# thing the file could not do, and bounds itself with a touched_at LRU so a
-# long-lived service cannot accumulate a row per host crawled forever. The
-# JSON file survives as import/export and is imported once on upgrade so an
-# existing deployment is not silently signed out; it is never written again,
-# because keeping it authoritative would keep the last-writer-wins path alive.
-#
-# One hundred forty-nine lines, and the guard is one step closer to coming off.
-#
-# RAISED to 14,821 from 14,715: `/metrics` reports the service, not the worker
-# that answered. MetricsStore was a dataclass whose counters were plain integer
-# increments reachable only from the process holding them, so under
-# `uvicorn --workers` the endpoint served one worker's numbers and called it
-# total traffic -- and the admission gate tunes itself from those numbers, so
-# the error fed back into the thing it was measuring.
-#
-# Counter names now live in one place, in `_COUNTERS`, instead of as a field
-# name plus a separate increment site. Reads are properties over the shared
-# store; the only write path is `observe_crawl` / `observe_search` /
-# `record_throttle` / `record_pause`, and a property setter cannot know its own
-# delta without a read-then-write that loses increments when two workers set it
-# at once, which is why the throttle counter is a method.
-#
-# The gauges stay process-local on purpose: memory and CPU utilization measure a
-# cgroup every worker shares, so summing them would multiply a ratio by the
-# worker count and alert on a healthy service. That split is the design, not an
-# omission.
-#
-# The ~90 lines of exposition moved to a module function, which took MetricsStore
-# off the oversized-class list the metrics budget gate reports -- the budget
-# stays at 3 because fixing one offender does not clear the other three.
-#
-# LOWERED to 14,815 from 14,828: the single-process guard is gone, and its
-# refusal message was more code than the fleet's shared state turned out to
-# need. It is not replaced by nothing -- the three invariants that made N
-# workers wrong are now asserted directly, in TestMultiWorkerInvariants for the
-# wiring and in tests/crawl/test_fleet_budget_split.py for the arithmetic, and
-# both fail if a shared store is pointed away from the one database or if a
-# ceiling stops being divided.
-#
-# The reserve in `max_http_concurrency_for` is a fleet quantity and is
-# multiplied before the subtraction. Subtracting it once and then dividing
-# overstated the fleet's free memory: 320 concurrent HTTP tasks at 4 workers on
-# a 16 GiB limit where a single worker would have run 283, which is the
-# over-admission the division exists to remove. The fleet total is now 283 at 1,
-# 2 and 4 workers.
-#
-# RAISED to 14,828 from 14,821: the per-process budgets are now divided by the
-# worker count. `derive_browser_pool_size` and `max_http_concurrency_for` sized
-# themselves from the cgroup memory limit, which belongs to the container and is
-# therefore the same number in every worker, while the pools they size are each
-# worker's own. N workers each spent the whole budget, which is how a fleet
-# arrives at an OOM kill of the whole service rather than a slow request.
-#
-# Measured on a 16 GiB limit: HTTP concurrency 283 -> 156 -> 81 -> 40 at 1, 2, 4
-# and 8 workers, with the fleet total flat. The derived pool ceiling is a fleet
-# total too -- left undivided it is the worse half of the same bug, a large
-# container letting N workers each take the full cap.
-#
-# Seven lines of real logic. The rest is `worker_count`, which had to become a
-# chokepoint in this module rather than staying a private constant in app.main:
-# the functions that divide the budget live here, and importing the number from
-# the module that refuses N>1 would be circular. The guard now reads it from
-# here too, so the workers env has exactly one reader in the tree.
-# 14_815 -> 14_972, for the job-row accumulator split (migration 0003). The
-# +157 is 63 lines of migration that moves the page history off the job row and
-# carries existing rows across, ~94 for JobAccumulators, which owns the two
-# append-only tables, and the manifest declaration that makes them part of the
-# job store's schema rather than a second thing to remember.
-#
-# Bought: a batch persist went from re-serializing every page crawled so far to
-# inserting the pages it added. Measured on the shape that caused it, the job
-# row was 104 KB at 50 pages and 1,045 KB at 500 -- linear in pages, rewritten
-# every batch, so a 3000-page crawl spent the square of the page count in writes
-# for no new information. That is a permanent per-crawl cost traded for a
-# one-time line count, which is the trade this ceiling exists to make
-# deliberately rather than by accident.
-#
-# 14_972 -> 14_992, for the read side of the same split. The write above was
-# never the whole cost: the page history also sat inside every READ, because
-# `load` deserialized it and the status response then called `len()` on the
-# lists to report three integers. `GET /v1/jobs/{id}` therefore read and
-# JSON-decoded the whole crawl per call, and the control plane read it twice
-# more per control action just to ask whether the row existed. The +20 is one
-# shared status projection, one row shaper used by both the detail and the list
-# read, a per-job count probe, an existence probe, and their off-loop twins.
-#
-# Bought: a status poll is O(1) in the pages crawled, on the endpoint a client
-# polls while its own crawl runs, and the detail view can no longer disagree
-# with the list view about the same job -- they are one projection now. The
-# list read already avoided this and the detail read did not, which is the
-# shape of a missing funnel rather than a missing feature.
-#
-# 14_992 -> 14_988: `_starting_strategies` was narrowed from the whole 13-field
-# `_ChainContext` to the three inputs the pin slice actually reads. The test
-# class that covers pinning had been restating that function's body five times
-# rather than calling it -- tautologies that keep passing if production's pinning
-# is deleted -- because reaching the function required fabricating thirteen
-# unrelated fields. Four lines cheaper in app/, and the pinning tests now
-# exercise the code they are named after.
-# Nine lines cheaper still: the two concrete fetchers each carried the
-# redirect walk's own state as three locals and spelled it back out as six
-# arguments to the hop decision. That state is now one `_RedirectChain` in
-# pinned_transport, shared by both transports, so the walk is written once.
-# The fetcher contract it is spelled against is irreducible in Python (two
-# entry points, two signatures) and is declared once as
-# `HttpFetchContract` with a tree-wide guard proving both still match.
-# One line spent, and this is the argument for spending it: the content-cache
-# envelope is the cache's *stored contract* and both write paths were building
-# it themselves. That is now `ContentCache._entry_to_store`, guarded tree-wide
-# by test_cache_envelope_is_built_by_one_owner so a third write path cannot
-# hand-roll a different shape. The extra line buys a single clock read per
-# write -- `expires` and `cached_at` were separate `clock()` calls, so the
-# instant a caller compares its remote last-modified signal against (#3) was
-# later than the one the expiry was derived from.
-# Two more spent, argued in the same terms: an extractor's text is coerced to
-# a string in exactly one place now (extraction.normalized_extraction, beside
-# the type whose invariant it is), because that `or ""` is what keeps an
-# extractor's None text from reaching a result at all. Writing the sweep that
-# enforces it is what found a fourth call site -- browser_result.py -- that the
-# clone list never showed, because at one line it sat under the clone floor
-# while carrying the same drift. A ceiling that only moves for things the
-# report happens to name is not measuring what the rule is for.
-# Two spent, argued in the same terms: the four terminal-result constructors
-# each spelled the same nine keyword-only parameters, and the two pairs jscpd
-# reported were those argument lists, not the logic. The irreducibility argument
-# above held for exactly one field -- `status` -- and the remaining nine are now
-# a frozen `TerminalResult` the constructors take positionally, so the field
-# list exists once and a caller passes one value. A scheduler test proved the
-# point in the other direction: a `status=` keyword on a constructor was
-# invisible to mypy, which runs over app/ only, and only the runtime assertion
-# caught a migrated call site that folded it into the value.
-#
-# One more spent, argued in the same terms: the two transports each spelled the
-# manual redirect walk themselves -- construct the chain, pin, send, decide,
-# repeat -- and jscpd reported the pair. The consolidation is `apinned_hops`
-# (pinned_transport.py), an async generator that owns pin/decide/advance and
-# yields each already-SSRF-checked hop; the body only sends, which is the part
-# that genuinely differs (httpx streams through its pooled client, curl_cffi
-# through a session get). The 19 lines are the generator plus the two
-# `async for` headers and their two reachability markers, and they buy the
-# property that a transport cannot now drop the per-hop re-pin (F1) or the
-# shared hop budget without anything noticing -- `advance` is the only thing
-# that increments `chain.hops`, so a re-spelled loop that forgot it terminates
-# the walk instead of looping, and a re-spelled loop that dropped the re-pin
-# simply had no chokepoint to drift from.
-# Spent, argued in the same terms: the browser and HTTP strategies each spelled
-# the three-way extraction dispatch, the offloaded post-fetch discovery call,
-# and the same block of discovered-links result fields, and jscpd reported the
-# import block and the result block. The consolidation is
-# `strategies/content_pipeline.py`: `_run_extraction` owns the mode chain,
-# `_discover_after_fetch` the single offloaded discovery parse,
-# `_discovery_result_fields` the one projection from an envelope to result
-# fields, and `_post_fetch_diagnostics` the pagination hint plus the
-# `filter_js_endpoints` egress door both answers to a page must share. The +27
-# is one module's imports, four signatures and the wiring behind them; it buys
-# the property that a discovered-links field cannot reach one strategy's result
-# and not the other's -- a divergence between two well-formed results that
-# nothing else in the tree can see, and that the HTTP path alone threading a
-# new field would have shipped. `test_the_selector_pair_is_one_contract` names
-# the same module for the same reason: the selector pair reaches extraction as
-# one `**selectors` mapping, built where the dispatch is.
-#
-# +8 since the last reconciliation, and the three slices that spent it are
-# recorded in the same terms as the ones above:
-#   * `crawl/strategies/content_pipeline.py` (+102, agent 2) buys the four
-#     chokepoints named immediately above this comment.
-#   * `crawl/coordination_store.py` (+14, agent 3) moves the `StoreSchema` +
-#     `connect_store` pairing -- a claim about who owns a schema -- behind one
-#     base class, so `CoordinationCounters` lost its `__init__` entirely and
-#     both stores dropped their `sqlite3`/`threading` imports.
-#   * `crawl/extraction.py` (+20, mine) makes the non-HTML selector drop
-#     reportable instead of silent. That is behaviour, not refactor: a
-#     `css_selector` against a PDF reached the public API and returned the whole
-#     document looking like a successful narrowing. A chokepoint that cannot
-#     express "this input does not apply here" is not a chokepoint, so the
-#     line is the fix.
-# Against that, `browser_result.py` and `http.py` are down 43 and 45 lines
-# (`_BrowserContent` deleted; both strategies now build the pipeline's
-# `_ExtractedContent`), `search/providers.py` is down 8 (a provider inherits
-# `_request`/`_items_of`, and `_results` lost three key parameters that had
-# become redundant with the class attributes), and `models.py` is down 3 (the
-# taxonomy `__post_init__` trampoline is gone; every result dataclass now
-# inherits it from `_LiteralChecked`).
-# this program's removals: the two twin fetcher signatures and the http phase
-# prefixes are now guarded rather than hand-maintained (4 lines / 25 tokens, two
-# pairs declared in jscpd-expectations.json with the guard that requires each),
-# the DNS resolver is a single off-loop chokepoint, and one extraction HTML-ness
-# predicate replaces two. Lower this when code is removed, never raise it to make
-# a run pass -- the number is a ceiling on growth, not a target.
-#
-# RAISED to 15,159 from 14,888 (+271) for the crawl-policy read edge, recorded in
-# the same terms as the purchases above. What the lines buy, and what they
-# removed, measured per file:
-#   * `crawl/policy.py` (+158, new module) is the single read edge. It replaces
-#     a hand-rolled validator that read `limits` three different ways inside one
-#     file and enforced bounds the model never declared, and it ends the
-#     two-home arrangement where `job_store.normalized_policy` and
-#     `policy.read_policy` were the same function under two names -- so a
-#     change to the repair rules had two definitions to keep in step. It is
-#     also what a stored row is read with, which is what stopped a job whose
-#     policy could not be read from silently resolving `respect_robots` to
-#     False and skipping robots rules entirely.
-#   * `api_models.py` (+163) states each field's default in a form a type
-#     checker can see. `Field(None, description=...)` declares a default that
-#     pyright reports as REQUIRED, so every consumer that read the model
-#     through a `dict[str, Any]` payload got None for a field that had a
-#     default -- `PageMetadata.title` on the render path -- and the checker
-#     that could have said so could not. The same block now rejects a
-#     non-`headers` field with the field named, and canonicalizes a credential
-#     origin, both of which were silent before.
-#   * Against that: `crawl/payload_helpers.py` is down 95 (the hand-rolled
-#     validator is deleted; the model enforces it), `crawl/job_store.py` is down
-#     11 (one job-construction path instead of two, and the async twins'
-#     duplication measured against a `class length` ceiling), and
-#     `crawl/strategies/http.py` is down 6.
-# The migration is not finished: the ceiling goes back DOWN as the remaining
-# `dict`-shaped reads become model reads. This raise buys the typed edge, not a
-# larger tree.
-#
-# RAISED to 15,164 (+5) for a REFUSAL mechanism the env chokepoint could not
-# previously express, and NOT as part of the migration above. Three retry
-# numbers became three authorities (what a job gets, what a deployment may
-# install, what one caller may ask for), which means a deployment value can now
-# be out of contract in a way it could not before. `get_mapping_int` clamped
-# such a value: an operator configuring 9 retries got 5 and configuring 999
-# seconds got 120, silently, while the code's own comment promised "falls back
-# here, loudly". The int face never exposed the float face's
-# `validate`/`validate_event` pair, so "refuse and warn" was inexpressible and
-# clamping was the only option. These 5 lines are that pair plus the range
-# predicate it consumes; a deployment misconfiguration is now visible at startup
-# instead of being rewritten at request time by one chokepoint for every caller.
-# The same pass DELETED 19 lines of verified-dead code to pay for most of it:
-# `ResourceGate.loop_lag`, `safe_regex.search_bounded`,
-# `CrawlPolicyLimits`-shadowing `_bounded_int`, `job_store.policy_limits`,
-# `job_store.job_max_depth`, and `SUPPORTED_EXTRACTION_METHODS` (all
-# definition-and-`__all__` only, zero references in app/, tests/ and docs/). A
-# definition-only AST sweep of app/ found 8 further candidates, all false
-# positives -- FastAPI route handlers and pydantic `@model_validator` hooks,
-# which the framework calls by identity rather than by name -- so there is no
-# further dead code here to pay with.
-# The reduction obligation recorded above is NOT discharged by this raise and
-# two raises inside one session is itself the signal: the next change in this
-# stream has to come down with real removals, not a third argument.
-_APP_TREE_CODE_LINE_BUDGET = 15_164
-
 
 def assert_trees_clean(
     detector: Callable[[ast.AST, Path], list[str]],
@@ -625,32 +105,6 @@ def assert_trees_clean(
         for offender in detector(tree, path)
     ]
     assert not offenders, f"{message}: {', '.join(offenders)}"
-
-
-def test_app_tree_code_line_count_does_not_grow():
-    """``app/`` may shrink freely; it may not grow without a argued raise.
-
-    This was an exact-equality assertion, which read as a ratchet but was not
-    one: it failed when refactors *removed* code, so every deletion in ``app/``
-    also obliged an edit to this constant. Under concurrent work that is
-    unsatisfiable by construction -- no number is correct while the tree is
-    moving -- and the failure is pure noise, because the tree was going down.
-
-    A ceiling is the shape the name already claims. ``<=`` still blocks growth,
-    which is the property that matters, and it lets a refactor land on its own
-    merits. What it gives up is the forced ratchet-down; the constant is
-    therefore lowered deliberately, from the number the run just measured, and
-    the argument for a raise lives in the comment above.
-    """
-    actual = sum(
-        code_line_count(path.read_text(encoding="utf-8")) for path in app_python_files(exclude=frozenset())
-    )
-    assert actual <= _APP_TREE_CODE_LINE_BUDGET, (
-        f"app/ contains {actual} code lines (comments, blanks and docstrings "
-        f"excluded), over the whole-tree ceiling of {_APP_TREE_CODE_LINE_BUDGET}. "
-        f"Lower the ceiling when code is removed; a raise must be argued in the "
-        f"comment above, never spent silently."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -690,7 +144,9 @@ def _admission_budget_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                 offender_at(
                     path,
                     node,
-                    f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...) spells a sizing weight directly; pass a resource_pressure.TaskRamBudget so the policy is built from the same weights it reports",
+                    f"{_ADMISSION_POLICY}(..., {keyword.arg}={ast.unparse(keyword.value)}, ...) "
+                    f"spells a sizing weight directly; pass a resource_pressure.TaskRamBudget "
+                    f"so the policy is built from the same weights it reports",
                 )
             )
     return offenders
@@ -742,34 +198,14 @@ def test_admission_budget_detector_bites():
     )
 
 
-def test_code_line_count_charges_code_and_not_prose():
-    """The counter's own contract: prose is free, and cannot be disguised as code."""
-    assert code_line_count("x = 1\n") == 1
-    # A comment line costs nothing.
-    assert code_line_count("# a long and important note\nx = 1\n") == 1
-    # Neither does a docstring, at module, class or function scope. The `def`
-    # and `class` headers are themselves code and are charged.
-    assert code_line_count('"""module why."""\nx = 1\n') == 1
-    assert code_line_count('class C:\n    """why."""\n\n    x = 1\n') == 2
-    assert code_line_count('def f():\n    """why."""\n    return 1\n') == 2
-    # A '#' inside a string is a character, not a comment; the line is still one
-    # line of code, and padding a string cannot buy budget.
-    assert code_line_count('url = "http://x/#frag"\n') == 1
-    # Blank and comment-only lines never register.
-    assert code_line_count("\n\n   \n# c\n\n") == 0
-    # A string that merely *looks* like a docstring is charged as code.
-    assert code_line_count('def f():\n    x = "why"\n    return x\n') == 3
-
-
 # Values are (declared public symbols, executable entry points). Public data
 # classes, exceptions, type aliases, and constants remain part of the contract,
 # but only functions and classes with their own methods are alternate ways in.
 #
-# app/bounded_io.py RAISED to (5, 3) for the same reason the whole-tree ceiling
-# moved: it now owns the shared HTML input cap and its truncation helper. A
-# chokepoint's public surface is the contract, not sprawl -- two symbols that
-# only exist to be the one place input gets capped is the module doing its job,
-# and a narrower budget would have pushed the cap back out to a second home.
+# app/bounded_io.py LOWERED to (4, 2): read_capped_sync is gone. It existed only
+# for the document extractor's urllib path, and that path is now the shared pinned
+# httpx transport like every other fetch, so the module has one reader rather
+# than a sync one and an async one that nothing used side by side.
 #
 # app/api/response_shaping.py RAISED to (9, 8) for the same reason: `EnvelopeOptions`
 # is the one record the sync and async envelope builders both take, and it exists
@@ -805,7 +241,7 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
     "app/crawl/sqlite_store.py": (7, 5),
     "app/safe_regex.py": (7, 2),
     "app/crawl/robots.py": (13, 4),
-    "app/bounded_io.py": (5, 3),
+    "app/bounded_io.py": (4, 2),
     "app/crawl/decompression.py": (3, 1),
     "app/crawl/credentials.py": (3, 3),
     "app/crawl/render_options.py": (2, 2),
@@ -919,7 +355,8 @@ def _surface_budget_offenders(*, grown: bool) -> list[str]:
         under = surface_count < surface_budget or entry_count < entry_budget
         if over if grown else under:
             offenders.append(
-                f"{relative}: surface {surface_count}/{surface_budget}, entry points {entry_count}/{entry_budget}"
+                f"{relative}: surface {surface_count}/{surface_budget}, "
+                f"entry points {entry_count}/{entry_budget}"
             )
     return offenders
 
@@ -1216,7 +653,7 @@ def _bare_body_reads(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag an unbounded body acquisition on a response-like object.
 
     Both ``response.read()`` (no size arg) and ``response.content`` pull the
-    whole body into RAM. Capped reads go through app/bounded_io.read_capped_*;
+    whole body into RAM. Capped reads go through app.bounded_io.read_capped_async;
     curl_cffi's ``.body`` attribute and non-response reads (files, sockets)
     are not HTTP body acquisitions and stay exempt. Tree-wide: any module may
 
@@ -1247,14 +684,14 @@ def _is_response_like(node: ast.expr | None) -> bool:
 def test_no_bare_body_reads():
     """Every HTTP body read anywhere must be capped (N2 class).
 
-    Scope note: app/bounded_io.py IS the chokepoint and calls ``stream.read(n)``
-    (a sized read on a ``stream`` receiver) -- exempt by receiver, not path, so
-    it survives a tree-wide sweep. Widening kept precise on the response-object
-    convention to avoid flagging file/socket reads.
+    Scope note: app/bounded_io.py IS the chokepoint and streams the capped body
+    itself -- exempt by receiver, not path, so it survives a tree-wide sweep.
+    Widening kept precise on the response-object convention to avoid flagging
+    file/socket reads.
     """
     assert_trees_clean(
         _bare_body_reads,
-        "Use app.bounded_io.read_capped_sync/read_capped_async",
+        "Use app.bounded_io.read_capped_async",
         trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
     )
 
@@ -1420,7 +857,8 @@ def test_html_input_cap_is_declared_once():
     """
     assert_trees_clean(
         _local_html_input_caps,
-        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input instead of declaring a second HTML input cap",
+        "Import MAX_HTML_INPUT_BYTES and call bounded_io.truncate_html_input "
+        "instead of declaring a second HTML input cap",
         trees=app_trees(exclude=SANCTIONED | {"bounded_io.py"}),
     )
 
@@ -1671,7 +1109,7 @@ def _optional_host_policy_offenders(tree, path):
         for index, arg in enumerate(positional):
             if index >= len(positional) - len(args.defaults):
                 defaulted.add(arg.arg)
-        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults, strict=True):
             if default is not None:
                 defaulted.add(arg.arg)
         for arg in [*positional, *args.kwonlyargs]:
@@ -1682,7 +1120,9 @@ def _optional_host_policy_offenders(tree, path):
                 yield offender_at(
                     path,
                     arg,
-                    f"{getattr(node, 'name', '<lambda>')}: parameter {arg.arg!r} is a HostPolicy and is optional; a caller that omits the SSRF policy gets the default instead of a TypeError",
+                    f"{getattr(node, 'name', '<lambda>')}: parameter {arg.arg!r} is a HostPolicy and "
+                    r"is optional; a caller that omits "
+                    r"the SSRF policy gets the default instead of a TypeError",
                 )
 
 
@@ -1834,7 +1274,8 @@ def test_crawl_response_envelope_adapter_detector_bites():
     """A hand-rolled adapter fires; the owner module and the exempt producers stay clean."""
     fires = {
         "async def f(result):\n"
-        "    return await abuild_unified_crawl_response(result['results'], options=EnvelopeOptions(request_id=result['request_id']))\n": "abuild_unified_crawl_response",
+        "    return await abuild_unified_crawl_response(result['results'], "
+        "options=EnvelopeOptions(request_id=result['request_id']))\n": "abuild_unified_crawl_response",
         "def f(results):\n    return build_unified_crawl_response(results)\n": "build_unified_crawl_response",
     }
     assert_fires_once(
@@ -1854,7 +1295,8 @@ def test_crawl_response_envelope_adapter_detector_bites():
         _unsanctioned_envelope_adapter_offenders,
         (
             "async def f(request_id):\n"
-            "    return await abuild_unified_crawl_response([], options=EnvelopeOptions(request_id=request_id, success=False))\n",
+            "    return await abuild_unified_crawl_response([], "
+            "options=EnvelopeOptions(request_id=request_id, success=False))\n",
         ),
         REPO_ROOT / "app" / "api" / "async_crawl_runner.py",
     )
@@ -1972,7 +1414,8 @@ def test_readiness_counter_detector_bites():
     """A hand-rolled admit, and a hand-rolled release, both fire; the gate stays clean."""
     fires = {
         "def f():\n    readiness_state.begin_request()\n": "begin_request",
-        "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n": "end_request",
+        "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n":
+        "end_request",
         "def f():\n    return READINESS_STATE.end_request()\n": "end_request",
     }
     assert_fires_once(
@@ -2045,7 +1488,8 @@ def test_job_row_accumulator_detector_bites():
         _job_row_accumulator_offenders,
         path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
         fires={
-            'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", (job.visited,))\n': (
+            'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", '
+            '(job.visited,))\n': (
                 "visited"
             )
         },
@@ -2155,7 +1599,8 @@ def test_memory_cache_twin_detector_bites():
         fires={
             "class C:\n    async def aget(self, key):\n        with self._lock:\n"
             "            if key in self._memory_cache:\n"
-            "                return self._memory_cache[key][1]\n": "aget() reads/writes _memory_cache directly",
+            "                return self._memory_cache[key][1]\n":
+            "aget() reads/writes _memory_cache directly",
         },
         clean=("class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",),
     )
@@ -2439,7 +1884,8 @@ def _selector_contract_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
             offender_at(
                 path,
                 node,
-                f"{node.name} declares {declared} instead of carrying the pair in one {_SELECTOR_CARRIER_PARAM!r} value",
+                f"{node.name} declares {declared} instead of "
+                f"carrying the pair in one {_SELECTOR_CARRIER_PARAM!r} value",
             )
         )
     return offenders
@@ -2552,12 +1998,14 @@ def test_keyed_provider_flow_detector_bites():
             "    async def search(self, query, limit, timeout_seconds):\n"
             "        status, body = await self._request(query, limit, timeout_seconds)\n"
             "        return self._results(status, body, lambda p: p.get('organic'), url_key='link',\n"
-            "            title_key='title', description_key='snippet')\n": "re-spells the shared provider flow",
+            "            title_key='title', description_key='snippet')\n":
+            "re-spells the shared provider flow",
             "from app.search.providers import _ApiKeyProvider\n"
             "class TavilyProvider(_ApiKeyProvider):\n"
             "    name = 'tavily'\n"
             "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n": "does not define _items_of()",
+            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n":
+            "does not define _items_of()",
         },
         REPO_ROOT / "app" / "search" / "_synthetic.py",
     )
@@ -2697,10 +2145,8 @@ def _call_node_names(node: ast.AST) -> set[str]:
     names: set[str] = set()
     for child in nodes_of(node):
         if isinstance(child, ast.Call):
-            try:
+            with contextlib.suppress(Exception):
                 names.add(ast.unparse(child.func))
-            except Exception:
-                pass
     return names
 
 
@@ -3277,7 +2723,8 @@ def _ungated_job_visited_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
                 offender_at(
                     path,
                     commits[0],
-                    f"job.visited.add() without a transience gate -- route it through {_TRANSIENCE_GATE_NAMES[0]}()",
+                    f"job.visited.add() without a transience "
+                    f"gate -- route it through {_TRANSIENCE_GATE_NAMES[0]}()",
                 )
             )
     return offenders
@@ -3287,7 +2734,8 @@ def test_whole_site_visited_commit_is_transient_gated():
     """A transiently-failed whole-site URL is re-queued, never counted done."""
     assert_trees_clean(
         _ungated_job_visited_offenders,
-        "gate every job.visited.add on is_transient_classification() so transient failures are re-queued, not marked visited",
+        "gate every job.visited.add on is_transient_classification() "
+        "so transient failures are re-queued, not marked visited",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -3365,7 +2813,8 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
 def test_every_test_function_is_one_pytest_can_collect():
     assert_trees_clean(
         _uncollectible_tests,
-        "these test functions are silently never run; pytest collects only module-level tests and Test* class methods",
+        "these test functions are silently never run; pytest "
+        "collects only module-level tests and Test* class methods",
         trees=trees_under(TESTS_DIR),
     )
 
@@ -3379,7 +2828,8 @@ def test_uncollectible_test_detector_bites():
         # A method of a class pytest will not collect from.
         "class Cases:\n    def test_inner(self):\n        pass\n": "not a module-level test",
         # Two levels deep inside a class, still invisible.
-        "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n": "nested inside helper()",
+        "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n":
+        "nested inside helper()",
     }
     assert_fires_once(_uncollectible_tests, fires, path)
 
@@ -3851,7 +3301,9 @@ def _asdict_rebuild_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                     offender_at(
                         path,
                         unpacked[0],
-                        "asdict(...) unpacked into a constructor call: the nested dataclasses become dicts and the rebuilt object violates its declared field types -- use dataclasses.replace()",
+                        "asdict(...) unpacked into a "
+                        "constructor call: the nested dataclasses become dicts and "
+                        "the rebuilt object violates its declared field types -- use dataclasses.replace()",
                     )
                 )
                 break
@@ -3882,7 +3334,8 @@ def test_asdict_rebuild_detector_bites():
     clean = [
         "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    return json.dumps(data)\n",
         "import dataclasses\ndef f(s):\n    return dataclasses.asdict(s)['results']\n",
-        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    return data\n",
+        "import dataclasses\ndef f(s):\n    data = dataclasses.asdict(s)\n    data['x'] = 1\n    return "
+        "data\n",
     ]
     for src in clean:
         assert not _asdict_rebuild_offenders(ast.parse(src), path), src
@@ -4079,7 +3532,8 @@ def _hand_rolled_failed_result_offenders(tree, path):
 def test_no_hand_rolled_failed_results_outside_the_chokepoint():
     assert_trees_clean(
         _hand_rolled_failed_result_offenders,
-        "failed results with a hardcoded classification must go through _engine_result_from_exception (the single exception->result chokepoint)",
+        "failed results with a hardcoded classification must go through "
+        "_engine_result_from_exception (the single exception->result chokepoint)",
         trees=app_trees(exclude=SANCTIONED),
     )
 
@@ -4123,7 +3577,8 @@ def _unsanctioned_pool_exhaustion_catch_offenders(tree, path):
 def test_pool_exhaustion_catch_sites_are_sanctioned():
     assert_trees_clean(
         _unsanctioned_pool_exhaustion_catch_offenders,
-        "BrowserPoolExhaustedError may only be caught by the render transports (503 response) and the browser worker guard; the crawl path reads the browser_pool_exhausted classification",
+        "BrowserPoolExhaustedError may only be caught by the render transports (503 response) "
+        "and the browser worker guard; the crawl path reads the browser_pool_exhausted classification",
         trees=app_trees(exclude=SANCTIONED | _POOL_EXHAUSTION_CATCH_SANCTIONED),
     )
 
@@ -4227,7 +3682,8 @@ def _non_member_classification_offenders(tree, path, *, members=None):
         offender_at(
             path,
             node,
-            f"classification={value!r} is not a CrawlClassification member; add it to the enum (app/constants.py) or route through the classifier",
+            f"classification={value!r} is not a CrawlClassification member; "
+            r"add it to the enum (app/constants.py) or route through the classifier",
         )
         for node, _field, value in non_member_literals(
             (node, "classification", value, members)
@@ -4330,7 +3786,8 @@ def _non_member_strategy_offenders(tree, path, *, members=None):
             yield offender_at(
                 path,
                 node,
-                f"strategy={value.value!r} is not a CrawlStrategy member; pass a real member, or None when no strategy was attempted",
+                f"strategy={value.value!r} is not a CrawlStrategy "
+                f"member; pass a real member, or None when no strategy was attempted",
             )
 
 
@@ -4872,7 +4329,8 @@ def _normalize_or_none_offenders(tree, path):
                 yield offender_at(
                     path,
                     node,
-                    "normalize_public_http_url + except ValueError re-inlined; use app.validation.safe_public_url_or_none",
+                    "normalize_public_http_url + except ValueError "
+                    "re-inlined; use app.validation.safe_public_url_or_none",
                 )
 
 
@@ -5180,7 +4638,8 @@ def _robots_compile_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[st
             offender_at(
                 path,
                 node,
-                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through the per-host cache so a hostile robots.txt cannot evict another site's matchers",
+                f"{_ROBOTS_COMPILE} called outside {_ROBOTS_COMPILE_HOME}.get; route through "
+                f"the per-host cache so a hostile robots.txt cannot evict another site's matchers",
             )
         )
     return offenders
@@ -5287,7 +4746,8 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
         offender_at(
             path,
             node,
-            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; use the accessor so the instance stays bound to the running loop",
+            f"{node.id} touched outside {_SEMAPHORE_ACCESSOR}; "
+            f"use the accessor so the instance stays bound to the running loop",
         )
         for node in nodes_of_type(tree, ast.Name)
         if node.id in _SEMAPHORE_GLOBALS
@@ -5376,7 +4836,8 @@ def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
         offender_at(
             path,
             node,
-            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a retired-but-alive slot would strand in the pool and inflate the size budget",
+            f"{_DOC_POOL_ACQUIRER} no longer reaps retired slots; a "
+            f"retired-but-alive slot would strand in the pool and inflate the size budget",
         )
         for node in functions(tree)
         if node.name == _DOC_POOL_ACQUIRER and not _rebuilds_pool_without_retired(node)
@@ -6505,7 +5966,8 @@ def _sync_store_call_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
                     offender_at(
                         path,
                         inner,
-                        f"{ast.unparse(inner.func.value)}.{inner.func.attr} is synchronous; await the async twin",
+                        f"{ast.unparse(inner.func.value)}.{inner.func.attr} "
+                        f"is synchronous; await the async twin",
                     )
                 )
     return offenders
@@ -6538,7 +6000,8 @@ def _action_chain_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             offender_at(
                 path,
                 node,
-                "_run_action_chain runs without a budget, so a wedged action holds the browser pool slot for as long as it likes",
+                "_run_action_chain runs without a budget, so a "
+                "wedged action holds the browser pool slot for as long as it likes",
             )
         )
     return offenders
@@ -6632,7 +6095,9 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
                             offender_at(
                                 path,
                                 inner,
-                                f"{inner.func.id}() inside the worker's try: delivery is not a worker step, and a raising sink must not be answered with a failure envelope",
+                                f"{inner.func.id}() inside the worker's try: delivery is not a "
+                                f"worker step, and a "
+                                f"raising sink must not be answered with a failure envelope",
                             )
                         )
     return offenders
@@ -8295,7 +7760,8 @@ def test_documented_knob_detector_bites():
             "mapping lookup passes field name to reader": (
                 "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
                 "def broken(source):\n"
-                "    return get_mapping_int(source, ENVIRONMENT_FIELD_ALIASES['BROWSER_CRAWLER_LAZY_SCROLL_STEPS'], 3)\n",
+                "    return get_mapping_int(source, "
+                "ENVIRONMENT_FIELD_ALIASES['BROWSER_CRAWLER_LAZY_SCROLL_STEPS'], 3)\n",
                 1,
             ),
             "docstring-only mention": (
@@ -9348,7 +8814,8 @@ def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
                 yield offender_at(
                     path,
                     inner,
-                    f"{target.attr} is cleared to None in {node.name}() rather than {chokepoint}(); route the release through the chokepoint so every exit path clears the same set of fields",
+                    f"{target.attr} is cleared to None in {node.name}() rather than {chokepoint}(); route "
+                    f"the release through the chokepoint so every exit path clears the same set of fields",
                 )
 
 
@@ -9432,7 +8899,8 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
             yield offender_at(
                 path,
                 node,
-                "ToolSpec registers a tool without a request_model; the inputSchema and the call's argument validation are both derived from it, so a tool without one has no validated contract",
+                "ToolSpec registers a tool without a request_model; the inputSchema and the call's argument "
+                "validation are both derived from it, so a tool without one has no validated contract",
             )
     # The dispatcher must be the one validating, not the handlers.
     for node in functions(tree):
@@ -9443,7 +8911,8 @@ def _mcp_unvalidated_tool_offenders(tree, path, *, tools_module):
                 yield offender_at(
                     path,
                     inner,
-                    f"{node.name}() still derives a schema itself; the schema belongs to ToolSpec.input_schema, derived from the request model",
+                    f"{node.name}() still derives a schema itself; the "
+                    f"schema belongs to ToolSpec.input_schema, derived from the request model",
                 )
 
 
@@ -9558,7 +9027,8 @@ def _extraction_reach_past_offenders(tree: ast.AST, path: pathlib.Path) -> list[
                 offender_at(
                     path,
                     node,
-                    f"{name} is dispatched outside strategies/content_pipeline.py; run the mode chain through _run_extraction",
+                    f"{name} is dispatched outside "
+                    f"strategies/content_pipeline.py; run the mode chain through _run_extraction",
                 )
             )
     return offenders
@@ -9619,7 +9089,8 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
                 offender_at(
                     path,
                     node,
-                    f"{node.func.id} spells {', '.join(spelled)}; spread content_pipeline._discovery_result_fields instead",
+                    f"{node.func.id} spells {', '.join(spelled)}; "
+                    f"spread content_pipeline._discovery_result_fields instead",
                 )
             )
     return offenders
@@ -9780,12 +9251,14 @@ def test_protocol_constant_production_detector_bites():
         "__all__ = ['HEADER_MISMATCH', 'META_CLIENT_INFO']\n"
     )
     elsewhere = APP_ROOT / "mcp" / "protocol.py"
-    silent = _unproduced_protocol_constants(owner, [(elsewhere, ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))])
+    silent = _unproduced_protocol_constants(owner, [(elsewhere,
+    ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))])
     assert len(silent) == 1, silent
     assert "constants.py:2 META_CLIENT_INFO is declared but nothing in app/ reads it" in silent[0], silent
     both = _unproduced_protocol_constants(
         owner,
-        [(elsewhere, ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"))],
+        [(elsewhere,
+        ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"))],
     )
     assert not both, both
     # The vacuous direction: a registry the sweep cannot read is not a clean bill.
@@ -10030,7 +9503,10 @@ def test_comment_clone_detector_bites():
     once = detect(f"x = 1\n{repeated}y = 2\n")
     assert not once, once
     twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
-    assert len(twice) == 1 and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0], twice
+    assert (
+        len(twice) == 1
+        and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0]
+    ), twice
     # Two blocks of the same length but different text are two notes.
     assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
     # Two lines is a section rule, not a WHY to centralize.

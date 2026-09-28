@@ -17,19 +17,6 @@ class BodyTooLarge(Exception):
     """A stream exceeded its byte budget."""
 
 
-def read_capped_sync(stream, cap: int) -> bytes:
-    """Read at most ``cap`` bytes from a urllib/http.client-style stream.
-
-    Asks for cap+1 bytes so overflow is detected exactly: a full read of
-    cap+1 means the body is larger than the budget (N2 -- a hostile origin
-    serving an infinite .pdf body must OOM nothing).
-    """
-    data = stream.read(cap + 1)
-    if len(data) > cap:
-        raise BodyTooLarge(f"streamed body exceeds {cap}-byte cap")
-    return data
-
-
 async def read_capped_async(chunks: AsyncIterator[bytes], cap: int) -> bytes:
     """Consume an async byte stream, capped.
 
@@ -68,9 +55,8 @@ def truncate_html_input(html: str | None) -> str:
 
 
 __all__ = [
-    "BodyTooLarge",
     "MAX_HTML_INPUT_BYTES",
+    "BodyTooLarge",
     "read_capped_async",
-    "read_capped_sync",
     "truncate_html_input",
 ]
