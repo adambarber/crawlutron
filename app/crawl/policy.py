@@ -89,11 +89,17 @@ class DiscoveryFlags(NamedTuple):
 def discovery_flags(policy: CrawlPolicy) -> DiscoveryFlags:
     """Resolve a policy's discovery channels once, absence included.
 
-    The block is optional and each channel inside it defaults to on, so the
-    case that actually needs an answer is *absent*: a stored row written before
-    the field existed, and a caller who simply did not mention discovery, are
-    the same thing, and both mean off. Reading the optional block at each call
-    site is how that quietly becomes on instead.
+    Every channel defaults to off -- ``true`` is the only thing that turns one
+    on -- so an absent block and an explicit ``{"discovery": {}}`` are the same
+    policy and have to be the same answer: fetch nothing. A stored row written
+    before the field existed is absent too, so it lands here as well.
+
+    Deciding that here is the whole point of the function. Reading the optional
+    field at each call site is how the two answers drifted apart to begin with:
+    a defaulted lookup over the raw mapping could not tell an absent channel
+    from an explicit ``false``, and the block being optional meant a policy that
+    never mentioned discovery arrived as an empty mapping rather than as a model
+    whose declared defaults had something to say about it.
     """
     discovery = policy.discovery
     if discovery is None:
