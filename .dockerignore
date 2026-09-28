@@ -1,0 +1,33 @@
+# Build context is this directory: compose declares `context: .` from here, and
+# the Dockerfile's own header documents the same root for the standalone
+# `crawlutron` repo ("the repository root where this Dockerfile lives"). Every
+# pattern below is therefore context-relative, so this file is correct whether
+# the service sits in a monorepo subdirectory or is the repo root.
+#
+# An allowlist, not a denylist, for two reasons. The image is built from exactly
+# four sources (listed at the bottom), and an allowlist states that as a fact
+# rather than guessing what some future directory might weigh. And it cannot go
+# stale: the local-only trees this context used to ship -- .venv alone was 771 MB
+# of an 867 MB context, alongside cache/, logs/, tmp/, report/, .cortexkit/,
+# .mypy_cache/, .pytest_cache/ -- are all excluded by the leading `*` without
+# being named, so none of them needs a line here to stay out. Being wrong costs
+# a loud `COPY failed: not found`, never a silently missing file.
+#
+# The four sources, from the Dockerfile's own COPY lines:
+#   requirements.txt         builder, camoufox-binary
+#   app/                     runtime
+#   uvicorn-log-config.json  runtime
+#   requirements-dev.txt     development
+*
+!app/
+!app/**
+!requirements.txt
+!requirements-dev.txt
+!uvicorn-log-config.json
+!Dockerfile
+
+# `!app/**` re-admits local bytecode sitting beside the source, which the leading
+# `*` had already excluded, so it has to be excluded again after the negation.
+# These are stale .pyc files for sources edited since they were written.
+**/__pycache__/
+**/*.py[cod]
