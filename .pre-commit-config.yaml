@@ -47,6 +47,18 @@
 # command, and `scripts/gate` is an enforcement input, so a commit that edits
 # the helper runs the gates.
 #
+# This file is the only place a gate command is written. CI runs
+# `pre-commit run --all-files` rather than restating ruff, mypy, pyright and
+# jscpd, and `make lint` / `make typecheck` invoke hooks by id from here instead
+# of spelling out their own copies. The Makefile did not always: it carried a
+# second `ruff check app tests scripts` and a bare `mypy` that had already
+# drifted from these in both scope and interpreter, and nothing compared them,
+# because the contract tests covered CI and this file and the Makefile was not
+# one of the things under contract. It is now -- tests/
+# test_precommit_ci_contract.py fails if a recipe runs a gate tool directly, or
+# names a hook id this file does not declare, and the Makefile is in
+# ENFORCEMENT_INPUTS so editing it re-runs every gate below.
+#
 # These gates are ergonomics, not enforcement: CI's required status check is the
 # authority. Their value is that each one is whole-tree and fast, so a violation
 # surfaces while the change is still in context. `language: system` means no

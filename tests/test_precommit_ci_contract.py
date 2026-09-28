@@ -15,6 +15,11 @@ from _executables import BASH, GIT, require_executable
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
+# The developer Makefile. It is the one place outside CI that a person runs a
+# gate by hand, which makes it the most likely place for a gate to acquire a
+# second spelling: CI is held to the config by the tests below, and nothing was
+# holding the Makefile to anything.
+MAKEFILE_PATH = SERVICE_ROOT / "Makefile"
 WORKFLOW_PATH = SERVICE_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 # The config as the workflow must name it. The workflow is a repository-root
@@ -39,6 +44,12 @@ ENFORCEMENT_INPUTS = (
     "app/settings.py",
     "tests/test_jscpd_gate.py",
     "scripts/module_graph.py",
+    # The Makefile is a gate entry point: `make lint` and `make typecheck` run
+    # hooks out of the config. A commit that edits it can silently retarget or
+    # repoint a gate, so it belongs in the set of edits that must re-run
+    # enforcement. It was absent while the file still declared its own ruff and
+    # mypy commands, which is how those copies survived the contract tests.
+    "Makefile",
     # The gate entry point itself. Every hook resolves to this file, so a commit
     # that edits it changes what all five gates actually run -- exactly the
     # "the config that decides what is checked cannot itself be the one change
@@ -507,6 +518,125 @@ def assert_no_hook_command_rerun(workflow: str, hook_tools) -> None:
                     "enforcement already runs it; a duplicate is a second copy "
                     "that can drift from the gate"
                 )
+
+
+# How a gate tool may be spelled in a Makefile recipe, as a pattern rather than
+# a literal string. The interpreter prefix is deliberately not part of the match:
+# `$(PYTHON) -m ruff` and `.venv/bin/python -m ruff` are the same gate, and
+# pinning either spelling would let the other through -- which is the exact shape
+# of the drift this detects, since the two copies differed in their prefix and in
+# their arguments at once.
+#
+# `pytest` is absent on purpose. The hooks run pytest SUBSETS (the pyright budget
+# test, the safety invariants), while `make test` runs the whole suite, which is
+# CI's separate test surface rather than a duplicate of a hook. Requiring that to
+# delegate by id would be wrong, so the rule is scoped to the tools a hook owns
+# outright.
+GATE_TOOL_PATTERNS = (
+    r"-m\s+ruff\b",
+    r"-m\s+mypy\b",
+    r"_jscpd_gate\.py\b",
+    r"test_pyright_budget\.py\b",
+    r"test_safety_invariants\.py\b",
+)
+
+
+# How a Makefile recipe names a hook: either the resolved binary (`pre-commit`)
+# or the Makefile's own indirection to it. The variable is written `PRE_COMMIT`
+# and closed with `)`, so a pattern for the bare word would never match it and
+# every delegation would read as no delegation at all.
+MAKEFILE_HOOK_ID = re.compile(r"(?:\$\(PRE_COMMIT\)|\bpre-commit)\s+run\s+(\S+)")
+
+
+def _makefile_recipe_lines(makefile: str) -> list[tuple[str, str]]:
+    """`(target, command)` for every non-comment recipe line in a Makefile.
+
+    Comments are dropped because they are prose about a command rather than the
+    command: this file's own comment records the ruff invocation it no longer
+    runs, and a detector that read that would be reporting the explanation of the
+    fix as the defect. A `Makefile` is tab-indented, and a line starting with a
+    non-tab is a target or a variable.
+    """
+    lines: list[tuple[str, str]] = []
+    target = ""
+    for raw in makefile.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not raw[0].isspace():
+            target = stripped.rstrip(":").strip()
+            continue
+        lines.append((target, stripped))
+    return lines
+
+
+def _assert_no_gate_restated(makefile: str) -> None:
+    """No Makefile recipe runs a gate tool directly instead of by hook id.
+
+    The Makefile used to spell out `ruff check app tests scripts` and `mypy`,
+    which made it a second declaration of every gate -- and the two copies had
+    already drifted apart in both scope and interpreter before this was checked.
+    Delegating with `pre-commit run <id>` deletes the second copy rather than
+    documenting it, and the commands then live only in the config CI also reads.
+    """
+    for target, command in _makefile_recipe_lines(makefile):
+        for pattern in GATE_TOOL_PATTERNS:
+            assert not re.search(pattern, command), (
+                f"make target {target!r} runs a gate tool directly ({command!r}): "
+                "run it as `pre-commit run <hook-id>` so the command stays in "
+                ".pre-commit-config.yaml, which is the only declaration of it"
+            )
+
+
+def test_makefile_runs_gates_through_hook_ids_rather_than_restating_them() -> None:
+    _assert_no_gate_restated(MAKEFILE_PATH.read_text(encoding="utf-8"))
+
+
+def test_a_makefile_target_that_restates_a_hook_command_is_caught() -> None:
+    """Bites: putting a gate command back in a recipe fails the check."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    broken = makefile.replace(
+        'cd "$(SUITE_DIR)" && $(PRE_COMMIT) run ruff --all-files --config "$(HOOK_CONFIG)"',
+        'cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests scripts',
+    )
+    assert broken != makefile, "the delegation line this test rewrites is gone"
+    with pytest.raises(AssertionError):
+        _assert_no_gate_restated(broken)
+
+
+def test_every_hook_id_the_makefile_names_exists() -> None:
+    """A delegation is only a single source of truth if the id resolves.
+
+    Delegating by id replaces one drift with a quieter one: a renamed hook would
+    leave `make lint` reporting "hook not found" as a non-zero exit that reads
+    like a passing gate that did nothing.
+    """
+    config = CONFIG_PATH.read_text(encoding="utf-8")
+    known = {hook_id for hook_id, _ in _hook_blocks(config)}
+    referenced = {
+        hook_id
+        for _target, command in _makefile_recipe_lines(MAKEFILE_PATH.read_text(encoding="utf-8"))
+        for hook_id in MAKEFILE_HOOK_ID.findall(command)
+    }
+    assert referenced, "the Makefile is expected to delegate at least one gate by hook id"
+    assert referenced <= known, (
+        f"the Makefile names hook ids the config does not declare: "
+        f"{sorted(referenced - known)}; declared ids are {sorted(known)}"
+    )
+
+
+def test_a_makefile_target_naming_an_unknown_hook_id_is_caught() -> None:
+    """Bites: a stale hook id fails the check rather than exiting quietly."""
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    broken = makefile.replace("$(PRE_COMMIT) run mypy", "$(PRE_COMMIT) run mypy-renamed")
+    assert broken != makefile, "the delegation line this test rewrites is gone"
+    known = {hook_id for hook_id, _ in _hook_blocks(CONFIG_PATH.read_text(encoding="utf-8"))}
+    referenced = {
+        hook_id
+        for _target, command in _makefile_recipe_lines(broken)
+        for hook_id in MAKEFILE_HOOK_ID.findall(command)
+    }
+    assert referenced - known == {"mypy-renamed"}
 
 
 def _evasive_workflow(evasion: str) -> str:

@@ -4,6 +4,16 @@
 
 PYTHON ?= python3
 SUITE_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+HOOK_CONFIG := $(SUITE_DIR)/.pre-commit-config.yaml
+
+# The gates are declared once, in .pre-commit-config.yaml, and run from here by
+# hook id. pre-commit is resolved from the service's pinned .venv first, for the
+# same reason scripts/gate resolves the interpreter: a gate should run the tools
+# the project pins, not whatever happens to be on PATH. Overridable, as PYTHON is.
+# Declared below SUITE_DIR because `:=` expands immediately -- above it, the venv
+# path would resolve against an empty root and silently fall through to PATH.
+VENV_BIN := $(SUITE_DIR)/.venv/bin
+PRE_COMMIT ?= $(if $(wildcard $(VENV_BIN)/pre-commit),$(VENV_BIN)/pre-commit,pre-commit)
 
 .PHONY: help install test test-fast test-all lint typecheck clean
 
@@ -13,8 +23,8 @@ help:
 	@echo "  make test      - run the fast hermetic test suite (default pytest)"
 	@echo "  make test-fast - alias for 'make test'"
 	@echo "  make test-all  - run the full suite including browser-marked tests"
-	@echo "  make lint      - run ruff on the app/ and tests/ trees"
-	@echo "  make typecheck - run mypy on the app tree (required CI gate)"
+	@echo "  make lint      - run the ruff hook (the style gate)"
+	@echo "  make typecheck - run the mypy hook (the fail type gate)"
 	@echo "  make clean     - remove caches and build artifacts"
 
 install:
@@ -26,22 +36,34 @@ test test-fast:
 test-all:
 	cd "$(SUITE_DIR)" && $(PYTHON) -m pytest -o addopts=
 
-lint:
-	cd "$(SUITE_DIR)" && $(PYTHON) -m ruff check app tests scripts
-
-# Type-check with mypy (the fail gate). Pyright is the third opinion that finds
-# annotation lies mypy cannot see -- the `regex` package is untyped in mypy.ini and
-# degrades its values to Any -- and it is gated by the same budget test, in the
-# two places that actually run: as part of the pytest suite (`make test`) and as
-# the pre-commit `enforcement` hook, which analyses the tree on every commit
-# rather than on a schedule.
+# lint and typecheck run the pre-commit hooks by ID rather than restating their
+# commands. They used to spell the commands out, which made this file a second
+# declaration of every gate: a third entry point to one assertion, not a third
+# opinion, and a gate that lives in three places is three places to keep in step
+# when a rule moves. The drift had already happened -- `ruff check app tests
+# scripts` here against the hook's identical command, and a bare `mypy` here
+# against the hook's `mypy app` -- and the two disagreed about both the scope
+# and the interpreter, since this file ran whatever `python3` was on PATH while
+# every gate resolves the service's pinned .venv through scripts/gate.
+# Delegating by id deletes the duplication instead of documenting it, and the
+# commands now live in exactly one file: .pre-commit-config.yaml, which CI also
+# reads rather than re-declaring.
 #
-# It used to be invoked here a third time. That was a third entry point to one
-# assertion, not a third opinion, and a gate that lives in three places is three
-# places to keep in step when the budget moves. This target is mypy because that
-# is the only one of the two with no automated home.
+# tests/test_precommit_ci_contract.py is what keeps it that way: it fails if a
+# target here restates a hook command, and if a target names a hook id that does
+# not exist.
+lint:
+	cd "$(SUITE_DIR)" && $(PRE_COMMIT) run ruff --all-files --config "$(HOOK_CONFIG)"
+
+# Pyright is the third opinion that finds annotation lies mypy cannot see -- the
+# `regex` package is untyped in mypy.ini and degrades its values to Any -- and it
+# is gated by the same budget test, in the two places that actually run: as part
+# of the pytest suite (`make test`) and as the pre-commit `pyright` hook, which
+# analyses the tree on every commit rather than on a schedule. It has no target
+# here for the same reason it is not a third declaration of mypy: its budget
+# already has two homes and a moving one is a fourth.
 typecheck:
-	cd "$(SUITE_DIR)" && $(PYTHON) -m mypy
+	cd "$(SUITE_DIR)" && $(PRE_COMMIT) run mypy --all-files --config "$(HOOK_CONFIG)"
 
 # Module coupling report: fan-in hubs, fan-out reachers, and import cycles.
 # The ranked report is the work list for the splitting programme -- a file's size
