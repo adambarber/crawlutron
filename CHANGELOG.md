@@ -371,6 +371,57 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fields stated one default twice, in `Field()` and on the assignment; the
   default now lives on the assignment, once. Declared and OpenAPI schema
   defaults verified unchanged per model (`''`, `''`, `False`).
+- **The cycle guard is applied in one function, not once per container arm**
+  (app/models.py, tests/test_to_dict.py, tests/test_safety_invariants.py):
+  `_to_jsonable_impl` carried the descend-and-give-up sequence inline in all
+  three container arms, so the guard existed in four places while `_entered`'s
+  own docstring claimed "One function rather than three copies of the four
+  lines" — the dedup was intended and never finished, and the claim made it
+  worse, because a reader checking that sentence would have believed it.
+  `_build_guarded` owns the check and every arm routes through it, which is
+  what makes the guard structural: a new container kind arrives as a new
+  `isinstance` arm, and nothing about adding one makes the check mandatory
+  there. The dict and sequence arms also had no test of their own (the
+  existing cyclic-graph test breaks its cycle on re-entering a *dataclass*),
+  so both were carried by a guard nothing exercised.
+  `test_the_cycle_guard_is_applied_in_exactly_one_place` pins the single owner
+  across `app/`, proven red on the three inline sites.
+- **The `_meta` key rejection reason is authored once, and its wire strings
+  are pinned** (app/mcp/protocol.py, tests/mcp/test_mcp.py,
+  tests/test_safety_invariants.py): `validate_meta` checked two required
+  `_meta` keys and, for each, spelled out the same absent-versus-wrong-type
+  reason. Telling a client that forgot the key from one that sent the wrong
+  shape is the caller's only way to act on the correction (N-6), so the
+  sentence is a contract, and two copies can drift both ways at once: the arms
+  can stop agreeing on wording, or one can stop distinguishing the cases, with
+  the suite green either way. `_require_meta_key` owns the check for both
+  keys, and `label` is the type as the spec names it rather than the Python
+  class, because the string goes on the wire. No test asserted any of the four
+  messages before;
+  `test_meta_key_rejection_separates_absent_from_wrong_type` now pins all of
+  them over the real endpoint, and
+  `test_the_meta_key_rejection_reason_is_authored_once` matches the literal
+  rather than the shape so a re-spelled arm is reported as the drift it is.
+  `_enclosing_calls` is generalized into `_enclosing_nodes` so a detector can
+  read ownership of any node kind — a message string is a contract too, and
+  neither is reachable through `nodes_of`.
+- **A duplicated comment block is now visible to the suite**
+  (app/crawl/content_cache.py, tests/test_safety_invariants.py): the same
+  six-line note about the content cache's eviction window sat at both write
+  call sites, and the jscpd gate could not see it — jscpd matches tokens, so a
+  duplicated comment contributes nothing and the enforced 4/25 floor reported
+  it as zero clones. It was also wrong. It claimed the call "briefly releases
+  `self._lock` between the write and the eviction"; `_lock` is a plain
+  `threading.Lock` and both call sites invoke `_enforce_limits()` outside their
+  `with` block, so nothing is released — the window is the caller's release to
+  `_enforce_limits`' acquisition, and a caller holding the lock there would
+  deadlock. Two copies kept in step by hand had already drifted into
+  describing a mechanism the code does not have. The note now lives on
+  `_enforce_limits`, where its acquisition closes the window, stating the
+  corrected mechanism. `test_no_comment_block_is_written_twice` gates the whole
+  class — no contiguous three-line comment appears twice in `app/`, normalized
+  on whitespace because a re-indented copy is how these forks arrive, and
+  matched on consecutive lines so a blank line or a statement ends a block.
 
 ### Round 3 hardening (from REVIEW_ROUND3.md)
 - **Body-size middleware: keep-alive poisoning fixed** (app/main.py):
