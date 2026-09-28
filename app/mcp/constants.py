@@ -4,10 +4,26 @@ Values mirror the 2026-07-28 specification: the protocol is stateless, results
 carry a ``resultType``, list/discover results carry ``ttlMs`` + ``cacheScope``,
 and the reserved JSON-RPC error range ``-32020..-32099`` is used for
 protocol-defined errors.
+
+The mirror is of the codes this server can actually produce, not of the codes the
+specification numbers. A code nothing returns is not documentation: it reads as
+coverage from across the room, so a caller auditing the surface finds a value
+with no path to it, and a future edit that wires the code up will not be caught
+for having done so. ``MISSING_REQUIRED_CLIENT_CAPABILITY`` and
+``META_CLIENT_INFO`` were both such values -- the 2026-07-28 spec requires only
+``protocolVersion`` and ``clientCapabilities`` in ``_meta``, so nothing ever
+raised the one or read the other. ``test_every_protocol_constant_is_produced``
+holds the line.
 """
 
 from app.constants import SERVICE_ID, SERVICE_VERSION
 
+# The version this server implements, and the only one it accepts. Named apart
+# from the list because the two are different claims -- what we speak, and what we
+# will tolerate being sent -- and because the error path for an unsupported
+# version has to quote the supported set back to the caller. Not exported: the
+# supported list is what other modules consume, and a name in ``__all__`` that
+# nothing imports is a claim about the surface rather than a part of it.
 MCP_PROTOCOL_VERSION = "2026-07-28"
 SUPPORTED_PROTOCOL_VERSIONS = [MCP_PROTOCOL_VERSION]
 MCP_SERVER_NAME = SERVICE_ID
@@ -22,12 +38,10 @@ INTERNAL_ERROR = -32603
 
 # MCP-specified error codes (reserved sub-range -32020..-32099).
 HEADER_MISMATCH = -32020
-MISSING_REQUIRED_CLIENT_CAPABILITY = -32021
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 # Per-request / per-result metadata keys (see ``_meta`` in the spec).
 META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
-META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 
@@ -37,7 +51,6 @@ DISCOVER_TTL_MS = 3_600_000
 CACHE_SCOPE = "public"
 
 __all__ = [
-    "MCP_PROTOCOL_VERSION",
     "SUPPORTED_PROTOCOL_VERSIONS",
     "MCP_SERVER_NAME",
     "MCP_SERVER_VERSION",
@@ -47,10 +60,8 @@ __all__ = [
     "INVALID_PARAMS",
     "INTERNAL_ERROR",
     "HEADER_MISMATCH",
-    "MISSING_REQUIRED_CLIENT_CAPABILITY",
     "UNSUPPORTED_PROTOCOL_VERSION",
     "META_PROTOCOL_VERSION",
-    "META_CLIENT_INFO",
     "META_CLIENT_CAPABILITIES",
     "META_SERVER_INFO",
     "DEFAULT_TTL_MS",

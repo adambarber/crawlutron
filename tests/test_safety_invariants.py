@@ -9661,3 +9661,113 @@ def test_discovery_result_projection_has_exactly_one_definition():
     ]
     assert len(definitions) == 1, f"the discovery projection was defined again: {definitions}"
     assert "app/crawl/strategies/content_pipeline.py" in definitions[0], definitions
+
+
+_PROTOCOL_CONSTANTS_MODULE = "app/mcp/constants.py"
+
+
+def _module_level_assignment_lines(tree: ast.AST, names: Iterable[str]) -> dict[str, int]:
+    """Line of each named module-level assignment, for the offender label.
+
+    Distinct from :func:`_declared_public_symbols`, which reads the *declaration*
+    of the surface; this locates a name the surface already vouches for, so a
+    reader of the failure is handed the line to delete rather than a name to go
+    looking for.
+    """
+    wanted = set(names)
+    lines: dict[str, int] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in wanted:
+                lines[target.id] = node.lineno
+    return lines
+
+
+def _unproduced_protocol_constants(
+    owner_tree: ast.AST | None,
+    trees: Iterable[tuple[Path, ast.Module]],
+    *,
+    owner: str = _PROTOCOL_CONSTANTS_MODULE,
+) -> list[str]:
+    """Declared protocol constants that no other module under ``app/`` reads.
+
+    This surface is a set of *values other code can rely on*: a JSON-RPC code a
+    caller can be sent, a ``_meta`` key the server looks for. A declared value
+    nothing reads is not a spare part of that surface, it is a claim about it --
+    and an untested error code is worse than an absent one precisely because it
+    reads as coverage. Two sat in that state: ``MISSING_REQUIRED_CLIENT_CAPABILITY``,
+    which nothing ever raised, and ``META_CLIENT_INFO``, which nothing ever read,
+    because the 2026-07-28 spec requires only ``protocolVersion`` and
+    ``clientCapabilities`` in ``_meta``.
+
+    Reachability is the check rather than a reviewer's memory, because the
+    registry is where a spec addition goes to be *recorded* and the recording is
+    not the same act as implementing it. The reference sweep is the whole
+    ``app/`` tree -- a constant read from a module this test never heard of is
+    produced -- with the declaring module excluded from the reference side,
+    because its own assignments would otherwise satisfy the check for every
+    name in it, which is the defect spelled backwards.
+
+    ``__all__`` rather than every module-level assignment, reusing
+    :func:`_declared_public_symbols`, because ``__all__`` is the module's own
+    statement of the surface it offers and the claim under test is about that
+    surface. An unreadable declaration is itself a finding: a registry the sweep
+    cannot read is a registry nothing holds.
+    """
+    declared = None if owner_tree is None else _declared_public_symbols(owner_tree)
+    if declared is None:
+        return [f"{owner}: the protocol registry is not one literal __all__, so it cannot be swept"]
+    referenced: set[str] = set()
+    for path, tree in trees:
+        if relative_posix(path) == owner:
+            continue
+        referenced.update(node.id for node in nodes_of_type(tree, ast.Name))
+        referenced.update(node.attr for node in nodes_of_type(tree, ast.Attribute))
+    lines = _module_level_assignment_lines(owner_tree, declared)
+    offenders: list[str] = []
+    for name in sorted(declared):
+        if name in referenced:
+            continue
+        detail = f"{name} is declared but nothing in app/ reads it"
+        if name in lines:
+            offenders.append(offender(REPO_ROOT / owner, lines[name], detail))
+        else:
+            offenders.append(f"{owner} {detail}")
+    return offenders
+
+
+def test_every_protocol_constant_is_produced():
+    """app/mcp/constants.py declares only codes and keys the server can reach."""
+    _, owner_tree = file_tree(_PROTOCOL_CONSTANTS_MODULE)
+    offenders = _unproduced_protocol_constants(owner_tree, app_trees())
+    assert not offenders, "protocol constants with no production reader: " + ", ".join(offenders)
+
+
+def test_protocol_constant_production_detector_bites():
+    """An unread constant fires; reading it by name, or as an attribute, stays clean."""
+    owner = ast.parse(
+        "HEADER_MISMATCH = -32020\n"
+        "META_CLIENT_INFO = 'x'\n"
+        "__all__ = ['HEADER_MISMATCH', 'META_CLIENT_INFO']\n"
+    )
+    elsewhere = APP_ROOT / "mcp" / "protocol.py"
+    silent = _unproduced_protocol_constants(owner, [(elsewhere, ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))])
+    assert len(silent) == 1, silent
+    assert "constants.py:2 META_CLIENT_INFO is declared but nothing in app/ reads it" in silent[0], silent
+    both = _unproduced_protocol_constants(
+        owner,
+        [(elsewhere, ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"))],
+    )
+    assert not both, both
+    # The vacuous direction: a registry the sweep cannot read is not a clean bill.
+    unreadable = ast.parse("__all__ = compute()\n")
+    expected = f"{_PROTOCOL_CONSTANTS_MODULE}: the protocol registry is not one literal __all__"
+    for source in (unreadable, None):
+        offenders = _unproduced_protocol_constants(source, [(elsewhere, ast.parse(""))])
+        assert len(offenders) == 1 and expected in offenders[0], offenders
