@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import functools
 import zlib
 from typing import Protocol, cast
+
+import brotli
 
 
 class _BoundedDecompressor(Protocol):
@@ -142,32 +143,6 @@ def decompress_body(
     return _passthrough(decoded)
 
 
-@functools.lru_cache(maxsize=1)
-def _brotli_available() -> bool:
-    """Whether a brotli decoder can be imported in this process.
-
-    This module supports two incompatible brotli APIs (see
-    :func:`_decompress_brotli`) precisely because either may be the one
-    installed, so "no decoder" is a supported deployment, not a bug. The answer
-    belongs here rather than at the call sites because the module that owns the
-    capability is the one that should be asked about it: a request header that
-    advertises an encoding this process cannot decode asks a server for a body
-    it will then refuse, which fails the crawl for a reason the caller chose.
-
-    Private because it is an internal capability check for the header builder,
-    not part of this module's decompression API -- naming it publicly would
-    spend the tree's public-surface budget on a question only one caller asks.
-
-    Cached because availability cannot change inside a running process, and
-    this is consulted per request.
-    """
-    try:
-        import brotli
-    except ImportError:
-        return False
-    return brotli is not None
-
-
 def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_bytes: int) -> bytes | bytearray:
     """Decode a brotli body within a cap or raise a typed error.
 
@@ -177,11 +152,12 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
     discriminator and the cast records what that check just proved -- the decoder
     is typed ``object`` for exactly that reason. The Protocols document the two
     shapes, which ``hasattr`` on an ``object`` did not.
+
+    That ambiguity is about WHICH brotli is installed, not whether one is. The
+    module is a declared dependency, so there is no availability to probe: the
+    old ``try: import brotli`` here and the ``_brotli_available`` it fed existed
+    for a deployment that requirements.txt does not describe.
     """
-    try:
-        import brotli
-    except ImportError as error:
-        raise DecompressionError("brotli decoder is unavailable") from error
     try:
         decoder: object | None = brotli.Decompressor()
     except Exception:

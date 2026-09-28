@@ -16,7 +16,6 @@ import httpx
 
 from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
-from app.crawl import decompression
 from app.crawl.credentials import apply_credentials as _apply_credentials
 from app.crawl.strategies import cookie_jar
 from app.crawl.strategies.cookie_jar import _COOKIE_NAMESPACE
@@ -142,23 +141,19 @@ def _select_fingerprint(profile: Mapping[str, Any], domain: str) -> dict[str, st
 def _accept_encoding() -> str:
     """The encodings this process will actually decode.
 
-    ``br`` is conditional because the brotli decoder is an OPTIONAL dependency
-    (see :func:`app.crawl.decompression._brotli_available`). Naming it
-    unconditionally made every brotli-capable server -- most of the modern web
-    -- return a body this process would then refuse to decode, so the crawl
-    failed on a request we had chosen to make that way.
+    Every one of these is a declared dependency, so the list is a constant rather
+    than a capability probe. It was conditional on ``_brotli_available`` because
+    brotli was documented as optional, and a server that returned a brotli body
+    this process then refused to decode failed the crawl on a request we had
+    chosen to make -- which is the correct reason to stop declining ``br``, and
+    not one to keep declining it in a deployment that cannot exist.
 
-    Its own function rather than an inline branch in ``_headers_for_strategy``:
-    that builder is already at the tree's complexity ceiling, and a capability
-    decision worth making is worth naming.
-
-    The attribute lookup is late-bound on the module rather than a from-import,
-    so the capability stays the single source of truth at call time instead of
-    freezing one answer at import time.
+    Its own function rather than an inline constant: the builder that reads it is
+    at the tree's complexity ceiling, and the list is a claim about the decoder
+    set that a reader should be able to check against
+    ``app.crawl.decompression._DECODABLE_ENCODINGS`` in one place.
     """
-    if decompression._brotli_available():
-        return "gzip, deflate, br"
-    return "gzip, deflate"
+    return "gzip, deflate, br"
 
 
 def _headers_for_strategy(
