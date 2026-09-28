@@ -1,13 +1,16 @@
 """Payload helpers: policy construction, advertised limits and invalid-limit handling."""
 
+from typing import Any
+
 import pytest
 
+from app.api_models import CrawlPolicy
 from app.crawl.payload_helpers import _payload_policy
 from app.crawl.policy import PolicyTier
 from app.settings import CrawlerSettings
 
 
-def _normalized_policy(**policy) -> dict:
+def _normalized_policy(**policy: Any) -> CrawlPolicy:
     """``_payload_policy`` over a bare crawl payload, with default settings.
 
     Every test in this file is about one field of the normalized policy, and
@@ -15,6 +18,12 @@ def _normalized_policy(**policy) -> dict:
     envelope and the empty ``CrawlerSettings`` are written once here. A test
     that is about a *rejection* still gets the raise from the real entry point:
     the helper is called inside ``pytest.raises``, it does not swallow anything.
+
+    The return type is ``CrawlPolicy`` because that is what ``_payload_policy``
+    returns and what every assertion here reads ``.limits`` off. It was annotated
+    ``-> dict``, which made the whole file look like attribute access on a
+    mapping. The annotation was the only thing wrong with it, and it was wrong in
+    the one place that decides what the helper hands back.
     """
     return _payload_policy(
         {"url": "https://example.com/", "policy": policy},

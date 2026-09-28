@@ -5,6 +5,10 @@ rejection of "pathological" shapes is bypassable, and chokepoints only
 hold if bypassing them fails CI instead of code review. These AST walks
 verify the UNSAFE patterns are absent from app/ so reintroducing them
 turns the build red.
+
+This module is being split by theme into :mod:`tests.invariants`; the
+tree-wide sweep it shares with every check now lives in
+:mod:`tests.invariants._sweep`.
 """
 
 from __future__ import annotations
@@ -62,6 +66,7 @@ from tests.chokepoint_walks import (
     trees_excluding,
     trees_under,
 )
+from tests.invariants._sweep import assert_trees_clean
 from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Property
 
 __all__ = [
@@ -78,33 +83,6 @@ __all__ = [
     "offender",
     "trees_under",
 ]
-
-
-def assert_trees_clean(
-    detector: Callable[[ast.AST, Path], list[str]],
-    message: str,
-    *,
-    trees: Iterable[tuple[Path, ast.AST]] | None = None,
-) -> None:
-    """Sweep every module through `detector` and fail on the offenders it finds.
-
-    This is the tree-wide walk every invariant check in this file depends on, so
-    it is written once here rather than per detector. It used to be four lines
-    copied into each of ~60 tests -- declare the list, walk ``app_trees()``,
-    ``extend``, assert -- and a copy is exactly what makes a check that sweeps
-    nothing, or sweeps a hard-coded file list, look identical to one that sweeps
-    the tree the rule actually requires (see :func:`app_trees`).
-
-    ``trees`` defaults to the whole app tree; a check passes an explicit walker
-    only to exclude sanctioned modules, and the default is what makes a forgotten
-    sweep fail loudly rather than silently pass on an empty list.
-    """
-    offenders = [
-        offender
-        for path, tree in (app_trees() if trees is None else trees)
-        for offender in detector(tree, path)
-    ]
-    assert not offenders, f"{message}: {', '.join(offenders)}"
 
 
 # ---------------------------------------------------------------------------
