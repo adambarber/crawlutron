@@ -19,7 +19,7 @@ from tests._fetcher_factories import (
     routed_fetcher,
     scripted_fetcher,
 )
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy, normalized
 
 
 def _resp(status, body="", etag=None, last_modified=None, ctype="application/xml"):
@@ -422,7 +422,7 @@ def test_build_site_map_handles_dataclass_links():
 
     link = DiscoveredLink(
         url="https://r/page",
-        normalized_url="https://r/page",
+        normalized_url=normalized("https://r/page"),
         text="",
         rel=[],
         source_url="https://r/",
