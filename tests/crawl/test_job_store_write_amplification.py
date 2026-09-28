@@ -21,6 +21,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, JobStore
 from tests._job_harnesses import make_crawled_job_store, make_job_store
 
@@ -141,7 +142,7 @@ def _job_with_pages(store: JobStore, count: int) -> CrawlJobState:
     *would* have cost something to re-serialize, so the body is what the seed
     exists to carry.
     """
-    job = store.create("https://example.com/", {"limits": {}})
+    job = store.create("https://example.com/", CrawlPolicy())
     for i in range(count):
         url = f"https://example.com/p{i}"
         job.results.append({"url": url, "status": "success", "body": _BODY})

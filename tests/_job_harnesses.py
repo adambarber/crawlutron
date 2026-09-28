@@ -167,7 +167,7 @@ def single_shot_job(job_id: str = "test-id", root: str = "http://example.com/"):
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         store = make_job_store(tmpdir)
-        yield store, store.create_single_shot(job_id, root, {"test": "policy"})
+        yield store, store.create_single_shot(job_id, root, CrawlPolicy())
 
 
 def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobState]:

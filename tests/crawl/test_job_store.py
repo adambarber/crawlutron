@@ -108,7 +108,7 @@ def test_crawljobstate_serialization():
 def test_create_returns_full_uuid_hex():
     """HIGH #9: job IDs must not be short brute-forceable suffixes."""
     store = job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
-    job = store.create("https://example.com/", {"limits": {}})
+    job = store.create("https://example.com/", CrawlPolicy())
     assert len(job.job_id) == 32
     assert all(c in "0123456789abcdef" for c in job.job_id)
     loaded = store.load(job.job_id)
@@ -118,7 +118,7 @@ def test_create_returns_full_uuid_hex():
 
 def test_ids_are_unique():
     store = job_store(":memory:", policy=UNRESTRICTED_HOST_POLICY)
-    ids = {store.create("https://example.com/", {"limits": {}}).job_id for _ in range(50)}
+    ids = {store.create("https://example.com/", CrawlPolicy()).job_id for _ in range(50)}
     assert len(ids) == 50
 
 
@@ -346,7 +346,9 @@ def test_load_honors_an_explicitly_disabled_robots_limit(tmp_path):
     job = store.create("https://example.test/root", CrawlPolicy())
     write_row_policy(store, job.job_id, '{"limits":{"respect_robots":false}}')
 
-    limits = read_policy(store.load(job.job_id).policy).limits
+    loaded = store.load(job.job_id)
+    assert loaded is not None, "the row just written must load back"
+    limits = read_policy(loaded.policy).limits
 
     assert limits.respect_robots is False
     assert limits.timeout_seconds == CrawlerSettings.from_mapping({}).default_timeout_seconds

@@ -376,9 +376,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         from tests._job_harnesses import make_job_store
 
         store = make_job_store(str(tmp_path))
-        job = store.create_single_shot(
-            "crawl_loop_test", "http://example.com/", {"url": "http://example.com/"}
-        )
+        job = store.create_single_shot("crawl_loop_test", "http://example.com/", CrawlPolicy())
 
         liveness = _LoopLiveness()
         observed: list[int] = [-1]  # loop progress seen by the blocking save
