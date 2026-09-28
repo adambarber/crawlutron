@@ -58,7 +58,7 @@ def requeue_transient(
     *,
     depth: int,
     frontier: deque[tuple[int, CrawlTask]],
-    attempts: dict[str, int],
+        attempts: dict[NormalizedUrl, int],
 ) -> bool:
     """Re-queue a transiently-failed task to the frontier tail, up to the cap.
 
@@ -119,7 +119,7 @@ class _RecursiveState:
     next_index: int
     ramp: float
     page_count: int = 0
-    transient_requeues: dict[str, int] = field(default_factory=dict)
+    transient_requeues: dict[NormalizedUrl, int] = field(default_factory=dict)
 
     def make_admitted_task(self, link: AdmittedLink) -> tuple[int, CrawlTask]:
         task = CrawlTask(
