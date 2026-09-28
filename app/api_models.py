@@ -685,7 +685,7 @@ class SearchResultItem(BaseModel):
         description="Result URL, normalized to a public HTTP(S) URL. Private/loopback targets are dropped by the service."
     )
     title: str = Field(description="Result title from the search engine.")
-    description: Annotated[str, Field("", description="Result snippet from the search engine.")] = ""
+    description: Annotated[str, Field(description="Result snippet from the search engine.")] = ""
 
 
 class SearchResponse(BaseModel):
@@ -759,7 +759,6 @@ class ClassificationEvidence(BaseModel):
     context: Annotated[
         str,
         Field(
-            "",
             description="Short normalized context around the matched signature.",
         ),
     ] = ""
@@ -770,7 +769,7 @@ class DiscoveredLink(BaseModel):
     normalized_url: str = Field(
         description="Absolute public HTTP(S) URL resolved against the selected page final URL."
     )
-    text: Annotated[str, Field("", description="Visible anchor text after whitespace normalization.")] = ""
+    text: Annotated[str, Field(description="Visible anchor text after whitespace normalization.")] = ""
     rel: list[str] = Field(default_factory=list, description="Anchor rel tokens, when present.")
     source_url: str = Field(description="Final page URL where this link was discovered.")
     host: str = Field(description="Host for the normalized URL.")
@@ -1049,7 +1048,6 @@ class JobStatusResponse(BaseModel):
     cap_truncated: Annotated[
         bool,
         Field(
-            default=False,
             description="True only when a positive job max_pages cap refused or truncated eligible queued or discovered pages. Ordinary BATCH_SIZE chunking does not set it; already-admitted in-flight overcommit is reported separately in stats.cap_overcommitted.",
         ),
     ] = False

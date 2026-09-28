@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections.abc import Iterator
 from functools import cache
 
 import pytest
@@ -332,36 +333,65 @@ def test_pyright_config_targets_the_running_interpreter() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _annotated_field_calls(annotation: ast.expr | None) -> Iterator[ast.Call]:
+    """Every ``Field(...)`` written as metadata inside an ``Annotated[...]``.
+
+    The half of the pattern space the detector was blind to, and in this file the
+    larger half. ``x: Annotated[T, Field(<default>, ...)] = <default>`` states its
+    default twice and puts it in the slot a checker cannot see; reading only the
+    assignment's value missed every one of them, including two ``url``
+    re-declarations in ``app/api_models.py`` written exactly this way, one of them
+    carrying a comment that said it was inherited. A detector that sees one of two
+    spellings of a shape is not a detector of the shape.
+    """
+    if not (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)):
+        return
+    if annotation.value.id != "Annotated":
+        return
+    items = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+    for item in items:
+        if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id == "Field":
+            yield item
+
+
 def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | None = None) -> list[str]:
-    """``x: T = Field(<default>, ...)`` sites, which pyright reads as required.
+    """``Field(<default>, ...)`` sites, wherever the ``Field`` is written.
 
     Ellipsis (``Field(..., ...)``) is excluded because those fields really are
     required and pyright is right about them. ``default_factory=`` is excluded
-    because pyright resolves the factory, so its six documented suppressions are
-    a different question from a default it cannot see.
+    because pyright resolves the factory, so it is a different question from a
+    default pyright cannot see.
+
+    Both spellings are swept -- the default in the assignment's value
+    (``x: T = Field(None, ...)``) and in the annotation's ``Annotated`` metadata
+    (``x: Annotated[T, Field(None, ...)] = None``) -- because they are one rule,
+    and a detector that reads only one of them reports a clean tree over the
+    other without ever saying so.
     """
     found: list[str] = []
-    for _node, target, value in assignments(nodes_of_type(tree, ast.AST)):
-        if not isinstance(value, ast.Call):
-            continue
-        if not (isinstance(value.func, ast.Name) and value.func.id == "Field"):
-            continue
-        if any(key.arg == "default_factory" for key in value.keywords):
-            continue
-        if value.args:
-            default = value.args[0]
-        else:
-            default = next((key.value for key in value.keywords if key.arg == "default"), None)
-        if default is None or (isinstance(default, ast.Constant) and default.value is ...):
-            continue
-        where = f"{path.name}:" if path is not None else ""
-        found.append(
-            f"{where}{ast.unparse(target)} declares its default in Field()'s first "
-            f"positional slot; pyright reads that as no default, so the field looks "
-            f"required to every constructor call. Write "
-            f"Annotated[T, Field(...)] = <default>, or a bare = <default> when "
-            f"Field carries nothing else."
-        )
+    where = f"{path.name}:" if path is not None else ""
+    for node, target, value in assignments(nodes_of_type(tree, ast.AST)):
+        candidates: list[ast.expr] = [value] if isinstance(value, ast.Call) else []
+        candidates.extend(_annotated_field_calls(node.annotation if isinstance(node, ast.AnnAssign) else None))
+        for call in candidates:
+            if not (isinstance(call.func, ast.Name) and call.func.id == "Field"):
+                continue
+            if any(key.arg == "default_factory" for key in call.keywords):
+                continue
+            if call.args:
+                default = call.args[0]
+            else:
+                default = next((key.value for key in call.keywords if key.arg == "default"), None)
+            if default is None or (isinstance(default, ast.Constant) and default.value is ...):
+                continue
+            found.append(
+                f"{where}{ast.unparse(target)} declares its default inside Field(); pyright "
+                f"reads that slot as no default, so the field looks required to every "
+                f"constructor call -- and where the assignment repeats it, the two "
+                f"statements of one default can drift. Declare it once, on the "
+                f"assignment: Annotated[T, Field(...)] = <default>, or a bare = <default> "
+                f"when Field carries nothing else."
+            )
     return found
 
 
@@ -390,20 +420,34 @@ def test_pydantic_default_visibility_detector_bites() -> None:
         "class M(BaseModel):\n"
         '    robots: bool = Field(default=True, description="Honor robots.txt.")\n'
     )
+    # The spelling the detector used to be blind to: the default sits inside the
+    # Annotated metadata while the assignment repeats it, so one default is stated
+    # twice and either statement can be edited alone.
+    inside_annotated = (
+        "from typing import Annotated\n"
+        "from pydantic import BaseModel, Field\n"
+        "class M(BaseModel):\n"
+        '    context: Annotated[str, Field("", description="Context.")] = ""\n'
+    )
     assert_fires_once(
         _positional_field_default_offenders, {positional: "looks required"}, pathlib.Path("bites.py")
     )
     assert_fires_once(
         _positional_field_default_offenders, {keyword: "looks required"}, pathlib.Path("bites.py")
     )
+    assert_fires_once(
+        _positional_field_default_offenders, {inside_annotated: "can drift"}, pathlib.Path("bites.py")
+    )
     assert_stays_clean(
         _positional_field_default_offenders,
         (
-            # The form the fix produces: the default sits where pyright reads it.
+            # The form the fix produces: the default sits where pyright reads it,
+            # on the assignment, stated once.
             "from typing import Annotated\n"
             "from pydantic import BaseModel, Field\n"
             "class M(BaseModel):\n"
             '    etag: Annotated[str | None, Field(description="Origin ETag.")] = None\n'
+            '    context: Annotated[str, Field(description="Context.")] = ""\n'
             "    plain: str | None = None\n",
             # Ellipsis is really required, and pyright is right about it.
             "from pydantic import BaseModel, Field\n"
