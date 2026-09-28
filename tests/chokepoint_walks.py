@@ -49,6 +49,9 @@ import tokenize
 import weakref
 from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
+from typing import Any, TypeVar
+
+_NodeT = TypeVar("_NodeT", bound=ast.AST)
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
@@ -98,7 +101,29 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
     return cached
 
 
-def nodes_of_type(root: ast.AST, *types: type) -> tuple[ast.AST, ...]:
+def lineno(node: ast.AST) -> int:
+    """The source line of `node`.
+
+    ``ast.AST`` is the root of the hierarchy and declares only ``_fields`` and
+    ``_attributes``; ``lineno`` is declared on the subclasses (``stmt``,
+    ``expr``, ``pattern``, ...). So reading it off a walk result is a claim about
+    which kind of node the walk produced, and the type system is right to refuse
+    the claim rather than take it on faith.
+
+    The claim holds for every node ``ast.parse`` produces, which is all any
+    detector here ever holds, so this is the one place that gets to state it.
+    What was not previously true is that a false claim would be noticed: an
+    unchecked read raised ``AttributeError`` from inside a detector, which reads
+    as a broken detector instead of a broken call site, and a detector that
+    raises is one whose verdict nobody trusts.
+    """
+    line = getattr(node, "lineno", None)
+    if not isinstance(line, int):
+        raise TypeError(f"{type(node).__name__} carries no lineno")
+    return line
+
+
+def nodes_of_type(root: ast.AST, *types: type[_NodeT]) -> tuple[_NodeT, ...]:
     """``nodes_of`` narrowed to `types`, cached alongside it.
 
     The narrow walk and the type filter are one decision. Every detector spelled
@@ -107,6 +132,12 @@ def nodes_of_type(root: ast.AST, *types: type) -> tuple[ast.AST, ...]:
     what two detectors had in common. One parameterized funnel beats a named
     selector per node kind: the kinds are unbounded, and a zoo of one-line
     wrappers is the same sprawl with better ergonomics.
+
+    Generic in the node kind on purpose. The filter is a real narrowing, so
+    returning ``tuple[ast.AST, ...]`` made every caller re-assert what it had
+    just paid this walk to learn: detectors passing the result to a helper typed
+    for one node kind had to ``isinstance`` again or suppress the mismatch, and
+    the type a walk reports is the single most load-bearing fact in the file.
     """
     key = (root, types)
     cached = _TYPED_NODES_BY_ROOT.get(key)
@@ -161,10 +192,14 @@ def functions(root: ast.AST) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ..
     that each opened with an ``isinstance`` guard to drop it. Zero of them used
     it, so the lie only ever cost the guard.
     """
-    return nodes_of_type(root, ast.FunctionDef, ast.AsyncFunctionDef)  # ty: ignore[invalid-return-type]
+    return nodes_of_type(root, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
-_TYPED_NODES_BY_ROOT: dict[tuple[ast.AST, tuple[type, ...]], tuple[ast.AST, ...]] = {}
+# The value is `Any`-typed on purpose. A read is only ever paired with the
+# `types` that produced it, and the filter in `nodes_of_type` is a real
+# narrowing, so the generic return is sound; `Any` is how that is expressed
+# without a `cast` asserting the same thing less visibly on every read.
+_TYPED_NODES_BY_ROOT: dict[tuple[ast.AST, tuple[type, ...]], tuple[Any, ...]] = {}
 
 _STRUCTURAL_TOKENS = frozenset(
     {
@@ -437,7 +472,7 @@ def literal_keyword_membership_offenders(
     return [
         offender(
             path,
-            node.lineno,
+            lineno(node),
             f"{label}={value!r} is not a {type_name} member; {advice}",
         )
         for node, _field, value in non_member_literals(
@@ -635,7 +670,7 @@ def offender_at(path: pathlib.Path, node: ast.AST, *detail: str) -> str:
     line at any message length, and ``offender`` stays the one place the label
     is formatted.
     """
-    return offender(path, node.lineno, "".join(detail))
+    return offender(path, lineno(node), "".join(detail))
 
 
 def _static_string(expr: ast.AST, bindings: dict[str, str]) -> str | None:
@@ -649,8 +684,9 @@ def _static_string(expr: ast.AST, bindings: dict[str, str]) -> str | None:
         return left + right if left is not None and right is not None else None
     if isinstance(expr, ast.JoinedStr):
         parts = [_static_string(value, bindings) for value in expr.values]
-        if all(part is not None for part in parts):
-            return "".join(parts)
+        if any(part is None for part in parts):
+            return None
+        return "".join(part for part in parts if part is not None)
     return None
 
 
@@ -675,8 +711,10 @@ def _import_bindings(tree: ast.AST) -> dict[str, str]:
             value = node.value
             if value is None:
                 continue
-            canonical = "" if isinstance(value, ast.Call) else _resolved_expr(value, bindings)
-            canonical = canonical or _static_string(value, bindings)
+            # Two candidate spellings, and the second is the fallback for an
+            # empty first -- including for a call, which resolves to nothing.
+            named = "" if isinstance(value, ast.Call) else _resolved_expr(value, bindings)
+            canonical = named or _static_string(value, bindings)
             if not canonical:
                 continue
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
