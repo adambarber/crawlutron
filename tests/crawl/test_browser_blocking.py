@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -236,7 +237,7 @@ class _FakeResponse:
 
 
 async def test_response_handler_caps_entries_and_payload_size():
-    collected = []
+    collected: list[Any] = []
     handler = BrowserRenderer._make_response_handler(collected)
 
     # Over the entry cap: only the first max_entries (10) are kept.
@@ -263,7 +264,7 @@ async def test_response_handler_caps_the_url_it_retains():
     put ten megabytes of page-controlled text into result metadata, through a
     bound the module documented as covering the whole entry.
     """
-    collected = []
+    collected: list[Any] = []
     handler = BrowserRenderer._make_response_handler(collected)
     long_url = "https://x/api?" + "k" * 500_000
 
@@ -278,7 +279,7 @@ async def test_response_handler_caps_the_url_it_retains():
 
 
 async def test_response_handler_does_not_flag_a_url_within_the_cap():
-    collected = []
+    collected: list[Any] = []
     handler = BrowserRenderer._make_response_handler(collected)
 
     await handler(_FakeResponse("https://x/api/data", {"a": 1}))

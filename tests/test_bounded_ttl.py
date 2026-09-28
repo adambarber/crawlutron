@@ -1,13 +1,15 @@
 """BoundedTTLCache contract: lock-inside, TTL, LRU eviction (chokepoint #1)."""
 
+from typing import Any
+
 from app.bounded_ttl import BoundedTTLCache
 from tests._thread_fanout import run_thread_fanout
 
 
 def _lru_with_a_b():
     """BoundedTTLCache (max_entries=2) pre-loaded with a and b."""
-    clock = {"now": 1000.0}
-    cache = BoundedTTLCache(max_entries=2, ttl=100.0, clock=lambda: clock["now"])
+    clock: dict[str, float] = {"now": 1000.0}
+    cache = BoundedTTLCache[str, Any](max_entries=2, ttl=100.0, clock=lambda: clock["now"])
     cache.put("a", 1)
     cache.put("b", 2)
     return cache
@@ -15,8 +17,8 @@ def _lru_with_a_b():
 
 class TestContract:
     def test_get_put_roundtrip_and_ttl_expiry(self):
-        clock = {"now": 1000.0}
-        cache = BoundedTTLCache(max_entries=4, ttl=10.0, clock=lambda: clock["now"])
+        clock: dict[str, float] = {"now": 1000.0}
+        cache = BoundedTTLCache[str, Any](max_entries=4, ttl=10.0, clock=lambda: clock["now"])
         cache.put("a", 1)
         assert cache.get("a") == 1
         clock["now"] += 10.0  # exactly at expiry boundary: engines treat
@@ -32,8 +34,8 @@ class TestContract:
         assert cache.get("a") is None
 
     def test_get_stale_returns_expired_entries_for_304_reuse(self):
-        clock = {"now": 1000.0}
-        cache = BoundedTTLCache(max_entries=4, ttl=10.0, clock=lambda: clock["now"])
+        clock: dict[str, float] = {"now": 1000.0}
+        cache = BoundedTTLCache[str, Any](max_entries=4, ttl=10.0, clock=lambda: clock["now"])
         cache.put("u", (["/p1"], "v1", None))
         clock["now"] += 60.0  # expired
         assert cache.get("u") is None  # freshness still enforced on get
@@ -50,8 +52,8 @@ class TestContract:
         assert cache.get("c") == 3
 
     def test_purge_expired_returns_count(self):
-        clock = {"now": 1000.0}
-        cache = BoundedTTLCache(max_entries=8, ttl=10.0, clock=lambda: clock["now"])
+        clock: dict[str, float] = {"now": 1000.0}
+        cache = BoundedTTLCache[str, Any](max_entries=8, ttl=10.0, clock=lambda: clock["now"])
         cache.put("a", 1)
         cache.put("b", 2, ttl=100.0)
         clock["now"] += 20.0
@@ -66,7 +68,7 @@ class TestContract:
         assert cache.get("a") is None
 
     def test_concurrent_put_get_are_consistent(self):
-        cache = BoundedTTLCache(max_entries=256, ttl=100.0)
+        cache = BoundedTTLCache[str, Any](max_entries=256, ttl=100.0)
 
         def worker(i: int) -> None:
             for round_ in range(200):

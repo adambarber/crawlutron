@@ -2,6 +2,7 @@
 
 import time
 import urllib.error
+from typing import Any
 
 import pytest
 
@@ -104,7 +105,7 @@ def test_seed_freshness_uses_real_default_strategies():
 
     url = "http://seed-fresh.test/page"
     # Normalized shape but no strategies key: the default must apply.
-    policy = {"headers": {}, "request_profile": {}}
+    policy: dict[str, Any] = {"headers": {}, "request_profile": {}}
     expected_key = _content_cache_key(
         url,
         HTTP_DECLARED_CRAWLER,

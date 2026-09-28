@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections import defaultdict
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 
@@ -37,7 +40,7 @@ def _call_edges(
     modules: tuple[tuple[pathlib.Path, ast.Module], ...],
     index: dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]],
 ) -> dict[str, set[str]]:
-    edges = {name: set() for name in index}
+    edges: dict[str, set[str]] = {name: set() for name in index}
     for name, candidates in index.items():
         if len(candidates) != 1:
             continue
@@ -97,7 +100,7 @@ def discover_host_policy_entry_points(
 ) -> set[str]:
     index = _module_definition_index(modules)
     edges = _call_edges(modules, index)
-    reverse = {name: set() for name in index}
+    reverse: dict[str, set[str]] = {name: set() for name in index}
     for caller, callees in edges.items():
         for callee in callees:
             reverse[callee].add(caller)
@@ -193,7 +196,23 @@ def _refused_result(result) -> bool:
     return result is None
 
 
-async def _assert_refused(awaitable, effects: dict[str, list]) -> None:
+def _effects() -> defaultdict[str, list[Any]]:
+    """An empty recorder for the "this must never be reached" lists.
+
+    The refusal tests all need the same thing: somewhere to record what the
+    refused code would have done, so the refusal is proven by the list staying
+    empty rather than by the absence of an exception. Eight sites spelled that out
+    as a hand-built dict literal, each declaring its keys up front -- while the
+    one assertion that consumes them never names a key and only walks whatever
+    got recorded. So those key lists were ceremony: a test could declare
+    ``{"webhook": []}``, record under ``"wire"``, and still pass, with the
+    declared key never read by anything. Here a key exists only if something was
+    recorded, so the recorder and the assertion cannot drift apart.
+    """
+    return defaultdict(list)
+
+
+async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
     try:
         result = await awaitable
     except (ValueError, RuntimeError):
@@ -215,7 +234,8 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
     from app.api_models import CrawlRequest
 
     background_tasks = BackgroundTasks()
-    effects = {"persisted": [], "queued": background_tasks.tasks}
+    effects = _effects()
+    effects["queued"] = background_tasks.tasks
     job_store = type(
         "Store", (), {"create_single_shot": lambda self, *args: effects["persisted"].append(args)}
     )()
@@ -235,7 +255,7 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
 async def _probe_crawl_executor(monkeypatch, tmp_path):
     from app.api import crawl_executor
 
-    effects = {"fetched": []}
+    effects = _effects()
 
     async def denied_crawl_request(payload, **kwargs):
         if payload.get("url") != _BLOCKED_URL:
@@ -257,7 +277,7 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
     from app.api import jobs_router
     from app.api_models import JobCreateRequest
 
-    effects = {"persisted": [], "started": []}
+    effects = _effects()
     job_store = type(
         "Store",
         (),
@@ -282,7 +302,7 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
     from app.api import map_endpoint
     from app.api_models import MapRequest
 
-    effects = {"fetched": []}
+    effects = _effects()
 
     async def denied_execute(payload, **kwargs):
         if payload.get("url") != _BLOCKED_URL:
@@ -303,7 +323,7 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
 async def _probe_render(monkeypatch, tmp_path):
     from app.api.render import render_request
 
-    effects = {"worker": []}
+    effects = _effects()
 
     async def worker(job):
         effects["worker"].append(job.url)
@@ -320,7 +340,7 @@ async def _probe_async_runner(monkeypatch, tmp_path):
 
     from app.api import async_crawl_runner
 
-    effects = {"webhook": []}
+    effects = _effects()
     # The REAL stores, not doubles: a hand-rolled `type("Store", ...)` drifted
     # the moment a call site moved to the async twin and reported a contract
     # change as an AttributeError, which is noise, not a finding. A real store
@@ -362,7 +382,7 @@ async def _probe_response_shaping(monkeypatch, tmp_path):
 async def _probe_webhook(monkeypatch, tmp_path):
     from app.api import webhooks
 
-    effects = {"wire": []}
+    effects = _effects()
 
     async def forbidden_delivery(*args, **kwargs):
         effects["wire"].append(args)
@@ -379,7 +399,7 @@ async def _probe_webhook_delivery(monkeypatch, tmp_path):
 
     from app.api import webhooks
 
-    effects = {"wire": []}
+    effects = _effects()
 
     def forbidden_client(*args, **kwargs):
         effects["wire"].append(args)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import threading
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -533,7 +534,7 @@ async def _run_diag(calls, *, engine_robots_sitemaps):
 
 
 async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
-    calls = []
+    calls: list[Any] = []
     diag = await _run_diag(calls, engine_robots_sitemaps=["https://x.test/sitemap.xml"])
     # robots.txt must NOT be fetched again; the engine-provided sitemaps are used.
     assert "https://x.test/robots.txt" not in calls
@@ -547,7 +548,7 @@ async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
 
 
 async def test_discovery_fetches_robots_when_no_sitemaps_passed():
-    calls = []
+    calls: list[Any] = []
     diag = await _run_diag(calls, engine_robots_sitemaps=None)
     # Without engine-provided sitemaps, robots.txt is fetched as before.
     assert "https://x.test/robots.txt" in calls

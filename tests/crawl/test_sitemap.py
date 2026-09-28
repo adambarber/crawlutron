@@ -3,6 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from functools import partial
+from typing import Any
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
@@ -46,7 +47,7 @@ async def test_304_reuses_cached_urls_without_reparsing():
         ([("http://x.test/p1", None)], "v1", None),
         ttl=-1.0,
     )
-    calls = []
+    calls: list[Any] = []
 
     def respond(u, headers):
         if headers.get("If-None-Match") == "v1":

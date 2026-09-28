@@ -5,6 +5,8 @@ matching URLs are revalidated with If-None-Match / If-Modified-Since and an
 unchanged page yields a not_modified result without a full body fetch.
 """
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -44,7 +46,7 @@ def _ok_fetcher(headers_out, body=b"hello", extra_headers=None):
 
 
 async def test_caller_validators_sent_as_conditional_headers():
-    captured = {}
+    captured: dict[str, Any] = {}
     fetcher = _ok_fetcher(captured, extra_headers={"etag": '"v1"'})
     await _run_http(
         fetcher,
@@ -58,7 +60,7 @@ async def test_caller_validators_sent_as_conditional_headers():
 
 
 async def test_no_validators_means_no_conditional_headers():
-    captured = {}
+    captured: dict[str, Any] = {}
     await _run_http(_ok_fetcher(captured))
     assert "If-None-Match" not in captured
     assert "If-Modified-Since" not in captured

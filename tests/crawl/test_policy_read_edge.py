@@ -18,6 +18,8 @@ report the problem, so the repair has to be right rather than loud.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -177,7 +179,7 @@ class TestValidateWirePolicyRejects:
         assert validated.limits.max_depth == 2
 
     def test_the_callers_mapping_is_not_mutated(self):
-        raw = {"limits": {}}
+        raw: dict[str, Any] = {"limits": {}}
 
         validate_wire_policy(raw)
 

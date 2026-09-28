@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 ROUTE_ARG_UNSET = object()
 
@@ -10,9 +11,9 @@ class BrowserFakePage:
     """
 
     def __init__(self, url: str = "http://1.2.3.4/"):
-        self.goto_calls = []
-        self.route_calls = []
-        self.set_extra_http_headers_calls = []
+        self.goto_calls: list[tuple[str, dict[str, Any]]] = []
+        self.route_calls: list[tuple[Any, Any]] = []
+        self.set_extra_http_headers_calls: list[dict[str, str]] = []
         self.url = url
 
     async def route(self, pattern, handler):

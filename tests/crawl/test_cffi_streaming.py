@@ -314,7 +314,7 @@ class _FakeCffiResponse:
     def __init__(self, body: bytes, *, chunk_size=1024):
         self.status_code = 200
         self.url = "http://example.test/page"
-        self.headers = {}  # no content-length: chunked-style body
+        self.headers: dict[str, str] = {}  # no content-length: chunked-style body
         self.elapsed = 0.01
         # The fetcher consumes queue items directly (the aiter_content
         # wrapper is bypassed because its aclose wedges on aborted streams).

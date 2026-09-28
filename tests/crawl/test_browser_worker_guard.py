@@ -79,7 +79,7 @@ class TestTransientRequeue:
             normalized_url=normalized("http://a.example/x"),
             domain="a.example",
         )
-        frontier = deque()
+        frontier: deque[tuple[int, CrawlTask]] = deque()
 
         # A first exhaustion is re-queued to the tail.
         assert requeue_transient(task, depth=1, frontier=frontier, attempts={}) is True
