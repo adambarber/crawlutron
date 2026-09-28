@@ -90,7 +90,12 @@ class TestDefaultCoercionNeverBlowsUp:
         monkeypatch.delenv("BROWSER_CRAWLER_TEST_FLOAT", raising=False)
         assert get_env_int("BROWSER_CRAWLER_TEST_INT", None) == 0
         assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", None) == 0.0
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", object()) == 0
+        # "abc" rather than a synthetic object: an unparseable string is a real
+        # default (a typo'd env var or a hand-edited mapping) and is the case
+        # `_as_int_default` documents by name. `object()` stood in for "not a
+        # number" with a value no caller can actually produce, so the assertion
+        # proved the try/except rather than the contract.
+        assert get_env_int("BROWSER_CRAWLER_TEST_INT", "abc") == 0
 
     def test_valid_env_value_still_wins_over_default(self, monkeypatch):
         monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", "0.25")

@@ -475,7 +475,15 @@ def _mapping_number(
 def get_mapping_int(
     mapping: Mapping[str, str],
     name: str,
-    default: int,
+    # The set a config default can actually be, not `int`. A default arrives
+    # from a settings mapping or an environment string, so it is a number, a
+    # string, or nothing -- and an unparseable one is a documented input, which
+    # is why `_as_int_default` is unannotated and enumerates the junk it absorbs
+    # (None, "abc", inf, nan). `int` said the opposite of the body and of the
+    # docstring three lines below. Coercion stays total in the body, so a
+    # wrongly-typed default is still absorbed rather than raised; this says what
+    # the edge promises, not that it is defensively unreachable.
+    default: int | float | str | None,
     *,
     lo: int | None = None,
     hi: int | None = None,
@@ -520,7 +528,13 @@ def get_mapping_int(
 
 
 def get_mapping_float(
-    mapping: Mapping[str, str], name: str, default: float, *, lo: float | None = None, hi: float | None = None
+    mapping: Mapping[str, str],
+    name: str,
+    # The same real set as the int face, for the same reason.
+    default: int | float | str | None,
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
 ) -> float:
     """Read a float from a mapping, or from the environment; never crash,
     always a finite float.
