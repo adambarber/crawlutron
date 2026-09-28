@@ -5176,21 +5176,30 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     # here instead was a second statement of which values are members, in the one
     # file whose job is to prove membership -- the worst place for a copy to live.
     member_engine_result = asdict(engine_result("http://a/", "rendered"))
-    member_crawl_result = {
-        "url": "http://a/",
-        "status": "success",
-        "classification": "rendered",
-        "final_url": None,
-        "html": None,
-        "text": None,
-        "attempts": 1,
-        "elapsed_ms": 0,
-        "domain": "example.com",
-    }
+    # Built, not spelled. A hand-written block of nine member values was a second
+    # statement of which strings are members -- unverified, in the one file whose
+    # job is to prove membership -- and a dict literal infers `int | str | None`
+    # per value, so the splat below was unchecked at every field. Constructing the
+    # result directly hands each value to the field's own type, so the all-member
+    # build is checked against the taxonomy it is a sample of. `asdict` is what
+    # makes the override splat below splat.
+    member_crawl_result = CrawlResult(
+        url="http://a/",
+        status="success",
+        classification="rendered",
+        final_url=None,
+        html=None,
+        text=None,
+        attempts=1,
+        elapsed_ms=0,
+        domain="example.com",
+    )
+    member_crawl_result_fields = asdict(member_crawl_result)
 
     # A direct construction with all-member values is accepted: the gate must
     # not reject legitimate direct builds (tests and the primitives both do it).
-    CrawlResult(**member_crawl_result)
+    # The construction above is that check -- every field was checked against its
+    # own type to get here.
     CrawlStrategyAttempt(
         strategy="BROWSER_HEADLESS",
         status="success",
@@ -5212,7 +5221,7 @@ def test_result_construction_enforces_membership_at_the_dataclass():
     with pytest.raises(ValueError, match=r"\.error="):
         CrawlResult(
             **{
-                **member_crawl_result,
+                **member_crawl_result_fields,
                 "status": "failed",
                 "classification": "network_error",
                 "error": "worker_failed",
