@@ -39,13 +39,19 @@ def assert_trees_clean(
     ``trees`` defaults to the whole app tree; a check passes an explicit walker
     only to exclude sanctioned modules, and the default is what makes a forgotten
     sweep fail loudly rather than silently pass on an empty list.
+
+    The offenders are appended to ``message`` separated by ``; ``, so a caller
+    writes one sentence of consequence and lets the sweep supply the evidence.
+    The separator is a semicolon because every offender is already a complete
+    sentence. It was a comma until a check whose message needed re-joining by
+    hand could not use this at all and copied the walk instead -- four had.
     """
     offenders = [
         hit
         for path, tree in (app_trees() if trees is None else trees)
         for hit in detector(tree, path)
     ]
-    assert not offenders, f"{message}: {', '.join(offenders)}"
+    assert not offenders, f"{message}: {'; '.join(offenders)}"
 
 
 def _enclosing_nodes(tree: ast.AST, matches: Callable[[ast.AST], bool]) -> list[tuple[ast.AST, str]]:

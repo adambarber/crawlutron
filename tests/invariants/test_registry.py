@@ -430,12 +430,45 @@ def test_doubles_do_not_accept_and_drop_kwargs():
     shape, because the doubles accepted the new kwarg and dropped it."""
     from tests.membership_gate import swallowing_test_double_offenders
 
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        offenders.extend(swallowing_test_double_offenders(tree, path))
-    assert not offenders, (
+    assert_trees_clean(
+        swallowing_test_double_offenders,
         "bind the production kwarg by name or forward **kwargs to the real callable; a"
-        " double that drops it implements a contract that no longer exists: " + "; ".join(offenders)
+        " double that drops it implements a contract that no longer exists",
+        trees=trees_under(TESTS_DIR),
+    )
+
+
+def test_failed_result_binding_detector_bites():
+    """Bites: the shape that shipped, and the two ways the rule could go dead.
+
+    The real offender is a scheduler double whose ``run`` takes the scheduler's
+    positional arguments and then declares only ``**kwargs``, so the envelope
+    argument has nowhere to land. The quiet cases are the ones that would make
+    the rule a false alarm: a ``run`` with no scheduler-shaped signature at all
+    is not a scheduler double, and a method that does bind the name is the
+    property being asserted.
+
+    The positional arguments are built from the real signature rather than typed
+    out, for the same reason the detector reads them: a double that mirrors two of
+    three real parameters is not a scheduler double, and spelling the tuple here
+    would have kept this test green against a rule that had stopped recognising
+    the shape that actually shipped.
+    """
+    path = REPO_ROOT / "tests" / "_synthetic.py"
+    positionals = ", ".join(_scheduler_run_positional_names())
+    drops = ast.parse(f"class _S:\n    async def run(self, {positionals}, **kwargs):\n        return {{}}\n")
+    found = _failed_result_binding_offenders(drops, path)
+    assert len(found) == 1 and "failed_result" in found[0], found
+
+    binds = ast.parse(
+        f"class _S:\n    async def run(self, {positionals}, *, failed_result=None, **kwargs):\n"
+        "        return {}\n"
+    )
+    assert not _failed_result_binding_offenders(binds, path)
+
+    unrelated = ast.parse("def run(a, b, **kwargs):\n    return 1\n")
+    assert not _failed_result_binding_offenders(unrelated, path), (
+        "a run that does not take the scheduler's own positional arguments is not a scheduler double"
     )
 
 
@@ -468,28 +501,70 @@ def test_swallowing_double_detector_bites():
     assert not swallowing_test_double_offenders(unrelated, REPO_ROOT / "tests" / "_synthetic.py")
 
 
+def _scheduler_run_positional_names() -> tuple[str, ...]:
+    """The real ``DomainScheduler.run`` positional parameter names, in order.
+
+    Read from ``app/scheduler.py`` rather than typed, because both the count and
+    the names are what tell a scheduler double from an unrelated function that
+    happens to be called ``run`` -- and a hand-kept tuple goes stale the moment a
+    parameter is added to the real signature, at which point the detector is
+    guarding a shape that no longer exists, and the bite test is asserting against
+    a signature the service stopped having. ``self`` is dropped because a double
+    is matched on the arguments a caller passes, and whether it is a method is not
+    part of that.
+    """
+    tree = ast.parse((REPO_ROOT / "app" / "scheduler.py").read_text(encoding="utf-8"))
+    for node in nodes_of(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
+            args = node.args
+            return tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
+    raise AssertionError("app/scheduler.py no longer has a run(); the rule it backs is unverifiable")
+
+
+def _failed_result_binding_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A scheduler-shaped ``run()`` that does not bind ``failed_result``.
+
+    "Scheduler-shaped" means as many positional parameters as the real
+    ``DomainScheduler.run`` and a ``**kwargs`` to absorb the rest -- which is the
+    whole failure this rule exists for: a double that mirrors the real positional
+    arguments and then swallows the keyword-only ones, so the result envelope the
+    pipeline supplies has nowhere to land. Counting against the production
+    signature rather than naming two parameters is what keeps a plain ``def
+    run(a, b, **kwargs)`` out of the report; it is a utility, not a scheduler.
+
+    A detector rather than an inline loop because the walk, the offender
+    formatting and the failure message are ``assert_trees_clean``'s job, and
+    because a check carrying its own walk is a check whose sweep can drift from
+    the tree the rule is about. Extracted, it is callable against a synthetic
+    module, which is what makes it provable.
+    """
+    scheduler_shaped = _scheduler_run_positional_names()
+    offenders: list[str] = []
+    for node in nodes_of(tree):
+        if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run"):
+            continue
+        args = node.args
+        positional = tuple(a.arg for a in args.posonlyargs + args.args if a.arg not in {"self", "cls"})
+        if positional[: len(scheduler_shaped)] != scheduler_shaped:
+            continue
+        if args.kwarg is None:
+            continue
+        names = {a.arg for a in args.args + args.kwonlyargs} | {a.arg for a in args.posonlyargs}
+        if "failed_result" not in names:
+            offenders.append(offender_at(path, node, "run() does not bind failed_result by name"))
+    return offenders
+
+
 def test_no_existing_double_swallows_failed_result():
     """Derived from the production signature, not a hand-kept list: every
     scheduler double in tests/ binds ``failed_result`` by name today, which is
     the property the ``failed_result`` refactor needed. A double that regressed
     to ``**kwargs``-only would be caught by both this and the sweep above."""
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        for node in nodes_of(tree):
-            if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run"):
-                continue
-            positional = [
-                a.arg for a in node.args.posonlyargs + node.args.args if a.arg not in {"self", "cls"}
-            ]
-            if len(positional) < 2:
-                continue
-            names = {a.arg for a in node.args.args + node.args.kwonlyargs}
-            names |= {a.arg for a in node.args.posonlyargs}
-            if "failed_result" not in names:
-                offenders.append(offender_at(path, node, "run() does not bind failed_result by name"))
-    assert not offenders, (
+    assert_trees_clean(
+        _failed_result_binding_offenders,
         "the DomainScheduler.run contract requires failed_result; a double that omits it"
-        " silently drops the envelope the pipeline supplies: " + "; ".join(offenders)
+        " silently drops the envelope the pipeline supplies",
+        trees=trees_under(TESTS_DIR),
     )
 
 

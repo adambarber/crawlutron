@@ -24,6 +24,7 @@ from tests.chokepoint_walks import (
     resolved_expr_name,
     trees_under,
 )
+from tests.invariants._shared import assert_trees_clean
 
 # ===========================================================================
 # NO TEST MAY MUTATE THE PRODUCTION TREE
@@ -279,13 +280,12 @@ def test_tests_do_not_mutate_the_production_tree():
     Tree-wide, and read from the tree rather than from a file list, so the
     sweep covers a test added tomorrow with nothing to register.
     """
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        offenders.extend(_app_tree_mutation_offenders(tree, path))
-    assert not offenders, (
+    assert_trees_clean(
+        _app_tree_mutation_offenders,
         "mirror the path shape under tmp_path and point the code under test at the mirror: "
         "a test that mutates app/ turns every concurrent tree walk into a list-then-read race, "
-        "and the detectors that lose it report nothing while looking green: " + "; ".join(offenders)
+        "and the detectors that lose it report nothing while looking green",
+        trees=trees_under(TESTS_DIR),
     )
 
 
@@ -476,13 +476,12 @@ def test_tests_import_their_helpers_by_package_path():
     Tree-wide over ``tests/``, so a helper added tomorrow is covered by existing
     the same way, and read from the tree rather than a file list.
     """
-    offenders: list[str] = []
-    for path, tree in trees_under(TESTS_DIR):
-        offenders.extend(_bare_sibling_import_offenders(tree, path))
-    assert not offenders, (
+    assert_trees_clean(
+        _bare_sibling_import_offenders,
         "import the helper through its package path (tests.<pkg>.<module>): a bare sibling name "
         "resolves only because pytest put this file's directory on sys.path, which is invisible to "
-        "both E402 and the type checker -- " + "; ".join(offenders)
+        "both E402 and the type checker",
+        trees=trees_under(TESTS_DIR),
     )
 
 
