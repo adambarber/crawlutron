@@ -42,6 +42,11 @@ required.
 - Every public module has a module-level docstring; every public function
   has a one-line summary plus a more detailed paragraph.
 
+## Conduct
+
+Review the change, not the contributor, and bring a reason rather than a
+preference. `CODE_OF_CONDUCT.md` states the expectations in full.
+
 ## Submitting a Change
 
 1. Branch off `main`.
