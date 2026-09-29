@@ -19,7 +19,7 @@ from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
 from app.crawl.decompression import DecompressionError, DecompressionTooLargeError
 from app.crawl.decompression import decompress_body as _decompress_body
 from app.crawl.strategies import http_client_pool, pinned_transport
-from app.crawl.strategies.request_profile import _store_set_cookies
+from app.crawl.strategies.request_profile import _store_set_cookies, _TransportHeaders
 from app.models import HttpFetcher, HttpFetchResult
 from app.timeouts import Timeouts
 from app.validation import HostPolicy
@@ -117,7 +117,7 @@ def _finish_fetch(
     final_url: str,
     status_code: int,
     raw: bytes | bytearray,
-    response_headers: Any,
+    response_headers: _TransportHeaders,
     max_content_length: int,
     elapsed_ms: int,
     too_large: Callable[[], HttpFetchResult],

@@ -318,8 +318,19 @@ class DomainScheduler:
         return True
 
     def record_latency(self, domain: str, latency_ms: float) -> None:
-        """Feed observed response latency (ms) into the adaptive delay estimator (#6)."""
-        if latency_ms is None or latency_ms < 0:
+        """Feed observed response latency (ms) into the adaptive delay estimator (#6).
+
+        Negative is the only rejected value, and it is rejected because it is a
+        bad measurement rather than a fast response: adopting one would pull the
+        EMA below any delay actually observed and speed the domain up on the
+        strength of a clock that went backwards.
+
+        There is deliberately no ``None`` case. The one production caller reads
+        ``SchedulerResult.elapsed_ms``, a non-optional ``int``, behind ``if
+        latency:`` -- no measurement means nothing to record, and "no
+        measurement" is decided at the call site where the result is in hand.
+        """
+        if latency_ms < 0:
             return
         prev = self._domain_latency_ema.get(domain)
         alpha = self._adaptive_smoothing

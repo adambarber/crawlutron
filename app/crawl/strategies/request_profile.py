@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlparse
-
-import httpx
 
 from app.api_models import CrawlPolicy
 from app.constants import DEFAULT_USER_AGENT, HTTP_CFFI_IMPERSONATE
@@ -58,13 +56,30 @@ def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
 
 
 @runtime_checkable
-class _HeadersWithList(Protocol):
+class _TransportHeaders(Protocol):
+    """A transport's own header multidict, which keeps duplicate values.
+
+    The two transports disagree about what a header map is -- httpx's is
+    ``httpx.Headers``, curl_cffi's is a libcurl multidict that is nothing like
+    it -- but both keep repeated header names separate, and that is the
+    property the cookie jar needs. Normalising either into a ``dict`` first
+    would comma-join duplicate ``Set-Cookie`` names into a single entry, which
+    ``Headers.items()`` does and ``dict`` construction always does.
+
+    So this is the shape the *transport* hands over, and it is deliberately not
+    a ``Mapping``: a plain ``dict`` of headers is accepted where a caller
+    offers one, but it is the one shape that cannot express a repeated header,
+    and naming the difference is what keeps the cookie path honest.
+    """
+
+    def get(self, key: str, default: str = "") -> str: ...
     def get_list(self, key: str) -> list[str]: ...
+    def items(self) -> Iterable[tuple[str, str]]: ...
 
 
 def _store_set_cookies(
     url: str,
-    response_headers: httpx.Headers | dict[str, str],
+    response_headers: _TransportHeaders | dict[str, str],
     *,
     namespace: str | None = None,
 ) -> None:
@@ -74,13 +89,21 @@ def _store_set_cookies(
     returns comma-joined values from ``.items()`` for duplicate keys).
     ``namespace`` isolates cookies for multi-tenant callers; when not
     provided, the per-request cookie namespace contextvar is used.
+
+    The parameter names ``_TransportHeaders`` because the body branches on it:
+    the ``isinstance`` below is the whole reason that protocol exists, and a
+    signature that omitted it made that branch unreachable to any checker -- so
+    the one caller shape the function was written to accept was the one it
+    could not legally be handed.
     """
     if namespace is None:
         namespace = _COOKIE_NAMESPACE.get()
-    # Accept both httpx.Headers (for get_list) and plain dict (for tests)
-    if isinstance(response_headers, httpx.Headers):
-        set_cookies = response_headers.get_list("set-cookie")
-    elif isinstance(response_headers, _HeadersWithList):
+    # A transport multidict keeps repeated header names separate, which is the
+    # only reason to read Set-Cookie through it; a plain dict has nothing to
+    # keep separate, so it is read as-is. httpx.Headers arrives through the
+    # first branch too -- it satisfies the protocol -- so there is no
+    # httpx-specific case to keep in step with this one.
+    if isinstance(response_headers, _TransportHeaders):
         set_cookies = response_headers.get_list("set-cookie")
     else:
         set_cookies = [v for k, v in response_headers.items() if k.lower() == "set-cookie"]

@@ -51,7 +51,7 @@ class ContentCache:
         clock: Callable[[], float] = _default_clock,
         max_entries: int = 10000,
         max_entry_bytes: int = CONTENT_CACHE_MAX_ENTRY_BYTES,
-        max_total_bytes: int = CONTENT_CACHE_MAX_TOTAL_BYTES,
+        max_total_bytes: int | None = CONTENT_CACHE_MAX_TOTAL_BYTES,
     ) -> None:
         self.cache_dir = Path(cache_dir)
         self.default_ttl = default_ttl
@@ -59,6 +59,12 @@ class ContentCache:
         self.clock = clock
         self.max_entries = max_entries
         self.max_entry_bytes = max_entry_bytes
+        # ``None`` means "no total-bytes cap" and ``_over_limits`` branches on
+        # exactly that, so the parameter says so too. Without it the byte bound
+        # was a safety bound in the body and a type error at the constructor --
+        # and ``max_entries`` is the only bound left when a caller turns this
+        # one off, which is why turning it off is a deliberate, visible
+        # constructor argument rather than a default.
         self.max_total_bytes = max_total_bytes
         # Parallel byte accounting for the LRU index (H9): entry count alone
         # cannot bound disk use when one envelope holds a multi-MB body.
@@ -142,9 +148,7 @@ class ContentCache:
         return removed
 
     def _over_limits(self) -> bool:
-        over_count = (
-            self.max_entries is not None and self.max_entries > 0 and len(self._index) > self.max_entries
-        )
+        over_count = self.max_entries > 0 and len(self._index) > self.max_entries
         over_bytes = (
             self.max_total_bytes is not None
             and self.max_total_bytes > 0
