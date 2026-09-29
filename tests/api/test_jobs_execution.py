@@ -9,15 +9,19 @@ These tests drive the real router + runner with a faked ``execute_crawl``
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.params import Depends as DependsParam
+from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
-from app.api import job_runner
+from app.api import dependencies, job_runner, jobs_router
+from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
 from app.api_models import CrawlPolicy
 from app.crawl.job_store import FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
@@ -83,21 +87,23 @@ def test_every_job_endpoint_declares_its_providers_through_an_alias():
     requirement, and it is the shape that let two hand-written dependency lists
     (one per endpoint) look equivalent without being checked against anything.
     """
-    import inspect
-
-    from app.api import dependencies, jobs_router
-
     aliases = {value for name, value in vars(dependencies).items() if name.endswith("Dep")}
     assert aliases, "app.api.dependencies declares no provider aliases"
 
     for route in jobs_router.router.routes:
+        # An APIRouter registers APIRoutes, but the attribute holding them is
+        # typed as BaseRoute, which declares no ``endpoint`` -- so the route
+        # type is the fact, and it is asserted rather than assumed.
+        assert isinstance(route, APIRoute), f"the jobs router registered a {type(route).__name__}"
         for name, param in inspect.signature(route.endpoint, eval_str=True).parameters.items():
             where = f"{route.endpoint.__name__}.{name}"
             assert param.default is inspect.Parameter.empty, (
                 f"{where} uses an invisible default; a provider belongs in the annotation"
             )
             for meta in getattr(param.annotation, "__metadata__", ()):
-                if isinstance(meta, DependsParam):
+                # ``Depends()`` with no argument carries no callable, so there is
+                # no dependency to name an alias for.
+                if isinstance(meta, DependsParam) and meta.dependency is not None:
                     assert any(param.annotation is alias for alias in aliases), (
                         f"{where} wires {meta.dependency.__name__} outside a declared alias"
                     )
@@ -110,18 +116,14 @@ def test_creating_and_controlling_a_job_need_the_same_providers():
     triple; they now name the same three aliases. If a fourth provider ever
     becomes necessary for one of them and not the other, this is what says so.
     """
-    import inspect
 
-    from app.api import jobs_router
-    from app.api.dependencies import get_job_store, get_settings, get_shutdown_event
-
-    def _providers(handler) -> dict[str, object]:
-        declared = {}
+    def _providers(handler) -> dict[str, Callable[..., Any]]:
+        declared: dict[str, Callable[..., Any]] = {}
         # eval_str: the router module defers its annotations (PEP 563), so the
         # alias objects are only reachable after the string is resolved.
         for name, param in inspect.signature(handler, eval_str=True).parameters.items():
             for meta in getattr(param.annotation, "__metadata__", ()):
-                if isinstance(meta, DependsParam):
+                if isinstance(meta, DependsParam) and meta.dependency is not None:
                     declared[name] = meta.dependency
         return declared
 
@@ -232,17 +234,24 @@ class TestCrashRecovery:
 class TestWholeSiteJobExecution:
     def test_engine_payload_builder_disables_recursion_and_preserves_limits(self, job_store):
         root = GRAPH_ROOT
-        # The limit block is stated once and then restated with the one field
-        # this test is about changed. Written out twice it is how a limit got
+        # The limit block is stated once and the one field this test is about is
+        # the only thing that varies. Restated per call it is how a limit got
         # "preserved" in the name of the test while the expectation quietly
-        # changed the value it was preserving.
-        original_limits = {
-            "max_depth": 2,
-            "max_pages": 50,
-            "max_discovered_links": 17,
-            "max_rps": 2.5,
-        }
-        job = job_store.create(root, job_limits(**original_limits, scope_regex=r"^https://example\.test/"))
+        # changed the value it was preserving. Named keywords rather than a
+        # splatted dict: the values are heterogeneous (an int depth, a float
+        # rps), so a mapping carries a union the checker cannot spread back onto
+        # ``job_limits``' parameters.
+
+        def limits(*, max_depth: int = 2) -> dict:
+            return job_limits(
+                max_depth=max_depth,
+                max_pages=50,
+                max_discovered_links=17,
+                max_rps=2.5,
+                scope_regex=r"^https://example\.test/",
+            )
+
+        job = job_store.create(root, limits())
         batch = [
             FrontierEntry(url=root, depth=0),
             FrontierEntry(url=GRAPH_CHILD, depth=1),
@@ -253,9 +262,7 @@ class TestWholeSiteJobExecution:
             "urls": [root, GRAPH_CHILD],
             # Depth zero and nothing else moved: this builder exists to stop the
             # per-call max_depth from re-expanding a whole-site job's frontier.
-            "policy": read_policy(
-                job_limits(**{**original_limits, "max_depth": 0}, scope_regex=r"^https://example\.test/")
-            ),
+            "policy": read_policy(limits(max_depth=0)),
             "url": root,
             "headers": {},
             "request_profile": {},
@@ -263,9 +270,7 @@ class TestWholeSiteJobExecution:
         # ``job.policy`` is the stored wire shape (a row is JSON), so the claim
         # is read-edge to read-edge: what the row holds must resolve to the
         # policy the job was created with.
-        assert read_policy(job.policy) == read_policy(
-            job_limits(**original_limits, scope_regex=r"^https://example\.test/")
-        )
+        assert read_policy(job.policy) == read_policy(limits())
 
     async def test_run_job_uses_engine_payload_builder(self, client, job_store):
         root = GRAPH_ROOT

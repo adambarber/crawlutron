@@ -8,7 +8,7 @@ from app.constants import BROWSER_HEADLESS
 from app.crawl.cache import HttpCache
 from app.crawl.engine import crawl_request
 from app.crawl.strategies.browser import BrowserRenderer
-from app.models import RenderOptions
+from app.models import CrawlResult, RenderOptions
 from app.validation import HostPolicy
 from tests._assertions import assert_result_success
 
@@ -23,7 +23,7 @@ class TestBrowserRenderer:
         yield
         await self.renderer.close()
 
-    async def _render(self, path: str, base_url: str, **options) -> object:
+    async def _render(self, path: str, base_url: str, **options) -> CrawlResult:
         url = f"{base_url}{path}"
         opts = RenderOptions(browser_profile=options.pop("browser_profile", {}), **options)
         return await self.renderer.render(
