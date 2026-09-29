@@ -68,12 +68,12 @@ def _job_engine_payload_chokepoint_offenders(tree: ast.AST, path: pathlib.Path) 
         ):
             builder_names.update(target.id for target in targets if isinstance(target, ast.Name))
     offenders: list[str] = []
-    for node in calls_to_any(tree, execute_names):
+    for call in calls_to_any(tree, execute_names):
         payload = (
-            node.args[0]
-            if node.args
+            call.args[0]
+            if call.args
             else next(
-                (keyword.value for keyword in node.keywords if keyword.arg in {"payload", "data"}), None
+                (keyword.value for keyword in call.keywords if keyword.arg in {"payload", "data"}), None
             )
         )
         if isinstance(payload, ast.Name) and payload.id in builder_names:
@@ -302,7 +302,10 @@ def _environment_reader_reference(
         isinstance(node, ast.Constant)
         and isinstance(expression, ast.Expr)
         and expression.value is node
-        and getattr(scope, "body", ())
+        # A statement rather than a getattr: "is this the first statement of a
+        # block" asks for a body, and only a stmt declares one.
+        and isinstance(scope, ast.stmt)
+        and scope.body
         and scope.body[0] is expression
     ):
         return None
@@ -329,7 +332,9 @@ def _environment_reader_reference(
         return None
     if is_alias_lookup:
         return alias_value
-    if node.value.startswith("BROWSER_CRAWLER_"):
+    # ast.Constant.value is the full literal union, so a prefix test is a claim
+    # about the value being a str, not about the node being a Constant.
+    if isinstance(node.value, str) and node.value.startswith("BROWSER_CRAWLER_"):
         return node.value
     return None
 
@@ -617,7 +622,7 @@ def test_mcp_request_model_detector_bites():
 _PROTOCOL_CONSTANTS_MODULE = "app/mcp/constants.py"
 
 
-def _module_level_assignment_lines(tree: ast.AST, names: Iterable[str]) -> dict[str, int]:
+def _module_level_assignment_lines(tree: ast.Module, names: Iterable[str]) -> dict[str, int]:
     """Line of each named module-level assignment, for the offender label.
 
     Distinct from :func:`_declared_public_symbols`, which reads the *declaration*
@@ -641,7 +646,7 @@ def _module_level_assignment_lines(tree: ast.AST, names: Iterable[str]) -> dict[
 
 
 def _unproduced_protocol_constants(
-    owner_tree: ast.AST | None,
+    owner_tree: ast.Module | None,
     trees: Iterable[tuple[Path, ast.Module]],
     *,
     owner: str = _PROTOCOL_CONSTANTS_MODULE,
@@ -671,7 +676,9 @@ def _unproduced_protocol_constants(
     surface. An unreadable declaration is itself a finding: a registry the sweep
     cannot read is a registry nothing holds.
     """
-    declared = None if owner_tree is None else _declared_public_symbols(owner_tree)
+    if owner_tree is None:
+        return [f"{owner}: the protocol registry module could not be read, so it cannot be swept"]
+    declared = _declared_public_symbols(owner_tree)
     if declared is None:
         return [f"{owner}: the protocol registry is not one literal __all__, so it cannot be swept"]
     referenced: set[str] = set()
@@ -719,11 +726,18 @@ def test_protocol_constant_production_detector_bites():
     )
     assert not both, both
     # The vacuous direction: a registry the sweep cannot read is not a clean bill.
+    # Two different reasons, two different messages -- a module that never parsed
+    # and a module whose __all__ is computed were reported by the same sentence,
+    # which told a reader to go looking for a computed __all__ that was not there.
     unreadable = ast.parse("__all__ = compute()\n")
-    expected = f"{_PROTOCOL_CONSTANTS_MODULE}: the protocol registry is not one literal __all__"
-    for source in (unreadable, None):
+    for source, reason in (
+        (unreadable, "the protocol registry is not one literal __all__"),
+        (None, "the protocol registry module could not be read"),
+    ):
         offenders = _unproduced_protocol_constants(source, [(elsewhere, ast.parse(""))])
-        assert len(offenders) == 1 and expected in offenders[0], offenders
+        assert len(offenders) == 1 and f"{_PROTOCOL_CONSTANTS_MODULE}: {reason}" in offenders[0], (
+            offenders
+        )
 
 
 _CYCLE_GUARD_CALL = "_entered"
