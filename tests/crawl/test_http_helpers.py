@@ -46,7 +46,6 @@ from app.crawl.strategies.request_profile import (
     _headers_for_strategy,
     _select_fingerprint,
 )
-from app.crawl.worker import call_worker
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._assertions import assert_result_failed, assert_result_success
@@ -67,6 +66,10 @@ from tests._http_test_helpers import (
     decompress_body,
 )
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, make_base_policy
+from tests._worker_doubles import (
+    assert_coroutine_worker_is_awaited_directly,
+    assert_sync_worker_runs_once_in_a_thread,
+)
 
 
 class TestValidationHelpers:
@@ -588,22 +591,10 @@ class TestFetchHelperUtilities:
 
 class TestCallWorkerContract:
     async def test_awaits_coroutine_worker_directly(self) -> None:
-        class _Job:
-            pass
-
-        async def coro_worker(job):
-            return "coro-result"
-
-        assert await call_worker(coro_worker, _Job()) == "coro-result"
+        await assert_coroutine_worker_is_awaited_directly()
 
     async def test_runs_sync_worker_in_thread(self) -> None:
-        class _Job:
-            pass
-
-        def sync_worker(job):
-            return "sync-result"
-
-        assert await call_worker(sync_worker, _Job()) == "sync-result"
+        await assert_sync_worker_runs_once_in_a_thread()
 
 
 class TestFingerprintInjectionRotation:

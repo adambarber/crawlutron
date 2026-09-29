@@ -21,6 +21,11 @@ from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models import EngineCrawlResult
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
+from tests._worker_doubles import (
+    assert_coroutine_worker_is_awaited_directly,
+    assert_sync_worker_returning_awaitable_is_named,
+    assert_sync_worker_runs_once_in_a_thread,
+)
 from tests.crawl._chain_policies import chain_policy
 
 # ---------------------------------------------------------------------------
@@ -200,51 +205,14 @@ class TestCallWorkerExecutesOnce:
     """
 
     async def test_sync_worker_runs_once_off_loop(self):
-        import asyncio
-
-        from app.crawl.worker import call_worker
-
-        calls: list[str] = []
-        loop_thread = asyncio.get_running_loop().run_in_executor(None, lambda: None)
-        await loop_thread
-
-        def worker(job):
-            calls.append(job)
-            return "result"
-
-        result = await call_worker(worker, "job")
-        assert len(calls) == 1, f"sync worker invoked {len(calls)}x (side effects kept, result discarded)"
-        assert result == "result"
+        await assert_sync_worker_runs_once_in_a_thread()
 
     async def test_async_worker_awaits_directly(self):
-        from app.crawl.worker import call_worker
-
-        calls: list[str] = []
-
-        async def worker(job):
-            calls.append(job)
-            return "async-result"
-
-        result = await call_worker(worker, "job")
-        assert len(calls) == 1
-        assert result == "async-result"
+        await assert_coroutine_worker_is_awaited_directly()
 
     async def test_a_sync_worker_returning_a_coroutine_is_named_at_the_seam(self):
-        """The mistake is reported where it is made, not 100 lines downstream.
-
-        A ``lambda job: render(job.url)`` is a plain function, so it took the
-        sync branch and handed the strategy an un-awaited coroutine. The browser
-        strategy then read ``.html`` off it and reported a ``network_error``,
-        which reads like a site problem and sent the investigation at the page
-        instead of at the double.
-        """
-        from app.crawl.worker import call_worker
-
-        async def render(job):
-            return "rendered"
-
-        with pytest.raises(TypeError, match="returned an awaitable"):
-            await call_worker(lambda job: render(job), "job")
+        """The mistake is reported where it is made, not 100 lines downstream."""
+        await assert_sync_worker_returning_awaitable_is_named()
 
 
 class TestShapeAllGuardsPerItem:

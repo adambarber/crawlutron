@@ -1,7 +1,15 @@
 from typing import Any
 
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.models import Classification, CrawlError, CrawlStrategyAttempt, CrawlStrategyName, RenderOptions
+from app.models import (
+    Classification,
+    CrawlError,
+    CrawlJob,
+    CrawlResult,
+    CrawlStrategyAttempt,
+    CrawlStrategyName,
+    RenderOptions,
+)
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 
@@ -14,8 +22,6 @@ def make_job(index: int, url: str, *, options: RenderOptions | None = None):
     one. The absent baseline is ``RenderOptions()`` itself, every field at its
     default.
     """
-    from app.models import CrawlJob
-
     return CrawlJob(
         index=index,
         url=url,
@@ -125,8 +131,6 @@ def _successful_engine_result(
 
 
 def make_result(url: str, domain: str):
-    from app.models import CrawlStrategyAttempt
-
     return _successful_engine_result(
         url,
         attempted_strategies=[
@@ -142,6 +146,28 @@ def make_result(url: str, domain: str):
         ],
         text="ok",
         markdown="ok",
+    )
+
+
+def crawl_result(url: str, domain: str | None = None) -> CrawlResult:
+    """A ``CrawlResult`` -- the object ``app.crawl.worker.call_worker`` hands back.
+
+    Worker-dispatch tests need a real result because the claim they make is
+    identity: that the worker's own object is what comes back, rather than a copy
+    or a discarded side effect. A string sentinel stood in for it, which made
+    the assertion weaker than the thing being asserted and was not a
+    ``CrawlResult`` at all.
+    """
+    return CrawlResult(
+        url=url,
+        status="success",
+        classification="rendered",
+        final_url=url,
+        html="ok",
+        text="ok",
+        attempts=1,
+        elapsed_ms=0,
+        domain=domain if domain is not None else url.split("/")[2],
     )
 
 
