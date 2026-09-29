@@ -197,6 +197,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   optionality is exactly why the equivalence has to be decided in one place.
 
 ### Added
+- **Reverse configuration-drift gate** (`tests/invariants/test_contracts.py`):
+  `test_documented_browser_knobs_have_consumers` walked documented ->
+  consumed, so a knob published in `.env.example` that nothing reads fails
+  the build. Nothing walked the other way, so a knob the service *did* read
+  could ship undocumented and still be green. That failure has no crash to
+  notice: the setting works, and the only way to find it is to read the
+  source. `test_every_consumed_knob_is_documented` closes it using the same
+  `_environment_reader_reference` detector as the forward direction, so the
+  two agree by construction rather than by two hand-maintained lists
+  happening to line up. It found three on first run --
+  `CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS`,
+  `CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT` and
+  `CRAWLUTRON_DOC_TASK_RAM_BYTES` -- now documented in `.env.example`. The
+  last is the one worth noting: it is a FIXED reservation for the persistent
+  markitdown workers, not a per-task estimate, and it is the knob that
+  decides whether the service is admitted work it cannot fit.
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
   query via an operator-configured provider. Provider abstraction ships
   Tavily, Brave, and Serper (keyed) plus a keyless DuckDuckGo fallback;

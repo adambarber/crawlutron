@@ -107,8 +107,8 @@ def _utc_timestamp(dt: datetime | None) -> float | None:
 def _parse_lastmod(lastmod: str | None) -> float | None:
     """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
 
-    A stamp further in the future than ``CRAWLUTRON_SITEMAP_LASTMOD_
-    FUTURE_SKEW_SECONDS`` (default 1 day; ``lo=0`` so a negative config can
+    A stamp further in the future than
+    ``CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS`` (default 1 day; ``lo=0`` so a negative config can
     never reject the recent past) is an untrustworthy claim, not freshness
     information -- broken generators stamp the whole sitemap "now-plus" on
     every regeneration. It parses to ``None``, the same verdict as an absent
