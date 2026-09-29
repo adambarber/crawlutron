@@ -2,7 +2,12 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 report/
+# Both spellings: a linked worktree reaches the venv through a `.venv` symlink,
+# which the trailing-slash form does not match -- and a committed symlink into
+# one checkout's venv is worse than no venv at all.
 .venv/
+.venv
+.dynamic-task-ledger.json
 *.egg-info/
 .cache/
 .mypy_cache/
