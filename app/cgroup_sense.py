@@ -11,9 +11,9 @@ from __future__ import annotations
 import time
 
 # cgroup reads are cheap individually but happen on every dispatch tick and on
-# every memory/CPU sample; caching them for a short window (adversarial perf
-# #2.3: "cache cgroup reads 50-200ms") removes redundant syscalls during a
-# burst without making the gate stale. The window is deliberately short.
+# every memory/CPU sample; caching them for a short window removes redundant
+# syscalls during a burst without making the gate stale. The window is
+# deliberately short.
 _CGROUP_READ_TTL_SECONDS = 0.1
 # The value type is ``str | None`` and nothing else: ``_read_text`` is the only
 # writer, and it stores either a stripped read or None. It was ``object``, which

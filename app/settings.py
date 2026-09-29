@@ -20,7 +20,7 @@ from app.memory_pressure import read_memory_stats
 from app.resource_pressure import derive_browser_pool_size, max_http_concurrency_for
 from app.validation import get_mapping_float, get_mapping_int, in_range, parse_bool_value
 
-# Connection-pool sizing (T7): bind the HTTP pool to the SAME RAM-derived HTTP
+# Connection-pool sizing: bind the HTTP pool to the SAME RAM-derived HTTP
 # concurrency the weighted admission allows, so the two can never diverge as RAM
 # scales. max_http_concurrency_for() reserves the browser pool's RAM then divides
 # the remainder by the per-HTTP-task estimate -- identical to the admission's

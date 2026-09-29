@@ -42,7 +42,7 @@ def _retry_after_seconds(headers: dict[str, str]) -> int | None:
         return None
     try:
         # Clamp hostile values: an unbounded Retry-After would park scheduler
-        # coroutines in cooldown sleep for years (adversarial review C2/C3).
+        # coroutines in cooldown sleep for years.
         return min(300, max(0, int(value.strip())))
     except ValueError:
         return None

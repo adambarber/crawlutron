@@ -30,8 +30,7 @@ if TYPE_CHECKING:
 # unique tenant id on every crawl, otherwise cookies WILL leak between
 # tenants. The legacy shared behavior is intentionally NOT opt-in because
 # silently switching to per-tenant isolation would break deployments that
-# depend on cross-request cookie persistence for a single user
-# (adversarial review F-cookie-cross-contamination).
+# depend on cross-request cookie persistence for a single user.
 _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "crawlutron_cookie_namespace", default=""
 )

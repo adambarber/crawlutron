@@ -92,7 +92,7 @@ def requeue_transient(
 RECURSIVE_RAMP_MAX: int = 128
 
 # How far into the frontier we look to decide whether the next batch is
-# predominantly cheap HTTP work (item 7). Matches the max achievable batch size
+# predominantly cheap HTTP work. Matches the max achievable batch size
 # (ramp ceiling x concurrency multiplier) so we gauge the very batch we're about
 # to size.
 _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTIPLIER
@@ -101,8 +101,8 @@ _HTTP_HEAVY_LOOKAHEAD: int = RECURSIVE_RAMP_MAX * ENGINE_BATCH_CONCURRENCY_MULTI
 async def _spill_write(spill: Any, index: int, result: Any) -> None:
     """Write a result to ``spill`` if present, tolerating sync or async ``write``.
 
-    ``_ResultSpill.write`` is async (offloaded off the event loop, adversarial
-    perf #1.3), but callers/tests may supply a sync spill object, so accept
+    ``_ResultSpill.write`` is async (offloaded off the event loop), but
+    callers/tests may supply a sync spill object, so accept
     either. A ``None`` spill is a no-op (in-memory caller).
     """
     if spill is None:

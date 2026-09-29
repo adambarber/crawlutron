@@ -164,8 +164,8 @@ class MemoryGate(ResourceGauge):
     """Global admission gate consulted before each crawl batch dispatch.
 
     Beyond the trailing ``memory.current`` fraction, the gate tracks the *rate
-    of change* of usage (adversarial perf #2.3: the trailing fraction is a
-    trailing signal). When usage climbs fast it anticipates the imminent
+    of change* of usage: a trailing fraction is a
+    trailing signal. When usage climbs fast it anticipates the imminent
     pressure and throttles early, so a sudden allocation spike cannot blow past
     the hard ceiling between samples. Only the dispatch scale uses that leading
     estimate; the hard-ceiling wait reads the raw fraction.

@@ -36,8 +36,8 @@ _DEFAULT_CPU_HARD = 0.95
 # Manual CPU budget override removed; the discovered quota is the ceiling.
 _DEFAULT_CPU_BUDGET = None
 
-# Opt-in event-loop lag probe (adversarial perf #2.3: feed loop-lag into
-# admission). Disabled by default so test suites and minimal deployments pay no
+# Opt-in event-loop lag probe: feed loop-lag into
+# admission. Disabled by default so test suites and minimal deployments pay no
 # background-task cost; enable with CRAWLUTRON_LOOP_LAG_PROBE=1 in the
 # container. When disabled the probe reports zero lag and the gate is unaffected.
 _LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
@@ -322,8 +322,8 @@ class ResourceGate:
             cpu_budget=cpu_budget,
         )
         self._poll_seconds = poll_seconds
-        # Event-loop lag is an independent throttle signal (adversarial perf
-        # #2.3). The probe is opt-in (CRAWLUTRON_LOOP_LAG_PROBE) so tests
+        # Event-loop lag is an independent throttle signal.
+        # The probe is opt-in (CRAWLUTRON_LOOP_LAG_PROBE) so tests
         # and minimal deployments do not pay for a background task; when off it
         # reports zero lag and leaves the gate untouched.
         self._lag_probe = LoopLagProbe()
@@ -545,8 +545,8 @@ class TaskRamBudget:
     """The per-task RAM weights admission sizing is derived from, as one value.
 
     ``_build_admission_policy`` and ``max_http_concurrency_for`` sized a
-    process's admission from the same four inputs, and the pair jscpd reported
-    was those two keyword-only parameter lists rather than any logic: the
+    process's admission from the same four inputs, and the duplication was those
+    two keyword-only parameter lists rather than any logic: the
     duplication was the argument list, not the arithmetic. Binding the list into
     a value the caller builds and this function hands on unchanged means the
     weights exist once, and a caller adding a weight edits a dataclass instead
@@ -582,8 +582,8 @@ class AdmissionPolicy:
     # the budget that is already spent before any task is admitted.
     doc_pool_reserve_bytes: int = 0
     # The fraction of RAM ``derive_browser_pool_size`` assumed the pool may
-    # hold. The browser tier must not shrink against its own reserved usage
-    # (T9); only surplus usage beyond this fraction yields browser capacity.
+    # hold. The browser tier must not shrink against its own reserved usage;
+    # only surplus usage beyond this fraction yields browser capacity.
     browser_ram_fraction: float = _BROWSER_RAM_FRACTION
 
 

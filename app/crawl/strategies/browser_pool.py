@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 # waiters forever with no diagnostics.
 BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS: float = 60.0
 
-# --- RAM-budget-aware browser pool sizing (adversarial perf: bounded browser pool) ---
+# --- RAM-budget-aware browser pool sizing ---
 # Each pooled renderer owns one persistent Camoufox process (~600-900 MiB RSS once
 # WebExtensions/Web Content are counted). Because uvicorn runs one pool PER WORKER
 # process, the only way to keep the TOTAL browser count bounded is a single worker

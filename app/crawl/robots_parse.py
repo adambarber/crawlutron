@@ -1,4 +1,4 @@
-"""Single robots.txt line-scanner and group selector (jscpd #5).
+"""Single robots.txt line-scanner and group selector.
 
 The engine parsed one robots.txt body with three hand-rolled scanners
 (crawl-delay at module level, rules + sitemaps as nested closures), each

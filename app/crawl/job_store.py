@@ -753,7 +753,7 @@ class JobStore:
 
     def create(self, root_url: str, policy: PolicyLike) -> CrawlJobState:
         """Create a new whole-site crawl job with initial frontier containing root_url."""
-        # Full UUID hex (32 chars) to avoid brute-forceable short IDs (HIGH #9).
+        # Full UUID hex (32 chars) to avoid brute-forceable short IDs.
         canonical_root = str(normalize_public_http_url(root_url, policy=self._host_policy))
         return _create_job(
             self,
@@ -779,7 +779,7 @@ class JobStore:
 
         ``status`` is written only on first INSERT (a new row's initial
         state); the UPDATE path deliberately never touches it. Control state
-        moves exclusively through :meth:`set_status` (H3): a whole-row save
+        moves exclusively through :meth:`set_status`: a whole-row save
         from a stale snapshot must not resurrect the writer's status view
         and clobber a concurrent pause/cancel.
         """

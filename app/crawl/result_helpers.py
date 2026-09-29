@@ -474,8 +474,8 @@ class TerminalResult:
     """The per-attempt fields every terminal result carries, bound as one value.
 
     Four constructors each spelled this same list of keyword-only parameters.
-    That is four signatures to widen when a field is added, and the two pairs
-    jscpd reported were exactly those signatures -- the duplication was never
+    That is four signatures to widen when a field is added, and the duplicated
+    text was exactly those signatures -- the duplication was never
     the logic, it was the argument list. Binding them into a value the
     constructors take positionally means the field list exists once, and a call
     site passes one object instead of nine keywords to say one thing.

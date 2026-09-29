@@ -186,7 +186,7 @@ def _build_pinned_request(
     documented pin policy (http -> IP literal + Host header, https ->
     hostname kept for SNI). Keeping the composition in one place is what
     makes IPv6 bracketing, port handling, and the Host header impossible
-    to drift between fetch paths (H5-C).
+    to drift between fetch paths.
     """
     from app.safe_url import SafeUrl
 
@@ -199,7 +199,7 @@ def _build_pinned_request(
 # fetches never block the event loop or contend with the default asyncio executor
 # (used for extraction and other blocking work). The pinning path resolves FRESH
 # on every call for SSRF safety, so without this the loop would stall on each
-# resolver call (adversarial perf #1.1).
+# resolver call.
 _DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-resolve")
 
 _P = ParamSpec("_P")
@@ -207,7 +207,7 @@ _R = TypeVar("_R")
 
 
 def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable[_R]]:
-    """The one way to run blocking call machinery off the event loop (perf #1.1).
+    """The one way to run blocking call machinery off the event loop.
 
     Two things are owned here instead of at the call sites: the *pool* and the
     *argument list*. The pool is this module's ``_DNS_EXECUTOR``, so every
@@ -234,7 +234,7 @@ def _off_loop(resolve: Callable[[], Callable[_P, _R]]) -> Callable[_P, Awaitable
 
 # The fetch path's off-loop entry to the pin rule -- SSRF-safe request building,
 # including the blocking ``socket.getaddrinfo`` call, on a worker thread so the
-# event loop is never stalled by a resolver lookup (adversarial perf #1.1).
+# event loop is never stalled by a resolver lookup.
 #
 # DERIVED from the rule rather than hand-written beside it. :func:`_off_loop`
 # keeps the builder's whole parameter list, so this binding has no signature of
@@ -270,7 +270,7 @@ def _redirect_target(
     Returns ``(new_url, updated_headers)`` when the response is an in-budget
     redirect, else ``None`` (terminal response). The caller must re-run
     ``_build_pinned_request`` for ``new_url`` so every hop re-validates against
-    the SSRF blocklist and re-pins DNS (F1). Sensitive headers (Cookie,
+    the SSRF blocklist and re-pins DNS. Sensitive headers (Cookie,
     Authorization) are stripped when crossing host boundaries (Fix 3).
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
@@ -349,7 +349,7 @@ async def apinned_hops(
     ``get()`` -- so it stays at the call site, while the parts that must not
     differ are here. Every iteration re-pins through :meth:`_RedirectChain.pin`,
     so each redirect target is re-validated against the SSRF blocklist and
-    re-resolved to a fresh IP (F1); :meth:`_RedirectChain.advance` applies the
+    re-resolved to a fresh IP; :meth:`_RedirectChain.advance` applies the
     shared hop budget and the cross-host credential strip. A transport that
     re-spelled the loop could drop either one and nothing would notice.
 

@@ -138,7 +138,7 @@ def _collect_results(
 
     The three keyed providers (Tavily/Brave/Serper) differ only in which key
     holds which field; the validation/dedupe/clip flow is one contract
-    (jscpd #4 — it was hand-copied three times). Non-dict entries and
+    rather than three hand-copied ones. Non-dict entries and
     non-public URLs are dropped, never rewritten.
     """
     results: list[SearchResult] = []

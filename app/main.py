@@ -8,10 +8,8 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-# Standalone JSON-line logging configuration. The previous version of this
-# module imported ``local_service_logging`` from the parent monorepo's
-# ``shared/python`` tree. The standalone equivalent now lives at
-# ``app/logging_config.py``; integration deployments that want richer
+# Standalone JSON-line logging configuration, wired once here so every
+# entry point logs the same way. Integration deployments that want richer
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
 from app.crawl.policy import PolicyTier
@@ -146,7 +144,7 @@ if FastAPI is not None:
         from .health.readiness import READINESS_STATE
 
         # Readiness saturation comes from the live resource gate, not the
-        # metrics gauges (which only recursive crawls refresh, M11).
+        # metrics gauges (which only recursive crawls refresh).
         READINESS_STATE.set_utilization_sampler(
             lambda: (_resource_gate.memory_ratio(), _resource_gate.cpu_ratio())
         )
@@ -156,7 +154,7 @@ if FastAPI is not None:
 
         await initialize_browser_pool(settings)
         # Cookies first: recovered jobs can receive cookies in their first
-        # batch, and a clear-then-populate load would drop those (final #5).
+        # batch, and a clear-then-populate load would drop those.
         if settings.cookie_persistence_enabled:
             # The jar is backed by the shared coordination store rather than by
             # a JSON file rewritten at shutdown. That rewrite was replace-
@@ -294,7 +292,7 @@ if FastAPI is not None:
     app.state.result_store = result_store
 
     # Body-size guard: 16 MiB cap at the ASGI receive layer (see
-    # app/api/middleware.py for the C1/C3 fixes).
+    # app/api/middleware.py for how truncation and keep-alive are handled).
     from app.api.exceptions import http_exception_handler, validation_exception_handler
     from app.api.middleware import limit_request_body
 

@@ -130,7 +130,7 @@ def build_unified_result(item: dict[str, Any]) -> UnifiedCrawlResult:
 
     The unified response carries both the LLM-friendly ``markdown`` and the
     full ``diagnostics`` payload. Page metadata comes from the result's
-    carried ``llm_metadata`` (H2) or, when absent, the shared
+    carried ``llm_metadata`` or, when absent, the shared
     page-metadata extractor (``_extract_llm_metadata``) over the raw HTML.
     """
     markdown, metadata_dict = format_crawl_item(item)

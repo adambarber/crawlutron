@@ -52,7 +52,7 @@ async def _default_http_fetcher(
 
     Async HTTP/2 fetch over the shared pooled ``httpx.AsyncClient`` with
     granular timeouts, SSRF protection, content-length limits and
-    SSRF-safe manual redirect handling (F1).
+    SSRF-safe manual redirect handling.
 
     Redirects are followed by hand so every hop is re-validated against the SSRF
     blocklist and re-pinned to its resolved IP. Automatic httpx following is off
@@ -179,8 +179,8 @@ async def _cffi_fetch(
     """The curl_cffi transport behind ``_default_http_fetcher(impersonate=True)``.
 
     TLS-fingerprint-impersonated, mirroring the httpx transport including its
-    SSRF-safe manual redirect handling (F1) and sensitive-header stripping on
-    cross-domain redirects (Fix 3).
+    SSRF-safe manual redirect handling and sensitive-header stripping on
+    cross-domain redirects.
 
     Returns ``None`` -- not a result -- when the attempt failed for any
     transport reason, so the caller decides the fallback. A transport that
@@ -223,11 +223,11 @@ async def _cffi_fetch(
             if chain.advance(response):
                 await response.aclose()  # N8: release the curl handle
                 continue
-            # N7: do not trust response.elapsed across curl_cffi versions
+            # Do not trust response.elapsed across curl_cffi versions
             # (timedelta in a requests-compatible build would TypeError
             # here and silently downgrade every fetch to httpx).
             elapsed_ms = int((time.monotonic() - started) * 1000)
-            # Stream RAW bytes with a running cap (H1): a hostile origin
+            # Stream RAW bytes with a running cap: a hostile origin
             # can omit content-length and stream gigabytes (chunked).
             # Abort with a 413 as soon as the cap is exceeded instead of
             # buffering the whole body into memory first.
@@ -238,7 +238,7 @@ async def _cffi_fetch(
             # very stalled-stream error it is trying to re-raise (the
             # LOW_SPEED abort lands as a queue item but the wrapper wedges
             # before delivering it). Reading the queue keeps the abort
-            # prompt and the failure reraise unblocked (H1).
+            # prompt and the failure reraise unblocked.
             #
             # Every exit out of this loop except STREAM_END is an abandon, and
             # an abandoned handle is never reclaimed on its own now that the
@@ -248,11 +248,11 @@ async def _cffi_fetch(
             # ``stream_completed`` therefore gates a release-on-any-exit in the
             # finally, using the same non-blocking path the stall and cap
             # branches already used -- awaiting aclose here would join the
-            # hostile producer being escaped (H1).
+            # hostile producer being escaped.
             stream_completed = False
             try:
                 while True:
-                    # Bound the wait PER CHUNK, not per response (N-5): this
+                    # Bound the wait PER CHUNK, not per response: this
                     # mirrors httpx's read-timeout semantics -- an inter-chunk
                     # gap limit. A slow-drip origin (one byte per interval)
                     # can keep the stream alive up to max_content_length; the
@@ -268,7 +268,7 @@ async def _cffi_fetch(
                         # Stall: release the handle WITHOUT awaiting. aclose()
                         # joins the producer task, which is exactly the wedged
                         # task being escaped; awaiting it hangs like the old
-                        # aiter_content() wrapper did (H1). A scheduled close
+                        # aiter_content() wrapper did. A scheduled close
                         # reclaims the handle; the session client bounds any leak.
                         raise TimeoutError("cffi stream queue stalled") from error
                     if isinstance(chunk, RequestException):
@@ -337,10 +337,10 @@ def _cffi_too_large_result(url: str, current_url: str, response: Any, elapsed_ms
 
 
 def _release_stream_noblock(response: Any) -> None:
-    """Schedule a best-effort stream close without awaiting it (N-5).
+    """Schedule a best-effort stream close without awaiting it.
 
     Callers are abandoning a live or wedged producer; awaiting
-    ``response.aclose()`` would join that task and can hang (H1). The done
+    ``response.aclose()`` would join that task and can hang. The done
     callback consumes the result so a failed close never surfaces.
     """
     try:

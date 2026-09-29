@@ -5,12 +5,12 @@ malicious caller cannot OOM the container before pydantic validation.
 Extracted from ``app/main.py`` so the FastAPI app factory stays thin
 and the middleware is testable in isolation.
 
-Behavior preserves the two adversarial-review fixes:
+Two properties of the cap are load-bearing:
 
-* **C1/C4** — truncated requests get ``Connection: close`` and the
-  wrapper keeps draining ``original_receive()`` until ``more_body=False``
-  so keep-alive is not poisoned.
-* **C3** — per-chunk trailers are preserved via ``{**message, ...}``.
+* Truncated requests get ``Connection: close`` and the wrapper keeps
+  draining ``original_receive()`` until ``more_body=False`` so keep-alive
+  is not poisoned.
+* Per-chunk trailers are preserved via ``{**message, ...}``.
 """
 
 from __future__ import annotations
@@ -55,9 +55,9 @@ async def limit_request_body(request: Request, call_next):
         # a final (more_body=False) truncated chunk, and the truncating chunk is
         # not charged to ``bytes_delivered``, so a later receive() computing
         # ``remaining = cap - bytes_delivered`` could still see a positive budget
-        # and admit bytes past the declared cap (B5). Every receive past the cap
+        # and admit bytes past the declared cap. Every receive past the cap
         # returns an empty final chunk, which also keeps draining
-        # original_receive() so the ASGI server's socket buffer empties (C1/C4).
+        # original_receive() so the ASGI server's socket buffer empties.
         if truncated:
             return {**message, "body": b"", "more_body": False}
         body = message.get("body", b"") or b""

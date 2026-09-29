@@ -1,9 +1,9 @@
-"""One sanctioned source of minted handles (jscpd #3 / H4 residue).
+"""One sanctioned source of minted handles.
 
 Every user-visible id is minted here so the entropy policy is stated once:
 request/job ids double as the only lookup credential for
 ``GET /v1/crawl/{request_id}``-style routes, so they carry the full 128-bit
-UUID hex — short ids are brute-forceable (HIGH #9).
+UUID hex — short ids are brute-forceable.
 """
 
 from __future__ import annotations
