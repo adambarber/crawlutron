@@ -14,9 +14,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # The browser suite needs a Camoufox binary and a manual trigger. Without this
-  # event the test-browser job's `if` could never be true, so the job was
-  # structurally unreachable: declared, never run, silently green.
+  # Kept so the suite can be re-run on demand against a given ref without
+  # opening a PR. It is no longer what makes test-browser reachable: that job
+  # used to be `if: github.event_name == 'workflow_dispatch'`, so every push and
+  # pull request silently skipped it -- declared, never run, green.
   workflow_dispatch:
 
 jobs:
@@ -64,11 +65,17 @@ jobs:
         run: python3 -m pytest
 
   test-browser:
-    name: Test suite (browser, manual)
+    name: Test suite (browser)
     runs-on: ubuntu-latest
-    # Manual only: needs the Camoufox binary. Not part of the required gate
-    # until it has actually run green against a known-good commit.
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    # Required. It was held back pending evidence that it can actually go green,
+    # and that evidence now exists: 8 passed against a known-good commit, and
+    # all 8 fail when BrowserRenderer.render is short-circuited, so the green
+    # reflects a real browser rather than a double. The suite costs ~20s here
+    # and a Camoufox fetch, which is cheap enough to pay on every push.
+    #
+    # It runs `-o addopts=` on purpose: the fast suite's default marker set
+    # deselects `browser`, and clearing addopts is what makes the full
+    # collection reachable from here at all.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,13 +95,14 @@ jobs:
   # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs
   # stay unconditional and this aggregate fails if any of them did not succeed.
-  # The only gate-carrying jobs are enforcement (every pre-commit hook) and
-  # test-fast (the suite); there is no separate lint or typecheck job because
-  # pre-commit already runs ruff, mypy and pyright inside `enforcement`.
+  # The gate-carrying jobs are enforcement (every pre-commit hook), test-fast
+  # (the suite) and test-browser (the Camoufox suite); there is no separate lint
+  # or typecheck job because pre-commit already runs ruff, mypy and pyright
+  # inside `enforcement`.
   required:
     name: Required quality gate
     if: ${{ always() }}
-    needs: [enforcement, test-fast]
+    needs: [enforcement, test-fast, test-browser]
     runs-on: ubuntu-latest
     steps:
       - name: Require every gate to have succeeded
@@ -108,3 +116,4 @@ jobs:
         run: |
           test "${{ needs.enforcement.result }}" = "success"
           test "${{ needs.test-fast.result }}" = "success"
+          test "${{ needs.test-browser.result }}" = "success"

@@ -34,7 +34,11 @@ EXPECTATIONS_PATH = SERVICE_ROOT / "jscpd-expectations.json"
 # the config ever moved off the service root, this would say so.
 WORKFLOW_ROOT_CONFIG = CONFIG_PATH.relative_to(SERVICE_ROOT).as_posix()
 ENFORCEMENT_COMMAND = f"pre-commit run --all-files --config {WORKFLOW_ROOT_CONFIG}"
-REPORTING_JOBS = {"enforcement", "test-fast"}
+# Every job that reports a result the aggregate must depend on. test-browser is
+# here because it is no longer `if: workflow_dispatch`: while it carried that
+# condition GitHub reported a *skipped* job as a success, so the aggregate saw a
+# green it had not earned and the browser suite could never fail a build.
+REPORTING_JOBS = {"enforcement", "test-fast", "test-browser"}
 # GitHub's template form for an errexit shell. The required aggregate is a chain
 # of `test` lines, so its exit code is its last line's without errexit.
 ERREXIT_SHELL = "bash -e {0}"
