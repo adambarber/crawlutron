@@ -158,3 +158,39 @@ class TestLifespanContextManager:
         assert "@asynccontextmanager" in src
         assert "async def _lifespan(_app: FastAPI)" in src
         assert "lifespan=_lifespan" in src
+
+
+class TestShutdownEventBelongsToOneLifespanRun:
+    """The shutdown signal is minted per run, not once per process.
+
+    ``shutdown_event`` was a module global built at import and wired to
+    ``app.state`` at import, while the lifespan only ever called ``.set()`` on
+    it. The first run to finish therefore left the process-wide event signalled
+    for good, and every later run handed that dead event to the request
+    dependency, so crawls started already cancelled.
+
+    Nothing in production reads the global -- ``get_shutdown_event`` resolves
+    ``request.app.state.shutdown_event`` -- so the state is the only thing that
+    has to be fresh, and the fix belongs in the lifespan.
+    """
+
+    async def test_a_second_lifespan_run_gets_a_live_shutdown_event(self, monkeypatch):
+        stub_heavy_teardown(monkeypatch)
+        app = service_app()
+
+        async with app.router.lifespan_context(app):
+            first = app.state.shutdown_event
+        assert first.is_set(), "precondition: leaving the lifespan must signal that run's event"
+
+        async with app.router.lifespan_context(app):
+            second = app.state.shutdown_event
+            # Read the liveness inside the block. The teardown signals the event
+            # on the way out, so asserting after the block would pass against a
+            # dead event for the wrong reason.
+            second_is_live = not second.is_set()
+
+        assert second is not first, "the lifespan reused the previous run's event object"
+        assert second_is_live, (
+            "the second lifespan run inherited the first run's shutdown signal, so every "
+            "crawl it starts is cancelled before it does any work"
+        )

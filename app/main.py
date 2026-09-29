@@ -119,7 +119,12 @@ logger = configure_service_logging(
 # The single browser pool lives in the browser_pool module (set up in lifespan
 # via initialize_browser_pool); request handlers reach it through
 # get_browser_pool(). There is intentionally no second pool global here.
-shutdown_event = asyncio.Event()
+#
+# The shutdown event is minted inside the lifespan and published to
+# ``app.state`` there, for the same reason. A module-level event wired to
+# ``app.state`` at import is signalled by the first run's teardown and never
+# cleared, so a second run in the same process hands every request a signal
+# that is already set and cancels each crawl before it does any work.
 
 # Third-party extraction libraries log per-element WARNINGs that are expected
 # parser noise (e.g. trafilatura on <a> elements without href) and cannot be
@@ -185,6 +190,8 @@ if FastAPI is not None:
         # Jobs: rewind crash orphans and resume every PENDING whole-site job.
         from .api.job_runner import recover_and_start_pending_jobs
 
+        shutdown_event = asyncio.Event()
+        _app.state.shutdown_event = shutdown_event
         await recover_and_start_pending_jobs(job_store, settings, shutdown_event)
 
         yield
@@ -283,7 +290,6 @@ if FastAPI is not None:
     # this module can fetch them via :func:`get_settings` /
     # :func:`get_shutdown_event` FastAPI dependencies.
     app.state.crawler_settings = settings
-    app.state.shutdown_event = shutdown_event
     app.state.job_store = job_store
     app.state.result_store = result_store
 

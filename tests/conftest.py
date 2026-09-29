@@ -584,3 +584,39 @@ def _reset_metrics():
 # Tearing down the ProcessPoolExecutor around every test made the suite slow;
 # the reset now lives as a scoped fixture in crawl/test_extraction_bounds.py,
 # the only module that needs it (it injects env vars into pool workers).
+
+
+@pytest.fixture(autouse=True)
+async def owned_job_runtime():
+    """Hand every test the job runtime, and take it back at the end.
+
+    ``app.api.job_runner`` keeps its task registry in a module-level dict and
+    the app keeps its shutdown event in ``app.state``, so both are shared by
+    every test in a worker process. A crawl started by one test therefore
+    stayed visible to the next, and a test that shut the world down did it for
+    its neighbours as well.
+
+    The event is minted per test here as well as per lifespan run in
+    ``app.main``, because ``async_client`` drives the app over an ASGI
+    transport without running its lifespan -- so the dependency
+    ``get_shutdown_event`` resolves has to be supplied by whoever owns the
+    test, and that is this fixture.
+
+    Leaving a crawl running is only legitimate until the test that started it
+    ends. Teardown is the one point where that is unconditionally true for every
+    test, so it is where the reset belongs, rather than in each test module that
+    happens to remember to call ``reset_job_runner()`` itself.
+
+    Async rather than sync because cancelling a task and awaiting its exit are
+    different acts, and only the second one proves the task is gone. Cancelling
+    without awaiting leaves it holding the store the next test opens.
+    """
+    from app.api import job_runner
+    from tests._app_factory import service_app
+
+    app = service_app()
+    if app is not None:
+        app.state.shutdown_event = asyncio.Event()
+    yield
+    await job_runner.shutdown_job_runner()
+    job_runner.reset_execute_crawl()
