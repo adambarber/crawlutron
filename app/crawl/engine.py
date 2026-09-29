@@ -85,6 +85,25 @@ def _purge_robots_cache(now: float | None = None) -> int:
     return robots_cache.purge_expired(now=now)
 
 
+def _utc_timestamp(dt: datetime | None) -> float | None:
+    """Seconds since the epoch, reading a naive datetime as UTC.
+
+    Sitemap ``<lastmod>`` arrives in two shapes -- RFC 822 via
+    ``parsedate_to_datetime``, ISO 8601 via ``fromisoformat`` -- and each
+    parser hands back a *naive* datetime for a stamp that omits an offset,
+    which is the common case rather than a malformed one. A naive value has no
+    epoch to compare against, so something has to say UTC is meant. The two
+    parse branches each said it, which is one assumption living in two places.
+
+    None in, None out: a parser that found nothing is not a timestamp.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
+
+
 def _parse_lastmod(lastmod: str | None) -> float | None:
     """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
 
@@ -104,20 +123,13 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     try:
         from email.utils import parsedate_to_datetime
 
-        dt = parsedate_to_datetime(s)
-        if dt is not None:
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            ts = dt.timestamp()
+        ts = _utc_timestamp(parsedate_to_datetime(s))
     except (TypeError, ValueError):
         pass
     if ts is None:
         iso = s.replace("Z", "+00:00")
         try:
-            dt = datetime.fromisoformat(iso)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=UTC)
-            ts = dt.timestamp()
+            ts = _utc_timestamp(datetime.fromisoformat(iso))
         except ValueError:
             return None
     if ts is None:

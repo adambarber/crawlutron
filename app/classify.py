@@ -270,6 +270,12 @@ _TAGS_RE = re.compile(r"<[^>]+>")
 # with; this site keeps only the reason THIS scan needs one.
 
 
+#: Openers whose matching closers are stripped before the page is classified.
+#: A declaration, not a branch per tag, so adding a noise construct is a list
+#: edit rather than two hand-written lines in the scan loop.
+_NOISE_OPENERS: Final = ("<script", "<style", "<!--")
+
+
 def _strip_html_noise(html: str | None) -> str:
     """Remove scripts, styles, and comments via linear string scanning.
 
@@ -290,17 +296,11 @@ def _strip_html_noise(html: str | None) -> str:
     pos = 0
     lower = body.lower()
     while pos < len(body):
-        # Find the earliest noise opener from ``pos``.
-        candidates = []
-        idx = lower.find("<script", pos)
-        if idx != -1:
-            candidates.append(idx)
-        idx = lower.find("<style", pos)
-        if idx != -1:
-            candidates.append(idx)
-        idx = lower.find("<!--", pos)
-        if idx != -1:
-            candidates.append(idx)
+        # Find the earliest noise opener from ``pos``. The openers are a set,
+        # not a hand-written branch per tag: each branch added two lines and a
+        # new tag to remember, and the list is the whole of what this scan
+        # knows about noise markup.
+        candidates = [idx for idx in (lower.find(opener, pos) for opener in _NOISE_OPENERS) if idx != -1]
 
         if not candidates:
             out.append(body[pos:])

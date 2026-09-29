@@ -68,6 +68,29 @@ def install_execute_crawl(fn: ExecuteCrawl) -> None:
     _execute_crawl = fn
 
 
+async def arecord_terminal_failure(job_store: JobStore, job_id: str, error: str) -> None:
+    """Stamp ``error`` on a running job and flip it to FAILED.
+
+    A job that has already left RUNNING -- cancelled, paused, finished -- is
+    left exactly as it is. Recording the failure anyway is not a cosmetic
+    inconsistency: a cancel that lands while a batch is in flight would find
+    its own error message overwritten by the batch's, so the job reports
+    *why it failed* when the operator asked for it to stop.
+
+    Written twice, and the two copies had already disagreed about this: the
+    whole-site runner re-checked the status before writing and the async
+    webhook runner did not, so the same cancel was honoured on the sync path
+    and silently overwritten on the async one. The status guard belongs to the
+    rule rather than to whichever caller remembered it, so it is here.
+    """
+    job = await job_store.aload(job_id)
+    if job is None or job.status is not JobStatus.RUNNING:
+        return
+    job.error = error
+    await job_store.asave(job)
+    await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
+
+
 def reset_execute_crawl() -> None:
     global _execute_crawl
     _execute_crawl = _real_execute_crawl
@@ -399,11 +422,7 @@ async def _run_job(
         raise
     except Exception as exc:
         logger.exception("job_runner_failed job_id=%s error=%r", job_id, exc)
-        job = await job_store.aload(job_id)
-        if job is not None and job.status == JobStatus.RUNNING:
-            job.error = str(exc)
-            await job_store.asave(job)
-            await job_store.aset_status(job_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
+        await arecord_terminal_failure(job_store, job_id, str(exc))
 
 
 def start_job(

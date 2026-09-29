@@ -424,22 +424,40 @@ def normalize_sitemap_candidates(
     return candidates
 
 
-def record_cap_truncated(job: Any) -> None:
-    if job.stats.get("cap_truncated", 0) == 0:
-        _logger.info(
-            "job_runner_cap_truncated",
+def _record_cap_flag(job: Any, stat_key: str, level: int, event: str) -> None:
+    """Set a once-only cap stat on ``job``, logging it the first time only.
+
+    ``cap_truncated`` and ``cap_overcommitted`` are the same signal at two
+    severities: the cap bit, a one-shot log so a capped crawl is visible in
+    aggregate without filling the log, and no change to the job's own fate.
+    Spelled per flag, the pair duplicated the log payload and the cap source
+    and invited a third hand-written copy of the same three facts.
+
+    Private because the two cap signals are the whole of this module's cap
+    vocabulary. A public four-argument version would let a caller pair a stat
+    key with the wrong log event, and a mismatch there is invisible -- the
+    stat and the log would simply disagree.
+
+    ``level`` is the stdlib logging level and ``event`` the record's event
+    name; both are part of the signal's identity, not of this helper.
+    """
+    if job.stats.get(stat_key, 0) == 0:
+        _logger.log(
+            level,
+            event,
             extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
         )
-    job.stats["cap_truncated"] = 1
+    job.stats[stat_key] = 1
+
+
+def record_cap_truncated(job: Any) -> None:
+    """The crawl hit its page cap and stopped adding pages."""
+    _record_cap_flag(job, "cap_truncated", logging.INFO, "job_runner_cap_truncated")
 
 
 def record_cap_overcommitted(job: Any) -> None:
-    if job.stats.get("cap_overcommitted", 0) == 0:
-        _logger.warning(
-            "job_runner_cap_overcommitted",
-            extra={"job_id": job.job_id, "max_pages": job_max_pages(job.policy)},
-        )
-    job.stats["cap_overcommitted"] = 1
+    """The crawl was admitted past its cap; the overflow is reported, not refused."""
+    _record_cap_flag(job, "cap_overcommitted", logging.WARNING, "job_runner_cap_overcommitted")
 
 
 async def admit_job_links(

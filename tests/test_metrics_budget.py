@@ -81,7 +81,7 @@ _BUDGETS = {
     "function length": 39,
     "abc size": 5,
     "class length": 3,
-    "block length": 13,
+    "block length": 12,
 }
 
 # The complexity approximation counts every node that introduces a branch, which

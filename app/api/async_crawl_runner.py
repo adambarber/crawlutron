@@ -24,6 +24,7 @@ import logging
 from typing import Any
 
 from app.api.crawl_executor import execute_crawl
+from app.api.job_runner import arecord_terminal_failure
 from app.api.response_shaping import EnvelopeOptions, abuild_unified_crawl_response
 from app.crawl.job_store import JobStatus
 from app.metrics import get_metrics
@@ -170,11 +171,7 @@ async def run_async_crawl(
 
     except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})
-        job = await job_store.aload(request_id)
-        if job is not None:
-            job.error = str(exc)
-            await job_store.asave(job)
-            await job_store.aset_status(request_id, JobStatus.FAILED, expected=JobStatus.RUNNING)
+        await arecord_terminal_failure(job_store, request_id, str(exc))
         if webhook_url:
             with contextlib.suppress(Exception):
                 error_payload = (
