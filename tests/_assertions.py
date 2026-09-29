@@ -204,7 +204,6 @@ def one_search_result(override_settings, fake_provider_http, **overrides):
 @functools.lru_cache(maxsize=1)
 def browser_available() -> bool:
     with contextlib.suppress(Exception):
-
         path = launch_path()
         return bool(path) and os.path.exists(path)
     try:

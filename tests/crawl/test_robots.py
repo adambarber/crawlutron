@@ -76,9 +76,7 @@ class TestGroupAccumulator:
         # foreign UA line alone contributes nothing. Agent lists accumulate
         # across non-consumed lines (a shipped quirk of both old scanners),
         # so selection must be what keeps foreign blocks out — pinned next.
-        text = (
-            "User-agent: baiduspider\nSitemap: https://x/a\n\nUser-agent: crawlutron\nDisallow: /priv\n"
-        )
+        text = "User-agent: baiduspider\nSitemap: https://x/a\n\nUser-agent: crawlutron\nDisallow: /priv\n"
         groups = _groups(text, lambda k, v: k in ("allow", "disallow"))
         assert len(groups) == 1
         assert groups[0][1] == [("disallow", "/priv")]
@@ -117,9 +115,7 @@ class TestSelection:
     def test_foreign_agents_never_claim_our_token(self):
         # M7: matching the *token*, not the full UA string, and only substrings
         # of it — a URL or version fragment must not select a group.
-        text = (
-            "User-agent: https://bot.example/crawlutron/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
-        )
+        text = "User-agent: https://bot.example/crawlutron/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
         best, star = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
         assert best is None
         assert star == [("disallow", "/*")]

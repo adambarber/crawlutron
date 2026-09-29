@@ -818,7 +818,6 @@ async def invoke_http_strategy(
     cap_capture: list[int] | None = None,
 ) -> Any:
     if dedupe_patch:
-
         monkeypatch.setattr(trafilatura.core, "duplicate_test", lambda *a, **k: False)
 
     def answer(url, _sent_headers, *_):

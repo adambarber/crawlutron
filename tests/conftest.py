@@ -88,9 +88,7 @@ os.environ.setdefault("CRAWLUTRON_CACHE_DIR", f"{_TEST_TMP}/crawlutron_test_cach
 os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TTL_SECONDS", "3600")
 # Keep the opt-in content cache disabled during tests so fake-fetcher suites that
 # serve different content for the same URL stay isolated.
-os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get(
-    "CRAWLUTRON_CONTENT_CACHE_ENABLED", "false"
-)
+os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get("CRAWLUTRON_CONTENT_CACHE_ENABLED", "false")
 
 
 @pytest.fixture

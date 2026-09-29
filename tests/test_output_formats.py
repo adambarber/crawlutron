@@ -92,8 +92,7 @@ def test_csv_has_header_and_one_row_per_result():
     assert media == "text/csv; charset=utf-8"
     rows = body.splitlines()
     assert (
-        rows[0]
-        == "original_url,normalized_url,final_url,status,classification,selected_strategy,"
+        rows[0] == "original_url,normalized_url,final_url,status,classification,selected_strategy,"
         "quality_score,discovered_link_count,error,http_status"
     )
     assert len(rows) == 3  # header + 2 rows

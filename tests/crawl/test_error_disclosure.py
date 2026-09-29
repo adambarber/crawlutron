@@ -123,7 +123,7 @@ def test_both_failure_primitives_log_the_same_server_side_payload(caplog):
     engine_record = _record_for(caplog, "strategy_result_error")
     render_record = _record_for(caplog, "render_result_error")
     # Same payload shape, from the same call site, differing only in the event.
-    assert vars(engine_record) .keys() == vars(render_record).keys()
+    assert vars(engine_record).keys() == vars(render_record).keys()
     assert engine_record.funcName == render_record.funcName == "_classify_and_log"
     # Distinct event names, so the two layers stay tellable apart in the stream.
     assert {r.msg for r in caplog.records} == {"strategy_result_error", "render_result_error"}

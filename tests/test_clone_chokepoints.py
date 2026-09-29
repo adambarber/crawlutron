@@ -32,7 +32,7 @@ FUNNELS = [
         "job-post",
         "post_api_job",
         'async def f(client):\n await client.post("/v1/jobs", json={"root_url": "x", "policy": '
-        '_execution_policy(None)})',
+        "_execution_policy(None)})",
     ),
     (
         "seeded-job",
@@ -55,20 +55,20 @@ FUNNELS = [
     (
         "http-strategy",
         "run_http_strategy",
-        'async def f():\n return await _http_strategy_result(request=StrategyRequest(original_url=url, '
+        "async def f():\n return await _http_strategy_result(request=StrategyRequest(original_url=url, "
         'normalized_url=url, strategy="HTTP_DECLARED_CRAWLER", policy=policy, '
-        'host_policy=HostPolicy.unrestricted()), http_fetcher=fetcher)',
+        "host_policy=HostPolicy.unrestricted()), http_fetcher=fetcher)",
     ),
     (
         "cache-entries",
         "make_expiring_cache",
-        'def f(tmp):\n cache = ContentCache(tmp, default_ttl=10, clock=clock, max_entries=100, '
+        "def f(tmp):\n cache = ContentCache(tmp, default_ttl=10, clock=clock, max_entries=100, "
         'max_total_bytes=10000)\n cache.set("a", "x" * 100)\n cache.set("b", "x" * 100)',
     ),
     (
         "html-fetcher",
         "make_html_fetcher",
-        'def f(calls):\n async def fetcher(url, headers, timeout):\n  calls.append(url)\n  return '
+        "def f(calls):\n async def fetcher(url, headers, timeout):\n  calls.append(url)\n  return "
         'make_fetch(url=url, final_url=url, status=200, ctype="text/html", body=body)',
     ),
     (
@@ -97,7 +97,7 @@ FUNNELS = [
         "crawled-urls",
         "crawled_urls",
         'async def f():\n payload = {"url": "http://example.com/", "policy": {"limits": {"max_depth": 1}}}\n '
-        'out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())\n return '
+        "out = await crawl_request(payload, http_fetcher=site_fetcher(pages), cache=HttpCache())\n return "
         '{r["normalized_url"] for r in out["results"]}',
     ),
     (
@@ -110,13 +110,13 @@ FUNNELS = [
         "crawl-submit",
         "_post_crawl",
         'async def f(client):\n resp = await client.post("/v1/crawl", json=payload)\n assert '
-        'resp.status_code '
-        ''
-        ''
-        ''
-        ''
-        ''
-        ''
+        "resp.status_code "
+        ""
+        ""
+        ""
+        ""
+        ""
+        ""
         '== 200\n return resp.json()["results"][0]',
     ),
     (

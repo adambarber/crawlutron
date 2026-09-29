@@ -95,9 +95,7 @@ class RecursiveRun(NamedTuple):
 def make_crawl_task(index: int, host: str) -> CrawlTask:
     """A seed task for ``http://<host>/page<index>``."""
     url = f"http://{host}/page{index}"
-    return CrawlTask(
-        index=index, original_url=url, normalized_url=normalized(url), domain=host
-    )
+    return CrawlTask(index=index, original_url=url, normalized_url=normalized(url), domain=host)
 
 
 async def drive_recursive_crawl(

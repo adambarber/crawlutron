@@ -81,9 +81,7 @@ def _env_get_aliases(tree: ast.AST) -> set[str]:
 
 def test_env_alias_escape_bites():
     """Shape 3 must fire on the read-back that shapes 1-2 structurally miss."""
-    bad = ast.parse(
-        'import os\n\ndef f():\n    raw = os.environ.get("CRAWLUTRON_X")\n    return int(raw)\n'
-    )
+    bad = ast.parse('import os\n\ndef f():\n    raw = os.environ.get("CRAWLUTRON_X")\n    return int(raw)\n')
     assert _env_get_aliases(bad) == {"raw"}
     ok = ast.parse('def f(limits):\n    raw = limits.get("max_bytes")\n    return int(raw)\n')
     assert not _env_get_aliases(ok)
@@ -116,13 +114,9 @@ def test_no_bare_env_int_or_float_in_app():
                 continue
             for arg in node.args:
                 if _is_crawlutron_get(arg):
-                    offenders.append(
-                        offender_at(path, node, f"bare {callee} on CRAWLUTRON_* mapping read")
-                    )
+                    offenders.append(offender_at(path, node, f"bare {callee} on CRAWLUTRON_* mapping read"))
                 elif _is_env_get(arg):
                     offenders.append(offender_at(path, node, f"bare {callee} on os.environ.get"))
                 elif isinstance(arg, ast.Name) and arg.id in env_aliases:
-                    offenders.append(
-                        offender_at(path, node, f"bare {callee} on env-read alias {arg.id!r}")
-                    )
+                    offenders.append(offender_at(path, node, f"bare {callee} on env-read alias {arg.id!r}"))
     assert not offenders, "Bare env int/float reintroduced: " + "; ".join(offenders)
