@@ -50,9 +50,23 @@ class IndexInfo:
     where: str | None
 
 
+def _set_busy_timeout(conn: sqlite3.Connection, milliseconds: int) -> None:
+    """Set ``PRAGMA busy_timeout`` through the one chokepoint that splices a value in.
+
+    The pragma guard admits a module constant or a validated identifier and
+    nothing else, and this statement needs a computed value, so the value goes
+    through the same allowlist as every other spliced fragment instead of
+    earning an exemption of its own. The allowlist is not ceremony here: a
+    busy timeout is a non-negative integer of milliseconds, and the one thing
+    that is not -- a negative, a float, anything with a sign or a dot -- is
+    exactly what SQLite would misread.
+    """
+    conn.execute(f"PRAGMA busy_timeout={_validated_identifier(str(milliseconds))}")
+
+
 def configure_store_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
     """Apply every connection-scoped service SQLite PRAGMA in this one function."""
-    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+    _set_busy_timeout(conn, _BUSY_TIMEOUT_MS)
     _ensure_wal(conn)
     return conn
 
@@ -63,16 +77,36 @@ def _ensure_wal(conn: sqlite3.Connection) -> None:
     On an already-WAL database the PRAGMA is a no-op read and never takes a
     write lock, so the steady state stays uncontended; the retry is reached
     only by the first conversion, which is the only time this is a write.
+
+    The two budgets are different things and both are real: ``_BUSY_TIMEOUT_MS``
+    is how long ONE attempt may block inside SQLite before it can report
+    contention, and ``_WAL_RETRY_SECONDS`` is the total wait. Checking the
+    deadline only between attempts is not enough to honour the second, because
+    an attempt allowed the first budget can outlive the second on its own -- a
+    15s budget over a 5s busy timeout really waits 20s, and a caller that
+    shortened the retry to half a second still waited five. Each attempt
+    therefore runs under whichever is smaller: its own timeout, or what is
+    left of the deadline.
+
+    The connection's configured timeout is restored on the way out, including
+    the failure path: a caller set ``_BUSY_TIMEOUT_MS`` for every statement on
+    this connection, and how long the WAL conversion happened to take is not
+    a licence to leave it narrowed.
     """
     deadline = time.monotonic() + _WAL_RETRY_SECONDS
-    while True:
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            return
-        except sqlite3.OperationalError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(_WAL_RETRY_BACKOFF_SECONDS)
+    try:
+        while True:
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            _set_busy_timeout(conn, max(1, min(_BUSY_TIMEOUT_MS, remaining_ms)))
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                return
+            except sqlite3.OperationalError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(_WAL_RETRY_BACKOFF_SECONDS)
+    finally:
+        _set_busy_timeout(conn, _BUSY_TIMEOUT_MS)
 
 
 def _open_raw_store_connection(

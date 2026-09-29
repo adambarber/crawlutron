@@ -122,7 +122,16 @@ def test_setup_outlasts_a_peer_beyond_the_busy_timeout(tmp_path, monkeypatch):
 
 
 def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
-    """Bounded, not forever: a hard lock must not become an unkillable hang."""
+    """Bounded, not forever: a hard lock must not become an unkillable hang.
+
+    The bound asserted is the one the caller set. This used to accept any wait
+    under ten seconds, which is what let the knob stay broken: the retry checked
+    its deadline only BETWEEN attempts, and one attempt could block for the
+    whole connection busy timeout, so a half-second budget still waited five and
+    the loose bound called that a pass. A budget that is not the wait is not a
+    budget, so the slack here is a quarter of the configured time -- enough for
+    a loaded machine, far too little to hide an attempt that outlives it.
+    """
     monkeypatch.setattr(sqlite_store, "_WAL_RETRY_SECONDS", 0.5)
 
     with _peer_locked_store(tmp_path, "stuck") as conn:
@@ -131,7 +140,7 @@ def test_setup_refuses_a_peer_that_never_releases(tmp_path, monkeypatch):
             configure_store_connection(conn)
         except sqlite3.OperationalError:
             waited = time.monotonic() - started
-            assert waited < 10, f"waited {waited:.1f}s, which is not bounded"
+            assert waited < 0.75, f"waited {waited:.2f}s against a 0.5s budget"
         else:
             raise AssertionError("expected a refusal while a peer held the database")
 
