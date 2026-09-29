@@ -225,6 +225,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   optionality is exactly why the equivalence has to be decided in one place.
 
 ### Added
+- **A gate on the doc gate's own scope**
+  (`tests/invariants/test_contracts.py::test_live_documents_are_derived_not_enumerated`).
+  The first cut of the live-document reference gate enumerated the nine
+  documents it checked, which made the gate's own coverage a hand-maintained
+  list that drifts silently: a document added later inherited no coverage and
+  nothing failed. That is not hypothetical -- `docs/typing-plan.md` sat
+  outside the enumerated nine for exactly as long as it had seven dead paths,
+  and no gate noticed. Coverage is now derived from the tree, so every
+  markdown file is checked unless it is *named* as an exception, and the
+  maintained list is inverted: four exemptions, each a deliberate decision
+  about a record that is supposed to cite deleted files, and each carrying the
+  reason. The `CHANGELOG`, the dated adversarial review and the ARCHIVED
+  refactoring plan are exempt because rewriting their citations would falsify
+  them. The typing plan joins them on a different basis: it is a snapshot
+  audit whose module references predate a reorganisation of `app/crawl/` and
+  `app/api/`, so it is now stamped as a snapshot rather than left to read as a
+  map of the tree. Repointing fifty audit entries by eye was rejected as a
+  claim of verification nobody performed. A performance review that had been
+  uncovered the whole time is now covered and passes.
 - **Deployment-manifest drift gate**
   (`tests/invariants/test_contracts.py::test_deployment_manifest_sets_no_dead_knob`):
   a key `docker-compose.yml` sets that nothing in `app/` reads is the

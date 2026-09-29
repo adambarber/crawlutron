@@ -500,38 +500,50 @@ def test_documented_browser_knobs_have_consumers():
     assert not failures, "; ".join(failures)
 
 
-_LIVE_NAVIGATIONAL_DOCS = (
-    "README.md",
-    "AGENTS.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "docs/property-inventory.md",
-    "docs/module-graph.md",
-    "docs/references/crawlutron-agent-contract.md",
-    "docs/references/crawlutron-telemetry.md",
-    "docs/references/crawlutron-manual-test-plan.md",
-)
+_DOC_REFERENCE_EXCLUSIONS = {
+    "CHANGELOG.md": "a record of what shipped; its citations name modules that were refactored away",
+    "ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md": "a dated review quoting the tree it reviewed",
+    "docs/review-and-refactoring-plan.md": "stamped ARCHIVED; describes a topology that no longer exists",
+    "docs/typing-plan.md": "a snapshot audit whose file references predate a reorganisation, and says so",
+}
+_SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest_cache", "__pycache__"})
 
 _BACKTICKED_PATH = re.compile(
     r"^[\w][\w./-]*/[\w./-]*\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::\d+)?$"
 )
 
 
+def _markdown_documents() -> list[str]:
+    return sorted(
+        str(document.relative_to(REPO_ROOT))
+        for document in REPO_ROOT.rglob("*.md")
+        if not _SKIP_DIRECTORIES.intersection(document.parts)
+    )
+
+
+def _live_documents() -> list[str]:
+    """Every markdown file that is not a stated exception.
+
+    Derived rather than listed, so a document added later is covered by
+    default. The earlier version enumerated the nine live documents, which
+    made the gate's scope itself a hand-maintained thing that drifts
+    silently: a new doc inherited no coverage and nothing failed. An
+    exclusion list is the right shape to keep by hand, because every entry is
+    a deliberate decision about a record that is *supposed* to cite files
+    that no longer exist, and each carries the reason it is exempt.
+    """
+    return [name for name in _markdown_documents() if name not in _DOC_REFERENCE_EXCLUSIONS]
+
+
 def _broken_doc_reference_offenders() -> list[str]:
     """Every repo path a live document tells a reader to open must exist.
 
-    The scope is the point, and it is deliberately narrow. A record of what
-    was true legitimately cites files that have since been deleted -- the
-    CHANGELOG names modules that were refactored away, an archived plan
-    describes a topology that no longer exists, and a dated review quotes the
-    tree it reviewed. Rewriting those citations would falsify the record, so
-    they are out of scope by design rather than by omission.
-
-    What is in scope is the set of documents a reader arrives with intent to
-    follow. A dead path there is not a historical artifact; it is a
-    navigational dead end, and it has no other signal: prose still reads
-    correctly, the build is green, and the reader only discovers it after
-    deciding to trust the document.
+    The scope is the point. A record of what was true legitimately cites
+    files that have since been deleted, and "fixing" those citations would
+    falsify the record -- so the exemptions are named, with reasons, rather
+    than applied by an exclusion nobody can see. What is checked is
+    everything else: the document a reader arrives intending to follow, where
+    a dead path is a navigational dead end and not history.
 
     The span must contain a separator, and that is not a stylistic filter. A
     bare `robots.txt` or `browser.py` in prose is a basename being discussed,
@@ -539,11 +551,8 @@ def _broken_doc_reference_offenders() -> list[str]:
     this tree's layout.
     """
     offenders: list[str] = []
-    for name in _LIVE_NAVIGATIONAL_DOCS:
+    for name in _live_documents():
         document = REPO_ROOT / name
-        if not document.exists():
-            offenders.append(f"{name} is listed as live but does not exist")
-            continue
         for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
             candidate = span.strip()
             if not _BACKTICKED_PATH.match(candidate):
@@ -604,6 +613,19 @@ def test_deployment_knob_detector_bites():
     finally:
         manifest.write_text(original, encoding="utf-8")
     assert "CRAWLUTRON_TYPO_PROBE" not in (_deployment_knobs() or set())
+
+
+def test_live_documents_are_derived_not_enumerated():
+    """The gate on the gate: coverage must equal the tree.
+
+    A document added later has to arrive covered, which is the failure a
+    hand-kept list cannot catch. `docs/typing-plan.md` sat outside the
+    original nine for exactly as long as it had seven dead paths, and
+    nothing said so -- the exclusion set, not the covered set, is what a
+    human maintains now.
+    """
+    assert set(_live_documents()) | set(_DOC_REFERENCE_EXCLUSIONS) == set(_markdown_documents())
+    assert not (stale := set(_DOC_REFERENCE_EXCLUSIONS) - set(_markdown_documents())), stale
 
 
 def test_live_docs_point_at_paths_that_exist():

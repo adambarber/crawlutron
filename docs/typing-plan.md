@@ -1,5 +1,15 @@
 # Typing programme
 
+> **Status 2026-09-29: a snapshot audit, not a map of the current tree.** The
+> file references below were accurate when the audit was taken and are kept
+> verbatim, because rewriting them would be a claim of verification nobody
+> performed: the modules they name have since been reorganised, and
+> repointing fifty entries by eye is how a document ends up asserting a
+> current state that was never checked. Read the findings; check any path
+> against the tree before acting on it. The count of 106 files, and the
+> `Any` totals that follow, describe that snapshot and are not a current
+> measurement.
+
 **Purpose.** At the original audit, the type checkers were green while the
 boundary types were absent: `mypy` reported zero errors across all 106 files in
 `app/` and the pyright budget was zero, yet the code had **no structural types
