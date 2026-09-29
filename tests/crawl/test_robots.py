@@ -28,6 +28,7 @@ from app.settings import CrawlerSettings
 from app.validation import HostPolicy
 from tests._fetcher_factories import make_fetch, routed_fetcher
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy
+from tests._timing_harnesses import cpu_seconds
 
 
 def robots_entry_key(origin: str) -> tuple[str, HostPolicy]:
@@ -264,19 +265,17 @@ def test_pathological_wildcard_rule_matches_in_linear_time():
     exponential backtracking (8.5s for 30 wildcards x 2000 chars). The
     matcher is linear, so doubling BOTH dimensions must stay fast.
     """
-    import time as _time
-
     from app.crawl.engine import _robots_pattern_to_regex
 
     pattern = "/*a*" * 30
     matcher = _robots_pattern_to_regex("example.com", pattern)
     path = "/" + "b" * 2000 + "a"
 
-    start = _time.perf_counter()
-    result = matcher.match(path)
-    elapsed = _time.perf_counter() - start
-    assert result is False
-    assert elapsed < 0.5, f"wildcard match took {elapsed:.3f}s (backtracking?)"
+    assert matcher.match(path) is False
+    # CPU seconds, not wall clock: the claim is about the matcher's work, and a
+    # wall clock also reports how loaded the box was. See `cpu_seconds`.
+    elapsed = cpu_seconds(lambda: matcher.match(path))
+    assert elapsed < 0.5, f"wildcard match cost {elapsed:.6f}s of CPU (backtracking?)"
 
 
 def test_pathological_pattern_match_parity_with_simple_cases():

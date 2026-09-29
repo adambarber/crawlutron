@@ -26,6 +26,7 @@ from app.crawl.strategies import browser as browser_mod
 from app.crawl.strategies import http as http_mod
 from app.crawl.strategies.browser import BrowserRenderer
 from tests._result_builders import skipped_result
+from tests._timing_harnesses import cpu_seconds
 from tests.chokepoint_walks import app_trees, nodes_of
 
 
@@ -421,34 +422,27 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
     each tag anchor re-scanned to end-of-string for a closing tag that never
     comes (adversarial review H-final-1). The replacement scanner must stay
     linear: doubling the input must roughly double, not quadruple, the time.
-    """
-    import time
 
+    Measured in CPU seconds, not wall clock. The claim is about the scanner's
+    work; a wall clock also reports how busy the box was, and a descheduled
+    process reads as a slow one. That is how this test came to fail a linear
+    scanner at a 37x ratio for a 2x input under a loaded full-suite run.
+    """
     from app.classify import _strip_html_noise
 
-    def timed(n):
+    def cpu_for(n):
         payload = ("<script>" + "a" * 500) * n
-        # Warm-up once to settle first-call effects; min-of-3 so timer
-        # noise on a loaded runner can't flake a linear implementation
-        # (final review #6).
-        _strip_html_noise(payload)
-        best = None
-        for _ in range(3):
-            t0 = time.perf_counter()
-            _strip_html_noise(payload)
-            elapsed = time.perf_counter() - t0
-            best = elapsed if best is None else min(best, elapsed)
-        return best
+        return cpu_seconds(lambda: _strip_html_noise(payload))
 
-    t_small = timed(400)
-    t_big = timed(800)
+    t_small = cpu_for(400)
+    t_big = cpu_for(800)
     assert t_big < t_small * 3.5, (
-        f"super-linear blowup: {t_small:.3f}s -> {t_big:.3f}s (ratio {t_big / t_small:.1f}x for 2x input)"
+        f"super-linear blowup: {t_small:.6f}s -> {t_big:.6f}s (ratio {t_big / t_small:.1f}x for 2x input)"
     )
-    # Absolute ceiling: the ~400 KB pass must complete well under one CI
-    # tick on any reasonable machine; a quadratic reimplementation would
-    # be orders of magnitude slower.
-    assert t_big < 0.25, f"linear scan too slow: {t_big:.3f}s for ~400 KB"
+    # Absolute ceiling: the ~400 KB pass must cost well under a quarter second
+    # of CPU on any reasonable machine; a quadratic reimplementation would be
+    # orders of magnitude slower.
+    assert t_big < 0.25, f"linear scan too slow: {t_big:.6f}s of CPU for ~400 KB"
 
 
 def test_strip_unclosed_script_neutralizes_to_end_and_keeps_preceding_text():

@@ -8,7 +8,7 @@ lost, once, to a box running four agent sessions (62.9s of user CPU inside a
 waiting for -- a signal, an ordering, a duration the code *asked for* -- and
 wait on exactly that.
 
-Three shapes, none of which wait for wall-clock seconds:
+Four shapes, none of which wait for wall-clock seconds:
 
 * :class:`SleepRecorder` -- assert on the durations the code requested, not on
   how long the box took to grant them. A scheduler that asked to sleep 0.3s has
@@ -19,6 +19,9 @@ Three shapes, none of which wait for wall-clock seconds:
 * :func:`await_until` -- yield the loop until a named predicate holds. This is
   the "let the already-scheduled task run" primitive, minus the optimism: it
   does not sleep a hopeful 50ms and hope, it runs until the condition is true.
+* :func:`cpu_seconds` -- assert on how much *work* a call cost, not on how long
+  the box took to let it happen. For claims about algorithmic cost only; a test
+  whose subject is a deadline the code asked for wants the wall clock instead.
 
 ``HANG_GUARD_SECONDS`` is the one wall-clock number here, and it is deliberately
 NOT an instrument. An event-driven wait returns the instant its event fires, no
@@ -39,6 +42,7 @@ task exists to be joined instead of a deadline to be met.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 
 # Bound on how long a wait may observe NOTHING before it calls the test a hang.
@@ -139,10 +143,45 @@ def recorder(monkeypatch) -> SleepRecorder:
     return SleepRecorder().install(monkeypatch)
 
 
+def cpu_seconds(work: Callable[[], object], *, samples: int = 3) -> float:
+    """CPU seconds for the cheapest of ``samples`` runs of ``work``.
+
+    The instrument for a claim about *work* -- "this is linear", "this is
+    bounded" -- and the wrong one for everything else.
+
+    ``time.perf_counter`` measures how long the box took, which is a claim
+    about the machine as much as about the code: a process that is descheduled
+    keeps the wall clock running while its own CPU clock stands still. On a
+    loaded runner a linear implementation therefore measures as super-linear,
+    which is how ``test_strip_is_linear_under_pathological_unclosed_script_flood``
+    came to report a 37x blowup for a 2x input against a scanner that spends a
+    flat ~3.9ns per byte from 50KB to 1.6MB. ``process_time`` excludes the
+    deschedule and keeps the quadratic, because a quadratic implementation
+    really does burn four times the CPU.
+
+    ``samples`` and the min-of-N are for the same reason the ``SleepRecorder``
+    exists: the cheapest run is the least contaminated one, and first-call
+    effects (lazy compiles, imports, cache fills) are settled by the untimed
+    warm-up rather than by sleeping.
+    """
+    if samples < 1:
+        raise ValueError(f"cpu_seconds needs at least one sample, got {samples}")
+    work()
+    started = time.process_time()
+    work()
+    best = time.process_time() - started
+    for _ in range(samples - 1):
+        started = time.process_time()
+        work()
+        best = min(best, time.process_time() - started)
+    return best
+
+
 __all__ = [
     "HANG_GUARD_SECONDS",
     "SleepRecorder",
     "await_signalled",
     "await_until",
+    "cpu_seconds",
     "recorder",
 ]
