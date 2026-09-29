@@ -288,6 +288,19 @@ def _allow_private_targets() -> bool:
         return cached[1]
     decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
     _PRIVATE_TARGET_DECISION = (raw, decision)
+    if decision:
+        # Warned at the decision, not at each call site: this runs on the
+        # per-fetch SSRF path, so a warning here would be a log flood. The memo
+        # makes it once per distinct env value, so a deployment that sets the
+        # variable logs exactly once and a test that re-sets it still sees it.
+        logging.getLogger(__name__).warning(
+            "SSRF private-target guard DISABLED by CRAWLUTRON_ALLOW_PRIVATE_TARGETS=%r: "
+            "caller-supplied URLs may now reach private, loopback, and link-local "
+            "addresses, including cloud metadata endpoints. Unset it, or set it to 0, "
+            "outside local development.",
+            raw,
+            extra={"env_name": "CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "env_value": raw},
+        )
     return decision
 
 

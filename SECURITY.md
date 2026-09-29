@@ -50,7 +50,8 @@ It is a powerful SSRF-enabled service that:
 - Never expose this service to the public internet without authentication,
   rate-limiting, and a concurrency cap on a per-client basis.
 - Keep `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0` in production; loopback
-  exemption is local-dev only.
+  exemption is local-dev only. Setting it logs a `SSRF private-target guard
+  DISABLED` WARNING at first use; treat that line in your logs as a finding.
 - Keep `CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED=false` unless you
   understand the cross-tenant cookie-leak risk; multi-tenant deployments
   should additionally set `request_profile.cookie_namespace`.

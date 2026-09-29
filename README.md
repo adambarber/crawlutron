@@ -274,6 +274,9 @@ Every crawl result carries a `classification` from a fixed enum of **30 values**
 
 - **SSRF protection** is on by default: only public HTTP(S) targets are allowed.
   Set `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1` to disable it (local testing only).
+  Enabling it logs a WARNING naming the disabled guard, and lets caller-supplied
+  URLs reach private, loopback, and link-local addresses including cloud
+  metadata endpoints.
 - **robots.txt** is respected by default (`respect_robots`). Disallowed targets
   return `robots_disallowed`.
 - **Recursion / frontier:** `POST /v1/crawl` recursively expands one in-memory

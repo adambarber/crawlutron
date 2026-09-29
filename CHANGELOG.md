@@ -333,6 +333,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `/v1/render` now uses the injected settings like every other endpoint.
 
 ### Security
+- **`CRAWLUTRON_ALLOW_PRIVATE_TARGETS` now warns when it disables the SSRF
+  guard** (app/validation.py). The hatch turns off the only thing between a
+  caller-supplied URL and `169.254.169.254`, and it did so silently -- a
+  misconfigured deployment looked identical to a correct one. The single
+  decision chokepoint now logs a `SSRF private-target guard DISABLED` WARNING
+  naming the variable, the raw value, and what is now reachable. It is warned
+  at the decision rather than at each call site because that path runs per
+  fetch; the existing raw-value-keyed memo makes it exactly once per distinct
+  value, so a production process logs it once. `README.md`, `SECURITY.md` and
+  `.env.example` now say so. This closes the second half of the recommendation
+  in `ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`; the first half (a literal true
+  value required, not merely a non-empty one) already held via `parse_bool_env`.
+- The same hatch was read in three places. `app/crawl/strategies/pinned_transport.py`
+  re-read the environment directly at both SSRF entry points through a
+  function-level import, bypassing the memoized reader, so the parse cost and
+  the decision were duplicated. All three call sites now go through
+  `_allow_private_targets()`, and the two function-level imports are gone.
 - **Thread-safety on `_DNS_CACHE`** (app/crawl/strategies/http.py): the
   module-level DNS resolution cache is now guarded by a `threading.Lock`,
   fixing a real concurrency bug where `_resolve_ips` (called from both

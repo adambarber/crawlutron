@@ -17,13 +17,16 @@ from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
 from app.models import HttpFetchResult
-from app.validation import HostPolicy, _is_public_ip_value, normalize_public_http_url
+from app.validation import (
+    HostPolicy,
+    _allow_private_targets,
+    _is_public_ip_value,
+    normalize_public_http_url,
+)
 
 
 def _is_private_or_loopback_ip(ip: str) -> bool:
     """Return whether an address is outside the shared public-target policy."""
-    from app.validation import _is_public_ip_value
-
     return not _is_public_ip_value(ip)
 
 
@@ -80,9 +83,7 @@ def _check_ssrf_protection(url: str) -> None:
     Set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
     to disable for local testing.
     """
-    from app.validation import parse_bool_env
-
-    if parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False):
+    if _allow_private_targets():
         return
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -116,9 +117,7 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
     hostname = parsed.hostname
     if not hostname:
         return hostname or "", hostname or ""
-    from app.validation import parse_bool_env
-
-    if parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False):
+    if _allow_private_targets():
         # Local-dev escape hatch: bypass resolution but connect to the REAL
         # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
         # fetch/webhook to loopback and broke virtual-host routing.
