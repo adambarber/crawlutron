@@ -163,6 +163,19 @@ def _grouping_declarations() -> dict[str, ast.AST]:
     return out
 
 
+def _assigned_value(source: str, index: int = 0) -> ast.AST:
+    """The value ``source``'s ``index``-th top-level statement assigns.
+
+    The snippets below are single-assignment modules, and reaching their value
+    was spelled out as ``ast.parse(...).body[i].value`` at each site. That
+    expression is only a value on an ``Assign``, and saying so once here is what
+    lets the tests be about the groupings rather than about the walk.
+    """
+    statement = ast.parse(source).body[index]
+    assert isinstance(statement, ast.Assign), source
+    return statement.value
+
+
 def _spelled_classification_members(value: ast.AST) -> set[str]:
     """Every ``CrawlClassification.<member>`` named inside ``value``."""
     return {
@@ -239,13 +252,13 @@ def test_groupings_are_derived_from_the_enum_not_relisted():
 
 def test_a_grouping_that_embeds_a_literal_fails_the_check():
     """The literal half of the guard above must fire on a hand-copied grouping."""
-    copied = ast.parse('GROUP = frozenset({"rate_limited", "access_denied"})\n').body[0].value
+    copied = _assigned_value('GROUP = frozenset({"rate_limited", "access_denied"})\n')
     assert _string_literals(copied) == ["rate_limited", "access_denied"]
 
 
 def test_a_grouping_with_no_path_to_the_taxonomy_fails_the_check():
     """The reachability half must fire on a grouping that composes nothing."""
-    declarations = {"LOOP": ast.parse("LOOP = LOOP | frozenset()\n").body[0].value}
+    declarations = {"LOOP": _assigned_value("LOOP = LOOP | frozenset()\n")}
     assert not _reaches_the_taxonomy("LOOP", declarations)
 
 
@@ -266,12 +279,12 @@ def test_a_classification_grouping_is_derived_not_restated():
 
 def test_the_restated_grouping_detector_bites():
     """A member transcribed into two groupings must fail the sweep above."""
-    restated = ast.parse(
+    source = (
         "FIRST = frozenset(m.value for m in (CrawlClassification.rendered,))\n"
         "SECOND = frozenset(m.value for m in (CrawlClassification.rendered,))\n"
     )
-    first = _spelled_classification_members(restated.body[0].value)
-    second = _spelled_classification_members(restated.body[1].value)
+    first = _spelled_classification_members(_assigned_value(source))
+    second = _spelled_classification_members(_assigned_value(source, 1))
     assert first & second == {"rendered"}
 
 

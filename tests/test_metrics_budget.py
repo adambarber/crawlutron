@@ -51,7 +51,7 @@ import pytest
 
 from tests._executables import GIT, require_executable
 from tests._jscpd_sweep import COMPOUND_NODES
-from tests.chokepoint_walks import APP_ROOT, app_trees, nodes_of
+from tests.chokepoint_walks import APP_ROOT, app_trees, is_scope_opener, nodes_of
 
 # Every collector in this file reads the same app tree, and `offenders()` is
 # called sixteen times per run (four metrics x the budget test, four x the
@@ -136,7 +136,7 @@ def _outer_blocks(tree: ast.AST) -> list[tuple[int, int, str]]:
     """
     candidates: list[tuple[int, int, int, str]] = []
     for node in nodes_of(tree):
-        if not isinstance(node, COMPOUND_NODES):
+        if not is_scope_opener(node):
             continue
         body = list(node.body)
         if not body:

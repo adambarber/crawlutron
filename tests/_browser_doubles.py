@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import (
@@ -60,17 +60,69 @@ class FakeBrowserPool(BrowserPool):
         await super().close()
 
 
+class PageCookieContext(Protocol):
+    """What the renderer reads off a page's context.
+
+    Production only asks for ``cookies``, so that is the whole contract -- and
+    declaring it here is what lets a test's own context double be passed in
+    without the page having to name that double's class.
+    """
+
+    async def cookies(self, url: str | None = None) -> list[dict[str, str]]: ...
+
+
+class FakePageContext:
+    """A page context that holds no cookies.
+
+    ``BrowserRenderer._harvest_session_cookies`` reads ``page.context.cookies``,
+    so a page double with no context is a double the renderer cannot ask -- and
+    the two ways tests were getting around that (assigning ``page.context`` after
+    construction) put a member on the object that its own type did not declare.
+    A context is part of the page's surface, so it is part of the double.
+    """
+
+    async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
+        return []
+
+
+async def _selector_is_present(selector, timeout=None, **kwargs):
+    """The default ``wait_for_selector``: the awaited element is there.
+
+    The renderer calls this for a page's hydration markers, and a double that
+    timed out by default would make every test that happens to use it about the
+    wait rather than about whatever it is actually testing.
+    """
+    return None
+
+
 class BrowserFakePage:
     """A page double whose ``url`` is a plant the test sets, not a navigation result.
 
     See :meth:`goto` for why navigation deliberately leaves it alone.
+
+    The surface is the renderer's, not the tests': ``context`` and
+    ``wait_for_selector`` are here because the renderer calls them, and a double
+    that omitted them made those two reads fail as ``AttributeError`` inside
+    production code rather than as a missing member at the call site that
+    installed it. ``on_wait_for_selector`` is the hook for a test that needs a
+    different answer -- a selector that never appears, or one that wedges the
+    wait -- because replacing the method outright is what the missing member
+    pushed people into doing.
     """
 
-    def __init__(self, url: str = "http://1.2.3.4/"):
+    def __init__(
+        self,
+        url: str = "http://1.2.3.4/",
+        *,
+        context: PageCookieContext | None = None,
+        on_wait_for_selector=None,
+    ):
         self.goto_calls: list[tuple[str, dict[str, Any]]] = []
         self.route_calls: list[tuple[Any, Any]] = []
         self.set_extra_http_headers_calls: list[dict[str, str]] = []
         self.url = url
+        self.context = context if context is not None else FakePageContext()
+        self.on_wait_for_selector = on_wait_for_selector or _selector_is_present
 
     async def route(self, pattern, handler):
         self.route_calls.append((pattern, handler))
@@ -104,6 +156,9 @@ class BrowserFakePage:
 
     async def query_selector(self, *a, **k):
         return None
+
+    async def wait_for_selector(self, selector, timeout=None, **kwargs):
+        return await self.on_wait_for_selector(selector, timeout=timeout, **kwargs)
 
 
 #: What the renderer reads out of a page, in the order it asks. A double that
@@ -141,11 +196,11 @@ class ScriptedPage(BrowserFakePage):
     to increment itself and keep in agreement.
     """
 
-    def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None):
+    def __init__(self, *, url="http://example.com/", answers=None, html=None, on_goto=None, **kwargs):
         # Everything the base records is the base's to record. Restating the three
         # call lists here was a second answer to "what does this double
         # remember", and one new recorded read had to be added in two places.
-        super().__init__(url=url)
+        super().__init__(url=url, **kwargs)
         self._answers = dict(DEFAULT_PAGE_ANSWERS if answers is None else answers)
         self._html = DEFAULT_PAGE_HTML if html is None else html
         self._on_goto = on_goto

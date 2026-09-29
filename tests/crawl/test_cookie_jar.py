@@ -119,8 +119,11 @@ class TestCookieJarHeaderHandling:
     def test_http_cookie_invalid(self):
         from app.crawl.strategies.cookie_jar import _GLOBAL_COOKIE_JAR
 
-        # Call with invalid cookie header - should not raise
-        _GLOBAL_COOKIE_JAR.add_cookie_header({}, "http://example.com/")
+        # Call with an invalid cookie header - should not raise. The header is
+        # a string, not a mapping: an empty ``{}`` was only "not a string" for as
+        # long as the jar did not read it, and a jar that started reading it
+        # would have been handed a dict.
+        _GLOBAL_COOKIE_JAR.add_cookie_header("", "http://example.com/")
 
 
 class _RecordingResponse:

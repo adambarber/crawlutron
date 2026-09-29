@@ -183,7 +183,10 @@ def test_memory_cache_twin_detector_bites():
 
 
 def _is_locked_helper_name(name: str | None) -> bool:
-    return bool(name) and name.startswith("_") and name.endswith("_locked")
+    # ``name is not None`` rather than ``bool(name)``: both reject the empty
+    # string, but only the first states the narrowing the two ``str`` methods
+    # below then rely on.
+    return name is not None and name.startswith("_") and name.endswith("_locked")
 
 
 def _references_lock(expr: ast.expr) -> bool:

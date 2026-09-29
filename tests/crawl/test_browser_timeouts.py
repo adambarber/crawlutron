@@ -20,7 +20,7 @@ class _TimeoutRecordingPage(BrowserFakePage):
         super().__init__()
         self.wait_timeouts = []
 
-    async def wait_for_selector(self, selector, timeout=None):
+    async def wait_for_selector(self, selector, timeout=None, **kwargs):
         self.wait_timeouts.append(timeout)
         return None
 
@@ -64,7 +64,11 @@ class TestNavigationTimeout:
         # caller's own guard is what makes a deadline that stopped firing a
         # FAILURE rather than a hang: a goto that never returns would
         # otherwise wedge the run instead of reporting.
-        options = RenderOptions(timeout_seconds=0.05, max_retries=0)
+        # Seconds as an int, which is what the policy model carries and what
+        # the renderer floors at one. A fractional value was reaching past the
+        # contract only to be raised back to 1.0 by ``max(1.0, ...)``, so the
+        # deadline this test asserts on was never the one it asked for.
+        options = RenderOptions(timeout_seconds=1, max_retries=0)
         result = await asyncio.wait_for(
             renderer.render(
                 "http://example.com/",

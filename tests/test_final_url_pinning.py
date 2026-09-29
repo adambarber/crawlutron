@@ -51,7 +51,7 @@ def test_final_url_uses_hostname_not_pinned_ip():
             _default_http_fetcher(
                 "http://example.com/page",
                 {},
-                5.0,
+                5,
                 1_000_000,
                 policy=HostPolicy.unrestricted(),
             )

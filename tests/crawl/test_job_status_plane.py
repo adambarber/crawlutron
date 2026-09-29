@@ -12,7 +12,7 @@ atomic compare-and-set on the row itself.
 import ast
 
 from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
-from tests._job_harnesses import make_job_store
+from tests._job_harnesses import frontier, loaded_job, make_job_store
 from tests.chokepoint_walks import app_trees, nodes_of, offender
 
 
@@ -21,7 +21,9 @@ def _store(tmp_path) -> JobStore:
 
 
 def _running_job(store: JobStore, job_id: str = "j1") -> CrawlJobState:
-    job = CrawlJobState(job_id=job_id, root_url="https://a.example/", frontier=["https://a.example/"])
+    job = CrawlJobState(
+        job_id=job_id, root_url="https://a.example/", frontier=frontier(["https://a.example/"])
+    )
     store.save(job)
     assert store.set_status(job_id, JobStatus.RUNNING, expected=JobStatus.PENDING) is True
     return job
@@ -31,17 +33,17 @@ class TestStatusPlane:
     def test_created_row_persists_the_initial_status(self, tmp_path):
         store = _store(tmp_path)
         store.save(CrawlJobState(job_id="new", root_url="https://a.example/"))
-        assert store.load("new").status is JobStatus.PENDING
+        assert loaded_job(store, "new").status is JobStatus.PENDING
 
     def test_set_status_transitions_only_from_the_expected_state(self, tmp_path):
         store = _store(tmp_path)
         _running_job(store)
         # Wrong expectation: no write, reported honestly.
         assert store.set_status("j1", JobStatus.CANCELLED, expected=JobStatus.PAUSED) is False
-        assert store.load("j1").status is JobStatus.RUNNING
+        assert loaded_job(store, "j1").status is JobStatus.RUNNING
         # Correct expectation: atomic flip.
         assert store.set_status("j1", JobStatus.PAUSED, expected=JobStatus.RUNNING) is True
-        assert store.load("j1").status is JobStatus.PAUSED
+        assert loaded_job(store, "j1").status is JobStatus.PAUSED
 
     def test_set_status_on_missing_row_is_false(self, tmp_path):
         store = _store(tmp_path)
@@ -62,7 +64,7 @@ class TestStatusPlane:
         snapshot.visited.add("https://a.example/")
         snapshot.frontier = []
         store.save(snapshot)
-        row = store.load("j1")
+        row = loaded_job(store, "j1")
         assert row.status is JobStatus.PAUSED, "data save resurrected the runner's stale status"
         assert row.visited == {"https://a.example"}  # data plane still flows
 
@@ -73,7 +75,7 @@ class TestStatusPlane:
         _running_job(store)
         assert store.set_status("j1", JobStatus.CANCELLED, expected=JobStatus.RUNNING) is True
         assert store.set_status("j1", JobStatus.COMPLETED, expected=JobStatus.RUNNING) is False
-        assert store.load("j1").status is JobStatus.CANCELLED
+        assert loaded_job(store, "j1").status is JobStatus.CANCELLED
 
 
 def _status_assignment_offenders() -> list[str]:

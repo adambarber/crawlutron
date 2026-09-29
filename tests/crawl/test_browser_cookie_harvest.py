@@ -18,9 +18,7 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 
 def _page_with_context():
     """A page whose cookie store answers with one session cookie."""
-    page = ScriptedPage()
-    page.context = _FakeContext()
-    return page
+    return ScriptedPage(context=_FakeContext())
 
 
 class _FakeContext:
@@ -67,8 +65,13 @@ class TestCookieHarvestCompletes:
 class _WedgedContext:
     """N6: cookies() that never resolves (simulates a wedged transport)."""
 
-    async def cookies(self, url):
+    # The declared return is what this WOULD answer if it ever did. Left
+    # undeclared, the signature inferred ``Coroutine[..., None]`` and the class
+    # stopped satisfying the ``PageCookieContext`` contract production reads it
+    # through -- a wedged context is a slow one, not a differently-shaped one.
+    async def cookies(self, url: str | None = None) -> list[dict[str, str]]:
         await asyncio.Event().wait()
+        raise AssertionError("unreachable: this coroutine never resolves")
 
 
 class TestHarvestWaitBounded:
@@ -80,8 +83,7 @@ class TestHarvestWaitBounded:
 
         url = "http://example.com/page"
         with isolated_browser_cookies(url) as domain:
-            page = BrowserFakePage()
-            page.context = _WedgedContext()
+            page = BrowserFakePage(context=_WedgedContext())
             renderer = build_pinned_renderer(monkeypatch, page)
             # The cap is the thing under test, so it is driven to a value the
             # test can afford rather than observed as five elapsed seconds. The
@@ -137,12 +139,11 @@ class TestActionChainFailuresAreVisible:
 
     async def test_a_selector_timeout_names_the_selector_url_and_budget(self, caplog):
         renderer = self._real_renderer()
-        page = BrowserFakePage()
 
         async def never_appears(selector, timeout=None, **kwargs):
             raise TimeoutError(f"waiting for selector {selector!r} timed out after {timeout}ms")
 
-        page.wait_for_selector = never_appears
+        page = BrowserFakePage(on_wait_for_selector=never_appears)
 
         with caplog.at_level("WARNING"):
             await renderer._run_action_chain(
@@ -187,7 +188,7 @@ class TestActionChainIsOneBoundedHold:
             observed.append(timeout)
             await asyncio.Event().wait()
 
-        page.wait_for_selector = never_appears
+        page.on_wait_for_selector = never_appears
         actions = [
             {"type": "wait", "selector": "#one", "timeout": 60_000},
             {"type": "wait", "selector": "#two", "timeout": 60_000},

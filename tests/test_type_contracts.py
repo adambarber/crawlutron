@@ -307,6 +307,7 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
         "async def f(url, headers, timeout_seconds, "
         "max_content_length=1, *, policy=None, impersonate=False): ...\n"
     ).body[0]
+    assert isinstance(mutated, (ast.FunctionDef, ast.AsyncFunctionDef))
     assert tuple(arg.arg for arg in mutated.args.args) == _EXPECTED_SHAPE["positional"]
     assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _EXPECTED_SHAPE["keyword_only"]
     widened = _defaulted_params(mutated)
@@ -350,7 +351,17 @@ class TestNormalizedUrlSeedType:
     def test_normalized_url_is_a_newtype_over_str(self):
         from app.models import NormalizedUrl
 
-        assert NormalizedUrl.__supertype__ is str
+        # Read through the class ``__dict__`` rather than as an attribute.
+        #
+        # ``__supertype__`` is a real attribute ``typing.NewType`` attaches to
+        # the class it builds at runtime, and it is what this test is about. mypy
+        # models ``NewType`` as a function returning a class and does not declare
+        # the attribute on that class, so ``NormalizedUrl.__supertype__`` is an
+        # attr-defined error against a value that is demonstrably there -- a
+        # limitation in mypy's model of ``NewType``, not a defect in the code or
+        # the assertion. ``vars()`` asks the same question the attribute access
+        # would, and answers it at runtime.
+        assert vars(NormalizedUrl)["__supertype__"] is str
 
     def test_crawl_task_normalized_url_field_is_typed(self):
         from typing import get_type_hints

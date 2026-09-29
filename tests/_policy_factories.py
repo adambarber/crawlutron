@@ -280,7 +280,11 @@ def deployment_tier(**overrides: str) -> PolicyTier:
 
 
 def job_store(
-    db_path: str | pathlib.Path, *, policy: HostPolicy | None = None, tier: PolicyTier | None = None
+    db_path: str | pathlib.Path,
+    *,
+    policy: HostPolicy | None = None,
+    tier: PolicyTier | None = None,
+    of: type[JobStore] = JobStore,
 ) -> JobStore:
     """A ``JobStore`` bound to a test deployment.
 
@@ -291,8 +295,15 @@ def job_store(
     ``str | Path`` because that is what ``JobStore`` takes: a test that hands it
     a ``tmp_path`` was always right, and the narrower annotation here was the
     only thing rejecting it.
+
+    ``of`` is there for a store a test specializes -- ``InstrumentedJobStore``
+    in the job-runner harness, which publishes writes to a bus. The subclass is
+    built through the same defaults rather than re-spelling the policy and the
+    deployment tier a second time, which is the restatement this factory exists
+    to prevent. ``of`` must stay a ``JobStore`` subclass: that is what every
+    caller passes on to production.
     """
-    return JobStore(
+    return of(
         db_path,
         policy=policy if policy is not None else UNRESTRICTED_HOST_POLICY,
         tier=tier if tier is not None else deployment_tier(),

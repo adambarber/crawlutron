@@ -14,19 +14,25 @@ singleton -- the counter is process-wide, so every assertion here is a delta
 rather than an absolute.
 """
 
+import asyncio
 import logging
+import pathlib
+import tempfile
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.api import map_endpoint
 from app.api.crawl_endpoint import crawl
+from app.api.exceptions import error_envelope_from_detail
 from app.api.main_helpers import request_gate
 from app.api.map_endpoint import map_site
 from app.api_models import CrawlRequest, MapRequest
+from app.crawl.result_store import CrawlResultStore
 from app.health.readiness import READINESS_STATE
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
+from tests._job_harnesses import make_job_store
 
 logger = logging.getLogger(__name__)
 
@@ -89,19 +95,30 @@ async def test_rejected_crawl_hands_its_slot_back_and_still_counts_the_error(cap
     metrics = get_metrics()
     before_active, before_errors = _active(), metrics.crawl_errors_total
 
-    with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
-        await crawl(
-            CrawlRequest(urls=["http://example.com/", "http://example.com/2"]),
-            BackgroundTasks(),
-            _denied_by_batch_cap(),
-            object(),
-            object(),
-            None,
-        )
+    # Real dependencies, not ``object()``. The gate refuses before it reaches
+    # any of them, and that is the claim under test -- so passing a stand-in
+    # made true an accident rather than a fact: the call had to be type-correct
+    # for "never touched" to mean anything. A store also asserts what the
+    # production ``crawl`` signature promises it will be handed.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with caplog.at_level(logging.WARNING), pytest.raises(HTTPException) as exc_info:
+            await crawl(
+                CrawlRequest(urls=["http://example.com/", "http://example.com/2"]),
+                BackgroundTasks(),
+                _denied_by_batch_cap(),
+                make_job_store(tmpdir),
+                CrawlResultStore(pathlib.Path(tmpdir) / "results.db"),
+                asyncio.Event(),
+            )
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail["code"] == "validation_error"
-    assert exc_info.value.detail["details"] == {"errors": [{"msg": "batch_size_exceeded"}]}
+    # Through the accessor the service itself uses, rather than indexing
+    # ``detail``: ``HTTPException.detail`` is declared ``str | None`` and carries
+    # an envelope dict here, so a direct index was reaching past what the type
+    # says is there. This is the shape a client actually receives.
+    envelope = error_envelope_from_detail(exc_info.value.detail, exc_info.value.status_code)
+    assert envelope["code"] == "validation_error"
+    assert envelope["details"] == {"errors": [{"msg": "batch_size_exceeded"}]}
     assert "crawl_request_rejected" in caplog.text
     assert _active() == before_active
     assert metrics.crawl_errors_total == before_errors + 1

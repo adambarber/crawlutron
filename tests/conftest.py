@@ -18,6 +18,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from tests._app_factory import service_app
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent  # the repository root, which is now the service root
 
@@ -272,9 +274,7 @@ def _disable_lazy_scroll():
 @pytest.fixture
 async def async_client():
     """Async HTTP client using ASGI transport for FastAPI app."""
-    from app.main import app
-
-    async with httpx.ASGITransport(app=app) as transport:
+    async with httpx.ASGITransport(app=service_app()) as transport:
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             yield client
 
@@ -294,8 +294,10 @@ def override_settings():
     instance it returns, so there is one place that decides how an override key
     becomes an environment variable.
     """
-    from app.main import app
     from app.settings import CrawlerSettings
+    from tests._app_factory import service_app
+
+    app = service_app()
 
     original = app.state.crawler_settings
 
@@ -490,9 +492,7 @@ def _reset_global_http_state():
     # so restore that invariant here -- otherwise later /v1/crawl calls
     # abort with empty results and fresh jobs go PAUSED (poisoned event).
     with contextlib.suppress(Exception):
-        from app.main import app as _app
-
-        _app.state.shutdown_event = asyncio.Event()
+        service_app().state.shutdown_event = asyncio.Event()
     # robots_cache was promoted to module-level and shared across crawl_request
     # calls (#9). Tests reuse origins with different robots.txt bodies, so
     # clear it between tests for isolation. Production keeps it shared (a given

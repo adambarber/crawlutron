@@ -29,6 +29,7 @@ def test_redirect_target_none_when_hop_budget_exhausted():
 def test_redirect_target_strips_sensitive_headers_cross_host():
     headers = {"Host": "a.com", "Cookie": "s=1", "Authorization": "Bearer t", "Accept": "*/*"}
     result = _redirect_target("http://a.com/", headers, 301, "http://b.com/z", 0)
+    assert result is not None, "a same-hop-count cross-host redirect is still a redirect"
     new_url, new_headers = result
     assert new_url == "http://b.com/z"
     assert "Cookie" not in new_headers and "Authorization" not in new_headers
@@ -39,5 +40,7 @@ def test_redirect_target_strips_sensitive_headers_cross_host():
 
 def test_redirect_target_keeps_sensitive_headers_same_host():
     headers = {"Cookie": "s=1"}
-    _, new_headers = _redirect_target("http://a.com/a", headers, 307, "/b", 2)
+    result = _redirect_target("http://a.com/a", headers, 307, "/b", 2)
+    assert result is not None
+    _, new_headers = result
     assert new_headers["Cookie"] == "s=1"

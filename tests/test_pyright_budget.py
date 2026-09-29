@@ -380,7 +380,7 @@ def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | N
     found: list[str] = []
     where = f"{path.name}:" if path is not None else ""
     for node, target, value in assignments(nodes_of(tree)):
-        candidates: list[ast.expr] = [value] if isinstance(value, ast.Call) else []
+        candidates: list[ast.Call] = [value] if isinstance(value, ast.Call) else []
         annotation = node.annotation if isinstance(node, ast.AnnAssign) else None
         candidates.extend(_annotated_field_calls(annotation))
         for call in candidates:
@@ -389,7 +389,12 @@ def _positional_field_default_offenders(tree: ast.Module, path: pathlib.Path | N
             if any(key.arg == "default_factory" for key in call.keywords):
                 continue
             if call.args:
-                default = call.args[0]
+                # Annotated rather than inferred: the two arms below bind
+                # different things (a positional expression, or the keyword's
+                # value which is absent when there is no ``default=``), and
+                # binding the first arm alone left the variable typed as
+                # always-present.
+                default: ast.expr | None = call.args[0]
             else:
                 default = next((key.value for key in call.keywords if key.arg == "default"), None)
             if default is None or (isinstance(default, ast.Constant) and default.value is ...):

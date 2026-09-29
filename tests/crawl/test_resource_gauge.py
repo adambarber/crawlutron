@@ -71,9 +71,12 @@ def test_leading_memory_signal_anticipates_climb(tmp_path, monkeypatch):
     def _fake_stats(*, cgroup_root):
         from app.memory_pressure import MemoryStats
 
+        # ``int`` because the field is bytes: a fraction here was a fraction of a
+        # byte, and the ratio the gauge computes is the same either way -- so the
+        # float was only ever a fiction about the unit.
         v = values[idx[0] % len(values)]
         idx[0] += 1
-        return MemoryStats(total_bytes=100, used_bytes=v * 100)
+        return MemoryStats(total_bytes=100, used_bytes=int(v * 100))
 
     monkeypatch.setattr("app.memory_pressure.read_memory_stats", _fake_stats)
     _invalidate_cgroup_cache()

@@ -2,6 +2,7 @@
 
 import asyncio
 import gzip
+from typing import Any
 
 import brotli
 import pytest
@@ -125,7 +126,7 @@ class TestValidationHelpers:
 
     def test_payload_policy_errors(self) -> None:
         tier = PolicyTier.model_defaults()
-        cases = [
+        cases: list[tuple[dict[str, Any], str]] = [
             ({"policy": "x"}, "invalid_policy"),
             ({"policy": {"limits": "x"}}, "invalid_policy_limits"),
             ({"policy": {"headers": "x"}}, "invalid_policy_headers"),
@@ -188,15 +189,24 @@ class TestFetchRetries:
         monkeypatch.setattr(asyncio, "sleep", _rec_sleep)
 
         state = {"n": 0}
+        answer = make_fetch(status=200, body=b"ok", final_url="http://x/")
 
-        async def _flaky(url, headers, timeout_seconds, max_content_length):
+        # ``max_content_length`` defaults, because ``HttpFetcher`` says a caller
+        # may omit it: a double that required the fourth argument was not
+        # substitutable for the fetcher this function is handed.
+        async def _flaky(url, headers, timeout_seconds, max_content_length=10_485_760):
             state["n"] += 1
             if state["n"] < 3:
                 raise ConnectionError("transient")
-            return "ok"
+            return answer
 
+        # A real ``HttpFetchResult``, not a bare string: this is handed to
+        # ``_fetch_with_retries`` as an ``HttpFetcher``, and a fetcher that
+        # answered with something the contract does not allow proved the retry
+        # loop passes its answer through -- which it does -- by asserting on a
+        # shape production can never produce.
         response, meta = await _fetch_with_retries(_flaky, "http://x/", {}, 5, 2)
-        assert response == "ok"
+        assert response is answer
         assert meta["attempts"] == 3
         # Gaps happen only between attempts (2 retries -> 2 waits), increasing
         # and within the ceiling.

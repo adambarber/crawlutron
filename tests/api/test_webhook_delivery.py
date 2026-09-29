@@ -72,6 +72,7 @@ class TestAsyncCrawlFailureWebhookDelivery:
             f"post_webhook awaited {post_webhook.await_count} times; the failure "
             "webhook is silently undelivered"
         )
+        assert post_webhook.await_args is not None, "the webhook was awaited; the call is recorded"
         delivered_url, payload = post_webhook.await_args.args
         assert delivered_url == webhook_url, delivered_url
         # Payload must be a real UnifiedCrawlResponse shape, not a coroutine.

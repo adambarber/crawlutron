@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import inspect
 
+from tests._app_factory import service_app
 from tests._assertions import assert_pool_unavailable, read_main_source
 from tests._job_harnesses import post_render_with_pool
 from tests._lifespan_doubles import stub_heavy_teardown
@@ -53,8 +54,9 @@ class TestMultiWorkerInvariants:
             dataclasses.replace(main_mod.settings, cookie_persistence_enabled=True),
         )
         stub_heavy_teardown(monkeypatch)
+        app = service_app()
 
-        async with main_mod.app.router.lifespan_context(main_mod.app):
+        async with app.router.lifespan_context(app):
             # A refusal anywhere on the startup path raises before the yield, so
             # being inside the block is the boot assertion. The store the jar
             # landed on is the multi-worker claim itself.

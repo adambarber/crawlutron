@@ -24,7 +24,7 @@ from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _ResultSpill
 from app.crawl.job_store import JobStatus
 from tests._fetcher_factories import crawled_results
-from tests._job_harnesses import make_job_store
+from tests._job_harnesses import loaded_job, make_job_store
 from tests._timing_harnesses import HANG_GUARD_SECONDS
 
 
@@ -353,7 +353,7 @@ class TestJobRunnerSavesOffTheEventLoop:
         # loop, and the shutdown pause is a pure CONTROL write -- a CAS,
         # observed on the row, never carried by save() anymore.
         assert saved, "the runner's write-ahead data save never ran"
-        assert store.load(job.job_id).status is JobStatus.PAUSED
+        assert loaded_job(store, job.job_id).status is JobStatus.PAUSED
 
 
 class TestAsyncCrawlRunnerSavesOffTheEventLoop:
@@ -421,7 +421,7 @@ class TestAsyncCrawlRunnerSavesOffTheEventLoop:
         )
         # The job reached COMPLETED through the offloaded save, so the store is
         # not just skipping the work.
-        assert store.load(job.job_id).status == JobStatus.COMPLETED
+        assert loaded_job(store, job.job_id).status == JobStatus.COMPLETED
 
 
 class TestSpillAssemblyOffTheEventLoop:

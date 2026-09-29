@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from pydantic import ValidationError
 
 from app.api_models import CrawlRequest, RenderRequest
+from tests._app_factory import service_app
 
 
 @pytest.mark.parametrize("model", [CrawlRequest, RenderRequest])
@@ -42,9 +43,7 @@ def test_empty_urls_list_with_url_rejected(model):
 
 class TestWebhookUrlValidation:
     async def test_main_invalid_webhook_url(self):
-        from app.main import app
-
-        transport = httpx.ASGITransport(app=app)
+        transport = httpx.ASGITransport(app=service_app())
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}

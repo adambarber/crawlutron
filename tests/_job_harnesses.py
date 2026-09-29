@@ -34,7 +34,7 @@ import pathlib
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Callable, Container
+from collections.abc import Callable, Collection
 from contextlib import contextmanager
 from typing import Any
 
@@ -42,8 +42,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api_models import CrawlPolicy
-from app.crawl.job_store import CrawlJobState, JobStatus, JobStore
-from tests._policy_factories import UNRESTRICTED_HOST_POLICY, job_store
+from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus, JobStore
+from app.crawl.job_store import _Expected as _Expected
+from app.crawl.policy import PolicyTier
+from app.validation import HostPolicy
+from tests._policy_factories import job_store
 from tests._result_builders import _canned_result
 
 #: Hang guard for the store waits. Deliberately NOT ``HANG_GUARD_SECONDS``: that
@@ -127,37 +130,74 @@ class _StoreListener:
         self._bus.discard(self)
 
 
-def _instrument_status_bus(store: JobStore) -> JobStore:
-    """Publish every control-plane and data write this store receives.
+class InstrumentedJobStore(JobStore):
+    """A real ``JobStore`` that also publishes every write it receives to a bus.
 
-    Both methods are rebound on the INSTANCE, which shadows the class method for
+    ``set_status`` and ``save`` are OVERRIDDEN, which shadows the base method for
     every caller (``job_store.save(...)``, ``asyncio.to_thread(job_store.save,
-    ...)``, ``self.save`` from ``asave``) without touching the store class that
+    ...)``, ``self.save`` from ``asave``) without touching the store class
     production uses.
-    """
-    bus = _StatusBus()
-    real_set_status = store.set_status
-    real_save = store.save
 
-    def set_status(job_id, new, *, expected):
-        changed = real_set_status(job_id, new, expected=expected)
+    This is a subclass rather than attributes poked onto an instance because
+    ``status_bus`` is not a ``JobStore`` field: production has no such concept,
+    and ``tests/api/test_jobs_execution.py`` asserts exactly that -- the marker
+    is present on an instrumented store and absent on a bare one. Poking the
+    attribute and the two methods onto the instance made that a promise the type
+    of the object denied, and rebound a method on an object typed as having a
+    read-only one. The bus is a test concern, so the type carrying it is a test
+    type, and it is still a real ``JobStore`` everywhere production asks for one.
+    """
+
+    def __init__(self, db_path: str | pathlib.Path, *, policy: HostPolicy, tier: PolicyTier) -> None:
+        super().__init__(db_path, policy=policy, tier=tier)
+        self.status_bus = _StatusBus()
+        # Bound off the CLASS, not off ``self``: by this point ``self.set_status``
+        # already resolves to the override below, and capturing that would make
+        # every publish an infinite recursion.
+        self._real_set_status: Callable[..., bool] = JobStore.set_status.__get__(self)
+        self._real_save: Callable[[CrawlJobState], None] = JobStore.save.__get__(self)
+
+    def set_status(self, job_id: str, new: JobStatus, *, expected: _Expected) -> bool:
+        changed = self._real_set_status(job_id, new, expected=expected)
         if changed:
-            bus.publish(job_id)
+            self.status_bus.publish(job_id)
         return changed
 
-    def save(job):
-        real_save(job)
-        bus.publish(job.job_id)
-
-    store.status_bus = bus
-    store.set_status = set_status
-    store.save = save
-    return store
+    def save(self, job: CrawlJobState) -> None:
+        self._real_save(job)
+        self.status_bus.publish(job.job_id)
 
 
 def make_job_store(tmpdir: str) -> JobStore:
     db_path = pathlib.Path(tmpdir) / "jobs.db"
-    return _instrument_status_bus(job_store(db_path, policy=UNRESTRICTED_HOST_POLICY))
+    return job_store(db_path, of=InstrumentedJobStore)
+
+
+def loaded_job(store: JobStore, job_id: str) -> CrawlJobState:
+    """``store.load(job_id)``, asserted present.
+
+    ``load`` returns ``None`` for a job that does not exist, and the call sites
+    that reach for it are all reading back a row they just created or saved.
+    Asserting here rather than at each site says what actually went wrong when
+    the store loses one -- a real message naming the job -- instead of an
+    ``AttributeError`` on ``None`` several frames from the cause, and it is one
+    check rather than the same check copied.
+    """
+    job = store.load(job_id)
+    assert job is not None, f"job {job_id!r} has no row in the store after it was written"
+    return job
+
+
+def frontier(urls: list[str], depth: int = 0) -> list[FrontierEntry]:
+    """``urls`` as frontier entries, at ``depth``.
+
+    ``CrawlJobState.frontier`` is ``list[FrontierEntry]``, and a raw string in
+    that list survives only because ``_frontier_identity`` sniffs the element
+    type. The moment anything reads ``entry.url`` off it, a string stops being
+    a URL and becomes an ``AttributeError``. Built through the real dataclass so
+    the fixture says what the field holds.
+    """
+    return [FrontierEntry(url=url, depth=depth) for url in urls]
 
 
 @contextmanager
@@ -183,14 +223,14 @@ def make_crawled_job_store(tmpdir: str, pages: int) -> tuple[JobStore, CrawlJobS
     """
     store = make_job_store(tmpdir)
     job = store.create("http://example.test/a", CrawlPolicy())
-    job.visited = [f"http://example.test/p/{i}" for i in range(pages)]
+    job.visited = {f"http://example.test/p/{i}" for i in range(pages)}
     job.results = [{"url": url, "status": "success"} for url in job.visited]
     store.save(job)
     return store, job
 
 
 async def run_job_control_test(
-    app,
+    app: FastAPI,
     job_store: JobStore,
     job_id: str,
     action: str,
@@ -363,7 +403,7 @@ async def _wait_for(job_store, job_id: str, satisfied, *, join_task: bool):
         listener.close()
 
 
-async def _wait_status(job_store, job_id: str, statuses: set[str]) -> str:
+async def _wait_status(job_store, job_id: str, statuses: Collection[str]) -> str:
     """Block until ``job_id`` holds one of ``statuses``; return the status name.
 
     When the caller is waiting for a terminal status there is a live runner task
@@ -375,7 +415,7 @@ async def _wait_status(job_store, job_id: str, statuses: set[str]) -> str:
         job_store,
         job_id,
         lambda row: row.status.value in statuses,
-        join_task=bool(statuses) and statuses <= _TERMINAL_STATUSES,
+        join_task=bool(statuses) and frozenset(statuses) <= _TERMINAL_STATUSES,
     )
     return job.status.value
 
@@ -567,10 +607,10 @@ def job_limits(max_depth: int = 2, max_pages: int = 0, **extra) -> dict:
 def assert_settled(
     job,
     *,
-    visited: Container[str],
+    visited: Collection[str],
     discovered: int | None = None,
     crawled: int | None = None,
-    in_flight: Container[str] = (),
+    in_flight: Collection[str] = (),
 ) -> None:
     """A job that ran to terminal: stopped, nothing queued, these pages kept.
 
@@ -583,6 +623,10 @@ def assert_settled(
     ``visited`` is compared as a set because the pages are what the test is
     about, not the order the runner happened to commit them in; the stats a
     test does not claim are not asserted here.
+
+    ``Collection``, not ``Container``: the comparison below builds a set from
+    these, and ``Container`` promises only ``in``. A test passing a list was
+    right; the annotation was the only thing saying otherwise.
     """
     assert job.status == JobStatus.COMPLETED, f"job ended {job.status}"
     assert not job.frontier, f"frontier left queued: {job.frontier}"

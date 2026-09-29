@@ -5,6 +5,7 @@ import contextlib
 import inspect
 import os
 import warnings
+from typing import Protocol
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -117,6 +118,20 @@ def _clean_pooled_state(monkeypatch):
     monkeypatch.setattr(http_mod, "_DEFAULT_CFFI_SESSION", None, raising=False)
 
 
+class _TrackedClient(Protocol):
+    """What a supersede test reads off a client it did not build itself.
+
+    The getter is named at runtime, so its return cannot be named statically;
+    declaring it as ``object`` made every read of ``closed`` an attribute error
+    rather than a question about the double. Both the ``_PooledFake`` fakes and
+    the real-shaped doubles below carry exactly these two, and they are the two
+    the loop-identity and reaper behaviour turn on.
+    """
+
+    closed: bool
+    _bound_loop: asyncio.AbstractEventLoop | None
+
+
 class _PooledFake:
     """Minimal loop-bound client: records its bound loop and whether it closed.
 
@@ -137,7 +152,11 @@ class _PooledFake:
     def __init__(self, closer: str, *, publishes_is_closed: bool) -> None:
         setattr(self, closer, self._closed)
         self.closed = False
-        self._bound_loop = None
+        # Annotated rather than left to the first assignment: without it the
+        # attribute's type is ``None``, and every site that binds a live loop
+        # afterwards -- which is what the pool's whole loop-identity question is
+        # about -- was an error.
+        self._bound_loop: asyncio.AbstractEventLoop | None = None
         if publishes_is_closed:
             # Only the kind that really has the flag may carry it.
             self.is_closed = False
@@ -221,7 +240,9 @@ def _stub_builder(monkeypatch, builder: str, fake) -> None:
     monkeypatch.setattr(http_mod, builder, lambda *args, **kwargs: fake())
 
 
-def _supersede_without_loop(monkeypatch, builder: str, getter: str, fake) -> tuple[object, object]:
+def _supersede_without_loop(
+    monkeypatch, builder: str, getter: str, fake
+) -> tuple[_TrackedClient, _TrackedClient]:
     """Return ``(first, second)`` where the handover happened with no loop running.
 
     The first client is built on a real loop; the rebuild then happens from
@@ -449,7 +470,7 @@ class _PooledClientDouble:
     closed = False
 
     def __init__(self) -> None:
-        self._bound_loop = None
+        self._bound_loop: asyncio.AbstractEventLoop | None = None
 
     async def _finish_close(self) -> None:
         await asyncio.sleep(0)
@@ -597,9 +618,14 @@ def test_real_shaped_session_is_closed_eagerly_on_a_live_loop(monkeypatch):
     )
 
 
-def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch):
-    """Inverse: moving the gate to the descriptor predicate must not cost the
-    pooled httpx client the eager close it already had.
+def install_httpx_double(monkeypatch) -> list[_RealShapedHttpClient]:
+    """Patch the httpx builder to hand out real-shaped doubles; return them.
+
+    The list is the point: the getter is typed as handing back a real
+    ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and which
+    has no ``closed`` at all, so a test that wants to read or set either has to
+    name the double the stub actually built. Two tests were each spelling this
+    builder out, and the second copy is the one that would have drifted.
     """
     built: list[_RealShapedHttpClient] = []
 
@@ -610,6 +636,17 @@ def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch):
         return client
 
     monkeypatch.setattr(http_mod, "_build_async_client", _build)
+    return built
+
+
+def test_httpx_kind_keeps_its_eager_close_after_the_gate_moves(monkeypatch):
+    """Inverse: moving the gate to the descriptor predicate must not cost the
+    pooled httpx client the eager close it already had.
+    """
+    # The double list is not read here: the scenario hands the same client back
+    # through the getter, and ``first`` is that client. Installed for the
+    # builder, not for the list.
+    install_httpx_double(monkeypatch)
 
     first, second = asyncio.run(run_loop_rebind_scenario(http_mod.get_async_http_client))
     assert second is not first
@@ -638,18 +675,19 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypa
 
     http_mod._safe_aclose = _spy
     try:
-
-        def _build(*args, **kwargs):
-            client = _RealShapedHttpClient()
-            client._bound_loop = asyncio.get_running_loop()
-            return client
-
-        monkeypatch.setattr(http_mod, "_build_async_client", _build)
+        # The double the stub built, kept so the scenario reads the same object
+        # production will: the getter is typed as handing back a real
+        # ``httpx.AsyncClient``, whose ``is_closed`` is a read-only property and
+        # which has no ``closed`` at all -- the two assignments below are on a
+        # double, and naming it is what says so.
+        built = install_httpx_double(monkeypatch)
 
         async def _scenario():
             first = http_mod.get_async_http_client()
-            first.is_closed = True  # someone else already closed it
-            first.closed = False  # would flip only if a teardown were scheduled
+            assert built, "the stubbed builder must have produced a client"
+            tracked = built[0]
+            tracked.is_closed = True  # someone else already closed it
+            tracked.closed = False  # would flip only if a teardown were scheduled
             second = http_mod.get_async_http_client()
             # One yield is enough for a scheduled teardown to run: the task is
             # put on the ready queue by ensure_future, and this hands the loop
@@ -664,7 +702,8 @@ def test_already_closed_pooled_client_is_not_re_closed_on_the_live_loop(monkeypa
 
     assert second is not first, "a closed pooled client must be rebuilt"
     assert scheduled == [], "an already-closed client was scheduled for close"
-    assert first.closed is False, "an already-closed client was scheduled for close"
+    assert built, "the stubbed builder must have produced a client"
+    assert built[0].closed is False, "an already-closed client was scheduled for close"
 
 
 def test_a_third_pooled_kind_is_not_left_out_by_the_httpx_attribute_shape(monkeypatch):

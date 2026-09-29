@@ -117,6 +117,7 @@ class TestFetchDecodeDiscovery:
         text, status, headers = await _fetch_decode_discovery(fetcher, "http://e.com/s", {}, 5)
         assert text is None
         assert status == 200
+        assert headers is not None
         assert headers.get("etag") == '"e"'
 
     async def test_headers_passed_through_to_fetcher(self):

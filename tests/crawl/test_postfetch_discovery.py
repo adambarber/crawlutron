@@ -10,6 +10,7 @@ import asyncio
 
 from lxml import etree
 
+from app.api_models import CrawlPolicy
 from app.crawl.extraction import extract_post_fetch_discovery
 from app.crawl.policy import read_policy
 from app.validation import HostPolicy
@@ -53,7 +54,7 @@ NEXT_PAGE_URL = "http://example.com/next"
 BROWSER_TEXT = "page one page two next page body copy"
 
 
-def _full_discovery_policy() -> dict:
+def _full_discovery_policy() -> CrawlPolicy:
     """Full extraction with discovery on: the policy that makes the post-fetch
     block have something to find, for whichever strategy is under test."""
     return http_strategy_policy(extraction="full", discovery=True)

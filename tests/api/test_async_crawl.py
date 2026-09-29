@@ -5,7 +5,7 @@ import asyncio
 from tests._assertions import accepted_crawl, completed_crawl, poll_webhook_delivery, submit_async_crawl
 from tests._async_harnesses import crawl_api as _crawl_api
 from tests._fetcher_factories import make_crawl_payload
-from tests._job_harnesses import single_shot_job
+from tests._job_harnesses import loaded_job, single_shot_job
 from tests.helpers.server import WEBHOOK_RECEIVED
 
 # The client + origin + cleared webhook sink come from the shared fixture, so
@@ -157,7 +157,7 @@ class TestAsyncCrawlApi:
             crawl_api.client,
             crawl_api.batch_payload(["/", "/no-such-page-xyz"], async_mode=True),
         )
-        job = job_store.load(request_id)
+        job = loaded_job(job_store, request_id)
         assert job.stats["total_failed"] == 1
         assert job.stats["total_crawled"] == 2
 

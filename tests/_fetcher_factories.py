@@ -1,17 +1,21 @@
 import asyncio
 import inspect
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
 import trafilatura.core
 
-from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES, HTTP_DECLARED_CRAWLER
+from app.constants import (
+    DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    HTTP_DECLARED_CRAWLER,
+)
 from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import crawl_request
 from app.crawl.policy import CrawlPolicy, read_policy
 from app.crawl.strategies.strategy_request import StrategyRequest
-from app.models import HttpFetchResult
+from app.models import CrawlStrategyName, HttpFetchResult
 from app.validation import HostPolicy
 from tests._browser_doubles import _fake_browser
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY
@@ -50,10 +54,25 @@ def make_fetch(
 #: What a route may answer with. An exception is raised, an ``HttpFetchResult``
 #: is returned verbatim, a ``(status, body, ctype)`` triple or a kwargs dict is
 #: turned into a real ``HttpFetchResult`` by :func:`make_fetch`.
+#:
+#: What a route may answer with. Left as ``Any`` deliberately: the set is
+#: caller-supplied, and the four shapes named below plus the fetch-result-shaped
+#: object ``answer_is_response`` passes through are exactly why a union here
+#: would be a claim about callers rather than about this module. What IS pinned
+#: is the answer's OUTPUT -- ``_answer`` returns a real ``HttpFetchResult``, and
+#: so does a fetcher double.
 Route = Any
 
 
-def _answer(spec: Route, url: str):
+def _answer(spec: Route, url: str) -> HttpFetchResult:
+    """The route spec as a real ``HttpFetchResult``.
+
+    ``HttpFetchResult`` rather than nothing: every branch that returns one here
+    does, and the branch that does not raise. Left unannotated the answer was
+    ``Any``, which is what let a fetcher double's return type be ``Any`` too --
+    a chain in which the one place that actually builds the result said nothing
+    about it.
+    """
     if isinstance(spec, BaseException) or (isinstance(spec, type) and issubclass(spec, BaseException)):
         raise spec() if isinstance(spec, type) else spec
     if isinstance(spec, HttpFetchResult):
@@ -66,6 +85,83 @@ def _answer(spec: Route, url: str):
     return make_fetch(url=url, final_url=url, status=status, body=body, ctype=ctype)
 
 
+class FetcherDouble:
+    """The production fetcher contract, the request seam, and the observations.
+
+    This was a plain function with ``calls`` attached to it after construction,
+    so the observations were invisible to every type that saw the return: a test
+    reading ``fetcher.calls`` was reaching for something only the factory could
+    promise. The class is where that promise lives, and it is still a real
+    ``HttpFetcher`` everywhere production asks for one -- ``app.crawl.worker``
+    recognises a callable object by its ``__call__``, so the async-discipline
+    check sees exactly what it saw before.
+    """
+
+    calls: list[str]
+    peak: Callable[[], int]
+    inflight: Callable[[], int]
+    #: How many fetches this double has answered. Declared because the scripted
+    #: factory below publishes it, and a member the type does not carry is one a
+    #: reader cannot trust is there.
+    served: Callable[[], int]
+    #: The headers this double was called with, in order. A separate member from
+    #: ``calls`` because the two are different facts: ``calls`` is which URLs
+    #: were fetched, this is what was sent with each. :func:`request_fetcher`
+    #: used to publish its header log AS ``calls``, so a test reading it was
+    #: reading a list of header dicts through a name that says URLs -- and the
+    #: other seam's log was nowhere.
+    headers: list[dict[str, str]]
+
+    def __init__(
+        self,
+        answer: Callable[..., Route],
+        calls: list[str] | None = None,
+        *,
+        record_headers: list[dict[str, str]] | None = None,
+        record_cap: list[int] | None = None,
+        answer_is_response: bool = False,
+    ) -> None:
+        self._answer = answer
+        self._record_cap = record_cap
+        self._answer_is_response = answer_is_response
+        self.calls = [] if calls is None else calls
+        self.headers = [] if record_headers is None else record_headers
+
+    async def __call__(
+        self,
+        url: str,
+        sent_headers: dict[str, str],
+        timeout: int,
+        max_content_length: int = DEFAULT_MAX_CONTENT_LENGTH_BYTES,
+    ) -> HttpFetchResult:
+        """What the strategy reads, whichever way this factory was built.
+
+        ``HttpFetchResult`` is the contract production consumes, and both arms
+        below satisfy it: ``_answer`` builds one from a route spec, and the
+        ``answer_is_response`` arm hands back the caller's own object, which is
+        shaped like one. Declaring it here rather than ``Any`` is what lets a
+        caller of a fetcher double know what it got.
+        """
+        self.calls.append(url)
+        self.headers.append(dict(sent_headers))
+        if self._record_cap is not None:
+            self._record_cap.append(max_content_length)
+        result = self._answer(url, sent_headers, timeout, max_content_length)
+        if inspect.isawaitable(result):
+            result = await result
+        # The flag says which of the two answer shapes this factory produces, and
+        # each arm now says so out loud. It used to be a boolean the type of the
+        # answer could not follow, so a ``Route`` handed to a response factory (or
+        # the reverse) was returned as though it were the other -- and the caller
+        # read ``.status_code`` off a route spec, or a strategy unpacked a
+        # response as a triple.
+        if self._answer_is_response:
+            # The answer already IS the fetch result, so it goes back untouched.
+            # A round trip through ``_answer`` would be a second reading of it.
+            return result
+        return _answer(result, url)
+
+
 def fetcher_double(
     answer,
     calls: list | None = None,
@@ -73,7 +169,7 @@ def fetcher_double(
     record_headers: list | None = None,
     record_cap: list | None = None,
     answer_is_response: bool = False,
-):
+) -> FetcherDouble:
     """A fetcher double: the production contract, the request seam, the answer.
 
     Every double in this module used to re-state the fetcher signature, cap
@@ -91,21 +187,13 @@ def fetcher_double(
     were fetched, which headers were sent, which body cap the strategy applied
     -- so none of them needs a second fetcher or a hand-rolled wrapper.
     """
-
-    async def fetcher(url, sent_headers, timeout, max_content_length=DEFAULT_MAX_CONTENT_LENGTH_BYTES):
-        if calls is not None:
-            calls.append(url)
-        if record_headers is not None:
-            record_headers.append(dict(sent_headers))
-        if record_cap is not None:
-            record_cap.append(max_content_length)
-        result = answer(url, sent_headers, timeout, max_content_length)
-        if inspect.isawaitable(result):
-            result = await result
-        return result if answer_is_response else _answer(result, url)
-
-    fetcher.calls = [] if calls is None else calls
-    return fetcher
+    return FetcherDouble(
+        answer,
+        calls,
+        record_headers=record_headers,
+        record_cap=record_cap,
+        answer_is_response=answer_is_response,
+    )
 
 
 def site_fetcher(pages: dict[str, Any]):
@@ -291,13 +379,12 @@ def request_fetcher(respond, calls: list | None = None):
     Distinct from :func:`tap_fetcher` (which delegates to a real fetcher) and
     from :func:`concurrent_fetcher` (which also counts overlap): this one adds
     no scheduling point, so a test about headers does not acquire a
-    concurrency behaviour it did not ask for. ``fetcher.calls`` is the header
-    log, which is what this seam is for.
+    concurrency behaviour it did not ask for. ``fetcher.headers`` is the header
+    log, which is what this seam is for -- and it is its own member rather than
+    ``calls`` so that "which URLs" and "what was sent" stay two different facts.
     """
-    seen = [] if calls is None else calls
-    fetcher = fetcher_double(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
-    fetcher.calls = seen
-    return fetcher
+    seen: list[dict[str, str]] = [] if calls is None else calls
+    return fetcher_double(lambda url, sent_headers, *_: respond(url, sent_headers), record_headers=seen)
 
 
 def tap_fetcher(inner, calls: list | None = None):
@@ -337,11 +424,14 @@ def concurrent_fetcher(
     """
     state = {"inflight": 0, "peak": 0}
 
-    async def answer(url, sent_headers, *_):
+    async def answer(url, sent_headers, *_args):
         state["inflight"] += 1
         state["peak"] = max(state["peak"], state["inflight"])
         try:
-            for _ in range(yield_times):
+            # ``_yield``, not ``_``: ``*_args`` above already binds the rest of
+            # the arguments, and a bare ``_`` loop variable is a second name for
+            # a value the enclosing call still needs.
+            for _yield in range(yield_times):
                 await asyncio.sleep(0)
             return respond(url, sent_headers)
         finally:
@@ -385,7 +475,7 @@ def build_payload(
     limits: dict | None = None,
     **extra,
 ) -> dict:
-    payload = {}
+    payload: dict[str, Any] = {}
     if url:
         payload["url"] = url
     if urls:
@@ -431,7 +521,7 @@ async def crawled_results(
     *,
     url: str = "http://example.com/",
     limits: dict[str, Any] | None = None,
-    policy: CrawlPolicy | dict[str, Any] | None = None,
+    policy: dict[str, Any] | None = None,
     spill_path: str | None = None,
     content_cache: Any = None,
     calls: list[str] | None = None,
@@ -445,9 +535,11 @@ async def crawled_results(
     routed one, which is the drift this chokepoint exists to prevent.
 
     ``limits`` is the limits sub-mapping; ``policy`` carries the rest of the
-    policy (``discovery``, ``scope_regex``, ``browser_profile``). ``calls``, if
-    given, records the URLs that actually reached the network, so a test about
-    caching does not have to build its own tap.
+    policy (``discovery``, ``scope_regex``, ``browser_profile``) as a mapping,
+    which is the shape the body below unpacks it as -- a ``CrawlPolicy`` is a
+    model, and ``**model`` is not a thing. ``calls``, if given, records the URLs
+    that actually reached the network, so a test about caching does not have to
+    build its own tap.
     """
     body: dict[str, Any] = {"limits": dict(limits or {}), **(policy or {})}
     fetcher = tap_fetcher(site_fetcher(pages), calls) if calls is not None else site_fetcher(pages)
@@ -673,7 +765,9 @@ def _spawn_fetch(fn):
         server.stop()
 
 
-def strategy_request(url: str, policy: CrawlPolicy | dict[str, Any], strategy: str) -> StrategyRequest:
+def strategy_request(
+    url: str, policy: CrawlPolicy | dict[str, Any], strategy: CrawlStrategyName
+) -> StrategyRequest:
     """The page identity these factories hand the real strategy entry points.
 
     One spelling, so a factory cannot pass one page's URL to a result builder

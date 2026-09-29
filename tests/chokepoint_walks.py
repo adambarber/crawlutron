@@ -49,6 +49,7 @@ import tokenize
 import weakref
 from collections.abc import Callable, Container, Iterable, Iterator
 from functools import cache, lru_cache
+from typing import TypeGuard
 
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
@@ -316,7 +317,7 @@ def assignments(nodes: Iterable[ast.AST]) -> Iterator[tuple[ast.AST, ast.expr, a
             yield node, node.target, node.value
 
 
-def trees_excluding(root: pathlib.Path, *sanctioned: str) -> Iterator[tuple[pathlib.Path, ast.AST]]:
+def trees_excluding(root: pathlib.Path, *sanctioned: str) -> Iterator[tuple[pathlib.Path, ast.Module]]:
     """``trees_under`` without the named files.
 
     A check that exempts a file used to spell the exemption as a ``continue``
@@ -324,6 +325,9 @@ def trees_excluding(root: pathlib.Path, *sanctioned: str) -> Iterator[tuple[path
     every detector that had one -- and a detector that forgot the ``continue``
     flagged the very file the rule carves out, which reads as a broken rule
     rather than a missing exemption. The exemption belongs to the walk.
+
+    The element is ``Module``, matching ``trees_under`` and ``app_trees``: this
+    yields their trees unchanged, and only filters.
     """
     skip = frozenset(sanctioned)
     return ((path, tree) for path, tree in trees_under(root) if path.name not in skip)
@@ -718,6 +722,72 @@ def assert_stays_clean(detector, clean: tuple[str, ...], path: pathlib.Path) -> 
     assert_detector(detector, path=path, fires={}, clean=clean)
 
 
+#: The statements that open a nested scope -- the compound statements. This is
+#: the vocabulary for "can contain a definition", and the metrics gate imports it
+#: rather than restating it: two lists that happen to agree on these seven are
+#: two lists that can stop agreeing.
+SCOPE_OPENING_NODES: tuple[type[ast.AST], ...] = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+)
+
+#: A statement that owns a body -- a suite of statements. A walk asking "is this
+#: the first statement of a block" is asking for exactly this, and ``ast.stmt``
+#: -- the union every statement belongs to -- declares no ``body`` on any of
+#: them, so the question could not be asked against it.
+#:
+#: Built as the scope-opening set plus the definition-bearing statements rather
+#: than as a list that happens to agree with it.
+BODY_OWNING_NODES: tuple[type[ast.AST], ...] = (
+    ast.Module,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+) + SCOPE_OPENING_NODES
+
+
+def is_scope_opener(
+    node: ast.AST,
+) -> TypeGuard[ast.If | ast.For | ast.AsyncFor | ast.While | ast.With | ast.AsyncWith | ast.Try]:
+    """Whether ``node`` is a compound statement, narrowed to the kinds that are.
+
+    The narrowed companion to :data:`SCOPE_OPENING_NODES`, for the walks that
+    read ``node.body`` off the answer. Membership in the tuple and the narrowed
+    type are one fact, and keeping them apart is how a walk ends up reading a
+    member the declared type does not have.
+    """
+    return isinstance(node, SCOPE_OPENING_NODES)
+
+
+def is_body_owner(
+    node: ast.AST,
+) -> TypeGuard[
+    ast.Module
+    | ast.FunctionDef
+    | ast.AsyncFunctionDef
+    | ast.ClassDef
+    | ast.If
+    | ast.For
+    | ast.AsyncFor
+    | ast.While
+    | ast.With
+    | ast.AsyncWith
+    | ast.Try
+]:
+    """Whether ``node`` is a statement that owns a body, narrowed to the kinds that do.
+
+    The predicate a walk needs rather than a bare ``isinstance``: the
+    membership test and the narrowed type are the same fact, and separating them
+    is how a check ends up written against a type that cannot answer it.
+    """
+    return isinstance(node, BODY_OWNING_NODES)
+
+
 def calls_to_any(tree: ast.AST, function_names) -> Iterator[ast.Call]:
     """Yield direct calls whose callee is any of ``function_names``.
 
@@ -730,6 +800,21 @@ def calls_to_any(tree: ast.AST, function_names) -> Iterator[ast.Call]:
     for node in nodes_of(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in function_names:
             yield node
+
+
+def named_calls_to_any(tree: ast.AST, function_names) -> Iterator[tuple[ast.Call, str]]:
+    """:func:`calls_to_any`, paired with the callee's name.
+
+    ``calls_to_any`` already filters on ``isinstance(node.func, ast.Name)``, so
+    the name is always right there -- but ``Call.func`` is declared as the whole
+    expression type, so a detector that wanted to *report* the callee had to
+    re-assert that same narrowing, and three of them in the result-shape sweep
+    were each carrying a copy. The assertion lives here, once, and a detector
+    that reports a name it did not actually match is the failure this removes.
+    """
+    for call in calls_to_any(tree, function_names):
+        assert isinstance(call.func, ast.Name), ast.unparse(call.func)
+        yield call, call.func.id
 
 
 def calls_named(tree: ast.AST, function_name: str) -> Iterator[ast.Call]:

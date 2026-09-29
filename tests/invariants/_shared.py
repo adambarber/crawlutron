@@ -14,18 +14,24 @@ import ast
 import pathlib
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import TypeAlias
 
 from tests.chokepoint_walks import REPO_ROOT, app_trees, relative_posix, resolved_call_name
 from tests.property_registry import Property
 
-__all__ = ["assert_trees_clean", "_module_definition_index", "_module_name"]
+__all__ = [
+    "DefinitionNode",
+    "assert_trees_clean",
+    "_module_definition_index",
+    "_module_name",
+]
 
 
 def assert_trees_clean(
-    detector: Callable[[ast.AST, Path], list[str]],
+    detector: Callable[[ast.Module, Path], list[str]],
     message: str,
     *,
-    trees: Iterable[tuple[Path, ast.AST]] | None = None,
+    trees: Iterable[tuple[Path, ast.Module]] | None = None,
 ) -> None:
     """Sweep every module through `detector` and fail on the offenders it finds.
 
@@ -39,6 +45,12 @@ def assert_trees_clean(
     ``trees`` defaults to the whole app tree; a check passes an explicit walker
     only to exclude sanctioned modules, and the default is what makes a forgotten
     sweep fail loudly rather than silently pass on an empty list.
+
+    ``detector`` and ``trees`` are ``Module``, not ``AST``: every tree this
+    sweeps came from ``ast.parse`` over a whole file, and a detector that reads
+    ``tree.body`` -- which is how a great many of them reach module-level
+    definitions -- is asking for exactly that. The wider node left those
+    detectors unable to say what they actually read.
 
     The offenders are appended to ``message`` separated by ``; ``, so a caller
     writes one sentence of consequence and lets the sweep supply the evidence.
@@ -240,10 +252,18 @@ def _module_name(path: pathlib.Path) -> str:
     return relative.replace("/", ".")
 
 
+#: A module-level symbol ``_module_definition_index`` records. The walk admits
+#: exactly these three kinds, and every caller reads ``.name`` off what it gets
+#: back -- so the index said ``ast.AST`` and each consumer had to re-assert the
+#: shape the index had already guaranteed. Naming the three keeps the guarantee
+#: where it is established.
+DefinitionNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+
+
 def _module_definition_index(
     modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
-) -> dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]]:
-    index: dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]] = {}
+) -> dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]]:
+    index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]] = {}
     for path, tree in modules or ():
         module = _module_name(path)
         for node in tree.body:

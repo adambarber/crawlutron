@@ -1,9 +1,37 @@
 from http.server import BaseHTTPRequestHandler
 
+from app.crawl.strategies import cookie_jar
+from app.crawl.strategies.cookie_jar import CookieJar
+from app.crawl.strategies.request_profile import _store_set_cookies
 from tests._fetcher_factories import run_default_http_fetcher
 from tests._transport_doubles import MockResponse, patch_http_fetcher_transport
 
 SENSITIVE_HEADERS = {"Cookie": "session=secret123", "Authorization": "Bearer token456"}
+
+
+class _TransportHeadersDouble:
+    """The transport's own header multidict, with only the repeated names.
+
+    ``get`` and ``items`` raise rather than answer, so the cookie path is pinned
+    to ``get_list``: reading Set-Cookie any other way is the corruption this
+    test exists to catch, and a double that quietly answered would hide the
+    regression instead of failing on it.
+    """
+
+    def __init__(self) -> None:
+        self.get_list_calls: list[str] = []
+
+    def get_list(self, key: str) -> list[str]:
+        self.get_list_calls.append(key)
+        if key.lower() == "set-cookie":
+            return ["session=abc; Path=/", "csrf=xyz; Path=/"]
+        return []
+
+    def get(self, key: str, default: str = "") -> str:
+        raise AssertionError("Set-Cookie extraction must use get_list")
+
+    def items(self):
+        raise AssertionError("Set-Cookie extraction must use get_list")
 
 
 async def _fetch_with_redirect(monkeypatch, redirect_location):
@@ -89,7 +117,6 @@ async def test_http_fetcher_persists_every_set_cookie_header():
     happily while the caller defeated it.
     """
     from app.crawl.strategies import cookie_jar as cookie_mod
-    from app.crawl.strategies.cookie_jar import CookieJar
     from tests.helpers.server import spawn_threaded_server
 
     server = spawn_threaded_server(_TwoCookieHandler)
@@ -114,40 +141,21 @@ def test_store_set_cookies_handles_multiple_set_cookie_headers():
 
     In httpx 0.28+, Headers.items() returns comma-joined values for duplicate
     keys. Using get_list("set-cookie") gives each header separately.
+
+    Reads the process-wide jar, which the conftest teardown empties between
+    tests, rather than swapping the module global for a private one: the swap
+    was 8 lines of try/finally guarding state the fixture already guarantees
+    is clean on entry.
     """
-    from app.crawl.strategies.cookie_jar import CookieJar
-    from app.crawl.strategies.request_profile import _store_set_cookies
+    jar = cookie_jar._GLOBAL_COOKIE_JAR
 
-    # Use a fresh jar to avoid interference from other tests
-    jar = CookieJar()
-    from app.crawl.strategies import cookie_jar as cookie_mod
+    headers = _TransportHeadersDouble()
+    _store_set_cookies("http://example.com/", headers)
 
-    old_jar = cookie_mod._GLOBAL_COOKIE_JAR
-    cookie_mod._GLOBAL_COOKIE_JAR = jar
-    try:
-
-        class MockHeaders:
-            def __init__(self):
-                self.get_list_calls = []
-
-            def get_list(self, key):
-                self.get_list_calls.append(key)
-                if key.lower() == "set-cookie":
-                    return ["session=abc; Path=/", "csrf=xyz; Path=/"]
-                return []
-
-            def items(self):
-                raise AssertionError("Set-Cookie extraction must use get_list")
-
-        headers = MockHeaders()
-        _store_set_cookies("http://example.com/", headers)
-
-        assert headers.get_list_calls == ["set-cookie"]
-        cookie_header = jar.cookie_header_for("http://example.com/")
-        assert "session=abc" in cookie_header
-        assert "csrf=xyz" in cookie_header
-    finally:
-        cookie_mod._GLOBAL_COOKIE_JAR = old_jar
+    assert headers.get_list_calls == ["set-cookie"]
+    cookie_header = jar.cookie_header_for("http://example.com/")
+    assert "session=abc" in cookie_header
+    assert "csrf=xyz" in cookie_header
 
 
 def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
@@ -156,8 +164,6 @@ def test_cookiejar_add_cookie_header_parses_each_cookie_separately():
     Passing a comma-joined string (what httpx.items() yields) to SimpleCookie
     corrupts cookie values (e.g., 'abc,' instead of 'abc').
     """
-    from app.crawl.strategies.cookie_jar import CookieJar
-
     jar = CookieJar()
 
     # BAD: comma-joined (what old code would pass)

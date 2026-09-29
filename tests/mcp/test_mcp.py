@@ -379,5 +379,6 @@ class TestInternalErrorContract:
             shutdown_event=None,
         )
         assert status == 500
+        assert payload is not None
         assert payload["error"]["code"] == -32603
         assert payload["id"] == 1

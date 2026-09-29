@@ -154,8 +154,13 @@ def _names_app_tree(component: ast.expr) -> bool:
     return parts[0] == "app" or (component.value.startswith("/") and "app" in parts)
 
 
-def _path_components(expr: ast.AST) -> list[ast.AST] | None:
-    """Flatten `a / b / c`, `os.path.join(a, b)`, and `Path(a)` into components."""
+def _path_components(expr: ast.expr) -> list[ast.expr] | None:
+    """Flatten `a / b / c`, `os.path.join(a, b)`, and `Path(a)` into components.
+
+    The elements are expressions -- a name, an attribute, a call result -- which
+    is what every consumer classifies them as, so the wider node type was the
+    only thing stopping them from saying so.
+    """
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
         head = _path_components(expr.left)
         return None if head is None else [*head, expr.right]
@@ -172,7 +177,7 @@ def _path_components(expr: ast.AST) -> list[ast.AST] | None:
 
 
 def _tree_role(
-    components: list[ast.AST],
+    components: list[ast.expr],
     anchors: set[str],
     rooted: set[str],
 ) -> str:
@@ -434,12 +439,15 @@ def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
     ``a.b`` as written. One traversal over both spellings so the caller compares
     one thing rather than repeating its verdict per import form.
     """
-    for node in from_imports(tree):
-        if node.module:
-            yield node, node.module
-    for node in plain_imports(tree):
-        for alias in node.names:
-            yield node, alias.name
+    for from_node in from_imports(tree):
+        if from_node.module:
+            yield from_node, from_node.module
+    # A distinct name from the loop above: the two are separate traversals of
+    # the same tree, and one binding for both meant the second yield carried the
+    # first loop's node type.
+    for plain_node in plain_imports(tree):
+        for alias in plain_node.names:
+            yield plain_node, alias.name
 
 
 def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:

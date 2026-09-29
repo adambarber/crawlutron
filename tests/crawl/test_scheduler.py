@@ -6,7 +6,7 @@ import time
 import pytest
 
 from app.crawl.result_helpers import TerminalResult
-from app.models import CrawlJob, CrawlTask, EngineCrawlResult
+from app.models import Classification, CrawlJob, CrawlTask, EngineCrawlResult
 from app.scheduler import _COOLDOWN_PURGE_INTERVAL, DomainScheduler, jittered_delay
 from tests._policy_factories import normalized
 from tests._result_builders import make_job, make_result
@@ -64,14 +64,18 @@ class TestScheduler:
         scheduler.set_domain_cooldown("example.com", 0.3)
         job = make_job(0, "http://example.com/")
 
-        async def worker(ran_job):
+        async def worker(ran_job: CrawlJob) -> EngineCrawlResult:
             assert sleeps.requests_over(0.29), (
                 "the worker ran before the domain cooldown was awaited; the "
                 f"recorded sleep requests were {sleeps.delays}"
             )
             return make_result(ran_job.url, ran_job.domain)
 
+        # The delivery channel decides the return: with no sink, ``run`` hands
+        # back the index-keyed mapping (the docstring's "otherwise" branch). The
+        # guard is the contract, stated where the call that relies on it is made.
         results = await scheduler.run([job], worker, failed_result=engine_envelope)
+        assert results is not None
         assert results[0].status == "success"
         assert sleeps.requests_over(0.29), (
             f"no cooldown sleep was requested at all (requests: {sleeps.delays})"
@@ -81,6 +85,7 @@ class TestScheduler:
         scheduler = make_scheduler(global_limit=2)
         jobs = [make_job(i, f"http://example.com/{i}") for i in range(3)]
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
+        assert results is not None
         # run reports a job.index -> result mapping so callers align each result
         # with its own job regardless of completion order (B1).
         assert sorted(results) == [0, 1, 2]
@@ -235,12 +240,12 @@ class TestCircuitBreakerSpillsOnResult:
         trip_circuit(scheduler, "example.com")
         assert scheduler.is_circuit_open("example.com")
 
-        spilled: list[tuple[int, object]] = []
+        spilled: list[tuple[int, EngineCrawlResult]] = []
 
-        async def on_result(index, result):
+        async def on_result(index: int, result: EngineCrawlResult) -> None:
             spilled.append((index, result))
 
-        async def worker(job):  # pragma: no cover - must never run
+        async def worker(job: CrawlTask) -> EngineCrawlResult:  # pragma: no cover - must never run
             raise AssertionError("worker must not run while the circuit is open")
 
         job = CrawlTask(
@@ -251,6 +256,9 @@ class TestCircuitBreakerSpillsOnResult:
         )
         # The bug raises TypeError inside gather with return_exceptions=True,
         # so run() returns normally but delivers nothing.
+        # The delivery channel decides the return: with no sink, ``run`` hands
+        # back the index-keyed mapping (the docstring's "otherwise" branch). The
+        # guard is the contract, stated where the call that relies on it is made.
         returned = await scheduler.run([job], worker, on_result=on_result, failed_result=engine_envelope)
 
         assert returned is None, "on_result mode must return None"
@@ -299,11 +307,10 @@ class TestSchedulerCircuitBreaker:
 class TestSchedulerLatencyEma:
     def test_scheduler_record_latency_invalid(self):
         scheduler = make_scheduler()
-        # None latency should be ignored (line 114: return)
-        scheduler.record_latency("example.com", None)
-        # Negative latency should be ignored
+        # A negative latency is a broken measurement, not a fast one: recording
+        # it would pull the EMA under every delay actually observed and let the
+        # domain through faster than anything it has been timed at.
         scheduler.record_latency("example.com", -1.0)
-        # Verify no latency was recorded
         assert "example.com" not in scheduler._domain_latency_ema
 
     def test_scheduler_record_latency_valid(self):
@@ -325,7 +332,7 @@ class TestSchedulerPolicies:
     def test_token_bucket_basic(self):
         from app.scheduler import _TokenBucket
 
-        bucket = _TokenBucket(rate=10.0, capacity=5.0)
+        bucket = _TokenBucket(rate=10.0, capacity=5)
         wait = bucket.consume(1.0)
         assert wait == 0.0
         wait = bucket.consume(4.0)
@@ -336,7 +343,7 @@ class TestSchedulerPolicies:
     def test_token_bucket_refill(self):
         from app.scheduler import _TokenBucket
 
-        bucket = _TokenBucket(rate=100.0, capacity=10.0)
+        bucket = _TokenBucket(rate=100.0, capacity=10)
         bucket.consume(10.0)
         # Manually refill tokens as if 0.1s passed (at 100 tokens/s, that's 10 more)
         bucket.tokens = 10.0
@@ -441,7 +448,7 @@ class TestSchedulerPolicies:
         release_slow = asyncio.Event()
         sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
-        async def worker(job: CrawlJob):
+        async def worker(job: CrawlJob) -> EngineCrawlResult:
             # Make index 0 wait until job 1 has been delivered, so streaming
             # order is observable without a real sleep.
             if job.index == 0:
@@ -467,7 +474,7 @@ class TestSchedulerPolicies:
         """Backward-compatible path (recursive frontier) still returns results."""
         sched = make_scheduler(global_limit=10, per_domain_limit=10)
 
-        async def worker(job: CrawlJob):
+        async def worker(job: CrawlJob) -> EngineCrawlResult:
             return make_result(job.url, job.domain)
 
         jobs = [make_job(i, f"http://h{i}.example.com/") for i in range(4)]
@@ -545,6 +552,7 @@ class TestSchedulerResilience:
             return make_result(job.url, job.domain)
 
         results = await scheduler.run(jobs, failing_worker, failed_result=engine_envelope)
+        assert results is not None
         # The failing job is not dropped: the chokepoint builds it a classified
         # terminal envelope (reading the URL pair off whichever shape the job
         # carries -- CrawlJob has only ``url``), so the caller never observes a
@@ -713,7 +721,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
     """
 
     @staticmethod
-    def _terminal(job, classification: str):
+    def _terminal(job: CrawlJob, classification: Classification):
         """A real terminal result, with its status derived by the real chokepoint."""
         from app.constants import status_for_classification
         from app.crawl.result_helpers import _terminal_engine_result
@@ -728,7 +736,10 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
                 normalized_url=job.url,
                 strategy=None,
                 classification=classification,
-                error=None,
+                # ``error`` is a taxonomy code, not an optional: production's own
+                # envelope passes the classification through it, and a result
+                # carrying no error code is a shape no caller produces.
+                error=classification,
             ),
             status=status_for_classification(classification),
         )
@@ -744,6 +755,7 @@ class TestSchedulerFailureAccountingIsAboutStatuses:
             return engine_envelope(job, socket.gaierror("name resolution failed"))
 
         results = await scheduler.run([job], failing_worker, failed_result=engine_envelope)
+        assert results is not None
         result = results[job.index]
         # Different axes: the status is the verdict, the classification the reason.
         # Comparing one against the other is why the old tuple could not work.

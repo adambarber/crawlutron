@@ -25,7 +25,10 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
     # of the shipped transport preference rather than of a second entry point.
     try:
         policy = HostPolicy.unrestricted()
-        result = asyncio.run(impersonating_fetcher(policy)(url, {}, 10, 50 * 1024 * 1024, policy=policy))
+        # No ``policy=`` here: the factory already bound it, and re-passing it
+        # was reaching for a keyword the bound fetcher's declared ``HttpFetcher``
+        # type does not carry -- the binding is what this call is testing.
+        result = asyncio.run(impersonating_fetcher(policy)(url, {}, 10, 50 * 1024 * 1024))
         out_queue.put(("ok", result.status_code))
     except Exception as error:
         out_queue.put(("err", type(error).__name__, str(error)[:160]))
@@ -111,14 +114,17 @@ class TestHttpStrategyEdges:
 
         cache = HttpCache()
 
-        class MockResponse:
-            content = b"error"
-            status_code = 500
-            headers = {"content-type": "text/plain"}
-            url = "http://error.example.com/"
+        # A real request/response pair, because ``HTTPStatusError`` carries both
+        # and the strategy reads ``.response`` off it. Stand-ins left ``request``
+        # as ``None`` and the response as an object that was not a response, so
+        # the error a test built was not the error httpx raises.
+        request = httpx.Request("GET", "http://error.example.com/")
+        response = httpx.Response(
+            500, headers={"content-type": "text/plain"}, content=b"error", request=request
+        )
 
         unreachable_fetcher = failing_fetcher(
-            httpx.HTTPStatusError("server error", request=None, response=MockResponse())
+            httpx.HTTPStatusError("server error", request=request, response=response)
         )
 
         result = await run_http_strategy(

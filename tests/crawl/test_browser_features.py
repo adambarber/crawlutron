@@ -45,6 +45,13 @@ class FakePage(ScriptedPage):
         self.elements = {}
         self.responses = []
         self.extra_http_headers = {}
+        # Where each interaction call goes. A test that wants one to blow up
+        # replaces the ENTRY rather than the method: assigning over a method left
+        # the object claiming a method it no longer had.
+        self.click = self._click
+
+    async def _click(self, selector):
+        self.calls.append(("click", selector))
 
     async def route(self, pattern, handler):
         self.route_calls.append((pattern, handler))
@@ -55,16 +62,13 @@ class FakePage(ScriptedPage):
     def on(self, event, handler):
         self.calls.append(("on", event))
 
-    async def click(self, selector):
-        self.calls.append(("click", selector))
-
     async def fill(self, selector, value):
         self.calls.append(("fill", selector, value))
 
     async def hover(self, selector):
         self.calls.append(("hover", selector))
 
-    async def wait_for_selector(self, selector, timeout=5000):
+    async def wait_for_selector(self, selector, timeout=5000, **kwargs):
         self.calls.append(("wait_for_selector", selector, timeout))
 
     async def query_selector(self, selector):
@@ -72,8 +76,11 @@ class FakePage(ScriptedPage):
             return None
         return self.elements.setdefault(selector, FakeElement(selector))
 
-    async def screenshot(self, full_page=False):
-        self.calls.append(("screenshot", full_page))
+    async def screenshot(self, **k):
+        # ``**k`` to match :meth:`BrowserFakePage.screenshot`; the page-level flag
+        # is read out of it rather than named, so a signature narrowed to
+        # ``full_page`` cannot reject the other kwargs the renderer passes.
+        self.calls.append(("screenshot", k.get("full_page", False)))
         return b"fakepngbytes"
 
 

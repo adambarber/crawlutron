@@ -780,33 +780,42 @@ class TestJobControlOverRunner:
 
 
 class TestJobControlTransitions:
-    async def test_main_job_control_invalid_action(self):
-        from app.main import app, job_store
+    """A control action the job is not in a state to accept is a state conflict.
+
+    The three cases differ only in the action and in the state the job is put
+    into first, so the wiring around them -- the app, the store, the seed job,
+    the cleanup -- is one helper rather than three copies of it. A copy is what
+    made the "seed to a terminal state first" line the one most likely to be
+    forgotten, and then a 409 test would have been asserting a 422.
+    """
+
+    @staticmethod
+    async def _control(action: str, expected: int, *, seed_terminal: bool = False) -> None:
+        from app.crawl.job_store import JobStatus
+        from app.main import job_store
+        from tests._app_factory import service_app
 
         job = job_store.create("http://example.com/", CrawlPolicy())
-        await run_job_control_test(app, job_store, job.job_id, "invalid_action", 422)
+        if seed_terminal:
+            # Through the control plane, not ``save``: ``save`` no longer writes
+            # status, so seeding a terminal state any other way would leave the
+            # row PENDING and the test would be asserting the wrong transition.
+            job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+            job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
+        await run_job_control_test(service_app(), job_store, job.job_id, action, expected)
         job_store.delete(job.job_id)
+
+    async def test_main_job_control_invalid_action(self):
+        await self._control("invalid_action", 422)
 
     async def test_main_job_control_cancel_completed(self):
         # H5: cancel from a terminal state is a state conflict (409), not a
         # shape error (422) — the request shape is valid, the transition isn't.
-        from app.crawl.job_store import JobStatus
-        from app.main import app, job_store
-
-        job = job_store.create("http://example.com/", CrawlPolicy())
-        # Set to completed via the control plane (save no longer writes status).
-        job_store.set_status(job.job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
-        job_store.set_status(job.job_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
-        await run_job_control_test(app, job_store, job.job_id, "cancel", 409)
-        job_store.delete(job.job_id)
+        await self._control("cancel", 409, seed_terminal=True)
 
     async def test_main_job_control_resume_not_paused(self):
         # H5: resume requires PAUSED; from PENDING it is a state conflict.
-        from app.main import app, job_store
-
-        job = job_store.create("http://example.com/", CrawlPolicy())
-        await run_job_control_test(app, job_store, job.job_id, "resume", 409)
-        job_store.delete(job.job_id)
+        await self._control("resume", 409)
 
 
 def assert_pair_crawled_once(finished, engine, root: str, child: str) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import pathlib
 from collections import defaultdict
 from collections.abc import Mapping
@@ -10,9 +11,10 @@ import httpx
 import pytest
 from fastapi import BackgroundTasks, HTTPException
 
+from app.crawl.result_store import CrawlResultStore
 from app.validation import HOST_POLICY_ENTRY_POINTS
 from tests.chokepoint_walks import REPO_ROOT, app_trees, local_nodes, nodes_of, resolved_call_name
-from tests.invariants._shared import _module_definition_index
+from tests.invariants._shared import DefinitionNode, _module_definition_index
 
 _DECISION_NAMES = frozenset(
     {
@@ -40,7 +42,7 @@ def _module_name(path: pathlib.Path) -> str:
 
 def _call_edges(
     modules: tuple[tuple[pathlib.Path, ast.Module], ...],
-    index: dict[str, list[tuple[pathlib.Path, ast.Module, ast.AST]]],
+    index: dict[str, list[tuple[pathlib.Path, ast.Module, DefinitionNode]]],
 ) -> dict[str, set[str]]:
     edges: dict[str, set[str]] = {name: set() for name in index}
     for name, candidates in index.items():
@@ -245,7 +247,11 @@ async def _probe_crawl_endpoint(monkeypatch, tmp_path):
             background_tasks,
             _denied_settings(),
             job_store,
-            object(),
+            # A real result store, not ``object()``. The gate refuses before it
+            # reaches this, and that is the claim under test -- so a stand-in
+            # made true an accident rather than a fact: the call had to be
+            # type-correct for "never touched" to mean anything.
+            CrawlResultStore(tmp_path / "host-policy-results.db"),
             asyncio.Event(),
         ),
         effects,
@@ -267,7 +273,9 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
         crawl_executor.execute_crawl(
             {"url": _BLOCKED_URL},
             settings=_denied_settings(),
-            shutdown_event=None,
+            # A real event: the guard refuses before it reads this, and the
+            # parameter is required.
+            shutdown_event=asyncio.Event(),
         ),
         effects,
     )
@@ -292,7 +300,9 @@ async def _probe_jobs_router(monkeypatch, tmp_path):
             JobCreateRequest(root_url=_BLOCKED_URL),
             job_store=job_store,
             settings=_denied_settings(),
-            shutdown_event=None,
+            # A real event: the handler refuses before it reads this, and the
+            # parameter is a required ``asyncio.Event``.
+            shutdown_event=asyncio.Event(),
         ),
         effects,
     )

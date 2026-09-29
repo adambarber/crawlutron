@@ -27,6 +27,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from tests.chokepoint_walks import SCOPE_OPENING_NODES
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import tests._jscpd_gate as gate
@@ -61,19 +63,11 @@ def _scan(root: str, min_lines: int, min_tokens: int) -> tuple[str, list[dict]]:
 # floor.
 _DOCSTRING_OPENERS = ('"""', "'''", 'r"""', "r'''")
 
-# The statements that open a nested scope. This is the vocabulary for "can
-# contain a definition", and the metrics gate imports it rather than restating
-# it: two lists that happen to agree on these seven are two lists that can stop
-# agreeing.
-COMPOUND_NODES = (
-    ast.If,
-    ast.For,
-    ast.AsyncFor,
-    ast.While,
-    ast.With,
-    ast.AsyncWith,
-    ast.Try,
-)
+# The statements that open a nested scope, from the shared walk vocabulary
+# rather than restated: two lists that happen to agree on these seven are two
+# lists that can stop agreeing, and the walk module's body-owner set is built
+# from this one.
+COMPOUND_NODES = SCOPE_OPENING_NODES
 
 # Every compound statement is also one that does something, so the logic
 # vocabulary is the nesting vocabulary plus the flat ones. Written as a sum
@@ -291,9 +285,14 @@ def main() -> int:
         )
         tipping.append((floor[1], len(logic), share, mass))
     print("\n  the tipping point is the highest token floor at which logic still outnumbers preamble")
-    for tokens, logic, share, mass in tipping:
-        mark = "  <-- tipping point" if logic and logic * 2 >= tipping[-1][1] else ""
-        print(f"    4/{tokens:<3} logic={logic:<4} {share:>3.0f}% of pairs  {mass:>5} logic tokens{mark}")
+    # ``logic_count``, not ``logic``: the loop above already bound ``logic`` to
+    # the list of duplicates, and rebinding it to a count meant the two facts
+    # shared a name -- and the comparison below read as list arithmetic.
+    for tokens, logic_count, share, mass in tipping:
+        mark = "  <-- tipping point" if logic_count and logic_count * 2 >= tipping[-1][1] else ""
+        print(
+            f"    4/{tokens:<3} logic={logic_count:<4} {share:>3.0f}% of pairs  {mass:>5} logic tokens{mark}"
+        )
 
     print("\nCONCENTRATION  (pairs per production file, over the whole range)")
     per_file: dict[str, int] = {}

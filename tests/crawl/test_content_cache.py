@@ -10,6 +10,7 @@ import tempfile
 import threading
 from collections.abc import Iterator
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -970,7 +971,7 @@ class TestContentCacheUnlinkDiscipline:
 
         # Evict exactly as _enforce_limits does, but leave the unlink pending
         # so the re-registration can land inside the deferral window.
-        doomed: list[tuple[str, Any]] = []
+        doomed: list[tuple[str | None, Path]] = []
         with cache._lock:
             cache._drop_locked(key, doomed)
 

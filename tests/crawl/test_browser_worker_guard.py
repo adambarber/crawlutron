@@ -5,25 +5,40 @@ from collections import deque
 import pytest
 
 from app.constants import BROWSER_HEADLESS
-from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
+from app.crawl.strategies.browser import BrowserRenderer
+from app.crawl.strategies.browser_pool import BrowserPool, BrowserPoolExhaustedError
 from tests._assertions import assert_result_failed
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, crawl_policy, normalized
 
 
-class ExhaustedPool:
-    """A pool with no renderer: ``acquire`` always raises, the release path is inert.
+class ExhaustedPool(BrowserPool):
+    """A real pool with no renderer: ``acquire`` always raises, ``close`` is a no-op.
 
-    The pool interface the worker reads on its failure path, and nothing else --
-    the worker under test is real, so a fake here that grew a method would be
-    modelling the production pool rather than the failure.
+    A SUBCLASS rather than a duck-typed stand-in, so ``PooledBrowserWorker`` is
+    handed something its own constructor accepts. It is typed ``BrowserPool``,
+    and a plain object with the two methods the failure path calls is not one --
+    the annotation was the only thing that could have noticed, and the pool
+    interface it stands for is ``acquire``/``release`` plus
+    ``browser_strategy``, which is all this overrides.
+
+    ``BrowserPool.__init__`` does no I/O -- it only builds the queue and the
+    lock -- so a real instance is as cheap as a stub, and every method the
+    worker does NOT reach on this path stays the production one. ``acquire`` and
+    ``close`` are the only two overridden; ``browser_strategy`` is the inherited
+    property, which already answers ``BROWSER_HEADLESS`` for a pool built with no
+    warmup URLs.
     """
 
-    browser_strategy = BROWSER_HEADLESS
+    def __init__(self) -> None:
+        super().__init__(pool_size=1)
 
-    async def acquire(self):
+    async def acquire(self, timeout: float | None = None) -> BrowserRenderer:
         raise BrowserPoolExhaustedError("no renderer")
 
-    def release(self, renderer):
+    def release(self, renderer) -> None:
+        pass
+
+    async def close(self) -> None:
         pass
 
 

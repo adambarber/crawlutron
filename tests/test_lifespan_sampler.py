@@ -5,6 +5,7 @@ Also the shutdown sequence's own contract: every teardown step is attempted,
 so one pool whose close() raises cannot cost the others theirs.
 """
 
+from tests._app_factory import service_app
 from tests._lifespan_doubles import stub_heavy_teardown
 
 
@@ -41,11 +42,11 @@ def _spy_on_every_teardown(monkeypatch, http_closer) -> list[str]:
 
 class TestLifespanSamplerSymmetry:
     async def test_shutdown_uninstalls_utilization_sampler(self, monkeypatch):
-        from app import main as main_mod
 
         fresh = stub_heavy_teardown(monkeypatch)
+        app = service_app()
 
-        async with main_mod.app.router.lifespan_context(main_mod.app):
+        async with app.router.lifespan_context(app):
             assert fresh._utilization_sampler is not None, "startup must install the sampler"
 
         assert fresh._utilization_sampler is None, "shutdown must uninstall the sampler"
@@ -64,29 +65,28 @@ class TestShutdownRunsEveryStep:
     async def test_a_raising_closer_does_not_skip_later_pools(self, monkeypatch):
         import pytest
 
-        from app import main as main_mod
-
         async def _explode():
             raise RuntimeError("pool close failed")
 
         ran = _spy_on_every_teardown(monkeypatch, _explode)
+        app = service_app()
 
         with pytest.raises(RuntimeError, match="shutdown steps failed"):
-            async with main_mod.app.router.lifespan_context(main_mod.app):
+            async with app.router.lifespan_context(app):
                 pass
 
         skipped = [n for n in ("cffi", "browser", "doc", "gate") if n not in ran]
         assert not skipped, f"every teardown step must be attempted; skipped: {skipped}"
 
     async def test_a_clean_shutdown_runs_every_step_and_raises_nothing(self, monkeypatch):
-        from app import main as main_mod
 
         async def _close():
             return None
 
         ran = _spy_on_every_teardown(monkeypatch, _close)
+        app = service_app()
 
-        async with main_mod.app.router.lifespan_context(main_mod.app):
+        async with app.router.lifespan_context(app):
             pass
 
         assert ran == ["cffi", "browser", "doc", "gate"]

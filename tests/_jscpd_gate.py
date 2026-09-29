@@ -643,7 +643,7 @@ def _run(args: argparse.Namespace) -> int:
     unsanctioned = sorted(set(observed) - set(expected))
     missing = sorted(set(expected) - set(observed))
     drifted: list[tuple[dict[str, Any], tuple[LocationPair, ...]]] = []
-    undeclared: list[tuple[dict[str, Any], list[LocationPair]]] = []
+    undeclared: list[tuple[dict[str, Any], list[LocationKey]]] = []
     for key, pair in expected.items():
         found = observed.get(key)
         if not found:
@@ -673,16 +673,17 @@ def _run(args: argparse.Namespace) -> int:
                 f"purpose, or its content changed, in which case it is an unsanctioned clone above.",
                 file=sys.stderr,
             )
-        for pair, found in drifted:
+        for pair, drifted_at in drifted:
             print(
                 f"jscpd {args.profile}: expected clone drifted: id={pair['id']} declares "
-                f"{_expected_locations(pair)} but its content is now at {list(found)}. "
+                f"{_expected_locations(pair)} but its content is now at {list(drifted_at)}. "
                 f"Update the expectation to match, in this commit, on purpose.",
                 file=sys.stderr,
             )
-        for pair, extra in undeclared:
+        for pair, undeclared_at in undeclared:
             print(
-                f"jscpd {args.profile}: sanctioned clone also appears undeclared: id={pair['id']} at {extra}",
+                f"jscpd {args.profile}: sanctioned clone also appears undeclared: "
+                f"id={pair['id']} at {undeclared_at}",
                 file=sys.stderr,
             )
         return 1

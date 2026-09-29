@@ -6,6 +6,8 @@ import time
 import pytest
 
 import app.crawl.extraction as ext_mod
+from app.crawl.extraction import ExtractedContent
+from tests._app_factory import service_app
 from tests._lifespan_doubles import stub_heavy_teardown
 from tests._lock_doubles import DelegatingLock
 from tests._process_doubles import (
@@ -243,7 +245,9 @@ def test_extract_document_degrades_when_no_worker_can_be_acquired(fake_pool, mon
         ext_mod._DOC_POOL = [stuck]
     monkeypatch.setattr(ext_mod, "_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 0.25, raising=False)
 
-    result_box: dict[str, object] = {}
+    # The extraction result's own type, so the two reads below are checks about
+    # a document-shaped value rather than about `object` having attributes.
+    result_box: dict[str, ExtractedContent] = {}
 
     def _call() -> None:
         result_box["result"] = ext_mod._extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
@@ -451,13 +455,13 @@ class TestLifespanDocPoolTeardown:
         heavy client teardowns are stubbed only so the test does not start real
         services; the document teardown itself runs for real.
         """
-        from app import main as main_mod
         from app.crawl import extraction as ext_mod
 
         stub_heavy_teardown(monkeypatch)
         worker = seeded_doc_pool
+        app = service_app()
 
-        async with main_mod.app.router.lifespan_context(main_mod.app):
+        async with app.router.lifespan_context(app):
             # Startup does not touch the document pool, and the worker must
             # still be live inside the app: the teardown is a shutdown concern.
             assert worker.proc.terminated is False, "startup retired a document worker"

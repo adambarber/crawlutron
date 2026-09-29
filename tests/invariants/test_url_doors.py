@@ -1163,11 +1163,11 @@ def _unfiltered_urljoin_return_offenders(tree: ast.AST, path: pathlib.Path) -> l
         returns_raw = False
         returns_binding = False
         for node in nodes_of(func):
-            if isinstance(node, ast.Assign) and _is_urljoin_call(node.value):
+            if isinstance(node, ast.Assign) and node.value is not None and _is_urljoin_call(node.value):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         joined.add(target.id)
-            elif isinstance(node, ast.Return):
+            elif isinstance(node, ast.Return) and node.value is not None:
                 if _is_urljoin_call(node.value):
                     returns_raw = True
                 elif isinstance(node.value, ast.Name) and node.value.id in joined:

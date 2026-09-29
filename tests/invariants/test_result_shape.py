@@ -27,11 +27,11 @@ from tests.chokepoint_walks import (
     call_nodes,
     calls_named,
     calls_named_leaf,
-    calls_to_any,
     dict_displays,
     file_tree,
     functions,
     name_reads,
+    named_calls_to_any,
     offender,
     offender_at,
     relative_posix,
@@ -183,8 +183,8 @@ def _unsanctioned_envelope_adapter_offenders(tree, path):
     if relative == _ENVELOPE_OWNER_MODULE or relative in _ENVELOPE_ADAPTER_EXEMPT:
         return []
     return [
-        offender_at(path, call, f"{call.func.id}() outside {_ENVELOPE_OWNER_MODULE}")
-        for call in calls_to_any(tree, _ENVELOPE_BUILDERS)
+        offender_at(path, call, f"{callee}() outside {_ENVELOPE_OWNER_MODULE}")
+        for call, callee in named_calls_to_any(tree, _ENVELOPE_BUILDERS)
     ]
 
 
@@ -534,10 +534,10 @@ def _is_raw_exception_text(value: ast.expr) -> bool:
 def _raw_exception_error_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag a wire-visible result built with the raw text of an exception."""
     offenders: list[str] = []
-    for node in calls_to_any(tree, _RESULT_ERROR_SINKS):
+    for node, callee in named_calls_to_any(tree, _RESULT_ERROR_SINKS):
         for kw in node.keywords:
             if kw.arg == "error" and _is_raw_exception_text(kw.value):
-                offenders.append(offender_at(path, node, f"{node.func.id}(error=<raw exception text>)"))
+                offenders.append(offender_at(path, node, f"{callee}(error=<raw exception text>)"))
     return offenders
 
 
@@ -1002,14 +1002,14 @@ def _respelled_discovery_result_fields_offenders(tree: ast.AST, path: pathlib.Pa
     nothing; a strategy that re-spells one field reports that field.
     """
     offenders: list[str] = []
-    for node in calls_to_any(tree, _RESULT_BUILDERS):
+    for node, callee in named_calls_to_any(tree, _RESULT_BUILDERS):
         spelled = sorted({kw.arg for kw in node.keywords if kw.arg in _DISCOVERY_RESULT_FIELDS})
         if spelled:
             offenders.append(
                 offender_at(
                     path,
                     node,
-                    f"{node.func.id} spells {', '.join(spelled)}; "
+                    f"{callee} spells {', '.join(spelled)}; "
                     f"spread content_pipeline._discovery_result_fields instead",
                 )
             )

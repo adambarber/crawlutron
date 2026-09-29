@@ -15,10 +15,10 @@ import httpx
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765"
 TARGET = sys.argv[2] if len(sys.argv) > 2 else "https://example.com/"
-results = []
+results: list[tuple[str, bool]] = []
 
 
-def check(name, ok, detail=""):
+def check(name, ok, detail="") -> None:
     results.append((name, bool(ok)))
     print(("PASS " if ok else "FAIL ") + name + (f"  | {str(detail)[:160]}" if detail and not ok else ""))
 

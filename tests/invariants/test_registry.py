@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -145,7 +146,7 @@ def _public_surface_offenders(tree, path, _prop, *, modules=None) -> list[str]:
     return [f"{relative}: __all__ mismatch (missing: {missing}; extra: {extra})"]
 
 
-def _owner_surface_counts(tree: ast.AST) -> tuple[int, int]:
+def _owner_surface_counts(tree: ast.Module) -> tuple[int, int]:
     return len(_owned_public_symbols(tree)), len(_entry_point_symbols(tree))
 
 
@@ -193,7 +194,7 @@ def test_property_owner_public_surface_budgets_are_tight():
 # Dynamic-pattern re.* calls: a non-literal first arg is a pattern built from
 # attacker-influenced text (the ReDoS shape). `re.search(LITERAL, text)` is
 # safe -- only a dynamic PATTERN is the hazard.
-_RE_DYNAMIC_METHODS = {"compile", "search", "match", "fullmatch", "sub", "findall", "split"}
+_RE_DYNAMIC_METHODS = frozenset({"compile", "search", "match", "fullmatch", "sub", "findall", "split"})
 
 
 def _re_dynamic_pattern_offenders(methods: frozenset[str]):
@@ -275,7 +276,7 @@ def test_no_bare_re_compile_on_nonliteral():
 # caught is that the count was compared against HEAD rather than assumed.
 
 
-def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
+def _uncollectible_tests(tree: ast.Module, path: pathlib.Path) -> list[str]:
     """Report every ``test_*`` def pytest would silently not collect."""
     legal_owners: set[int] = set()
     for node in tree.body:
@@ -287,22 +288,27 @@ def _uncollectible_tests(tree: ast.AST, path: pathlib.Path) -> list[str]:
             )
 
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
+    for test_def in ast.walk(tree):
+        if not isinstance(test_def, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if id(node) in legal_owners:
+        if not test_def.name.startswith("test"):
             continue
+        if id(test_def) in legal_owners:
+            continue
+        # A different name from the module-level scan above: the two loops are
+        # unrelated passes over the same tree, and reusing the binding made the
+        # second one look at the first loop's node.
         owners = [
             parent.name
             for parent in ast.walk(tree)
             if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node in ast.walk(parent)
-            and parent is not node
+            and test_def in ast.walk(parent)
+            and parent is not test_def
         ]
         where = (
             f"nested inside {owners[0]}()" if owners else "not a module-level test or a Test* class method"
         )
-        offenders.append(offender_at(path, node, f"test_{node.name} is uncollectible -- {where}"))
+        offenders.append(offender_at(path, test_def, f"test_{test_def.name} is uncollectible -- {where}"))
     return offenders
 
 
@@ -633,7 +639,7 @@ def _property_contexts(tree: ast.AST) -> list[ast.AST]:
     return contexts
 
 
-_PROPERTY_MODULES: ContextVar[tuple[tuple[pathlib.Path, ast.AST], ...] | None] = ContextVar(
+_PROPERTY_MODULES: ContextVar[tuple[tuple[pathlib.Path, ast.Module], ...] | None] = ContextVar(
     "property_modules", default=None
 )
 
@@ -654,7 +660,7 @@ def _resolvedlocal_nodes(
     node: ast.AST,
     excluded_ids: set[int] | frozenset[int] = frozenset(),
     *,
-    modules: tuple[tuple[pathlib.Path, ast.AST], ...] | None = None,
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None = None,
     prop: Property | None = None,
 ) -> list[tuple[ast.AST, ast.AST]]:
     definitions: dict[str, list[ast.AST]] = {}
@@ -681,10 +687,10 @@ def _resolvedlocal_nodes(
                     pending.append((current_tree, matches[0]))
             if not module_index:
                 continue
-            matches = module_index.get(resolved_call_name(current_tree, child), [])
-            if len(matches) != 1:
+            module_matches = module_index.get(resolved_call_name(current_tree, child), [])
+            if len(module_matches) != 1:
                 continue
-            candidate_path, candidate_tree, candidate = matches[0]
+            candidate_path, candidate_tree, candidate = module_matches[0]
             if (
                 prop is not None
                 and _relative_app_path(candidate_path) == prop.owner_module
@@ -864,7 +870,7 @@ def _bool_env_literal_sets(
 
 def _bool_env_tree_sets(
     tree: ast.AST,
-    modules: tuple[tuple[pathlib.Path, ast.AST], ...] | None = None,
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None = None,
 ) -> dict[str, set[str]]:
     trees = (tree,) if modules is None else tuple(module_tree for _path, module_tree in modules)
     named: dict[str, set[str]] = {}
@@ -911,7 +917,7 @@ def _bool_env_contexts(
     tree: ast.AST,
     path: pathlib.Path,
     prop: Property,
-    modules: tuple[tuple[pathlib.Path, ast.AST], ...] | None,
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
 ) -> list[list[tuple[ast.AST, ast.AST]]]:
     excluded = _owner_definition_ids(tree, path, prop)
     if _relative_app_path(path) == prop.owner_module:
@@ -1090,7 +1096,7 @@ def _robots_observations_for_node(tree: ast.AST, path: pathlib.Path, node: ast.A
 def _robot_module_paths(
     tree: ast.AST,
     path: pathlib.Path,
-    modules: tuple[tuple[pathlib.Path, ast.AST], ...] | None,
+    modules: tuple[tuple[pathlib.Path, ast.Module], ...] | None,
 ) -> dict[int, pathlib.Path]:
     module_paths = {id(module_tree): module_path for module_path, module_tree in modules or ()}
     module_paths.setdefault(id(tree), path)
@@ -1256,7 +1262,7 @@ def test_property_registry_is_not_empty():
 
 def _property_owner_failures(
     registry: tuple[Property, ...],
-    definitions: dict[str, list[tuple[str, ast.AST]]],
+    definitions: Mapping[str, Sequence[tuple[str, ast.AST]]],
 ) -> list[str]:
     failures: list[str] = []
     for prop in registry:

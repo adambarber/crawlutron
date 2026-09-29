@@ -9,7 +9,7 @@ import pytest
 from app.api_models import CrawlPolicy, CrawlPolicyLimits
 from app.constants import BROWSER_HEADLESS, EXTRACTION_DOCUMENT, EXTRACTION_TRAFILATURA, HTTP_DECLARED_CRAWLER
 from app.crawl.engine import _payload_policy
-from app.crawl.policy import read_policy
+from app.crawl.policy import PolicyTier, read_policy
 from app.crawl.strategies.browser import BrowserRenderer
 from app.models import CrawlResult, to_dict
 from app.scheduler import DomainScheduler
@@ -164,8 +164,10 @@ class TestEngineChainEdges:
         assert d["url"] == "http://x/"
 
     def test_payload_policy_invalid_strategy(self):
+        # A real tier: the only production caller builds one from the active
+        # settings, so ``None`` was never a value this entry point accepts.
         with pytest.raises(ValueError):
-            _payload_policy({"policy": {"strategies": ["BOGUS"]}}, None)
+            _payload_policy({"policy": {"strategies": ["BOGUS"]}}, PolicyTier.model_defaults())
 
     async def test_browser_strategy_document_extraction(self, base_url):
         # Live origin: M7's robots gate fail-closes connection-refused origins

@@ -153,14 +153,17 @@ async def test_nonrecursive_robots_checks_run_concurrently(monkeypatch):
 
             return _Resp()
 
-        class _Resp:
+        # A second name from the robots class above: they are two branches of one
+        # responder, and one name for both meant the second definition shadowed
+        # the first for anything that read it.
+        class _PageResp:
             status_code = 200
             headers = {"content-type": "text/html"}
             body = b"<html><body>hello world, enough text to render</body></html>"
             final_url = url
             elapsed_ms = 1
 
-        return _Resp()
+        return _PageResp()
 
     urls = [f"http://nc{i}.example/page" for i in range(5)]
     result = await crawl_request(

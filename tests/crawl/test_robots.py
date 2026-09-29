@@ -409,7 +409,9 @@ def test_failure_ttl_is_60s_not_600s():
         # A 500 response writes rules=[(False,"/")], ttl=min(600,60)=60.
         em.robots_cache.put(robots_entry_key("http://fail-ttl.test"), ([(False, "/")], [], None), ttl=60.0)
         entries = em.robots_cache._entries
-        expires_at, value = entries.get(robots_entry_key("http://fail-ttl.test"))
+        cached = entries.get(robots_entry_key("http://fail-ttl.test"))
+        assert cached is not None, "the fetch wrote a robots entry; the cache must hold it"
+        expires_at, value = cached
         delta = (expires_at - time.monotonic()) if expires_at else float("inf")
         # 60s TTL at write time → delta ≈ 60, never the 600s default.
         assert delta > 45.0 and delta < 90.0

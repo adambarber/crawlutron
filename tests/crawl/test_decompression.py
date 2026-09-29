@@ -2,6 +2,7 @@
 
 import gzip
 import zlib
+from typing import Any
 
 import brotli
 import pytest
@@ -16,8 +17,15 @@ _CAP = 10_000_000
 def test_cap_is_required_keyword():
     # H2 closure: the uncapped branch existed only as a default; making the
     # cap mandatory turns "forgot to bound a bomb" into a TypeError.
+    #
+    # The call is made through a mapping of arguments on purpose. Spelling it
+    # out positionally is a call with a missing required keyword, which is
+    # exactly what a type checker reports statically -- so the runtime check
+    # this test exists for (that the argument is enforced, not merely
+    # annotated) can only be reached by not spelling the signature out.
+    uncapped: dict[str, Any] = {"body": gzip.compress(b"hello"), "content_encoding": "gzip"}
     with pytest.raises(TypeError):
-        decompress_body(gzip.compress(b"hello"), "gzip")
+        decompress_body(**uncapped)
 
 
 def test_garbage_gzip_is_rejected_under_cap():
@@ -58,8 +66,16 @@ def test_concatenated_gzip_members_are_decoded():
 def test_decode_body_no_longer_decompresses():
     # Decompression lives at the chokepoint, not inside the text decoder;
     # the headers parameter existed only to double-decompress uncapped.
+    # As above: the extra ``headers`` positional is the defect under test, so
+    # the call is made through an argument mapping rather than restating a
+    # signature the type checker can already reject.
+    with_headers: dict[str, Any] = {
+        "body": gzip.compress(b"hello world"),
+        "content_type": "text/html",
+        "headers": {"content-encoding": "gzip"},
+    }
     with pytest.raises(TypeError):
-        _decode_body(gzip.compress(b"hello world"), "text/html", {"content-encoding": "gzip"})
+        _decode_body(**with_headers)
 
 
 def test_decode_body_respects_charset():
@@ -191,7 +207,6 @@ def test_decode_unknown_charset_falls_back():
 
 
 def test_decode_handles_bytearray_and_headers():
-    import gzip
 
     from app.crawl.decompression import decompress_body
 
@@ -206,7 +221,6 @@ def test_decode_handles_bytearray_and_headers():
 
 
 def test_accepts_bytearray_gzip():
-    import gzip
 
     from app.crawl.decompression import decompress_body
 
@@ -226,7 +240,7 @@ def test_accepts_bytearray_brotli():
 def test_accepts_memoryview():
     from app.crawl.decompression import decompress_body
 
-    body = memoryview(gzip.compress(b"mv test")) if (gzip := __import__("gzip")) else None
+    body = memoryview(gzip.compress(b"mv test"))
     out = decompress_body(body, "gzip", max_output_bytes=10_000_000)
     assert out == b"mv test"
 
@@ -272,8 +286,9 @@ def test_decompression_without_limit_is_rejected():
     payload = b"hello world"
     bomb = gzip.compress(payload)
     # H2 closure: no cap is no longer a legal call — the bound is required.
+    uncapped: dict[str, Any] = {"body": bomb, "content_encoding": "gzip"}
     with pytest.raises(TypeError):
-        decompress_body(bomb, "gzip")
+        decompress_body(**uncapped)
 
 
 def test_deflate_bomb_is_bounded():
@@ -298,9 +313,12 @@ def test_brotli_feeds_incrementally(monkeypatch):
     # A single process() call with the whole input means unbounded RAM.
 
     calls: list[int] = []
-    real_decompressor = brotli.Decompressor
 
-    class SpyDecompressor(real_decompressor):
+    # Subclassing ``brotli.Decompressor`` directly, not a variable bound to it:
+    # the base class is resolved when this statement runs, and the monkeypatch
+    # below replaces the module attribute afterwards, so the spy still wraps the
+    # real implementation.
+    class SpyDecompressor(brotli.Decompressor):
         def process(self, data):
             calls.append(len(data))
             return super().process(data)

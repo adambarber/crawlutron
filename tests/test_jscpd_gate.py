@@ -163,11 +163,22 @@ def _stub_report(
 
 
 def _command_for(commands: list[list[str]], root: str) -> list[str]:
-    return next(
-        command
-        for command in commands
-        if (command[command.index("--fail-on-empty") + 1 :] or [None])[-1] == root
-    )
+    """The scan command declaring ``--fail-on-empty <root>``.
+
+    The ``[None]`` sentinel this replaces stood in for "the flag is the last
+    word and has no value", which it reported by comparing ``None`` to a root --
+    a comparison that is always False, so a command missing the flag and a
+    command naming a different root were indistinguishable and the ``next()``
+    below simply stopped. Naming the two cases is what lets the absence be an
+    error.
+    """
+    for command in commands:
+        if "--fail-on-empty" not in command:
+            continue
+        flag = command.index("--fail-on-empty") + 1
+        if flag < len(command) and command[flag] == root:
+            return command
+    raise AssertionError(f"no scan command declares --fail-on-empty {root}")
 
 
 def _run_against_empty_tree(monkeypatch, tmp_path, **kwargs) -> list[list[str]]:
@@ -783,7 +794,7 @@ def test_unowned_ignore_list_fails_before_any_scan(monkeypatch, tmp_path, drift)
     if drift == "added-glob":
         ignore = [*sanctioned, "**/zz_probe_clone.py"]
     elif drift == "removed-glob":
-        ignore = sanctioned[:-1]
+        ignore = list(sanctioned[:-1])
     else:
         ignore = [*sanctioned, "**"]
 

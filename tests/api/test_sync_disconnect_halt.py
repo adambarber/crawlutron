@@ -13,11 +13,19 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
 from app.api import crawl_endpoint
 
+#: The ASGI scope a ``Request`` is built from. ``await_or_client_gone`` only
+#: ever asks a request whether the client is gone, but the doubles below are real
+#: requests rather than objects that merely have that one method: the parameter is
+#: typed ``Request``, and a stand-in shaped like it -- but not one -- is exactly
+#: the kind of lie that lets a real attribute read slip through untyped.
+_SCOPE = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
 
-class _MidFlightGone:
+
+class _MidFlightGone(Request):
     """Client that disconnects mid-crawl (the 283-abandon shape).
 
     Reports connected for the first ``after_checks - 1`` polls so the crawl
@@ -26,6 +34,7 @@ class _MidFlightGone:
     """
 
     def __init__(self, after_checks: int = 2) -> None:
+        super().__init__(_SCOPE)
         self.after_checks = after_checks
         self.checks = 0
 
@@ -34,8 +43,11 @@ class _MidFlightGone:
         return self.checks >= self.after_checks
 
 
-class _NeverGone:
+class _NeverGone(Request):
     """Connected client; must never trigger the halt."""
+
+    def __init__(self) -> None:
+        super().__init__(_SCOPE)
 
     async def is_disconnected(self) -> bool:
         return False

@@ -19,6 +19,7 @@ class TestCompileUntrusted:
 
     def test_valid_pattern_compiles(self):
         compiled = compile_untrusted(r"^https://example\.com/")
+        assert compiled is not None, "a safe pattern must compile"
         assert compiled.search("https://example.com/x")
 
     def test_overlong_pattern_rejected(self):

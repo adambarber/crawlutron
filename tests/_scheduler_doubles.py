@@ -12,12 +12,29 @@ The delivery channel: ``on_result`` is where a crawl spills a result to disk, so
 spelling the same callback, the same log capture and the same run call.
 """
 
-from typing import Any
+from typing import TypeVar
 
 from app.crawl.result_helpers import _failed_result_for
-from app.models import CrawlJob, EngineCrawlResult
+from app.models import CrawlJob, CrawlTask, EngineCrawlResult
 from app.scheduler import DomainScheduler
 from tests._result_builders import make_result
+
+# The two job shapes ``DomainScheduler.run`` is polymorphic over. The doubles here
+# serve both, so they are generic over exactly that pair -- a bound TypeVar
+# annotated with one of the two would have been a lie the scheduler's own
+# ``ScheduledJob`` docstring warns about.
+_EnvelopeJob = TypeVar("_EnvelopeJob", CrawlJob, CrawlTask)
+
+
+def _job_url(job: CrawlJob | CrawlTask) -> str:
+    """The reporting URL, whichever of the two job shapes carries it.
+
+    ``ScheduledJob`` deliberately has no URL member: the two shapes name it
+    differently, so reading it is the pipeline boundary's job, not the
+    scheduler's.
+    """
+    return job.original_url if isinstance(job, CrawlTask) else job.url
+
 
 # The three knobs a scheduling test always wants and no scheduling test ever
 # wants spelled out: serial execution makes ordering observable, and a zero
@@ -48,7 +65,7 @@ def trip_circuit(scheduler: DomainScheduler, domain: str, *, failures: int | Non
         scheduler.record_failure(domain)
 
 
-async def ok_worker(job: CrawlJob) -> Any:
+async def ok_worker(job: _EnvelopeJob) -> EngineCrawlResult:
     """A worker that succeeds, returning a real ``SchedulerResult``.
 
     A stand-in that returned a bare ``"ok"`` would not be one: the scheduler
@@ -57,10 +74,10 @@ async def ok_worker(job: CrawlJob) -> Any:
     envelope -- a test whose worker "succeeded" while the scheduler recorded the
     opposite.
     """
-    return make_result(job.url, job.domain)
+    return make_result(_job_url(job), job.domain)
 
 
-def engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
+def engine_envelope(job: _EnvelopeJob, error: BaseException) -> EngineCrawlResult:
     """The crawl pipeline's real failure envelope.
 
     Routes through the production ``_failed_result_for`` chokepoint rather than
@@ -70,7 +87,7 @@ def engine_envelope(job: CrawlJob, error: BaseException) -> EngineCrawlResult:
     is supplied here for the same reason production supplies one -- the two job
     shapes carry it under different names.
     """
-    return _failed_result_for(job, error, url_of=lambda j: getattr(j, "original_url", None) or j.url)
+    return _failed_result_for(job, error, url_of=_job_url)
 
 
 class FailingSink:

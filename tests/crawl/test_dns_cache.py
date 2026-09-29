@@ -94,4 +94,6 @@ class TestDnsCacheLocking:
         assert not errors, errors
         # Cache is consistent (not corrupted by concurrent mutation) and the
         # winning write is readable.
-        assert set(http_mod._DNS_CACHE.peek(host)) == {"127.0.0.1"}
+        resolved = http_mod._DNS_CACHE.peek(host)
+        assert resolved is not None, "a resolved host must be in the cache"
+        assert set(resolved) == {"127.0.0.1"}

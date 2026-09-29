@@ -15,7 +15,7 @@ overrides only the operation it is watching, calling ``super()`` for the rest.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 
 class DelegatingLock:
@@ -52,6 +52,6 @@ class DelegatingLock:
         self.acquire()
         return self
 
-    def __exit__(self, *exc: object) -> bool:
+    def __exit__(self, *exc: object) -> Literal[False]:
         self.release()
         return False

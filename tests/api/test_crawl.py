@@ -10,7 +10,6 @@ from fastapi.exceptions import RequestValidationError
 
 from app.api_models import CrawlPolicy
 from app.constants import HTTP_DECLARED_CRAWLER
-from app.main import app
 from tests._assertions import (
     accepted_crawl,
     assert_pool_unavailable,
@@ -415,14 +414,19 @@ class TestDiscoveryAndRenderApi:
         assert resp.json()["code"] == "validation_error"
 
     async def test_validation_exception_handler_returns_422(self):
+        # The handler itself, not the one in the app's registry. The registry is
+        # typed as holding ``Response | Awaitable[Response]`` per exception type,
+        # which is true and says nothing about any one of them -- so reaching
+        # through it could not say whether this handler is async, and the
+        # registration it is registered under is the other test's subject.
+        from app.api.exceptions import validation_exception_handler
 
-        handler = app.exception_handlers[RequestValidationError]
         scope = {"type": "http", "method": "POST", "path": "/v1/crawl", "headers": [], "query_string": b""}
         request = Request(scope)
         exc = RequestValidationError(
             errors=[{"loc": ("body", "url"), "msg": "field required", "type": "value_error.missing"}]
         )
-        response = await handler(request, exc)
+        response = await validation_exception_handler(request, exc)
         assert response.status_code == 422
 
 

@@ -26,6 +26,7 @@ from tests.chokepoint_walks import (
     class_defs,
     file_tree,
     functions,
+    is_body_owner,
     name_reads,
     nodes_of,
     offender,
@@ -302,9 +303,12 @@ def _environment_reader_reference(
         isinstance(node, ast.Constant)
         and isinstance(expression, ast.Expr)
         and expression.value is node
-        # A statement rather than a getattr: "is this the first statement of a
-        # block" asks for a body, and only a stmt declares one.
-        and isinstance(scope, ast.stmt)
+        # The block-owning statement kinds, named rather than ``ast.stmt``: "is
+        # this the first statement of a block" asks for a body, and only some
+        # statements have one. ``ast.stmt`` says none of them do, so the check
+        # had to be written against a type that could not answer it.
+        and scope is not None
+        and is_body_owner(scope)
         and scope.body
         and scope.body[0] is expression
     ):

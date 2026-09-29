@@ -100,7 +100,7 @@ def _is_identifier_chokepoint(node: ast.expr) -> bool:
     return True
 
 
-def _module_constants(tree: ast.AST) -> set[str]:
+def _module_constants(tree: ast.Module) -> set[str]:
     """Module-level names bound to a literal.
 
     A PRAGMA that interpolates one of these is not naming an identifier -- it is
@@ -114,6 +114,42 @@ def _module_constants(tree: ast.AST) -> set[str]:
             tree.body, lambda value: isinstance(value, ast.Constant)
         )
     }
+
+
+def _snippet_call(source: str, *, fn: int = 0, stmt: int = 0) -> ast.Call:
+    """The ``Call`` evaluated by ``source``'s ``fn``-th function at statement ``stmt``.
+
+    Every snippet in this file is a tiny module whose function body is a single
+    statement that evaluates a ``conn.execute(...)``, sometimes as a bare
+    expression and sometimes as a ``return``. The walk down to that call was
+    spelled out index by index at each site, and those indices are not what those
+    tests are about -- they are only how each one reaches the node -- so the walk
+    itself had to be taken on faith. Naming the step says what is being handed to
+    the detector, and fails loudly if a snippet stopped being the shape its test
+    believes it is.
+    """
+    module = ast.parse(source)
+    function = module.body[fn]
+    assert isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)), source
+    statement = function.body[stmt]
+    assert isinstance(statement, (ast.Expr, ast.Return)), source
+    assert statement.value is not None, source
+    assert isinstance(statement.value, ast.Call), source
+    return statement.value
+
+
+def _pragma_sql(call: ast.Call) -> ast.JoinedStr:
+    """``call``'s first argument, asserted to be an f-string.
+
+    Every snippet below builds its PRAGMA with an f-string, and that is the only
+    shape :func:`_unvalidated_interpolations` can read -- it walks
+    ``sql.values``. Narrowing here means a snippet that stopped being an
+    f-string fails as itself, rather than being reported as "zero unvalidated
+    interpolations" by a detector that never looked.
+    """
+    sql = call.args[0]
+    assert isinstance(sql, ast.JoinedStr), ast.unparse(sql)
+    return sql
 
 
 def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
@@ -131,7 +167,7 @@ def _local_chokepoint_bindings(function: ast.AST) -> set[str]:
     }
 
 
-def _enclosing_function(tree: ast.AST, target: ast.AST) -> ast.AST | None:
+def _enclosing_function(tree: ast.Module, target: ast.AST) -> ast.AST | None:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if any(child is target for child in ast.walk(node)):
@@ -139,7 +175,7 @@ def _enclosing_function(tree: ast.AST, target: ast.AST) -> ast.AST | None:
     return None
 
 
-def _unvalidated_interpolations(tree: ast.AST, sql: ast.JoinedStr, at: ast.AST) -> list[str]:
+def _unvalidated_interpolations(tree: ast.Module, sql: ast.JoinedStr, at: ast.AST) -> list[str]:
     """Interpolated expressions that skip the identifier chokepoint.
 
     ``_validated_identifier`` is an alnum+underscore allowlist, which is the
@@ -208,9 +244,10 @@ def test_pragma_confinement_detector_bites():
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "execute"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
         and isinstance(n.args[0].value, str)
         and "pragma" in n.args[0].value.lower()
-        if n.args
     ]
     assert hits == ["1"]
 
@@ -228,23 +265,25 @@ def test_dynamic_pragma_identifiers_go_through_the_chokepoint():
 def test_dynamic_pragma_detector_bites():
     """Every way to get this wrong fires; the two live shapes stay clean."""
     # A bare parameter spliced straight into the statement: the actual injection.
-    bare = ast.parse("def f(conn, table):\n    conn.execute(f'PRAGMA table_info({table})')\n")
-    call = bare.body[0].body[0].value
+    bare_source = "def f(conn, table):\n    conn.execute(f'PRAGMA table_info({table})')\n"
+    bare = ast.parse(bare_source)
+    call = _snippet_call(bare_source)
     assert _mentions_pragma(call.args[0])
-    assert _unvalidated_interpolations(bare, call.args[0], call) == ["table"]
+    assert _unvalidated_interpolations(bare, _pragma_sql(call), call) == ["table"]
 
     # Concatenation, not an f-string, and the keyword is still recognized.
     concatenated = 'def f(conn, table):\n    conn.execute("PRAGMA index_info(" + table + ")")\n'
-    parsed_concat = ast.parse(concatenated).body[0].body[0].value
+    parsed_concat = _snippet_call(concatenated)
     assert _mentions_pragma(parsed_concat.args[0])
 
     # Live shape 1: allowlisted inline.
-    inline = ast.parse(
+    inline_source = (
         "def f(conn, table):\n    return conn.execute(f'PRAGMA table_info({_validated_identifier(table)})')\n"
     )
-    inline_call = inline.body[0].body[0].value
+    inline = ast.parse(inline_source)
+    inline_call = _snippet_call(inline_source)
     assert _mentions_pragma(inline_call.args[0])
-    assert not _unvalidated_interpolations(inline, inline_call.args[0], inline_call)
+    assert not _unvalidated_interpolations(inline, _pragma_sql(inline_call), inline_call)
 
     # Live shape 2: allowlisted into a local, then the local is interpolated.
     # sqlite_store.py does this twice (index_list, index_info) and an
@@ -257,24 +296,26 @@ def test_dynamic_pragma_detector_bites():
         '    return conn.execute(f"PRAGMA index_info({index_name})")\n'
     )
     for node, _ in _dynamic_pragma_calls(hoisted):
-        assert not _unvalidated_interpolations(hoisted, node.args[0], node)
+        assert not _unvalidated_interpolations(hoisted, _pragma_sql(node), node)
 
     # A module constant is a pragma *value*, not an identifier (busy_timeout=5000).
-    constant = ast.parse(
+    constant_source = (
         '_TIMEOUT = 5000\ndef f(conn):\n    return conn.execute(f"PRAGMA busy_timeout={_TIMEOUT}")\n'
     )
-    constant_call = constant.body[1].body[0].value
-    assert not _unvalidated_interpolations(constant, constant_call.args[0], constant_call)
+    constant = ast.parse(constant_source)
+    constant_call = _snippet_call(constant_source, fn=1)
+    assert not _unvalidated_interpolations(constant, _pragma_sql(constant_call), constant_call)
 
     # But hoisting a raw parameter into a local is not laundering: the binding
     # has to be the chokepoint itself, not any assignment at all.
-    laundered = ast.parse(
+    laundered_source = (
         "def f(conn, table):\n"
         "    table = str(table)\n"
         '    return conn.execute(f"PRAGMA table_info({table})")\n'
     )
-    laundered_call = laundered.body[0].body[-1].value
-    assert _unvalidated_interpolations(laundered, laundered_call.args[0], laundered_call) == ["table"]
+    laundered = ast.parse(laundered_source)
+    laundered_call = _snippet_call(laundered_source, stmt=-1)
+    assert _unvalidated_interpolations(laundered, _pragma_sql(laundered_call), laundered_call) == ["table"]
 
 
 def test_pragma_confinement_does_not_only_match_literals():

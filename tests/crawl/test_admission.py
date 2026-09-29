@@ -557,7 +557,10 @@ class PinnedGate(ResourceGate):
         self._cpu = cpu
         self.calls: list[str] = []
 
-    async def wait_while_saturated(self):
+    async def wait_while_saturated(self, max_wait_seconds: float | None = None):
+        # The parameter is part of the signature this double stands in for.
+        # Dropping it would let a caller passing a budget through be type-checked
+        # against a gate that silently cannot receive one.
         self.calls.append("wait")
 
     def batch_scale_factor(self):

@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from typing import Literal
 
 import curl_cffi.requests as cffi_requests
 import pytest
@@ -344,11 +345,15 @@ class _FakeCffiResponse:
 
 
 class _FakeCffiClient:
-    last_instance = None
+    #: The most recent client built, or ``None`` when none has been. Annotated
+    #: because a class attribute initialized to ``None`` is otherwise typed as
+    #: exactly that -- and the very next statement assigns a client to it.
+    last_instance: "_FakeCffiClient | None" = None
 
     def __init__(self, body: bytes, **kwargs):
         self._body = body
-        self.response = None
+        #: Set by ``get``; ``None`` until this client has answered a request.
+        self.response: _FakeCffiResponse | None = None
         # Session acquisition is now construction (shared session, perf #4),
         # not per-request __aenter__; record here so construction counts.
         type(self).last_instance = self
@@ -357,7 +362,7 @@ class _FakeCffiClient:
         type(self).last_instance = self
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(self, *args) -> Literal[False]:
         return False
 
     async def get(self, url, **kwargs):
@@ -397,7 +402,10 @@ class TestCffiStreamingCap:
     async def test_streaming_stops_shortly_after_cap(self, monkeypatch):
         result = await _capped_fetch(monkeypatch, 100_000)
         assert result.status_code == 413
-        consumed = _FakeCffiClient.last_instance.response.chunks_yielded * 1024
+        client = _FakeCffiClient.last_instance
+        assert client is not None, "the capped fetch must have built a cffi client"
+        assert client.response is not None, "the capped fetch must have got a response to stream"
+        consumed = client.response.chunks_yielded * 1024
         assert consumed <= 64 + 1024
 
 
@@ -421,10 +429,13 @@ async def test_cffi_session_reused_across_requests(base_url, monkeypatch):
     """
     from app.crawl.strategies import http_client_pool as http_mod
 
-    real_session = cffi_requests.AsyncSession
     constructions = 0
 
-    class _CountingSession(real_session):
+    # Subclassing ``cffi_requests.AsyncSession`` directly rather than a variable
+    # bound to it: the base is resolved when this statement runs, and the test
+    # patches the module attribute afterwards, so the counter still wraps the
+    # real session.
+    class _CountingSession(cffi_requests.AsyncSession):
         def __init__(self, *args, **kwargs):
             nonlocal constructions
             constructions += 1

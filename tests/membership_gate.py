@@ -42,7 +42,8 @@ from __future__ import annotations
 import ast
 import pathlib
 import typing
-from collections.abc import Collection
+from collections.abc import Iterator
+from typing import Any
 
 from tests.chokepoint_walks import (
     attribute_calls,
@@ -137,7 +138,7 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
             continue
         if isinstance(node, ast.Assign):
             targets = node.targets
-            value = node.value
+            value: ast.expr | None = node.value
         else:
             targets = [node.target] if node.value is not None else []
             value = node.value
@@ -150,7 +151,7 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
 
 
 def primitive_keyword_calls(
-    tree: ast.AST, *, arg_names: Collection[str] | None = None
+    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
 ) -> list[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
 
@@ -168,7 +169,28 @@ def primitive_keyword_calls(
     two implementations of a walk is how the two halves of a keyword detector
     end up disagreeing about ``**kwargs``.
     """
-    return list(call_keyword_arguments(tree, function_names=RESULT_PRIMITIVES, keyword_names=arg_names))
+    # The walker takes a name collection; ``arg_names`` is one, plus the
+    # ``dict`` form the field-set detectors pass (iterating a mapping yields its
+    # keys, which is exactly the name set). Normalized here so the walker's own
+    # declared union -- which does not include ``dict`` -- is not bypassed.
+    names = None if arg_names is None else ({arg_names} if isinstance(arg_names, str) else set(arg_names))
+    return list(call_keyword_arguments(tree, function_names=RESULT_PRIMITIVES, keyword_names=names))
+
+
+def named_primitive_keyword_calls(
+    tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
+) -> Iterator[tuple[ast.Call, str, ast.expr]]:
+    """``primitive_keyword_calls``, each keyword paired with its name and value.
+
+    The underlying walk already drops ``**kwargs`` -- a keyword with no name is
+    not a member of any field's set -- but it hands back an ``ast.keyword``,
+    whose ``arg`` is declared ``str | None``, so every detector that keyed a
+    field's member set by that name had to re-assert a fact the walk already
+    guarantees. Three of the four were doing exactly that.
+    """
+    for call, keyword in primitive_keyword_calls(tree, arg_names=arg_names):
+        assert keyword.arg is not None, ast.unparse(keyword)
+        yield call, keyword.arg, keyword.value
 
 
 def generic_literal_field_offenders(
@@ -193,8 +215,8 @@ def generic_literal_field_offenders(
             f" {field} Literal; add it to the taxonomy or pass a member",
         )
         for node, field, value in non_member_literals(
-            (node, kw.arg, kw.value, field_members[kw.arg])
-            for node, kw in primitive_keyword_calls(tree, arg_names=field_members)
+            (node, field, value, field_members[field])
+            for node, field, value in named_primitive_keyword_calls(tree, arg_names=field_members)
         )
     ]
 
@@ -255,21 +277,20 @@ def wrong_namespace_constant_offenders(
     """
     constants = _module_constants(tree)
     out: list[str] = []
-    for node, kw in primitive_keyword_calls(tree, arg_names=field_members):
-        value = kw.value
+    for node, field, value in named_primitive_keyword_calls(tree, arg_names=field_members):
         if not isinstance(value, ast.Name):
             continue
         if value.id not in constants:
             continue
-        hit = _namespace_violation(value.id, kw.arg)
+        hit = _namespace_violation(value.id, field)
         if hit is None:
             continue
         out.append(
             offender(
                 path,
                 lineno(node),
-                f"{bare_callee(node)}({kw.arg}={value.id}) is a constant from the"
-                f" {'/'.join(hit)} namespace, not a {kw.arg}; the value"
+                f"{bare_callee(node)}({field}={value.id}) is a constant from the"
+                f" {'/'.join(hit)} namespace, not a {field}; the value"
                 f" {constants[value.id]!r} collides with a real member, which is"
                 " exactly what makes this invisible to a value check -- pass the"
                 " taxonomy member or the enum attribute instead",
@@ -694,7 +715,7 @@ def error_field_taxonomy_offenders(
             " declare it in the taxonomy or route it through the classifier",
         )
         for node, _field, value in non_member_literals(
-            (node, "error", kw.value, members)
-            for node, kw in primitive_keyword_calls(tree, arg_names={"error"})
+            (node, "error", value, members)
+            for node, _field, value in named_primitive_keyword_calls(tree, arg_names={"error"})
         )
     ]

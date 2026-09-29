@@ -3,7 +3,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import Any
 
 from app.crawl.content_cache import ContentCache
 from app.crawl.engine import _parse_lastmod, _seed_is_fresh, _stale_seeds
@@ -47,14 +46,14 @@ async def test_304_reuses_cached_urls_without_reparsing():
         ([("http://x.test/p1", None)], "v1", None),
         ttl=-1.0,
     )
-    calls: list[Any] = []
+    sent: list[dict[str, str]] = []
 
     def respond(u, headers):
         if headers.get("If-None-Match") == "v1":
             return _resp(304, etag="v1")  # not modified
         return _resp(200, "<x></x>", etag="v1")
 
-    fetcher = request_fetcher(respond, calls=calls)
+    fetcher = request_fetcher(respond, calls=sent)
 
     out = await fetch_sitemap_urls(
         fetcher,
@@ -65,7 +64,7 @@ async def test_304_reuses_cached_urls_without_reparsing():
     )
     assert out == {("http://x.test/p1", None)}
     # Conditional header was sent.
-    assert any(c.get("If-None-Match") == "v1" for c in calls)
+    assert any(h.get("If-None-Match") == "v1" for h in sent)
     # Cache TTL was refreshed (entry still present, not re-parsed).
     assert (
         _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY)) is not None
@@ -93,8 +92,10 @@ async def test_etag_captured_and_stored_on_200():
     out = await fetch_sitemap_urls(fetcher, url, 10, host_policy=UNRESTRICTED_HOST_POLICY)
     assert ("http://x.test/p1", "2024-01-01") in out
     # The new etag/last-modified are stored so the next crawl can send a 304 check.
-    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY))[1] == "v2"
-    assert _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY))[2] == "Wed, 01 Jan 2024 00:00:00 GMT"
+    cached = _SITEMAP_CACHE.peek((url, UNRESTRICTED_HOST_POLICY))
+    assert cached is not None, "the fetch must have stored its conditional-request headers"
+    assert cached[1] == "v2"
+    assert cached[2] == "Wed, 01 Jan 2024 00:00:00 GMT"
 
 
 def _resp_test_sitemap_fanout(body: str):
@@ -316,7 +317,7 @@ class TestStaleSeedBatch:
         policy = _POLICY_SEED_BATCH()
 
         stale_set = _stale_seeds(
-            [("http://seed-batch.test/never-cached", "2020-01-01"), (None, "2020-01-01")],
+            [("http://seed-batch.test/never-cached", "2020-01-01"), ("", "2020-01-01")],
             cache,
             read_policy(policy),
         )

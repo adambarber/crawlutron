@@ -77,6 +77,22 @@ def _recording_hook(sink: list):
     return hook
 
 
+class ScriptedClient(httpx.AsyncClient):
+    """An ``httpx.AsyncClient`` that also keeps the headers it was called with.
+
+    A real client, because everything around the answer is what httpx actually
+    does: the request the fetcher built, the timeout it passed, the streaming
+    read, the close on the way out. ``captured_headers`` used to be poked onto
+    the instance after construction, which put a member on the object that its
+    own type did not declare -- so a test reading it was reaching for something
+    only the factory could promise. The type is where that promise belongs.
+    """
+
+    def __init__(self, *args, captured_headers: list[httpx.Headers], **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.captured_headers = captured_headers
+
+
 def scripted_transport_client(
     responses: Sequence[httpx.Response],
     *,
@@ -107,8 +123,7 @@ def scripted_transport_client(
         captured.append(request.headers)
         return responses[len(captured) - 1]
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(_handle))
-    client.captured_headers = captured
+    client = ScriptedClient(transport=httpx.MockTransport(_handle), captured_headers=captured)
     if observed_requests is not None:
         client.event_hooks["request"].append(_recording_hook(observed_requests))
     if observed_responses is not None:
@@ -292,5 +307,6 @@ __all__ = [
     "dispatching_transport_client",
     "patch_http_fetcher_transport",
     "real_cffi_fetch_outcome",
+    "ScriptedClient",
     "scripted_transport_client",
 ]

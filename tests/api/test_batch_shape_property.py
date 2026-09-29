@@ -230,7 +230,12 @@ class TestPoisonDegradesLoudly:
 
     def test_poison_error_field_carries_a_stable_marker(self):
         """Callers can tell 'we could not shape this' from a real site failure."""
-        shaped = _shape_all([None])
+        # A dict missing every required key is the per-item guard's subject: the
+        # declared item type is a result dict, and a dict the shaper cannot read
+        # is what "malformed" means here. A ``None`` item degrades through the
+        # same ``except`` and to the same marker, but it is not an item the
+        # signature admits, so the probe stays inside the contract it is pinning.
+        shaped = _shape_all([{}])
         assert shaped[0].error == "result_shaping_failed"
         shaped_url = _shape_all([{"original_url": "https://x.example/a", "status": None}])
         assert shaped_url[0].original_url == "https://x.example/a"

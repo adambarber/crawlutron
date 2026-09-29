@@ -10,7 +10,7 @@ from app.api_models import CrawlPolicy
 from app.crawl.job_store import CrawlJobState, FrontierEntry, JobStatus
 from app.crawl.policy import read_policy
 from app.settings import CrawlerSettings
-from tests._job_harnesses import make_job_store, raw_job_row, write_row_policy
+from tests._job_harnesses import frontier, loaded_job, make_job_store, raw_job_row, write_row_policy
 from tests._policy_factories import UNRESTRICTED_HOST_POLICY, deployment_tier, job_store
 
 
@@ -83,7 +83,7 @@ def test_crawljobstate_serialization():
         root_url="http://example.com/",
         policy={"strategies": ["HTTP_DECLARED_CRAWLER"]},
         status=JobStatus.RUNNING,
-        frontier=["http://example.com/a", "http://example.com/b"],
+        frontier=frontier(["http://example.com/a", "http://example.com/b"]),
         visited={"http://example.com/"},
         results=[{"url": "http://example.com/", "status": "success"}],
         stats={"total_discovered": 3, "total_crawled": 1, "total_failed": 0},
@@ -291,7 +291,7 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
             (json.dumps([root, child]), json.dumps([root, child]), job.job_id),
         )
 
-    loaded = store.load(job.job_id)
+    loaded = loaded_job(store, job.job_id)
 
     assert loaded.frontier == []
     assert loaded.in_flight == [
@@ -303,7 +303,7 @@ def test_legacy_string_collections_load_with_depth_and_single_identity(tmp_path)
 def test_create_canonicalizes_root_and_initial_frontier(tmp_path):
     store = make_job_store(tmp_path)
     job = store.create("HTTPS://Example.test:443/", CrawlPolicy())
-    loaded = store.load(job.job_id)
+    loaded = loaded_job(store, job.job_id)
 
     assert loaded.root_url == "https://example.test"
     assert loaded.frontier == [FrontierEntry(url="https://example.test", depth=0)]
@@ -324,7 +324,7 @@ def test_load_resolves_unreadable_policy_to_the_declared_defaults(tmp_path):
         job = store.create("https://example.test/root", CrawlPolicy())
         write_row_policy(store, job.job_id, policy_json)
 
-        loaded = store.load(job.job_id)
+        loaded = loaded_job(store, job.job_id)
         limits = read_policy(loaded.policy).limits
 
         assert limits.respect_robots is True, policy_json

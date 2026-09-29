@@ -96,7 +96,11 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     for thread in race_threads:
         thread.start()
     for thread in race_threads:
-        assert thread.join(timeout=10) is None, "the scheduled race wedged"
+        # ``join`` is called for its effect and returns nothing; asserting on
+        # its return was asserting on ``None`` and said nothing about whether
+        # the thread finished. The liveness check below is the real one.
+        thread.join(timeout=10)
+    assert not any(thread.is_alive() for thread in race_threads), "the scheduled race wedged"
 
     assert len(old_error) == 1, f"the unsynchronized read was expected to raise exactly once, got {old_error}"
     assert isinstance(old_error[0], KeyError), (
@@ -168,13 +172,17 @@ def test_concurrent_read_and_eviction_does_not_raise(clean_cookie_store):
     probe.start()
     assert lock_taken.wait(timeout=5), "the lock holder never took the store lock"
     reader.start()
-    assert read_started.wait(timeout=5), "the reader never reached the read"
+    assert read_started.wait(timeout=5) is True, "the reader never reached the read"
     probe_release.set()
     probe.join(timeout=5)
     reader.join(timeout=5)
     patch.undo()
 
     assert not probe.is_alive() and not reader.is_alive(), "the guarded read wedged"
+    # ``Thread.ident`` is None only before ``start``, and this reader was
+    # started above; a real join of the started thread is what makes that a
+    # checked fact rather than an assumption.
+    assert reader.ident is not None
     assert recording.acquisitions.get(reader.ident, 0) > 0, (
         "the read path never took the store lock: reads are unsynchronized and the eviction race is wide open"
     )
