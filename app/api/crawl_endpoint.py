@@ -71,6 +71,26 @@ def _crawl_rejection(error: ValueError) -> HTTPException:
     return validation_http_error(error)
 
 
+def _serialize_or_reject(items: list[dict[str, Any]], output_format: str) -> tuple[str, str]:
+    """Serialize ``items`` for ``output_format``, or refuse the way the API says.
+
+    An unusable output format is a caller error, so it becomes the 422
+    ``validation_error`` the contract names -- and it is the only edge where a
+    refused format is allowed to surface. ``/v1/crawl`` serializes twice on
+    purpose: once to validate the format before the sync/async branch commits
+    to a shape, and once to produce the real body. Written inline at both
+    sites, the refusal was a second thing each site could spell differently,
+    and the async branch's copy is the one a caller is least able to see.
+
+    Callers that only want the format checked pass no items and discard the
+    result; the validation is the point, not the bytes.
+    """
+    try:
+        return serialize_results(items, output_format)
+    except ValueError as error:
+        raise http_error(422, "validation_error", str(error)) from error
+
+
 async def crawl(
     payload: CrawlRequest,
     background_tasks: BackgroundTasks,
@@ -83,10 +103,10 @@ async def crawl(
     """Execute a policy-driven crawl (sync or async webhook mode)."""
     with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
         if payload.output_format:
-            try:
-                serialize_results([], payload.output_format)
-            except ValueError as error:
-                raise http_error(422, "validation_error", str(error)) from error
+            # Validate the format before the branch commits to sync or async
+            # (L4): the async path otherwise accepts a bad format and only
+            # fails inside a detached task the caller can no longer inspect.
+            _serialize_or_reject([], payload.output_format)
         payload_dict = payload.model_dump(exclude_none=True)
         # L4: gate the batch size at the boundary, before the 202 is ever
         # returned. The async branch otherwise accepts an oversized batch and
@@ -164,12 +184,9 @@ async def crawl(
             logger.warning("crawl_result_store_failed", extra={"request_id": result["request_id"]})
         output_format = payload.output_format
         if output_format and output_format.lower() != "json":
-            try:
-                body, media_type = serialize_results(
-                    [u.model_dump() for u in response_model.results], output_format
-                )
-            except ValueError as error:
-                raise http_error(422, "validation_error", str(error)) from error
+            body, media_type = _serialize_or_reject(
+                [u.model_dump() for u in response_model.results], output_format
+            )
             return Response(content=body, media_type=media_type)
         return response_model
 

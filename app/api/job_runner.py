@@ -429,34 +429,56 @@ def cancel_job_task(job_id: str) -> None:
         task.cancel()
 
 
-async def pause_job(job_id: str, job_store: JobStore) -> str:
-    """Pause: flip the row; the task exits at the next batch boundary."""
-    ok = await job_store.aset_status(job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
-    if ok:
+async def _transition(
+    job_store: JobStore,
+    job_id: str,
+    to: JobStatus,
+    *,
+    expected: JobStatus | frozenset[JobStatus],
+) -> str:
+    """Flip a job's status and say why if the flip did not happen.
+
+    Every status-changing control needs the same three-way answer -- applied,
+    no such job, or a job in a state it cannot leave -- and needs it to mean
+    the same thing everywhere. It was spelled per control instead, and the
+    copies had already diverged: ``resume_job`` read it one way (triage first,
+    then act) and ``pause_job``/``cancel_job`` another (act, then triage),
+    which is the shape of a bug waiting for the next state transition added to
+    only one of them. Here the answer is produced once, so a fourth control
+    cannot get it wrong.
+
+    ``missing`` is distinguished from ``conflict`` by re-reading the row
+    rather than by the store's refusal, because the two refusals look the same
+    to a caller otherwise: a typo'd id and a job already cancelled are both
+    ``aset_status`` returning False.
+    """
+    if await job_store.aset_status(job_id, to, expected=expected):
         return "ok"
     return "missing" if await job_store.aload(job_id) is None else "conflict"
 
 
+async def pause_job(job_id: str, job_store: JobStore) -> str:
+    """Pause: flip the row; the task exits at the next batch boundary."""
+    return await _transition(job_store, job_id, JobStatus.PAUSED, expected=JobStatus.RUNNING)
+
+
 async def resume_job(job_id: str, job_store: JobStore, settings: Any, shutdown_event: asyncio.Event) -> str:
     """Resume a paused job by respawning its runner task."""
-    ok = await job_store.aset_status(job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
-    if not ok:
-        return "missing" if await job_store.aload(job_id) is None else "conflict"
-    start_job(job_id, job_store, settings, shutdown_event)
-    return "ok"
+    outcome = await _transition(job_store, job_id, JobStatus.RUNNING, expected=JobStatus.PAUSED)
+    if outcome == "ok":
+        start_job(job_id, job_store, settings, shutdown_event)
+    return outcome
 
 
 async def cancel_job(job_id: str, job_store: JobStore) -> str:
     """Cancel: flip the row; the task exits at the next batch boundary (the
     in-flight batch is still recorded — the engine already did the work)."""
-    ok = await job_store.aset_status(
+    return await _transition(
+        job_store,
         job_id,
         JobStatus.CANCELLED,
         expected=frozenset({JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.PENDING}),
     )
-    if ok:
-        return "ok"
-    return "missing" if await job_store.aload(job_id) is None else "conflict"
 
 
 __all__ = [

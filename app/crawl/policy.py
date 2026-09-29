@@ -305,12 +305,28 @@ def _drop_rejected(raw: dict[str, Any], exc: ValidationError) -> dict[str, Any] 
 PolicyLike = CrawlPolicy | dict[str, Any]
 
 
+def _already_built(raw: Any) -> CrawlPolicy | None:
+    """The policy ``raw`` already is, or ``None`` if it is something to validate.
+
+    A validated policy must not be validated again. Re-validating one that
+    arrived as a model is not merely wasted work: the wire edge rejects a
+    non-mapping as ``invalid_policy``, so a caller holding a real
+    ``CrawlPolicy`` -- the whole-site runner reads one out of a job row and
+    hands it to the engine through the raw payload shape -- was having its
+    own policy refused, for the crime of already being valid.
+
+    Stated once because it was stated twice, in two functions whose second
+    lines disagreed about what a non-policy is. Both now ask this, so a change
+    to what counts as already-valid cannot land in one and miss the other.
+    """
+    return raw if isinstance(raw, CrawlPolicy) else None
+
+
 def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     """Total read edge: any input resolves to a policy, repairing what failed.
 
     A row the write edge produced is always valid, so a stored policy that
     fails here is corrupt text or a pre-schema-version row.
-
     The repair is field-scoped, and the reason it is not "fall back to the
     whole declared default" is that the whole-default answer discards the
     fields the caller got right. One retry bound over the ceiling used to
@@ -327,8 +343,8 @@ def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     removes at least one key, and it ends at full defaults only when there is
     nothing left to drop.
     """
-    if isinstance(raw, CrawlPolicy):
-        return raw
+    if (built := _already_built(raw)) is not None:
+        return built
     if not isinstance(raw, dict):
         return CrawlPolicy()
     candidate = _with_omitted_defaults(raw, tier)
@@ -368,8 +384,8 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
     just wasted work -- it was rejecting it, as ``invalid_policy``, for not
     being a dict.
     """
-    if isinstance(raw, CrawlPolicy):
-        return raw
+    if (built := _already_built(raw)) is not None:
+        return built
     if not isinstance(raw, dict):
         raise ValueError("invalid_policy") from None
     raw_limits = raw.get("limits")

@@ -388,12 +388,8 @@ class ContentCache:
                 # Refuse before any disk write (N5): a still-valid older
                 # entry for this key is kept; TTL governs its staleness.
                 return
-            old_size = self._index_sizes.get(key, 0)
             self._write_data(path, data)
-            self._index[key] = path
-            self._index.move_to_end(key)
-            self._index_sizes[key] = len(data)
-            self._index_total_bytes += len(data) - old_size
+            self._commit_entry_locked(key, path, len(data))
             # Freshness metadata is known at write time; record it so later
             # cached_at_of() calls never deserialize this envelope (P6).
             self._index_cached_at[key] = (expires, envelope["cached_at"])
@@ -443,17 +439,33 @@ class ContentCache:
             # stays absent; there is nothing to roll back. Just propagate (N1).
             raise
         with self._lock:
-            # Read the prior size under the commit lock (like sync set()), so a
-            # concurrent commit between the size-check and here can't leave the
-            # byte total off by the stale delta.
-            old_size = self._index_sizes.get(key, 0)
-            self._index[key] = path
-            self._index.move_to_end(key)
-            self._index_sizes[key] = size
-            self._index_total_bytes += size - old_size
+            # The prior size is read here rather than before the size check, so a
+            # concurrent commit between the two cannot leave the byte total off
+            # by a stale delta. The commit reads it under the same lock, which
+            # is the only reason that holds.
+            self._commit_entry_locked(key, path, size)
             # Mirror only after the write commits, under the shared gate.
             self._remember_memory_locked(key, value, expires, size)
         self._enforce_limits()
+
+    def _commit_entry_locked(self, key: str, path: Path, size: int) -> None:
+        """Record ``key``'s new path and size in the index, and the byte delta.
+
+        The index, the per-entry sizes, the running byte total, and the LRU
+        order are one accounting fact with four fields, and a reader of the
+        total (``_enforce_limits``) trusts all four to agree. Written inline
+        once at each commit site, it was two places to update and the async
+        path had to add a comment explaining why it re-read the prior size
+        under this same lock -- a property of the accounting, not of asynchrony,
+        stated only where someone was already thinking about it.
+
+        Callers must hold ``self._lock``.
+        """
+        old_size = self._index_sizes.get(key, 0)
+        self._index[key] = path
+        self._index.move_to_end(key)
+        self._index_sizes[key] = size
+        self._index_total_bytes += size - old_size
 
     def _write_data(self, path: Path, data: str) -> None:
         """Persist a pre-serialized envelope (N1: ``aset`` sizes the exact
