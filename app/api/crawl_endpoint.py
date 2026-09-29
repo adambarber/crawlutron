@@ -28,7 +28,7 @@ from app.api.response_shaping import _aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
 from app.api_models import CrawlRequest, UnifiedCrawlResponse
 from app.crawl.ids import new_request_id
-from app.crawl.job_store import JobKind, JobStore
+from app.crawl.job_store import TERMINAL_STATUSES, JobKind, JobStore
 from app.crawl.payload_helpers import checked_payload_urls
 from app.crawl.policy import read_policy
 from app.crawl.result_store import CrawlResultStore
@@ -196,13 +196,20 @@ async def get_crawl_result(
     job_store,
     result_store,
 ) -> UnifiedCrawlResponse:
-    """Retrieve a completed crawl response by request_id."""
+    """Retrieve a completed crawl response by request_id.
+
+    Answers 200 only for a job in a terminal state. A job that has written its
+    results but not yet been marked ``COMPLETED`` is still 202, because
+    ``run_async_crawl`` performs those two writes in that order: reporting the
+    result a moment early tells a polling client the crawl is finished while it
+    is still running, and the job store it then reads says ``running``.
+    """
     stored = await result_store.aget(request_id)
     if stored is not None:
         return UnifiedCrawlResponse(**stored)
     job = await job_store.aload(request_id)
     if job is not None and job.kind == JobKind.SINGLE_SHOT:
-        if job.results:
+        if job.results and job.status in TERMINAL_STATUSES:
             return UnifiedCrawlResponse(**job.results[0])
         raise http_error(
             202,

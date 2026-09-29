@@ -60,6 +60,17 @@ class JobStatus(StrEnum):
 #: legal from. Named once so the sync method and its async twin cannot diverge.
 _Expected = JobStatus | frozenset[JobStatus]
 
+#: The states a job never leaves, and so the only ones a reader may treat as a
+#: final answer. Named once here, beside the enum, because "has this job
+#: finished?" is a question every status reader asks and the answer is a set
+#: rather than a comparison -- and because the tempting proxy for it is wrong.
+#: ``run_async_crawl`` writes ``job.results`` and only then flips the status, so
+#: "has it written results?" is true for a window during which the job is still
+#: running. A reader that answers with results reports a crawl as done while it
+#: is still in flight. PAUSED is deliberately absent: a paused job is stopped,
+#: not finished, and will resume.
+TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
+
 
 @dataclass(frozen=True)
 class FrontierEntry:

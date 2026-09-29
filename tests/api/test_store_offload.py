@@ -30,7 +30,7 @@ from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 
 from app.api import job_runner
-from app.crawl.job_store import JobAccumulators, JobStore
+from app.crawl.job_store import TERMINAL_STATUSES, JobAccumulators, JobStatus, JobStore
 from app.crawl.result_store import CrawlResultStore
 from app.settings import CrawlerSettings
 from tests._job_harnesses import (
@@ -357,6 +357,61 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         assert raised.value.status_code == 202
 
 
+async def _job_with_results_written(store, job_id: str) -> None:
+    """Put a single-shot job into the state the runner passes through mid-flight.
+
+    ``run_async_crawl`` persists ``job.results`` and only then flips the status
+    to ``COMPLETED``, so this is a state a real job genuinely occupies, not a
+    contrived one. Both halves of the status contract need it, and spelling it
+    out twice is how the two tests would drift into testing different things.
+    """
+    await _off_loop(store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
+    job = await _off_loop(store.load, job_id)
+    job.results = [
+        {
+            "request_id": job_id,
+            "results": [],
+            "submitted_count": 0,
+            "policy_schema_version": "",
+            "success": True,
+        }
+    ]
+    await _off_loop(store.save, job)
+
+
+class TestStatusEndpointAnswersOnlyForTerminalJobs:
+    """A 200 from ``GET /v1/crawl/{request_id}`` means the job is finished.
+
+    An endpoint keyed on results alone answers 200 inside the gap between the
+    runner's two writes, and a client that polls to 200 and then reads the job
+    store finds a job still marked ``running`` -- told the crawl was done, and
+    handed one that had not stopped.
+    """
+
+    async def test_a_running_job_that_has_written_results_is_still_pending(
+        self, loop_guard_store, result_store
+    ):
+        from app.api.crawl_endpoint import get_crawl_result
+
+        await _off_loop(loop_guard_store.create_single_shot, "req-3", _ROOT, {"strategies": []})
+        await _job_with_results_written(loop_guard_store, "req-3")
+
+        with pytest.raises(HTTPException) as raised:
+            await get_crawl_result("req-3", loop_guard_store, result_store)
+        assert raised.value.status_code == 202, raised.value.detail
+
+    async def test_the_same_job_answers_200_once_it_is_completed(self, loop_guard_store, result_store):
+        """The complement: the fix must not make a finished job unreadable."""
+        from app.api.crawl_endpoint import get_crawl_result
+
+        await _off_loop(loop_guard_store.create_single_shot, "req-4", _ROOT, {"strategies": []})
+        await _job_with_results_written(loop_guard_store, "req-4")
+        await _off_loop(loop_guard_store.set_status, "req-4", JobStatus.COMPLETED, expected=JobStatus.RUNNING)
+
+        response = await get_crawl_result("req-4", loop_guard_store, result_store)
+        assert response.request_id == "req-4"
+
+
 async def _await_terminal_status(store: JobStore, job_id: str) -> str:
     """Poll the status off-loop until it is terminal.
 
@@ -364,10 +419,12 @@ async def _await_terminal_status(store: JobStore, job_id: str) -> str:
     ``_wait_status`` (it reads on the loop). The bound here is the same hang
     guard the job harness documents; a job that is progressing reaches a
     terminal status on its own, and one that is not should fail loudly.
+    Callers assert which terminal status they wanted -- the set is only what
+    ends the wait, so it is read from the enum rather than restated here.
     """
     for _ in range(int(30.0 / 0.005)):
         job = await _off_loop(store.load, job_id)
-        if job is not None and job.status.value in {"completed", "failed"}:
+        if job is not None and job.status in TERMINAL_STATUSES:
             return job.status.value
         await asyncio.sleep(0.005)
     raise AssertionError(f"job {job_id} never reached a terminal status")
