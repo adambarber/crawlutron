@@ -385,17 +385,30 @@ async def test_extract_document_output_capped_at_5mb(monkeypatch):
     monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
 
 
-async def test_extract_document_normal_works(monkeypatch):
-    """Normal extraction returns the markdown content."""
-    # Use env var to inject test data into the worker subprocess.
-    monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
-    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
+async def test_extract_document_normal_works():
+    """A real document comes back as real markdown, converted by a real worker.
 
-    result = _extract_document(b"%PDF-1.4 fake", "http://example.com/x.pdf")
-    assert result.markdown == "## Hello Markdown"
-    assert result.text == "## Hello Markdown"
+    This deliberately does not inject ``TEST_MARKITDOWN_OUTPUT``. The hook
+    short-circuits the worker's task loop before markitdown is called, so a test
+    using it passes whether or not the worker can convert anything at all --
+    it is reading back an echo. The echo path itself is covered by the output
+    cap test above.
 
-    monkeypatch.delenv("TEST_MARKITDOWN_OUTPUT", raising=False)
+    Running the real converter is also the only thing that covers the request
+    and reply shape the parent and the child must agree on. A stub connection
+    is written by the same hand as the code it stands in for, so it cannot
+    disagree with it; the two could drift apart and every stub-backed test
+    would still pass. Here the parent and the child are separate processes that
+    have to mean the same thing.
+    """
+    ext_mod._reset_doc_pool()
+    result = _extract_document(b"name,score\nada,10\n", "http://example.com/data.csv")
+
+    assert result.markdown is not None
+    # "ada" only reaches the reply if markitdown really read these bytes, and
+    # it only gets read in a worker subprocess.
+    assert "ada" in result.markdown
+    assert ext_mod._doc_pool_pids(), "no worker process served the conversion"
 
 
 # ============================================================

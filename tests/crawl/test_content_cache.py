@@ -479,15 +479,30 @@ def test_max_entries_enforces_bound(tmp_path):
 
 
 def test_explicit_max_entries_zero_disables_limit():
-    """max_entries=0 means no limit (opt-out)."""
+    """max_entries=0 means no limit (opt-out).
 
-    with scoped_cache(default_ttl=3600, max_entries=0) as c:
-        # Should not enforce
-        for i in range(15000):
-            c.set(f"k{i}", i)
-        # All should be present (no eviction)
-        assert c.get("k0") == 0
-        assert c.get("k14999") == 14999
+    Two records, run twice: once under a cap of one, once under a cap of zero.
+    The contrast at the same volume is the point -- "nothing was evicted" only
+    says something next to a cache that did evict, and pinning both here means
+    the second half cannot pass by being broken too.
+
+    The volume is two because the claim is that the count cap is not applied.
+    The cap reads ``max_entries > 0 and len(index) > max_entries``, so a zero
+    with anything in the index evicts every entry if the ``> 0`` test is ever
+    dropped -- two records catch that, one would not. It used to write 15,000,
+    which took longer than every other test in this file combined and proved
+    only that a large number of writes finish.
+    """
+    with scoped_cache(default_ttl=3600, max_entries=1) as bounded:
+        bounded.set("k0", 0)
+        bounded.set("k1", 1)
+        assert bounded.get("k0") is None, "a cap of one should not have kept two records"
+
+    with scoped_cache(default_ttl=3600, max_entries=0) as uncapped:
+        uncapped.set("k0", 0)
+        uncapped.set("k1", 1)
+        assert uncapped.get("k0") == 0
+        assert uncapped.get("k1") == 1
 
 
 def test_lru_keeps_recently_used_entries():

@@ -1,6 +1,7 @@
 """SSRF protection: blocked IP ranges, unresolved hosts, DNS pinning, local mode and fixture enforcement."""
 
 import contextlib
+import ipaddress
 import socket
 
 import pytest
@@ -17,6 +18,20 @@ from tests._assertions import (
 
 def _blocked(ip):
     return http_mod._is_private_or_loopback_ip(ip)
+
+
+def _teredo_hiding(client: str, server: str = "192.0.2.1") -> str:
+    """A Teredo address (``2001::/32``) whose reachable half is ``client``.
+
+    Teredo reverses the client IPv4 in the low 32 bits, so a private target can
+    be smuggled through a syntactically public IPv6 literal. Built here rather
+    than pasted so the test data cannot drift from the encoding the stdlib
+    actually decodes.
+    """
+    server_bits = int(ipaddress.IPv4Address(server))
+    client_bits = int(ipaddress.IPv4Address(client)) ^ 0xFFFFFFFF
+    packed = (0x20010000 << 96) | (server_bits << 64) | client_bits
+    return str(ipaddress.IPv6Address(packed))
 
 
 def test_cgnat_is_blocked():
@@ -78,6 +93,12 @@ def test_ipv6_embedded_ipv4_is_classified_like_the_bare_ipv4():
         ("::ffff:169.254.1.1", "169.254.1.1"),
         ("2002:7f00:1::", "127.0.0.1"),
         ("2002:64:40::", "100.64.0.1"),
+        (_teredo_hiding("127.0.0.1"), "127.0.0.1"),
+        (_teredo_hiding("10.1.2.3"), "10.1.2.3"),
+        (_teredo_hiding("100.64.0.1"), "100.64.0.1"),
+        (_teredo_hiding("169.254.1.1"), "169.254.1.1"),
+        (_teredo_hiding("192.168.5.5"), "192.168.5.5"),
+        (_teredo_hiding("8.8.8.8"), "8.8.8.8"),
     ]:
         assert _blocked(ipv6) is _blocked(ipv4), (
             f"{ipv6} verdict {_blocked(ipv6)} != bare {ipv4} verdict {_blocked(ipv4)}"
