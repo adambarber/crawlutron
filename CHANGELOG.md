@@ -225,6 +225,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   optionality is exactly why the equivalence has to be decided in one place.
 
 ### Added
+- **Deployment-manifest drift gate**
+  (`tests/invariants/test_contracts.py::test_deployment_manifest_sets_no_dead_knob`):
+  a key `docker-compose.yml` sets that nothing in `app/` reads is the
+  quietest failure in the configuration surface. The service does not crash
+  and nothing 5xxs -- the deployment starts, the operator believes the
+  setting is applied, and the default silently wins. From the service's
+  point of view the key was never mentioned, so no runtime signal can
+  surface it. The manifest is now checked against the same consumer set the
+  `.env.example` direction uses, because compose is a declaration of intent
+  from the same authority, only later and more consequential: `.env.example`
+  describes a local checkout, while a key set here is what a real deployment
+  runs with. Verified by mutating a live key to `CRAWLUTRON_LOG_LEVL`; the
+  build goes red and green again on revert. Clean as of this change, which is
+  the point of adding it while it is still clean.
 - **Live-document reference gate** (`tests/invariants/test_contracts.py`):
   `test_live_docs_point_at_paths_that_exist` walks the backticked repo paths
   in the nine documents a reader arrives intending to follow, and fails when

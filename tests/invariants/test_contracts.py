@@ -12,6 +12,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+import pytest
+
 from app.settings import ENVIRONMENT_FIELD_ALIASES
 from tests.chokepoint_walks import (
     APP_ROOT,
@@ -549,6 +551,59 @@ def _broken_doc_reference_offenders() -> list[str]:
             if not (REPO_ROOT / candidate.split(":")[0]).exists():
                 offenders.append(f"{name} points at `{candidate}`, which does not exist")
     return offenders
+
+
+def _compose_file() -> pathlib.Path:
+    return REPO_ROOT / "docker-compose.yml"
+
+
+def _deployment_knobs() -> set[str] | None:
+    """Knobs the compose manifest sets, and the container runs with.
+
+    Compose is how the service is actually deployed, so it is a declaration
+    of intent from the same authority as ``.env.example`` -- but a later
+    one, and the more consequential: ``.env.example`` describes a local
+    checkout, while a key set here is what a real deployment runs with.
+    """
+    manifest = _compose_file()
+    if not manifest.exists():
+        return None
+    return {
+        name
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+        for name in _KNOB_PATTERN.findall(line)
+    }
+
+
+def test_deployment_manifest_sets_no_dead_knob():
+    """A key compose sets that nothing reads is the quietest failure here.
+
+    Not a crash and not a 5xx: the deployment starts, the operator believes
+    the setting is applied, and the default silently wins. Nothing surfaces
+    it, because from the service's point of view the key was never
+    mentioned. So the manifest is checked against the same consumer set the
+    ``.env.example`` direction uses, rather than trusted.
+    """
+    declared = _deployment_knobs()
+    if declared is None:
+        pytest.skip("no compose manifest in this tree")
+    dead = sorted(declared - _consumed_knobs())
+    assert not dead, f"compose sets knobs nothing reads: {', '.join(dead)}"
+
+
+def test_deployment_knob_detector_bites():
+    """Proved by mutating the manifest rather than by trusting the helper."""
+    manifest = _compose_file()
+    if not manifest.exists():
+        pytest.skip("no compose manifest in this tree")
+    original = manifest.read_text(encoding="utf-8")
+    try:
+        manifest.write_text(original + '\n  CRAWLUTRON_TYPO_PROBE: "1"\n', encoding="utf-8")
+        assert "CRAWLUTRON_TYPO_PROBE" in (_deployment_knobs() or set())
+    finally:
+        manifest.write_text(original, encoding="utf-8")
+    assert "CRAWLUTRON_TYPO_PROBE" not in (_deployment_knobs() or set())
 
 
 def test_live_docs_point_at_paths_that_exist():
