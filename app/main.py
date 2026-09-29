@@ -38,9 +38,9 @@ else:
     except ImportError:
         # FastAPI is optional at import time (the MCP/CLI surface and tests
         # import this module for its settings and pool wiring without a web
-        # server). ``FastAPI`` becomes None so ``create_app``'s guard reads it;
-        # the two exception types become ``Exception`` so handler registration
-        # below still types.
+        # server). ``FastAPI`` becomes None so the ``if FastAPI is not None``
+        # guard further down reads it; the two exception types become
+        # ``Exception`` so handler registration below still types.
         FastAPI = None
         HTTPException = Exception
         RequestValidationError = Exception
@@ -325,8 +325,7 @@ if FastAPI is not None:
 
 else:
     # ``FastAPI`` is None here (the optional import failed), so there is no app
-    # to build. Assigned to a distinctly-named module constant rather than
-    # reusing ``app`` (the ``if`` branch owns that name and its type); readers
-    # that need the optional app import ``create_app`` instead of touching a
+    # to build. The module-level ``app`` is None on this path; a reader that
+    # needs the optional web surface must handle that, rather than touching a
     # half-initialized module global.
     app = None
