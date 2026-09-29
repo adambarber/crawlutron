@@ -17,6 +17,7 @@ from tests.chokepoint_walks import (
     app_trees,
     assert_detector,
     callable_defs,
+    enclosing_function,
     f_strings,
     functions,
     local_nodes,
@@ -34,6 +35,7 @@ from tests.invariants._shared import (
     _SCOPE_PATTERN_LENGTH_BOUND,
     assert_property_detector_bites,
     assert_trees_clean,
+    function_defs,
 )
 from tests.property_registry import Property
 
@@ -354,7 +356,7 @@ def _frontier_sink_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag ``*.frontier.append(x)`` where ``x`` (or its same-function binding)
     reads the raw ``"url"`` key instead of going through frontier_link_url()."""
     offenders: list[str] = []
-    for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+    for fn in function_defs(tree):
         tainted: set[str] = set()
         for assign in (a for a in nodes_of(fn) if isinstance(a, ast.Assign | ast.AnnAssign)):
             value = assign.value
@@ -748,17 +750,12 @@ def _host_policy_expression_state(
             )
         return False, False
     if isinstance(node, ast.Dict):
-        return any(
-            isinstance(key, ast.Constant)
-            and key.value in _HOST_POLICY_URL_FIELDS
-            and _host_policy_expression_state(tree, value, url_names, validated_names, policy_names)[0]
+        dict_states = [
+            _host_policy_expression_state(tree, value, url_names, validated_names, policy_names)
             for key, value in zip(node.keys, node.values, strict=True)
-        ), any(
-            isinstance(key, ast.Constant)
-            and key.value in _HOST_POLICY_URL_FIELDS
-            and _host_policy_expression_state(tree, value, url_names, validated_names, policy_names)[1]
-            for key, value in zip(node.keys, node.values, strict=True)
-        )
+            if isinstance(key, ast.Constant) and key.value in _HOST_POLICY_URL_FIELDS
+        ]
+        return any(is_url for is_url, _ in dict_states), any(is_validated for _, is_validated in dict_states)
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         states = [
             _host_policy_expression_state(tree, element, url_names, validated_names, policy_names)
@@ -1290,14 +1287,12 @@ def _direct_frontier_growth_offenders(
 ) -> list[str]:
     growth_methods = {"append", "extend", "insert"}
     offenders: list[str] = []
-    parents = {child: parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
+    parents = parent_map(tree)
 
     def is_allowed(node: ast.AST) -> bool:
         if not allowed_functions:
             return False
-        owner = parents.get(node)
-        while owner is not None and not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
-            owner = parents.get(owner)
+        owner = enclosing_function(node, parents)
         if (
             not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef)
             or owner.name not in allowed_functions
@@ -1335,7 +1330,7 @@ def _direct_frontier_growth_offenders(
                         offender_at(path, node, "frontier method alias bypasses admit_job_links")
                     )
         elif isinstance(node, ast.Subscript) and _frontier_expression(node.value):
-            parent = parents.get(node)
+            parent = parents.get(id(node))
             if isinstance(parent, ast.Assign | ast.AugAssign | ast.AnnAssign):
                 offenders.append(offender_at(path, node, "frontier slice mutation bypasses admit_job_links"))
     return offenders
@@ -1401,7 +1396,7 @@ def _imported_filter_names(tree: ast.Module) -> dict[str, str]:
 def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     assert isinstance(tree, ast.Module)
     aliases = _imported_filter_names(tree)
-    parents = {child: parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
+    parents = parent_map(tree)
     function_calls: dict[ast.FunctionDef | ast.AsyncFunctionDef, set[str]] = {}
     filter_names = set(_FILTER_NAMES.values())
     for node in nodes_of(tree):
@@ -1410,9 +1405,7 @@ def _shared_admission_filter_offenders(tree: ast.AST, path: pathlib.Path) -> lis
         name = aliases.get(node.func.id, node.func.id)
         if name not in filter_names:
             continue
-        owner = parents.get(node)
-        while owner is not None and not isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
-            owner = parents.get(owner)
+        owner = enclosing_function(node, parents)
         if isinstance(owner, ast.FunctionDef | ast.AsyncFunctionDef):
             function_calls.setdefault(owner, set()).add(name)
     offenders: list[str] = []

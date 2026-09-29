@@ -24,6 +24,7 @@ from tests.chokepoint_walks import (
     functions,
     nodes_of,
     offender_at,
+    offenders_over_functions,
 )
 from tests.invariants._shared import assert_trees_clean
 
@@ -462,10 +463,10 @@ def _is_result_sink_owner(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
 
 
 def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    offenders: list[str] = []
-    for node in functions(tree):
+    def check(node):
         if not _is_result_sink_owner(node):
-            continue
+            return []
+        found: list[str] = []
         for statement in node.body:
             if not isinstance(statement, ast.Try):
                 continue
@@ -477,7 +478,7 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
                     if not (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)):
                         continue
                     if inner.func.id in {_SINK_PARAM_NAME, _SINK_CLOSURE_NAME}:
-                        offenders.append(
+                        found.append(
                             offender_at(
                                 path,
                                 inner,
@@ -486,7 +487,9 @@ def _sink_call_in_try_body(tree: ast.AST, path: pathlib.Path) -> list[str]:
                                 f"raising sink must not be answered with a failure envelope",
                             )
                         )
-    return offenders
+        return found
+
+    return offenders_over_functions(tree, check)
 
 
 def test_result_delivery_never_runs_inside_the_worker_try():

@@ -31,6 +31,7 @@ from tests.chokepoint_walks import (
     functions,
     nodes_of,
     offender_at,
+    offenders_over_functions,
     relative_posix,
     resolved_expr_name,
     trees_excluding,
@@ -212,21 +213,22 @@ def test_selector_contract_detector_bites():
 
 
 def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    """A keyed provider supplies a request and a payload hook, not the flow.
+    """A keyed provider states one request; it does not write one.
 
     The normalize/dedupe/clip contract above is only half the shared flow. The
     other half -- issue the request, refuse a non-200, hand the result list to
-    the collector -- used to be spelled once per provider, and the two POST
-    bodies jscpd reported were those spellings: identical but for the endpoint
-    and the payload lambda, so the only part that genuinely varied was the part
-    left as a hook. This says the hooks are mandatory and the flow is not
-    writable, which is what makes a fourth provider a subclass with two methods
-    instead of a fourth copy of the non-200 check.
+    the collector -- used to be spelled once per provider, and the per-provider
+    request bodies jscpd reported were those spellings: identical but for the
+    endpoint and the credential placement, so the only part that genuinely
+    varied was the part left as a hook. The flow then moved into the base, and
+    what a provider supplies is a ``_call`` describing its request and an
+    ``_items_path`` saying where the results sit.
 
-    The base is matched on the resolved name's last segment because
-    ``_ApiKeyProvider`` is module-private: inside ``app/search/providers.py`` it
-    is a bare name with no import to resolve, and outside it is only ever
-    reachable through that one import.
+    Requiring the declaration *and* forbidding the flow is what makes a fourth
+    provider a subclass with two declarations instead of a fourth copy of the
+    non-200 check. ``search``, ``_request``, ``_results`` and ``_items_of`` are
+    all the base's now, so a subclass defining any of them is re-spelling part
+    of the shared flow and reaching the network by a route the base never sees.
     """
     offenders: list[str] = []
     for node in class_defs(tree):
@@ -234,37 +236,50 @@ def _keyed_provider_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
             resolved_expr_name(tree, base).rsplit(".", 1)[-1] == "_ApiKeyProvider" for base in node.bases
         ):
             continue
-        defined = {
+        methods = {
             child.name for child in node.body if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef)
         }
-        for hook in ("_request", "_items_of"):
-            if hook not in defined:
-                offenders.append(offender_at(path, node, f"{node.name} does not define {hook}()"))
-        if "search" in defined:
-            offenders.append(
-                offender_at(path, node, f"{node.name} re-spells the shared provider flow in search()")
-            )
+        attributes = {
+            target.id
+            for child in node.body
+            if isinstance(child, ast.Assign)
+            for target in child.targets
+            if isinstance(target, ast.Name)
+        }
+        if "_call" not in methods:
+            offenders.append(offender_at(path, node, f"{node.name} does not state a _call()"))
+        if "_items_path" not in attributes:
+            offenders.append(offender_at(path, node, f"{node.name} does not declare _items_path"))
+        for hook in ("search", "_request", "_results", "_items_of"):
+            if hook in methods:
+                offenders.append(
+                    offender_at(path, node, f"{node.name} re-spells the shared provider flow in {hook}()")
+                )
     return offenders
 
 
 def test_keyed_providers_inherit_the_shared_response_flow():
-    """One flow for the keyed providers: request and payload hook per subclass."""
+    """One flow for the keyed providers: a request declared, never written."""
     assert_trees_clean(
         _keyed_provider_offenders,
-        "a keyed search provider must supply _request() and _items_of() and inherit"
-        " _ApiKeyProvider.search, so the non-200 check cannot be re-spelled or dropped",
+        "a keyed search provider must state a _call() and an _items_path and not"
+        " define search()/_request()/_results()/_items_of(), so the non-200 check"
+        " cannot be re-spelled or dropped",
     )
 
 
 def test_keyed_provider_flow_detector_bites():
-    """The re-spelled flow fires, the incomplete subclass fires, the hooks pass.
+    """The re-spelled flow fires, the incomplete subclass fires, the data passes.
 
-    The first shape is what the two POST providers did: the whole flow written
-    per provider, differing only in the endpoint and the payload lambda. The
-    second is the quieter failure -- a provider that inherits the flow and
-    defines only one of the two hooks, which reaches ``NotImplementedError`` on
-    the first query instead of at import. The third is the shape the class is
-    for.
+    The first two shapes are what the two POST providers did: the whole flow
+    written per provider, differing only in the endpoint and the credential
+    placement -- once by overriding ``search``, once by re-opening the request
+    itself. The next two are the quieter failures: a provider that never says
+    what its request looks like, and one that never says where its results sit,
+    each reaching ``NotImplementedError`` or an empty result set on the first
+    query instead of at import. The last is the shape the class is for. Each
+    source is built to trip exactly one rule, so a rule that started firing for
+    the wrong reason shows up as a count change rather than a green run.
     """
     assert_fires_once(
         _keyed_provider_offenders,
@@ -272,21 +287,31 @@ def test_keyed_provider_flow_detector_bites():
             "from app.search.providers import _ApiKeyProvider\n"
             "class SerperProvider(_ApiKeyProvider):\n"
             "    name = 'serper'\n"
-            "    def _items_of(self, payload):\n"
-            "        return payload.get('organic')\n"
-            "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n"
+            "    _items_path = ('organic',)\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('POST', url)\n"
             "    async def search(self, query, limit, timeout_seconds):\n"
             "        status, body = await self._request(query, limit, timeout_seconds)\n"
-            "        return self._results(status, body, lambda p: p.get('organic'), url_key='link',\n"
-            "            title_key='title',\n"
-            "            description_key='snippet')\n": "re-spells the shared provider flow",
+            "        return self._results(status, body, lambda p: p.get('organic'),\n"
+            "            url_key='link')\n": "re-spells the shared provider flow in search()",
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class BraveProvider(_ApiKeyProvider):\n"
+            "    name = 'brave'\n"
+            "    _items_path = ('web', 'results')\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('GET', url)\n"
+            "    async def _request(self, query, limit, timeout_seconds):\n"
+            "        return await _provider_http('GET', url)\n": "re-spells the shared"
+            " provider flow in _request()",
             "from app.search.providers import _ApiKeyProvider\n"
             "class TavilyProvider(_ApiKeyProvider):\n"
             "    name = 'tavily'\n"
-            "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http(\n"
-            "            'POST', url, timeout_seconds=timeout_seconds)\n": "does not define _items_of()",
+            "    _items_path = ('results',)\n": "does not state a _call()",
+            "from app.search.providers import _ApiKeyProvider\n"
+            "class BingProvider(_ApiKeyProvider):\n"
+            "    name = 'bing'\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('GET', url)\n": "does not declare _items_path",
         },
         REPO_ROOT / "app" / "search" / "_synthetic.py",
     )
@@ -296,10 +321,11 @@ def test_keyed_provider_flow_detector_bites():
             "class TavilyProvider(_ApiKeyProvider):\n"
             "    name = 'tavily'\n"
             "    _url_key = 'url'\n"
-            "    def _items_of(self, payload):\n"
-            "        return payload.get('results')\n"
-            "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n",
+            "    _title_key = 'title'\n"
+            "    _description_key = 'content'\n"
+            "    _items_path = ('results',)\n"
+            "    def _call(self, query, limit):\n"
+            "        return _ProviderCall('POST', url, json_body={'api_key': self._api_key})\n",
             # A provider that does not inherit the keyed flow (DuckDuckGo) is not
             # this guard's business; the loop guard above owns its shape.
             "class DuckDuckGoProvider:\n"
@@ -432,22 +458,20 @@ def _call_node_names(node: ast.AST) -> set[str]:
 
 
 def _poll_loop_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
-    offenders: list[str] = []
-    for node in functions(tree):
+    def check(node):
         src = ast.dump(node)
         has_while_true = any(
             isinstance(n, ast.While) and ast.unparse(n.test) == "True" for n in nodes_of(node)
         )
         if not (has_while_true and "iscoroutine" in src and "wait_for" in src):
-            continue
+            return []
         # The sanctioned _assertions.poll_until terminates with pytest.fail. A
         # docstring may *claim* a fail; only a real call node counts.
         if any(name == "fail" or name.endswith(".fail") for name in _call_node_names(node)):
-            continue
-        offenders.append(
-            offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")
-        )
-    return offenders
+            return []
+        return [offender_at(path, node, "use _testkit.poll_until instead of a hand-rolled poll loop")]
+
+    return offenders_over_functions(tree, check)
 
 
 def test_tests_do_not_relinline_poll_loop():

@@ -117,6 +117,23 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
 _PARENTS_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, dict[int, ast.AST]] = weakref.WeakKeyDictionary()
 
 
+def enclosing_function(
+    node: ast.AST, parents: dict[int, ast.AST]
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """The function that encloses `node`, or ``None`` if it is at module scope.
+
+    :func:`parent_map` one level up. Every "which function is this call
+    inside?" detector wants it, and it was a three-line loop written into each
+    one -- which is how two detectors end up disagreeing about whether a nested
+    function counts as the owner, since a copy in each place was free to settle
+    the question differently.
+    """
+    owner = parents.get(id(node))
+    while owner is not None and not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        owner = parents.get(id(owner))
+    return owner
+
+
 def parent_map(root: ast.AST) -> dict[int, ast.AST]:
     """``id(node) -> parent`` for every node in `root`, built once per root.
 
@@ -379,6 +396,23 @@ def functions(root: ast.AST) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ..
         for node in _narrow(root, "function", ast.FunctionDef, ast.AsyncFunctionDef)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     )
+
+
+def offenders_over_functions(
+    root: ast.AST,
+    check: Callable[[ast.FunctionDef | ast.AsyncFunctionDef], Iterable[str]],
+) -> list[str]:
+    """What `check` flags across every function in `root`, concatenated.
+
+    The opening of most shape detectors: declare a list, walk the functions,
+    append what each one offends, return. Spelled out per detector, a copy is
+    free to settle "every function" differently -- :func:`functions` here, a raw
+    :func:`ast.walk` with its own filter there -- and the two then disagree
+    about the same file with no visible reason. Same argument as
+    :func:`functions` narrowing its own return: the walk belongs to one place,
+    and the per-function rule is the only thing a detector should be saying.
+    """
+    return [offender for node in functions(root) for offender in check(node)]
 
 
 _STRUCTURAL_TOKENS = frozenset(

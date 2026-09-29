@@ -537,6 +537,19 @@ def _make_cache(tmp_path, **kwargs):
     return ContentCache(str(tmp_path), **kwargs)
 
 
+async def _seeded_then_write_fails(cache, monkeypatch, body="old"):
+    """A cache holding a persisted value, armed to fail the next write.
+
+    Both rollback tests start from the same place: a live entry that an
+    in-flight write fails against, so what is under test is what the *failed*
+    write left behind. Spelling that start state in each test meant a change to
+    the seeded value or to how a write is broken had to be made twice, and one
+    copy could be left asserting about a state the other never created.
+    """
+    await cache.aset("k", {"body": body}, ttl=60)
+    watch_writes(cache, monkeypatch, fail="new")
+
+
 def budgeted_cache(tmp_path, *, max_total_bytes: int = 400, **settings) -> ContentCache:
     """A cache whose total byte budget is the only limit in play.
 
@@ -707,8 +720,7 @@ class TestContentCacheByteBudget:
         entry, the in-memory mirror must not keep serving the value that was
         never persisted — rollback covers RAM, not just the index."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
-        await cache.aset("k", {"body": "old"}, ttl=60)
-        watch_writes(cache, monkeypatch, fail="new")
+        await _seeded_then_write_fails(cache, monkeypatch)
         with pytest.raises(OSError):
             await cache.aset("k", {"body": "new"}, ttl=60)
         assert await cache.aget("k") == {"body": "old"}
@@ -737,7 +749,7 @@ class TestContentCacheByteBudget:
         """L1: an existing key whose re-write fails keeps its prior bytes counted
         (the old rollback applied a spurious `prior_size - size` delta)."""
         cache = _make_cache(tmp_path, max_entry_bytes=10_000)
-        await cache.aset("k", {"body": "old"}, ttl=60)
+        await _seeded_then_write_fails(cache, monkeypatch)
         total_before = cache._index_total_bytes
         assert cache._index_sizes["k"] > 0
         watch_writes(cache, monkeypatch, fail="new")

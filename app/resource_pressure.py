@@ -1,13 +1,10 @@
-"""Resource-adaptive admission control (#self-tuning): memory + CPU.
+"""Resource-adaptive admission control: every bounded resource, not just memory.
 
-Extends the self-tuning admission control from memory-only to every bounded
-resource. The service senses its own ceilings (cgroup memory limit, cgroup CPU
-quota) and current usage, and throttles crawl-batch dispatch so aggregate usage
-rides at a configured target instead of tripping the OOM killer (memory) or
-saturating the CPU quota and getting throttled by the kernel (CPU). No operator
-tuning required: under target the service runs at full speed; approaching it,
-throughput scales down smoothly; at the hard ceiling new batches pause until
-usage drains.
+:class:`app.memory_pressure.MemoryGate` senses the memory ceiling and throttles
+crawl-batch dispatch against it, with no operator knob. This module extends
+that to the other bounded resources the service runs under: the cgroup CPU
+quota, which the kernel would otherwise throttle from behind the crawler's back,
+and the event loop, whose lag is the first place queueing delay shows up.
 
 CPU is a *rate*, not a level, so :class:`CpuGate` keeps a small history and
 reports utilization as (delta CPU-time / delta wall-time) divided by the

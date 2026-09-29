@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from itertools import islice
 from typing import Any, NamedTuple, Protocol, TypeAlias
 
@@ -15,9 +16,11 @@ from app.constants import (
 )
 from app.crawl.admission import gather_robots_decisions
 from app.metrics import MetricsStore
-from app.models import CrawlTask, EngineCrawlResult
+from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
 from app.resource_pressure import ResourceGate, WeightedAdmission
+from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
+from app.validation import HostPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -34,17 +37,42 @@ class _BatchState(Protocol):
     page_count: int
 
 
-class _BatchRun(Protocol):
+@dataclass
+class RecursiveRunState:
+    """Everything one recursive crawl carries while it runs.
+
+    This lives here rather than beside the dispatch loop that assembles it
+    because admission is the consumer that defines what a run has to offer: the
+    loop builds one of these and hands it down, and the stage signatures below
+    read it. It was previously declared twice -- once as a concrete dataclass
+    beside the loop, once as a ``_BatchRun`` protocol beside the stages -- and
+    the two lists had to be kept in step by hand. One declaration, in the module
+    that consumes it, is the version where they cannot drift.
+
+    Fields the admission stages never read (``max_depth``, ``include_html``,
+    ``want_document_bodies``, ``scope_pattern``, ``seed_sitemaps``) are still
+    here: this is the run's state, and the dispatch stages further down the
+    pipeline read the same object.
+    """
+
     scheduler: DomainScheduler
+    worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
     robots_allows: Callable[[str], Awaitable[bool]]
     robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None
     robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
+    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
     spill: Any
+    max_depth: int
     max_pages: int
     respect_robots: bool
+    include_html: bool
+    want_document_bodies: bool
+    scope_pattern: BoundedPattern | None
     global_concurrency: int
+    seed_sitemaps: bool
     resource_gate: ResourceGate
     admission: WeightedAdmission
+    host_policy: HostPolicy
     ramp_max: int
     http_heavy_lookahead: int
     spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]]
@@ -59,7 +87,7 @@ class _BatchContext(NamedTuple):
     a stage cannot be wired to one run's gate and another run's bookkeeping.
     """
 
-    run: _BatchRun
+    run: RecursiveRunState
     state: _BatchState
     metrics: MetricsStore
 
@@ -223,7 +251,7 @@ async def _robots_admitted_batch(ctx: _BatchContext, batch: list[_Admitted]) -> 
 
 
 async def admit_recursive_batch(
-    run: _BatchRun,
+    run: RecursiveRunState,
     state: _BatchState,
     metrics: MetricsStore,
 ) -> list[_Admitted]:

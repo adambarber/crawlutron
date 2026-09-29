@@ -11,6 +11,7 @@ import pathlib
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
+from typing import Any
 
 from tests.chokepoint_walks import (
     REPO_ROOT,
@@ -34,6 +35,7 @@ from tests.chokepoint_walks import (
     trees_under,
 )
 from tests.invariants._shared import (
+    DefinitionNode,
     _declared_public_symbols,
     _enclosing_nodes,
     _module_definition_index,
@@ -778,39 +780,96 @@ def _public_target_counts(nodes: list[tuple[ast.AST, ast.AST]]) -> tuple[int, in
     return parses, _public_range_accesses(nodes)
 
 
-def _public_target_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
-    observations: dict[str, int] = {}
+class _PropertyObservations:
+    """One file's observation walk, and the counts it has tallied so far.
 
-    if _relative_app_path(path) == prop.owner_module:
-        owner_ids = _owner_definition_ids(tree, path, prop)
-        owner_nodes = [
-            node
-            for node in nodes_of(tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in owner_ids
-        ]
-        owner_parses, owner_ranges = _public_target_counts([(tree, node) for node in owner_nodes])
-        if owner_parses and owner_ranges:
-            observations["ipaddress_range_verdict"] = min(owner_parses, owner_ranges)
-        return observations
-    excluded = _owner_definition_ids(tree, path, prop)
-    for _name, node in _property_nodes(tree, path, prop):
-        parses, ranges = _public_target_counts(
-            _resolvedlocal_nodes(tree, node, excluded, modules=None, prop=prop)
+    Every registered property is checked the same way -- walk this file, ask a
+    detector what it recognises, return a fingerprint->count map -- so the three
+    things that walk needs (the tree, the path, the claim) and the accumulator
+    belong together. They were four functions taking the same three positional
+    parameters, each declaring its own ``observations: dict[str, int] = {}`` and
+    each re-tallying a fingerprint with the same ``get(..., 0) + count``. A
+    fourth property needed the same three lines re-spelled, and a count had two
+    places to be tallied.
+    """
+
+    def __init__(self, tree: ast.AST, path: pathlib.Path, prop: Property) -> None:
+        self.tree = tree
+        self.path = path
+        self.prop = prop
+        self.counts: dict[str, int] = {}
+
+    def record(self, fingerprint: str, count: int) -> None:
+        """Tally `count` more observations of `fingerprint`."""
+        self.counts[fingerprint] = self.counts.get(fingerprint, 0) + count
+
+    def public_target(self) -> dict[str, int]:
+        if _relative_app_path(self.path) == self.prop.owner_module:
+            owner_ids = _owner_definition_ids(self.tree, self.path, self.prop)
+            owner_nodes = [
+                node
+                for node in nodes_of(self.tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and id(node) in owner_ids
+            ]
+            owner_parses, owner_ranges = _public_target_counts([(self.tree, node) for node in owner_nodes])
+            if owner_parses and owner_ranges:
+                self.record("ipaddress_range_verdict", min(owner_parses, owner_ranges))
+            return self.counts
+        for _name, _node, nodes in _property_sites(self.tree, self.path, self.prop, modules=None):
+            parses, ranges = _public_target_counts(nodes)
+            if parses and ranges:
+                self.record("ipaddress_range_verdict", min(parses, ranges))
+        return self.counts
+
+    def bool_env(self) -> dict[str, int]:
+        tree_sets = _bool_env_tree_sets(self.tree, None)
+        contexts = _bool_env_contexts(self.tree, self.path, self.prop, None)
+        observations = [_bool_env_node_observation(context, tree_sets) for context in contexts]
+        if not any(observed for observed, _count in observations):
+            return {}
+        return {"bool_literal_set": sum(count for _observed, count in observations)}
+
+    def robots_policy(self) -> dict[str, int]:
+        contexts = (
+            _property_contexts(self.tree)
+            if _relative_app_path(self.path) == self.prop.owner_module
+            else [node for _name, node in _property_nodes(self.tree, self.path, self.prop)]
         )
-        count = min(parses, ranges) if parses and ranges else 0
-        if count:
-            observations["ipaddress_range_verdict"] = observations.get("ipaddress_range_verdict", 0) + count
-    return observations
+        module_paths = _robot_module_paths(self.tree, self.path, None)
+        for node in contexts:
+            resolved = _resolvedlocal_nodes(self.tree, node, modules=None, prop=self.prop)
+            for fingerprint, count in _robot_capabilities_from_nodes(
+                self.tree, self.path, self.prop, resolved, module_paths, suppress_shared=False
+            ).items():
+                self.record(fingerprint, count)
+        return self.counts
+
+
+def _property_sites(
+    tree: ast.AST, path: pathlib.Path, prop: Property, *, modules: Any
+) -> list[tuple[str, DefinitionNode, list[tuple[ast.AST, ast.AST]]]]:
+    """``(name, site node, resolved nodes)`` per site, the owner's own code excluded.
+
+    A registered property is a claim about the whole codebase, so the code that
+    *implements* it cannot be evidence for it. Every observation walk therefore
+    asks :func:`_owner_definition_ids` what to skip, takes the property's node
+    list, and runs the local-resolution pass over what is left. Those three
+    steps were spelled out in each detector, and a copy that dropped the
+    exclusion would quietly observe the owner believing it had observed the
+    codebase -- the one way a registry check can pass without being run.
+    """
+    excluded = _owner_definition_ids(tree, path, prop)
+    return [
+        (name, node, _resolvedlocal_nodes(tree, node, excluded, modules=modules, prop=prop))
+        for name, node in _property_nodes(tree, path, prop)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
 
 
 @_module_aware
 def _public_target_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> list[str]:
     offenders: list[str] = []
-    excluded = _owner_definition_ids(tree, path, prop)
-    for name, node in _property_nodes(tree, path, prop):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        nodes = _resolvedlocal_nodes(tree, node, excluded, modules=_PROPERTY_MODULES.get(), prop=prop)
+    for name, node, nodes in _property_sites(tree, path, prop, modules=_PROPERTY_MODULES.get()):
         parses, ranges = _public_target_counts(nodes)
         if parses and ranges:
             offenders.append(
@@ -934,12 +993,7 @@ def _bool_env_contexts(
 
 
 def _bool_env_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
-    tree_sets = _bool_env_tree_sets(tree, None)
-    contexts = _bool_env_contexts(tree, path, prop, None)
-    observations_for_contexts = [_bool_env_node_observation(context, tree_sets) for context in contexts]
-    if not any(observed for observed, _count in observations_for_contexts):
-        return {}
-    return {"bool_literal_set": sum(count for _observed, count in observations_for_contexts)}
+    return _PropertyObservations(tree, path, prop).bool_env()
 
 
 @_module_aware
@@ -1128,20 +1182,7 @@ def _robot_capabilities_from_nodes(
 
 
 def _robots_policy_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
-    observations: dict[str, int] = {}
-    contexts = (
-        _property_contexts(tree)
-        if _relative_app_path(path) == prop.owner_module
-        else [node for _name, node in _property_nodes(tree, path, prop)]
-    )
-    module_paths = _robot_module_paths(tree, path, None)
-    for node in contexts:
-        resolved = _resolvedlocal_nodes(tree, node, modules=None, prop=prop)
-        for fingerprint, count in _robot_capabilities_from_nodes(
-            tree, path, prop, resolved, module_paths, suppress_shared=False
-        ).items():
-            observations[fingerprint] = observations.get(fingerprint, 0) + count
-    return observations
+    return _PropertyObservations(tree, path, prop).robots_policy()
 
 
 def _robots_shared_parser(
@@ -1199,12 +1240,13 @@ def _robots_policy_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) 
 
 
 def _property_observations(tree: ast.AST, path: pathlib.Path, prop: Property) -> dict[str, int]:
+    walk = _PropertyObservations(tree, path, prop)
     if prop.name == "public-target":
-        return _public_target_observations(tree, path, prop)
+        return walk.public_target()
     if prop.name == "bool-env":
-        return _bool_env_observations(tree, path, prop)
+        return walk.bool_env()
     if prop.name == "robots-policy":
-        return _robots_policy_observations(tree, path, prop)
+        return walk.robots_policy()
     return {}
 
 

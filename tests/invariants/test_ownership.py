@@ -29,7 +29,12 @@ from tests.chokepoint_walks import (
     unary_ops,
     with_blocks,
 )
-from tests.invariants._shared import _enclosing_calls, _enclosing_defs, assert_trees_clean
+from tests.invariants._shared import (
+    _enclosing_calls,
+    _enclosing_defs,
+    assert_trees_clean,
+    function_defs,
+)
 
 
 def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -143,7 +148,7 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     the sync and async paths cannot drift (aget once lost the LRU count cap,
     and the pre-write mirror never rolled back — both invisible twins)."""
     offenders: list[str] = []
-    for fn in (n for n in nodes_of(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)):
+    for fn in function_defs(tree):
         if fn.name not in _CACHE_TWIN_METHODS:
             continue
         for sub in subscript_reads(fn):

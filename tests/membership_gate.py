@@ -24,7 +24,7 @@ This module closes the class on the field axis, in two halves.
    ``strategy``; a new Literal field in a result dataclass is covered the day
    it is added.
 
-2. Named-constant provenance (:func:`wrong_namespace_constant_offenders`).
+2. Named-constant provenance (:func:`namespace_constant_offenders`).
    A literal detector is blind to ``classification=SOME_CONSTANT`` -- the
    historical escape was exactly that shape: ``EXTRACTION_METHOD_BINARY_NO_TEXT``
    is a real module constant whose *value* ("binary_no_text") is a legal
@@ -43,7 +43,7 @@ import ast
 import pathlib
 import typing
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TypeAlias
 
 from tests.chokepoint_walks import (
     attribute_calls,
@@ -92,7 +92,7 @@ RESULT_PRIMITIVES = (
 _OPTIONAL_FIELDS = frozenset({"strategy", "error", "extraction_method", "selected_strategy"})
 
 
-def literal_typed_field_members() -> dict[str, set[str]]:
+def literal_typed_field_members() -> FieldMembers:
     """Every Literal field across the result dataclasses, as ``field -> members``.
 
     Enumerated from ``app.models`` at test time: the union over the dataclasses
@@ -177,6 +177,14 @@ def primitive_keyword_calls(
     return list(call_keyword_arguments(tree, function_names=RESULT_PRIMITIVES, keyword_names=names))
 
 
+#: The declared members of every ``Literal``-typed result field, keyed by field
+#: name. The map is derived from ``app/models`` rather than written down, so a
+#: Literal field nobody has listed is a gap in the model rather than a silent
+#: hole in the sweep -- which is why both field detectors name this type instead
+#: of repeating ``dict[str, set[str]]`` in their signatures.
+FieldMembers: TypeAlias = dict[str, set[str]]
+
+
 def named_primitive_keyword_calls(
     tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
 ) -> Iterator[tuple[ast.Call, str, ast.expr]]:
@@ -193,12 +201,10 @@ def named_primitive_keyword_calls(
         yield call, keyword.arg, keyword.value
 
 
-def generic_literal_field_offenders(
-    tree: ast.AST, path: pathlib.Path, *, field_members: dict[str, set[str]]
-) -> list[str]:
+def generic_literal_field_offenders(tree: ast.AST, path: pathlib.Path, *, members: FieldMembers) -> list[str]:
     """Flag a literal handed to a result primitive outside its declared Literal.
 
-    Generic over fields: ``field_members`` comes from
+    Generic over fields: ``members`` comes from
     :func:`literal_typed_field_members`, so the sweep covers ``status`` and
     ``classification`` (and any future Literal field) without naming either.
     A non-Literal field (``error``, ``extraction_method``) is not in the map and
@@ -215,8 +221,8 @@ def generic_literal_field_offenders(
             f" {field} Literal; add it to the taxonomy or pass a member",
         )
         for node, field, value in non_member_literals(
-            (node, field, value, field_members[field])
-            for node, field, value in named_primitive_keyword_calls(tree, arg_names=field_members)
+            (node, field, value, members[field])
+            for node, field, value in named_primitive_keyword_calls(tree, arg_names=members)
         )
     ]
 
@@ -262,9 +268,7 @@ def _namespace_violation(name: str, field: str) -> tuple[str, ...] | None:
     return None
 
 
-def wrong_namespace_constant_offenders(
-    tree: ast.AST, path: pathlib.Path, *, field_members: dict[str, set[str]]
-) -> list[str]:
+def namespace_constant_offenders(tree: ast.AST, path: pathlib.Path, *, members: FieldMembers) -> list[str]:
     """Flag a constant from a foreign taxonomy passed as a Literal field.
 
     Catches ``_failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)``:
@@ -277,7 +281,7 @@ def wrong_namespace_constant_offenders(
     """
     constants = _module_constants(tree)
     out: list[str] = []
-    for node, field, value in named_primitive_keyword_calls(tree, arg_names=field_members):
+    for node, field, value in named_primitive_keyword_calls(tree, arg_names=members):
         if not isinstance(value, ast.Name):
             continue
         if value.id not in constants:

@@ -6,6 +6,7 @@ place to drift from. The `_enclosing_*` helpers answer "what def encloses this
 node?", which the shape detectors need and which is subtle enough to write once.
 `assert_property_detector_bites` is the check that a registered property's
 detector would actually fire, i.e. that the registry entry is not a lie.
+`function_defs` is the walk most shape detectors open with.
 """
 
 from __future__ import annotations
@@ -21,10 +22,27 @@ from tests.property_registry import Property
 
 __all__ = [
     "DefinitionNode",
+    "FunctionNode",
     "assert_trees_clean",
+    "function_defs",
     "_module_definition_index",
     "_module_name",
 ]
+
+
+FunctionNode: TypeAlias = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def function_defs(tree: ast.AST) -> list[FunctionNode]:
+    """Every function definition in ``tree``, sync or async, in source order.
+
+    The opening move of most shape detectors: "look inside each function in this
+    module and find the one that does X". Written as a parenthesised generator
+    inside a ``for`` it appeared verbatim in detector after detector, which is
+    how a detector ends up walking a narrower set of nodes than the one beside
+    it and the two disagree about the same file for no visible reason.
+    """
+    return [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
 def assert_trees_clean(

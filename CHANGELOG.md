@@ -6,6 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **The duplication gate is now 3 lines / 30 tokens, and reports zero clones.**
+  The hook read `--min-lines 4 --min-tokens 25`, but jscpd counts *newlines*
+  inside a fragment, so a floor of 4 enforced fragments of five lines and was
+  blind to every four-line duplicate. At the real 4/25 it already passed while
+  17 unsanctioned pairs existed. Dropping to 3/30 surfaced all 17, and each was
+  removed by structural change rather than by renaming or reformatting:
+  - `app/search/providers.py` — the three keyed providers each re-spelled the
+    request skeleton (method, endpoint, pooled call) around a different payload
+    lambda. `_ApiKeyProvider` now owns that skeleton; a provider declares a
+    `_ProviderCall` and an `_items_path` and nothing else. The invariant that
+    guards it was rewritten to the stronger rule: a provider may not define
+    `search`, `_request`, `_results` or `_items_of` at all.
+  - `app/crawl/recursive_admission.py` — the recursive run's state was declared
+    twice, as a concrete dataclass beside the dispatch loop and as a `Protocol`
+    beside the stages, with 13 overlapping fields to keep in step by hand. It is
+    now declared once, `RecursiveRunState`, in the module that consumes it.
+  - `app/resource_pressure.py` — the module docstring restated the throttling
+    mechanism it extends instead of pointing at the module that owns it.
+  - Test-side, the missing funnels were extracted rather than the pairs
+    tolerated: `function_defs`, `enclosing_function` and
+    `offenders_over_functions` in `tests/chokepoint_walks.py`;
+    `_property_sites` and `_PropertyObservations` in
+    `tests/invariants/test_registry.py`; `FieldMembers` in
+    `tests/membership_gate.py`. `jscpd-expectations.json` stays empty, which
+    `tests/test_jscpd_gate.py` asserts: a sanction is a standing licence to
+    duplicate, so every pair gets a chokepoint instead.
 - **The tool no longer describes itself by naming the control it defeats.**
   Three surfaces described the curl_cffi strategy as "browser-like headers for
   WAF/Cloudflare bypass" (agent hints), "browser-like headers for WAF/Cloudflare

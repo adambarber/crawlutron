@@ -4,7 +4,7 @@ import ast
 import asyncio
 import pathlib
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 import httpx
@@ -216,6 +216,19 @@ def _effects() -> defaultdict[str, list[Any]]:
     return defaultdict(list)
 
 
+def _record_probe_fetch(effects: MutableMapping[str, list], payload: Mapping[str, Any]) -> None:
+    """Note a fetch the guard was supposed to prevent, unless it was the blocked URL.
+
+    The stand-in execution helpers all need the same recording: the only fetch
+    that is *not* a finding is the one the guard was supposed to refuse. Spelled
+    inline in each helper, a probe that compared a different value than the one
+    the test asserted on would record every URL it saw -- and the assertion
+    still passed, because the test only ever checked the blocked one.
+    """
+    if payload.get("url") != _BLOCKED_URL:
+        effects["fetched"].append(payload.get("url"))
+
+
 async def _assert_refused(awaitable, effects: Mapping[str, list]) -> None:
     try:
         result = await awaitable
@@ -264,8 +277,7 @@ async def _probe_crawl_executor(monkeypatch, tmp_path):
     effects = _effects()
 
     async def denied_crawl_request(payload, **kwargs):
-        if payload.get("url") != _BLOCKED_URL:
-            effects["fetched"].append(payload.get("url"))
+        _record_probe_fetch(effects, payload)
         return {"results": [{"status": "blocked", "classification": "blocked"}]}
 
     monkeypatch.setattr(crawl_executor, "crawl_request", denied_crawl_request)
@@ -315,8 +327,7 @@ async def _probe_map_endpoint(monkeypatch, tmp_path):
     effects = _effects()
 
     async def denied_execute(payload, **kwargs):
-        if payload.get("url") != _BLOCKED_URL:
-            effects["fetched"].append(payload.get("url"))
+        _record_probe_fetch(effects, payload)
         return {"results": []}
 
     monkeypatch.setattr(map_endpoint, "execute_crawl", denied_execute)

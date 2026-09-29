@@ -505,38 +505,33 @@ def test_engine_emitted_classifications_are_enum_members():
     )
 
 
-def test_non_member_classification_detector_bites():
-    bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
-    offenders = list(
-        _non_member_classification_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"})
-    )
-    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
-    good = ast.parse(
-        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n"
-    )
-    assert not list(
-        _non_member_classification_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"})
-    )
+def _assert_classification_literal_is_caught(bad_source: str, good_source: str) -> None:
+    """One factory's worth of the non-member-classification invariant.
 
+    The claim is that a literal classification outside the enum is flagged and
+    a non-literal one is not. That is one claim about one detector, so it is
+    written once and asserted twice -- for the failed-result factory and for the
+    terminal-result chokepoint -- rather than inlined, where the second copy
+    could be edited into agreement with the first without either changing what
+    the detector does.
+    """
+    path = REPO_ROOT / "app" / "_synthetic.py"
+    offenders = list(_non_member_classification_offenders(ast.parse(bad_source), path, members={"rendered"}))
+    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
+    assert not list(_non_member_classification_offenders(ast.parse(good_source), path, members={"rendered"}))
+
+
+def test_non_member_classification_detector_bites():
+    _assert_classification_literal_is_caught(
+        'def f():\n    return _failed_engine_result(classification="totally_made_up")\n',
+        "def f(cls):\n    return _failed_engine_result(classification=cls.url_budget_exceeded)\n",
+    )
     # The terminal-CrawlResult chokepoint is covered too: the render path builds
     # terminal results through it, so an unknown literal there reaches the wire
     # through the same lenient dataclass that let url_budget_exceeded ship.
-    bad_terminal = ast.parse(
-        'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n'
-    )
-    offenders = list(
-        _non_member_classification_offenders(
-            bad_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}
-        )
-    )
-    assert len(offenders) == 1 and "CrawlClassification member" in offenders[0], offenders
-    good_terminal = ast.parse(
-        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n"
-    )
-    assert not list(
-        _non_member_classification_offenders(
-            good_terminal, REPO_ROOT / "app" / "_synthetic.py", members={"rendered"}
-        )
+    _assert_classification_literal_is_caught(
+        'def f():\n    return _terminal_crawl_result(classification="made_up_render_code")\n',
+        "def f(cls):\n    return _terminal_crawl_result(classification=cls.site_error)\n",
     )
 
 
@@ -860,7 +855,7 @@ def test_result_primitives_emit_only_declared_literal_members():
     from tests.membership_gate import generic_literal_field_offenders, literal_typed_field_members
 
     field_members = literal_typed_field_members()
-    offenders = app_offenders(generic_literal_field_offenders, field_members=field_members)
+    offenders = app_offenders(generic_literal_field_offenders, members=field_members)
     assert not offenders, (
         "a literal passed to a result primitive must be a member of its field's"
         " declared Literal, or the strict enum at response shaping rejects the whole"
@@ -877,18 +872,14 @@ def test_generic_membership_detector_bites():
     members = literal_typed_field_members()
     assert members, "no Literal fields were enumerated; the generic sweep is a no-op"
     bad = ast.parse('def f():\n    return _failed_engine_result(classification="totally_made_up")\n')
-    hits = generic_literal_field_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    hits = generic_literal_field_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
     assert len(hits) == 1 and "totally_made_up" in hits[0], hits
     # A real member literal passes.
     good = ast.parse('def f():\n    return _failed_engine_result(classification="network_error")\n')
-    assert not generic_literal_field_offenders(
-        good, REPO_ROOT / "app" / "_synthetic.py", field_members=members
-    )
+    assert not generic_literal_field_offenders(good, REPO_ROOT / "app" / "_synthetic.py", members=members)
     # A non-literal (the shape a correct caller writes) passes without comment.
     var = ast.parse("def f(c):\n    return _failed_engine_result(classification=c)\n")
-    assert not generic_literal_field_offenders(
-        var, REPO_ROOT / "app" / "_synthetic.py", field_members=members
-    )
+    assert not generic_literal_field_offenders(var, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
 def test_generic_membership_subsumes_the_per_field_detectors():
@@ -1039,10 +1030,10 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
     """A constant from one taxonomy must not be consumed as a member of
     another. Value membership cannot see this -- the colliding value is what
     made the historical defect invisible."""
-    from tests.membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+    from tests.membership_gate import literal_typed_field_members, namespace_constant_offenders
 
     field_members = literal_typed_field_members()
-    offenders = app_offenders(wrong_namespace_constant_offenders, field_members=field_members)
+    offenders = app_offenders(namespace_constant_offenders, members=field_members)
     assert not offenders, (
         "a constant from a foreign namespace was consumed as a taxonomy member; the"
         " value collides with a real member which is exactly why a value check misses"
@@ -1053,7 +1044,7 @@ def test_result_primitives_take_taxonomy_constants_not_foreign_namespaces():
 def test_wrong_namespace_detector_bites():
     """The provenance detector fires on the historical shape and admits the
     correct one."""
-    from tests.membership_gate import literal_typed_field_members, wrong_namespace_constant_offenders
+    from tests.membership_gate import literal_typed_field_members, namespace_constant_offenders
 
     members = literal_typed_field_members()
     bad = ast.parse(
@@ -1061,7 +1052,7 @@ def test_wrong_namespace_detector_bites():
         "def f():\n"
         "    return _failed_engine_result(classification=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
     )
-    hits = wrong_namespace_constant_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", field_members=members)
+    hits = namespace_constant_offenders(bad, REPO_ROOT / "app" / "_synthetic.py", members=members)
     assert len(hits) == 1 and "EXTRACTION_METHOD_" in hits[0], hits
     # The same constant used as its own field is the intended use.
     ok = ast.parse(
@@ -1069,14 +1060,10 @@ def test_wrong_namespace_detector_bites():
         "def f(m):\n"
         "    return _make_engine_result(extraction_method=EXTRACTION_METHOD_BINARY_NO_TEXT)\n"
     )
-    assert not wrong_namespace_constant_offenders(
-        ok, REPO_ROOT / "app" / "_synthetic.py", field_members=members
-    )
+    assert not namespace_constant_offenders(ok, REPO_ROOT / "app" / "_synthetic.py", members=members)
     # A parameter (what a correct caller writes) is not a constant: passes.
     param = ast.parse("def f(cls):\n    return _failed_engine_result(classification=cls.site_error)\n")
-    assert not wrong_namespace_constant_offenders(
-        param, REPO_ROOT / "app" / "_synthetic.py", field_members=members
-    )
+    assert not namespace_constant_offenders(param, REPO_ROOT / "app" / "_synthetic.py", members=members)
 
 
 # ---------------------------------------------------------------------------

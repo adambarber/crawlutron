@@ -23,16 +23,24 @@ PATH = pathlib.Path("synthetic.py")
 _SOURCE = "value = 1\n"
 
 
+def _calls(tree: ast.AST, name: str) -> bool:
+    """Whether ``tree`` contains a call to a bare function of that name.
+
+    The predicate every marker detector in this file is really asking. It was
+    spelled into each detector, so a detector that matched a different shape
+    than the next one was invisible -- the walks looked like they disagreed
+    about the same tree when they were only differing in how they spelled the
+    question.
+    """
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+        for node in ast.walk(tree)
+    )
+
+
 def _fires_on_marker(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """A detector whose entire behaviour is 'flag a call named marker'."""
-    return (
-        [f"{path}:1 marker"]
-        if any(
-            isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "marker"
-            for node in ast.walk(tree)
-        )
-        else []
-    )
+    return [f"{path}:1 marker"] if _calls(tree, "marker") else []
 
 
 def _never_fires(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -49,10 +57,7 @@ def _yields_once(tree: ast.AST, path: pathlib.Path):
     generator, every proof calling it raises TypeError instead of running.
     Normalization belongs here, once.
     """
-    if any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "marker"
-        for node in ast.walk(tree)
-    ):
+    if _calls(tree, "marker"):
         yield f"{path}:1 marker"
 
 

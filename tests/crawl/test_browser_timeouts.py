@@ -9,6 +9,8 @@
 
 import asyncio
 
+import pytest
+
 from app.crawl.strategies.browser import _MAX_ACTION_WAIT_SECONDS, BrowserRenderer
 from app.models import RenderOptions
 from tests._browser_doubles import BrowserFakePage, pinned_page_renderer
@@ -26,24 +28,33 @@ class _TimeoutRecordingPage(BrowserFakePage):
 
 
 class TestWaitActionClamp:
-    async def test_wait_timeout_clamped_to_max(self):
+    @pytest.mark.parametrize(
+        ("timeout", "assert_timeout"),
+        [
+            pytest.param(
+                890000,
+                lambda seen: seen == [int(_MAX_ACTION_WAIT_SECONDS * 1000)],
+                id="caller-value-is-clamped",
+            ),
+            pytest.param(
+                0,
+                # Playwright treats timeout=0 as "no timeout", so the floor is
+                # what keeps the wait bounded rather than the caller's value.
+                lambda seen: len(seen) == 1 and seen[0] >= 1,
+                id="zero-is-floored-not-disabling",
+            ),
+            pytest.param(
+                "forever",
+                lambda seen: seen == [5000],
+                id="garbage-falls-back-to-default",
+            ),
+        ],
+    )
+    async def test_wait_timeout_is_bounded(self, timeout, assert_timeout):
         page = _TimeoutRecordingPage()
         renderer = BrowserRenderer()
-        await renderer._run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": 890000}])
-        assert page.wait_timeouts == [int(_MAX_ACTION_WAIT_SECONDS * 1000)]
-
-    async def test_wait_timeout_zero_not_disabling(self):
-        # Playwright treats timeout=0 as "no timeout": floor to stay bounded.
-        page = _TimeoutRecordingPage()
-        renderer = BrowserRenderer()
-        await renderer._run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": 0}])
-        assert page.wait_timeouts[0] >= 1
-
-    async def test_wait_timeout_garbage_falls_back_to_default(self):
-        page = _TimeoutRecordingPage()
-        renderer = BrowserRenderer()
-        await renderer._run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": "forever"}])
-        assert page.wait_timeouts == [5000]
+        await renderer._run_action_chain(page, [{"type": "wait", "selector": "#x", "timeout": timeout}])
+        assert_timeout(page.wait_timeouts)
 
 
 class _HangingPage(BrowserFakePage):

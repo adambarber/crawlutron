@@ -79,6 +79,21 @@ def client(job_store):
     return AsyncClient(transport=transport, base_url="http://test")
 
 
+def _root_with_alias(alias_query: str) -> tuple[str, str, str, ScriptedExecute]:
+    """A seeded root, one query-aliased URL of it, an unrelated child, and an engine.
+
+    Both alias tests are about an aliased URL being *the same work item* as the
+    URL it aliases, so the shape is fixed and only the alias's query string
+    differs. Written out per test it could drift in a way the assertion would
+    not catch -- a different child, or a seed that was not the root -- and the
+    test would then pass for a reason that had nothing to do with aliasing.
+    """
+    root = "https://example.test/root"
+    root_alias = f"{root}?{alias_query}"
+    child = "https://example.test/child"
+    return root, root_alias, child, ScriptedExecute(_scripted_result_map((root, child)))
+
+
 def test_every_job_endpoint_declares_its_providers_through_an_alias():
     """No job endpoint wires a provider as an invisible ``= Depends(...)`` default.
 
@@ -1075,10 +1090,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.stats["total_discovered"] == 0
 
     async def test_legacy_frontier_canonical_aliases_do_not_underfill_cap(self, job_store):
-        root = "https://example.test/root"
-        root_alias = "https://example.test/root?utm_source=test"
-        child = "https://example.test/child"
-        engine = ScriptedExecute(_scripted_result_map((root, child)))
+        root, root_alias, child, engine = _root_with_alias("utm_source=test")
         finished = await run_seeded_scripted_job(
             job_store, root, self._policy(1, 2), engine, frontier=[root, root_alias, child]
         )
@@ -1098,10 +1110,7 @@ class TestWholeSiteAdmissionContract:
         assert finished.stats["cap_overcommitted"] == 1
 
     async def test_cross_list_alias_identity_is_single_work_item(self, job_store):
-        root = "https://example.test/root"
-        root_alias = "https://example.test/root?utm_source=legacy"
-        child = "https://example.test/child"
-        engine = ScriptedExecute(_scripted_result_map((root, child)))
+        root, root_alias, child, engine = _root_with_alias("utm_source=legacy")
         finished = await run_seeded_scripted_job(
             job_store,
             root,

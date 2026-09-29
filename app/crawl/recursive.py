@@ -22,7 +22,7 @@ from app.crawl.admission import (
     admit_discovered_links,
     canonical_page_identity,
 )
-from app.crawl.recursive_admission import admit_recursive_batch
+from app.crawl.recursive_admission import RecursiveRunState, admit_recursive_batch
 from app.crawl.result_helpers import _failed_result_for
 from app.metrics import get_metrics
 from app.models import CrawlTask, EngineCrawlResult, NormalizedUrl
@@ -132,33 +132,8 @@ class _RecursiveState:
         return link.depth, task
 
 
-@dataclass
-class _RecursiveRun:
-    scheduler: DomainScheduler
-    worker: Callable[[CrawlTask], Awaitable[EngineCrawlResult]]
-    robots_allows: Callable[[str], Awaitable[bool]]
-    robots_crawl_delay: Callable[[str], Awaitable[float | None]] | None
-    robots_disallowed: Callable[[CrawlTask], EngineCrawlResult]
-    sitemap_seeds: Callable[[], Awaitable[list[NormalizedUrl]]]
-    spill: Any
-    max_depth: int
-    max_pages: int
-    respect_robots: bool
-    include_html: bool
-    want_document_bodies: bool
-    scope_pattern: BoundedPattern | None
-    global_concurrency: int
-    seed_sitemaps: bool
-    resource_gate: ResourceGate
-    admission: WeightedAdmission
-    host_policy: HostPolicy
-    ramp_max: int
-    http_heavy_lookahead: int
-    spill_write: Callable[[Any, int, EngineCrawlResult], Awaitable[None]]
-
-
 async def _seed_recursive_frontier(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     state: _RecursiveState,
     frontier: deque[tuple[int, CrawlTask]],
     seed_identities: set[str],
@@ -181,7 +156,7 @@ async def _seed_recursive_frontier(
 
 
 async def _crawl_recursive_batch(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     allowed_jobs: list[tuple[int, CrawlTask]],
 ) -> dict[int, EngineCrawlResult] | None:
     if not allowed_jobs:
@@ -194,7 +169,7 @@ async def _crawl_recursive_batch(
 
 
 async def _commit_recursive_result(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     state: _RecursiveState,
     job: CrawlTask,
     depth: int,
@@ -216,7 +191,7 @@ async def _commit_recursive_result(
 
 
 async def _expand_recursive_result(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     state: _RecursiveState,
     depth: int,
     result: EngineCrawlResult,
@@ -241,7 +216,7 @@ async def _expand_recursive_result(
 
 
 async def _commit_recursive_results(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     state: _RecursiveState,
     allowed_jobs: list[tuple[int, CrawlTask]],
     scheduled_results: dict[int, EngineCrawlResult] | None,
@@ -257,7 +232,7 @@ async def _commit_recursive_results(
 
 
 async def _start_recursive_state(
-    run: _RecursiveRun,
+    run: RecursiveRunState,
     jobs: list[CrawlTask],
 ) -> _RecursiveState:
     state = _RecursiveState(
@@ -304,7 +279,7 @@ async def run_recursive_crawl(
     closures so this stays a pure dispatch function.
     """
     metrics = get_metrics()
-    run = _RecursiveRun(
+    run = RecursiveRunState(
         scheduler=scheduler,
         worker=worker,
         robots_allows=robots_allows,
