@@ -17,12 +17,11 @@ from __future__ import annotations
 
 import ast
 import inspect
-from typing import get_args
 
 import pytest
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
-from app.models import HttpFetchContract, HttpFetcher
+from app.models import HttpFetchContract, HttpFetcher, HttpFetchResult
 from tests.chokepoint_walks import app_python_files
 
 # There is ONE concrete fetcher. The impersonating transport is a binding of it
@@ -103,27 +102,53 @@ def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset
     return frozenset([*positional, *keyword_only])
 
 
-@pytest.mark.parametrize("fetcher", _CONCRETE_FETCHERS)
-def test_http_fetcher_alias_matches_the_concrete_fetcher_arity(fetcher):
-    """The alias's positional arity must equal each concrete fetcher's.
+def _http_fetcher_alias_signature() -> inspect.Signature:
+    """The alias's own signature, read off its Protocol.
 
-    ``Callable[[...args], ReturnType]`` carries its argument types as the first
-    element of ``get_args`` (the second is the return type), so comparing that
-    list to the concrete signature's positional parameters catches exactly the
-    drift the alias was written to prevent: a caller typed against the alias
-    calling ``fetcher(url, headers, timeout, max_content_length)``.
+    ``HttpFetcher`` is a Protocol, so its shape is a real signature rather than
+    a ``Callable`` type argument: ``get_args(HttpFetcher)[0]`` is empty, and the
+    argument types live on ``__call__`` where a caller can also see *which* of
+    them carry a default. The old reading could count the parameters and name
+    their types, but it could not tell an optional fourth from a required one --
+    which is the axis the alias got wrong.
+
+    ``self`` is dropped because a Protocol's ``__call__`` is read unbound. A
+    first parameter by any other name means the Protocol is not shaped the way
+    this reading assumes, which is a fact about the file rather than about the
+    four parameters, so it fails here instead of skewing the comparison.
+
+    ``eval_str`` because the source is written with postponed annotations, so
+    without it every parameter type reads as the string ``'int'`` rather than
+    the class -- and a string compares equal to nothing a caller can check.
     """
-    alias_args = get_args(HttpFetcher)[0]
-    signature = inspect.signature(fetcher)
-    positional = [
+    declared = inspect.signature(HttpFetcher.__call__, eval_str=True)
+    parameters = list(declared.parameters.values())
+    assert parameters[0].name == "self", (
+        f"HttpFetcher.__call__ opens with {parameters[0].name!r}, not self"
+    )
+    return declared.replace(parameters=parameters[1:])
+
+
+def _positional(signature: inspect.Signature) -> list[inspect.Parameter]:
+    return [
         param
         for param in signature.parameters.values()
         if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
     ]
-    assert len(alias_args) == len(positional), (
-        f"HttpFetcher declares {len(alias_args)} positional parameters "
-        f"{alias_args} but {fetcher.__name__} accepts "
-        f"{[param.name for param in positional]}"
+
+
+@pytest.mark.parametrize("fetcher", _CONCRETE_FETCHERS)
+def test_http_fetcher_alias_matches_the_concrete_fetcher_arity(fetcher):
+    """The alias's positional parameters must equal each concrete fetcher's.
+
+    Compared by name as well as by count, so a reordering is caught too. A
+    caller typed against the alias calls ``fetcher(url, headers, timeout,
+    max_content_length)`` by position.
+    """
+    alias_names = [param.name for param in _positional(_http_fetcher_alias_signature())]
+    concrete_names = [param.name for param in _positional(inspect.signature(fetcher))]
+    assert alias_names == concrete_names, (
+        f"HttpFetcher declares {alias_names} but {fetcher.__name__} accepts {concrete_names}"
     )
 
 
@@ -131,7 +156,35 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     """The alias is the documented contract, so its argument types must be the
     (url, headers, timeout_seconds, max_content_length) tuple the concrete
     fetchers accept -- not the three-parameter shape it drifted to."""
-    assert get_args(HttpFetcher)[0] == [str, dict[str, str], int, int]
+    alias = _http_fetcher_alias_signature()
+    assert [param.annotation for param in _positional(alias)] == [
+        str,
+        dict[str, str],
+        int,
+        int,
+    ]
+    assert alias.return_annotation is HttpFetchResult
+
+
+def test_http_fetcher_alias_marks_the_content_length_cap_optional():
+    """The cap must read as omittable, which is what a Callable alias cannot say.
+
+    Every implementation gives ``max_content_length`` a default, and the engine
+    binds its fetcher with ``functools.partial``, which drops defaults when it
+    synthesizes a signature. So when the alias was ``Callable[[str, dict, int,
+    int], Any]`` -- four required positionals -- a correct three-argument call
+    read to the type checker as a missing argument, and the only real
+    requirement to fix it was to stop using a Callable alias.
+    """
+    alias_defaulted = frozenset(
+        param.name
+        for param in _http_fetcher_alias_signature().parameters.values()
+        if param.default is not inspect.Parameter.empty
+    )
+    assert alias_defaulted == {"max_content_length"}, (
+        f"HttpFetcher marks {sorted(alias_defaulted)} optional; "
+        "only max_content_length is omittable in every implementation"
+    )
 
 
 def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:

@@ -17,7 +17,7 @@ from tests._fetcher_factories import scripted_fetcher, strategy_request
 from tests._policy_factories import make_base_policy
 from tests._timing_harnesses import await_until
 from tests._transport_doubles import real_cffi_fetch_outcome
-from tests.helpers.server import spawn_threaded_server
+from tests.helpers.server import SilentHandler, spawn_threaded_server
 
 # The impersonating transport, bound once for this module. It used to be a local
 # wrapper function called from nine places, each re-deciding that "the cffi
@@ -226,8 +226,16 @@ async def test_clean_stream_end_awaits_the_close_and_never_abandons(monkeypatch)
     assert response.awaited is True, "the success path must await the handle close"
 
 
-class _StalledBodyHandler:
+class _StalledBodyHandler(SilentHandler):
     """200 + headers, then not one body byte until ``_STALL_RELEASE`` is set.
+
+    Subclasses ``SilentHandler`` because the response methods used to be
+    duck-typed onto a bare class. ``socketserver`` constructs a handler with
+    ``(request, client_address, server)``, so the bare class raised
+    ``TypeError: _StalledBodyHandler() takes no arguments`` on every request and
+    the server reset the connection instead of stalling. The test below reads
+    any transport error as a pass, so it stayed green having never run the path
+    it names. ``counter.hits`` is what now proves the handler was reached.
 
     The stall is an ``Event`` rather than a sleep because the suite patches
     ``time.sleep`` to a no-op: a handler that waits by sleeping returns at once,
@@ -239,15 +247,13 @@ class _StalledBodyHandler:
     protocol_version = "HTTP/1.1"
 
     def do_GET(self):
+        self.counter.hits += 1
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
         self.wfile.flush()
         _STALL_RELEASE.wait()
-
-    def log_message(self, *args):
-        pass
 
 
 _STALL_RELEASE = threading.Event()
@@ -288,6 +294,14 @@ def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
         # Any transport-error class is contract-fine (ReadError, Timeout,
         # ConnectionError...): the point is a bounded failure, not a hang.
         assert outcome.error, outcome
+
+    # The load-bearing assertion. Both arms above are satisfiable by a server
+    # that died before serving, which is exactly what this handler used to do:
+    # every request reset, the reset surfaced as the accepted error class, and
+    # the test reported the timeout honored without a body ever being withheld.
+    # At least one, not exactly one: the impersonated fetcher retries a read
+    # timeout, so the withheld body is requested more than once.
+    assert server.hits >= 1, "the stall handler was never reached, so nothing was withheld"
 
 
 class _FeedOnDemandQueue:

@@ -397,11 +397,32 @@ class EngineCrawlResult(_LiteralChecked):
 SyncCrawlWorker = Callable[[CrawlJob], CrawlResult]
 AsyncCrawlWorker = Callable[[CrawlJob], Awaitable[CrawlResult]]
 CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
+
+
 # Four positional parameters: (url, headers, timeout_seconds, max_content_length).
 # The concrete fetcher accepts the content-length cap and the retry wrapper passes
 # it positionally, so the alias must describe four parameters -- a caller typed
 # against it must be able to invoke the real fetcher it is handed (P2-A).
-HttpFetcher = Callable[[str, dict[str, str], int, int], Any]
+#
+# A Protocol rather than a ``Callable[[str, dict[str, str], int, int], Any]``
+# alias, for two reasons that are both load-bearing. The fourth parameter is
+# optional in every implementation and a Callable alias cannot say so -- it types
+# all four as required -- and ``functools.partial`` drops the default when it
+# synthesizes a signature, so a correct three-argument call read as a missing
+# argument. The return is the result model, not ``Any``.
+#
+# :class:`HttpFetchContract` is the same shape before the policy is bound; this
+# is what the engine hands the chain once it has bound it.
+class HttpFetcher(Protocol):
+    """The four positional parameters of a fetcher whose policy is already bound."""
+
+    async def __call__(
+        self,
+        url: str,
+        headers: dict[str, str],
+        timeout_seconds: int,
+        max_content_length: int = ...,
+    ) -> HttpFetchResult: ...
 
 
 class HttpFetchContract(Protocol):
