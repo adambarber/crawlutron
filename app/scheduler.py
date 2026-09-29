@@ -274,7 +274,7 @@ class DomainScheduler:
         if accounting != "success":
             return
         self.record_success(domain)
-        # Feed observed latency into the adaptive estimator (#6). One declared
+        # Feed observed latency into the adaptive estimator. One declared
         # member, satisfied by both result shapes, so this reads the same
         # whether the job came through the crawl or the render pipeline.
         latency = result.elapsed_ms
@@ -318,7 +318,7 @@ class DomainScheduler:
         return True
 
     def record_latency(self, domain: str, latency_ms: float) -> None:
-        """Feed observed response latency (ms) into the adaptive delay estimator (#6).
+        """Feed observed response latency (ms) into the adaptive delay estimator.
 
         Negative is the only rejected value, and it is rejected because it is a
         bad measurement rather than a fast response: adopting one would pull the
@@ -348,7 +348,7 @@ class DomainScheduler:
         self._domain_strategy_pins[domain] = strategy
 
     def _recompute_delay(self, domain: str) -> float:
-        """Target per-domain delay (seconds) from the latency EMA (#6)."""
+        """Target per-domain delay (seconds) from the latency EMA."""
         lat = self._domain_latency_ema.get(domain)
         if lat is None:
             return self._delay_seconds
@@ -356,7 +356,7 @@ class DomainScheduler:
         return min(self._adaptive_max_delay, max(self._adaptive_min_delay, target))
 
     def current_delay(self, domain: str) -> float:
-        """Delay (seconds) to apply before the next request to ``domain`` (#6).
+        """Delay (seconds) to apply before the next request to ``domain``.
 
         When adaptive throttling is enabled this is latency-driven; otherwise the
         fixed ``delay_seconds`` is used. A per-domain robots Crawl-delay floor
@@ -371,7 +371,7 @@ class DomainScheduler:
 
         Non-finite values are ignored and finite values are clamped to the
         politeness ceiling so a hostile robots.txt cannot install an unbounded
-        per-domain floor (M1) — the cap is enforced at the write, the
+        per-domain floor — the cap is enforced at the write, the
         chokepoint where a delay becomes a scheduler wait.
         """
         if seconds and seconds > 0 and math.isfinite(seconds):

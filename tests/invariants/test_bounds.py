@@ -445,7 +445,7 @@ def test_discovery_response_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Header ints are guarded (L2): a hostile header must never crash a fetch
+# Header ints are guarded: a hostile header must never crash a fetch
 # ---------------------------------------------------------------------------
 
 
@@ -522,7 +522,7 @@ def _unguarded_header_int_offenders(tree: ast.AST, path: pathlib.Path) -> list[s
 
 
 def test_header_numbers_are_converted_under_guard():
-    """No unguarded int()/float() on a header value anywhere in app/ (L2)."""
+    """No unguarded int()/float() on a header value anywhere in app/."""
     assert_trees_clean(
         _unguarded_header_int_offenders,
         "parse header numbers through a guard or try/except ValueError",

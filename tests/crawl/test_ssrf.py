@@ -89,7 +89,7 @@ def _fail_resolution(host, *args, **kwargs):
 
 
 def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
     with pytest.raises(ValueError):
         http_mod._check_ssrf_protection("http://nonexistent.invalid/")
@@ -97,7 +97,7 @@ def test_check_ssrf_protection_blocks_unresolvable_host(monkeypatch):
 
 def test_resolve_and_pin_host_does_not_fall_back_to_loopback(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     hostname, pinned_ip = http_mod._resolve_and_pin_host("http://nonexistent.invalid/")
     assert pinned_ip != "127.0.0.1", "unresolvable host must not pin to loopback"
     assert pinned_ip == "nonexistent.invalid"
@@ -107,7 +107,7 @@ def test_build_pinned_request_never_targets_loopback_for_unresolvable(monkeypatc
     # Defense-in-depth: even if a caller skips the SSRF check, pinning must not
     # point at 127.0.0.1 for an attacker-influenced, unresolvable hostname.
     monkeypatch.setattr(socket, "getaddrinfo", _fail_resolution)
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     # _build_pinned_request raises now (check fails closed), so assert it raises.
     with pytest.raises(ValueError):
         http_mod._build_pinned_request(
@@ -144,7 +144,7 @@ class TestSSRFProtection:
     def test_hostname_resolved_only_once(self, monkeypatch):
         """The SSRF check must resolve the hostname exactly once.
 
-        Clears the process-global DNS cache first: the resolution cache (#3)
+        Clears the process-global DNS cache first: the resolution cache
         persists across tests, so without isolation a prior test that resolved
         the same host would serve this call from cache (0 getaddrinfo calls).
         """
@@ -179,7 +179,7 @@ class TestSsrfDnsPinning:
 
 def test_ssrf_fixture_passes_when_opted_out(monkeypatch, ssrf_guard_required):
     """The happy path: opt out, then exercise the helper. Should pass."""
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     # Call the real helper; it will fail to resolve but the call itself
     # counts as "exercised", which is what the fixture checks.
     with contextlib.suppress(Exception):
@@ -190,12 +190,12 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_require
     """If the test forgets to opt out, the fixture must fail with a clear
     message naming the missing opt-out.
     """
-    # Deliberately do NOT set BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=0.
+    # Deliberately do NOT set CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0.
     # The fixture must catch this.
     import os
 
-    monkeypatch.delenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", raising=False)
-    os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
+    monkeypatch.delenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", raising=False)
+    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     with pytest.raises(pytest.fail.Exception, match="SSRF guard"):
         http_mod._check_ssrf_protection("http://example.invalid/")
 
@@ -208,7 +208,7 @@ def test_ssrf_fixture_fails_when_opt_out_missing(monkeypatch, ssrf_guard_require
 
 
 def test_allow_private_returns_original_hostname_not_loopback(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     hostname, pinned = _resolve_and_pin_host("http://example.com/")
     assert hostname == "example.com"
     # Must connect to the requested host, not hardcoded loopback.
@@ -219,7 +219,7 @@ def test_allow_private_returns_original_hostname_not_loopback(monkeypatch):
 def test_allow_private_preserves_host_for_webhook_style_urls(monkeypatch):
     # A non-loopback host under local dev mode stays as-is (so webhooks and
     # fetches to the real hostname are not misrouted to 127.0.0.1).
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     hostname, pinned = _resolve_and_pin_host("https://hooks.svc.local/path")
     assert hostname == "hooks.svc.local"
     assert pinned == "hooks.svc.local"

@@ -51,7 +51,7 @@ async def _default_http_fetcher(
     fallback is not a failure of the attempt that could not be made.
 
     Async HTTP/2 fetch over the shared pooled ``httpx.AsyncClient`` with
-    granular timeouts (#4), SSRF protection (#7), content-length limits (#5) and
+    granular timeouts, SSRF protection, content-length limits and
     SSRF-safe manual redirect handling (F1).
 
     Redirects are followed by hand so every hop is re-validated against the SSRF
@@ -82,7 +82,7 @@ async def _default_http_fetcher(
             status_code = response.status_code
             if chain.advance(response):
                 continue
-            # Terminal response: stream RAW bytes, capping total read (#5).
+            # Terminal response: stream RAW bytes, capping total read.
             # bytearray.extend is O(chunk); ``raw += chunk`` on immutable
             # bytes re-allocates and copies the whole buffer per chunk.
             # A non-2xx streams through this same capped loop, so an error
@@ -212,7 +212,7 @@ async def _cffi_fetch(
             except Exception:
                 # Fall back to plain httpx for this request on transport errors.
                 return None
-            # Content-length check (#5)
+            # Content-length check
             content_length = response.headers.get("content-length")
             if pinned_transport._declared_length_exceeds(content_length, max_content_length):
                 await response.aclose()  # N8: release the curl handle
@@ -289,7 +289,7 @@ async def _cffi_fetch(
             # is safe (unlike the stall/abandon paths above) and required now
             # that the session is shared -- the per-request `async with` used
             # to release the handle implicitly. Without this the next streamed
-            # request on the shared session stalls on the busy handle (#4).
+            # request on the shared session stalls on the busy handle.
             await response.aclose()
             # Decompress with a size cap (decompression-bomb guard), normalise
             # headers and persist cookies via the shared tail.

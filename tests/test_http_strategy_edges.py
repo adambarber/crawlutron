@@ -15,7 +15,7 @@ def _cffi_smoke_worker(url: str, out_queue: multiprocessing.Queue) -> None:
     """Subprocess body for the cffi smoke test (must be module-level to pickle)."""
     import asyncio
 
-    os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
+    os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
 
     from app.crawl.strategies.fetchers import impersonating_fetcher
     from app.validation import HostPolicy

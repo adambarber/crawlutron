@@ -182,7 +182,7 @@ class MemoryGate(ResourceGauge):
     _MAX_ANTICIPATION = 0.15
 
     def _usage_ratio(self) -> float:
-        """Current trailing fraction. Pure read (L7): never mutates slope
+        """Current trailing fraction. Pure read: never mutates slope
         state, so interleaved readiness/metrics/wait readers cannot perturb
         the dispatch estimator's slope series."""
         stats = read_memory_stats(cgroup_root=self.cgroup_root)

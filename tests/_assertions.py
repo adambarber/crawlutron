@@ -19,7 +19,7 @@ def set_optional_env(monkeypatch, name: str, value: str | None) -> None:
 
 
 def block_private_targets(monkeypatch) -> None:
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
 
 @contextmanager

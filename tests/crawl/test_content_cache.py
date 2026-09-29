@@ -292,7 +292,7 @@ async def test_http_strategy_result_uses_content_cache(base_url, tmp_path):
 
 
 async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
-    """An etagged URL is revalidated (conditional GET) and served from cache on 304 (#5)."""
+    """An etagged URL is revalidated (conditional GET) and served from cache on 304."""
     run = cached_strategy_runner(*etag_case(tmp_path, etag_server))
     first = await run()
     assert first.status == "success"
@@ -306,7 +306,7 @@ async def test_content_cache_revalidates_etagged_url(etag_server, tmp_path):
 
 
 async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
-    """If the etag changed, revalidation returns 200 and fresh content is served (#5)."""
+    """If the etag changed, revalidation returns 200 and fresh content is served."""
     run = cached_strategy_runner(*etag_case(tmp_path, etag_server))
     await run()
     with etag_serving("v2", b"<html><body>changed content</body></html>"):
@@ -316,7 +316,7 @@ async def test_content_cache_etag_change_avoids_stale(etag_server, tmp_path):
 
 
 async def test_crawl_request_serves_recursive_pages_from_content_cache(tmp_path):
-    """Recursive crawl_request reuses the content cache for seed AND discovered pages (#5)."""
+    """Recursive crawl_request reuses the content cache for seed AND discovered pages."""
     from urllib.parse import urlparse
 
     # ``calls`` is the chokepoint's own URL log: this test is about what the
@@ -491,7 +491,7 @@ def test_explicit_max_entries_zero_disables_limit():
 
 
 def test_lru_keeps_recently_used_entries():
-    """Accessing an entry protects it from next eviction (#5)."""
+    """Accessing an entry protects it from next eviction."""
 
     with scoped_cache(default_ttl=3600, max_entries=3) as c:
         c.set("a", 1)

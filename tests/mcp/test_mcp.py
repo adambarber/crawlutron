@@ -233,7 +233,7 @@ class TestDiscover:
         assert "tools" in result["capabilities"]
         assert result["ttlMs"] > 0
         assert result["cacheScope"] == "public"
-        assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "browser-crawler"
+        assert result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"] == "crawlutron"
         assert "instructions" in result
 
 

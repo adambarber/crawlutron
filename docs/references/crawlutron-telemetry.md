@@ -1,6 +1,6 @@
-# Browser-Crawler Telemetry Posture
+# Crawlutron Telemetry Posture
 
-**Invariant:** the browser-crawler service sends **zero** telemetry / usage
+**Invariant:** the crawlutron service sends **zero** telemetry / usage
 analytics / update phone-homes. This is a hard posture, not a preference: the
 service crawls arbitrary public sites on a user's behalf and must not leak that
 activity — or a stable device identifier — to third parties.
@@ -82,11 +82,11 @@ endpoints, not a general egress filter.
 
 ```sh
 # 1. onnxruntime must NOT emit the telemetry device-ID warning at import:
-docker exec browser-crawler python -c 'import onnxruntime' 2>&1 | grep -c telemetry
+docker exec crawlutron python -c 'import onnxruntime' 2>&1 | grep -c telemetry
 #    -> expect 0
 
 # 2. the OneCollector / App-Insights sinks must be sinkholed (0.0.0.0), not real IPs:
-docker exec browser-crawler python -c 'import socket; \
+docker exec crawlutron python -c 'import socket; \
   [print(h, socket.gethostbyname(h)) for h in \
   ["mobile.events.data.microsoft.com","dc.services.visualstudio.com"]]'
 #    -> both resolve to 0.0.0.0

@@ -1,4 +1,4 @@
-"""_content_metrics must count tags in a single pass (#13) with stable keys."""
+"""_content_metrics must count tags in a single pass with stable keys."""
 
 from app.crawl.strategies.body_decode import _content_metrics
 

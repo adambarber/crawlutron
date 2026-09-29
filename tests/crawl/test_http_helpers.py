@@ -152,7 +152,7 @@ class TestHeaderHelpers:
         assert "iPhone" in headers["User-Agent"]
 
     def test_configured_user_agent_overrides_identity(self, monkeypatch) -> None:
-        monkeypatch.setenv("BROWSER_CRAWLER_USER_AGENT", "crawler-test/1")
+        monkeypatch.setenv("CRAWLUTRON_USER_AGENT", "crawler-test/1")
         headers = _headers_for_strategy(HTTP_DECLARED_CRAWLER, read_policy({"headers": {}}), "http://x/")
         assert headers["User-Agent"] == "crawler-test/1"
 
@@ -170,7 +170,7 @@ class TestFetchRetries:
             await _fetch_with_retries(raise_fetcher, "http://x/", {}, 5, 0)
 
     def test_retry_backoff_is_exponential_and_capped(self) -> None:
-        """Each retry gap doubles from the base and plateaus at the ceiling (L3)."""
+        """Each retry gap doubles from the base and plateaus at the ceiling."""
         from app.crawl.strategies.fetch_policy import _RETRY_BACKOFF_CAP_SECONDS
 
         assert _retry_backoff_seconds(1) == pytest.approx(0.25)
@@ -465,7 +465,7 @@ class TestCrawlRequest:
             await crawl_request(payload, settings=settings, http_fetcher=ok_fetcher, browser_worker=None)
 
     def test_checked_payload_urls_is_the_shared_batch_gate(self) -> None:
-        """One chokepoint returns in-range urls and rejects oversized batches (L4)."""
+        """One chokepoint returns in-range urls and rejects oversized batches."""
         from app.crawl.payload_helpers import checked_payload_urls
 
         within = {"urls": ["http://example.com/a", "http://example.com/a", "http://example.com/b"]}

@@ -95,7 +95,7 @@ _EXTRACTION_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thre
 
 # Default 2 keeps memory bounded: each worker loads markitdown + parsers and the
 # production container runs with a 3g mem limit (compose pins `mem_limit: 3g`).
-# Raise via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS when more PDF/Office
+# Raise via CRAWLUTRON_EXTRACTION_DOC_WORKERS when more PDF/Office
 # throughput is needed and the memory budget allows it.
 _DEFAULT_DOC_WORKERS = 2
 
@@ -145,9 +145,9 @@ def _test_hooks_enabled() -> bool:
     The hooks exist so tests can simulate child death/hang/output without
     real parsers, but a stray env var must never alter production behavior:
     they only fire when the operator explicitly exports
-    BROWSER_CRAWLER_TEST_HOOKS=1 alongside the per-hook flag.
+    CRAWLUTRON_TEST_HOOKS=1 alongside the per-hook flag.
     """
-    return parse_bool_env("BROWSER_CRAWLER_TEST_HOOKS", default=False)
+    return parse_bool_env("CRAWLUTRON_TEST_HOOKS", default=False)
 
 
 def _doc_task_hooks() -> dict | None:
@@ -287,7 +287,7 @@ def _teardown_doc_pool_locked() -> None:
 
 
 def _document_extraction_enabled() -> bool:
-    return parse_bool_env("BROWSER_CRAWLER_EXTRACTION_DOC_ENABLED", default=True)
+    return parse_bool_env("CRAWLUTRON_EXTRACTION_DOC_ENABLED", default=True)
 
 
 def _acquire_doc_worker() -> _DocWorker | None:
@@ -421,18 +421,18 @@ async def _shutdown_doc_extraction_executor() -> None:
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
 # A pathological selector (or adversarial payload) could otherwise run
 # unbounded and tie up a request worker. Override via env var.
-_EXTRACTION_SELECTOR_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_SELECTOR_TIMEOUT", 2.0)
+_EXTRACTION_SELECTOR_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT", 2.0)
 
 # Wall-clock bound (seconds) for document extraction (markitdown).
-# Override via BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT.
-_EXTRACTION_DOC_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_TIMEOUT", 10.0)
+# Override via CRAWLUTRON_EXTRACTION_DOC_TIMEOUT.
+_EXTRACTION_DOC_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_DOC_TIMEOUT", 10.0)
 
 # How long a caller waits for a free worker slot. A healthy pool releases a
 # worker when its own task hits _EXTRACTION_DOC_TIMEOUT, so a full round of the
 # pool is already generous; this bound exists for the unhealthy case, where a
 # busy flag is never cleared and an unbounded wait would take the whole pool
-# down with it. Override via BROWSER_CRAWLER_EXTRACTION_DOC_ACQUIRE_TIMEOUT.
-_EXTRACTION_DOC_ACQUIRE_TIMEOUT = get_env_float("BROWSER_CRAWLER_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 90.0)
+# down with it. Override via CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT.
+_EXTRACTION_DOC_ACQUIRE_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_DOC_ACQUIRE_TIMEOUT", 90.0)
 
 # Re-check interval for a waiting acquirer (the escape hatch for "nothing will
 # ever notify"); releases still wake waiters immediately via notify_all.
@@ -442,7 +442,7 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 # unbounded document can balloon it past the memory ceiling. Cap the input
 # size and allow deployments to disable subprocess extraction entirely.
 _EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int(
-    "BROWSER_CRAWLER_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1
+    "CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1
 )
 
 # Maximum extracted markdown size (chars) to prevent unbounded output (F5).
@@ -801,7 +801,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
         try:
             worker.conn.send((body, _doc_task_hooks()))
         except (EOFError, OSError):
-            # Send raced a worker death: reap the slot and report empty (M8).
+            # Send raced a worker death: reap the slot and report empty.
             logger.warning("extraction_document_child_died")
             _retire_doc_worker(worker)
             return ExtractedContent(None, None)
@@ -819,7 +819,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
                 # The worker died before sending (segfault on hostile
                 # input): poll() reports EOF as readable, then recv()
                 # raises. Graceful empty extraction, not an unhandled
-                # error -- and retire the slot on every death path (M8).
+                # error -- and retire the slot on every death path.
                 logger.warning("extraction_document_child_died")
                 _retire_doc_worker(worker)
                 return ExtractedContent(None, None)

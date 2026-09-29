@@ -211,7 +211,7 @@ async def fetch_sitemap_urls(
 
     If a previous resolution cached an ETag/Last-Modified (or the caller passes
     ``conditional``), the root sitemap is fetched with a conditional request
-    (#5). A 304 reuses the cached URLs without re-parsing the body, which
+    A 304 reuses the cached URLs without re-parsing the body, which
     avoids re-downloading unchanged sitemaps on every crawl.
     """
     import re as _re

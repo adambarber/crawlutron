@@ -2,7 +2,7 @@
 
 The browser strategy hardcodes goto(wait_until="domcontentloaded") and
 implements the documented "network_idle_or_timeout" settle semantic in
-_wait_for_ready_state (M9). A second settle path would compete with that,
+_wait_for_ready_state. A second settle path would compete with that,
 so the field was removed from RenderOptions, the /v1/render schema, and
 the MCP tool descriptions. These tests pin the removal and that callers
 sending wait_until are not broken (the unknown key is simply ignored).

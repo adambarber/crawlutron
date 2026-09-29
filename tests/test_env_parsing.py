@@ -25,34 +25,34 @@ from app.validation import get_env_float, get_env_int, parse_bool_env
 
 class TestGetEnvInt:
     def test_unset_returns_default(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 42
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        assert get_env_int("CRAWLUTRON_TEST_INT", 42) == 42
 
     def test_valid_value_parses(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "7")
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 7
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", "7")
+        assert get_env_int("CRAWLUTRON_TEST_INT", 42) == 7
 
     def test_env_readers_accept_surrounding_whitespace_consistently(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_BOOL", " FALSE ")
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", " 7 ")
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", " 0.25 ")
-        assert parse_bool_env("BROWSER_CRAWLER_TEST_BOOL", True) is False
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 7
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", 0.5) == 0.25
+        monkeypatch.setenv("CRAWLUTRON_TEST_BOOL", " FALSE ")
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", " 7 ")
+        monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", " 0.25 ")
+        assert parse_bool_env("CRAWLUTRON_TEST_BOOL", True) is False
+        assert get_env_int("CRAWLUTRON_TEST_INT", 42) == 7
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.25
 
     def test_typo_falls_back_to_default(self, monkeypatch, caplog):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "four")
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", "four")
         with caplog.at_level(logging.WARNING):
-            assert get_env_int("BROWSER_CRAWLER_TEST_INT", 42) == 42
+            assert get_env_int("CRAWLUTRON_TEST_INT", 42) == 42
         assert caplog.records, "expected an invalid_int_env warning"
-        assert caplog.records[0].env_name == "BROWSER_CRAWLER_TEST_INT"
+        assert caplog.records[0].env_name == "CRAWLUTRON_TEST_INT"
         assert caplog.records[0].fallback == 42
 
     def test_clamps_to_bounds(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "0")
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 4, lo=1) == 1
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "9999")
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 4, hi=100) == 100
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", "0")
+        assert get_env_int("CRAWLUTRON_TEST_INT", 4, lo=1) == 1
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", "9999")
+        assert get_env_int("CRAWLUTRON_TEST_INT", 4, hi=100) == 100
 
 
 class TestDefaultCoercionNeverBlowsUp:
@@ -65,67 +65,67 @@ class TestDefaultCoercionNeverBlowsUp:
     """
 
     def test_int_getter_coerces_string_default(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        value = get_env_int("BROWSER_CRAWLER_TEST_INT", "42")
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        value = get_env_int("CRAWLUTRON_TEST_INT", "42")
         assert value == 42 and isinstance(value, int)
 
     def test_float_getter_coerces_string_default(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_FLOAT", raising=False)
-        value = get_env_float("BROWSER_CRAWLER_TEST_FLOAT", "0.5")
+        monkeypatch.delenv("CRAWLUTRON_TEST_FLOAT", raising=False)
+        value = get_env_float("CRAWLUTRON_TEST_FLOAT", "0.5")
         assert value == 0.5 and isinstance(value, float)
 
     def test_float_default_keeps_arithmetic_numeric(self, monkeypatch):
         # The exact regression: int * fraction must be float math, not str repeat.
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_FLOAT", raising=False)
-        fraction = get_env_float("BROWSER_CRAWLER_TEST_FLOAT", "0.5")
+        monkeypatch.delenv("CRAWLUTRON_TEST_FLOAT", raising=False)
+        fraction = get_env_float("CRAWLUTRON_TEST_FLOAT", "0.5")
         assert 100 * fraction == 50.0
 
     def test_int_getter_truncates_float_default(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        value = get_env_int("BROWSER_CRAWLER_TEST_INT", 4.7)
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        value = get_env_int("CRAWLUTRON_TEST_INT", 4.7)
         assert value == 4 and isinstance(value, int)
 
     def test_uncoercible_default_falls_back_without_raising(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_FLOAT", raising=False)
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", None) == 0
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", None) == 0.0
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        monkeypatch.delenv("CRAWLUTRON_TEST_FLOAT", raising=False)
+        assert get_env_int("CRAWLUTRON_TEST_INT", None) == 0
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", None) == 0.0
         # "abc" rather than a synthetic object: an unparseable string is a real
         # default (a typo'd env var or a hand-edited mapping) and is the case
         # `_as_int_default` documents by name. `object()` stood in for "not a
         # number" with a value no caller can actually produce, so the assertion
         # proved the try/except rather than the contract.
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", "abc") == 0
+        assert get_env_int("CRAWLUTRON_TEST_INT", "abc") == 0
 
     def test_valid_env_value_still_wins_over_default(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", "0.25")
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", "0.5") == 0.25
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_INT", "7")
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", "42") == 7
+        monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "0.25")
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", "0.5") == 0.25
+        monkeypatch.setenv("CRAWLUTRON_TEST_INT", "7")
+        assert get_env_int("CRAWLUTRON_TEST_INT", "42") == 7
 
     def test_clamp_bounds_survive_string_default(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        assert get_env_int("BROWSER_CRAWLER_TEST_INT", 0, lo=1) == 1
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        assert get_env_int("CRAWLUTRON_TEST_INT", 0, lo=1) == 1
 
     def test_rejects_infinite_env_value(self, monkeypatch):
         # ``float("inf")`` parses cleanly but ``limit * inf`` overflows at
         # int() — a malicious value must fall back, not wedge the boot.
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", "inf")
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", 0.5) == 0.5
+        monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "inf")
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.5
 
     def test_rejects_nan_env_value(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", "nan")
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", 0.5) == 0.5
+        monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "nan")
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5) == 0.5
 
     def test_finite_huge_value_clamps_to_hi(self, monkeypatch):
         # 1e308 is finite (passes isfinite) yet ``limit * 1e308`` overflows;
         # only the declared bound keeps the arithmetic safe.
-        monkeypatch.setenv("BROWSER_CRAWLER_TEST_FLOAT", "1e308")
-        assert get_env_float("BROWSER_CRAWLER_TEST_FLOAT", 0.5, lo=0.0, hi=1.0) == 1.0
+        monkeypatch.setenv("CRAWLUTRON_TEST_FLOAT", "1e308")
+        assert get_env_float("CRAWLUTRON_TEST_FLOAT", 0.5, lo=0.0, hi=1.0) == 1.0
 
     def test_int_default_is_always_int_type(self, monkeypatch):
-        monkeypatch.delenv("BROWSER_CRAWLER_TEST_INT", raising=False)
-        value = get_env_int("BROWSER_CRAWLER_TEST_INT", 4)
+        monkeypatch.delenv("CRAWLUTRON_TEST_INT", raising=False)
+        value = get_env_int("CRAWLUTRON_TEST_INT", 4)
         assert type(value) is int
 
 
@@ -146,21 +146,21 @@ class TestDeploymentValuesAreRefusedNotClamped:
     """
 
     def test_out_of_ceiling_timeout_yields_the_default_not_the_ceiling(self):
-        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "999"})
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS": "999"})
         assert settings.default_timeout_seconds == DEFAULT_HTTP_TIMEOUT_SECONDS  # 30, not 120
         assert settings.default_timeout_seconds != MAX_HTTP_TIMEOUT_SECONDS
 
     def test_out_of_ceiling_retries_yields_the_default(self):
-        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "9"})
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_DEFAULT_MAX_RETRIES": "9"})
         assert settings.default_max_retries == DEFAULT_MAX_RETRIES
 
     def test_in_ceiling_retry_default_is_honoured(self):
-        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "3"})
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_DEFAULT_MAX_RETRIES": "3"})
         assert settings.default_max_retries == 3
 
     def test_the_refusal_is_logged_with_the_value_that_was_refused(self, caplog):
         with caplog.at_level(logging.WARNING, logger="app.validation"):
-            CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "9"})
+            CrawlerSettings.from_mapping({"CRAWLUTRON_DEFAULT_MAX_RETRIES": "9"})
         refused = [r for r in caplog.records if r.message == "operator_max_retries_out_of_range"]
         assert refused, "a refused deployment value must be visible at startup"
         assert refused[0].env_value == "9"

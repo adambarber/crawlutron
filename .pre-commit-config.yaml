@@ -1,4 +1,4 @@
-# Quality gates for browser-crawler.
+# Quality gates for crawlutron.
 #
 # This file lives INSIDE the service and IS the repository's own
 # `.pre-commit-config.yaml`: the service is now its own repository, so pre-commit

@@ -18,7 +18,7 @@ HTTP_DECLARED_CRAWLER: Final = "HTTP_DECLARED_CRAWLER"
 HTTP_CFFI_IMPERSONATE: Final = "HTTP_CFFI_IMPERSONATE"
 BROWSER_HEADLESS: Final[Literal["BROWSER_HEADLESS"]] = "BROWSER_HEADLESS"
 
-# Service version: single source of truth (L2), imported directly by callers.
+# Service version: single source of truth, imported directly by callers.
 SERVICE_VERSION: str = "0.3.0"
 # The service's own id, as callers and clients see it. This string was spelled
 # at seven sites -- the three discovery payloads, the MCP server name, the
@@ -26,7 +26,7 @@ SERVICE_VERSION: str = "0.3.0"
 # they all answer for the same service, so a rename that missed one would make
 # the wire describe something other than what replied. One constant, seven
 # references: a site that drifts is now a visible edit rather than a silent lie.
-SERVICE_ID: Final = "browser-crawler"
+SERVICE_ID: Final = "crawlutron"
 ROUTER_MODULE_DOC: Final = (
     "Pure router: imports :func:`{handler}` and binds it\n"
     "to the ``{path}`` POST path. The handler implementation lives in the\n"
@@ -44,10 +44,10 @@ REPOSITORY_URL: Final = "https://github.com/adambarber/crawlutron"
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
 # to outbound requests, and so the package version is sourced from a single
 # place instead of being duplicated across files.
-# Overridable via BROWSER_CRAWLER_USER_AGENT.
+# Overridable via CRAWLUTRON_USER_AGENT.
 DEFAULT_USER_AGENT: str = f"{SERVICE_ID}/{SERVICE_VERSION} (+{REPOSITORY_URL})"
 USER_AGENT_TOKEN: str = SERVICE_ID
-# TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
+# TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy: the
 # fetcher and the agent-hints copy both reference this, so they cannot drift.
 CFFI_IMPERSONATE_TARGET: str = "firefox135"
 BROWSER_HEADED_WARMED: Final[Literal["BROWSER_HEADED_WARMED"]] = "BROWSER_HEADED_WARMED"
@@ -565,7 +565,7 @@ MAX_URL_TRANSIENT_ATTEMPTS: int = 3
 # otherwise hold a concurrency slot for many minutes while the resource gate
 # reports idle capacity. Generous so it never trips on healthy targets.
 DEFAULT_TOTAL_URL_BUDGET_SECONDS: float = 180.0
-# The single source for large-crawl guidance (M14). It shipped once as three
+# The single source for large-crawl guidance. It shipped once as three
 # hand-maintained copies (capabilities, agent-hints, the OpenAPI endpoint
 # description); one constant feeds every surface, so the advice cannot drift
 # between the places an agent reads it.
@@ -609,7 +609,7 @@ SITEMAP_INDEX_FANOUT: int = 16
 ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
 
 # Browser runtime limits (also exposed as CrawlerSettings fields with
-# BROWSER_CRAWLER_* env mappings).
+# CRAWLUTRON_* env mappings).
 DEFAULT_MAX_BROWSER_RENDERS: int = 100
 DEFAULT_MAX_CONCURRENT_PAGES: int = 3
 
@@ -625,7 +625,7 @@ DEFAULT_COOKIE_HARVEST_TIMEOUT_SECONDS: float = 5.0
 # Browser pool: number of persistent browser instances to keep warm PER WORKER.
 # Each browser uses ~300MB (200MB binary + ~100MB WebExtensions).
 # With 4 uvicorn workers, default 1 per worker = 4 browsers total (~1.2GB,
-# leaves ~1.8GB for HTTP + orchestrator). Override via BROWSER_CRAWLER_BROWSER_POOL_SIZE.
+# leaves ~1.8GB for HTTP + orchestrator). Override via CRAWLUTRON_BROWSER_POOL_SIZE.
 DEFAULT_BROWSER_POOL_SIZE: int = 1
 
 

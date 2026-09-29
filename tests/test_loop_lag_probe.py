@@ -21,10 +21,10 @@ def test_loop_lag_probe_flag_accepts_shared_bool_spellings(monkeypatch):
     import importlib
 
     for value in (" true ", "yes", "1"):
-        monkeypatch.setenv("BROWSER_CRAWLER_LOOP_LAG_PROBE", value)
+        monkeypatch.setenv("CRAWLUTRON_LOOP_LAG_PROBE", value)
         module = importlib.reload(rp)
         assert module._LOOP_LAG_PROBE_ENABLED is True
-    monkeypatch.delenv("BROWSER_CRAWLER_LOOP_LAG_PROBE")
+    monkeypatch.delenv("CRAWLUTRON_LOOP_LAG_PROBE")
     importlib.reload(rp)
 
 

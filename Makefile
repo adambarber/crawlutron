@@ -1,4 +1,4 @@
-# browser-crawler developer Makefile.
+# crawlutron developer Makefile.
 # Convenience entrypoints that mirror scripts/run-tests.sh without
 # requiring zsh.
 
@@ -18,7 +18,7 @@ PRE_COMMIT ?= $(if $(wildcard $(VENV_BIN)/pre-commit),$(VENV_BIN)/pre-commit,pre
 .PHONY: help install test test-fast test-all lint typecheck clean
 
 help:
-	@echo "browser-crawler development tasks:"
+	@echo "crawlutron development tasks:"
 	@echo "  make install   - install package + dev dependencies"
 	@echo "  make test      - run the fast hermetic test suite (default pytest)"
 	@echo "  make test-fast - alias for 'make test'"

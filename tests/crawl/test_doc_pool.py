@@ -27,8 +27,8 @@ def _stub_worker(pid: int, responds_to_sigterm: bool = True) -> ext_mod._DocWork
 @pytest.fixture
 def fake_pool(monkeypatch):
     """Give the pool stub slots, one worker wide, and restore it afterwards."""
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", "1")
-    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     saved_pool = ext_mod._DOC_POOL
     saved_spawn = ext_mod._spawn_doc_worker
     with ext_mod._POOL_LOCK:
@@ -496,8 +496,8 @@ def _counted_spawns(monkeypatch):
 def _use_single_worker(monkeypatch):
     import app.crawl.extraction as ext_mod
 
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", "1")
-    monkeypatch.setenv("BROWSER_CRAWLER_TEST_HOOKS", "1")
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_TEST_HOOKS", "1")
     monkeypatch.setenv("TEST_MARKITDOWN_OUTPUT", "## Hello Markdown")
     ext_mod._reset_doc_pool()
 
@@ -507,8 +507,8 @@ def _restore_pool():
 
     for var in ("TEST_MARKITDOWN_OUTPUT", "TEST_MARKITDOWN_HANG", "TEST_MARKITDOWN_DIE"):
         ext_mod.os.environ.pop(var, None)
-    ext_mod.os.environ.pop("BROWSER_CRAWLER_TEST_HOOKS", None)
-    ext_mod.os.environ.pop("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", None)
+    ext_mod.os.environ.pop("CRAWLUTRON_TEST_HOOKS", None)
+    ext_mod.os.environ.pop("CRAWLUTRON_EXTRACTION_DOC_WORKERS", None)
     ext_mod._reset_doc_pool()
 
 

@@ -273,7 +273,7 @@ def test_cffi_stream_timeout_honored_on_stalled_body(monkeypatch) -> None:
     here rather than relying on the suite-wide default, which a strict-SSRF run
     does not set. The child inherits this process's environment.
     """
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
     _STALL_RELEASE.clear()
     server = spawn_threaded_server(_StalledBodyHandler)
     try:

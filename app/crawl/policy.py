@@ -117,7 +117,7 @@ class PolicyTier:
     resolves it once and every read edge is handed the result. Threading the
     settings themselves made it optional at each site, and optional at each site
     is the same as absent at one of them: every job-path read passed ``None``,
-    so ``/v1/crawl`` honoured ``BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS`` and
+    so ``/v1/crawl`` honoured ``CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS`` and
     ``/v1/jobs`` did not, from the same deployment, on the same policy.
 
     Bounded at the settings chokepoint by the deployment's own authority, which

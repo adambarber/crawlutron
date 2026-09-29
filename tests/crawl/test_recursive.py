@@ -123,7 +123,7 @@ class TestRecursiveCrawlServer:
 
     async def test_memory_strip_both_modes_include_html_false(self):
         # html/text must be stripped inside the loop for both the recursive and
-        # non-recursive branches (#1), not retained for the whole crawl.
+        # non-recursive branches, not retained for the whole crawl.
         pages = site_linking_to("/a", bodies={"/a": "<html><body>hello</body></html>"})
 
         async def run(max_depth):

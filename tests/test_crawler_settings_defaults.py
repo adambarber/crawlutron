@@ -1,4 +1,4 @@
-"""CrawlerSettings defaults tuned for faster parallel single-domain crawls (#7)."""
+"""CrawlerSettings defaults tuned for faster parallel single-domain crawls."""
 
 import logging
 from dataclasses import dataclass
@@ -50,8 +50,8 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
         with patch.dict("os.environ", {}, clear=False):
             import os
 
-            os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", None)
-            os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", None)
+            os.environ.pop("CRAWLUTRON_HTTP_MAX_CONNECTIONS", None)
+            os.environ.pop("CRAWLUTRON_HTTP_MAX_KEEPALIVE", None)
             from_env = CrawlerSettings.from_mapping()
         assert from_env.http_max_connections == expected
 
@@ -77,8 +77,8 @@ class TestFromMappingHardening:
     def test_garbage_numeric_values_fall_back_to_defaults(self, caplog):
         settings = CrawlerSettings.from_mapping(
             {
-                "BROWSER_CRAWLER_GLOBAL_CONCURRENCY": "four",
-                "BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY": "not-a-float",
+                "CRAWLUTRON_GLOBAL_CONCURRENCY": "four",
+                "CRAWLUTRON_ADAPTIVE_MIN_DELAY": "not-a-float",
             }
         )
         assert not hasattr(settings, "host_port")
@@ -87,7 +87,7 @@ class TestFromMappingHardening:
 
     def test_typo_respect_robots_fails_closed_with_warning(self, caplog):
         with caplog.at_level(logging.WARNING, logger="app.validation"):
-            settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_RESPECT_ROBOTS": "ture"})
+            settings = CrawlerSettings.from_mapping({"CRAWLUTRON_RESPECT_ROBOTS": "ture"})
         assert settings.respect_robots is True  # dataclass default: robots stay respected
         assert any(
             "RESPECT_ROBOTS" in rec.getMessage() or "respect_robots" in str(rec.__dict__)
@@ -97,8 +97,8 @@ class TestFromMappingHardening:
     def test_recognized_bools_still_parse(self):
         settings = CrawlerSettings.from_mapping(
             {
-                "BROWSER_CRAWLER_RESPECT_ROBOTS": "no",
-                "BROWSER_CRAWLER_ADAPTIVE_THROTTLING": "1",
+                "CRAWLUTRON_RESPECT_ROBOTS": "no",
+                "CRAWLUTRON_ADAPTIVE_THROTTLING": "1",
             }
         )
         assert settings.respect_robots is False
@@ -108,8 +108,8 @@ class TestFromMappingHardening:
         assert "surrounding whitespace" in (parse_bool_value.__doc__ or "").lower()
         settings = CrawlerSettings.from_mapping(
             {
-                "BROWSER_CRAWLER_RESPECT_ROBOTS": " FALSE ",
-                "BROWSER_CRAWLER_ADAPTIVE_THROTTLING": " true ",
+                "CRAWLUTRON_RESPECT_ROBOTS": " FALSE ",
+                "CRAWLUTRON_ADAPTIVE_THROTTLING": " true ",
             }
         )
         assert settings.respect_robots is False

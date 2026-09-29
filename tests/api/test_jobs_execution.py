@@ -208,11 +208,11 @@ class TestCrashRecovery:
 
         app = _make_app(job_store)
         app.dependency_overrides[get_settings] = lambda: CrawlerSettings.from_mapping(
-            {f"BROWSER_CRAWLER_{key.upper()}": value for key, value in settings_values.items()}
+            {f"CRAWLUTRON_{key.upper()}": value for key, value in settings_values.items()}
         )
         started: list[str] = []
         monkeypatch.setattr(job_runner, "start_job", lambda job_id, *args: started.append(job_id))
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:

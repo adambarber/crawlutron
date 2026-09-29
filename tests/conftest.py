@@ -1,4 +1,4 @@
-"""Shared pytest fixtures and path setup for the browser-crawler test suite.
+"""Shared pytest fixtures and path setup for the crawlutron test suite.
 
 Puts the service root on ``sys.path`` once so every test file can import
 :mod:`app` and the suite's own helpers (as ``tests.helpers.server``). The
@@ -40,7 +40,7 @@ if ROOT.exists() and str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # The ``app/validation.py`` production default for
-# ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
+# ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` is ``False`` (the secure default).
 # For this test suite, the file-level default is ALSO ``"0"`` so that anyone
 # reading ``conftest.py`` sees the secure default first. The session-scoped
 # autouse fixture below (``_enable_loopback_for_test_suite``) flips the value
@@ -51,14 +51,14 @@ if ROOT.exists() and str(ROOT) not in sys.path:
 # opt in via ``monkeypatch.setenv(..., "1")``), set the env var before
 # invoking pytest:
 #
-#     BROWSER_CRAWLER_TEST_STRICT_SSRF=1 pytest
+#     CRAWLUTRON_TEST_STRICT_SSRF=1 pytest
 #
 # Tests that exercise the SSRF guard itself should opt out via
 # ``_assertions.block_private_targets(monkeypatch)`` or the
 # ``ssrf_guard_required`` fixture regardless of mode.
-os.environ.setdefault("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
-_TEST_STRICT_SSRF = os.environ.get("BROWSER_CRAWLER_TEST_STRICT_SSRF", "0") == "1"
+_TEST_STRICT_SSRF = os.environ.get("CRAWLUTRON_TEST_STRICT_SSRF", "0") == "1"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -66,14 +66,14 @@ def _enable_loopback_for_test_suite():
     """Enable private targets (loopback crawling) for the entire test session.
 
     This is the **only** path that flips the secure default for the suite. If
-    ``BROWSER_CRAWLER_TEST_STRICT_SSRF=1`` is set, this fixture is a no-op and
+    ``CRAWLUTRON_TEST_STRICT_SSRF=1`` is set, this fixture is a no-op and
     every test that needs to crawl loopback must explicitly set the env var.
     """
     if not _TEST_STRICT_SSRF:
-        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "1"
+        os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "1"
     yield
     if not _TEST_STRICT_SSRF:
-        os.environ["BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS"] = "0"
+        os.environ["CRAWLUTRON_ALLOW_PRIVATE_TARGETS"] = "0"
 
 
 # Per-xdist-worker paths: when running under pytest-xdist each worker gets its
@@ -83,13 +83,13 @@ def _enable_loopback_for_test_suite():
 _XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 _WORKER_SUFFIX = f"-{_XDIST_WORKER}" if _XDIST_WORKER else ""
 _TEST_TMP = tempfile.gettempdir()
-os.environ.setdefault("BROWSER_CRAWLER_LOG_FILE", f"{_TEST_TMP}/browser_crawler_test{_WORKER_SUFFIX}.log")
-os.environ.setdefault("BROWSER_CRAWLER_CACHE_DIR", f"{_TEST_TMP}/browser_crawler_test_cache{_WORKER_SUFFIX}")
-os.environ["BROWSER_CRAWLER_CACHE_TTL_SECONDS"] = os.environ.get("BROWSER_CRAWLER_CACHE_TTL_SECONDS", "3600")
+os.environ.setdefault("CRAWLUTRON_LOG_FILE", f"{_TEST_TMP}/crawlutron_test{_WORKER_SUFFIX}.log")
+os.environ.setdefault("CRAWLUTRON_CACHE_DIR", f"{_TEST_TMP}/crawlutron_test_cache{_WORKER_SUFFIX}")
+os.environ["CRAWLUTRON_CACHE_TTL_SECONDS"] = os.environ.get("CRAWLUTRON_CACHE_TTL_SECONDS", "3600")
 # Keep the opt-in content cache disabled during tests so fake-fetcher suites that
-# serve different content for the same URL stay isolated (#5).
-os.environ["BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"] = os.environ.get(
-    "BROWSER_CRAWLER_CONTENT_CACHE_ENABLED", "false"
+# serve different content for the same URL stay isolated.
+os.environ["CRAWLUTRON_CONTENT_CACHE_ENABLED"] = os.environ.get(
+    "CRAWLUTRON_CONTENT_CACHE_ENABLED", "false"
 )
 
 
@@ -97,18 +97,18 @@ os.environ["BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"] = os.environ.get(
 def ssrf_guard_required(monkeypatch):
     """Mark a test that exercises ``_check_ssrf_protection`` or
     ``_resolve_and_pin_host`` and assert that it opted OUT of the test
-    default ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1``.
+    default ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1``.
 
     The suite defaults to private-targets ON so the loopback helper server
     works; tests that intentionally probe the SSRF guard MUST opt back in
     via ``_assertions.block_private_targets(monkeypatch)`` or
-    ``monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")``.
+    ``monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")``.
     Failure to opt out is a silent false-positive: the SSRF code path is
     short-circuited before the actual guard runs.
 
     Usage:
         def test_my_ssrf_check(monkeypatch, ssrf_guard_required):
-            monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+            monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
             _check_ssrf_protection(...)
     """
     called: list[str] = []
@@ -120,13 +120,13 @@ def ssrf_guard_required(monkeypatch):
             # If the env var is still "1", the SSRF guard was short-circuited
             # before the real test logic could run. That is the silent
             # false-positive this fixture exists to prevent.
-            if os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS") != "0":
+            if os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS") != "0":
                 pytest.fail(
-                    f"{name} was called but BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS "
-                    f"is still enabled (value={os.environ.get('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS')!r}). "
+                    f"{name} was called but CRAWLUTRON_ALLOW_PRIVATE_TARGETS "
+                    f"is still enabled (value={os.environ.get('CRAWLUTRON_ALLOW_PRIVATE_TARGETS')!r}). "
                     f"This test exercises the SSRF guard and must opt out via "
                     f"_assertions.block_private_targets(monkeypatch) or "
-                    f"monkeypatch.setenv('BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS', '0') "
+                    f"monkeypatch.setenv('CRAWLUTRON_ALLOW_PRIVATE_TARGETS', '0') "
                     f"BEFORE invoking the SSRF helper."
                 )
             return fn(*args, **kwargs)
@@ -284,7 +284,7 @@ def override_settings():
     """Point ``app.state.crawler_settings`` at a fresh instance for a test.
 
     ``CrawlerSettings`` is a frozen dataclass, so per-test overrides build a
-    new instance from ``os.environ`` plus ``BROWSER_CRAWLER_*`` overrides and
+    new instance from ``os.environ`` plus ``CRAWLUTRON_*`` overrides and
     restore the original after the test.
 
     This is also the suite's only spelling of "env plus overrides becomes
@@ -304,7 +304,7 @@ def override_settings():
     def _apply(**overrides) -> CrawlerSettings:
         merged = dict(os.environ)
         for key, value in overrides.items():
-            merged[f"BROWSER_CRAWLER_{key.upper()}"] = str(value)
+            merged[f"CRAWLUTRON_{key.upper()}"] = str(value)
         settings = CrawlerSettings.from_mapping(merged)
         app.state.crawler_settings = settings
         return settings
@@ -494,7 +494,7 @@ def _reset_global_http_state():
     with contextlib.suppress(Exception):
         service_app().state.shutdown_event = asyncio.Event()
     # robots_cache was promoted to module-level and shared across crawl_request
-    # calls (#9). Tests reuse origins with different robots.txt bodies, so
+    # calls. Tests reuse origins with different robots.txt bodies, so
     # clear it between tests for isolation. Production keeps it shared (a given
     # origin always serves the same robots.txt).
     with contextlib.suppress(Exception):

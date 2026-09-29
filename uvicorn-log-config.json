@@ -9,7 +9,7 @@
   "filters": {
     "service": {
       "()": "app.logging_config._ServiceFieldFilter",
-      "service_name": "browser-crawler"
+      "service_name": "crawlutron"
     }
   },
   "handlers": {

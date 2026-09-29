@@ -19,13 +19,13 @@ Implemented outcomes:
 
 Verification completed before archive:
 
-- `python3 -m unittest tests.test_browser_crawler_api -v`
-- `python3 -m unittest tests.test_browser_crawler_core -v`
-- `python3 -m unittest tests.test_config_validation.ConfigValidationTest.test_browser_crawler_service_is_profile_gated_and_configurable -v`
+- `python3 -m unittest tests.test_crawlutron_api -v`
+- `python3 -m unittest tests.test_crawlutron_core -v`
+- `python3 -m unittest tests.test_config_validation.ConfigValidationTest.test_crawlutron_service_is_profile_gated_and_configurable -v`
 - `python3 -m unittest discover -s tests -v`
-- `docker compose --profile browser-crawler config --services`
-- `docker compose --profile browser-crawler config`
-- `docker compose --profile browser-crawler build browser-crawler`
+- `docker compose --profile crawlutron config --services`
+- `docker compose --profile crawlutron config`
+- `docker compose --profile crawlutron build crawlutron`
 
 Next step: run the service locally through the safe helper and exercise `GET /v1/capabilities`, `GET /v1/agent-hints`, and `POST /v1/crawl` against known public/local test URLs.
 
@@ -107,7 +107,7 @@ Anti-detection in this project means reducing accidental automation fingerprints
 - Domain parsing: `tldextract` or equivalent Public Suffix List-aware parsing for registrable-domain grouping.
 - HTML/text extraction: JavaScript execution in the rendered page context, with fallback to Selenium page source and body text.
 - Testing: Python `unittest` first, matching this repository's existing test style, with fakes for browser behavior and targeted integration tests for API contract.
-- Containerization: Docker Compose service gated behind a new profile, likely `browser-crawler`.
+- Containerization: Docker Compose service gated behind a new profile, likely `crawlutron`.
 
 Dependencies should be pinned in a service-specific requirements file during implementation. If dependency resolution makes `undetected-chromedriver` incompatible with the selected Chromium version, the implementation plan must pin a known-good browser/driver combination and document the upgrade path.
 
@@ -207,9 +207,9 @@ Response body:
 ### Domain-aware concurrency
 
 - Group scheduled URLs by registrable domain.
-- Run multiple domains in parallel up to `BROWSER_CRAWLER_GLOBAL_CONCURRENCY`.
-- Run same-domain tasks up to `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY`, defaulting to `1`.
-- Apply `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` between same-domain navigations.
+- Run multiple domains in parallel up to `CRAWLUTRON_GLOBAL_CONCURRENCY`.
+- Run same-domain tasks up to `CRAWLUTRON_PER_DOMAIN_CONCURRENCY`, defaulting to `1`.
+- Apply `CRAWLUTRON_PER_DOMAIN_DELAY_MS` between same-domain navigations.
 - Apply stronger backoff after 429, 503, navigation timeout, or suspected block.
 - Preserve input order in the final response even when execution completes out of order.
 
@@ -285,23 +285,23 @@ docker/browser-crawler/
     robots.py
     settings.py
 scripts/
-  browser-crawler.sh
+  crawlutron.sh
 tests/
-  test_browser_crawler_api.py
-  test_browser_crawler_scheduler.py
-  test_browser_crawler_classifier.py
-  test_browser_crawler_settings.py
+  test_crawlutron_api.py
+  test_crawlutron_scheduler.py
+  test_crawlutron_classifier.py
+  test_crawlutron_settings.py
   test_scripts.py
 docs/work/active/
-  2026-06-23-browser-crawler-service.md
+  2026-06-23-crawlutron-service.md
 ```
 
 Potential Compose additions during implementation:
 
-- `browser-crawler` service under a `browser-crawler` profile.
+- `crawlutron` service under a `crawlutron` profile.
 - explicit environment variables only; no broad `env_file`.
-- pinned image default in `.env.example`, such as `BROWSER_CRAWLER_IMAGE=dev-stack/browser-crawler:local`.
-- localhost-only published API port, such as `127.0.0.1:${BROWSER_CRAWLER_HOST_PORT:-8765}:8765`.
+- pinned image default in `.env.example`, such as `CRAWLUTRON_IMAGE=dev-stack/crawlutron:local`.
+- localhost-only published API port, such as `127.0.0.1:${CRAWLUTRON_HOST_PORT:-8765}:8765`.
 - Caddy route only if local dashboard/API UX warrants it, e.g. `https://crawler.local`.
 - log rotation using existing Compose logging anchor.
 - `mem_limit` and shared memory sizing appropriate for Chromium.
@@ -312,21 +312,21 @@ Specification and planning phase:
 
 ```bash
 python3 -m unittest discover -s tests -v
-docker compose --profile browser-crawler config --services
-docker compose --profile browser-crawler config browser-crawler
+docker compose --profile crawlutron config --services
+docker compose --profile crawlutron config crawlutron
 ```
 
 Expected implementation commands:
 
 ```bash
-python3 -m unittest tests.test_browser_crawler_api -v
-python3 -m unittest tests.test_browser_crawler_scheduler -v
-python3 -m unittest tests.test_browser_crawler_classifier -v
+python3 -m unittest tests.test_crawlutron_api -v
+python3 -m unittest tests.test_crawlutron_scheduler -v
+python3 -m unittest tests.test_crawlutron_classifier -v
 python3 -m unittest discover -s tests -v
-docker compose --profile browser-crawler build browser-crawler
-docker compose --profile browser-crawler up -d browser-crawler
-curl -sS http://127.0.0.1:${BROWSER_CRAWLER_HOST_PORT:-8765}/health
-curl -sS http://127.0.0.1:${BROWSER_CRAWLER_HOST_PORT:-8765}/v1/render \
+docker compose --profile crawlutron build crawlutron
+docker compose --profile crawlutron up -d crawlutron
+curl -sS http://127.0.0.1:${CRAWLUTRON_HOST_PORT:-8765}/health
+curl -sS http://127.0.0.1:${CRAWLUTRON_HOST_PORT:-8765}/v1/render \
   -H 'Content-Type: application/json' \
   -d '{"urls":["https://example.org"],"options":{"include_html":true,"include_text":true}}'
 ```
@@ -334,10 +334,10 @@ curl -sS http://127.0.0.1:${BROWSER_CRAWLER_HOST_PORT:-8765}/v1/render \
 Safe helper expectations:
 
 ```bash
-./scripts/browser-crawler.sh up --print-command
-./scripts/browser-crawler.sh up
-./scripts/browser-crawler.sh check
-./scripts/browser-crawler.sh render https://example.org
+./scripts/crawlutron.sh up --print-command
+./scripts/crawlutron.sh up
+./scripts/crawlutron.sh check
+./scripts/crawlutron.sh render https://example.org
 ```
 
 ## Code Style
@@ -423,20 +423,20 @@ Use TDD. Write failing tests before implementation for each behavior slice.
 Expected environment variables:
 
 ```text
-BROWSER_CRAWLER_IMAGE=dev-stack/browser-crawler:local
-BROWSER_CRAWLER_HOST_PORT=8765
-BROWSER_CRAWLER_GLOBAL_CONCURRENCY=4
-BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY=1
-BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS=1000
-BROWSER_CRAWLER_MAX_BATCH_SIZE=50
-BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS=30
-BROWSER_CRAWLER_DEFAULT_MAX_RETRIES=2
-BROWSER_CRAWLER_RESPECT_ROBOTS=true
-BROWSER_CRAWLER_ALLOWED_HOSTS=
-BROWSER_CRAWLER_DENIED_HOSTS=
-BROWSER_CRAWLER_LOG_LEVEL=INFO
-BROWSER_CRAWLER_MEM_LIMIT=2g
-BROWSER_CRAWLER_SHM_SIZE=1g
+CRAWLUTRON_IMAGE=dev-stack/crawlutron:local
+CRAWLUTRON_HOST_PORT=8765
+CRAWLUTRON_GLOBAL_CONCURRENCY=4
+CRAWLUTRON_PER_DOMAIN_CONCURRENCY=1
+CRAWLUTRON_PER_DOMAIN_DELAY_MS=1000
+CRAWLUTRON_MAX_BATCH_SIZE=50
+CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS=30
+CRAWLUTRON_DEFAULT_MAX_RETRIES=2
+CRAWLUTRON_RESPECT_ROBOTS=true
+CRAWLUTRON_ALLOWED_HOSTS=
+CRAWLUTRON_DENIED_HOSTS=
+CRAWLUTRON_LOG_LEVEL=INFO
+CRAWLUTRON_MEM_LIMIT=2g
+CRAWLUTRON_SHM_SIZE=1g
 ```
 
 ## Success Criteria
@@ -445,7 +445,7 @@ The feature is ready to implement when this spec is accepted and converted into 
 
 - Tests are written first for each behavior slice.
 - `python3 -m unittest discover -s tests -v` passes.
-- `docker compose --profile browser-crawler config browser-crawler` validates the service shape.
+- `docker compose --profile crawlutron config crawlutron` validates the service shape.
 - The service renders a local JavaScript test page and returns both rendered HTML and rendered text.
 - Batch requests process different domains concurrently under deterministic scheduler tests.
 - Same-domain requests are rate-limited under deterministic scheduler tests.

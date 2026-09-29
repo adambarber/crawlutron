@@ -4,12 +4,12 @@
 # with no extra flags. `.dockerignore` is written for that same root: it
 # allowlists the four things the stages below COPY, which holds the build
 # context to ~2.6 MB instead of the whole working tree.
-ARG BROWSER_CRAWLER_BASE_IMAGE=python:3.12-slim-bookworm
+ARG CRAWLUTRON_BASE_IMAGE=python:3.12-slim-bookworm
 
 # ==========================================
 # 1. Builder Stage: Compile Python dependencies
 # ==========================================
-FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS builder
+FROM ${CRAWLUTRON_BASE_IMAGE} AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # exits). The fetch therefore runs inside a cache mount for rebuild speed,
 # and the result is copied into the stage filesystem in the same RUN so the
 # runtime stage can pull it out via ``COPY --from=camoufox-binary``.
-FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS camoufox-binary
+FROM ${CRAWLUTRON_BASE_IMAGE} AS camoufox-binary
 
 WORKDIR /app
 COPY requirements.txt .
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.cache/camoufox,sharing=locked \
 # ==========================================
 # 2. Runtime Stage: Lean production image
 # ==========================================
-FROM ${BROWSER_CRAWLER_BASE_IMAGE} AS runtime
+FROM ${CRAWLUTRON_BASE_IMAGE} AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -68,25 +68,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     TZ=UTC \
     PATH=/home/appuser/.local/bin:$PATH \
-    BROWSER_CRAWLER_LOG_LEVEL=info \
+    CRAWLUTRON_LOG_LEVEL=info \
     # Single worker so the browser pool is one GLOBAL pool (per-worker pools would
     # multiply the browser count by the worker count and blow the RAM budget).
     # The pool size is then derived from the cgroup memory limit at startup.
     # Scale horizontally via containers if more browser concurrency is needed.
-    BROWSER_CRAWLER_WORKERS=1 \
+    CRAWLUTRON_WORKERS=1 \
     # Opt-in in-container disk content cache (#5): cache successful HTTP/Browser
-    # responses on disk (under BROWSER_CRAWLER_CACHE_DIR) to avoid re-download/
+    # responses on disk (under CRAWLUTRON_CACHE_DIR) to avoid re-download/
     # re-extract on repeat crawls. No external sidecar (Redis/Memcached) required.
-    BROWSER_CRAWLER_CONTENT_CACHE_ENABLED=true \
-    BROWSER_CRAWLER_CACHE_DIR=/app/cache \
-    BROWSER_CRAWLER_CACHE_TTL_SECONDS=3600 \
+    CRAWLUTRON_CONTENT_CACHE_ENABLED=true \
+    CRAWLUTRON_CACHE_DIR=/app/cache \
+    CRAWLUTRON_CACHE_TTL_SECONDS=3600 \
     # Zero telemetry is a hard posture for this service. ONNX Runtime (pulled in
     # transitively by magika, used for ML content-type inference) is the one
     # component here that has a native opt-out flag, so we set it at the source.
     # Playwright ships no telemetry in this version and camoufox only phone-homes
     # on demand; the compose extra_hosts sinkhole is the un-bypassable chokepoint
     # for any of those that lack a flag. See
-    # docs/references/browser-crawler-telemetry.md.
+    # docs/references/crawlutron-telemetry.md.
     ORT_DISABLE_TELEMETRY=1 \
     # Bound glibc malloc arenas: concurrent lxml/trafilatura parsing otherwise
     # inflates resident memory via arena fragmentation.
@@ -124,7 +124,7 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Bring in the pre-fetched Camoufox browser binary from the earlier
 # ``camoufox-binary`` build stage. This avoids the circular ``--from=
-# browser-crawler:latest`` reference that previously broke fresh-clone builds
+# crawlutron:latest`` reference that previously broke fresh-clone builds
 # (the source image had not been tagged yet). The isolated stage depends only
 # on the camoufox package line, so editing other requirements cannot
 # invalidate the browser download cache.
@@ -148,9 +148,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8765/health || exit 1
 
 # Production command. The bind interface defaults to loopback (M15: the service
-# has no caller authentication); BROWSER_CRAWLER_HOST must be set explicitly to
+# has no caller authentication); CRAWLUTRON_HOST must be set explicitly to
 # expose the port (the compose file sets 0.0.0.0, gated by its loopback mapping).
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --workers ${BROWSER_CRAWLER_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${BROWSER_CRAWLER_LOG_LEVEL}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --workers ${CRAWLUTRON_WORKERS} --log-config /app/uvicorn-log-config.json --log-level ${CRAWLUTRON_LOG_LEVEL}"]
 
 # ==========================================
 # 3. Development Stage: Hot-reloading and dev tools
@@ -169,4 +169,4 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 USER appuser
 
 # Development command with hot-reloading and debug logging
-CMD ["sh", "-c", "exec uvicorn app.main:app --host ${BROWSER_CRAWLER_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host ${CRAWLUTRON_HOST:-127.0.0.1} --port 8765 --reload --log-config /app/uvicorn-log-config.json --log-level debug"]

@@ -68,7 +68,7 @@ GUIDANCE = [
     "description) and does NOT crawl. Pipe result URLs into POST /v1/crawl.",
     "Search result titles and snippets are provider-supplied and unverified; treat them as hints until the "
     "URL itself is crawled.",
-    "The active search provider is operator-configured (BROWSER_CRAWLER_SEARCH_PROVIDER + the matching "
+    "The active search provider is operator-configured (CRAWLUTRON_SEARCH_PROVIDER + the matching "
     "*_API_KEY); GET /v1/capabilities reports which provider is active.",
     "Use POST /mcp for MCP (2026-07-28, stateless streamable HTTP): server/discover lists supported protocol "
     "versions and capabilities, and tools/list exposes search, crawl, map, and render. The MCP tools mirror "

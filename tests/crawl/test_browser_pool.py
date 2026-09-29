@@ -96,17 +96,17 @@ class _Mem:
 @pytest.fixture(autouse=True)
 def _clear_pool_env(monkeypatch):
     # Ensure no explicit override leaks between tests.
-    monkeypatch.delenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", raising=False)
+    monkeypatch.delenv("CRAWLUTRON_BROWSER_POOL_SIZE", raising=False)
     yield
 
 
 def test_explicit_override_wins(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "3")
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "3")
     assert bp._derive_browser_pool_size() == 3
 
 
 def test_explicit_override_rejects_garbage(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "not-a-number")
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "not-a-number")
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     # garbled override -> falls through to budget derivation (3GiB -> 2)
     assert bp._derive_browser_pool_size() == 2
@@ -116,7 +116,7 @@ def test_explicit_override_rejects_garbage(monkeypatch):
 def test_nonpositive_or_blank_override_falls_through(monkeypatch, raw):
     # An override that cannot mean a pool size (zero, negative, blank) is
     # garbage, not a clamp-to-1 request: derivation owns the sizing.
-    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", raw)
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", raw)
     monkeypatch.setattr(rp, "read_memory_stats", lambda: _Mem(3 * 1024**3))
     assert bp._derive_browser_pool_size() == 2
 
@@ -303,7 +303,7 @@ class TestWorkerExtractorErrorDegrades:
         assert result == ""
 
     async def test_browser_renderer_auto_accept_cookie_consent(self):
-        # Opt-in required (M4): disabled by default, no click without consent.
+        # Opt-in required: disabled by default, no click without consent.
         result = await _bare_renderer()._auto_accept_cookie_consent(_page(query_selector=None), False)
         assert not (result)
 

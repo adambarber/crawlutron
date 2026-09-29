@@ -13,7 +13,7 @@ router = APIRouter(tags=["Crawler"])
 
 @router.post(
     "/v1/map",
-    summary="Discover the URL frontier for a root URL (#2)",
+    summary="Discover the URL frontier for a root URL",
     description=(
         "Map a root URL to the URLs reachable from it: in-page discovered links plus the "
         "URLs advertised via robots.txt sitemaps and feeds. Discovery is always enabled; the "

@@ -101,8 +101,8 @@ job_store = JobStore(
 # makes results recoverable if the HTTP connection drops mid-response).
 result_store = CrawlResultStore(
     DATABASE_PATH,
-    ttl_seconds=get_env_float("BROWSER_CRAWLER_RESULT_TTL_SECONDS", 3600.0),
-    max_entries=get_env_int("BROWSER_CRAWLER_RESULT_MAX_ENTRIES", 1000),
+    ttl_seconds=get_env_float("CRAWLUTRON_RESULT_TTL_SECONDS", 3600.0),
+    max_entries=get_env_int("CRAWLUTRON_RESULT_MAX_ENTRIES", 1000),
 )
 
 # Ensure the parent directory of the log file exists before the logger tries
@@ -146,7 +146,7 @@ if FastAPI is not None:
             lambda: (_resource_gate.memory_ratio(), _resource_gate.cpu_ratio())
         )
         # The module-level gate is built at import time with no running
-        # loop, so its lag probe must start here (M16).
+        # loop, so its lag probe must start here.
         _resource_gate.start_lag_probe()
 
         await initialize_browser_pool(settings)

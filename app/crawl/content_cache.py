@@ -73,13 +73,13 @@ class ContentCache:
         # Metadata mirror for cached_at_of(): (expires, cached_at) per live key,
         # parallel to _index. Sitemap freshness checks run this for every key
         # of a crawl and must not deserialize multi-MB envelopes to read a
-        # timestamp (P6). _read_envelope stays the single chokepoint for full
+        # timestamp. _read_envelope stays the single chokepoint for full
         # reads and for every index mutation; this mirror only answers.
         self._index_cached_at: dict[str, tuple[float | None, float | None]] = {}
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         # In-memory LRU index (key -> path) so eviction never globs/stats the
-        # whole cache directory on the hot path (#5). The on-disk file remains
+        # whole cache directory on the hot path. The on-disk file remains
         # the source of truth for values; this index only tracks recency/order.
         # (A warm restart with pre-existing files repopulates the index lazily
         # on first get/set of each key; prune() reconciles disk vs index.)
@@ -162,7 +162,7 @@ class ContentCache:
         Enforces both the entry-count cap and the total byte budget (H9).
         Runs in O(overflow) unlinks with no directory glob/stat, unlike the
         previous implementation that listed and stat() every cache file on each
-        write (#5).
+        write.
 
         Callers invoke this OUTSIDE ``self._lock``, so this method takes the
         lock itself. That leaves a window between the caller's write section
@@ -220,7 +220,7 @@ class ContentCache:
             with self._lock:
                 if raw is None:
                     # No readable file. A stale index entry would keep counting
-                    # phantom bytes (M1), so free the accounting here too.
+                    # phantom bytes, so free the accounting here too.
                     if key in self._index:
                         self._drop_locked(key, doomed)
                     return None
@@ -232,7 +232,7 @@ class ContentCache:
                 expires = envelope.get("expires")
                 if expires is not None and self.clock() > expires:
                     # Free the byte accounting too, not just the index slot
-                    # (M1): otherwise an expired read leaves phantom bytes that
+                    # otherwise an expired read leaves phantom bytes that
                     # keep ``_over_limits`` true and evict LIVE entries later.
                     self._drop_locked(key, doomed)
                     return None
@@ -257,7 +257,7 @@ class ContentCache:
                 # passes; the guard is what keeps a warm entry honest.
                 if self._index_sizes.get(key) == len(raw):
                     # Remember the freshness metadata so later cached_at_of()
-                    # calls are answered without re-reading the envelope (P6).
+                    # calls are answered without re-reading the envelope.
                     self._index_cached_at[key] = (envelope.get("expires"), envelope.get("cached_at"))
                     # Warm the RAM mirror under the same lock (the accelerator
                     # contract is method-independent); the gate uses the exact
@@ -321,7 +321,7 @@ class ContentCache:
         """Return the cached value if present and unexpired, else ``None``.
 
         Checks the in-memory value cache first; on a miss (or an expired memory
-        entry) it falls back to the on-disk envelope (#7).
+        entry) it falls back to the on-disk envelope.
         """
         hit = self._memory_probe(key)
         if hit is not None:
@@ -334,10 +334,10 @@ class ContentCache:
 
         Returns ``None`` if the key is missing, expired, or unreadable. Used by
         sitemap lastmod freshness checks to decide whether a cached page is
-        newer than the sitemap's advertised last-modified time (#3).
+        newer than the sitemap's advertised last-modified time.
 
         Freshness is answered from the ``(expires, cached_at)`` metadata mirror
-        (P6) so a multi-MB envelope is never read and JSON-parsed just to read a
+        so a multi-MB envelope is never read and JSON-parsed just to read a
         timestamp. A mirror miss, or an entry the mirror shows as expired, is
         routed through :meth:`_read_envelope` -- the single chokepoint for full
         reads and for every index mutation -- so the fast path can never answer
@@ -364,11 +364,11 @@ class ContentCache:
         Also one clock read per write. ``expires`` and ``cached_at`` came from
         separate ``clock()`` calls, so ``cached_at`` recorded a later instant
         than the one the expiry was derived from -- which is the instant a
-        caller compares its remote last-modified signal against (#3).
+        caller compares its remote last-modified signal against.
         """
         effective_ttl = self.default_ttl if ttl is None else ttl
         # cached_at records when this entry was written so callers can compare a
-        # remote "last modified" signal against our local fetch time (#3).
+        # remote "last modified" signal against our local fetch time.
         now = self.clock()
         expires = None if effective_ttl <= 0 else now + effective_ttl
         return {"expires": expires, "value": value, "cached_at": now}, expires
@@ -391,9 +391,9 @@ class ContentCache:
             self._write_data(path, data)
             self._commit_entry_locked(key, path, len(data))
             # Freshness metadata is known at write time; record it so later
-            # cached_at_of() calls never deserialize this envelope (P6).
+            # cached_at_of() calls never deserialize this envelope.
             self._index_cached_at[key] = (expires, envelope["cached_at"])
-            # Mirror small values into the in-memory value cache (#7), under
+            # Mirror small values into the in-memory value cache, under
             # the same gate + count cap as every other mirror write.
             self._remember_memory_locked(key, value, expires, len(data))
         self._enforce_limits()

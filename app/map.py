@@ -40,7 +40,7 @@ def build_site_map(crawl_response: dict[str, Any], *, host_policy: HostPolicy) -
     def _normalize(u: str | None) -> str | None:
         """Canonicalize every emitted URL (sorts query params, strips
         fragments/default ports). Origin-relative paths resolve against the
-        crawled root (L6); anything that still is not a normalizable public
+        crawled root; anything that still is not a normalizable public
         URL is dropped rather than leaked raw."""
         if not u:
             return None

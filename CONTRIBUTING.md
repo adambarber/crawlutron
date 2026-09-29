@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in browser-crawler. This document covers the
+Thanks for your interest in crawlutron. This document covers the
 mechanics of submitting a change.
 
 ## Development Setup

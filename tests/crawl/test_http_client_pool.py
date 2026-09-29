@@ -859,7 +859,7 @@ def test_huge_limit_is_capped():
 
 def test_env_override_still_wins():
     # CrawlerSettings still honors an explicit env override over the derived default.
-    with patch.dict("os.environ", {"BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS": "200"}):
+    with patch.dict("os.environ", {"CRAWLUTRON_HTTP_MAX_CONNECTIONS": "200"}):
         s = settings_mod.CrawlerSettings.from_mapping()
         assert s.http_max_connections == 200
 
@@ -881,8 +881,8 @@ def test_the_pool_default_is_derived_per_construction_not_frozen_at_import():
         patch.object(settings_mod, "read_memory_stats", lambda: _FakeStats(limit)),
         patch.dict("os.environ"),
     ):
-        os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", None)
-        os.environ.pop("BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", None)
+        os.environ.pop("CRAWLUTRON_HTTP_MAX_CONNECTIONS", None)
+        os.environ.pop("CRAWLUTRON_HTTP_MAX_KEEPALIVE", None)
         derived = settings_mod.CrawlerSettings()
         assert derived.http_max_connections == expected
         assert derived.http_max_keepalive == max(20, min(128, expected // 2))

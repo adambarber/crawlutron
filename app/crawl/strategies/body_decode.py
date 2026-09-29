@@ -28,7 +28,7 @@ def _decode_body(body: bytes | bytearray | memoryview, content_type: str | None)
     charset-normalizer when that fails, then to a lossy UTF-8 decode. This
     avoids scanning/rewriting the whole body with ``errors='replace'`` (and
     the resulting replacement-character check) on the common valid-UTF-8 path
-    (#5).
+
 
     ``body`` may be a bytearray/memoryview when the streamed fetcher returns an
     uncompressed buffer without converting to immutable bytes; ``bytes`` is
@@ -99,7 +99,7 @@ def _quality_score(
 
 # Single compiled pattern so _content_metrics counts every tag of interest
 # in ONE linear scan of the HTML instead of four separate re.findall/re.search
-# passes (#13). Each group is tallied as we walk the string once.
+# passes. Each group is tallied as we walk the string once.
 _CONTENT_TAG_RE = re.compile(r"<(a|iframe|frame|frameset|form)\b", re.IGNORECASE)
 
 

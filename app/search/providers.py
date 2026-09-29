@@ -140,7 +140,7 @@ def _collect_results(
     The three keyed providers (Tavily/Brave/Serper) differ only in which key
     holds which field; the validation/dedupe/clip flow is one contract
     (jscpd #4 — it was hand-copied three times). Non-dict entries and
-    non-public URLs are dropped, never rewritten (#1721).
+    non-public URLs are dropped, never rewritten.
     """
     results: list[SearchResult] = []
     seen: set[str] = set()
@@ -339,13 +339,13 @@ class DuckDuckGoProvider:
         if status != 200:
             raise SearchProviderError(
                 f"duckduckgo HTTP {status}; the keyless provider is unreliable from "
-                "datacenter IPs — configure a keyed provider via BROWSER_CRAWLER_*_API_KEY"
+                "datacenter IPs — configure a keyed provider via CRAWLUTRON_*_API_KEY"
             )
         lowered = body.lower()
         if "anomaly" in lowered or "challenge to confirm" in lowered:
             raise SearchProviderError(
                 "duckduckgo returned a bot challenge; the keyless provider is unreliable "
-                "from datacenter IPs — configure a keyed provider via BROWSER_CRAWLER_*_API_KEY"
+                "from datacenter IPs — configure a keyed provider via CRAWLUTRON_*_API_KEY"
             )
         results: list[SearchResult] = []
         seen: set[str] = set()
@@ -453,7 +453,7 @@ def get_search_provider(settings: Any) -> SearchProvider:
         return provider
     raise SearchProviderUnavailable(
         f"search provider '{requested}' is not configured; "
-        f"set BROWSER_CRAWLER_{requested.upper()}_API_KEY (or BROWSER_CRAWLER_SEARCH_PROVIDER=duckduckgo)"
+        f"set CRAWLUTRON_{requested.upper()}_API_KEY (or CRAWLUTRON_SEARCH_PROVIDER=duckduckgo)"
     )
 
 

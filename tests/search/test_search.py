@@ -243,7 +243,7 @@ class TestProviderSelection:
 
     def test_explicit_unconfigured_provider_raises_actionable_error(self, override_settings):
         settings = override_settings(search_provider="brave")
-        with pytest.raises(SearchProviderUnavailable, match="BROWSER_CRAWLER_BRAVE_API_KEY"):
+        with pytest.raises(SearchProviderUnavailable, match="CRAWLUTRON_BRAVE_API_KEY"):
             get_search_provider(settings)
 
     def test_configured_providers_report_priority_order(self, override_settings):
@@ -300,7 +300,7 @@ class TestSearchEndpoint:
         assert capture[0]["json_body"]["max_results"] == 2
 
     async def test_search_unconfigured_provider_returns_503(self, async_client, override_settings):
-        override_settings(search_provider="brave")  # no BROWSER_CRAWLER_BRAVE_API_KEY
+        override_settings(search_provider="brave")  # no CRAWLUTRON_BRAVE_API_KEY
         resp = await async_client.post("/v1/search", json={"query": "x"})
         assert resp.status_code == 503
         assert resp.json()["code"] == "search_provider_unavailable"

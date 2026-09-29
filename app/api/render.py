@@ -112,7 +112,7 @@ async def render_request(
     # slots. Matching by URL here would collapse duplicates onto index 0 and
     # KeyError on the missing slot (adversarial H8), and is O(n^2) (L5a).
     # Worker exceptions are swallowed by the scheduler's gather, so capture
-    # them per index: total pool exhaustion raises for a 503 (M12), any other
+    # them per index: total pool exhaustion raises for a 503, any other
     # missing slot becomes a per-URL failed result instead of a 500.
     from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 

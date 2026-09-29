@@ -103,8 +103,8 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
-| F1 | An environment boolean has one spelling policy, in either polarity, wherever it is read | `app/validation.py:parse_bool_value` | runtime construction | property registry `bool-env` + decision-path tests | `PARTIAL` — `BROWSER_CRAWLER_LOOP_LAG_PROBE` is still parsed with `== "1"` in `app/resource_pressure.py:45`, so `" true "` and `"yes"` read false there and true in the shared reader; two test-only parsers in `app/crawl/extraction.py` do the same |
-| F2 | Every documented `BROWSER_CRAWLER_*` knob has a real production consumer, and env names resolve through declared aliases | `app/settings.py` | runtime construction | documented-knob detector | `PARTIAL` — a bare mention was accepted as a consumer (being fixed) |
+| F1 | An environment boolean has one spelling policy, in either polarity, wherever it is read | `app/validation.py:parse_bool_value` | runtime construction | property registry `bool-env` + decision-path tests | `PARTIAL` — `CRAWLUTRON_LOOP_LAG_PROBE` is still parsed with `== "1"` in `app/resource_pressure.py:45`, so `" true "` and `"yes"` read false there and true in the shared reader; two test-only parsers in `app/crawl/extraction.py` do the same |
+| F2 | Every documented `CRAWLUTRON_*` knob has a real production consumer, and env names resolve through declared aliases | `app/settings.py` | runtime construction | documented-knob detector | `PARTIAL` — a bare mention was accepted as a consumer (being fixed) |
 | F3 | Two documented knobs cannot silently collapse onto one settings field | `app/settings.py:ENVIRONMENT_FIELD_ALIASES` | runtime construction | alias integrity check | `PARTIAL` — duplicate targets were accepted (being fixed) |
 | F4 | Numeric settings are read through never-raise readers that warn and fall back; there is one int face and one float face | `app/validation.py:_mapping_number` | runtime construction | differential tests over bounds, garbage, non-finite | `GATED` |
 | F5 | The process bind port is owned by the process invocation, not duplicated into application settings | Dockerfile / compose | config | documented-knob detector (field removed) | `GATED` |
@@ -114,7 +114,7 @@ route gate, which is why the same defect keeps reappearing at a new call site.
 
 | # | Property | Owner | Seam | Gate | Status |
 |---|---|---|---|---|---|
-| G1 | The service sends no telemetry, and no dependency may introduce one | dependency configuration | config | `docs/references/browser-crawler-telemetry.md` documents the posture; no mechanical gate | `PARTIAL` — documentation, not enforcement |
+| G1 | The service sends no telemetry, and no dependency may introduce one | dependency configuration | config | `docs/references/crawlutron-telemetry.md` documents the posture; no mechanical gate | `PARTIAL` — documentation, not enforcement |
 | G2 | Custom safety predicates have exactly one owner and one exit path; a standard linter must not reimplement them | `tests/invariants/` | config | architecture convention; registry integrity for properties | `PARTIAL` — not mechanically enforced |
 | G3 | No inline suppression of the style gate | ruff config | config | `RUF100` is selected, so a `# noqa` that suppresses nothing is a lint error; the tree holds zero `# noqa` comments | `ENFORCED` |
 

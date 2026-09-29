@@ -27,7 +27,7 @@ from app.settings import CrawlerSettings
 logger = logging.getLogger(__name__)
 
 
-# Default bound for BrowserPool.acquire (M12). Renders carry their own
+# Default bound for BrowserPool.acquire. Renders carry their own
 # per-URL budget on top; this only stops a leaked renderer from hanging
 # waiters forever with no diagnostics.
 BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS: float = 60.0
@@ -81,7 +81,7 @@ class BrowserPool:
     async def acquire(self, timeout: float | None = BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS) -> BrowserRenderer:
         """Acquire a renderer from the pool.
 
-        The wait is bounded (M12): a leaked renderer must shrink capacity
+        The wait is bounded: a leaked renderer must shrink capacity
         loudly, not hang every subsequent acquire forever with no
         diagnostics. Pass ``timeout=None`` only when the caller owns an
         outer deadline.

@@ -27,11 +27,11 @@ from app import resource_pressure as rp
 @pytest.fixture(autouse=True)
 def _one_worker(monkeypatch):
     """Default every test to a single worker unless it says otherwise."""
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
 
 
 def test_worker_count_reads_through_the_never_raise_chokepoint(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
 
     assert rp.worker_count() == 4
 
@@ -42,13 +42,13 @@ def test_a_typo_in_the_worker_count_does_not_zero_every_budget(monkeypatch):
     Zero would divide every budget to nothing and silently refuse all work,
     which reads as "the crawler is broken" rather than "the config is wrong".
     """
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "many")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "many")
 
     assert rp.worker_count() == 1
 
 
 def test_a_non_positive_worker_count_is_clamped_to_one(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "0")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "0")
 
     assert rp.worker_count() == 1
 
@@ -63,15 +63,15 @@ def test_every_worker_derives_a_pool_that_fits_the_whole_fleet(monkeypatch):
     satisfiable by giving a worker no browser at all.
     """
     limit = 16 * 1024 * 1024 * 1024
-    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "")
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
     per_worker = rp.derive_browser_pool_size(limit)
 
     assert per_worker * 4 <= rp._MAX_DERIVED_POOL_SIZE
     assert per_worker >= 1
 
     # Un-divided, 4 workers on this limit would each take the full cap.
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert rp.derive_browser_pool_size(limit) * 4 > per_worker * 4
 
 
@@ -82,21 +82,21 @@ def test_the_pool_size_knob_is_a_fleet_total_not_a_per_process_one(monkeypatch):
     this changes no shipped behaviour -- it stops the fleet from quietly
     multiplying the number the operator thought they were capping.
     """
-    monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "4")
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "4")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert rp.derive_browser_pool_size() == 4
 
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
     assert rp.derive_browser_pool_size() == 1
 
 
 def test_http_concurrency_is_split_across_workers(monkeypatch):
     """Each worker's HTTP ceiling is its share of the container's RAM."""
     limit = 4 * 1024 * 1024 * 1024
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     single = rp.max_http_concurrency_for(limit, pool_size=1, doc_workers=1)
 
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
     per_worker = rp.max_http_concurrency_for(limit, pool_size=1, doc_workers=1)
 
     assert per_worker * 4 <= single
@@ -105,18 +105,18 @@ def test_http_concurrency_is_split_across_workers(monkeypatch):
 
 def test_doc_workers_are_split_across_workers(monkeypatch):
     """2 markitdown workers per process is 2N of them, each 100-300 MiB."""
-    monkeypatch.setenv("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", "8")
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_EXTRACTION_DOC_WORKERS", "8")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert rp.doc_worker_count() == 8
 
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
     assert rp.doc_worker_count() == 2
 
 
 def test_the_content_length_budget_is_split_across_workers(monkeypatch):
     """The last cgroup budget that was read undivided.
 
-    ``BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES`` bounds the RAM held by in-flight
+    ``CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES`` bounds the RAM held by in-flight
     page bodies, which is container memory -- the same shared number the pool
     sizes read. Left whole, each worker sized its per-page cap against the whole
     budget, so the fleet held N times what the knob names. This is the same
@@ -137,13 +137,13 @@ def test_the_content_length_budget_is_split_across_workers(monkeypatch):
 
     # 16 MiB across one worker clears the 10 MiB per-page default, so the
     # default binds and is reported undivided.
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert cck._effective_max_content_length(uncapped, global_concurrency=1) == 10 * 1024 * 1024
 
     # Below the default the budget is the binding constraint, and each worker
     # takes its share of it.
     for workers in (2, 4, 8):
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
         each = cck._effective_max_content_length(uncapped, global_concurrency=1)
         assert each == budget // workers, f"at {workers} workers"
 
@@ -160,9 +160,9 @@ def test_an_explicit_content_cap_is_not_divided(monkeypatch):
 
     explicit = CrawlPolicyLimits(max_content_length_bytes=5 * 1024 * 1024)
 
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "8")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "8")
     assert cck._effective_max_content_length(explicit, global_concurrency=1) == 5 * 1024 * 1024
 
 
@@ -173,7 +173,7 @@ def test_a_worker_always_gets_at_least_one_slot(monkeypatch):
     an over-subscribed fleet is the operator's memory-limit error, not a
     reason to make the crawler refuse to work at all.
     """
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "64")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "64")
 
     assert rp.derive_browser_pool_size(64 * 1024 * 1024) >= 1
     assert rp.max_http_concurrency_for(64 * 1024 * 1024, pool_size=1) >= 1
@@ -205,11 +205,11 @@ def test_the_admission_gate_grants_the_fleet_no_more_than_one_worker_would(monke
     which is the safe direction to be wrong in.
     """
     limit = 16 * 1024 * 1024 * 1024
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "1")
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", "1")
     single = _policy(limit)
 
     for workers in (2, 4, 8):
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
         each = _policy(limit)
         assert each.max_http_concurrency * workers <= single.max_http_concurrency, (
             f"http fleet at {workers} workers"
@@ -236,12 +236,12 @@ def test_the_browser_tier_stays_inside_the_ram_budget(monkeypatch):
 
     affordable = budget // browser_bytes
     for workers in range(1, affordable + 1):
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(workers))
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", str(workers))
         assert rp.derive_browser_pool_size(limit) * workers * browser_bytes <= budget, (
             f"over-committed at {workers} workers"
         )
 
     # One past the ceiling is over-committed, and that is the documented limit.
-    monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", str(affordable + 1))
+    monkeypatch.setenv("CRAWLUTRON_WORKERS", str(affordable + 1))
     over = rp.derive_browser_pool_size(limit) * (affordable + 1) * browser_bytes
     assert over > budget

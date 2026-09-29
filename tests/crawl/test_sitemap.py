@@ -363,7 +363,7 @@ class TestSeedingIsOffLoop:
         await crawl_request(payload, http_fetcher=fetcher, content_cache=cache)
 
         assert "_stale_seeds" in seen, "freshness filtering was not offloaded off the loop"
-        # The fresh seed was skipped (#3): only robots.txt, the sitemap and the
+        # The fresh seed was skipped: only robots.txt, the sitemap and the
         # crawled origin were fetched -- never the cached page itself.
         assert fresh_url not in fetched
 
@@ -478,7 +478,7 @@ def test_parse_lastmod_rejects_far_future(monkeypatch):
 
 
 def test_future_skew_bound_is_configurable(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "0")
+    monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "0")
     assert _parse_lastmod(_iso_offset(300)) is None
     assert _parse_lastmod(_iso_offset(-300)) is not None
 
@@ -486,7 +486,7 @@ def test_future_skew_bound_is_configurable(monkeypatch):
 def test_negative_bound_config_falls_back_to_floor(monkeypatch):
     """A negative skew would reject stamps from the last N seconds (the
     site's clock runs ahead); the lo=0 floor keeps 'trust the past' intact."""
-    monkeypatch.setenv("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "-3600")
+    monkeypatch.setenv("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", "-3600")
     assert _parse_lastmod(_iso_offset(-1800)) is not None
 
 

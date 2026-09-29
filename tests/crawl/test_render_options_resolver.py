@@ -43,8 +43,8 @@ from tests._fetcher_factories import strategy_request
 #: the deployment-side rejection is pinned in
 #: ``test_env_parsing.test_an_out_of_ceiling_deployment_value_is_refused``.
 SETTINGS_OVERRIDES = {
-    "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS": "11",
-    "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES": "4",
+    "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS": "11",
+    "CRAWLUTRON_DEFAULT_MAX_RETRIES": "4",
 }
 
 

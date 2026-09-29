@@ -90,7 +90,7 @@ def test_browser_knob_defaults_unchanged():
 
 @pytest.mark.parametrize(("raw", "expected"), BOOL_ENV_CASES)
 def test_headless_decision_uses_shared_bool_parser(monkeypatch, raw, expected):
-    set_optional_env(monkeypatch, "BROWSER_CRAWLER_HEADLESS", raw)
+    set_optional_env(monkeypatch, "CRAWLUTRON_HEADLESS", raw)
     assert BrowserRenderer()._get_browser_kwargs({})["headless"] is expected
 
 
@@ -100,9 +100,9 @@ def test_browser_knob_env_mapping():
 
     mapped = CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_LAZY_SCROLL_STEPS": "7",
-            "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS": "0.2",
-            "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS": "2.5",
+            "CRAWLUTRON_LAZY_SCROLL_STEPS": "7",
+            "CRAWLUTRON_LAZY_SCROLL_DELAY_SECONDS": "0.2",
+            "CRAWLUTRON_COOKIE_HARVEST_TIMEOUT_SECONDS": "2.5",
         }
     )
     assert mapped.browser_lazy_scroll_steps == 7
@@ -110,9 +110,9 @@ def test_browser_knob_env_mapping():
     assert mapped.browser_cookie_harvest_timeout_seconds == 2.5
     junk = CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_LAZY_SCROLL_STEPS": "junk",
-            "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS": "junk",
-            "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS": "junk",
+            "CRAWLUTRON_LAZY_SCROLL_STEPS": "junk",
+            "CRAWLUTRON_LAZY_SCROLL_DELAY_SECONDS": "junk",
+            "CRAWLUTRON_COOKIE_HARVEST_TIMEOUT_SECONDS": "junk",
         }
     )
     assert junk.browser_lazy_scroll_steps == 3
@@ -126,9 +126,9 @@ def test_log_knob_env_mapping():
     log_file = f"{tempfile.gettempdir()}/crawler.jsonl"
     mapped = CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_LOG_FILE": log_file,
-            "BROWSER_CRAWLER_LOG_MAX_BYTES": "4096",
-            "BROWSER_CRAWLER_LOG_BACKUP_COUNT": "7",
+            "CRAWLUTRON_LOG_FILE": log_file,
+            "CRAWLUTRON_LOG_MAX_BYTES": "4096",
+            "CRAWLUTRON_LOG_BACKUP_COUNT": "7",
         }
     )
 

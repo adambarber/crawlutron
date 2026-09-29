@@ -25,7 +25,7 @@ router = APIRouter(tags=["Search"])
         "Run a web search query through the configured provider and return SERP-style "
         "results (title, url, description). The service does NOT crawl result URLs; "
         "callers pipe them into POST /v1/crawl. The active provider is operator-configured "
-        "via BROWSER_CRAWLER_SEARCH_PROVIDER and the matching *_API_KEY; GET "
+        "via CRAWLUTRON_SEARCH_PROVIDER and the matching *_API_KEY; GET "
         "/v1/capabilities reports which provider is active. Results are normalized to "
         "public HTTP(S) URLs; loopback/private targets are dropped."
     ),

@@ -1,4 +1,4 @@
-"""Command-line entry point for browser-crawler store migrations."""
+"""Command-line entry point for crawlutron store migrations."""
 
 from app.crawl.migrations.runner import main
 

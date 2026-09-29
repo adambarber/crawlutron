@@ -108,7 +108,7 @@ class TestDocumentRedirectSsrf:
             return [self.PINNED_IP]
 
         monkeypatch.setattr(http_strategy, "_resolve_ips", fake_resolve_ips)
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
 
         fetched: list[str] = []  # logical host names from the Host header
         connect_urls: list[str] = []  # URLs actually handed to the connection

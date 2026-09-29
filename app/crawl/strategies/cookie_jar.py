@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # depend on cross-request cookie persistence for a single user
 # (adversarial review F-cookie-cross-contamination).
 _COOKIE_NAMESPACE: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "browser_crawler_cookie_namespace", default=""
+    "crawlutron_cookie_namespace", default=""
 )
 
 # Cap on distinct (namespace, host) cookie slots. The jar is module-global
@@ -224,5 +224,5 @@ class CookieJar:
         }
 
 
-# Module-level cookie jar for persistent cross-request cookie storage (#2).
+# Module-level cookie jar for persistent cross-request cookie storage.
 _GLOBAL_COOKIE_JAR = CookieJar()

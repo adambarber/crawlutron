@@ -467,7 +467,7 @@ def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
 
 
 def test_no_hand_rolled_error_envelopes():
-    """Every HTTP error body flows through error_envelope/http_error (#1722)."""
+    """Every HTTP error body flows through error_envelope/http_error."""
     assert_trees_clean(
         _envelope_dict_offenders,
         "Use app.api.exceptions.http_error/browser_pool_unavailable",

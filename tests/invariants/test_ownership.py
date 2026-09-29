@@ -96,7 +96,7 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
 
 
 def test_no_await_inside_lock_bodies():
-    """A lock held across an await blocks the loop and can deadlock (M3)."""
+    """A lock held across an await blocks the loop and can deadlock."""
     assert_trees_clean(
         _lock_bodies_with_awaits,
         "Lock held across await",
@@ -105,7 +105,7 @@ def test_no_await_inside_lock_bodies():
 
 
 def test_lock_detector_bites():
-    """Name stems beyond 'lock' and threading-bound aliases must fire (M3)."""
+    """Name stems beyond 'lock' and threading-bound aliases must fire."""
     mutex = ast.parse(
         "class C:\n    def __init__(self):\n        self._mutex = __import__('threading').Lock()\n"
         "    async def go(self):\n        with self._mutex:\n            await x()\n"
@@ -178,7 +178,7 @@ def test_memory_cache_twin_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Lock ownership: a *_locked helper presumes the caller holds the lock (M1)
+# Lock ownership: a *_locked helper presumes the caller holds the lock
 # ---------------------------------------------------------------------------
 
 
@@ -306,7 +306,7 @@ def test_id_mint_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Robots politeness floor is committed only through the bounded setter (M1)
+# Robots politeness floor is committed only through the bounded setter
 # ---------------------------------------------------------------------------
 
 

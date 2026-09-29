@@ -1,4 +1,4 @@
-"""Live end-to-end feature verification for browser-crawler.
+"""Live end-to-end feature verification for crawlutron.
 
 Usage:
     python scripts/e2e_verify.py [base_url] [target_url]

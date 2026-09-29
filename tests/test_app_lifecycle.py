@@ -11,7 +11,7 @@ from tests._lifespan_doubles import stub_heavy_teardown
 
 
 class TestMultiWorkerInvariants:
-    """`BROWSER_CRAWLER_WORKERS > 1` is supported; these are the properties that make it so.
+    """`CRAWLUTRON_WORKERS > 1` is supported; these are the properties that make it so.
 
     The service used to refuse a second process, because three of its
     process-local singletons were wrong rather than merely wasteful:
@@ -47,7 +47,7 @@ class TestMultiWorkerInvariants:
         from app.crawl.coordination_cookies import SharedCookieStore
         from app.crawl.strategies import cookie_jar as cookie_jar_module
 
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
         monkeypatch.setattr(
             main_mod,
             "settings",
@@ -71,8 +71,8 @@ class TestMultiWorkerInvariants:
         from app.crawl import request_pipeline
         from app.resource_pressure import derive_browser_pool_size
 
-        monkeypatch.setenv("BROWSER_CRAWLER_WORKERS", "4")
-        monkeypatch.setenv("BROWSER_CRAWLER_BROWSER_POOL_SIZE", "")
+        monkeypatch.setenv("CRAWLUTRON_WORKERS", "4")
+        monkeypatch.setenv("CRAWLUTRON_BROWSER_POOL_SIZE", "")
         assert derive_browser_pool_size(16 * 1024**3) == 1
 
         source = inspect.getsource(request_pipeline)

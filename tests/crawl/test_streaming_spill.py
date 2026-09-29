@@ -1,4 +1,4 @@
-"""Streaming spill (#2): page results serialize to disk as each batch
+"""Streaming spill: page results serialize to disk as each batch
 completes, so peak memory scales with batch size instead of total pages.
 
 Contract:

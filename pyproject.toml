@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "browser-crawler"
+name = "crawlutron"
 version = "0.3.0"
 description = "Policy-driven, self-hosted web crawler and content-extraction service built around FastAPI"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-    { name = "browser-crawler maintainers" },
+    { name = "crawlutron maintainers" },
 ]
 keywords = [
     "crawler",

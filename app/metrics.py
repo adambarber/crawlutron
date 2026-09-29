@@ -1,4 +1,4 @@
-"""Prometheus-style metrics for the crawler service (#16).
+"""Prometheus-style metrics for the crawler service.
 
 Counters are service totals and live in the shared coordination store, so
 `/metrics` reports the service rather than whichever worker happened to answer

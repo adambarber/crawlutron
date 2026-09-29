@@ -1,8 +1,8 @@
 """Ad-hoc browser/curl_cffi probe for an arbitrary public site (loopback by default).
 
-Originally hardcoded to ``/opt/stack/browser-crawler`` and
+Originally hardcoded to ``/opt/stack/crawlutron`` and
 ``/opt/stack/shared/python`` for an in-house container; rewritten to derive
-those paths from the script location and ``BROWSER_CRAWLER_*`` env vars so
+those paths from the script location and ``CRAWLUTRON_*`` env vars so
 the probe runs in any clone of the repository (adversarial review
 F-probe-session-hardcoded-paths).
 
@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-# Resolve the browser-crawler root from this script location so the probe
+# Resolve the crawlutron root from this script location so the probe
 # works whether it is invoked from a container, a workstation, or a CI
 # checkout. The previous version of this script also injected the parent
 # monorepo's ``shared/python`` directory; the equivalent logging helper now
@@ -30,10 +30,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 _PROBE_TARGET = os.environ.get(
-    "BROWSER_CRAWLER_PROBE_TARGET", "https://example.com/"
+    "CRAWLUTRON_PROBE_TARGET", "https://example.com/"
 )
 _PROBE_OUTPUT = os.environ.get(
-    "BROWSER_CRAWLER_PROBE_OUTPUT", str(_REPO_ROOT / "tmp" / "probe_out.txt")
+    "CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp" / "probe_out.txt")
 )
 
 

@@ -45,10 +45,10 @@ async def test_recursive_crawl_fetches_links_concurrently():
     }
     settings = CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_GLOBAL_CONCURRENCY": "8",
+            "CRAWLUTRON_GLOBAL_CONCURRENCY": "8",
             # Same-host links are additionally bounded by the per-domain gate;
             # raise it so concurrency is observable for this single-domain site.
-            "BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY": "4",
+            "CRAWLUTRON_PER_DOMAIN_CONCURRENCY": "4",
         }
     )
     response = await crawl_request(payload, settings=settings, http_fetcher=fetcher)

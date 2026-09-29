@@ -357,7 +357,7 @@ class Credential(BaseModel):
 
 
 class CrawlPolicy(BaseModel):
-    # Rejected policy.headers names -> why (M12). Conditional pairs keep the
+    # Rejected policy.headers names -> why. Conditional pairs keep the
     # M14 reason (they must arrive via ``validators``); the rest bypass an
     # engine chokepoint or spoof origin-side identity. The map is the single
     # ban list -- adding an entry here is the whole change surface.
@@ -538,13 +538,13 @@ class CrawlPolicy(BaseModel):
     @field_validator("headers")
     @classmethod
     def _reject_banned_headers(cls, value: dict[str, str]) -> dict[str, str]:
-        """Reject chokepoint-bypassing header names in ``policy.headers`` (M12).
+        """Reject chokepoint-bypassing header names in ``policy.headers``.
 
         Anchored on ``CrawlPolicy`` (not a request model) so every endpoint
         that embeds a policy -- crawl, map, render alike -- inherits the ban
         from one site; a per-request validator is a per-call-site guard the
         engine's chokepoints would still have to re-trust. Rejection, never a
-        silent strip, so the caller learns the contract (#1912).
+        silent strip, so the caller learns the contract.
 
         ``authorization`` is deliberately absent: credentialed crawling of
         one's own site is a real use case, and the typed replacement
@@ -733,8 +733,8 @@ class SearchRequest(BaseModel):
             ge=1,
             le=100,
             description="Maximum results to return. Defaults to the server setting "
-            "BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT and is clamped to "
-            "BROWSER_CRAWLER_SEARCH_LIMIT_MAX.",
+            "CRAWLUTRON_SEARCH_LIMIT_DEFAULT and is clamped to "
+            "CRAWLUTRON_SEARCH_LIMIT_MAX.",
         ),
     ] = None
 

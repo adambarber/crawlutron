@@ -1,4 +1,4 @@
-"""Tracking-parameter normalization dedups URLs that differ only by UTM/tracking tags (#6)."""
+"""Tracking-parameter normalization dedups URLs that differ only by UTM/tracking tags."""
 
 from functools import partial
 

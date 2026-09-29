@@ -17,7 +17,7 @@ class TestPolicyValidation:
             normalize_public_http_url("ftp://example.com/")
 
     def test_private_network_blocked(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             normalize_public_http_url("http://127.0.0.1/x")
 
@@ -52,8 +52,8 @@ class TestPolicyValidation:
 
         settings = CrawlerSettings.from_mapping(
             {
-                "BROWSER_CRAWLER_ALLOWED_HOSTS": "allowed.test",
-                "BROWSER_CRAWLER_DENIED_HOSTS": "blocked.test",
+                "CRAWLUTRON_ALLOWED_HOSTS": "allowed.test",
+                "CRAWLUTRON_DENIED_HOSTS": "blocked.test",
             }
         )
         policy = HostPolicy.from_settings(settings)
@@ -62,7 +62,7 @@ class TestPolicyValidation:
         assert_url_refused("https://blocked.test/page", policy, "host_denied")
 
     def test_host_policy_keeps_ssrf_guard_active(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         assert_url_refused(
             "http://127.0.0.1/page", HostPolicy.from_strings("127.0.0.1", ""), "private_network_target"
         )
@@ -76,12 +76,12 @@ class TestPolicyValidation:
             normalize_public_http_url("http:///path")
 
     def test_private_network_localhost_blocked(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             normalize_public_http_url("http://localhost/x")
 
     def test_private_network_normal_domain_passed_through(self, monkeypatch):
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         out = normalize_public_http_url("http://example.com/x")
         assert out == "http://example.com/x"
 
@@ -90,7 +90,7 @@ class TestPolicyValidation:
 
     def test_integer_ip_literal_blocked(self, monkeypatch):
         # L4: resolvers read bare integers/hex as IPv4; layer 1 must too.
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             normalize_public_http_url("http://2130706433/")  # 127.0.0.1
         with pytest.raises(ValueError):
@@ -100,13 +100,13 @@ class TestPolicyValidation:
 
     def test_public_integer_literal_allowed(self, monkeypatch):
         # Numeric but public (1.1.1.1) stays reachable.
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         assert normalize_public_http_url("http://16843009/") == "http://16843009"
 
     def test_wrapping_integer_to_loopback_blocked(self, monkeypatch):
         # Oversized integers wrap mod 2**32 on resolvers: this one lands on
         # 127.0.0.1 and must be rejected, not passed through as a hostname.
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         with pytest.raises(ValueError):
             normalize_public_http_url("http://6425673729/")
 

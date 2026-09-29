@@ -17,8 +17,8 @@ from tests._fetcher_factories import make_html_fetcher, routed_fetcher
 def _settings(*, allowed: str = "", denied: str = "") -> CrawlerSettings:
     return CrawlerSettings.from_mapping(
         {
-            "BROWSER_CRAWLER_ALLOWED_HOSTS": allowed,
-            "BROWSER_CRAWLER_DENIED_HOSTS": denied,
+            "CRAWLUTRON_ALLOWED_HOSTS": allowed,
+            "CRAWLUTRON_DENIED_HOSTS": denied,
         }
     )
 
@@ -163,7 +163,7 @@ async def test_render_request_never_invokes_worker_for_policy_blocked_host():
 
 
 def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     policy = HostPolicy.from_strings("", "")
     html = "<script>fetch('/api/public'); fetch('http://127.0.0.1/private');</script>"
 
@@ -178,7 +178,7 @@ def test_js_endpoint_extraction_filters_private_targets_on_real_discovery_path(m
 
 
 async def test_allow_listed_private_target_is_still_refused(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     calls: list[str] = []
 
     fetcher = make_html_fetcher(calls, b"<html></html>")

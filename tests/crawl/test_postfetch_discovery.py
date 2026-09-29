@@ -132,7 +132,7 @@ async def test_no_lxml_tree_escapes_to_loop(monkeypatch):
 
 
 def test_html_diagnostics_omit_policy_blocked_frame_and_private_form(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     html = '<iframe src="https://blocked.test/frame"></iframe><form action="http://127.0.0.1/admin"></form>'
     result = extract_post_fetch_discovery(
         html,

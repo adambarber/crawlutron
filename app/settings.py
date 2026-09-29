@@ -45,18 +45,18 @@ def _default_http_keepalive() -> int:
 
 
 ENVIRONMENT_FIELD_ALIASES: dict[str, str] = {
-    "browser_cookie_harvest_timeout_seconds": "BROWSER_CRAWLER_COOKIE_HARVEST_TIMEOUT_SECONDS",
-    "browser_lazy_scroll_delay_seconds": "BROWSER_CRAWLER_LAZY_SCROLL_DELAY_SECONDS",
-    "browser_lazy_scroll_steps": "BROWSER_CRAWLER_LAZY_SCROLL_STEPS",
-    "log_file_backup_count": "BROWSER_CRAWLER_LOG_BACKUP_COUNT",
-    "log_file_path": "BROWSER_CRAWLER_LOG_FILE",
-    "log_file_max_bytes": "BROWSER_CRAWLER_LOG_MAX_BYTES",
+    "browser_cookie_harvest_timeout_seconds": "CRAWLUTRON_COOKIE_HARVEST_TIMEOUT_SECONDS",
+    "browser_lazy_scroll_delay_seconds": "CRAWLUTRON_LAZY_SCROLL_DELAY_SECONDS",
+    "browser_lazy_scroll_steps": "CRAWLUTRON_LAZY_SCROLL_STEPS",
+    "log_file_backup_count": "CRAWLUTRON_LOG_BACKUP_COUNT",
+    "log_file_path": "CRAWLUTRON_LOG_FILE",
+    "log_file_max_bytes": "CRAWLUTRON_LOG_MAX_BYTES",
 }
 
 
 @dataclass(frozen=True)
 class CrawlerSettings:
-    # Bind interface (M15): loopback by default since the service has no
+    # Bind interface: loopback by default since the service has no
     # caller authentication. Container deployments that rely on port mapping
     # must set 0.0.0.0 explicitly (the compose file does, gated by its
     # loopback-only ports mapping).
@@ -71,15 +71,15 @@ class CrawlerSettings:
     allowed_hosts: str = ""
     denied_hosts: str = ""
     log_level: str = "info"
-    log_file_path: str = "./logs/browser-crawler.jsonl"
+    log_file_path: str = "./logs/crawlutron.jsonl"
     log_file_max_bytes: int = 10 * 1024 * 1024
     log_file_backup_count: int = 3
     cache_dir: str = "./cache"
     cache_ttl_seconds: int = 3600
-    # Opt-in disk content cache (#5). Disabled by default so per-URL content is
+    # Opt-in disk content cache. Disabled by default so per-URL content is
     # always freshly fetched unless explicitly enabled (e.g. in the container image).
     content_cache_enabled: bool = False
-    # Adaptive throttling (#6): per-domain delay is driven by observed latency.
+    # Adaptive throttling: per-domain delay is driven by observed latency.
     adaptive_throttling: bool = True
     adaptive_min_delay: float = 0.5
     adaptive_max_delay: float = 10.0
@@ -95,7 +95,7 @@ class CrawlerSettings:
     http_max_connections: int = field(default_factory=_default_http_max_connections)
     http_max_keepalive: int = field(default_factory=_default_http_keepalive)
     http_keepalive_expiry: float = 60.0
-    # Browser runtime limits (previously read from raw BROWSER_CRAWLER_*
+    # Browser runtime limits (previously read from raw CRAWLUTRON_*
     # env vars inside browser.py; centralized here so they share the env
     # mapping and are visible in /v1/capabilities-style config).
     max_browser_renders: int = DEFAULT_MAX_BROWSER_RENDERS
@@ -136,20 +136,20 @@ class CrawlerSettings:
         """
         source = os.environ if values is None else values
         return cls(
-            host=source.get("BROWSER_CRAWLER_HOST", cls.host),
+            host=source.get("CRAWLUTRON_HOST", cls.host),
             global_concurrency=get_mapping_int(
-                source, "BROWSER_CRAWLER_GLOBAL_CONCURRENCY", cls.global_concurrency
+                source, "CRAWLUTRON_GLOBAL_CONCURRENCY", cls.global_concurrency
             ),
             per_domain_concurrency=get_mapping_int(
-                source, "BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency
+                source, "CRAWLUTRON_PER_DOMAIN_CONCURRENCY", cls.per_domain_concurrency
             ),
             per_domain_delay_ms=get_mapping_int(
-                source, "BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
+                source, "CRAWLUTRON_PER_DOMAIN_DELAY_MS", cls.per_domain_delay_ms
             ),
-            max_batch_size=get_mapping_int(source, "BROWSER_CRAWLER_MAX_BATCH_SIZE", cls.max_batch_size),
+            max_batch_size=get_mapping_int(source, "CRAWLUTRON_MAX_BATCH_SIZE", cls.max_batch_size),
             default_timeout_seconds=get_mapping_int(
                 source,
-                "BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS",
+                "CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS",
                 cls.default_timeout_seconds,
                 # Bounded by the same declaration the policy is validated
                 # against, so an operator config cannot install a per-request
@@ -164,7 +164,7 @@ class CrawlerSettings:
             ),
             default_max_retries=get_mapping_int(
                 source,
-                "BROWSER_CRAWLER_DEFAULT_MAX_RETRIES",
+                "CRAWLUTRON_DEFAULT_MAX_RETRIES",
                 cls.default_max_retries,
                 # The deployment's ceiling, not the per-job one: this default
                 # applies to every caller, so it is capped at MAX_RETRIES and an
@@ -176,13 +176,13 @@ class CrawlerSettings:
                 validate_event="operator_max_retries_out_of_range",
             ),
             respect_robots=parse_bool_value(
-                source.get("BROWSER_CRAWLER_RESPECT_ROBOTS"),
+                source.get("CRAWLUTRON_RESPECT_ROBOTS"),
                 cls.respect_robots,
-                env_name="BROWSER_CRAWLER_RESPECT_ROBOTS",
+                env_name="CRAWLUTRON_RESPECT_ROBOTS",
             ),
-            allowed_hosts=source.get("BROWSER_CRAWLER_ALLOWED_HOSTS", cls.allowed_hosts),
-            denied_hosts=source.get("BROWSER_CRAWLER_DENIED_HOSTS", cls.denied_hosts),
-            log_level=source.get("BROWSER_CRAWLER_LOG_LEVEL", cls.log_level),
+            allowed_hosts=source.get("CRAWLUTRON_ALLOWED_HOSTS", cls.allowed_hosts),
+            denied_hosts=source.get("CRAWLUTRON_DENIED_HOSTS", cls.denied_hosts),
+            log_level=source.get("CRAWLUTRON_LOG_LEVEL", cls.log_level),
             log_file_path=source.get(ENVIRONMENT_FIELD_ALIASES["log_file_path"], cls.log_file_path),
             log_file_max_bytes=get_mapping_int(
                 source,
@@ -194,55 +194,55 @@ class CrawlerSettings:
                 ENVIRONMENT_FIELD_ALIASES["log_file_backup_count"],
                 cls.log_file_backup_count,
             ),
-            cache_dir=source.get("BROWSER_CRAWLER_CACHE_DIR", cls.cache_dir),
+            cache_dir=source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
             cache_ttl_seconds=get_mapping_int(
-                source, "BROWSER_CRAWLER_CACHE_TTL_SECONDS", cls.cache_ttl_seconds
+                source, "CRAWLUTRON_CACHE_TTL_SECONDS", cls.cache_ttl_seconds
             ),
             content_cache_enabled=parse_bool_value(
-                source.get("BROWSER_CRAWLER_CONTENT_CACHE_ENABLED"),
+                source.get("CRAWLUTRON_CONTENT_CACHE_ENABLED"),
                 cls.content_cache_enabled,
-                env_name="BROWSER_CRAWLER_CONTENT_CACHE_ENABLED",
+                env_name="CRAWLUTRON_CONTENT_CACHE_ENABLED",
             ),
             adaptive_throttling=parse_bool_value(
-                source.get("BROWSER_CRAWLER_ADAPTIVE_THROTTLING"),
+                source.get("CRAWLUTRON_ADAPTIVE_THROTTLING"),
                 cls.adaptive_throttling,
-                env_name="BROWSER_CRAWLER_ADAPTIVE_THROTTLING",
+                env_name="CRAWLUTRON_ADAPTIVE_THROTTLING",
             ),
             adaptive_min_delay=get_mapping_float(
-                source, "BROWSER_CRAWLER_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay
+                source, "CRAWLUTRON_ADAPTIVE_MIN_DELAY", cls.adaptive_min_delay
             ),
             adaptive_max_delay=get_mapping_float(
-                source, "BROWSER_CRAWLER_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay
+                source, "CRAWLUTRON_ADAPTIVE_MAX_DELAY", cls.adaptive_max_delay
             ),
             adaptive_latency_factor=get_mapping_float(
-                source, "BROWSER_CRAWLER_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor
+                source, "CRAWLUTRON_ADAPTIVE_LATENCY_FACTOR", cls.adaptive_latency_factor
             ),
             cookie_persistence_enabled=parse_bool_value(
-                source.get("BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED"),
+                source.get("CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED"),
                 cls.cookie_persistence_enabled,
-                env_name="BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED",
+                env_name="CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED",
             ),
-            cookie_jar_path=source.get("BROWSER_CRAWLER_COOKIE_JAR_PATH", cls.cookie_jar_path),
+            cookie_jar_path=source.get("CRAWLUTRON_COOKIE_JAR_PATH", cls.cookie_jar_path),
             http_max_connections=get_mapping_int(
-                source, "BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS", _default_http_max_connections()
+                source, "CRAWLUTRON_HTTP_MAX_CONNECTIONS", _default_http_max_connections()
             ),
             http_max_keepalive=get_mapping_int(
-                source, "BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE", _default_http_keepalive()
+                source, "CRAWLUTRON_HTTP_MAX_KEEPALIVE", _default_http_keepalive()
             ),
             http_keepalive_expiry=get_mapping_float(
-                source, "BROWSER_CRAWLER_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry
+                source, "CRAWLUTRON_HTTP_KEEPALIVE_EXPIRY", cls.http_keepalive_expiry
             ),
             max_browser_renders=get_mapping_int(
-                source, "BROWSER_CRAWLER_MAX_BROWSER_RENDERS", cls.max_browser_renders
+                source, "CRAWLUTRON_MAX_BROWSER_RENDERS", cls.max_browser_renders
             ),
             max_concurrent_pages=get_mapping_int(
-                source, "BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
+                source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
             ),
             browser_pool_size=get_mapping_int(
-                source, "BROWSER_CRAWLER_BROWSER_POOL_SIZE", cls.browser_pool_size
+                source, "CRAWLUTRON_BROWSER_POOL_SIZE", cls.browser_pool_size
             ),
             challenge_wait_seconds=get_mapping_int(
-                source, "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
+                source, "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
             ),
             browser_lazy_scroll_steps=get_mapping_int(
                 source,
@@ -262,17 +262,17 @@ class CrawlerSettings:
                 cls.browser_cookie_harvest_timeout_seconds,
                 lo=0.0,
             ),
-            search_provider=source.get("BROWSER_CRAWLER_SEARCH_PROVIDER", cls.search_provider),
-            tavily_api_key=source.get("BROWSER_CRAWLER_TAVILY_API_KEY", cls.tavily_api_key),
-            brave_api_key=source.get("BROWSER_CRAWLER_BRAVE_API_KEY", cls.brave_api_key),
-            serper_api_key=source.get("BROWSER_CRAWLER_SERPER_API_KEY", cls.serper_api_key),
+            search_provider=source.get("CRAWLUTRON_SEARCH_PROVIDER", cls.search_provider),
+            tavily_api_key=source.get("CRAWLUTRON_TAVILY_API_KEY", cls.tavily_api_key),
+            brave_api_key=source.get("CRAWLUTRON_BRAVE_API_KEY", cls.brave_api_key),
+            serper_api_key=source.get("CRAWLUTRON_SERPER_API_KEY", cls.serper_api_key),
             search_limit_default=get_mapping_int(
-                source, "BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
+                source, "CRAWLUTRON_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
             ),
             search_limit_max=get_mapping_int(
-                source, "BROWSER_CRAWLER_SEARCH_LIMIT_MAX", cls.search_limit_max
+                source, "CRAWLUTRON_SEARCH_LIMIT_MAX", cls.search_limit_max
             ),
             search_timeout_seconds=get_mapping_int(
-                source, "BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
+                source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
             ),
         )

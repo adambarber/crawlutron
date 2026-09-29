@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def error_envelope(code: str, message: str, details: dict | None = None) -> dict:
-    """The single definition of the wire error shape (#1722).
+    """The single definition of the wire error shape.
 
     ``details`` is always present — a hand-rolled site that forgets it is
     exactly the drift this factory exists to prevent.
@@ -32,7 +32,7 @@ MALFORMED_DETAIL_CODE = "malformed_error_detail"
 
 
 def error_envelope_from_detail(detail: Any, status_code: int) -> dict:
-    """The only way an ``HTTPException`` detail becomes an error envelope (M8).
+    """The only way an ``HTTPException`` detail becomes an error envelope.
 
     Conforming detail (built by :func:`http_error`) unwraps 1:1. Anything else
     means someone raised ``HTTPException`` outside the helpers -- a string

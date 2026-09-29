@@ -240,7 +240,7 @@ def test_strategy_runner_guard_detector_bites():
     assert not _unguarded_strategy_runner_offenders(method_guarded, path)
 
 
-_KNOB_PATTERN = re.compile(r"\bBROWSER_CRAWLER_[A-Z0-9_]+\b")
+_KNOB_PATTERN = re.compile(r"\bCRAWLUTRON_[A-Z0-9_]+\b")
 
 
 def _documented_browser_knobs() -> set[str] | None:
@@ -338,7 +338,7 @@ def _environment_reader_reference(
         return alias_value
     # ast.Constant.value is the full literal union, so a prefix test is a claim
     # about the value being a str, not about the node being a Constant.
-    if isinstance(node.value, str) and node.value.startswith("BROWSER_CRAWLER_"):
+    if isinstance(node.value, str) and node.value.startswith("CRAWLUTRON_"):
         return node.value
     return None
 
@@ -363,7 +363,7 @@ def _settings_alias_failures(
     failures = [
         f"{field} maps to invalid environment name {environment}"
         for field, environment in aliases.items()
-        if field not in known_fields or not environment.startswith("BROWSER_CRAWLER_")
+        if field not in known_fields or not environment.startswith("CRAWLUTRON_")
     ]
     fields_by_environment: dict[str, list[str]] = {}
     for field, environment in aliases.items():
@@ -379,7 +379,7 @@ def _settings_alias_failures(
 def _production_browser_knob_references() -> set[str]:
     references: set[str] = set()
     fields = _settings_fields()
-    field_knobs = {f"BROWSER_CRAWLER_{field.upper()}": field for field in fields}
+    field_knobs = {f"CRAWLUTRON_{field.upper()}": field for field in fields}
     for path, tree in app_trees(exclude=frozenset()):
         for node in string_literals(tree):
             if isinstance(node.value, str) and (not _settings_alias_declaration_constant(path, tree, node)):
@@ -394,7 +394,7 @@ def _production_browser_knob_references() -> set[str]:
                 environment = ENVIRONMENT_FIELD_ALIASES.get(node.attr)
                 if environment is not None:
                     references.add(environment)
-                conventional = f"BROWSER_CRAWLER_{node.attr.upper()}"
+                conventional = f"CRAWLUTRON_{node.attr.upper()}"
                 if conventional in field_knobs:
                     references.add(conventional)
     dockerfile = REPO_ROOT / "Dockerfile"
@@ -412,7 +412,7 @@ def _documented_knob_offenders(
     if documented is None:
         return ["documented knob source could not be located"]
     if not documented:
-        return ["no documented BROWSER_CRAWLER knobs were found"]
+        return ["no documented CRAWLUTRON knobs were found"]
     return [f"{name} has no production consumer" for name in sorted(documented - references)]
 
 
@@ -424,7 +424,7 @@ def _resolved_env_reader_offenders(tree: ast.AST, path: pathlib.Path, prop: Prop
             if environment is not None:
                 references.add(environment)
     return _documented_knob_offenders(
-        {"BROWSER_CRAWLER_LAZY_SCROLL_STEPS"},
+        {"CRAWLUTRON_LAZY_SCROLL_STEPS"},
         references,
     )
 
@@ -439,25 +439,25 @@ def test_documented_browser_knobs_have_consumers():
 
 
 def test_documented_knob_detector_bites():
-    assert _documented_knob_offenders({"BROWSER_CRAWLER_FAKE"}, set()) == [
-        "BROWSER_CRAWLER_FAKE has no production consumer"
+    assert _documented_knob_offenders({"CRAWLUTRON_FAKE"}, set()) == [
+        "CRAWLUTRON_FAKE has no production consumer"
     ]
     assert _documented_knob_offenders(None, set()) == ["documented knob source could not be located"]
     current = _documented_browser_knobs()
     assert current is not None
-    assert "BROWSER_CRAWLER_ALLOWED_HOSTS" in current
+    assert "CRAWLUTRON_ALLOWED_HOSTS" in current
     assert not _documented_knob_offenders(
-        {"BROWSER_CRAWLER_ALLOWED_HOSTS"}, {"BROWSER_CRAWLER_ALLOWED_HOSTS"}
+        {"CRAWLUTRON_ALLOWED_HOSTS"}, {"CRAWLUTRON_ALLOWED_HOSTS"}
     )
-    assert _documented_knob_offenders({"BROWSER_CRAWLER_LOG_FILE"}, set())
-    assert _settings_alias_failures({"missing_field": "BROWSER_CRAWLER_FAKE"}, {"real_field"})
+    assert _documented_knob_offenders({"CRAWLUTRON_LOG_FILE"}, set())
+    assert _settings_alias_failures({"missing_field": "CRAWLUTRON_FAKE"}, {"real_field"})
     assert _settings_alias_failures(
         {
-            "browser_lazy_scroll_steps": "BROWSER_CRAWLER_FAKE",
-            "log_file_path": "BROWSER_CRAWLER_FAKE",
+            "browser_lazy_scroll_steps": "CRAWLUTRON_FAKE",
+            "log_file_path": "CRAWLUTRON_FAKE",
         },
         {"browser_lazy_scroll_steps", "log_file_path"},
-    ) == ["browser_lazy_scroll_steps, log_file_path map to BROWSER_CRAWLER_FAKE"]
+    ) == ["browser_lazy_scroll_steps, log_file_path map to CRAWLUTRON_FAKE"]
     prop = Property(
         name="resolved-env-reader",
         owner_module="app/settings.py",
@@ -474,12 +474,12 @@ def test_documented_knob_detector_bites():
                 "from app.settings import ENVIRONMENT_FIELD_ALIASES\n"
                 "def broken(source):\n"
                 "    return get_mapping_int(source, "
-                "ENVIRONMENT_FIELD_ALIASES['BROWSER_CRAWLER_LAZY_SCROLL_STEPS'], 3)\n",
+                "ENVIRONMENT_FIELD_ALIASES['CRAWLUTRON_LAZY_SCROLL_STEPS'], 3)\n",
                 1,
             ),
             "docstring-only mention": (
                 "def read_setting():\n"
-                "    '''Mentions BROWSER_CRAWLER_LAZY_SCROLL_STEPS without reading it.'''\n"
+                "    '''Mentions CRAWLUTRON_LAZY_SCROLL_STEPS without reading it.'''\n"
                 "    return object()\n",
                 1,
             ),

@@ -1,4 +1,4 @@
-# Standalone docker-compose for local browser-crawler development.
+# Standalone docker-compose for local crawlutron development.
 #
 # This file is intentionally minimal: it builds the local Dockerfile, exposes
 # the service on loopback only, and mounts ./logs and ./cache so a development
@@ -6,7 +6,7 @@
 # authenticated reverse proxy (e.g. Caddy) and persistent volumes.
 
 services:
-  browser-crawler:
+  crawlutron:
     build:
       context: .
       dockerfile: Dockerfile
@@ -15,8 +15,8 @@ services:
       # build would run the service in hot-reload dev mode under a supervisor
       # process. The runtime stage is the production command.
       target: runtime
-    image: browser-crawler:local
-    container_name: browser-crawler
+    image: crawlutron:local
+    container_name: crawlutron
     restart: unless-stopped
     # PID 1 must reap children. The service spawns long-lived subprocesses
     # (persistent markitdown doc workers, Playwright browser drivers) whose
@@ -39,30 +39,30 @@ services:
       - "127.0.0.1:8765:8765"
     environment:
       # Keep defaults out of the container; override per-deployment.
-      # BROWSER_CRAWLER_HOST=0.0.0.0 is required here: Docker port mapping
+      # CRAWLUTRON_HOST=0.0.0.0 is required here: Docker port mapping
       # cannot reach a loopback-bound process inside the container.
       # External exposure stays gated by the loopback-only ports mapping above.
-      BROWSER_CRAWLER_HOST: "0.0.0.0"
-      BROWSER_CRAWLER_LOG_LEVEL: "info"
-      BROWSER_CRAWLER_WORKERS: "1"
-      BROWSER_CRAWLER_CACHE_DIR: "/app/cache"
-      BROWSER_CRAWLER_LOG_FILE: "/app/logs/browser-crawler.jsonl"
+      CRAWLUTRON_HOST: "0.0.0.0"
+      CRAWLUTRON_LOG_LEVEL: "info"
+      CRAWLUTRON_WORKERS: "1"
+      CRAWLUTRON_CACHE_DIR: "/app/cache"
+      CRAWLUTRON_LOG_FILE: "/app/logs/crawlutron.jsonl"
       # Opt-in: enable the on-disk content cache for repeatable crawls.
-      BROWSER_CRAWLER_CONTENT_CACHE_ENABLED: "true"
+      CRAWLUTRON_CONTENT_CACHE_ENABLED: "true"
       # SSRF guard on (secure default): only public HTTP(S) targets are
       # crawlable. Set to "1" only for loopback-only local experimentation.
-      BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS: "0"
+      CRAWLUTRON_ALLOW_PRIVATE_TARGETS: "0"
       # --- Web search (POST /v1/search) ---
       # "auto" activates the first keyed provider whose *_API_KEY is set, then
       # falls back to the keyless DuckDuckGo endpoint. Uncomment a key below to
       # enable that provider for production use.
-      BROWSER_CRAWLER_SEARCH_PROVIDER: "auto"
-      BROWSER_CRAWLER_TAVILY_API_KEY: "${BROWSER_CRAWLER_TAVILY_API_KEY:-}"
-      # BROWSER_CRAWLER_BRAVE_API_KEY: ""
-      # BROWSER_CRAWLER_SERPER_API_KEY: ""
+      CRAWLUTRON_SEARCH_PROVIDER: "auto"
+      CRAWLUTRON_TAVILY_API_KEY: "${CRAWLUTRON_TAVILY_API_KEY:-}"
+      # CRAWLUTRON_BRAVE_API_KEY: ""
+      # CRAWLUTRON_SERPER_API_KEY: ""
       # Belt over the image's baked value: guarantee ORT telemetry is off even if
       # this service is ever pointed at an image built before that ENV landed.
-      # Zero-telemetry posture; see docs/references/browser-crawler-telemetry.md.
+      # Zero-telemetry posture; see docs/references/crawlutron-telemetry.md.
       ORT_DISABLE_TELEMETRY: "1"
     volumes:
       - ./logs:/app/logs
@@ -71,7 +71,7 @@ services:
     # is the un-bypassable chokepoint for the sinks that have NO opt-out flag
     # (Playwright 1DS, a future ORT, camoufox's App-Insights path). These hosts
     # are never crawl targets, so sinkholing to 0.0.0.0 cannot affect the crawler
-    # itself. See docs/references/browser-crawler-telemetry.md.
+    # itself. See docs/references/crawlutron-telemetry.md.
     extra_hosts:
       - "mobile.events.data.microsoft.com:0.0.0.0"
       - "browser.events.data.microsoft.com:0.0.0.0"

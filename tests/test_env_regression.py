@@ -9,7 +9,7 @@ Two shapes are banned, because name-aliasing defeats shape-only matching
 (``source = os.environ; int(source.get(...))`` slipped past the original
 single-shape detector):
 
-1. ``int/float(<anything>.get("BROWSER_CRAWLER_..."))`` -- the constant
+1. ``int/float(<anything>.get("CRAWLUTRON_..."))`` -- the constant
    env-key prefix is the robust signal regardless of how the mapping is
    aliased (settings.py:from_mapping blinds spot, OSS-review H1).
 2. ``int/float(os.environ.get(...))`` -- the direct shape, any key name.
@@ -82,19 +82,19 @@ def _env_get_aliases(tree: ast.AST) -> set[str]:
 def test_env_alias_escape_bites():
     """Shape 3 must fire on the read-back that shapes 1-2 structurally miss."""
     bad = ast.parse(
-        'import os\n\ndef f():\n    raw = os.environ.get("BROWSER_CRAWLER_X")\n    return int(raw)\n'
+        'import os\n\ndef f():\n    raw = os.environ.get("CRAWLUTRON_X")\n    return int(raw)\n'
     )
     assert _env_get_aliases(bad) == {"raw"}
     ok = ast.parse('def f(limits):\n    raw = limits.get("max_bytes")\n    return int(raw)\n')
     assert not _env_get_aliases(ok)
     subscript = ast.parse(
-        'import os\n\ndef f():\n    raw = os.environ["BROWSER_CRAWLER_X"]\n    return int(raw)\n'
+        'import os\n\ndef f():\n    raw = os.environ["CRAWLUTRON_X"]\n    return int(raw)\n'
     )
     assert _env_get_aliases(subscript) == {"raw"}
 
 
-def _is_browser_crawler_get(node: ast.expr) -> bool:
-    """True for ``<mapping>.get("BROWSER_CRAWLER_...")`` under any alias."""
+def _is_crawlutron_get(node: ast.expr) -> bool:
+    """True for ``<mapping>.get("CRAWLUTRON_...")`` under any alias."""
     if not isinstance(node, ast.Call) or not node.args:
         return False
     first = node.args[0]
@@ -102,7 +102,7 @@ def _is_browser_crawler_get(node: ast.expr) -> bool:
         _get_receiver(node) is not None
         and isinstance(first, ast.Constant)
         and isinstance(first.value, str)
-        and first.value.startswith("BROWSER_CRAWLER_")
+        and first.value.startswith("CRAWLUTRON_")
     )
 
 
@@ -115,9 +115,9 @@ def test_no_bare_env_int_or_float_in_app():
             if callee not in ("int", "float"):
                 continue
             for arg in node.args:
-                if _is_browser_crawler_get(arg):
+                if _is_crawlutron_get(arg):
                     offenders.append(
-                        offender_at(path, node, f"bare {callee} on BROWSER_CRAWLER_* mapping read")
+                        offender_at(path, node, f"bare {callee} on CRAWLUTRON_* mapping read")
                     )
                 elif _is_env_get(arg):
                     offenders.append(offender_at(path, node, f"bare {callee} on os.environ.get"))

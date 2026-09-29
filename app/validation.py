@@ -127,7 +127,7 @@ _PSL: _PublicSuffixDataset | None = _PSL_UNSET
 # Attribution/tracking query parameters that carry no content-identity
 # information. Dropping them lets URLs that differ only by UTM/tracking tags
 # canonicalize to the same key, preventing duplicate fetches of the same page
-# (#6). Bare ``ref`` is intentionally excluded: it is ambiguous and frequently
+# Bare ``ref`` is intentionally excluded: it is ambiguous and frequently
 # a legitimate content parameter, so stripping it could collapse distinct pages.
 _TRACKING_PARAM_EXACT = frozenset(
     {
@@ -172,7 +172,7 @@ def _resolver_numeric_part(part: str) -> int | None:
 
 
 def _resolver_numeric_ipv4(host: str) -> int | None:
-    """Interpret *host* as IPv4 the way resolvers parse numeric forms (L4).
+    """Interpret *host* as IPv4 the way resolvers parse numeric forms.
 
     ``ipaddress`` rejects bare integers (``2130706433``), hex
     (``0x7f000001``), and short dotted quads (``127.1``), but resolvers
@@ -254,7 +254,7 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
     if query:
         # Drop known tracking/attribution parameters so URLs that differ only
         # by UTM/tracking tags canonicalize to the same key and are not fetched
-        # as duplicate pages (#6). Remaining params are sorted so URLs differing
+        # as duplicate pages. Remaining params are sorted so URLs differing
         # only in parameter order also canonicalize identically.
         pairs = [(k, v) for (k, v) in parse_qsl(query, keep_blank_values=True) if not _is_tracking_param(k)]
         pairs.sort()
@@ -268,7 +268,7 @@ def _strip_trailing_colon(value: str) -> str:
     return value[:-1] if value.endswith(":") else value
 
 
-# (raw env value, parsed decision) for BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS.
+# (raw env value, parsed decision) for CRAWLUTRON_ALLOW_PRIVATE_TARGETS.
 # Value-keyed, not time-keyed: an env change (including a test monkeypatch)
 # takes effect on the very next call; an unchanged value skips the parse.
 _PRIVATE_TARGET_DECISION: tuple[str | None, bool] | None = None
@@ -282,11 +282,11 @@ def _allow_private_targets() -> bool:
     every distinct value change is honored immediately.
     """
     global _PRIVATE_TARGET_DECISION
-    raw = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS")
+    raw = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS")
     cached = _PRIVATE_TARGET_DECISION
     if cached is not None and cached[0] == raw:
         return cached[1]
-    decision = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
+    decision = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
     _PRIVATE_TARGET_DECISION = (raw, decision)
     return decision
 
@@ -316,7 +316,7 @@ def _host_is_public(host: str) -> bool:
     except ValueError:
         address = None
     if address is None:
-        # Resolver-numeric forms ipaddress rejects (L4): classify the
+        # Resolver-numeric forms ipaddress rejects: classify the
         # packed value with the same predicate set.
         numeric = _resolver_numeric_ipv4(host)
         if numeric is not None:
@@ -628,7 +628,7 @@ get_env_float = partial(get_mapping_float, os.environ)
 
 
 def _public_suffix_list():
-    """Lazily load the real public-suffix dataset (M5), None when absent.
+    """Lazily load the real public-suffix dataset, None when absent.
 
     The publicsuffixlist package ships a snapshot .dat (no runtime network).
     Cached on first use; any failure falls back to the heuristic below so

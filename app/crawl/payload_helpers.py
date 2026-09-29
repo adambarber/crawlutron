@@ -62,7 +62,7 @@ def checked_payload_urls(
     host_policy: HostPolicy,
     urls: list[str] | None = None,
 ) -> list[str]:
-    """Deduplicated URL batch, rejected if it exceeds the batch cap (L4).
+    """Deduplicated URL batch, rejected if it exceeds the batch cap.
 
     The single gate shared by the engine (sync) and the crawl endpoint (async
     accept path): the async handler must call this *before* returning 202 so

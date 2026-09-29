@@ -29,7 +29,7 @@ _RETRY_BACKOFF_CAP_SECONDS = 2.0
 def _retry_backoff_seconds(attempt: int) -> float:
     """Capped exponential gap before the retry following a failed ``attempt``.
 
-    Doubles from the base and plateaus at the ceiling (L3): one failing origin
+    Doubles from the base and plateaus at the ceiling: one failing origin
     must not be hammered back-to-back, yet the wait stays bounded so a large
     ``max_retries`` budget cannot park a URL for minutes.
     """
@@ -165,7 +165,7 @@ async def _discovery_diagnostics(
     elif engine_robots_sitemaps is not None:
         # The engine already fetched /robots.txt (for allow/deny checks) and
         # extracted its Sitemap directives; reuse them instead of hitting the
-        # network a second time (#4). An empty list is a valid signal (robots
+        # network a second time. An empty list is a valid signal (robots
         # fetched, no Sitemap lines) and still means "do not re-fetch".
         robots_sitemaps = [
             safe_url

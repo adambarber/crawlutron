@@ -31,7 +31,7 @@ from tests._policy_factories import UNRESTRICTED_HOST_POLICY
 async def test_document_extractor_blocks_internal_url(monkeypatch):
     # F2: the document fetch must refuse a loopback target, and refuse it
     # loudly -- a refused target is not the same outcome as an empty PDF.
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         doc_mod._default_document_text_extractor("http://127.0.0.1:9/secret.pdf", UNRESTRICTED_HOST_POLICY)
 
@@ -120,7 +120,7 @@ async def test_browser_pin_resolve_does_not_run_on_the_event_loop(monkeypatch):
 
 
 async def test_assert_safe_final_url_blocks_internal(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         _assert_safe_final_url("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY)
     # A public IP literal is allowed.
@@ -138,7 +138,7 @@ async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
     # Navigate to the pinned IP, not the hostname (DNS-rebinding safe).
     assert page.goto_calls[0][0] == "http://1.2.3.4:80/"
     # Should use set_extra_http_headers, NOT extra_http_headers param;
-    # the pinned Host is cleared right after navigation (M2).
+    # the pinned Host is cleared right after navigation.
     assert page.set_extra_http_headers_calls == [{"Host": "example.com"}, {}]
     assert result.status == "success"
 
@@ -146,7 +146,7 @@ async def test_render_navigates_to_pinned_ip_with_host_header(monkeypatch):
 async def test_render_rejects_internal_redirect_target(monkeypatch):
     page, renderer = pinned_page_renderer(monkeypatch)
     page.url = "http://127.0.0.1:9/"  # site redirected the browser to loopback
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     with pytest.raises(ValueError):
         await render_bare(renderer)
 
@@ -157,14 +157,14 @@ async def test_render_rejects_internal_redirect_target(monkeypatch):
 
 
 async def test_is_ssrf_blocked_classifies_targets(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     assert _is_ssrf_blocked("http://127.0.0.1:9/", policy=UNRESTRICTED_HOST_POLICY) is True
     assert _is_ssrf_blocked("http://169.254.169.254/latest/", policy=UNRESTRICTED_HOST_POLICY) is True
     assert _is_ssrf_blocked("http://1.2.3.4/", policy=UNRESTRICTED_HOST_POLICY) is False
 
 
 async def test_ssrf_route_handler_aborts_unsafe_and_continues_safe(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     handler = _make_ssrf_route_handler(policy=UNRESTRICTED_HOST_POLICY)
 
     bad = FakeRoute()

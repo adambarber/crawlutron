@@ -7,7 +7,7 @@ guidance.
 
 ## Discovery Surfaces
 
-When the service is running at `http://127.0.0.1:${BROWSER_CRAWLER_HOST_PORT:-8765}`,
+When the service is running at `http://127.0.0.1:${CRAWLUTRON_HOST_PORT:-8765}`,
 discover the contract from:
 
 - `GET /health`
@@ -221,7 +221,7 @@ results and **does not crawl** them — pipe result URLs into `POST /v1/crawl`.
 
 - Response shape: `{success, query, provider, limit, data: [{url, title, description}]}`.
 - The active provider is operator-configured, not caller-selected:
-  `BROWSER_CRAWLER_SEARCH_PROVIDER` (`auto` | `tavily` | `brave` | `serper` |
+  `CRAWLUTRON_SEARCH_PROVIDER` (`auto` | `tavily` | `brave` | `serper` |
   `duckduckgo`). `auto` activates the first configured keyed provider
   (Tavily → Brave → Serper) and falls back to the keyless DuckDuckGo HTML
   endpoint when no key is set. `GET /v1/capabilities` reports
@@ -278,15 +278,15 @@ Use the targeted helper for local operation (from the repository root):
 make test                      # fast hermetic test suite
 python3 -m pytest -q           # same, via pytest directly
 ./scripts/run-tests.sh         # zsh entrypoint mirroring make test
-docker compose build browser-crawler
+docker compose build crawlutron
 # Run the container on 127.0.0.1:8765 (recreates only this service):
-docker compose up -d browser-crawler
+docker compose up -d crawlutron
 ```
 
 ## Fixture and Regression Corpus
 
-Real fixture coverage lives under `tests/fixtures/browser_crawler/`, with a
-manifest at `tests/fixtures/browser_crawler/manifest.json`. The Mass.gov
+Real fixture coverage lives under `tests/fixtures/crawlutron/`, with a
+manifest at `tests/fixtures/crawlutron/manifest.json`. The Mass.gov
 fixtures cover direct HTTP `access_denied` with successful browser fallback
 and guard against false `rate_limited` classifications from script/style
 contents.

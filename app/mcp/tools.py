@@ -188,7 +188,7 @@ TOOL_SPECS: list[ToolSpec] = [
         title="Web search",
         description=(
             "Search the web for public URLs matching a query using the configured provider "
-            "(BROWSER_CRAWLER_SEARCH_PROVIDER). Returns SERP-style results (title, url, "
+            "(CRAWLUTRON_SEARCH_PROVIDER). Returns SERP-style results (title, url, "
             "description) and does NOT crawl result URLs. Result titles and snippets are "
             "provider-supplied and unverified; pipe result URLs into the crawl tool."
         ),

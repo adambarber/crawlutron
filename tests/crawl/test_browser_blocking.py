@@ -196,7 +196,7 @@ async def test_xcom_aborted_regardless_of_mode():
 
 
 async def test_image_blocked_by_default_unless_screenshot():
-    # default (no screenshot requested) -> abort unconditionally (#4)
+    # default (no screenshot requested) -> abort unconditionally
     route = FakeRoute()
     await ssrf_route_handler()(route, FakeRequest("https://x.test/logo.png", "image"))
     assert route.decision == "abort"

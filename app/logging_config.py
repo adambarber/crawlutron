@@ -1,4 +1,4 @@
-"""Standalone JSON-structured logging for the browser-crawler service.
+"""Standalone JSON-structured logging for the crawlutron service.
 
 This module replaces the previous ``local_service_logging`` shim that was
 imported from the parent monorepo's ``shared/python`` directory. The shim

@@ -19,7 +19,7 @@ def _default_global_concurrency() -> int:
         return 4
 ```
 
-`_effective_max_content_length` is invoked once per strategy attempt in `_http_strategy_result`. Because `_payload_policy` normalizes `max_content_length_bytes` to `0` (the "unset" sentinel), and `0 > 0` is false, the fallback branch fires **on every HTTP/CFFI fetch**. `CrawlerSettings.from_mapping()` walks ~40 `BROWSER_CRAWLER_*` env vars, each through `get_mapping_int`/`get_mapping_float`/`parse_bool_value` with try/except and logging.
+`_effective_max_content_length` is invoked once per strategy attempt in `_http_strategy_result`. Because `_payload_policy` normalizes `max_content_length_bytes` to `0` (the "unset" sentinel), and `0 > 0` is false, the fallback branch fires **on every HTTP/CFFI fetch**. `CrawlerSettings.from_mapping()` walks ~40 `CRAWLUTRON_*` env vars, each through `get_mapping_int`/`get_mapping_float`/`parse_bool_value` with try/except and logging.
 
 **Impact:** ~100–500 µs per fetch of pure environment parsing. For a crawl of 10 000 URLs (two HTTP strategies each), that's 2–10 seconds of pure waste, plus a hidden coupling where a settings typo can silently change the effective per-page cap per request.
 
@@ -34,7 +34,7 @@ def _default_global_concurrency() -> int:
 ```python
 def normalize_public_http_url(url: str) -> str:
     ...
-    allow_private = parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False)
+    allow_private = parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False)
 ```
 
 This runs for **every URL and every discovered link**. `_extract_discovered_links` calls it per anchor; `_payload_urls` calls it per submitted URL; scope filtering calls it per link; the frontier calls it per expansion. On a page with 2 000 links, that's 2 000 `os.environ.get` + `str.strip().lower()` + set-membership checks, plus the `ipaddress.ip_address` try/except and `_resolver_numeric_ipv4` string walk.
@@ -316,7 +316,7 @@ On a 64 GiB host, the derived browser pool is capped at 4 (by `_MAX_DERIVED_POOL
 
 ---
 
-### 3.5 `BROWSER_CRAWLER_MAX_WEBHOOK_CONCURRENCY` defaults to 4
+### 3.5 `CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY` defaults to 4
 
 For "hundreds of pages per minute" via the async/webhook path, 4 concurrent background crawls is the bottleneck, not the crawler itself. Each crawl can process a batch, so the effective concurrency is `4 × batch_size`. For batch size 1 (single-URL requests), that's 4 URLs in flight.
 
@@ -621,9 +621,9 @@ Skip unless the cache size grows.
 
 ## 8. Recommended sequencing
 
-**Week 1 (P0):** Hoist settings/env reads out of hot paths (1.1, 1.2), rate-limit spill GC (1.3), fix `HttpCache` eviction (1.4), add lock to `_BROWSER_COOKIES_BY_DOMAIN` (1.5), gate `_purge_expired` (1.6), move unlink out of lock (1.7). These are all small, localized changes with measurable impact.
+**Week 1:** Hoist settings/env reads out of hot paths (1.1, 1.2), rate-limit spill GC (1.3), fix `HttpCache` eviction (1.4), add lock to `_BROWSER_COOKIES_BY_DOMAIN` (1.5), gate `_purge_expired` (1.6), move unlink out of lock (1.7). These are all small, localized changes with measurable impact.
 
-**Week 2 (P1):** Single `checked_payload_urls` (2.1), batch sitemap freshness (2.2), offload `_seed_is_fresh` (2.3), fast/bounded scope regex split (2.4), lock lazy singletons (2.5), raise `_HTTP_TASK_RAM_BYTES` (3.1), fix double browser scaling (3.2), make `_MAX_DERIVED_POOL_SIZE` RAM-derived (3.4), raise webhook concurrency (3.5).
+**Week 2:** Single `checked_payload_urls` (2.1), batch sitemap freshness (2.2), offload `_seed_is_fresh` (2.3), fast/bounded scope regex split (2.4), lock lazy singletons (2.5), raise `_HTTP_TASK_RAM_BYTES` (3.1), fix double browser scaling (3.2), make `_MAX_DERIVED_POOL_SIZE` RAM-derived (3.4), raise webhook concurrency (3.5).
 
 **Week 3 (P2 capture):** `<base href>`, `Link` header, `meta refresh`, `data-*`, `<area>`, `srcset`, JSON-LD URLs, `hreflang`, `amphtml`, `X-Robots-Tag`, 451/507/511, `Retry-After` on 5xx, `Request-rate`, `site_error` re-queue, SPA hash routes. These directly expand capture rate.
 

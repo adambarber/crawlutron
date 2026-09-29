@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from app.bounded_ttl import BoundedTTLCache
-from app.constants import HTTP_DECLARED_CRAWLER
+from app.constants import HTTP_DECLARED_CRAWLER, SERVICE_ID
 from app.crawl import engine as engine_mod
 from app.crawl.cache import HttpCache
 from app.crawl.engine import _robots_allows, _robots_pattern_to_regex, crawl_request
@@ -53,7 +53,7 @@ class TestRobotsCacheLocking:
         assert hasattr(cache, "put") and hasattr(cache, "purge_expired")
 
 
-TOKEN = "browser-crawler"
+TOKEN = SERVICE_ID
 
 
 class TestTokenizer:
@@ -77,7 +77,7 @@ class TestGroupAccumulator:
         # across non-consumed lines (a shipped quirk of both old scanners),
         # so selection must be what keeps foreign blocks out — pinned next.
         text = (
-            "User-agent: baiduspider\nSitemap: https://x/a\n\nUser-agent: browser-crawler\nDisallow: /priv\n"
+            "User-agent: baiduspider\nSitemap: https://x/a\n\nUser-agent: crawlutron\nDisallow: /priv\n"
         )
         groups = _groups(text, lambda k, v: k in ("allow", "disallow"))
         assert len(groups) == 1
@@ -104,13 +104,13 @@ class TestGroupAccumulator:
 
 class TestSelection:
     def test_most_specific_token_match_beats_wildcard(self):
-        text = "User-agent: *\nDisallow: /*\n\nUser-agent: browser-crawler\nDisallow: /no\n"
+        text = "User-agent: *\nDisallow: /*\n\nUser-agent: crawlutron\nDisallow: /no\n"
         best, star = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
         assert best == [("disallow", "/no")]
         assert star == [("disallow", "/*")]
 
     def test_longest_matching_agent_wins(self):
-        text = "User-agent: crawler\nDisallow: /short\n\nUser-agent: browser-crawler\nDisallow: /long\n"
+        text = "User-agent: crawler\nDisallow: /short\n\nUser-agent: crawlutron\nDisallow: /long\n"
         best, _ = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
         assert best == [("disallow", "/long")]
 
@@ -118,7 +118,7 @@ class TestSelection:
         # M7: matching the *token*, not the full UA string, and only substrings
         # of it — a URL or version fragment must not select a group.
         text = (
-            "User-agent: https://bot.example/browser-crawler/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
+            "User-agent: https://bot.example/crawlutron/9\nDisallow: /x\n\nUser-agent: *\nDisallow: /*\n"
         )
         best, star = select_robots_values(_groups(text, lambda k, v: True), TOKEN)
         assert best is None
@@ -135,32 +135,32 @@ class TestRulesParser:
         # ``Disallow:`` (empty) opens the matched group and records the
         # empty path — the linear-time matcher interprets it as allow-all.
         # Crucially it does NOT fall through to the star block's rules.
-        text = "User-agent: *\nDisallow: /*\n\nUser-agent: browser-crawler\nDisallow:\n"
+        text = "User-agent: *\nDisallow: /*\n\nUser-agent: crawlutron\nDisallow:\n"
         assert parse_robots_rules(text, token=TOKEN) == [(False, "")]
 
     def test_allow_and_disallow_pairs_are_directional(self):
-        text = "User-agent: browser-crawler\nAllow: /pub\nDisallow: /priv\n"
+        text = "User-agent: crawlutron\nAllow: /pub\nDisallow: /priv\n"
         assert parse_robots_rules(text, token=TOKEN) == [(True, "/pub"), (False, "/priv")]
 
 
 class TestCrawlDelayParser:
     def test_last_valid_delay_in_the_group_wins(self):
-        text = "User-agent: browser-crawler\nCrawl-delay: 1\nCrawl-delay: 7.5\n"
+        text = "User-agent: crawlutron\nCrawl-delay: 1\nCrawl-delay: 7.5\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 7.5
 
     def test_garbage_and_negative_delays_are_dropped(self):
-        text = "User-agent: browser-crawler\nCrawl-delay: soon\nCrawl-delay: -2\n"
+        text = "User-agent: crawlutron\nCrawl-delay: soon\nCrawl-delay: -2\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) is None
 
     def test_matched_group_without_a_delay_falls_back_to_star(self):
-        text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: browser-crawler\nDisallow: /x\n"
+        text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: crawlutron\nDisallow: /x\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 3.0
 
     def test_matched_group_with_only_invalid_delay_falls_back_to_star(self):
         # The shipped quirk: the group materializes (non-empty garbage
         # value) yet yields no number, and selection returns the star
         # delay rather than "no politeness floor".
-        text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: browser-crawler\nCrawl-delay: soon\n"
+        text = "User-agent: *\nCrawl-delay: 3\n\nUser-agent: crawlutron\nCrawl-delay: soon\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 3.0
 
     def test_inf_and_overflow_delays_are_dropped(self):
@@ -168,14 +168,14 @@ class TestCrawlDelayParser:
         # able to install a non-finite politeness floor. The parser rejects
         # non-finite numbers outright (the scheduler clamps finite ones).
         for raw in ("1e999", "inf", "nan"):
-            text = f"User-agent: browser-crawler\nCrawl-delay: {raw}\n"
+            text = f"User-agent: crawlutron\nCrawl-delay: {raw}\n"
             assert parse_robots_crawl_delay(text, token=TOKEN) is None, raw
 
     def test_huge_finite_delay_is_parsed_verbatim(self):
         # The parser does not clamp: bounding the wait is the scheduler's
         # enforcement job (chokepoint), so a finite value passes through
         # untouched and the scheduler clamps it at the write.
-        text = "User-agent: browser-crawler\nCrawl-delay: 1e9\n"
+        text = "User-agent: crawlutron\nCrawl-delay: 1e9\n"
         assert parse_robots_crawl_delay(text, token=TOKEN) == 1e9
 
 
@@ -207,8 +207,8 @@ def _module_source(module) -> str:
 
 @pytest.mark.parametrize("token", [TOKEN.capitalize(), TOKEN])
 def test_agent_matching_is_case_insensitive(token):
-    # The file declares the agent in upper case while the query arrives mixed
-    # and lower, so all three spellings are one token. A matcher that compared
+    # The file declares the agent in upper case while the query arrives mixed and
+    # lower, so all three spellings are one token. A matcher that compared
     # literally would pass the lower param and fail the mixed one.
     text = f"User-agent: {TOKEN.upper()}\nDisallow: /x\n"
     assert parse_robots_rules(text, token=token) == [(False, "/x")]
@@ -565,7 +565,7 @@ async def test_discovery_skips_robots_fetch_when_sitemaps_passed():
     assert diag["discovery"]["sitemap_urls"] == ["https://x.test/p1"]
     assert diag["robots"]["evaluation"] == "cached"
     assert diag["robots"]["reused_from_engine"] is True
-    # lastmod is surfaced for downstream skip-if-unchanged logic (#1)
+    # lastmod is surfaced for downstream skip-if-unchanged logic
     assert diag.get("sitemap_lastmod") == {"https://x.test/p1": "2024-05-05"}
 
 

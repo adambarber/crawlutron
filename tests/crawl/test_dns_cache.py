@@ -1,4 +1,4 @@
-"""DNS resolution results are cached per-host for a short TTL (#3).
+"""DNS resolution results are cached per-host for a short TTL.
 
 The validation path (_check_ssrf_protection) may reuse a cached resolution so
 a crawl of N pages on one host does not issue N blocking socket.getaddrinfo
@@ -31,7 +31,7 @@ def _counting_resolver(ip: str = "8.8.8.8"):
 
 
 def test_ssrf_check_caches_within_ttl(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"a-{uuid.uuid4().hex}.example.com"
     calls, fake = _counting_resolver()
     http_mod._DNS_CACHE.clear()
@@ -43,7 +43,7 @@ def test_ssrf_check_caches_within_ttl(monkeypatch):
 
 
 def test_resolve_pin_host_resolves_fresh_each_call(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"b-{uuid.uuid4().hex}.example.com"
     calls, fake = _counting_resolver()
     http_mod._DNS_CACHE.clear()
@@ -56,7 +56,7 @@ def test_resolve_pin_host_resolves_fresh_each_call(monkeypatch):
 
 
 def test_ssrf_check_uses_cache_and_still_blocks_private(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+    monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
     host = f"c-{uuid.uuid4().hex}.example.com"
     http_mod._DNS_CACHE.clear()
     with patch(

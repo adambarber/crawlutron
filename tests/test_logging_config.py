@@ -34,7 +34,7 @@ def service_sink(tmp_path):
     root.handlers[:] = [h for h in root.handlers if not getattr(h, _BC_OWNED_HANDLER, False)]
     try:
         configure_service_logging(
-            service_name="browser-crawler", log_level="info", log_file_path=str(log_file)
+            service_name="crawlutron", log_level="info", log_file_path=str(log_file)
         )
         yield log_file
     finally:
@@ -60,7 +60,7 @@ def test_module_logger_extras_serialize_to_json(service_sink):
     assert record["message"] == "http_strategy_result_error"
     assert record["error_code"] == "boom"
     assert record["error_detail"] == "bad"
-    assert record["service"] == "browser-crawler"
+    assert record["service"] == "crawlutron"
     assert record["level"] == "WARNING"
 
 
@@ -113,7 +113,7 @@ def test_uvicorn_loggers_route_through_the_service_sink():
 
     assert record["logger"] == "uvicorn.error"
     assert record["message"] == "uvicorn_started"
-    assert record["service"] == "browser-crawler"
+    assert record["service"] == "crawlutron"
 
 
 def test_doc_worker_suppresses_pdfminer_chatter():

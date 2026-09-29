@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The browser-crawler is a **well-architected, production-grade local crawling service** with strong separation of concerns, thoughtful async orchestration, and defense-in-depth security defaults (SSRF protection, no credential injection, no CAPTCHA solving). The modular refactoring (health, discovery, crawl/engine, strategies) is largely complete and improves maintainability significantly.
+The crawlutron is a **well-architected, production-grade local crawling service** with strong separation of concerns, thoughtful async orchestration, and defense-in-depth security defaults (SSRF protection, no credential injection, no CAPTCHA solving). The modular refactoring (health, discovery, crawl/engine, strategies) is largely complete and improves maintainability significantly.
 
 **Overall Risk Level**: **LOW–MEDIUM** — No critical vulnerabilities, but several correctness bugs, test flakiness risks, and architectural debt items that should be addressed before relying on this for production municipal workloads.
 
@@ -62,12 +62,12 @@ The endpoint declares `response_model=UnifiedCrawlResponse` but returns a manual
 
 ```python
 # validation.py:41
-allow_private = os.environ.get("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "") not in {"", "0", "false", "no"}
+allow_private = os.environ.get("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "") not in {"", "0", "false", "no"}
 ```
 
 **Issue**: Any caller with env access can disable SSRF protection. In a multi-tenant or shared CI environment, this is a footgun.
 
-**Recommendation**: Require explicit `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` (not just non-empty) and log a warning when disabled.
+**Recommendation**: Require explicit `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1` (not just non-empty) and log a warning when disabled.
 
 ### 2.2 Cookie Jar Persistence Path Traversal
 **File**: `app/crawl/strategies/http.py` → `CookieJar.save_to_file()` / `load_from_file()`  
@@ -416,7 +416,7 @@ No SSRF check on webhook URL! Could post to `http://localhost:8765/shutdown` or 
 ## 8. Documentation & Contract Drift
 
 ### 8.1 Agent Contract Lists Deprecated Strategies
-**File**: `docs/references/browser-crawler-agent-contract.md`
+**File**: `docs/references/crawlutron-agent-contract.md`
 
 ```markdown
 Supported strategy names:

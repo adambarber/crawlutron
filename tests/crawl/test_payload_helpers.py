@@ -54,7 +54,7 @@ class TestPayloadPolicyCarriesAdvertisedLimits:
     def test_max_content_length_above_ceiling_rejected(self):
         # An explicit cap must not be a caller-controlled RAM/decompression
         # override: over the hard ceiling it is rejected, like max_rps, never
-        # silently clamped into a different contract (M2).
+        # silently clamped into a different contract.
         from app.constants import MAX_CONTENT_LENGTH_BYTES
 
         with pytest.raises(ValueError):
@@ -122,8 +122,8 @@ class TestMaxContentLengthBytesActuallyEnforced:
         from app.constants import HTTP_DECLARED_CRAWLER
         from app.crawl.engine import crawl_request
 
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")
-        settings = CrawlerSettings.from_mapping({"BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS": "1"})
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")
+        settings = CrawlerSettings.from_mapping({"CRAWLUTRON_ALLOW_PRIVATE_TARGETS": "1"})
         result = await crawl_request(
             {
                 "url": f"{base_url}/",

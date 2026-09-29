@@ -459,7 +459,7 @@ def to_dict(result: Any) -> dict[str, Any]:
     dicts) are shared by reference, and only nested dataclasses (e.g.
     ``DiscoveredLink``) are converted to dicts -- so the output stays
     JSON-serializable without paying asdict's full recursive deep-copy cost on
-    every field of every result in a large batch (#2).
+    every field of every result in a large batch.
     """
     return _to_jsonable(result)
 

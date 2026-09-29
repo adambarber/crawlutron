@@ -27,7 +27,7 @@ def _is_private_or_loopback_ip(ip: str) -> bool:
     return not _is_public_ip_value(ip)
 
 
-# Per-host DNS resolution cache (#3). Crawling a single host thousands of times
+# Per-host DNS resolution cache. Crawling a single host thousands of times
 # would otherwise issue a blocking socket.getaddrinfo per fetch. The TTL is
 # deliberately short so DNS changes (and the rebinding window for SSRF) stay
 # bounded; the SSRF path re-validates resolved IPs on every fresh resolution.
@@ -77,12 +77,12 @@ def _resolve_ips(hostname: str, *, use_cache: bool = True) -> list[str]:
 def _check_ssrf_protection(url: str) -> None:
     """Resolve the URL hostname and abort if any IP is private/loopback.
 
-    Set ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
+    Set ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` (or ``true``/``yes``/``on``)
     to disable for local testing.
     """
     from app.validation import parse_bool_env
 
-    if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
+    if parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False):
         return
     parsed = urlparse(url)
     hostname = parsed.hostname
@@ -118,7 +118,7 @@ def _resolve_and_pin_host(url: str) -> tuple[str, str]:
         return hostname or "", hostname or ""
     from app.validation import parse_bool_env
 
-    if parse_bool_env("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", default=False):
+    if parse_bool_env("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", default=False):
         # Local-dev escape hatch: bypass resolution but connect to the REAL
         # hostname. Previously this hardcoded 127.0.0.1, which misrouted every
         # fetch/webhook to loopback and broke virtual-host routing.
@@ -144,7 +144,7 @@ def _declared_length_exceeds(header_value: str | None, limit: int) -> bool:
     """True iff a ``Content-Length`` header parses to an int strictly over ``limit``.
 
     A malformed, negative, or absent value reads as "unknown size" and returns
-    False (L2) -- it must never raise. Skipping the pre-flight rejection is
+    False -- it must never raise. Skipping the pre-flight rejection is
     safe: the streamed running cap still bounds the actual body, so a hostile
     ``Content-Length: abc`` cannot crash the fetch or spoof a pass.
     """

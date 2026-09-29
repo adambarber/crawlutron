@@ -79,7 +79,7 @@ def _open_raw_store_connection(
     db_path: str | Path,
 ) -> tuple[sqlite3.Connection, str | None]:
     if str(db_path) == ":memory:":
-        memory_name = f"browser-crawler-{secrets.token_hex(16)}"
+        memory_name = f"crawlutron-{secrets.token_hex(16)}"
         conn = sqlite3.connect(
             f"file:{memory_name}?mode=memory&cache=shared",
             check_same_thread=False,

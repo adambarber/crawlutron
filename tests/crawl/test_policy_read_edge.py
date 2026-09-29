@@ -224,14 +224,14 @@ class TestOperatorTier:
         return PolicyTier.from_settings(CrawlerSettings.from_mapping(overrides))
 
     def test_an_omitted_limit_takes_the_deployment_default(self):
-        resolved = read_policy({}, self._tier(BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS="77"))
+        resolved = read_policy({}, self._tier(CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="77"))
 
         assert resolved.limits.timeout_seconds == 77
 
     def test_a_stated_limit_is_never_overwritten_by_the_deployment_default(self):
         resolved = read_policy(
             {"limits": {"timeout_seconds": 11}},
-            self._tier(BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS="77"),
+            self._tier(CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="77"),
         )
 
         assert resolved.limits.timeout_seconds == 11
@@ -245,8 +245,8 @@ class TestOperatorTier:
         copy of a number is one that will drift.
         """
         tier = self._tier(
-            BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS="500",
-            BROWSER_CRAWLER_DEFAULT_MAX_RETRIES="50",
+            CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="500",
+            CRAWLUTRON_DEFAULT_MAX_RETRIES="50",
         )
 
         assert _within_model_bounds("timeout_seconds", tier.timeout_seconds)
@@ -260,7 +260,7 @@ class TestOperatorTier:
         ``/v1/crawl`` answered with the operator tier -- same deployment, same
         policy, two different numbers, and no test comparing them.
         """
-        tier = self._tier(BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS="77")
+        tier = self._tier(CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS="77")
         stored_row = read_policy({}, tier).model_dump()
 
         assert read_policy({}, tier).limits == read_policy(stored_row, tier).limits

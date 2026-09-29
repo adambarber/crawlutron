@@ -12,7 +12,7 @@
 
 Please **do not file public issues** for suspected security vulnerabilities.
 
-Email `security@browser-crawler.local` (or open a private security advisory on GitHub) with:
+Email `security@crawlutron.local` (or open a private security advisory on GitHub) with:
 
 - A description of the vulnerability and the affected component.
 - Reproduction steps (a minimal request payload is ideal).
@@ -24,7 +24,7 @@ in the release notes unless they request anonymity.
 
 ## Threat Model
 
-The browser-crawler is designed for **localhost or trusted-network** operation.
+The crawlutron is designed for **localhost or trusted-network** operation.
 It is a powerful SSRF-enabled service that:
 
 - Resolves and **pins** the IP of every URL it fetches to defeat DNS
@@ -49,9 +49,9 @@ It is a powerful SSRF-enabled service that:
 
 - Never expose this service to the public internet without authentication,
   rate-limiting, and a concurrency cap on a per-client basis.
-- Keep `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=0` in production; loopback
+- Keep `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=0` in production; loopback
   exemption is local-dev only.
-- Keep `BROWSER_CRAWLER_COOKIE_PERSISTENCE_ENABLED=false` unless you
+- Keep `CRAWLUTRON_COOKIE_PERSISTENCE_ENABLED=false` unless you
   understand the cross-tenant cookie-leak risk; multi-tenant deployments
   should additionally set `request_profile.cookie_namespace`.
 - Run behind a reverse proxy that strips `Server` headers and adds

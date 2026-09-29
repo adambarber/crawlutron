@@ -104,7 +104,7 @@ async def crawl(
     with request_gate("crawl_request_rejected", logger=logger, reject=_crawl_rejection):
         if payload.output_format:
             # Validate the format before the branch commits to sync or async
-            # (L4): the async path otherwise accepts a bad format and only
+            # the async path otherwise accepts a bad format and only
             # fails inside a detached task the caller can no longer inspect.
             _serialize_or_reject([], payload.output_format)
         payload_dict = payload.model_dump(exclude_none=True)

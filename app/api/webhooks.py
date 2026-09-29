@@ -83,7 +83,7 @@ async def deliver_pinned_webhook(
         ) as response:
             try:
                 # The webhook RESPONSE is attacker-controlled: drain it through
-                # the bounded_io cap instead of buffering it in RAM (M3).
+                # the bounded_io cap instead of buffering it in RAM.
                 await read_capped_async(response.aiter_bytes(), _max_webhook_size())
             except BodyTooLarge:
                 logger.warning(
@@ -103,8 +103,8 @@ def _parse_webhook_size(raw: str | None) -> int:
     in ``get_mapping_int``; caching on the raw string means the parse runs once
     per distinct value while an override is still picked up on the next call.
     """
-    mapping = {} if raw is None else {"BROWSER_CRAWLER_MAX_WEBHOOK_SIZE": raw}
-    return get_mapping_int(mapping, "BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
+    mapping = {} if raw is None else {"CRAWLUTRON_MAX_WEBHOOK_SIZE": raw}
+    return get_mapping_int(mapping, "CRAWLUTRON_MAX_WEBHOOK_SIZE", _WEBHOOK_SIZE_DEFAULT, lo=1)
 
 
 def _max_webhook_size() -> int:
@@ -116,7 +116,7 @@ def _max_webhook_size() -> int:
     override -- operator env, or a test -- is honored on the very next call
     instead of being shadowed by a stale cached parse.
     """
-    return _parse_webhook_size(os.environ.get("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE"))
+    return _parse_webhook_size(os.environ.get("CRAWLUTRON_MAX_WEBHOOK_SIZE"))
 
 
 async def post_webhook(
@@ -172,7 +172,7 @@ def validate_webhook_url(webhook_url: str, *, host_policy: HostPolicy) -> None:
 
 
 async def validate_webhook_url_async(webhook_url: str, *, host_policy: HostPolicy) -> None:
-    """Off-event-loop twin of :func:`validate_webhook_url` (M6).
+    """Off-event-loop twin of :func:`validate_webhook_url`.
 
     ``SafeUrl.parse(pin=True)`` calls the synchronous ``socket.getaddrinfo``,
     so running validation inline stalls the event loop whenever a

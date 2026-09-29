@@ -4,7 +4,7 @@ Two families, both rejected at the *model* (rejection at the validation site,
 never a silent strip at consumption, per #1912):
 
 - Conditional headers (``if-none-match`` / ``if-modified-since``) belong to
-  the ``validators`` map (M14).
+  the ``validators`` map.
 - ``cookie`` / ``host`` / ``proxy-authorization`` / ``x-forwarded-*`` /
   ``x-real-ip`` bypass chokepoints or spoof caller identity to the origin:
   the cookie jar owns Cookie, the pinned-request chokepoint owns Host, and

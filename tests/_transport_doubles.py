@@ -278,7 +278,7 @@ def real_cffi_fetch_outcome(
     """Run the genuine curl_cffi fetcher against `url` in a spawned interpreter.
 
     The child inherits this process's environment, so a loopback target needs
-    ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1`` set here (and undone by
+    ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`` set here (and undone by
     monkeypatch afterwards) rather than inside the child.
 
     ``join_timeout`` is a hang guard, not a budget: the fetch's own

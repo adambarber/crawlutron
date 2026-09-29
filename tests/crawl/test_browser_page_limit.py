@@ -66,7 +66,7 @@ class _FakeBrowser:
 
 
 async def test_concurrent_page_renders_capped(monkeypatch):
-    monkeypatch.setenv("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", "2")
+    monkeypatch.setenv("CRAWLUTRON_MAX_CONCURRENT_PAGES", "2")
     saturated = asyncio.Event()
     tracker = {"n": 0, "max": 0, "expected": 2}
     renderer = scripted_renderer(_FakeBrowser(tracker, saturated))

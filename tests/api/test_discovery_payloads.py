@@ -15,7 +15,7 @@ class TestCapabilitiesPayload:
     def test_capabilities_payload_structure(self):
         settings = CrawlerSettings.from_mapping()
         payload = capabilities_payload(settings)
-        assert payload["service"] == "browser-crawler"
+        assert payload["service"] == "crawlutron"
         assert "supported_strategies" in payload
         assert "supported_classifications" in payload
         assert "output_fields" in payload
@@ -76,7 +76,7 @@ class TestCapabilitiesWireContract:
         """M14 follow-up: the no-time-ceiling guidance shipped as three
         hand-maintained copies (capabilities, agent-hints, the OpenAPI
         endpoint description). One constant now feeds all three, so the
-        surfaces cannot drift; this pins the identity on the WIRE (#1939),
+        surfaces cannot drift; this pins the identity on the WIRE,
         not in the source text.
         """
         caps = (await async_client.get("/v1/capabilities")).json()
@@ -94,7 +94,7 @@ class TestCapabilitiesWireContract:
 class TestAgentHintsPayload:
     def test_agent_hints_payload_structure(self):
         payload = agent_hints_payload()
-        assert payload["service"] == "browser-crawler"
+        assert payload["service"] == "crawlutron"
         assert "strategies" in payload
         assert "guidance" in payload
         assert "example_policies" in payload
@@ -141,7 +141,7 @@ class TestAgentHintsPayload:
 class TestDiscoveryPayload:
     def test_discovery_payload_structure(self):
         payload = discovery_payload()
-        assert payload["service"] == "browser-crawler"
+        assert payload["service"] == "crawlutron"
         assert "version" in payload
         assert "policy_schema_version" in payload
         assert "links" in payload

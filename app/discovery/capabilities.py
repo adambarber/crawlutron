@@ -100,7 +100,7 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "active_provider": active_search_provider_name(settings),
             "configured_providers": configured_search_providers(settings),
             "endpoint": "/v1/search",
-            "provider_selection": "BROWSER_CRAWLER_SEARCH_PROVIDER (auto "
+            "provider_selection": "CRAWLUTRON_SEARCH_PROVIDER (auto "
             "picks the first keyed provider; DuckDuckGo is the keyless fallback)",
         },
         "mcp": {

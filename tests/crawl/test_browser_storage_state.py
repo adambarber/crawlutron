@@ -79,6 +79,6 @@ class TestStorageStatePathValidation:
     def test_browser_renderer_stores_cache_dir(self):
         """The cache_dir set on settings is accessible for storage_state validation."""
 
-        settings = CrawlerSettings(cache_dir="/var/lib/browser-crawler/cache")
+        settings = CrawlerSettings(cache_dir="/var/lib/crawlutron/cache")
         r = BrowserRenderer(settings=settings)
-        assert r._cache_dir == "/var/lib/browser-crawler/cache"
+        assert r._cache_dir == "/var/lib/crawlutron/cache"

@@ -186,7 +186,7 @@ Useful diagnostics currently include request profile, retry attempts, rate-limit
 
 ## Regression Fixtures
 
-The regression suite includes real Mass.gov HTML fixtures under `tests/fixtures/browser_crawler/` with a manifest at `tests/fixtures/browser_crawler/manifest.json`:
+The regression suite includes real Mass.gov HTML fixtures under `tests/fixtures/crawlutron/` with a manifest at `tests/fixtures/crawlutron/manifest.json`:
 
 - `massgov_city_town_websites.browser.html`
 - `massgov_municipal_databank.browser.html`
@@ -199,8 +199,8 @@ These fixtures cover the known Mass.gov behavior where direct HTTP can return a 
 After changing crawler code locally:
 
 ```bash
-docker compose build browser-crawler
-docker compose up -d browser-crawler
+docker compose build crawlutron
+docker compose up -d crawlutron
 curl -fsS http://127.0.0.1:8765/ready
 python3 scripts/probe_session.py
 ```

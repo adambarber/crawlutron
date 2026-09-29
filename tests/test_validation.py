@@ -80,7 +80,7 @@ class TestNormalizationGuardMemoization:
     def test_repeat_call_reuses_env_decision_and_host_verdict(self, monkeypatch):
         import app.validation as validation
 
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         counts = self._spy(monkeypatch)
         first = validation.normalize_public_http_url(self.URL, policy=_HOST_POLICY)
         env_after_first = counts["env"]
@@ -98,10 +98,10 @@ class TestNormalizationGuardMemoization:
     def test_env_flip_between_calls_still_visible(self, monkeypatch):
         import app.validation as validation
 
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "false")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "false")
         with pytest.raises(ValueError, match="private_network_target"):
             validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "true")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "true")
         assert (
             validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
             == "http://localhost/x"
@@ -110,14 +110,14 @@ class TestNormalizationGuardMemoization:
     def test_unrecognized_env_value_keeps_guard_on(self, monkeypatch):
         import app.validation as validation
 
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "affirmative")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "affirmative")
         with pytest.raises(ValueError, match="private_network_target"):
             validation.normalize_public_http_url("http://localhost/x", policy=_HOST_POLICY)
 
     def test_numeric_host_forms_still_classified(self, monkeypatch):
         import app.validation as validation
 
-        monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "0")
+        monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
         for host in ("2130706433", "0x7f000001"):
             with pytest.raises(ValueError, match="private_network_target"):
                 validation.normalize_public_http_url(f"http://{host}/x", policy=_HOST_POLICY)

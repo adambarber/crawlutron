@@ -110,7 +110,7 @@ def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
 
 # Subresource types that carry no crawlable text content. When the
 # browser profile runs in "reduced" resource mode, these are aborted at the
-# route layer to cut render bandwidth (#2); the crawler only needs
+# route layer to cut render bandwidth; the crawler only needs
 # document/script/xhr/stylesheet to extract content.
 # Tracking/analytics hosts: never fetch them -- they return no crawlable
 # content and only add network load. The canonical list lives in
@@ -161,14 +161,14 @@ def _make_ssrf_route_handler(
             return
         # Tracking/analytics requests carry no crawlable content; drop them
         # unconditionally so they never consume bandwidth or trigger their own
-        # SSRF resolution (#2).
+        # SSRF resolution.
         if _is_analytics_url(request.url):
             await route.abort()
             return
         # Abort non-essential presentation subresources unconditionally: a
         # text-extraction crawler never needs images/fonts/media, and blocking
         # them cuts ~70% of rendered-page bandwidth. They are only permitted
-        # when an explicit screenshot is requested (#4).
+        # when an explicit screenshot is requested.
         if getattr(request, "resource_type", "") in _REDUCED_BLOCK_RESOURCE_TYPES and not include_screenshot:
             await route.abort()
             return
@@ -206,7 +206,7 @@ def _make_ssrf_route_handler(
         overrides = {}
         if host_headers.get("Host"):
             overrides["Host"] = host_headers["Host"]
-        # Omit headers= when there are no overrides (M1): Playwright treats
+        # Omit headers= when there are no overrides: Playwright treats
         # an explicit headers dict as a full replacement, so passing {}
         # would wipe UA/cookies/accept headers off every HTTPS subresource.
         if overrides:
@@ -267,7 +267,7 @@ _MAX_ACTION_WAIT_SECONDS = 10.0
 
 
 def _action_wait_ms(action: dict[str, Any]) -> int:
-    """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is (M9).
+    """Clamp a caller-supplied ``wait`` timeout the way ``wait_seconds`` is.
 
     Unbounded values park the render for as long as the caller likes, and 0
     disables Playwright's timeout entirely instead of meaning "immediately".
@@ -303,7 +303,7 @@ def _profile_float(profile: dict[str, Any], key: str, default: float) -> float:
 # Session cookies harvested from browser renders, keyed by registrable domain.
 # Lets HTTP_CFFI_IMPERSONATE replay a browser-minted session on retry.
 # Bounded with an LRU so a long-lived process crawling many domains cannot
-# grow this dict without bound (#6).
+# grow this dict without bound.
 _BROWSER_COOKIES_MAX = 500
 
 
@@ -454,7 +454,7 @@ class BrowserRenderer:
                 self._challenge_wait_seconds = float(settings.challenge_wait_seconds)
             else:
                 self._challenge_wait_seconds = get_env_float(
-                    "BROWSER_CRAWLER_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
+                    "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", DEFAULT_CHALLENGE_WAIT_SECONDS, lo=0.0, hi=300.0
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
@@ -475,7 +475,7 @@ class BrowserRenderer:
         )
         self._pdf_text_extractor = pdf_text_extractor or _default_document_text_extractor
         self._warmup_urls = warmup_urls if warmup_urls is not None else self._warmup_urls_from_env()
-        # Reusable browser instance (#6): one browser per BrowserRenderer lifecycle.
+        # Reusable browser instance: one browser per BrowserRenderer lifecycle.
         self._browser_cm: Any = None
         # Cache dir for safe storage_state validation. Defaults to /tmp if no
         # settings were passed (single-tenant local-mode usage), but when
@@ -491,14 +491,14 @@ class BrowserRenderer:
         self._max_browser_renders = (
             settings.max_browser_renders
             if settings is not None
-            else get_env_int("BROWSER_CRAWLER_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
+            else get_env_int("CRAWLUTRON_MAX_BROWSER_RENDERS", DEFAULT_MAX_BROWSER_RENDERS, lo=1)
         )
         # Cap concurrent page renders: N simultaneous requests each open a tab,
         # which otherwise crashes/OOMs the browser under burst load.
         _concurrent_pages = (
             settings.max_concurrent_pages
             if settings is not None
-            else get_env_int("BROWSER_CRAWLER_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
+            else get_env_int("CRAWLUTRON_MAX_CONCURRENT_PAGES", DEFAULT_MAX_CONCURRENT_PAGES, lo=1)
         )
         self._page_semaphore = asyncio.Semaphore(max(1, _concurrent_pages))
 
@@ -529,7 +529,7 @@ class BrowserRenderer:
 
         Must run BEFORE the page/context is closed -- Camoufox destroys the
         context with the last page, leaving ``browser.contexts`` empty -- and
-        must COMPLETE before returning (M3): the cffi retry reads the store
+        must COMPLETE before returning: the cffi retry reads the store
         synchronously right after the render, so a fire-and-forget task would
         usually lose the race and retry cookieless. Harvest failures never
         break the render itself.
@@ -598,7 +598,7 @@ class BrowserRenderer:
         return self._failure_result(url, "failed", "unknown_error", attempts, started, last_error)
 
     async def _acquire_browser(self, options: RenderOptions) -> Any:
-        """Return a reused browser instance, launching one on first use (#6).
+        """Return a reused browser instance, launching one on first use.
 
         Recycles the browser once it has served ``_max_browser_renders`` to
         bound memory growth of a long-lived Camoufox process.
@@ -631,7 +631,7 @@ class BrowserRenderer:
                 await close()
 
     async def close(self) -> None:
-        """Release the reused browser instance at service shutdown (#6)."""
+        """Release the reused browser instance at service shutdown."""
         await self._release_browser()
 
     async def _render_with_browser(
@@ -700,7 +700,7 @@ class BrowserRenderer:
 
             # Navigate to target URL: set Host header for pinned IP navigation.
             # page.goto() does not accept extra_http_headers; use set_extra_http_headers().
-            # The navigation honors RenderOptions.timeout_seconds (M9) via
+            # The navigation honors RenderOptions.timeout_seconds via
             # wait_for: expiration raises TimeoutError, which the render
             # retry envelope maps to navigation_timeout. Floor at 1s so a
             # zero/negative budget cannot break every render.
@@ -718,7 +718,7 @@ class BrowserRenderer:
                 # subsequent navigations, M2).
                 await page.set_extra_http_headers({})
 
-            # Browser action chains (#10): run policy-specified interactions before extraction.
+            # Browser action chains: run policy-specified interactions before extraction.
             actions = (options.browser_profile or {}).get("actions") or []
             if actions:
                 await self._run_action_chain(page, actions, url=url, budget_seconds=navigation_timeout)
@@ -726,7 +726,7 @@ class BrowserRenderer:
             # Lazy-load scroll: trigger deferred/infinite-scroll content.
             await self._lazy_load_scroll(page, options.browser_profile)
 
-            # Shadow-DOM flattening (#25): inline open shadow roots so their links
+            # Shadow-DOM flattening: inline open shadow roots so their links
             # and visible text are reachable by the standard HTML/text extractors.
             await self._flatten_shadow_dom(page)
 
@@ -768,7 +768,7 @@ class BrowserRenderer:
                 "intercepted_xhr": intercepted_xhr,
             }
 
-            # Screenshots (#14): optional full-page, plus targeted element screenshots by CSS selector.
+            # Screenshots: optional full-page, plus targeted element screenshots by CSS selector.
             if options.browser_profile.get("include_screenshot"):
                 screenshot_bytes = await page.screenshot(full_page=True)
                 metadata["screenshot"] = base64.b64encode(screenshot_bytes).decode("ascii")
@@ -847,7 +847,7 @@ class BrowserRenderer:
             )
 
     async def _perform_action_chain(self, page: Any, actions: list[dict[str, Any]], *, url: str) -> None:
-        """Execute a sequence of browser actions before extraction (#10).
+        """Execute a sequence of browser actions before extraction.
 
         Supported action types: ``click``, ``fill``, ``hover``, ``scroll``
         (into an element), ``scroll_bottom``, ``wait`` (for a selector), and
@@ -902,7 +902,7 @@ class BrowserRenderer:
                 continue
 
     async def _capture_element_screenshots(self, page: Any, selectors: list[str]) -> list[dict[str, Any]]:
-        """Capture targeted element screenshots as base64 (#14)."""
+        """Capture targeted element screenshots as base64."""
         shots: list[dict[str, Any]] = []
         for selector in selectors:
             with contextlib.suppress(Exception):  # best-effort per-element capture
@@ -915,7 +915,7 @@ class BrowserRenderer:
 
     @staticmethod
     def _make_response_handler(collected: list[dict[str, Any]]) -> Callable[[Any], Awaitable[None]]:
-        # Bounds on intercepted XHR (#4): a hostile page can fire thousands of
+        # Bounds on intercepted XHR: a hostile page can fire thousands of
         # JSON responses. Cap at 10 entries x 8KB payload (was 50 x 64KB =
         # ~3.2MB held per page in result metadata); feed/API discovery does not
         # need more than a small sample. The URL is page-controlled too and is
@@ -1264,14 +1264,14 @@ class BrowserRenderer:
         return AsyncCamoufox(**kwargs)
 
     def _warmup_urls_from_env(self) -> list[str]:
-        value = os.environ.get("BROWSER_CRAWLER_WARMUP_URLS", "")
+        value = os.environ.get("CRAWLUTRON_WARMUP_URLS", "")
         return [url.strip() for url in value.split(",") if url.strip()]
 
     def _headless_enabled(self) -> bool:
         return parse_bool_value(
-            os.environ.get("BROWSER_CRAWLER_HEADLESS"),
+            os.environ.get("CRAWLUTRON_HEADLESS"),
             default=True,
-            env_name="BROWSER_CRAWLER_HEADLESS",
+            env_name="CRAWLUTRON_HEADLESS",
         )
 
     def _looks_like_pdf(self, url: str) -> bool:

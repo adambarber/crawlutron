@@ -41,9 +41,9 @@ _DEFAULT_CPU_BUDGET = None
 
 # Opt-in event-loop lag probe (adversarial perf #2.3: feed loop-lag into
 # admission). Disabled by default so test suites and minimal deployments pay no
-# background-task cost; enable with BROWSER_CRAWLER_LOOP_LAG_PROBE=1 in the
+# background-task cost; enable with CRAWLUTRON_LOOP_LAG_PROBE=1 in the
 # container. When disabled the probe reports zero lag and the gate is unaffected.
-_LOOP_LAG_PROBE_ENABLED = parse_bool_env("BROWSER_CRAWLER_LOOP_LAG_PROBE", default=False)
+_LOOP_LAG_PROBE_ENABLED = parse_bool_env("CRAWLUTRON_LOOP_LAG_PROBE", default=False)
 _LOOP_LAG_SAMPLE_INTERVAL = 0.05
 _LOOP_LAG_OK_THRESHOLD = 0.05  # below this lag (s) -> full speed
 _LOOP_LAG_HARD_THRESHOLD = 0.30  # at/above this lag (s) -> full throttle
@@ -326,13 +326,13 @@ class ResourceGate:
         )
         self._poll_seconds = poll_seconds
         # Event-loop lag is an independent throttle signal (adversarial perf
-        # #2.3). The probe is opt-in (BROWSER_CRAWLER_LOOP_LAG_PROBE) so tests
+        # #2.3). The probe is opt-in (CRAWLUTRON_LOOP_LAG_PROBE) so tests
         # and minimal deployments do not pay for a background task; when off it
         # reports zero lag and leaves the gate untouched.
         self._lag_probe = LoopLagProbe()
 
     def start_lag_probe(self) -> None:
-        """Start the loop-lag sampler on the running loop (M16).
+        """Start the loop-lag sampler on the running loop.
 
         Called from lifespan startup, not __init__: the module-level gate is
         constructed at import time with no running loop, so an __init__-time
@@ -410,7 +410,7 @@ class ResourceGate:
 # the HTTP path can scale to hundreds of concurrent pages while the browser tier
 # stays RAM-budgeted.
 
-_HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
+_HTTP_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_HTTP_TASK_RAM_BYTES", 48 * 1024 * 1024, lo=0)
 # P2-H: the 700 MiB default reservation sits BELOW the measured RSS range for a
 # live renderer (~600-900 MiB once WebExtensions/Web Content are counted; see
 # app/crawl/strategies/browser_pool.py). That gap is deliberate, not an
@@ -422,29 +422,29 @@ _HTTP_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_HTTP_TASK_RAM_BYTES", 48 * 1
 # hard container memory ceiling (docker-compose mem_limit; the failure mode is
 # an OOM kill of the whole service), so the number stays conservative while the
 # measured range straddles it. The right knob for that trade-off is here
-# (BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES), not a change to the default.
-_BROWSER_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
+# (CRAWLUTRON_BROWSER_TASK_RAM_BYTES), not a change to the default.
+_BROWSER_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_TASK_RAM_BYTES", 700 * 1024 * 1024, lo=0)
 # Persistent markitdown workers (app.crawl.extraction._DocWorker): each imports
 # markitdown plus the PDF/Office parsers once and stays alive for the process, so
 # this is a FIXED reservation, not a per-task estimate. Measured footprint is
 # 100-300 MiB apiece depending on which parsers get touched; the conservative
 # end is the default because the container ceiling is hard (docker-compose
 # mem_limit) and the failure mode is an OOM kill of the whole service.
-_DOC_TASK_RAM_BYTES = get_env_int("BROWSER_CRAWLER_DOC_TASK_RAM_BYTES", 300 * 1024 * 1024, lo=0)
+_DOC_TASK_RAM_BYTES = get_env_int("CRAWLUTRON_DOC_TASK_RAM_BYTES", 300 * 1024 * 1024, lo=0)
 # Default persistent markitdown worker count; mirrors the 3 GiB container
-# ceiling the compose pins. Overridable via BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS.
+# ceiling the compose pins. Overridable via CRAWLUTRON_EXTRACTION_DOC_WORKERS.
 _DEFAULT_DOC_WORKERS = 2
-_ADMIT_YIELD_SECONDS = get_env_float("BROWSER_CRAWLER_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
-_MAX_HTTP_CONCURRENCY = get_env_int("BROWSER_CRAWLER_MAX_HTTP_CONCURRENCY", 512, lo=1)
+_ADMIT_YIELD_SECONDS = get_env_float("CRAWLUTRON_ADMIT_YIELD_SECONDS", 0.05, lo=0.0)
+_MAX_HTTP_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_HTTP_CONCURRENCY", 512, lo=1)
 
 
 # --- Shared RAM-budget sizing (browser pool + httpx pool derive from this) ---
 # Both the browser pool and the HTTP connection pool size themselves from the cgroup
 # memory limit, centralized here (import-safe from settings) as the single source of
 # truth so the connection ceiling tracks the weighted admission's HTTP concurrency.
-_BROWSER_RAM_BYTES = get_env_int("BROWSER_CRAWLER_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
-_BROWSER_RAM_FRACTION = get_env_float("BROWSER_CRAWLER_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
-_MAX_DERIVED_POOL_SIZE = get_env_int("BROWSER_CRAWLER_MAX_DERIVED_POOL_SIZE", 4)
+_BROWSER_RAM_BYTES = get_env_int("CRAWLUTRON_BROWSER_RAM_BYTES", 700 * 1024 * 1024)
+_BROWSER_RAM_FRACTION = get_env_float("CRAWLUTRON_BROWSER_RAM_FRACTION", 0.5, lo=0.0, hi=1.0)
+_MAX_DERIVED_POOL_SIZE = get_env_int("CRAWLUTRON_MAX_DERIVED_POOL_SIZE", 4)
 
 
 def worker_count() -> int:
@@ -459,7 +459,7 @@ def worker_count() -> int:
     Reads through the never-raise env chokepoint, so a typo'd value falls back
     to one worker instead of dividing every budget to nothing.
     """
-    return get_env_int("BROWSER_CRAWLER_WORKERS", 1, lo=1)
+    return get_env_int("CRAWLUTRON_WORKERS", 1, lo=1)
 
 
 def doc_worker_count() -> int:
@@ -476,7 +476,7 @@ def doc_worker_count() -> int:
     workers at the configured count would be N times the reserved RAM.
     """
     try:
-        configured = get_env_int("BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
+        configured = get_env_int("CRAWLUTRON_EXTRACTION_DOC_WORKERS", _DEFAULT_DOC_WORKERS, lo=1)
     except ValueError:
         configured = _DEFAULT_DOC_WORKERS
     return max(1, configured // worker_count())
@@ -485,7 +485,7 @@ def doc_worker_count() -> int:
 def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     """Browser-pool size *for this process*, from the cgroup memory limit.
 
-    Honors ``BROWSER_CRAWLER_BROWSER_POOL_SIZE``; else derives so this process's
+    Honors ``CRAWLUTRON_BROWSER_POOL_SIZE``; else derives so this process's
     share of the fleet uses at most ``_BROWSER_RAM_FRACTION`` of RAM; falls back
     to 1 when no limit is discoverable. Shared by
     ``app.crawl.strategies.browser_pool`` and the httpx pool sizing so the
@@ -498,7 +498,7 @@ def derive_browser_pool_size(limit_bytes: int | None = None) -> int:
     configuration that ships.
     """
     workers = worker_count()
-    explicit = get_env_int("BROWSER_CRAWLER_BROWSER_POOL_SIZE", 0, lo=0)
+    explicit = get_env_int("CRAWLUTRON_BROWSER_POOL_SIZE", 0, lo=0)
     if explicit > 0:
         return max(1, explicit // workers)
     limit = limit_bytes if limit_bytes is not None else read_memory_stats().total_bytes

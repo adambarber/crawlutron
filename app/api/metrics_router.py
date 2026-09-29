@@ -11,7 +11,7 @@ router = APIRouter(tags=["Health"])
 
 @router.get(
     "/metrics",
-    summary="Prometheus metrics endpoint (#16)",
+    summary="Prometheus metrics endpoint",
 )
 async def metrics_endpoint() -> Response:
     """Return the crawler metrics in Prometheus exposition format."""

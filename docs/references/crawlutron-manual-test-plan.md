@@ -1,7 +1,7 @@
-# Browser-Crawler Service — Manual Test Plan
+# Crawlutron Service — Manual Test Plan
 
-**Service:** `browser-crawler` (Policy-driven universal crawler execution service)
-**Image:** built from this directory's `Dockerfile` (see `docker compose build browser-crawler`)
+**Service:** `crawlutron` (Policy-driven universal crawler execution service)
+**Image:** built from this directory's `Dockerfile` (see `docker compose build crawlutron`)
 **Base URL (local):** `http://127.0.0.1:8765`
 **Policy schema version:** `2026-06-23` (from `/v1/capabilities`)
 
@@ -29,27 +29,27 @@ exposed via the API contract.
 ## 2. Prerequisites
 
 - Docker / OrbStack with BuildKit enabled.
-- Ability to `docker compose build` and `up` the `browser-crawler` service (profile `browser-crawler`).
+- Ability to `docker compose build` and `up` the `crawlutron` service (profile `crawlutron`).
 - Outbound internet access from the container (the crawler fetches public URLs).
 - `curl` + `jq` on the host for executing cases.
-- For SSRF/private-target cases: default deny behavior (no `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1`).
+- For SSRF/private-target cases: default deny behavior (no `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1`).
 
 ### 2.1 Environment variables (defaults shown)
 | Variable | Default | Effect |
 |---|---|---|
-| `BROWSER_CRAWLER_HOST_PORT` | `8765` | Listen port |
-| `BROWSER_CRAWLER_WORKERS` | 1 | uvicorn workers (Dockerfile) |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | _(internal default `4`; env-overridable floor)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
-| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `2` | Per-host parallel crawls |
-| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `500` | Delay between same-domain jobs |
-| `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per request |
-| `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Per-strategy timeout |
-| `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Retries inside a strategy |
-| `BROWSER_CRAWLER_RESPECT_ROBOTS` | `true` | Honor robots.txt |
-| `BROWSER_CRAWLER_ALLOWED_HOSTS` | `""` | Allowlist (empty = all public) |
-| `BROWSER_CRAWLER_DENIED_HOSTS` | `""` | Denylist |
-| `BROWSER_CRAWLER_LOG_LEVEL` | `info` | Log verbosity |
-| `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` | unset | SSRF override (set `1` to allow private IPs) |
+| `CRAWLUTRON_HOST_PORT` | `8765` | Listen port |
+| `CRAWLUTRON_WORKERS` | 1 | uvicorn workers (Dockerfile) |
+| `CRAWLUTRON_GLOBAL_CONCURRENCY` | _(internal default `4`; env-overridable floor)_ | Concurrency floor for the recursive dispatcher; self-managed by the resource guard |
+| `CRAWLUTRON_PER_DOMAIN_CONCURRENCY` | `2` | Per-host parallel crawls |
+| `CRAWLUTRON_PER_DOMAIN_DELAY_MS` | `500` | Delay between same-domain jobs |
+| `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per request |
+| `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Per-strategy timeout |
+| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `2` | Retries inside a strategy |
+| `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Honor robots.txt |
+| `CRAWLUTRON_ALLOWED_HOSTS` | `""` | Allowlist (empty = all public) |
+| `CRAWLUTRON_DENIED_HOSTS` | `""` | Denylist |
+| `CRAWLUTRON_LOG_LEVEL` | `info` | Log verbosity |
+| `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` | unset | SSRF override (set `1` to allow private IPs) |
 
 ---
 
@@ -58,10 +58,10 @@ exposed via the API contract.
 ```bash
 # From repo root
 docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile browser-crawler build browser-crawler
+  --profile crawlutron build crawlutron
 
 docker compose -f docker-compose.yml -f docker-compose.municipal.yml \
-  --profile browser-crawler up -d browser-crawler
+  --profile crawlutron up -d crawlutron
 
 # Wait for liveness
 for i in $(seq 1 30); do
@@ -258,13 +258,13 @@ All 30 values appear in `supported_classifications` (TC-CAP-01) and counters
 
 | TC | Concern | Expectation |
 |---|---|---|
-| TC-SSRF-01 | Private/loopback block | Default: `http://127.0.0.1`, `http://localhost`, `http://10.0.0.1`, `http://169.254.169.254` → `private_network_target`/`blocked`. With `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` → allowed (override). |
+| TC-SSRF-01 | Private/loopback block | Default: `http://127.0.0.1`, `http://localhost`, `http://10.0.0.1`, `http://169.254.169.254` → `private_network_target`/`blocked`. With `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1` → allowed (override). |
 | TC-VAL-01 | `url` xor `urls` | Neither `url` nor `urls` → `422 missing_url`. Both provided → `200` (lenient: service uses `urls`, ignores `url`). Enforcing a strict xor is deferred hardening. |
 | TC-VAL-02 | `batch_size_exceeded` | `> max_batch_size` (50) URLs → `422`. |
 | TC-VAL-03 | schema/field validation | Invalid policy field → `422` with `details.errors`. |
 | TC-CONC-01 | Global + per-domain concurrency | Many parallel requests; scheduler enforces `global_concurrency=4`, `per_domain_concurrency=2`, `per_domain_delay_ms=500`. |
 | TC-RATE-01 | `max_rps` | Sustained ≤ configured RPS per domain. |
-| TC-LOG-01 | Structured logging | `/app/logs/browser-crawler.jsonl` receives redacted, structured log lines (no secret leakage). |
+| TC-LOG-01 | Structured logging | `/app/logs/crawlutron.jsonl` receives redacted, structured log lines (no secret leakage). |
 | TC-LIFECYCLE-01 | Graceful shutdown | `SIGTERM` → browser renderer closed, in-flight crawls finish/abort cleanly via `shutdown_event`. |
 
 ---
@@ -272,10 +272,10 @@ All 30 values appear in `supported_classifications` (TC-CAP-01) and counters
 ## 9. Search & MCP Endpoints
 
 ### TC-SEARCH-01 — Search returns shaped results
-With a keyed provider configured (`BROWSER_CRAWLER_SEARCH_PROVIDER` + the matching `*_API_KEY`), `POST /v1/search` with `{"query": "..."}` → `200`, body `{success, query, provider, limit, data:[{url, title, description}]}`. Result URLs are public HTTP(S) only; loopback/private targets are dropped.
+With a keyed provider configured (`CRAWLUTRON_SEARCH_PROVIDER` + the matching `*_API_KEY`), `POST /v1/search` with `{"query": "..."}` → `200`, body `{success, query, provider, limit, data:[{url, title, description}]}`. Result URLs are public HTTP(S) only; loopback/private targets are dropped.
 
 ### TC-SEARCH-02 — Provider selection and configuration errors
-`GET /v1/capabilities` reports `search.active_provider` and `search.configured_providers`. With `BROWSER_CRAWLER_SEARCH_PROVIDER=brave` but no `BROWSER_CRAWLER_BRAVE_API_KEY` → `503 search_provider_unavailable` naming the missing variable. Keyless DuckDuckGo is the `auto` fallback when no key is configured (may be captcha-blocked from datacenter IPs).
+`GET /v1/capabilities` reports `search.active_provider` and `search.configured_providers`. With `CRAWLUTRON_SEARCH_PROVIDER=brave` but no `CRAWLUTRON_BRAVE_API_KEY` → `503 search_provider_unavailable` naming the missing variable. Keyless DuckDuckGo is the `auto` fallback when no key is configured (may be captcha-blocked from datacenter IPs).
 
 ### TC-SEARCH-03 — Provider error surface
 A keyed provider returning non-200 → `502 search_provider_error` with the provider's message.

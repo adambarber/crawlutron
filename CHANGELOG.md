@@ -5,27 +5,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: every configuration knob is now `CRAWLUTRON_*`.** The service is
+  `adambarber/crawlutron`, and the `BROWSER_CRAWLER_` prefix no longer names
+  anything. This covers the `BROWSER_CRAWLER_BASE_IMAGE` build arg in the
+  Dockerfile, all ~90 environment variables in `.env.example` and
+  `docker-compose.yml`, and the settings prefixes read by `app/settings.py`.
+  Deployments that set these variables by name must rename them, or they will
+  silently fall back to defaults -- `CRAWLUTRON_HOST` still defaults to
+  loopback, so the service starts and binds `127.0.0.1` rather than failing
+  loudly.
+- `SERVICE_ID` is `crawlutron` and `REPOSITORY_URL` is
+  `https://github.com/adambarber/crawlutron`, so the user-agent now announces
+  the real remote. `pyproject.toml` metadata, `CONTRIBUTING.md`'s clone URL and
+  the uvicorn log config's `service_name` are pinned to the same spelling by
+  `tests/test_project_urls.py`.
+
 ### Performance
-- **Concurrent robots screens (throughput #1)** (app/crawl/recursive.py,
+- **Concurrent robots screens** (app/crawl/recursive.py,
   app/crawl/engine.py): the recursive batch screen, discovered-link screen,
   and the non-recursive batch screen now `asyncio.gather` their
   `robots_allows`/`robots_crawl_delay` checks instead of awaiting them one
   URL at a time. Same closures, same `robots_cache` chokepoint and SSRF
   semantics; in-batch duplicates keep visit-once behavior.
-- **LLM metadata off the event loop (throughput #2)**
+- **LLM metadata off the event loop**
   (app/api/response_shaping.py): new additive `aformat_crawl_item` /
   `abuild_unified_result` / `abuild_unified_crawl_response` offload the
   per-item lxml metadata parse with `asyncio.to_thread` (items gathered
   concurrently) and are now used by the async runner, render, webhook, MCP,
   and job-runner paths. Sync shapers are unchanged. `crawl_endpoint.py` is
   owned by another stream and keeps the sync call until it adopts the seam.
-- **Sync trafilatura off the loop (throughput #3)**
+- **Sync trafilatura off the loop**
   (app/crawl/strategies/http.py, app/crawl/engine.py): both `_extract_html`
   call sites (HTTP strategy result, browser strategy result) now run via
   `asyncio.to_thread`, matching the neighboring document/full-pipeline
   extractions. `strategies/browser.py` needed no change: its `_extract_html`
   is already async browser I/O (`page.content()`), not a CPU parse.
-- **Shared curl_cffi session (throughput #4)**
+- **Shared curl_cffi session**
   (app/crawl/strategies/http.py, app/main.py, tests/conftest.py):
   `_default_cffi_fetcher` reuses one `AsyncSession` per event loop
   (`get_cffi_session`, mirroring `get_async_http_client` with loop-change
@@ -34,7 +50,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the shared session can serve the next request. Shutdown closes it via
   `close_cffi_session` (lifespan + test reset). The streaming-cap fake now
   records construction (shared protocol has no per-request enter).
-- **RAM-scaled body cap uses live concurrency (throughput #5)**
+- **RAM-scaled body cap uses live concurrency**
   (app/crawl/engine.py, app/crawl/strategies/http.py):
   `_execute_crawl_chain`/`_http_strategy_result` accept the crawl's
   `global_concurrency` (threaded from the engine's active settings) so
@@ -43,24 +59,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   floor. Omitted (tests, direct callers) preserves the old floor behavior.
   True live-dispatch scaling (admission-derived concurrency) remains future
   work -- this threads the configured value, not a measured one.
-- **Browser fixed-overhead knobs are configurable, defaults frozen
-  (throughput #7)** (app/constants.py, app/settings.py,
+- **Browser fixed-overhead knobs are configurable, defaults frozen** (app/constants.py, app/settings.py,
   app/crawl/strategies/browser.py, .env.example): lazy-scroll steps/delay
   and the cookie-harvest wait are now settable via env/CrawlerSettings and
   per-render `browser_profile` keys (`lazy_scroll_steps`,
   `lazy_scroll_delay_seconds`, `cookie_harvest_timeout_seconds`). Shipped
   defaults are byte-identical (3 / 1s / 5.0s); ready-state and challenge
   behavior are untouched.
-- **Persistent markitdown pool (throughput #8)** (app/crawl/extraction.py):
+- **Persistent markitdown pool** (app/crawl/extraction.py):
   `_extract_document` is served by persistent pool workers (spawned on
-  demand up to `BROWSER_CRAWLER_EXTRACTION_DOC_WORKERS`) instead of one
+  demand up to `CRAWLUTRON_EXTRACTION_DOC_WORKERS`) instead of one
   process per document; markitdown imports once per worker lifetime.
   Timeout-kill semantics kept: a hung/dead worker is terminated and reaped
   per task, its slot respawned on next acquisition. The hermetic
   `TEST_MARKITDOWN_*` seam is snapshotted per task parent-side (persistent
   workers would otherwise see spawn-time env); all extraction-bounds tests
   pass unchanged.
-- **Sync post-fetch parsing off the loop (throughput #9)**
+- **Sync post-fetch parsing off the loop**
   (app/crawl/extraction.py, app/crawl/engine.py,
   app/crawl/strategies/http.py): new `extract_post_fetch_discovery` parses
   once and derives frames/forms, discovered links, JS endpoints, and the
@@ -75,7 +90,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fresh, and loop-change rebuild/pending-close semantics are unchanged.
 - **Normalization guard memoized (tier-2 T2)** (app/validation.py):
   `normalize_public_http_url` now consults the
-  `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` decision through a raw-value-keyed
+  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` decision through a raw-value-keyed
   memo (any env change, including tests, is visible on the very next call;
   unrecognized values keep the guard ON) and classifies hosts through a
   bounded pure-function `lru_cache` verdict — per-anchor normalization no
@@ -143,6 +158,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unlinks.
 
 ### Fixed
+- **robots.txt agent matching is case-insensitive for the query side too**
+  (`app/crawl/robots_parse.py`): `robots_groups` lower-cased the file's
+  `User-agent` lines but `select_robots_values` compared that lower-cased
+  string against the token as passed, so case-insensitivity silently depended
+  on every caller supplying an already-lower-case token. A mixed-case token
+  matched no group and fell through to the `*` group -- answering a question
+  RFC 9309 2.2.1 makes case-insensitive by discarding the site's own rules.
+  The token is now normalised at the comparison, so the guarantee lives with
+  the code that depends on it rather than in each caller's discipline.
 - **Doc-pool child-death assertion now checks the real invariant (M8)**
   (app/crawl/extraction.py, tests/crawl/test_extraction_bounds.py):
   `test_extract_document_child_death_returns_empty` asserted
@@ -176,7 +200,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Web search endpoint** (`POST /v1/search`): discover public URLs from a
   query via an operator-configured provider. Provider abstraction ships
   Tavily, Brave, and Serper (keyed) plus a keyless DuckDuckGo fallback;
-  `BROWSER_CRAWLER_SEARCH_PROVIDER=auto` activates the first provider whose
+  `CRAWLUTRON_SEARCH_PROVIDER=auto` activates the first provider whose
   `*_API_KEY` is set. Result URLs pass the same public-URL/SSRF validation as
   crawl targets; provider failures surface as `502` and a selected-but-
   unconfigured provider as `503` naming the missing variable. Search metrics
@@ -470,7 +494,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   enough).
 - **SSRF env var parsing centralized** (app/validation.py,
   app/crawl/strategies/http.py, app/main.py): every
-  `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` check now goes through
+  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` check now goes through
   `app.validation.parse_bool_env`, which treats `1`/`true`/`yes`/`on`
   as truthy (case-insensitive). The previous `== "1"` literal in
   three files agreed on the value but rejected `"true"`/`"yes"`/`"on"`.
@@ -486,12 +510,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   startup.
 - **Identity strings normalized** (app/crawl/strategies/http.py,
   app/crawl/engine.py, app/main.py, app/constants.py): the
-  `dev-stack-browser-crawler/0.2 (+https://local.dev-stack/crawler)`
-  User-Agent and the `dev-stack-browser-crawler` token are replaced
+  `dev-stack-crawlutron/0.2 (+https://local.dev-stack/crawler)`
+  User-Agent and the `dev-stack-crawlutron` token are replaced
   with `DEFAULT_USER_AGENT` and `USER_AGENT_TOKEN` constants sourced
   from `app.constants`.
 - **`worcesterma.gov` defaults replaced** (scripts/probe_session.py,
-  scripts/e2e_verify.py): the `BROWSER_CRAWLER_PROBE_TARGET` default
+  scripts/e2e_verify.py): the `CRAWLUTRON_PROBE_TARGET` default
   is now `https://example.com/`.
 - **Webhook delivery paths consolidated** (app/main.py): the
   IP-pinned delivery logic now lives in `_deliver_pinned_webhook`
@@ -521,7 +545,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   per-hop re-validation; `final_url`/cookies report the logical URL, not
   the pinned IP. Drift invariant requires every `SafeUrl.parse` site to
   commit to a `pin` decision.
-- **Env-core consolidation (H1-OSS)**: all `BROWSER_CRAWLER_*` numeric
+- **Env-core consolidation (H1-OSS)**: all `CRAWLUTRON_*` numeric
   reads (including the 25 in `CrawlerSettings.from_mapping`) flow through
   `get_env_int/float`/`get_mapping_int/float` — bad strings can never
   reach arithmetic; the bool parser fails closed.
@@ -530,31 +554,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Single scope matcher (M10)**: engine/recursive's duplicated
   `_scope_allows` deduped into `app/crawl/scope_match.py`; one definition
   enforced by drift test.
-- **Result shaping cannot drift (jscpd #1)**: every
+- **Result shaping cannot drift**: every
   `UnifiedCrawlResponse`-with-results path (async runner, webhooks, both
   crawl_endpoint branches, render, MCP `tools/call`) now flows through
   `build_unified_crawl_response`; REST, job, webhook, and MCP payloads
-  cannot diverge (#1715). The webhooks DI seam shrank 7 to 5 globals —
+  cannot diverge. The webhooks DI seam shrank 7 to 5 globals —
   shaper hooks existed only to be bypassed.
-- **ContentCache mirror twins collapsed (jscpd #2)**: one locked probe and
+- **ContentCache mirror twins collapsed**: one locked probe and
   one locked store replace four hand-copied blocks. The twins had been
   hiding three real bugs: `aget` cold reads skipped the RAM-mirror entry
   cap (unbounded growth), `aset` mirrored before the disk write so a
   failed write left a stale mirror serving an unpersisted value, and the
   sync `get` never warmed the mirror the async path populated.
-- **Error envelope factory (jscpd #3)**: 18 hand-rolled
+- **Error envelope factory**: 18 hand-rolled
   `{code, message, details}` dicts across 8 endpoint files replaced by
   `error_envelope`/`http_error`. Wire-visible effect: three error bodies
   that silently omitted `details` now always carry it (contract already
   documented it); the triplicated browser-pool 503 message is one
   constant. Envelope literals outside the sanctioned module fail CI.
-- **One search-result normalization contract (jscpd #4)**: the
+- **One search-result normalization contract**: the
   Tavily/Brave/Serper parse loops — verbatim copies differing only in key
   names — collapsed into `_collect_results`. Behavior byte-identical; the
   risk retired is one provider's SSRF-drop or dedupe rule silently
   drifting from its siblings. Tree-wide detector keeps the loop in one
   place.
-- **One robots.txt line-scanner (jscpd #5)**: crawl-delay, rules, and
+- **One robots.txt line-scanner**: crawl-delay, rules, and
   sitemaps each re-rolled the BOM/comment/`partition(":")` walk plus the
   RFC-9309 group accumulator, and had already drifted on the empty-value
   gate. `app/crawl/robots_parse.py` is the single tokenizer + selector;
@@ -603,7 +627,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   false-positive directions.
 - **Env alias escape closed (H1 family)** (app/resource_pressure.py,
   tests/test_env_regression.py): `derive_browser_pool_size` read
-  `BROWSER_CRAWLER_BROWSER_POOL_SIZE` raw and wrapped `int()` in a
+  `CRAWLUTRON_BROWSER_POOL_SIZE` raw and wrapped `int()` in a
   try/except two statements after the `.get()` — invisible to the
   coercion-shape detector. The value now comes through `get_env_int`, so
   a non-positive or blank override falls through to derivation instead of
@@ -777,7 +801,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
    `/.well-known/crawler-service` links `/v1/map`, `/v1/jobs`, and
    `GET /v1/crawl/{request_id}`. The `/v1/crawl` OpenAPI description was corrected the
    same way (its `202` said "webhook" only, now "`async_mode` or `webhook_url`").
-   Doc fidelity: the README and `browser-crawler-agent-contract.md` still claimed
+   Doc fidelity: the README and `crawlutron-agent-contract.md` still claimed
    "callers own dedupe" and "5 MB → 5 MB" for the gzip-bomb test — both corrected to
    the real behavior (canonical within-request dedup + within-TTL reuse; a ~1 KB →
    1 MB gzip bomb plus deflate/brotli cases). Contract tests assert the new
@@ -934,7 +958,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   chokepoint for libraries with no opt-out flag (Playwright's driver ships none
   in this version; camoufox phone-homes only on explicit operator action).
   Posture and verification documented in
-  docs/references/browser-crawler-telemetry.md.
+  docs/references/crawlutron-telemetry.md.
 
 ### Repository scaffolding
 - Added `pyproject.toml`, `LICENSE` (MIT), `.env.example`, `SECURITY.md`,
@@ -946,9 +970,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   paths; target and output are env-var configurable.
 
 ### Test infrastructure
-- `./test.sh browser-crawler` (dev-stack root) now delegates to
+- `./test.sh crawlutron` (dev-stack root) now delegates to
   `docker/browser-crawler/scripts/run-tests.sh` instead of failing on
-  missing `tests.test_browser_crawler_api` / `tests.test_browser_crawler_core`.
+  missing `tests.test_crawlutron_api` / `tests.test_crawlutron_core`.
 - New `tests/crawl/test_cookie_namespace.py` covers the per-request
   cookie namespace behavior (7 tests).
 - Test suite: **738 passed, 54 browser-marked deselected** in ~32 s.
@@ -982,7 +1006,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 - **Identity strings**: ``DEFAULT_USER_AGENT`` and ``USER_AGENT_TOKEN``
   constants added to ``app/constants.py``. All references to the
   dev-stack monorepo / local hostname have been replaced with the
-  project-neutral ``browser-crawler/0.2`` identity. FastAPI
+  project-neutral ``crawlutron/0.2`` identity. FastAPI
   ``contact`` and ``license_info`` now reference the project, not the
   monorepo.
 - **Probe target neutral**: ``scripts/probe_session.py`` and
@@ -991,7 +1015,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 
 ### Security
 - **SSRF env var parsing centralized**: ``app.validation.parse_bool_env``
-  now owns the ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS`` parsing with
+  now owns the ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` parsing with
   consistent ``1``/``true``/``yes``/``on`` semantics. The
   ``os.environ.get(...) == "1"`` check at three call sites has been
   replaced.
@@ -1013,7 +1037,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
   bodies truncated mid-script by ``max_content_length`` the text after the
   cut no longer reaches classification (the old regex left truncated-script
   content visible). Deliberate fail-closed trade; classification-sensitive
-  callers may see diffs on truncated pages (final review #8).
+  callers may see diffs on truncated pages.
 - **``_ResultSpill.close()`` double-unlink**: removed the duplicate
   ``if self._own:`` block that could ``os.unlink`` the same path
   twice (raising ``FileNotFoundError`` once the first unlink
@@ -1037,7 +1061,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
   successful ``REVIEW_ROUND3.md`` review.
 
 ### Build
-- ``Dockerfile``: the circular ``COPY --from=browser-crawler:latest``
+- ``Dockerfile``: the circular ``COPY --from=crawlutron:latest``
   reference (which broke fresh-clone builds where the source image
   had not been tagged yet) replaced with ``COPY --from=camoufox-binary``.
   The ``shared/python/local_service_logging`` ``COPY`` is gone (the
@@ -1058,7 +1082,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 - ``ssrf_guard_required`` pytest fixture: tests that exercise
   ``_check_ssrf_protection`` or ``_resolve_and_pin_host`` can opt in
   via this fixture, which fails the test if the SSRF helper ran
-  while ``BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS`` was still enabled
+  while ``CRAWLUTRON_ALLOW_PRIVATE_TARGETS`` was still enabled
   (the silent false-positive that lets the guard short-circuit
   before real test logic runs).
 
@@ -1066,7 +1090,7 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 ## [0.3.1] - Reviewer-5 Follow-Up
 
 ### Fixed (from `REVIEW_ROUND5.md`)
-- **Dockerfile comment cleanup**: the `# browser-crawler:latest` comment in
+- **Dockerfile comment cleanup**: the `# crawlutron:latest` comment in
   the runtime stage now describes the historical reason for using
   `--from=camoufox-binary`, not an active broken reference.
 - **`app/main.py`** has zero runtime `try/except ImportError` for the
@@ -1079,8 +1103,8 @@ leak, JobStore concurrency, selector DoS) were already fixed.
   paragraph now points at `app/logging_config.configure_service_logging`
   as the in-tree equivalent.
 - **`tests/conftest.py`**: the suite-wide default for
-  `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` is now gated behind a new
-  `BROWSER_CRAWLER_TEST_ALLOW_PRIVATE_TARGETS` env var. Defaulting to
+  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` is now gated behind a new
+  `CRAWLUTRON_TEST_ALLOW_PRIVATE_TARGETS` env var. Defaulting to
   `"1"` (loopback-crawl-friendly) preserves all 740 existing tests.
   CI can set the new var to `"0"` for an SSRF-strict mode where every
   loopback test must explicitly opt in.
@@ -1107,14 +1131,14 @@ leak, JobStore concurrency, selector DoS) were already fixed.
 - **`_parse_robots_crawl_delay`** uses `USER_AGENT_TOKEN` (was already
   fixed in the prior round but the reviewer noted it; verified twice).
 - **SSRF test-suite default inverted**: `tests/conftest.py` now sets
-  `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS` to `"0"` (the secure
+  `CRAWLUTRON_ALLOW_PRIVATE_TARGETS` to `"0"` (the secure
   production default). A session-scoped autouse fixture
   (`_enable_loopback_for_test_suite`) flips it to `"1"` for the
   default test run so existing loopback-crawl tests keep working
   unchanged. CI runs that want SSRF-strict mode set
-  `BROWSER_CRAWLER_TEST_STRICT_SSRF=1` to disable the session-wide
+  `CRAWLUTRON_TEST_STRICT_SSRF=1` to disable the session-wide
   flip; every loopback test must then opt in explicitly via
-  `monkeypatch.setenv("BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS", "1")`.
+  `monkeypatch.setenv("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "1")`.
 - **`docker-compose.yml`** standalone file exists at the repo root
   (already created in round 4; verified).
 - **`app/browser.py`** and **`app/service.py`** shims are deleted

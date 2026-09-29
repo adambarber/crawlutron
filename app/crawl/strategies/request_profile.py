@@ -33,7 +33,7 @@ def cookie_namespace_for(profile: Mapping[str, Any]) -> str:
 
 
 def _cookie_header_for_url(profile: Mapping[str, Any], url: str) -> str:
-    """Build a Cookie header from policy cookies and the persistent jar (#2)."""
+    """Build a Cookie header from policy cookies and the persistent jar."""
     host = (urlparse(url).hostname or "").lower()
     parts: list[str] = []
 
@@ -83,7 +83,7 @@ def _store_set_cookies(
     *,
     namespace: str | None = None,
 ) -> None:
-    """Extract Set-Cookie headers from a response into the persistent jar (#2).
+    """Extract Set-Cookie headers from a response into the persistent jar.
 
     Uses ``get_list`` to capture all ``Set-Cookie`` headers (httpx 0.28+
     returns comma-joined values from ``.items()`` for duplicate keys).
@@ -137,13 +137,13 @@ def _domain_seed(url: str) -> str:
 def _rotating_index(profile: Mapping[str, Any], domain: str, pool_size: int) -> int:
     """Deterministic per-host pool index so repeated crawls of the same host keep a
     stable fingerprint (the disk content-cache key stays consistent) while different
-    hosts rotate through the pool (#11)."""
+    hosts rotate through the pool."""
     seed = f"{profile.get('fingerprint_seed', '')}:{domain}".encode()
     return int(hashlib.sha256(seed).hexdigest(), 16) % pool_size
 
 
 def _select_fingerprint(profile: Mapping[str, Any], domain: str) -> dict[str, str]:
-    """Select fingerprint signals for a host (#11). Rotation is deterministic per host.
+    """Select fingerprint signals for a host. Rotation is deterministic per host.
     Explicit ``user_agents``/``accept_languages`` pools are preferred; ``fingerprint_rotation``
     falls back to built-in pools. Anchored on the host so it is complementary to Camoufox
     and curl_cffi TLS impersonation rather than conflicting with them."""
@@ -198,7 +198,7 @@ def _headers_for_strategy(
     }
     user_agent_family = str(resolved_profile.get("user_agent_family", "generic_crawler"))
     is_browser_like = strategy == HTTP_CFFI_IMPERSONATE or user_agent_family == "desktop_chrome"
-    # Fingerprint injection/rotation (#11): deterministic per-host selection so a single
+    # Fingerprint injection/rotation: deterministic per-host selection so a single
     # crawl rotates fingerprints across hosts while staying stable per host.
     fp = _select_fingerprint(resolved_profile, _domain_seed(url))
     if "user_agent" in fp:
@@ -237,7 +237,7 @@ def _headers_for_strategy(
         )
     if "accept_language" in fp:
         headers["Accept-Language"] = fp["accept_language"]
-    configured_user_agent = os.environ.get("BROWSER_CRAWLER_USER_AGENT", "").strip()
+    configured_user_agent = os.environ.get("CRAWLUTRON_USER_AGENT", "").strip()
     if configured_user_agent:
         headers["User-Agent"] = configured_user_agent
     cookie_header = _cookie_header_for_url(resolved_profile, url)

@@ -60,7 +60,7 @@ def _content_cache_key(
 # is the last cgroup budget in app/ that was still undivided -- the browser pool,
 # the HTTP ceiling and the doc-worker count are all split, and this one bounded
 # the same memory through the same container and had escaped that sweep.
-_RAM_SAFETY_BYTES = get_env_int("BROWSER_CRAWLER_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
+_RAM_SAFETY_BYTES = get_env_int("CRAWLUTRON_CONTENT_RAM_BUDGET_BYTES", 1 * 1024 * 1024 * 1024, lo=1)
 _MIN_PER_PAGE_BYTES = 256 * 1024  # never shrink the cap below 256 KiB
 
 

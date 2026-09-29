@@ -131,8 +131,8 @@ async def crawl(
         "Return the stored UnifiedCrawlResponse for a previously completed "
         "/v1/crawl request (see status_url in the 202 webhook response). "
         "For async single-shot jobs, reads from the durable job store. "
-        "Results are retained for BROWSER_CRAWLER_RESULT_TTL_SECONDS "
-        "(default 1h, capped at BROWSER_CRAWLER_RESULT_MAX_ENTRIES entries)."
+        "Results are retained for CRAWLUTRON_RESULT_TTL_SECONDS "
+        "(default 1h, capped at CRAWLUTRON_RESULT_MAX_ENTRIES entries)."
     ),
 )
 async def get_crawl_result(

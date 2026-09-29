@@ -65,7 +65,7 @@ _DEFAULT_FETCH_AND_DECODE = _fetch_and_decode
 # Shared conditional cache so repeated crawls can leverage 304 responses.
 _SHARED_HTTP_CACHE = HttpCache()
 
-# Lazy, disk-backed content cache (#5). Created on first use so importing
+# Lazy, disk-backed content cache. Created on first use so importing
 # this module has no filesystem side effects (tests can pass their own).
 _SHARED_CONTENT_CACHE: ContentCache | None = None
 
@@ -107,7 +107,7 @@ def _utc_timestamp(dt: datetime | None) -> float | None:
 def _parse_lastmod(lastmod: str | None) -> float | None:
     """Parse a sitemap <lastmod> (ISO-8601 or RFC-822) into epoch seconds.
 
-    A stamp further in the future than ``BROWSER_CRAWLER_SITEMAP_LASTMOD_
+    A stamp further in the future than ``CRAWLUTRON_SITEMAP_LASTMOD_
     FUTURE_SKEW_SECONDS`` (default 1 day; ``lo=0`` so a negative config can
     never reject the recent past) is an untrustworthy claim, not freshness
     information -- broken generators stamp the whole sitemap "now-plus" on
@@ -134,7 +134,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
             return None
     if ts is None:
         return None
-    skew = get_env_int("BROWSER_CRAWLER_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", 86400, lo=0)
+    skew = get_env_int("CRAWLUTRON_SITEMAP_LASTMOD_FUTURE_SKEW_SECONDS", 86400, lo=0)
     if ts > time.time() + skew:
         return None
     return ts
@@ -143,7 +143,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
 def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: CrawlPolicy) -> bool:
     """True if ``url`` is cached and the sitemap ``lastmod`` is not newer than
     our cache timestamp, i.e. our cached copy is fresh and the crawl can skip
-    re-fetching it (#3).
+    re-fetching it.
     """
     if content_cache is None or not lastmod:
         return False
@@ -157,7 +157,7 @@ def _seed_is_fresh(url: str, lastmod: str | None, content_cache: Any, policy: Cr
     from app.crawl.strategies.content_cache_key import _content_cache_key
     from app.crawl.strategies.request_profile import _headers_for_strategy
 
-    # Default to the real strategy chain (L5): the old ["HTTP"] placeholder
+    # Default to the real strategy chain: the old ["HTTP"] placeholder
     # is not a strategy, so its cache keys could never match stored entries
     # and freshness was never detected through this path.
     for strategy in policy.strategies:

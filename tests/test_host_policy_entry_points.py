@@ -177,7 +177,7 @@ _BLOCKED_URL = "https://blocked.test/secret"
 def _denied_settings():
     from app.settings import CrawlerSettings
 
-    return CrawlerSettings.from_mapping({"BROWSER_CRAWLER_DENIED_HOSTS": "blocked.test"})
+    return CrawlerSettings.from_mapping({"CRAWLUTRON_DENIED_HOSTS": "blocked.test"})
 
 
 def _denied_policy():

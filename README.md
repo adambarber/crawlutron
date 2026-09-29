@@ -1,4 +1,4 @@
-# browser-crawler
+# crawlutron
 
 A policy-driven, self-hosted web crawler and content-extraction service built around
 FastAPI. It exposes a single, machine-readable crawl contract that supports:
@@ -28,7 +28,7 @@ production deployments typically front it with an authenticated reverse proxy.
 
 ## Security Posture
 
-browser-crawler is a **localhost-only** service. By design it does not
+crawlutron is a **localhost-only** service. By design it does not
 authenticate callers and binds to `127.0.0.1`; expose it beyond localhost
 only behind an authenticated reverse proxy.
 
@@ -93,15 +93,15 @@ monorepo or shared-helper tree.
 ```bash
 # Build the image (multi-stage; the Camoufox browser binary is fetched once in an
 # isolated stage so editing requirements.txt does not re-download ~1.3 GB).
-docker compose build browser-crawler
+docker compose build crawlutron
 
 # Run it (recreates only this service).
-docker compose up -d browser-crawler
+docker compose up -d crawlutron
 ```
 
 The container listens on `127.0.0.1:8765`. The served API docs (Swagger UI)
 are available at `/docs` and the machine-readable schema at `/openapi.json`.
-For local-hostname routing (e.g. `http://browser-crawler.local`), front the
+For local-hostname routing (e.g. `http://crawlutron.local`), front the
 container with Caddy or another reverse proxy that owns the `.local` zone.
 
 > **Note on the build:** The Camoufox browser binary is downloaded in a dedicated
@@ -166,13 +166,13 @@ It does **not** crawl result URLs — pipe them into `POST /v1/crawl`.
 
 The backend is operator-configured, not caller-selected:
 
-- `BROWSER_CRAWLER_SEARCH_PROVIDER` (`auto` | `tavily` | `brave` | `serper` | `duckduckgo`).
+- `CRAWLUTRON_SEARCH_PROVIDER` (`auto` | `tavily` | `brave` | `serper` | `duckduckgo`).
 - `auto` (default) activates the first configured keyed provider in priority
   order (Tavily to Brave to Serper) and falls back to the keyless DuckDuckGo
   HTML endpoint when no API key is set. The keyless endpoint may be
   captcha-blocked from datacenter IPs, so configure a key for production use.
 - A selected provider without its key returns `503 search_provider_unavailable`
-  naming the missing `BROWSER_CRAWLER_*_API_KEY` variable.
+  naming the missing `CRAWLUTRON_*_API_KEY` variable.
 
 Result URLs pass the same public-URL validation as crawl targets (loopback and
 private targets are dropped). `GET /v1/capabilities` reports the active
@@ -259,7 +259,7 @@ Every crawl result carries a `classification` from a fixed enum of **30 values**
 ## Behavior notes
 
 - **SSRF protection** is on by default: only public HTTP(S) targets are allowed.
-  Set `BROWSER_CRAWLER_ALLOW_PRIVATE_TARGETS=1` to disable it (local testing only).
+  Set `CRAWLUTRON_ALLOW_PRIVATE_TARGETS=1` to disable it (local testing only).
 - **robots.txt** is respected by default (`respect_robots`). Disallowed targets
   return `robots_disallowed`.
 - **Recursion / frontier:** `POST /v1/crawl` recursively expands one in-memory
@@ -319,38 +319,38 @@ Every crawl result carries a `classification` from a fixed enum of **30 values**
 
 ## Configuration
 
-All settings are read from `BROWSER_CRAWLER_*` environment variables (sensible
+All settings are read from `CRAWLUTRON_*` environment variables (sensible
 defaults shown):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `BROWSER_CRAWLER_GLOBAL_CONCURRENCY` | `4` (env-overridable floor) | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
-| `BROWSER_CRAWLER_PER_DOMAIN_CONCURRENCY` | `2` | Max concurrent tasks per host. |
-| `BROWSER_CRAWLER_PER_DOMAIN_DELAY_MS` | `500` | Delay between requests to the same host. |
-| `BROWSER_CRAWLER_HTTP_MAX_CONNECTIONS` | _(RAM-derived; ~139 at 3 GiB)_ | Max concurrent HTTP connections. Derived from the cgroup memory limit and capped at 512; override only to shrink. Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
-| `BROWSER_CRAWLER_HTTP_MAX_KEEPALIVE` | _(RAM-derived; ~69 at 3 GiB)_ | Max idle keep-alive connections (≈ half of the connection ceiling). |
-| `BROWSER_CRAWLER_BROWSER_POOL_SIZE` | _(RAM-derived; 2 at 3 GiB)_ | Explicit browser-pool size override. Default is derived from the cgroup limit (reserves ≤50% of RAM for browsers); raising it multiplies RAM use and risks OOM. |
-| `BROWSER_CRAWLER_SEARCH_PROVIDER` | `auto` | Search backend: `auto` (first configured keyed provider) or explicit `tavily` / `brave` / `serper` / `duckduckgo`. |
-| `BROWSER_CRAWLER_TAVILY_API_KEY` | `""` | Tavily Search API key (activates the `tavily` provider). |
-| `BROWSER_CRAWLER_BRAVE_API_KEY` | `""` | Brave Search API key (activates the `brave` provider). |
-| `BROWSER_CRAWLER_SERPER_API_KEY` | `""` | Serper.dev API key (activates the `serper` provider). |
-| `BROWSER_CRAWLER_SEARCH_LIMIT_DEFAULT` | `5` | Default result count per search. |
-| `BROWSER_CRAWLER_SEARCH_LIMIT_MAX` | `20` | Hard cap on results per search. |
-| `BROWSER_CRAWLER_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
-| `BROWSER_CRAWLER_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
-| `BROWSER_CRAWLER_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
-| `BROWSER_CRAWLER_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
-| `BROWSER_CRAWLER_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
-| `BROWSER_CRAWLER_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated suffix match; case, IDNA, and port normalized). |
-| `BROWSER_CRAWLER_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated suffix match; deny wins over allow). |
-| `BROWSER_CRAWLER_LOG_LEVEL` | `info` | Log verbosity. |
-| `BROWSER_CRAWLER_LOG_FILE` | `/app/logs/browser-crawler.jsonl` | Structured JSONL log path. |
-| `BROWSER_CRAWLER_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
-| `BROWSER_CRAWLER_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
+| `CRAWLUTRON_GLOBAL_CONCURRENCY` | `4` (env-overridable floor) | Concurrency floor for the recursive dispatcher. Real concurrency is self-managed by the resource guard; `/ready` no longer keys off this value. |
+| `CRAWLUTRON_PER_DOMAIN_CONCURRENCY` | `2` | Max concurrent tasks per host. |
+| `CRAWLUTRON_PER_DOMAIN_DELAY_MS` | `500` | Delay between requests to the same host. |
+| `CRAWLUTRON_HTTP_MAX_CONNECTIONS` | _(RAM-derived; ~139 at 3 GiB)_ | Max concurrent HTTP connections. Derived from the cgroup memory limit and capped at 512; override only to shrink. Bound to the weighted admission's HTTP concurrency so the pool can't starve or over-provision. |
+| `CRAWLUTRON_HTTP_MAX_KEEPALIVE` | _(RAM-derived; ~69 at 3 GiB)_ | Max idle keep-alive connections (≈ half of the connection ceiling). |
+| `CRAWLUTRON_BROWSER_POOL_SIZE` | _(RAM-derived; 2 at 3 GiB)_ | Explicit browser-pool size override. Default is derived from the cgroup limit (reserves ≤50% of RAM for browsers); raising it multiplies RAM use and risks OOM. |
+| `CRAWLUTRON_SEARCH_PROVIDER` | `auto` | Search backend: `auto` (first configured keyed provider) or explicit `tavily` / `brave` / `serper` / `duckduckgo`. |
+| `CRAWLUTRON_TAVILY_API_KEY` | `""` | Tavily Search API key (activates the `tavily` provider). |
+| `CRAWLUTRON_BRAVE_API_KEY` | `""` | Brave Search API key (activates the `brave` provider). |
+| `CRAWLUTRON_SERPER_API_KEY` | `""` | Serper.dev API key (activates the `serper` provider). |
+| `CRAWLUTRON_SEARCH_LIMIT_DEFAULT` | `5` | Default result count per search. |
+| `CRAWLUTRON_SEARCH_LIMIT_MAX` | `20` | Hard cap on results per search. |
+| `CRAWLUTRON_SEARCH_TIMEOUT_SECONDS` | `15` | Provider call timeout. |
+| `CRAWLUTRON_MAX_BATCH_SIZE` | `50` | Max URLs per batch request. |
+| `CRAWLUTRON_DEFAULT_TIMEOUT_SECONDS` | `30` | Default per-request timeout. |
+| `CRAWLUTRON_DEFAULT_MAX_RETRIES` | `2` | Default retry count. |
+| `CRAWLUTRON_RESPECT_ROBOTS` | `true` | Respect robots.txt by default. |
+| `CRAWLUTRON_ALLOWED_HOSTS` | `""` | Optional host allowlist (comma-separated suffix match; case, IDNA, and port normalized). |
+| `CRAWLUTRON_DENIED_HOSTS` | `""` | Optional host denylist (comma-separated suffix match; deny wins over allow). |
+| `CRAWLUTRON_LOG_LEVEL` | `info` | Log verbosity. |
+| `CRAWLUTRON_LOG_FILE` | `/app/logs/crawlutron.jsonl` | Structured JSONL log path. |
+| `CRAWLUTRON_LOG_MAX_BYTES` | `10485760` | Log rotation size. |
+| `CRAWLUTRON_LOG_BACKUP_COUNT` | `3` | Number of rotated log files to keep. |
 
 Host policy is applied at the shared public-URL chokepoint before the SSRF/private-target check. Entries are normalized as case-insensitive IDNA hostnames and may include a port; a denied host wins over an allowed host, while an empty allowlist permits every otherwise-valid public host.
 
-> The container's production command also reads `BROWSER_CRAWLER_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
+> The container's production command also reads `CRAWLUTRON_WORKERS` (uvicorn worker count). **Keep this at `1`.** The browser pool is a single global pool sized to the container RAM budget; running more than one uvicorn worker multiplies the browser-pool count across workers (e.g. 4 workers × pool_size 2 = 8 Camoufox processes ≈ 5+ GiB) and blows the 3 GiB memory limit. Do not raise it.
 
 > **Secrets & logs:** Logs and prompt JSONL can contain full page content and
 > request metadata. Do not commit generated logs under `logs/`.
@@ -375,7 +375,7 @@ with `422`.
 ## Project layout
 
 ```
-.  # repository root (clone of browser-crawler)
+.  # repository root (clone of crawlutron)
 ├── Dockerfile            # Multi-stage build; isolated camoufox-binary stage (context: .)
 ├── docker-compose.yml    # Standalone local stack (loopback-only)
 ├── pyproject.toml        # Package metadata + ruff config
@@ -429,5 +429,5 @@ make test          # fast hermetic suite (default)
 python3 -m pytest -q
 ```
 
-The manual test plan lives at `docs/references/browser-crawler-manual-test-plan.md`
-and the agent integration contract at `docs/references/browser-crawler-agent-contract.md`.
+The manual test plan lives at `docs/references/crawlutron-manual-test-plan.md`
+and the agent integration contract at `docs/references/crawlutron-agent-contract.md`.

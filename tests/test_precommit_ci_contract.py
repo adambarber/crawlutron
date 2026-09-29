@@ -944,6 +944,9 @@ def _run_gate_entry_in_layout(repo: Path, layout: str) -> tuple[Path, subprocess
     real files rather than re-typed stand-ins, so a helper that stops doing its
     job cannot pass this by agreeing with a copy of itself.
     """
+    # `browser-crawler` here is the pre-extraction layout the hook's prologue
+    # still probes for, not this project's name; the nested branch exists to
+    # prove the helper resolves there too.
     service_root = repo / "docker" / "browser-crawler" if layout == "nested" else repo
     subprocess.run([require_executable(GIT), "init", "-q", str(repo)], check=True, capture_output=True)
     (service_root / "scripts").mkdir(parents=True)

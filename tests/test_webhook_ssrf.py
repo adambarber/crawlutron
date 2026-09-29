@@ -121,15 +121,15 @@ def test_webhook_size_cap_honors_a_live_env_override(monkeypatch):
     -- is still picked up on the very next call."""
     from app.api import webhooks
 
-    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "1234")
+    monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "1234")
     assert webhooks._max_webhook_size() == 1234, "the override was not honored"
 
     # A later change to the same env var is reflected without a reload.
-    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "4321")
+    monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "4321")
     assert webhooks._max_webhook_size() == 4321, "a cached value shadowed the new override"
 
     # Removing the override restores the default, not a stale cached value.
-    monkeypatch.delenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE")
+    monkeypatch.delenv("CRAWLUTRON_MAX_WEBHOOK_SIZE")
     assert webhooks._max_webhook_size() == 10_485_760
 
 
@@ -138,8 +138,8 @@ def test_webhook_size_cap_keeps_the_unit_floor(monkeypatch):
     cap every delivery at nothing and silently drop all webhooks."""
     from app.api import webhooks
 
-    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "0")
+    monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "0")
     assert webhooks._max_webhook_size() == 1
 
-    monkeypatch.setenv("BROWSER_CRAWLER_MAX_WEBHOOK_SIZE", "not-an-int")
+    monkeypatch.setenv("CRAWLUTRON_MAX_WEBHOOK_SIZE", "not-an-int")
     assert webhooks._max_webhook_size() == 10_485_760, "a garbage value must fall back, not raise"

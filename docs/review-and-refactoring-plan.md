@@ -27,7 +27,7 @@ Tests: 67 total (historical) → **744 passed (fast suite, 2026-09-03), `app/api
 
 All 7 endpoints reachable:
 - GET /health -> 200
-- GET /ready -> 200  
+- GET /ready -> 200
 - GET /v1/capabilities -> 200 (7 strategies, 26 classifications, 20 output fields)
 - GET /v1/agent-hints -> 200
 - GET /.well-known/crawler-service -> 200

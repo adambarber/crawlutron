@@ -49,7 +49,7 @@ class ReadinessState:
         self._utilization_sampler: Callable[[], tuple[float, float]] | None = None
 
     def set_utilization_sampler(self, sampler: Callable[[], tuple[float, float]] | None) -> None:
-        """Install a live ``(memory, cpu)`` utilization source (M11).
+        """Install a live ``(memory, cpu)`` utilization source.
 
         The lifespan wires the engine's ResourceGate here so /ready reflects
         current pressure even when no recursive crawl has run to refresh the
