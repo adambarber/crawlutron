@@ -38,8 +38,7 @@ def discovery_payload() -> dict[str, Any]:
             "GET /v1/crawl/{request_id}",
             "POST /mcp",
         ],
-        "description":
-        "Policy-driven universal crawler execution service for script-tool municipal crawling.",
+        "description": "Policy-driven universal crawler execution service for script-tool municipal crawling.",  # noqa: E501
     }
 
 

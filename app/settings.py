@@ -195,9 +195,7 @@ class CrawlerSettings:
                 cls.log_file_backup_count,
             ),
             cache_dir=source.get("CRAWLUTRON_CACHE_DIR", cls.cache_dir),
-            cache_ttl_seconds=get_mapping_int(
-                source, "CRAWLUTRON_CACHE_TTL_SECONDS", cls.cache_ttl_seconds
-            ),
+            cache_ttl_seconds=get_mapping_int(source, "CRAWLUTRON_CACHE_TTL_SECONDS", cls.cache_ttl_seconds),
             content_cache_enabled=parse_bool_value(
                 source.get("CRAWLUTRON_CONTENT_CACHE_ENABLED"),
                 cls.content_cache_enabled,
@@ -238,9 +236,7 @@ class CrawlerSettings:
             max_concurrent_pages=get_mapping_int(
                 source, "CRAWLUTRON_MAX_CONCURRENT_PAGES", cls.max_concurrent_pages
             ),
-            browser_pool_size=get_mapping_int(
-                source, "CRAWLUTRON_BROWSER_POOL_SIZE", cls.browser_pool_size
-            ),
+            browser_pool_size=get_mapping_int(source, "CRAWLUTRON_BROWSER_POOL_SIZE", cls.browser_pool_size),
             challenge_wait_seconds=get_mapping_int(
                 source, "CRAWLUTRON_CHALLENGE_WAIT_SECONDS", cls.challenge_wait_seconds
             ),
@@ -269,9 +265,7 @@ class CrawlerSettings:
             search_limit_default=get_mapping_int(
                 source, "CRAWLUTRON_SEARCH_LIMIT_DEFAULT", cls.search_limit_default
             ),
-            search_limit_max=get_mapping_int(
-                source, "CRAWLUTRON_SEARCH_LIMIT_MAX", cls.search_limit_max
-            ),
+            search_limit_max=get_mapping_int(source, "CRAWLUTRON_SEARCH_LIMIT_MAX", cls.search_limit_max),
             search_timeout_seconds=get_mapping_int(
                 source, "CRAWLUTRON_SEARCH_TIMEOUT_SECONDS", cls.search_timeout_seconds
             ),

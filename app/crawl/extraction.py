@@ -441,9 +441,7 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 # #mem-guard: a markitdown worker process shares the container cgroup; an
 # unbounded document can balloon it past the memory ceiling. Cap the input
 # size and allow deployments to disable subprocess extraction entirely.
-_EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int(
-    "CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1
-)
+_EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
 
 # Maximum extracted markdown size (chars) to prevent unbounded output (F5).
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB

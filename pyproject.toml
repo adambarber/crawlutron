@@ -163,6 +163,21 @@ select = [
 # RUF100 and PGH004 selected below, so a noqa that no longer earns its place
 # fails the build rather than accumulating.
 #
+# `ruff format --check` now runs as a hook beside `ruff check`, which retires
+# the objection above: E501 was re-enabled *because* "handled by formatter" was
+# an unfounded claim when no formatter ran. It is founded now, and the two
+# still disagree on twelve lines, all of them the same shape: a dict entry in a
+# discovery document whose value is a single prose string that no formatter can
+# break. The formatter joins the key and the value onto one line, and E501 then
+# fires on a line the formatter has already decided it cannot help with.
+#
+# So E501 stays enforced, and those twelve carry `# noqa: E501`. That is the
+# reconciliation rather than a weakening: PGH004 requires each to name its rule
+# and RUF100 deletes any that stops suppressing, so an exemption cannot outlive
+# the problem that earned it. Shorten the string and the build fails until the
+# comment goes with it. Relaxing `line-length` or turning E501 off would have
+# been the two easy moves, and both trade a mechanical check for a comment.
+#
 # B008: FastAPI dependency injection passes Depends(...) as a default argument
 # by design; calls listed here are recognized as immutable by bugbear.
 # S311: random.uniform jitter in the scheduler is throughput shaping, not crypto.

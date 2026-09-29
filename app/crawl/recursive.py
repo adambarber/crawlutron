@@ -58,7 +58,7 @@ def requeue_transient(
     *,
     depth: int,
     frontier: deque[tuple[int, CrawlTask]],
-        attempts: dict[NormalizedUrl, int],
+    attempts: dict[NormalizedUrl, int],
 ) -> bool:
     """Re-queue a transiently-failed task to the frontier tail, up to the cap.
 

@@ -29,12 +29,8 @@ _REPO_ROOT = _HERE.parent  # the repository root, which is now the service root
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-_PROBE_TARGET = os.environ.get(
-    "CRAWLUTRON_PROBE_TARGET", "https://example.com/"
-)
-_PROBE_OUTPUT = os.environ.get(
-    "CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp" / "probe_out.txt")
-)
+_PROBE_TARGET = os.environ.get("CRAWLUTRON_PROBE_TARGET", "https://example.com/")
+_PROBE_OUTPUT = os.environ.get("CRAWLUTRON_PROBE_OUTPUT", str(_REPO_ROOT / "tmp" / "probe_out.txt"))
 
 
 async def main() -> None:

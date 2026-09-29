@@ -65,9 +65,18 @@
 # hook environment is downloaded, no package index is contacted, and the
 # project's own pinned tools (installed in the service venv) are what runs.
 #
-# ruff format is intentionally absent: the tree carries formatting debt (CI runs
-# it as advisory for the same reason) and a hook that fails every commit trains
-# people to bypass the gate. It belongs here once the tree is format-clean.
+# ruff format joined the gates once the tree was actually format-clean, which
+# is the condition this comment used to name as a precondition. It was absent
+# because the tree carried formatting debt and a hook that fails every commit
+# trains people to bypass the gate -- both true, and both reasons to clear the
+# debt rather than to keep declining the check. The debt was then cleared in
+# full, so the check could be added without failing anyone.
+#
+# The point is that formatting stopped being a convention. With no hook, it was
+# maintained by whoever happened to run `ruff format` and nobody noticed when
+# they did not: twenty-one files had drifted, and the fix was a hand sweep
+# rather than anything that stopped the next one. A gate that only exists once
+# the debt is paid is worth having precisely because the debt was paid.
 repos:
   - repo: local
     hooks:
@@ -81,6 +90,21 @@ repos:
           .venv/bin/python -m ruff check app tests scripts
         language: system
         files: &service_trigger ^(docker/browser-crawler/|(?!docker/))
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # Formatter as a gate, not as advice. `check` rather than a bare
+      # invocation so the hook reports drift instead of silently rewriting the
+      # tree on the way past: an auto-fixing hook would commit other people's
+      # changes to their files, and this one is scoped whole-tree so a violation
+      # is visible while the change that caused it is still in context.
+      - id: ruff-format
+        name: ruff format
+        entry: >-
+          bash -c 'for d in "$(git rev-parse --show-toplevel)/docker/browser-crawler" "$(git rev-parse --show-toplevel)"; do [ -x "$d/scripts/gate" ] && exec bash "$d/scripts/gate" "$@"; done; echo "scripts/gate not found in either layout" >&2; exit 1' gate
+          .venv/bin/python -m ruff format --check app tests scripts
+        language: system
+        files: *service_trigger
         pass_filenames: false
         stages: [pre-commit]
 

@@ -81,14 +81,10 @@ SUPPORTED_EXTRACTIONS: list[str] = [
 
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
-    EXTRACTION_FULL:
-    "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",
-    EXTRACTION_TRAFILATURA:
-    "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",
-    EXTRACTION_DOCUMENT:
-    "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",
-    EXTRACTION_DOM:
-    "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura "
+    EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",  # noqa: E501
+    EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",  # noqa: E501
+    EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",  # noqa: E501
+    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura "  # noqa: E501
     "pipelines.",
 }
 

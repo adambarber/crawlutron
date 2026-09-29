@@ -16,6 +16,7 @@ wrong place.
 The report is ranked, because a sorted list of 100 modules is not a work list.
 The diagram is for the shape; the ranking is for the next commit.
 """
+
 from __future__ import annotations
 
 import argparse

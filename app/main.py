@@ -259,8 +259,7 @@ if FastAPI is not None:
         openapi_tags=[
             {
                 "name": "Health",
-                "description":
-                "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",
+                "description": "Lightweight liveness and crawl-capacity readiness endpoints for local orchestration.",  # noqa: E501
             },
             {
                 "name": "Discovery",
