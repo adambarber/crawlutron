@@ -81,11 +81,14 @@ SUPPORTED_EXTRACTIONS: list[str] = [
 
 # Human-readable descriptions for discovery/agent-hints.
 EXTRACTION_DESCRIPTIONS: dict[str, str] = {
-    EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, markitdown for documents, plain-text passthrough.",  # noqa: E501
-    EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; does not parse PDF or binary documents.",  # noqa: E501
-    EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and non-HTML responses when text evidence is needed.",  # noqa: E501
-    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough without the document or Trafilatura "  # noqa: E501
-    "pipelines.",
+    EXTRACTION_FULL: "Unified output pipeline: trafilatura HTML main text, "
+    "markitdown for documents, plain-text passthrough.",
+    EXTRACTION_TRAFILATURA: "HTML-only main-text extraction for noisy HTML; "
+    "does not parse PDF or binary documents.",
+    EXTRACTION_DOCUMENT: "Document/body extraction via markitdown for PDFs and "
+    "non-HTML responses when text evidence is needed.",
+    EXTRACTION_DOM: "DOM-text extraction: rendered or parsed page text passthrough "
+    "without the document or Trafilatura pipelines.",
 }
 
 # ---------------------------------------------------------------------------
@@ -265,8 +268,8 @@ CLASSIFICATION_STATUS_BY_LABEL: dict[str, ResultStatus] = {
     **dict.fromkeys(HTTP_BLOCKED_CLASSIFICATIONS | BROWSER_BLOCKED_CLASSIFICATIONS, "blocked"),
     # Retrieved, but nothing a consumer can use.
     **dict.fromkeys(FAILED_CLASSIFICATIONS, "failed"),
-    # Fetch-level failure codes the HTTP strategy's error classifier emits
-    # (H3). These are known-dead outcomes, not unclassified blocks: the
+    # Fetch-level failure codes the HTTP strategy's error classifier emits.
+    # These are known-dead outcomes, not unclassified blocks: the
     # strategy already reported status "failed" for the URL, and these must
     # not fall through to the "blocked" default, which would disagree with
     # the fetcher's own status and keep a dead page eligible for re-serve.
@@ -583,7 +586,7 @@ MAX_RATE_LIMIT_RPS: float = 100.0
 # Cache TTLs (seconds).
 DEFAULT_CACHE_TTL_SECONDS: float = 3600.0
 
-# Disk content-cache byte budget (H9). max_entries bounds entry count, not
+# Disk content-cache byte budget. max_entries bounds entry count, not
 # size: one envelope can hold a multi-MB base64 body, so without these caps
 # 10k entries could exceed 100GB of disk. Entries over the per-entry cap
 # are refused; LRU eviction enforces the total budget.
@@ -596,7 +599,7 @@ SITEMAP_MAX_URLS: int = 10_000
 SITEMAP_CACHE_TTL_SECONDS: float = DEFAULT_CACHE_TTL_SECONDS
 SITEMAP_CACHE_MAX_ENTRIES: int = 1000
 SITEMAP_FANOUT_TIMEOUT_SECONDS: int = 45
-# Maximum child-sitemap fetches in flight per index level (H7). An index
+# Maximum child-sitemap fetches in flight per index level. An index
 # lists every child before any max_urls accounting, so without chunking a
 # single hostile sitemapindex could spawn tens of thousands of tasks.
 SITEMAP_INDEX_FANOUT: int = 16

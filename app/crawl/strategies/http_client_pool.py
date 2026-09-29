@@ -2,6 +2,36 @@
 
 This module owns construction, loop binding, supersession, bounded close queues,
 and teardown. It must not assemble request policy, fetch responses, or own crawl results.
+
+THE SUPERSESSION LIFECYCLE
+--------------------------
+``httpx.AsyncClient`` and curl_cffi's ``AsyncSession`` are pooled the same way:
+built once for the running loop, reused while that loop lives, rebuilt when the
+loop changes. The rebuild is the dangerous step -- the object being replaced
+owns sockets on a loop that is already gone, and releasing it is asynchronous.
+:class:`_LoopBoundPooledClient` implements the only reliable pattern:
+
+  1. hand the superseded client to the bounded, deduped pending-close queue
+     (:func:`_queue_superseded_close`) so the reference is tracked even with
+     no loop running, and release whatever the cap displaced
+     (:func:`_release_dropped_client`) -- a synchronous close if that kind
+     publishes one, otherwise a close scheduled on the running loop;
+  2. also schedule a best-effort close on the current loop
+     (:func:`_schedule_client_close`) for the case where the rebuild happens
+     on a live loop;
+  3. let the next fetch on a live loop drain the queue
+     (:func:`_drain_pending_client_closes`) -- that drain is what actually
+     releases the sockets once step 2 loses the race with loop shutdown.
+
+Steps 1 and 2 are gated by the descriptor's ``is_closed`` predicate, never by
+probing an attribute name: only the owning kind knows how it reports being
+finished, and curl_cffi's session reports it in no way at all.
+
+Both pooled singletons are descriptors of this one lifecycle so they cannot
+drift apart again: the cffi copy stopped at step 2 and leaked one TLS session
+per loop change. The class docstring states the contract; the narrative lives
+here because the reader who needs it is looking for the mechanism, not the
+attribute list.
 """
 
 from __future__ import annotations
@@ -49,7 +79,7 @@ class _NoStoreCookieJar(_StdlibCookieJar):
     namespaced ``Cookie:`` header the fetcher sets per request.
 
     The base is deliberately the ALIASED stdlib jar (``_StdlibCookieJar``), not
-    the project's own ``CookieJar`` defined further down this module (P2-B):
+    the project's own ``CookieJar`` defined further down this module:
     this class is defined first, so its base resolves from whatever the
     ``CookieJar`` name points at at class-creation time. Basing it on the alias
     makes that resolution independent of source order -- rebinding the base to
@@ -156,7 +186,7 @@ async def _safe_aclose(client):
 # are the same resource: a connection pool bound to one loop), so one bounded
 # backlog and one reaper cover both.
 # Bounded so a stream of superseded clients cannot grow the list without
-# bound if drains are delayed (adversarial review F-pending-client-close).
+# bound if drains are delayed.
 _PENDING_CLIENT_CLOSE: list[Any] = []
 _PENDING_CLIENT_CLOSE_MAX = 32
 _PENDING_CLIENT_CLOSE_LOCK = threading.Lock()
@@ -172,9 +202,8 @@ def _queue_superseded_close(old_client: Any) -> Any | None:
     """Track one superseded pooled client; return whatever the cap displaced.
 
     The dedupe check lives inside the cap branch so a re-entrant append+pop
-    race cannot pop two distinct entries (adversarial review
-    F-pending-client-close B3). Returns the displaced object for the caller to
-    release *outside* the lock.
+    race cannot pop two distinct entries. Returns the displaced object for the
+    caller to release *outside* the lock.
     """
     stale_to_release: Any | None = None
     with _PENDING_CLIENT_CLOSE_LOCK:
@@ -190,9 +219,7 @@ def _release_dropped_client(stale_to_release: Any, *, is_closed: Callable[[Any],
     """Best-effort release of a client the cap had to displace.
 
     Runs outside ``_PENDING_CLIENT_CLOSE_LOCK`` so a potentially slow
-    socket-close cannot block other clients entering that critical section
-    (adversarial review F-pending-client-close B-minor
-    lock-held-during-close).
+    socket-close cannot block other clients entering that critical section.
 
     What this actually does, per context:
 
@@ -246,7 +273,7 @@ async def _drain_pending_client_closes() -> None:
     Draining here, inside a fetch that is already running on a live loop,
     actually releases those sockets instead of leaking them. A bounded
     queue with cap-on-enqueue keeps the list from growing unboundedly under
-    a stream of rapid loop changes (adversarial F-pending-client-close).
+    a stream of rapid loop changes.
     """
     while True:
         with _PENDING_CLIENT_CLOSE_LOCK:
@@ -311,37 +338,19 @@ def _schedule_client_close(client, *, is_closed: Callable[[Any], bool]) -> None:
 class _LoopBoundPooledClient:
     """One pooled HTTP client per running event loop, released on loop change.
 
-    ``httpx.AsyncClient`` and curl_cffi's ``AsyncSession`` are pooled the same
-    way: built once for the running loop, reused while that loop lives, rebuilt
-    when the loop changes. The rebuild is the dangerous step -- the object being
-    replaced owns sockets on a loop that is already gone, and releasing it is
-    asynchronous. The only reliable pattern is the one implemented here:
+    The contract, not the narrative: :meth:`current` is the pooled client as the
+    module global holds it, :meth:`_supersede` and :meth:`_rebuild` implement the
+    three-step supersession lifecycle documented at module level, and both
+    pooled singletons (httpx and curl_cffi) are descriptors of this one class so
+    they cannot drift apart.
 
-      1. hand the superseded client to the bounded, deduped pending-close queue
-         (:func:`_queue_superseded_close`) so the reference is tracked even with
-         no loop running, and release whatever the cap displaced
-         (:func:`_release_dropped_client`) -- a synchronous close if that kind
-         publishes one, otherwise a close scheduled on the running loop;
-       2. also schedule a best-effort close on the current loop
-         (:func:`_schedule_client_close`) for the case where the rebuild happens
-         on a live loop;
-       3. let the next fetch on a live loop drain the queue
-         (:func:`_drain_pending_client_closes`) -- that drain is what actually
-         releases the sockets once step 2 loses the race with loop shutdown.
-
-    Steps 1 and 2 are gated by this descriptor's ``is_closed`` predicate, never
-    by probing an attribute name: only the owning kind knows how it reports
-    being finished, and curl_cffi's session reports it in no way at all.
-
-    Both pooled singletons are descriptors of this one lifecycle so they cannot
-    drift apart again: the cffi copy stopped at step 2 and leaked one TLS
-    session per loop change.
-
-    The pooled instance is kept in the module global named by ``slot`` rather
-    than on this object, because service teardown and the suites reset pooled
-    state by assigning that global. ``build`` is held as a late-bound lambda for
-    the same reason: a test that monkeypatches ``_build_async_client`` or
-    ``_build_cffi_session`` must still be observed.
+    ``is_closed`` is the owning kind's own predicate, consulted for every
+    decision about whether a client still needs closing. ``build`` is a
+    late-bound lambda rather than a called symbol so a test that monkeypatches
+    ``_build_async_client`` or ``_build_cffi_session`` is still observed; the
+    pooled instance lives in the module global named by ``slot`` for the same
+    reason, since service teardown and the suites reset pooled state by
+    assigning that global.
     """
 
     __slots__ = ("build", "consults_settings", "is_closed", "lock", "slot")
