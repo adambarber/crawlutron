@@ -279,14 +279,14 @@ def test_keyed_provider_flow_detector_bites():
             "    async def search(self, query, limit, timeout_seconds):\n"
             "        status, body = await self._request(query, limit, timeout_seconds)\n"
             "        return self._results(status, body, lambda p: p.get('organic'), url_key='link',\n"
-            "            title_key='title', description_key='snippet')\n":
-            "re-spells the shared provider flow",
+            "            title_key='title',\n"
+            "            description_key='snippet')\n": "re-spells the shared provider flow",
             "from app.search.providers import _ApiKeyProvider\n"
             "class TavilyProvider(_ApiKeyProvider):\n"
             "    name = 'tavily'\n"
             "    async def _request(self, query, limit, timeout_seconds):\n"
-            "        return await _provider_http('POST', url, timeout_seconds=timeout_seconds)\n":
-            "does not define _items_of()",
+            "        return await _provider_http(\n"
+            "            'POST', url, timeout_seconds=timeout_seconds)\n": "does not define _items_of()",
         },
         REPO_ROOT / "app" / "search" / "_synthetic.py",
     )
@@ -819,10 +819,9 @@ def test_comment_clone_detector_bites():
     once = detect(f"x = 1\n{repeated}y = 2\n")
     assert not once, once
     twice = detect(f"x = 1\n{repeated}y = 2\n{repeated}")
-    assert (
-        len(twice) == 1
-        and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0]
-    ), twice
+    assert len(twice) == 1 and "app/crawl/content_cache.py:2 and app/crawl/content_cache.py:6" in twice[0], (
+        twice
+    )
     # Two blocks of the same length but different text are two notes.
     assert not detect(f"x = 1\n{repeated}y = 2\n{other}"), "equal-length distinct blocks are not clones"
     # Two lines is a section rule, not a WHY to centralize.

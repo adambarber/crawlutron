@@ -170,8 +170,8 @@ def test_memory_cache_twin_detector_bites():
         fires={
             "class C:\n    async def aget(self, key):\n        with self._lock:\n"
             "            if key in self._memory_cache:\n"
-            "                return self._memory_cache[key][1]\n":
-            "aget() reads/writes _memory_cache directly",
+            "                return self._memory_cache["
+            "key][1]\n": "aget() reads/writes _memory_cache directly",
         },
         clean=("class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",),
     )

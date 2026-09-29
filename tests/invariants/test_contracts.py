@@ -33,6 +33,7 @@ from tests.chokepoint_walks import (
     nodes_of,
     offender,
     offender_at,
+    parent_map,
     relative_posix,
     resolved_call_name,
     string_literals,
@@ -267,7 +268,7 @@ def _settings_alias_declaration_constant(
 ) -> bool:
     if _relative_app_path(path) != "app/settings.py":
         return False
-    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
+    parents = parent_map(tree)
     current: ast.AST = node
     while id(current) in parents:
         current = parents[id(current)]
@@ -298,7 +299,7 @@ def _environment_reader_reference(
     node: ast.Constant,
     field_environments: dict[str, str],
 ) -> str | None:
-    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
+    parents = parent_map(tree)
     expression = parents.get(id(node))
     scope = parents.get(id(expression)) if expression is not None else None
     if (
@@ -535,7 +536,9 @@ def _live_documents() -> list[str]:
     return [name for name in _markdown_documents() if name not in _DOC_REFERENCE_EXCLUSIONS]
 
 
-def _broken_doc_reference_offenders() -> list[str]:
+def _broken_doc_reference_offenders(
+    root: pathlib.Path = REPO_ROOT, documents: list[str] | None = None
+) -> list[str]:
     """Every repo path a live document tells a reader to open must exist.
 
     The scope is the point. A record of what was true legitimately cites
@@ -549,15 +552,19 @@ def _broken_doc_reference_offenders() -> list[str]:
     bare `robots.txt` or `browser.py` in prose is a basename being discussed,
     not a path being pointed at; only a slash makes the span a claim about
     this tree's layout.
+
+    ``root`` and ``documents`` exist so the proof that this detector bites can
+    run on a copy of a real document instead of on the real one, which is a
+    race with every other test that reads the tree.
     """
     offenders: list[str] = []
-    for name in _live_documents():
-        document = REPO_ROOT / name
+    for name in _live_documents() if documents is None else documents:
+        document = root / name
         for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
             candidate = span.strip()
             if not _BACKTICKED_PATH.match(candidate):
                 continue
-            if not (REPO_ROOT / candidate.split(":")[0]).exists():
+            if not (root / candidate.split(":")[0]).exists():
                 offenders.append(f"{name} points at `{candidate}`, which does not exist")
     return offenders
 
@@ -566,15 +573,18 @@ def _compose_file() -> pathlib.Path:
     return REPO_ROOT / "docker-compose.yml"
 
 
-def _deployment_knobs() -> set[str] | None:
+def _deployment_knobs(manifest: pathlib.Path | None = None) -> set[str] | None:
     """Knobs the compose manifest sets, and the container runs with.
 
     Compose is how the service is actually deployed, so it is a declaration
     of intent from the same authority as ``.env.example`` -- but a later
     one, and the more consequential: ``.env.example`` describes a local
     checkout, while a key set here is what a real deployment runs with.
+
+    The manifest is a parameter so the proof that this detector bites can
+    mutate a copy rather than the repository's own deployment descriptor.
     """
-    manifest = _compose_file()
+    manifest = manifest if manifest is not None else _compose_file()
     if not manifest.exists():
         return None
     return {
@@ -601,17 +611,25 @@ def test_deployment_manifest_sets_no_dead_knob():
     assert not dead, f"compose sets knobs nothing reads: {', '.join(dead)}"
 
 
-def test_deployment_knob_detector_bites():
-    """Proved by mutating the manifest rather than by trusting the helper."""
+def test_deployment_knob_detector_bites(tmp_path):
+    """Proved by mutating a real manifest rather than by trusting the helper.
+
+    A copy, and the copy is the point rather than a compromise. The first
+    version injected the key into the repository's own ``docker-compose.yml``
+    and restored it in a ``finally``; under a parallel run the gate that reads
+    that file read it mid-injection and failed on a knob that existed only
+    because this test had written it. A gate proved by breaking the artifact
+    it protects is not evidence when the proof is the outage.
+    """
     manifest = _compose_file()
     if not manifest.exists():
         pytest.skip("no compose manifest in this tree")
-    original = manifest.read_text(encoding="utf-8")
-    try:
-        manifest.write_text(original + '\n  CRAWLUTRON_TYPO_PROBE: "1"\n', encoding="utf-8")
-        assert "CRAWLUTRON_TYPO_PROBE" in (_deployment_knobs() or set())
-    finally:
-        manifest.write_text(original, encoding="utf-8")
+    probe = tmp_path / manifest.name
+    probe.write_text(
+        manifest.read_text(encoding="utf-8") + '\n  CRAWLUTRON_TYPO_PROBE: "1"\n',
+        encoding="utf-8",
+    )
+    assert "CRAWLUTRON_TYPO_PROBE" in (_deployment_knobs(probe) or set())
     assert "CRAWLUTRON_TYPO_PROBE" not in (_deployment_knobs() or set())
 
 
@@ -632,25 +650,28 @@ def test_live_docs_point_at_paths_that_exist():
     assert not (failures := _broken_doc_reference_offenders()), "; ".join(failures)
 
 
-def test_live_doc_reference_detector_bites():
-    """The gate must be able to fail against the real documents, or it is
-    decoration rather than a check. Proved by mutating the document set, not
-    by feeding the helper a synthetic string."""
-    current = _broken_doc_reference_offenders()
-    assert current == [], current
+def test_live_doc_reference_detector_bites(tmp_path):
+    """The gate must be able to fail against a real document, or it is
+    decoration rather than a check. Proved by mutating a real document, not by
+    feeding the helper a synthetic string.
 
-    missing = REPO_ROOT / "README.md"
-    original = missing.read_text(encoding="utf-8")
-    try:
-        missing.write_text(
-            original + "\n`app/does_not_exist.py`\n", encoding="utf-8"
-        )
-        assert _broken_doc_reference_offenders() == [
-            "README.md points at `app/does_not_exist.py`, which does not exist"
-        ]
-    finally:
-        missing.write_text(original, encoding="utf-8")
+    On a copy, for the same reason the deployment detector bites on one: this
+    test used to inject the dead path into the repository's actual ``README.md``
+    and put it back afterwards, which races every other test that reads the
+    tree's documents. The text under test is still the real document -- only the
+    directory is not -- and that is also why the assertion is containment: a
+    bare copy has none of the paths the document cites, and each of those is a
+    true positive about the copy rather than a false one.
+    """
     assert _broken_doc_reference_offenders() == []
+
+    document = REPO_ROOT / "README.md"
+    (tmp_path / "README.md").write_text(
+        document.read_text(encoding="utf-8") + "\n`app/does_not_exist.py`\n",
+        encoding="utf-8",
+    )
+    offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
+    assert "README.md points at `app/does_not_exist.py`, which does not exist" in offenders
 
 
 def test_documented_knob_detector_bites():
@@ -661,9 +682,7 @@ def test_documented_knob_detector_bites():
     current = _documented_browser_knobs()
     assert current is not None
     assert "CRAWLUTRON_ALLOWED_HOSTS" in current
-    assert not _documented_knob_offenders(
-        {"CRAWLUTRON_ALLOWED_HOSTS"}, {"CRAWLUTRON_ALLOWED_HOSTS"}
-    )
+    assert not _documented_knob_offenders({"CRAWLUTRON_ALLOWED_HOSTS"}, {"CRAWLUTRON_ALLOWED_HOSTS"})
     assert _documented_knob_offenders({"CRAWLUTRON_LOG_FILE"}, set())
     assert _settings_alias_failures({"missing_field": "CRAWLUTRON_FAKE"}, {"real_field"})
     assert _settings_alias_failures(
@@ -934,14 +953,19 @@ def test_protocol_constant_production_detector_bites():
         "__all__ = ['HEADER_MISMATCH', 'META_CLIENT_INFO']\n"
     )
     elsewhere = APP_ROOT / "mcp" / "protocol.py"
-    silent = _unproduced_protocol_constants(owner, [(elsewhere,
-    ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))])
+    silent = _unproduced_protocol_constants(
+        owner, [(elsewhere, ast.parse("raise ProtocolError(HEADER_MISMATCH)\n"))]
+    )
     assert len(silent) == 1, silent
     assert "constants.py:2 META_CLIENT_INFO is declared but nothing in app/ reads it" in silent[0], silent
     both = _unproduced_protocol_constants(
         owner,
-        [(elsewhere,
-        ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"))],
+        [
+            (
+                elsewhere,
+                ast.parse("def check(meta):\n    return meta, HEADER_MISMATCH, err.META_CLIENT_INFO\n"),
+            )
+        ],
     )
     assert not both, both
     # The vacuous direction: a registry the sweep cannot read is not a clean bill.
@@ -954,9 +978,7 @@ def test_protocol_constant_production_detector_bites():
         (None, "the protocol registry module could not be read"),
     ):
         offenders = _unproduced_protocol_constants(source, [(elsewhere, ast.parse(""))])
-        assert len(offenders) == 1 and f"{_PROTOCOL_CONSTANTS_MODULE}: {reason}" in offenders[0], (
-            offenders
-        )
+        assert len(offenders) == 1 and f"{_PROTOCOL_CONSTANTS_MODULE}: {reason}" in offenders[0], offenders
 
 
 _CYCLE_GUARD_CALL = "_entered"

@@ -59,9 +59,7 @@ def assert_trees_clean(
     hand could not use this at all and copied the walk instead -- four had.
     """
     offenders = [
-        hit
-        for path, tree in (app_trees() if trees is None else trees)
-        for hit in detector(tree, path)
+        hit for path, tree in (app_trees() if trees is None else trees) for hit in detector(tree, path)
     ]
     assert not offenders, f"{message}: {'; '.join(offenders)}"
 
@@ -104,8 +102,9 @@ def _enclosing_calls(tree: ast.AST, target: str) -> list[tuple[ast.Call, str]]:
         (node, enclosing)
         for node, enclosing in _enclosing_nodes(
             tree,
-            lambda child: isinstance(child, ast.Call)
-            and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target,
+            lambda child: (
+                isinstance(child, ast.Call) and resolved_call_name(tree, child).rsplit(".", 1)[-1] == target
+            ),
         )
         if isinstance(node, ast.Call)
     ]

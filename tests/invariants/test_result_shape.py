@@ -350,9 +350,7 @@ def test_job_row_accumulator_detector_bites():
         path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
         fires={
             'def f(conn, job):\n    return conn.execute("UPDATE crawl_jobs SET visited = ?", '
-            '(job.visited,))\n': (
-                "visited"
-            )
+            "(job.visited,))\n": ("visited")
         },
         clean=(
             "def f(conn, job):\n"

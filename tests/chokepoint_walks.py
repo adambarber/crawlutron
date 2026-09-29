@@ -107,6 +107,38 @@ def nodes_of(root: ast.AST) -> tuple[ast.AST, ...]:
     return cached
 
 
+# ``id(node) -> parent`` for every node of one root, keyed by the root's
+# identity on the same weak terms as _NODES_BY_ROOT. A detector asking "what
+# encloses this node?" was rebuilding that whole map for every candidate it
+# examined rather than once per tree, which made each such check quadratic in
+# the size of the module. The cost was measurable: the env-knob detector runs
+# this per string constant, and one tests/invariants/ run spent 82M of its 115M
+# node visits inside this one dict comprehension.
+_PARENTS_BY_ROOT: weakref.WeakKeyDictionary[ast.AST, dict[int, ast.AST]] = weakref.WeakKeyDictionary()
+
+
+def parent_map(root: ast.AST) -> dict[int, ast.AST]:
+    """``id(node) -> parent`` for every node in `root`, built once per root.
+
+    :func:`nodes_of` one level down, for the same reason: it is a pure function
+    of a tree this module already snapshots, and the detectors were recomputing
+    it per candidate node instead of per tree.
+
+    Keyed by ``id`` because that is the question being asked -- "what is this
+    exact node's parent" -- and :class:`ast.AST` hashes by identity anyway, so
+    no structural key would be both cheaper and clearer. The map holds ids
+    rather than nodes, which is safe precisely because the weak key does the
+    holding: while the entry lives, the root is alive, and the root reaches
+    every one of its descendants, so no id in the map can be recycled onto an
+    unrelated node.
+    """
+    cached = _PARENTS_BY_ROOT.get(root)
+    if cached is None:
+        cached = {id(child): parent for parent in nodes_of(root) for child in ast.iter_child_nodes(parent)}
+        _PARENTS_BY_ROOT[root] = cached
+    return cached
+
+
 def lineno(node: ast.AST) -> int:
     """The source line of `node`.
 
@@ -523,6 +555,38 @@ def local_nodes(node: ast.AST) -> Iterator[ast.AST]:
         yield from local_nodes(child)
 
 
+@cache
+def local_subtree(node: ast.AST) -> tuple[ast.AST, ...]:
+    """``local_nodes(node)`` as a cached tuple -- one walk per node, walked once.
+
+    ``local_nodes`` is a generator, so a detector asking a question about a
+    node's local subtree walked it again from the top. The property registry
+    asks four questions per node, and asks them of every node of every module,
+    so one node was traversed five or six times per pass: sixty-odd million
+    node visits for a single test run. Caching the walk makes each of those a
+    tuple read.
+
+    Keyed on the node alone, because the walk reads only that node's own
+    subtree and AST nodes are compared by identity. Same reasoning, and the
+    same memory profile, as the cached ``nodes_of`` above.
+    """
+    return tuple(local_nodes(node))
+
+
+@cache
+def local_calls(node: ast.AST) -> tuple[ast.Call, ...]:
+    """Every call in ``node``'s local subtree, walked once per node.
+
+    ``local_call_leaf_names`` re-walked the subtree on every call, and it is in
+    turn the body of ``calls_naming_method`` and ``has_method_call``, so one
+    question about a node cost a fresh walk of it. Only the tree-independent
+    half is cached -- which nodes are calls -- because the name a call resolves
+    to is a property of the tree it is read in, and a node reached through two
+    modules is read in each.
+    """
+    return tuple(child for child in local_subtree(node) if isinstance(child, ast.Call))
+
+
 def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, ast.Call]]:
     """Yield ``(lowercased_leaf_name, call)`` for every call inside ``node``.
 
@@ -531,9 +595,8 @@ def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, a
     imported it. Spelled out it is four lines, and it was written out separately
     by every detector that asked.
     """
-    for child in local_nodes(node):
-        if isinstance(child, ast.Call):
-            yield resolved_call_name(tree, child).rsplit(".", 1)[-1].lower(), child
+    for call in local_calls(node):
+        yield resolved_call_name(tree, call).rsplit(".", 1)[-1].lower(), call
 
 
 def getattr_literal_name(call: ast.Call) -> str | None:

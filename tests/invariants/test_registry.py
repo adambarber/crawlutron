@@ -25,6 +25,7 @@ from tests.chokepoint_walks import (
     lineno,
     local_call_leaf_names,
     local_nodes,
+    local_subtree,
     nodes_of,
     offender,
     offender_at,
@@ -330,8 +331,8 @@ def test_uncollectible_test_detector_bites():
         # A method of a class pytest will not collect from.
         "class Cases:\n    def test_inner(self):\n        pass\n": "not a module-level test",
         # Two levels deep inside a class, still invisible.
-        "class TestOuter:\n    def helper(self):\n        def test_inner(self):\n            pass\n":
-        "nested inside helper()",
+        "class TestOuter:\n    def helper(self):\n"
+        "        def test_inner(self):\n            pass\n": "nested inside helper()",
     }
     assert_fires_once(_uncollectible_tests, fires, path)
 
@@ -956,7 +957,7 @@ def _bool_env_offenders(tree: ast.AST, path: pathlib.Path, prop: Property) -> li
 
 
 def _source_and_literals(node: ast.AST) -> tuple[str, str]:
-    nodes = list(local_nodes(node))
+    nodes = local_subtree(node)
     source = (
         " ".join(ast.unparse(child) for child in nodes[1:]).lower()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -1009,7 +1010,7 @@ def _string_constructor(tree: ast.AST, node: ast.AST) -> bool:
 def _url_literal_capability(tree: ast.AST, node: ast.AST) -> bool:
     if not isinstance(node, (ast.BinOp, ast.JoinedStr, ast.Call)):
         return False
-    nodes = list(local_nodes(node))
+    nodes = local_subtree(node)
     if not any(isinstance(child, (ast.BinOp, ast.JoinedStr)) for child in nodes) and not _string_constructor(
         tree, node
     ):
@@ -1023,7 +1024,7 @@ def _url_literal_capability(tree: ast.AST, node: ast.AST) -> bool:
 
 
 def _url_constructor(tree: ast.AST, node: ast.AST) -> bool:
-    nodes = list(local_nodes(node))
+    nodes = local_subtree(node)
     return has_method_call(tree, node, _URL_CONSTRUCTOR_METHODS) or any(
         _url_literal_capability(tree, child) for child in nodes
     )
@@ -1058,7 +1059,7 @@ def _parser_definition(tree: ast.AST, path: pathlib.Path, node: ast.AST) -> bool
         return True
     if "robot" in name and any(token in name for token in ("parse", "rule", "directive")):
         return True
-    nodes = list(local_nodes(node))
+    nodes = local_subtree(node)
     line_scan = has_method_call(tree, node, _ROBOTS_LINE_SPLIT_METHODS)
     collection_return = any(
         isinstance(child, ast.Return)
@@ -1704,6 +1705,7 @@ def _meta_key_reason_offenders(tree: ast.AST, path: Path, *, owner: str = _META_
     the shape would wave it through. The rule is that the sentence is authored
     once, in the function both keys check through.
     """
+
     def is_reason(node: ast.AST) -> bool:
         return (
             isinstance(node, ast.Constant)

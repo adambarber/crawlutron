@@ -165,8 +165,8 @@ def test_readiness_counter_detector_bites():
     """A hand-rolled admit, and a hand-rolled release, both fire; the gate stays clean."""
     fires = {
         "def f():\n    readiness_state.begin_request()\n": "begin_request",
-        "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n":
-        "end_request",
+        "def f():\n    try:\n        pass\n    finally:\n"
+        "        readiness_state.end_request()\n": "end_request",
         "def f():\n    return READINESS_STATE.end_request()\n": "end_request",
     }
     assert_fires_once(

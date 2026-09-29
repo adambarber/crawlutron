@@ -20,9 +20,11 @@ from tests.chokepoint_walks import (
     f_strings,
     functions,
     local_nodes,
+    local_subtree,
     nodes_of,
     offender,
     offender_at,
+    parent_map,
     resolved_call_name,
     returns,
     try_blocks,
@@ -647,7 +649,7 @@ def _host_policy_value(node: ast.AST | None, policy_names: set[str]) -> bool:
 
 
 def _host_policy_scope_names(tree: ast.AST, function: ast.AST) -> set[str]:
-    parents = {id(child): parent for parent in nodes_of(tree) for child in ast.iter_child_nodes(parent)}
+    parents = parent_map(tree)
     names: set[str] = set()
     current: ast.AST | None = function
     while current is not None:
@@ -802,7 +804,7 @@ def _url_return_shapes(function: ast.AST, tree: ast.AST) -> bool:
     url_names = {argument.arg for argument in arguments if _url_parameter_name(argument.arg)}
     policy_names = _host_policy_scope_names(tree, function)
     validated_names: set[str] = set()
-    nodes = list(local_nodes(function))
+    nodes = local_subtree(function)
     changed = True
     while changed:
         changed = False
