@@ -1,6 +1,6 @@
-# Browser Crawler Agent Contract
+# Crawlutron Agent Contract
 
-The Browser Crawler Service is a local, policy-driven execution service for
+The Crawlutron service is a local, policy-driven execution service for
 public web crawling. Agents should treat its machine-readable discovery
 surfaces as the source of truth and use this reference as integration
 guidance.

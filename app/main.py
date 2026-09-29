@@ -238,7 +238,7 @@ if FastAPI is not None:
         READINESS_STATE.set_utilization_sampler(None)
 
     app = FastAPI(
-        title="Browser Crawler Execution Service",
+        title="Crawlutron Execution Service",
         lifespan=_lifespan,
         description=(
             "Localhost-only policy-driven crawler execution service for municipal script tools. "

@@ -498,6 +498,84 @@ def test_documented_browser_knobs_have_consumers():
     assert not failures, "; ".join(failures)
 
 
+_LIVE_NAVIGATIONAL_DOCS = (
+    "README.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "docs/property-inventory.md",
+    "docs/module-graph.md",
+    "docs/references/crawlutron-agent-contract.md",
+    "docs/references/crawlutron-telemetry.md",
+    "docs/references/crawlutron-manual-test-plan.md",
+)
+
+_BACKTICKED_PATH = re.compile(
+    r"^[\w][\w./-]*/[\w./-]*\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::\d+)?$"
+)
+
+
+def _broken_doc_reference_offenders() -> list[str]:
+    """Every repo path a live document tells a reader to open must exist.
+
+    The scope is the point, and it is deliberately narrow. A record of what
+    was true legitimately cites files that have since been deleted -- the
+    CHANGELOG names modules that were refactored away, an archived plan
+    describes a topology that no longer exists, and a dated review quotes the
+    tree it reviewed. Rewriting those citations would falsify the record, so
+    they are out of scope by design rather than by omission.
+
+    What is in scope is the set of documents a reader arrives with intent to
+    follow. A dead path there is not a historical artifact; it is a
+    navigational dead end, and it has no other signal: prose still reads
+    correctly, the build is green, and the reader only discovers it after
+    deciding to trust the document.
+
+    The span must contain a separator, and that is not a stylistic filter. A
+    bare `robots.txt` or `browser.py` in prose is a basename being discussed,
+    not a path being pointed at; only a slash makes the span a claim about
+    this tree's layout.
+    """
+    offenders: list[str] = []
+    for name in _LIVE_NAVIGATIONAL_DOCS:
+        document = REPO_ROOT / name
+        if not document.exists():
+            offenders.append(f"{name} is listed as live but does not exist")
+            continue
+        for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
+            candidate = span.strip()
+            if not _BACKTICKED_PATH.match(candidate):
+                continue
+            if not (REPO_ROOT / candidate.split(":")[0]).exists():
+                offenders.append(f"{name} points at `{candidate}`, which does not exist")
+    return offenders
+
+
+def test_live_docs_point_at_paths_that_exist():
+    assert not (failures := _broken_doc_reference_offenders()), "; ".join(failures)
+
+
+def test_live_doc_reference_detector_bites():
+    """The gate must be able to fail against the real documents, or it is
+    decoration rather than a check. Proved by mutating the document set, not
+    by feeding the helper a synthetic string."""
+    current = _broken_doc_reference_offenders()
+    assert current == [], current
+
+    missing = REPO_ROOT / "README.md"
+    original = missing.read_text(encoding="utf-8")
+    try:
+        missing.write_text(
+            original + "\n`app/does_not_exist.py`\n", encoding="utf-8"
+        )
+        assert _broken_doc_reference_offenders() == [
+            "README.md points at `app/does_not_exist.py`, which does not exist"
+        ]
+    finally:
+        missing.write_text(original, encoding="utf-8")
+    assert _broken_doc_reference_offenders() == []
+
+
 def test_documented_knob_detector_bites():
     assert _documented_knob_offenders({"CRAWLUTRON_FAKE"}, set()) == [
         "CRAWLUTRON_FAKE has no production consumer"

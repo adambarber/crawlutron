@@ -1,1 +1,1 @@
-"""Browser crawler service package."""
+"""Crawlutron service package."""

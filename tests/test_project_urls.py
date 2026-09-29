@@ -64,6 +64,33 @@ def test_user_agent_is_built_from_the_same_identity() -> None:
     assert DEFAULT_USER_AGENT == f"{SERVICE_ID}/{SERVICE_VERSION} (+{CANONICAL_REMOTE})"
 
 
+def test_openapi_title_is_the_brand() -> None:
+    """The `/docs` title is the brand a user actually sees.
+
+    Pinned positively because the rename missed it: the sweep matched hyphen
+    and underscore spellings, and this one is spaced and title-cased, so it
+    shipped an OpenAPI document still calling the service something else. A
+    positive pin catches the next spelling without anyone having to remember
+    to widen a ban list.
+    """
+    from app.main import app as service
+
+    assert service.title == "Crawlutron Execution Service"
+
+
+def test_agent_contract_is_reachable_under_the_documented_path() -> None:
+    """README and AGENTS.md both send agents here, in backticks.
+
+    A backticked path is a navigational instruction, and when the document
+    and the tree disagree the reader finds out at the worst moment. This
+    pins the path they cite, which is what makes the reference chain
+    `test_live_docs_point_at_paths_that_exist` walks from the top.
+    """
+    contract = SERVICE_ROOT / "docs" / "references" / "crawlutron-agent-contract.md"
+    assert contract.exists()
+    assert contract.read_text(encoding="utf-8").startswith("# Crawlutron Agent Contract")
+
+
 def test_contributing_clones_the_canonical_remote() -> None:
     """A contributor who follows the setup block verbatim should land in the
     repository the package metadata points at. It is the only copy a human

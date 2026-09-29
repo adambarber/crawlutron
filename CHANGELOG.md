@@ -158,6 +158,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unlinks.
 
 ### Fixed
+- **The agent contract doc was unreachable from every doc that cites it.**
+  `README.md` and `AGENTS.md` both send agents to
+  `docs/references/crawlutron-agent-contract.md`; the file on disk was
+  `browser-crawler-agent-contract.md`. The rename swept link targets and
+  missed the filename, so the reference chain a new integration is expected
+  to follow dead-ended at the first hop. Renamed via `git mv` so history
+  follows the file, and the document's own title and opening line now carry
+  the brand. `docs/review-and-refactoring-plan.md` keeps the old name on
+  purpose: it is stamped ARCHIVED and describes a topology that no longer
+  exists, so its references are history, not navigation.
+- **The OpenAPI document still called the service something else.** The
+  rename matched hyphen and underscore spellings; the `/docs` title is
+  spaced and title-cased, so it shipped as "Browser Crawler Execution
+  Service" while the discovery payload beside it announced `crawlutron`. Two
+  surfaces a client reads, disagreeing, in the same response tree. Now pinned
+  positively in `tests/test_project_urls.py` rather than added to a ban list,
+  because a pin fails on the next spelling and a ban list only fails on the
+  one someone remembered to write down.
+- **README documented two test suites that no longer exist.**
+  `tests/test_adversarial_fixes.py` and
+  `tests/test_adversarial_round3_fixes.py` were consolidated into the themed
+  modules under `tests/invariants/`, but the adversarial-coverage section
+  still told readers to open them, listing ten attack classes against
+  filenames that had been gone for some time. Repointed at the suites that
+  actually carry each class now, every one verified to contain the case
+  before it was cited. A coverage claim is worth exactly as much as its
+  accuracy: pointing a security reader at a missing file teaches them the
+  coverage is not where they were told, which is worse than saying nothing.
 - **robots.txt agent matching is case-insensitive for the query side too**
   (`app/crawl/robots_parse.py`): `robots_groups` lower-cased the file's
   `User-agent` lines but `select_robots_values` compared that lower-cased
@@ -197,6 +225,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   optionality is exactly why the equivalence has to be decided in one place.
 
 ### Added
+- **Live-document reference gate** (`tests/invariants/test_contracts.py`):
+  `test_live_docs_point_at_paths_that_exist` walks the backticked repo paths
+  in the nine documents a reader arrives intending to follow, and fails when
+  one does not exist. It is deliberately scoped, because the alternative
+  reading is wrong: a CHANGELOG entry naming a since-deleted module, an
+  ARCHIVED plan describing a topology that no longer exists, and a dated
+  review quoting the tree it reviewed are all accurate, and "fixing" them
+  would falsify the record. Only navigational claims are checked. Spans must
+  contain a separator, since a bare `robots.txt` in prose is a basename being
+  discussed rather than a path being pointed at. It found the contract-doc
+  break above. Note the convention it had to match: this tree cites paths in
+  backticks, not markdown links, so a conventional link checker finds four
+  links in fourteen documents and misses all of it.
 - **Reverse configuration-drift gate** (`tests/invariants/test_contracts.py`):
   `test_documented_browser_knobs_have_consumers` walked documented ->
   consumed, so a knob published in `.env.example` that nothing reads fails

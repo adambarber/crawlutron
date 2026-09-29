@@ -60,11 +60,24 @@ The test suite was grown alongside the adversarial reviews; the following
 suites cover the specific attack classes the security posture is designed
 to defeat:
 
-- **`tests/test_adversarial_fixes.py`** + **`tests/test_adversarial_round3_fixes.py`** —
-  sync `httpx.AsyncClient.close()`, `Connection: close` on truncated
-  requests, per-chunk trailers, body-size drain, `_ResultSpill` FD leak,
-  DNS-cache lock, robots-cache lock, per-tenant cookie namespace,
-  `parse_bool_env` parsing edge cases, webhook TOCTOU consolidation.
+- **Truncation and drain** (`tests/test_body_size_middleware.py`,
+  `tests/test_body_cap_state_machine.py`) — chunked handling,
+  `Connection: close` on a truncated request, per-chunk trailers and headers,
+  body-size drain after truncation, and the rule that no further bytes are
+  admitted once a chunk trips the cap.
+- **File-descriptor ownership** (`tests/test_spill_stream.py`,
+  `tests/invariants/test_ownership.py`) — `_ResultSpill` deletes the file it
+  owns and leaves the one it borrowed.
+- **Cache locking** (`tests/crawl/test_dns_cache.py`,
+  `tests/crawl/test_robots_policy_consolidation.py`) — concurrent access to
+  the DNS and robots caches, including that robots reads go through the one
+  chokepoint.
+- **Cookie namespacing** (`tests/crawl/test_cookie_namespace.py`) — per-tenant
+  cookies cannot cross a tenant boundary.
+- **Env parsing** (`tests/test_env_parsing.py`) — `parse_bool_env` edge cases,
+  including that a typo cannot silently open a policy.
+- **Webhook TOCTOU** (`tests/api/test_webhook_delivery.py`) — one resolved
+  target per delivery, consolidated at the chokepoint.
 - **Decompression bomb tests** — a real gzip bomb (`~1 KB` compressed →
   `1 MB` expanded), plus deflate and brotli bomb cases, verify the decompression
   guard rejects over-cap output before OOM.
