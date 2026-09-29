@@ -10,7 +10,6 @@ from dataclasses import asdict
 
 import httpx
 import pytest
-from _chain_policies import chain_policy
 
 from app.constants import (
     BROWSER_HEADED_WARMED,
@@ -22,6 +21,7 @@ from app.crawl.strategies.browser_pool import BrowserPoolExhaustedError
 from app.models import EngineCrawlResult
 from tests._browser_doubles import _fake_browser
 from tests._fetcher_factories import failing_fetcher, raise_fetcher, run_chain
+from tests.crawl._chain_policies import chain_policy
 
 # ---------------------------------------------------------------------------
 # Classification: the taxonomy is the single source of "what went wrong"

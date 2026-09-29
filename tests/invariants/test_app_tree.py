@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from collections.abc import Iterator
 
 from tests.chokepoint_walks import (
     APP_ROOT,
@@ -16,8 +17,10 @@ from tests.chokepoint_walks import (
     app_python_files,
     app_trees,
     call_nodes,
+    from_imports,
     nodes_of,
     offender_at,
+    plain_imports,
     resolved_expr_name,
     trees_under,
 )
@@ -412,6 +415,107 @@ def _app_reads(monkeypatch) -> list[pathlib.Path]:
 
     monkeypatch.setattr(pathlib.Path, "read_text", counting)
     return seen
+
+
+def _test_tree_module_names() -> frozenset[str]:
+    """The bare module names that name a file in the test tree.
+
+    Cached because the sweep asks once per import statement and the set does not
+    change within a run -- the same reasoning as the shared ``app_trees``
+    snapshot, and it is what keeps this affordable at every call site.
+    """
+    return frozenset(candidate.stem for candidate in TESTS_DIR.rglob("*.py"))
+
+
+def _imported_modules(tree: ast.AST) -> Iterator[tuple[ast.AST, str]]:
+    """Every module name a tree imports, with the node that imported it.
+
+    ``from a.b import c`` contributes ``a.b``; ``import a.b`` contributes
+    ``a.b`` as written. One traversal over both spellings so the caller compares
+    one thing rather than repeating its verdict per import form.
+    """
+    for node in from_imports(tree):
+        if node.module:
+            yield node, node.module
+    for node in plain_imports(tree):
+        for alias in node.names:
+            yield node, alias.name
+
+
+def _bare_sibling_import_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
+    """A test module importing a sibling helper by its bare name.
+
+    ``from _chain_policies import chain_policy`` resolves only because pytest
+    puts each test file's own directory on ``sys.path``. That is the conftest
+    path hack in a form E402 and mypy cannot see: the module is unresolvable to
+    the type checker, and the import breaks the moment the file moves up a
+    directory or the rootdir changes. Two test modules had it, both reading
+    exactly like the package imports around them.
+
+    Membership is decided by asking whether the name is a file in the test tree,
+    not by listing the standard library -- so ``httpx`` and ``pytest`` are left
+    alone by construction rather than by an allowlist that would need a third
+    dependency added to it. The match is on the whole name because no module in
+    the test tree is dotted, so a dotted import cannot be one of these.
+    """
+    local = _test_tree_module_names()
+    return [
+        offender_at(
+            path,
+            node,
+            f"imports the test helper '{module}' by bare name; use its package path",
+        )
+        for node, module in _imported_modules(tree)
+        if module in local
+    ]
+
+
+def test_tests_import_their_helpers_by_package_path():
+    """No test module reaches a sibling helper by bare name.
+
+    Tree-wide over ``tests/``, so a helper added tomorrow is covered by existing
+    the same way, and read from the tree rather than a file list.
+    """
+    offenders: list[str] = []
+    for path, tree in trees_under(TESTS_DIR):
+        offenders.extend(_bare_sibling_import_offenders(tree, path))
+    assert not offenders, (
+        "import the helper through its package path (tests.<pkg>.<module>): a bare sibling name "
+        "resolves only because pytest put this file's directory on sys.path, which is invisible to "
+        "both E402 and the type checker -- " + "; ".join(offenders)
+    )
+
+
+def test_bare_sibling_import_detector_bites():
+    """Bites: the shipped spellings, and the neighbors that must stay quiet.
+
+    The first is the real thing -- the exact ``from _chain_policies import
+    chain_policy`` that two test modules carried. The rest pin both directions:
+    the package form, a stdlib import, and a third-party import all name a
+    module that is not a test file and must be left alone, so the rule cannot
+    degenerate into "no unqualified imports".
+    """
+    path = REPO_ROOT / "tests" / "_synthetic.py"
+    planted = ast.parse(
+        "from _chain_policies import chain_policy\n"
+        "import _jscpd_gate as gate\n"
+        "from _policy_factories import _policy\n"
+    )
+    found = _bare_sibling_import_offenders(planted, path)
+    assert len(found) == 3, f"one offender per import statement, got {found}"
+
+    quiet = ast.parse(
+        "from __future__ import annotations\n"
+        "from pathlib import Path\n"
+        "import httpx\n"
+        "import pytest\n"
+        "from tests._policy_factories import _policy\n"
+        "from tests.crawl._chain_policies import chain_policy\n"
+        "from app.crawl.policy import read_policy\n"
+    )
+    assert not _bare_sibling_import_offenders(quiet, path), (
+        "package, stdlib and third-party forms are not offenders"
+    )
 
 
 def test_every_detector_sees_the_same_app_trees():
