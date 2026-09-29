@@ -3,6 +3,12 @@
 # and the gate agree, not that a human approved the duplication — so this file
 # is covered by an owner review on every change. GitHub rulesets return 403 on
 # this account; the trust boundary for the baseline is this CODEOWNERS entry
-# plus the required CI check. Adjust the owner glob when this service is its own
-# repository.
-docker/browser-crawler/jscpd-expectations.json @dev-stack
+# plus the required CI check.
+#
+# Root-relative, because the service is its own repository now. This path used
+# to carry a `docker/browser-crawler/` prefix naming a directory that does not
+# exist here — the same prefix .github/workflows/ci.yml warns cannot survive a
+# file copy — so it named nothing and matched no file. The owner moved off
+# `@dev-stack` for the same reason: it was a placeholder from the pre-extraction
+# layout rather than anyone who reviews anything.
+jscpd-expectations.json @adambarber

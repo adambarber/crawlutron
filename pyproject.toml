@@ -102,12 +102,13 @@ dev = [
 ]
 
 [project.urls]
-# TODO: replace the placeholder org before publishing; these URLs are not yet
-# a real remote.
-Homepage = "https://github.com/browser-crawler/browser-crawler"
-Issues = "https://github.com/browser-crawler/browser-crawler/issues"
-Changelog = "https://github.com/browser-crawler/browser-crawler/blob/main/CHANGELOG.md"
-Security = "https://github.com/browser-crawler/browser-crawler/blob/main/SECURITY.md"
+# The canonical remote, and the same value as app.constants.REPOSITORY_URL --
+# which is the copy that goes out on the wire in the user-agent. pyproject
+# cannot import it, so tests/test_project_urls.py fails if these drift apart.
+Homepage = "https://github.com/adambarber/crawlutron"
+Issues = "https://github.com/adambarber/crawlutron/issues"
+Changelog = "https://github.com/adambarber/crawlutron/blob/main/CHANGELOG.md"
+Security = "https://github.com/adambarber/crawlutron/blob/main/SECURITY.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

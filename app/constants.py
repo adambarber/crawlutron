@@ -33,15 +33,19 @@ ROUTER_MODULE_DOC: Final = (
     "endpoint module so the router stays trivial and the handler is testable\n"
     "without FastAPI machinery."
 )
+# The project's canonical remote. It goes out on the wire in the user-agent
+# below, so a placeholder here is not a documentation wart: it tells every host
+# the crawler visits that a repository which does not exist is where to find
+# the code. pyproject.toml needs the same value and cannot import this, so
+# tests/test_project_urls.py asserts the two agree rather than trusting a copy
+# to stay in step.
+REPOSITORY_URL: Final = "https://github.com/adambarber/crawlutron"
 # Public-facing identity strings. Kept here so the same UA appears in both the
 # declared-crawler header and the synthetic ``User-Agent:`` line we attach
 # to outbound requests, and so the package version is sourced from a single
 # place instead of being duplicated across files.
-# Overridable via BROWSER_CRAWLER_USER_AGENT; update before publishing
-# to the final GitHub org (replace the placeholder URL below).
-DEFAULT_USER_AGENT: str = (
-    f"{SERVICE_ID}/{SERVICE_VERSION} (+https://github.com/browser-crawler/browser-crawler)"
-)
+# Overridable via BROWSER_CRAWLER_USER_AGENT.
+DEFAULT_USER_AGENT: str = f"{SERVICE_ID}/{SERVICE_VERSION} (+{REPOSITORY_URL})"
 USER_AGENT_TOKEN: str = SERVICE_ID
 # TLS-fingerprint target for the HTTP_CFFI_IMPERSONATE strategy (L2): the
 # fetcher and the agent-hints copy both reference this, so they cannot drift.
