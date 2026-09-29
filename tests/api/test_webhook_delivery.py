@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.api.async_crawl_runner import run_async_crawl
+from app.crawl.job_store import JobStatus
 from app.crawl.result_store import CrawlResultStore
 from app.validation import HostPolicy
 from tests._assertions import block_private_targets, host_resolves_to
@@ -80,6 +81,79 @@ class TestAsyncCrawlFailureWebhookDelivery:
         assert payload["request_id"] == request_id, payload
         assert payload["success"] is False, payload
         assert isinstance(payload["results"], list), payload
+
+
+class TestAsyncCrawlTerminalCasControlsWhatIsPublished:
+    """What the runner publishes is decided by whether its terminal write won.
+
+    ``pause_job`` and ``recover_orphaned_running_jobs`` both compare-and-set
+    from ``RUNNING``, and so does the runner's own ``COMPLETED`` write. The
+    runner used to discard the result of that write and publish regardless, so
+    the two cases below failed in opposite directions: a paused crawl answered
+    200 and fired a success webhook, and a crawl rewound to ``PENDING`` was left
+    unreachable, because ``PENDING`` is never picked up again.
+    """
+
+    REQUEST_ID = "crawl_terminal_cas"
+
+    async def _displaced_crawl(self, job_store, tmp_path, displaced_to):
+        """Run a crawl whose job is moved off ``RUNNING`` while the crawl runs.
+
+        The displacement runs *inside* ``execute_crawl`` rather than before the
+        call, because the window the runner has to survive is exactly the one
+        between claiming ``RUNNING`` and writing the terminal status. Moving the
+        status first would lose the runner's claim and return before reaching
+        that window, which tests the claim rather than the terminal write.
+        """
+        request_id = self.REQUEST_ID
+        job_store.create_single_shot(request_id, "http://example.com/", {"url": "http://example.com/"})
+        result_store = CrawlResultStore(tmp_path / "results.db")
+
+        async def execute(*args, **kwargs):
+            await job_store.aset_status(request_id, displaced_to, expected=JobStatus.RUNNING)
+            return {
+                "results": [],
+                "request_id": request_id,
+                "submitted_count": 0,
+                "policy_schema_version": "",
+            }
+
+        with patch("app.api.async_crawl_runner.execute_crawl", new=execute):
+            with patch("app.api.webhooks.post_webhook", new_callable=AsyncMock) as post_webhook:
+                await run_async_crawl(
+                    request_id,
+                    {"url": "http://example.com/"},
+                    "http://webhook.example.com/cb",
+                    MagicMock(),
+                    job_store,
+                    result_store,
+                    asyncio.Event(),
+                )
+        return result_store, post_webhook
+
+    async def test_a_paused_crawl_publishes_nothing_and_fires_no_webhook(self, job_store, tmp_path):
+        result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PAUSED)
+        assert result_store.get(self.REQUEST_ID) is None, (
+            "a paused crawl published results it will never serve"
+        )
+        assert post_webhook.await_count == 0, (
+            f"post_webhook awaited {post_webhook.await_count} times; a paused "
+            "crawl announced a completion that did not happen"
+        )
+
+    async def test_a_crawl_rewound_to_pending_is_published_so_the_client_is_not_stranded(
+        self, job_store, tmp_path
+    ):
+        result_store, post_webhook = await self._displaced_crawl(job_store, tmp_path, JobStatus.PENDING)
+        # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on startup
+        # on the assumption that nothing is in flight. When a second app
+        # instance shares the store that assumption is false, and a job left at
+        # PENDING is never picked up again -- so the client polls forever.
+        assert result_store.get(self.REQUEST_ID) is not None, (
+            "the terminal write lost to PENDING and the results were dropped, so this job can never complete"
+        )
+        assert job_store.load(self.REQUEST_ID).status == JobStatus.COMPLETED
+        assert post_webhook.await_count == 1, post_webhook.await_count
 
 
 class TestWebhookValidationRunsOffLoop:
