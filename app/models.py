@@ -39,7 +39,7 @@ Classification = Literal[
     "url_budget_exceeded",
     # Fetch-failure codes the HTTP strategy's error classifier emits; they are
     # CrawlClassification members (see app.api_models) so they survive the
-    # strict enum field at response shaping (H3).
+    # strict enum field at response shaping.
     "payload_too_large",
     "too_many_redirects",
     "http_error",
@@ -125,6 +125,12 @@ def as_classification(value: str, *, default: Classification = "unknown_error") 
 # and a config one. They are not page outcomes, so forcing them into
 # Classification would distort that taxonomy.
 PIPELINE_ONLY_CRAWL_ERRORS = Literal[
+    # Deliberately not spelled like its ``robots_disallowed`` Classification
+    # member: this is the stable ERROR code, which may differ from the
+    # classification of the same event, and the taxonomy invariant asserts the
+    # two sets stay disjoint. ``request_pipeline._robots_disallowed`` sets the
+    # pair (``classification="robots_disallowed"``,
+    # ``error="robots_txt_disallowed"``); the two strings are not interchangeable.
     "robots_txt_disallowed",
     "browser_worker_unavailable",
     "unsupported_strategy",
@@ -353,7 +359,7 @@ class EngineCrawlResult(_LiteralChecked):
     # conditionally on later requests (freshness monitoring).
     validators: dict[str, str] = field(default_factory=dict)
     # Page metadata (title/og/twitter/JSON-LD) computed once from the engine's
-    # shared discovery tree (H2). None = never computed here (no tree existed);
+    # shared discovery tree. None = never computed here (no tree existed);
     # shaping then reparses once. A dict is plain JSON data -- persisted in the
     # spill, read by response shaping, and NEVER part of the wire response
     # (build_unified_result maps it into the existing PageMetadata fields).
@@ -402,7 +408,7 @@ CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # Four positional parameters: (url, headers, timeout_seconds, max_content_length).
 # The concrete fetcher accepts the content-length cap and the retry wrapper passes
 # it positionally, so the alias must describe four parameters -- a caller typed
-# against it must be able to invoke the real fetcher it is handed (P2-A).
+# against it must be able to invoke the real fetcher it is handed.
 #
 # A Protocol rather than a ``Callable[[str, dict[str, str], int, int], Any]``
 # alias, for two reasons that are both load-bearing. The fourth parameter is
@@ -417,8 +423,7 @@ CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # contract -- and Python cannot derive one from the other, because a function
 # with a *required* keyword-only argument does not satisfy a Protocol that does
 # not require it. So the four lines were written twice and could only be kept in
-# step by a guard that compared each half against a third thing, which is how
-# jscpd found them.
+# step by a guard that compared each half against a third thing.
 #
 # The bound view is the right one to keep: it is the narrower declaration, and it
 # is the one a call site needs. The keywords a production fetcher adds on top of
