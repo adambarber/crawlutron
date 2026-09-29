@@ -21,7 +21,8 @@ from app.constants import (
 STRATEGY_DESCRIPTIONS = {
     CrawlStrategy.HTTP_DECLARED_CRAWLER: "Direct HTTP using a transparent crawler user agent and caller-approved headers.",  # noqa: E501
     CrawlStrategy.HTTP_CFFI_IMPERSONATE: f"TLS-fingerprint-impersonated HTTP via curl_cffi "
-    f"({CFFI_IMPERSONATE_TARGET}) with browser-like compatibility headers for WAF/Cloudflare bypass.",
+    f"({CFFI_IMPERSONATE_TARGET}) with browser-shaped headers, for sites that reject clients "
+    f"presenting a non-browser TLS fingerprint.",
     CrawlStrategy.BROWSER_HEADLESS: "Firefox rendering in headless mode using Camoufox for JavaScript-dependent pages.",  # noqa: E501
     CrawlStrategy.BROWSER_HEADED_WARMED: "Headed Firefox with configured warmup URLs for challenge-prone municipal systems.",  # noqa: E501
 }

@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **The tool no longer describes itself by naming the control it defeats.**
+  Three surfaces described the curl_cffi strategy as "browser-like headers for
+  WAF/Cloudflare bypass" (agent hints), "browser-like headers for WAF/Cloudflare
+  bypass" (the OpenAPI `strategies` field), and "evades naive fingerprinting"
+  (the README strategy table). Nothing in those strings says the service
+  *reports* a challenge instead of clearing one, which is the behavior a reader
+  needs to know. They now describe the mechanism and the condition it serves:
+  a browser-shaped TLS fingerprint, for sites that reject non-browser clients.
+- `/v1/capabilities` no longer advertises a `cloudflare_bypass` field, and
+  `credential_bypass` is now `credential_injection`. The field's own comment
+  said "do not advertise bypass" while the line below it advertised bypass. It
+  is removed rather than reworded because a Cloudflare interstitial *is* a
+  challenge, so the existing `captcha_solving: false` already states it;
+  keeping it meant carrying a second, redundant declaration with the offending
+  noun in it. `credential_injection` matches the verb the guidance prose, the
+  MCP tool descriptions and `AGENTS.md` already use. **Callers reading
+  `features.credential_bypass` must read `features.credential_injection`;
+  `features.cloudflare_bypass` is gone, and `features.captcha_solving` is the
+  statement that challenges are not solved.**
 - **BREAKING: every configuration knob is now `CRAWLUTRON_*`.** The service is
   `adambarber/crawlutron`, and the `BROWSER_CRAWLER_` prefix no longer names
   anything. This covers the `BROWSER_CRAWLER_BASE_IMAGE` build arg in the

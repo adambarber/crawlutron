@@ -392,8 +392,8 @@ class CrawlPolicy(BaseModel):
         "the service records every attempted strategy, and fallback stops at the first successful content "
         "result. Available fetch strategies: HTTP_DECLARED_CRAWLER (transparent direct HTTP with the "
         "service's declared crawler identity), HTTP_CFFI_IMPERSONATE (TLS-fingerprint-impersonated HTTP via "
-        "curl_cffi with browser-like headers for WAF/Cloudflare bypass), BROWSER_HEADLESS (headless Firefox "
-        "rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
+        "curl_cffi with browser-shaped headers, for sites that reject non-browser clients), BROWSER_HEADLESS "
+        "(headless Firefox rendering via Camoufox), BROWSER_HEADED_WARMED (headed Firefox with warmup URLs).",
     )
     extraction: Annotated[
         CrawlExtractionMethod,

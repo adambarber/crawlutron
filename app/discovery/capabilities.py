@@ -83,10 +83,11 @@ def capabilities_payload(settings: CrawlerSettings) -> dict[str, Any]:
             "captcha_solving": False,
             "proxy_rotation": False,
             "identity_rotation": False,
-            "credential_bypass": False,
-            # The service passively waits out challenges (challenge_wait_seconds);
-            # it does NOT solve or bypass them, so do not advertise bypass.
-            "cloudflare_bypass": False,
+            "credential_injection": False,
+            # No field for defeating a bot-protection control: a Cloudflare
+            # interstitial is a challenge, so `captcha_solving: false` above
+            # already states it, and naming the capability in the payload is
+            # the advertisement the comment used to warn against.
             "robots_diagnostics": True,
             "sitemap_discovery": True,
             "feed_discovery": True,

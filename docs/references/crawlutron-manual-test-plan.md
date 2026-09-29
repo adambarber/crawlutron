@@ -122,7 +122,7 @@ Values increment after crawl/render calls.
 - `supported_extractions` = `[full, trafilatura, document, dom]`
 - `supported_classifications` includes all 27 classifications (see §7).
 - `default_limits` present (timeout_seconds=30, max_retries=2, max_discovered_links=250, etc.).
-- `features` object present with `recursive_frontier=false`, `captcha_solving=false`, `proxy_rotation=false`, `identity_rotation=false`, `credential_bypass=false`, `cloudflare_bypass=true`, `headed_browser=true`, `pdf_extraction=true`, etc.
+- `features` object present with `recursive_frontier=true`, `captcha_solving=false`, `proxy_rotation=false`, `identity_rotation=false`, `credential_injection=false`, `headed_browser=true`, `pdf_extraction=true`, etc.
 - `output_fields`, `openapi_url=/openapi.json`, `swagger_ui_url=/docs`.
 
 ### TC-HINTS-01 — Agent hints

@@ -246,7 +246,7 @@ exhausted.
 | Strategy | Description |
 | -------- | ----------- |
 | `HTTP_DECLARED_CRAWLER` | Transparent direct HTTP fetch with a declared-crawler identity (lightweight, fast). |
-| `HTTP_CFFI_IMPERSONATE` | TLS-fingerprint-impersonated HTTP via `curl_cffi` with browser-like headers (evades naive fingerprinting). |
+| `HTTP_CFFI_IMPERSONATE` | TLS-fingerprint-impersonated HTTP via `curl_cffi` with browser-shaped headers, for sites that reject non-browser clients. |
 | `BROWSER_HEADLESS` | Headless Firefox (Camoufox) render for JS-heavy / anti-bot pages. |
 | `BROWSER_HEADED_WARMED` | Headed Firefox with warmup URLs for sites that fingerprint cold browser launches. |
 

@@ -37,7 +37,7 @@ check(
     "capabilities truthful",
     feats.get("conditional_fetch") is True
     and feats.get("recursive_frontier") is True
-    and feats.get("cloudflare_bypass") is False,
+    and feats.get("captcha_solving") is False,
 )
 check("agent-hints", c.get(f"{BASE}/v1/agent-hints").status_code == 200)
 

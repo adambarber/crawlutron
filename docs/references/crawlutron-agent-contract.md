@@ -60,7 +60,7 @@ Current policy schema version: `2026-06-23`.
 Supported strategy names (fetch strategies):
 
 - `HTTP_DECLARED_CRAWLER` — Transparent direct HTTP with declared crawler User-Agent
-- `HTTP_CFFI_IMPERSONATE` — TLS-fingerprint-impersonated HTTP via curl_cffi (browser-like headers)
+- `HTTP_CFFI_IMPERSONATE` — TLS-fingerprint-impersonated HTTP via curl_cffi (browser-shaped headers, for sites that reject non-browser clients)
 - `BROWSER_HEADLESS` — Headless Firefox rendering via Camoufox
 - `BROWSER_HEADED_WARMED` — Headed Firefox with warmup URLs
 
