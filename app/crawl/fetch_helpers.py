@@ -246,7 +246,7 @@ async def fetch_sitemap_urls(
             return etag, last_modified
         locs = loc_pattern.findall(text)
         if "<sitemapindex" in text.lower():
-            # Bounded fan-out (H7): never schedule more children than still
+            # Bounded fan-out: never schedule more children than still
             # needed to reach max_urls, and fetch them in capped chunks so a
             # hostile index with tens of thousands of children cannot spawn
             # a task (and a fetch) per child.

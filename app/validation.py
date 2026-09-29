@@ -238,7 +238,7 @@ def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
     # Inverted-by-default: any value not explicitly recognized as truthy keeps
     # the SSRF guard ON, using the shared ``parse_bool_value`` policy so every
     # path agrees on what counts as "on". Both layers below are memoized
-    # (perf tier-2 T2) because this function runs per anchor: the env decision
+    # because this function runs per anchor: the env decision
     # is keyed on its raw value (so any change is visible on the very next
     # call) and the host verdict is a pure function of the canonical host.
     if not _allow_private_targets() and not _host_is_public(host):
@@ -346,7 +346,7 @@ def _embedded_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipadd
     (``2001::/32``) all reach an IPv4 target, so the SSRF verdict must be taken
     on the embedded IPv4 rather than the wrapper. Otherwise a wrapper hides
     whatever the IPv4 range check rejects: ``::ffff:100.64.0.1`` wrapped a
-    carrier-grade NAT target and was classified public (B3). Returns ``None``
+    carrier-grade NAT target and was classified public. Returns ``None``
     for native IPv6 and bare IPv4, meaning "classify ``addr`` as-is".
     """
     if not isinstance(addr, ipaddress.IPv6Address):
@@ -362,7 +362,7 @@ def _classified_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
     """Return the address an SSRF range verdict must be computed on.
 
     The single chokepoint for IPv6-embedded IPv4 unwrapping so the mapped and
-    bare forms of a target can never diverge (B3).
+    bare forms of a target can never diverge.
     """
     return _embedded_ipv4(addr) or addr
 
@@ -512,10 +512,10 @@ def get_mapping_int(
     dict in tests), and the env form used to be a second copy of this
     signature -- a second place to forget an option, where forgetting is
     silent. (Adding ``validate``/``validate_event`` here is what exposed that
-    restatement: the clone gate caught the parameter list twice.)
+    restatement: the duplication gate caught the parameter list twice.)
 
-    Hardened against every class of bad input (adversarial review: the
-    chokepoint must make the mistake unrepresentable): a typo'd env var or
+    Hardened against every class of bad input: the
+    chokepoint must make the mistake unrepresentable. A typo'd env var or
     an un-coercible/non-numeric *default* falls back to a bounded int, and
     the result is always clamped to ``[lo, hi]`` when bounds are given. A
     string default like ``"0.5"`` can no longer leak a ``str`` into

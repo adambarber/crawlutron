@@ -70,7 +70,7 @@ def checked_payload_urls(
     and failing inside the detached background task, where the caller can no
     longer see why.
 
-    ``urls`` carries an already-derived batch forward (tier-2 T3): the
+    ``urls`` carries an already-derived batch forward: the
     endpoint gate parses the payload once and hands the result to the engine,
     so a request never parses the same batch twice. A forwarded batch skips
     re-derivation but not the cap -- supplying urls cannot smuggle an

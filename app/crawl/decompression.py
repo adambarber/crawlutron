@@ -171,7 +171,7 @@ def _decompress_brotli(body: bytes | bytearray | memoryview[int], max_output_byt
         elif decoder is not None and hasattr(decoder, "process"):
             streaming = cast("_StreamingDecompressor", decoder)
             # google-brotli streaming API: feed incrementally and stop past the
-            # cap (H6). A single process(body) call would materialize the entire
+            # cap. A single process(body) call would materialize the entire
             # bomb in RAM. Stopping early leaves the output over the cap, which
             # the caller's post-hoc check turns into DecompressionTooLargeError.
             chunks = bytearray()

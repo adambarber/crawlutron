@@ -172,7 +172,7 @@ def _accept_encoding() -> str:
     not one to keep declining it in a deployment that cannot exist.
 
     Its own function rather than an inline constant: the builder that reads it is
-    at the tree's complexity ceiling, and the list is a claim about the decoder
+    already long, and the list is a claim about the decoder
     set that a reader should be able to check against
     ``app.crawl.decompression._DECODABLE_ENCODINGS`` in one place.
     """

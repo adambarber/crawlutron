@@ -109,10 +109,10 @@ def _doc_extraction_worker_count() -> int:
 
 
 # Document extraction (markitdown) runs in a PERSISTENT pool of worker
-# processes (perf throughput #8). Each worker imports markitdown once (it
+# processes. Each worker imports markitdown once (it
 # stays in the worker's sys.modules) and serves many documents, amortizing
 # the spawn + import cost of the old spawn-per-document design. Timeout-kill
-# semantics are kept per task (adversarial perf #3.2): a worker that exceeds
+# semantics are kept per task: a worker that exceeds
 # _EXTRACTION_DOC_TIMEOUT -- or dies mid-task -- is terminated and reaped
 # immediately, and its slot is respawned on the next acquisition, so a
 # pathological document can neither block the pool nor linger as a zombie.
@@ -160,7 +160,7 @@ _DOC_POOL: list[_DocWorker] | None = None
 
 
 def _test_hooks_enabled() -> bool:
-    """Single gate for the TEST_MARKITDOWN_* child-process hooks (N10).
+    """Single gate for the TEST_MARKITDOWN_* child-process hooks.
 
     The hooks exist so tests can simulate child death/hang/output without
     real parsers, but a stray env var must never alter production behavior:
@@ -178,7 +178,7 @@ def _doc_task_hooks() -> dict | None:
     always sees current env) snapshots the gated hooks per call and ships
     them with the task; the worker honors the message, never its own env.
     Returns None in production (gate off) so a stray test flag can never
-    alter real behavior (N10).
+    alter real behavior.
     """
     if not _test_hooks_enabled():
         return None
@@ -439,7 +439,7 @@ async def _shutdown_doc_extraction_executor() -> None:
 
 
 # Wall-clock bound (seconds) for a single CSS/XPath selector evaluation.
-# A pathological selector (or adversarial payload) could otherwise run
+# A pathological selector (or a hostile payload) could otherwise run
 # unbounded and tie up a request worker. Override via env var.
 _EXTRACTION_SELECTOR_TIMEOUT = get_env_float("CRAWLUTRON_EXTRACTION_SELECTOR_TIMEOUT", 2.0)
 
@@ -463,7 +463,7 @@ _DOC_ACQUIRE_RECHECK_SECONDS = 1.0
 # size and allow deployments to disable subprocess extraction entirely.
 _EXTRACTION_DOC_MAX_INPUT_BYTES = get_env_int("CRAWLUTRON_EXTRACTION_DOC_MAX_BYTES", 20 * 1024 * 1024, lo=1)
 
-# Maximum extracted markdown size (chars) to prevent unbounded output (F5).
+# Maximum extracted markdown size (chars) to prevent unbounded output.
 _MAX_EXTRACTED_MARKDOWN = 5 * 1024 * 1024  # 5 MB
 
 
@@ -788,7 +788,7 @@ def _extract_html(
 
 
 def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
-    """Extract markdown from document bytes with a wall-clock timeout (F5).
+    """Extract markdown from document bytes with a wall-clock timeout.
 
     The markitdown conversion runs on a persistent pool worker with a hard
     per-task timeout so a pathological document cannot block the pool
@@ -807,9 +807,9 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     # Serve the document from the persistent pool with a hard wall-clock
     # timeout per task; on timeout -- or if the worker died mid-task -- the
     # runaway worker is forcefully terminated and reaped so it cannot linger
-    # as a zombie (adversarial perf #3.2), and its slot is respawned on the
+    # as a zombie, and its slot is respawned on the
     # next acquisition. Pool size bounds concurrent processes so memory
-    # stays within the container ceiling (perf throughput #8).
+    # stays within the container ceiling.
     worker = _acquire_doc_worker()
     if worker is None:
         # No slot within the acquire budget: degrade this document like every
@@ -857,7 +857,7 @@ def _extract_document(body: bytes, url: str | None) -> ExtractedContent:
     if not md or not md.strip():
         return ExtractedContent(None, None)
 
-    # Cap output size (F5).
+    # Cap output size.
     if len(md) > _MAX_EXTRACTED_MARKDOWN:
         md = md[:_MAX_EXTRACTED_MARKDOWN]
         logger.warning("extraction_document_truncated", extra={"max_chars": _MAX_EXTRACTED_MARKDOWN})

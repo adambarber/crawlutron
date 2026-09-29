@@ -198,17 +198,17 @@ class DomainScheduler:
         self._delay_seconds = max(0.0, delay_seconds)
         # Per-domain minimum delay (e.g. a robots.txt Crawl-delay directive),
         # applied in addition to the global/adaptive delay so a host's stated
-        # politeness floor is always respected (adversarial perf #2.6).
+        # politeness floor is always respected.
         self._domain_min_delay: dict[str, float] = defaultdict(float)
         self._max_rps = max(0.0, max_rps)
         self._circuit_threshold = max(1, circuit_threshold)
         # Circuit breaker cooldown is now exponential: the first trip waits
         # ``base`` seconds, each subsequent consecutive trip doubles (capped at
         # ``circuit_cooldown``). A poisoned/tarpit domain is thus parked for
-        # progressively longer without a manual reset (adversarial perf #2.1).
+        # progressively longer without a manual reset.
         self._circuit_cooldown_base = max(1.0, circuit_cooldown_base)
         self._circuit_cooldown_max = max(self._circuit_cooldown_base, circuit_cooldown)
-        # Adaptive throttling (AutoThrottle-style, #6): per-domain delay is driven by
+        # Adaptive throttling (AutoThrottle-style): per-domain delay is driven by
         # observed response latency rather than a single fixed value.
         self._adaptive = adaptive
         self._adaptive_min_delay = max(0.0, adaptive_min_delay)
@@ -249,7 +249,7 @@ class DomainScheduler:
 
         Also purges domain cooldowns/circuits that have already elapsed, so the
         mappings cannot leak memory across a long-lived service — but on an
-        amortized cadence (T8), since every rate-limited result reaches here
+        amortized cadence, since every rate-limited result reaches here
         and rebuilding both dicts per call is quadratic in the number of 429s.
         """
         if seconds > 0:
@@ -263,8 +263,8 @@ class DomainScheduler:
         """Apply a result's domain-health verdict. See _STATUS_ACCOUNTING.
 
         Its own method because it is one decision, not part of running a job:
-        inlined it pushed the enclosing ``async with`` in run_one over the
-        tree's block-length budget, and the verdict it reads is the whole
+        inlined it pushed the enclosing ``async with`` in run_one too long to
+        read, and the verdict it reads is the whole
         question of what a status means for a domain's health.
         """
         accounting = _STATUS_ACCOUNTING.get(result.status, "none")
@@ -361,7 +361,7 @@ class DomainScheduler:
         When adaptive throttling is enabled this is latency-driven; otherwise the
         fixed ``delay_seconds`` is used. A per-domain robots Crawl-delay floor
         (set via :meth:`set_domain_min_delay`) is always respected on top of the
-        adaptive/global delay (adversarial perf #2.6).
+        adaptive/global delay.
         """
         base = self._delay_seconds if not self._adaptive else self._recompute_delay(domain)
         return max(base, self._domain_min_delay.get(domain, 0.0))
@@ -398,7 +398,7 @@ class DomainScheduler:
         When ``on_result`` is provided, each completed result is handed to it
         immediately (e.g. streamed to the on-disk result spill) and is NOT
         retained in memory -- peak RAM then tracks the in-flight set rather than
-        the whole batch (adversarial perf #3.1). In that mode ``run`` returns
+        the whole batch. In that mode ``run`` returns
         ``None``; otherwise it returns a mapping of ``job.index -> result``.
 
         The mapping is keyed by job index rather than positionally so callers
@@ -465,7 +465,7 @@ class DomainScheduler:
                 # Writing results[job.index] directly here raised TypeError,
                 # which gather(return_exceptions=True) swallowed -- the job
                 # then got no envelope, was not spilled, and silently vanished
-                # from /v1/crawl (H1).
+                # from /v1/crawl.
                 #
                 # The classification and redaction this branch used to inline
                 # now live in the pipeline's ``failed_result``: the crawl
@@ -477,7 +477,7 @@ class DomainScheduler:
                 )
                 return
 
-            # Token bucket rate limiting (#1: Advanced Client-Side Rate Limiting)
+            # Token bucket rate limiting.
             if self._max_rps > 0:
                 bucket = self._token_buckets.get(job.domain)
                 if bucket is None:
@@ -517,7 +517,7 @@ class DomainScheduler:
                     await deliver(job.index, result)
 
         # return_exceptions=True: a single job failure must not cancel the
-        # other in-flight jobs (HIGH #6). Exceptions are captured here; the
+        # other in-flight jobs. Exceptions are captured here; the
         # failing job is simply absent from the returned mapping.
         await asyncio.gather(*(run_one(job) for job in jobs), return_exceptions=True)
         if on_result is not None:

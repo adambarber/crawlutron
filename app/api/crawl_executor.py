@@ -25,8 +25,7 @@ def _request_needs_browser(payload_dict: dict) -> bool:
 
     Used to defer the ``browser_pool_unavailable`` 503 to only requests that
     actually need the browser pool, so HTTP-only crawls can succeed during
-    lifespan startup or after a pool-init failure (adversarial review
-    F-browser-pool-none).
+    lifespan startup or after a pool-init failure.
 
     The chain is read through ``read_policy`` rather than ``payload["policy"]
     .get("strategies")`` because the job path puts a ``CrawlPolicy`` in that slot
@@ -60,7 +59,7 @@ async def execute_crawl(
     Pool guard: only raises ``browser_pool_unavailable`` 503 when the pool
     is None AND the request actually needs a browser strategy.
 
-    ``urls`` forwards the caller's already-gated batch (tier-2 T3) so the
+    ``urls`` forwards the caller's already-gated batch so the
     engine skips re-deriving it; the cap still applies there.
     """
     active_settings = settings or CrawlerSettings.from_mapping()

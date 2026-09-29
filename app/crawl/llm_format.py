@@ -26,31 +26,31 @@ _META_MAP = {
 # Cap the HTML passed to lxml parsing for metadata extraction. lxml builds a
 # full DOM tree; a 50 MB body can balloon to ~200 MB+ of RAM during parsing.
 # Anything above a few MB is almost certainly above the practical meta-tag
-# density and is rejected (adversarial review F-llm-format-size-guard). The
-# value lives in app.bounded_io; this site keeps the reason THIS parse needs one.
+# density and is rejected. The value lives in app.bounded_io; this site keeps
+# the reason THIS parse needs one.
 
 
 def _extract_llm_metadata(html: str, url: str) -> dict[str, Any]:
     """Extract Page metadata from HTML meta tags.
 
-    #15: parse the HTML once with lxml and read every field (title, meta
+    # Parse the HTML once with lxml and read every field (title, meta
     og/twitter tags, JSON-LD, canonical, favicon, language) from the single
     tree instead of running 8+ independent regex scans over the raw string.
     Inputs above ``MAX_HTML_INPUT_BYTES`` are truncated before
     lxml parses them so a malicious oversized payload cannot exhaust RAM
-    building the DOM tree (adversarial F-llm-format-size-guard).
+    building the DOM tree.
 
     This is the fallback computation site: engine-produced items carry
     metadata computed once from the discovery tree
     (``app.crawl.extraction.extract_post_fetch_discovery``) and shaping
-    reads that dict instead of reaching this function (H2). Keep the two
+    reads that dict instead of reaching this function. Keep the two
     paths in sync through :func:`_llm_metadata_from_tree` -- it is the only
     reader of a parsed tree.
     """
     metadata: dict[str, Any] = {"source_url": url}
     html = truncate_html_input(html)
     # Lazy import avoids a circular import: extraction.py imports this module
-    # at module level, so this direction must stay lazy (H2 constraint).
+    # at module level, so this direction must stay lazy.
     from app.crawl.extraction import _parse_html_tree
 
     tree = _parse_html_tree(html)

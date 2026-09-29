@@ -26,11 +26,11 @@ def _content_cache_key(
     """Stable content-cache key mirroring what http.py stores under.
 
     Kept as a shared helper so engine.py can reconstruct the exact key a future
-    fetch of ``normalized_url`` would use (for sitemap lastmod freshness checks,
-    #3) without duplicating the key composition.
+    fetch of ``normalized_url`` would use (for sitemap lastmod freshness checks)
+    without duplicating the key composition.
 
     ``base_headers`` is serialized WHOLE, and that deliberately includes the
-    per-request ``Cookie`` header set by ``_headers_for_strategy`` (P2-G). The
+    per-request ``Cookie`` header set by ``_headers_for_strategy``. The
     comment at the call site documents the intentional EXCLUSION of the
     conditional-revalidation headers; ``Cookie`` is the opposite case -- an
     intentional INCLUSION, and a safety property rather than an optimization:
@@ -51,7 +51,7 @@ def _content_cache_key(
     )
 
 
-# Adversarial perf #2.1: bound the RAM consumed by in-flight page bodies. At high
+# Bound the RAM consumed by in-flight page bodies. At high
 # global_concurrency the per-page cap shrinks so the whole active set cannot
 # exhaust the budget. Operators with known RAM headroom can override the budget.
 #
@@ -74,7 +74,7 @@ def _default_global_concurrency() -> int:
 
 
 def _effective_max_content_length(limits: CrawlPolicyLimits, global_concurrency: int | None = None) -> int:
-    """Per-page body cap, scaled down as concurrency rises (adversarial perf #2.1).
+    """Per-page body cap, scaled down as concurrency rises.
 
     An explicit ``max_content_length_bytes`` in the policy always wins. Otherwise
     the cap is ``min(DEFAULT, RAM_BUDGET / (concurrency x workers))`` so the

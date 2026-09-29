@@ -10,8 +10,8 @@ the identical part is the part that must not be re-spelled: which schema the
 store owns, that the PRAGMAs and the migration are the store chokepoint's, and
 that the ``Lock`` serializes this process only.
 
-Left per store, that preamble was two copies of one contract, and jscpd reported
-them: the ``StoreSchema`` + ``connect_store`` pairing is a claim about schema
+Left per store, that preamble was two copies of one contract: the
+``StoreSchema`` + ``connect_store`` pairing is a claim about schema
 ownership, and a second copy of it is a second claim that can drift from the
 first. So the pairing is here, once, and a store contributes only the schema
 name it owns.

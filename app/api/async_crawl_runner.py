@@ -34,10 +34,9 @@ from app.validation import HostPolicy, get_env_int
 logger = logging.getLogger(__name__)
 
 # Module-level concurrency semaphore. Bounded so a flood of 202 responses
-# cannot spawn unbounded concurrent crawls and OOM the container
-# (adversarial review F-no-concurrency-cap).
+# cannot spawn unbounded concurrent crawls and OOM the container.
 _WEBHOOK_CRAWL_CONCURRENCY = get_env_int("CRAWLUTRON_MAX_WEBHOOK_CONCURRENCY", 4, lo=1)
-# P2-C: a lazily-built module-global asyncio.Semaphore binds to whichever event
+# A lazily-built module-global asyncio.Semaphore binds to whichever event
 # loop first uses it, and asyncio's loop-bound primitives cannot be awaited from
 # a loop other than the one they were created on -- the same hazard
 # ``_LoopBoundPooledClient`` was built for in app.crawl.strategies.http. The
@@ -96,7 +95,7 @@ async def run_async_crawl(
 
     Updates the job through PENDING -> RUNNING -> COMPLETED/FAILED.
     If ``webhook_url`` is provided, POSTs the result on completion.
-    ``urls`` carries the endpoint's already-gated batch forward (tier-2 T3).
+    ``urls`` carries the endpoint's already-gated batch forward.
     """
     # Load job and mark RUNNING
     job = await job_store.aload(request_id)

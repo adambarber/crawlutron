@@ -1,10 +1,7 @@
 """Standalone JSON-structured logging for the crawlutron service.
 
-This module replaces the previous ``local_service_logging`` shim that was
-imported from the parent monorepo's ``shared/python`` directory. The shim
-deliberately exposes the same call surface as the original so the rest of
-the codebase can import ``configure_service_logging`` without checking
-whether the shared logging helper is present.
+The module exposes one call surface: ``configure_service_logging`` returns a
+configured logger, and every entry point wires it the same way.
 
 For deployments that want richer logging (rotating files, structured
 JSON, JSON-Lines with HTTP context), swap ``configure_service_logging``

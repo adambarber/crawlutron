@@ -51,14 +51,13 @@ async def deliver_pinned_webhook(
     because certs carry no IP SANs -- the residual rebinding window there is
     the same posture the fetcher accepts: pre-connect check + CA validation).
     This helper holds no URL composition of its own, so the IPv6 bracketing
-    and Host handling cannot drift from the fetchers (H5-C).
+    and Host handling cannot drift from the fetchers.
 
     Caller MUST have validated ``webhook_url`` via ``validate_webhook_url``
     first; this helper assumes the URL has already passed the SSRF guard.
 
     Consolidated from ``run_and_deliver_webhook`` so the ``post_webhook``
-    path shares the same TOCTOU-safe delivery code (adversarial review
-    F-webhook-toctou).
+    path shares the same TOCTOU-safe delivery code.
     """
     # Re-parse through the chokepoint (normalize + check + pin in one place)
     # rather than reimplementing urlparse/check/pin inline -- the manual
@@ -69,7 +68,7 @@ async def deliver_pinned_webhook(
     safe = await _parse_pinned_off_loop(webhook_url, host_policy=host_policy)
     connect_url, connect_headers = safe.connect()
     request_headers = {"Content-Type": "application/json", **connect_headers}
-    # A fresh client per delivery is deliberate (M4 audit): the security
+    # A fresh client per delivery is deliberate: the security
     # posture REQUIRES a per-delivery parse+resolve+pin (line above; the
     # F-webhook-toctou consolidation), and pooling connections across
     # deliveries would either re-resolve by hostname (defeating the pin) or
@@ -97,7 +96,7 @@ _WEBHOOK_SIZE_DEFAULT = 10_485_760
 
 @functools.lru_cache(maxsize=256)
 def _parse_webhook_size(raw: str | None) -> int:
-    """Parse one distinct raw env value into the bounded webhook cap (P2-F).
+    """Parse one distinct raw env value into the bounded webhook cap.
 
     The parse -- and its never-raise contract plus the ``lo=1`` floor -- stays
     in ``get_mapping_int``; caching on the raw string means the parse runs once
@@ -111,7 +110,7 @@ def _max_webhook_size() -> int:
     """The outbound webhook payload/response size cap.
 
     Read 2-3 times per delivery, this used to re-read and re-parse
-    ``os.environ`` on every call (P2-F). It is cached on the raw env value, so
+    ``os.environ`` on every call. It is cached on the raw env value, so
     the parse runs once per distinct value; the key is the value itself, so an
     override -- operator env, or a test -- is honored on the very next call
     instead of being shadowed by a stale cached parse.

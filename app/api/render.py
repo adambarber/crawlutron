@@ -110,7 +110,7 @@ async def render_request(
     # The scheduler hands each completed result to on_result together with the
     # submitting job's index, so duplicate URLs in one batch map to their own
     # slots. Matching by URL here would collapse duplicates onto index 0 and
-    # KeyError on the missing slot (adversarial H8), and is O(n^2) (L5a).
+    # KeyError on the missing slot, and is O(n^2).
     # Worker exceptions are swallowed by the scheduler's gather, so capture
     # them per index: total pool exhaustion raises for a 503, any other
     # missing slot becomes a per-URL failed result instead of a 500.

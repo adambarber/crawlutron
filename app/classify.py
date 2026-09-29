@@ -281,8 +281,8 @@ def _strip_html_noise(html: str | None) -> str:
 
     Replaces the previous regex pass (``.*?`` alternation with ``re.DOTALL``),
     which exhibited O(N^2) backtracking on inputs with many unclosed script
-    tags (adversarial review H-final-1: 4MB of unclosed tags pinned a worker
-    for tens of seconds). ``str.find`` scans each region exactly once, so the
+    tags: 4MB of unclosed tags pinned a worker for tens of seconds.
+    ``str.find`` scans each region exactly once, so the
     cost is linear in input size regardless of tag structure.
 
     Semantics are browser-consistent: an *unclosed* ``<script>``/``<style>``

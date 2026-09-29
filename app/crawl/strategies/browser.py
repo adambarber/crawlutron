@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
-    """SSRF-check + IP-pin ``url`` for browser navigation (F2).
+    """SSRF-check + IP-pin ``url`` for browser navigation.
 
     Returns ``(pinned_url, extra_http_headers)``. The browser is told to connect
     to the single resolved IP (preventing DNS-rebinding) while preserving the
@@ -88,7 +88,7 @@ async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str,
 
 
 def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
-    """Re-validate the post-navigation URL (F2/F8).
+    """Re-validate the post-navigation URL.
 
     The rendered site may have redirected the browser to an internal host. Fail
     closed (raise ``ValueError``) rather than returning potentially-internal
@@ -99,7 +99,7 @@ def _assert_safe_final_url(final_url: str, *, policy: HostPolicy) -> None:
 
 
 def _is_ssrf_blocked(url: str, *, policy: HostPolicy) -> bool:
-    """Return ``True`` if ``url`` resolves to an SSRF-unsafe target (F8)."""
+    """Return ``True`` if ``url`` resolves to an SSRF-unsafe target."""
     try:
         normalized = normalize_public_http_url(url, policy=policy)
         _check_ssrf_protection(normalized)
@@ -125,7 +125,7 @@ def _make_ssrf_route_handler(
     include_screenshot: bool = False,
     policy: HostPolicy,
 ):
-    """Playwright route handler that aborts requests to SSRF-unsafe hosts (F8).
+    """Playwright route handler that aborts requests to SSRF-unsafe hosts.
 
     Registered via ``page.route`` so the main navigation, server-side
     redirects, and every subresource load (images/scripts/XHR) is checked
@@ -481,7 +481,7 @@ class BrowserRenderer:
         # settings were passed (single-tenant local-mode usage), but when
         # settings are available the operator-controlled cache_dir is used so
         # a malicious storage_state path cannot piggy-back on the world-
-        # readable /tmp (adversarial review F-storage-state-path-traversal).
+        # readable /tmp.
         self._cache_dir = settings.cache_dir if settings is not None else None
         self._browser: Any = None
         self._browser_reused = False
@@ -518,7 +518,7 @@ class BrowserRenderer:
 
         The default ``time.sleep`` clock (injectable for tests) would block the
         whole event loop; run it in a thread so one render can never freeze the
-        service (adversarial review C2).
+        service.
         """
         if seconds <= 0:
             return
@@ -658,7 +658,7 @@ class BrowserRenderer:
         *,
         policy: HostPolicy,
     ) -> CrawlResult:
-        # SSRF protection (F2): validate + IP-pin the target so the browser
+        # SSRF protection: validate + IP-pin the target so the browser
         # connects to a single resolved IP (DNS-rebinding safe) while preserving
         # the original Host header. Raises ValueError if the target is unsafe.
         pinned_url, goto_headers = await _resolve_browser_target(url, policy=policy)
@@ -742,7 +742,7 @@ class BrowserRenderer:
 
             extraction_method = "dom_text"
             final_url = page.url
-            # Re-validate the post-navigation URL (F2/F8): the site may have
+            # Re-validate the post-navigation URL: the site may have
             # redirected the browser to an internal host. Fail closed.
             _assert_safe_final_url(final_url, policy=policy)
 
@@ -750,7 +750,7 @@ class BrowserRenderer:
             if self._looks_like_pdf(final_url) and not (text or "").strip():
                 # Blocking file read + parse: keep it off the event loop like
                 # every other document-extraction path (the extractor may be a
-                # sync downloader/parser; C3, adversarial perf family).
+                # sync downloader/parser).
                 text = await asyncio.to_thread(self._pdf_text_extractor, final_url, policy)
                 html = html if options.include_html else None
                 title = await page.evaluate("() => document.title")
@@ -1032,8 +1032,7 @@ class BrowserRenderer:
         When the operator has supplied a ``cache_dir`` via settings, only that
         directory is accepted. ``/tmp`` is intentionally NOT in the default
         allowlist: it is world-readable on most hosts and would let any user
-        on the box read another tenant's session tokens
-        (adversarial review F-storage-state-path-traversal).
+        on the box read another tenant's session tokens.
         """
         import tempfile
         from pathlib import Path

@@ -66,7 +66,7 @@ class ContentCache:
         # one off, which is why turning it off is a deliberate, visible
         # constructor argument rather than a default.
         self.max_total_bytes = max_total_bytes
-        # Parallel byte accounting for the LRU index (H9): entry count alone
+        # Parallel byte accounting for the LRU index: entry count alone
         # cannot bound disk use when one envelope holds a multi-MB body.
         self._index_sizes: dict[str, int] = {}
         self._index_total_bytes: int = 0
@@ -159,7 +159,7 @@ class ContentCache:
     def _enforce_limits(self) -> None:
         """Evict least-recently-used entries using the in-memory index.
 
-        Enforces both the entry-count cap and the total byte budget (H9).
+        Enforces both the entry-count cap and the total byte budget.
         Runs in O(overflow) unlinks with no directory glob/stat, unlike the
         previous implementation that listed and stat() every cache file on each
         write.
@@ -238,7 +238,7 @@ class ContentCache:
                     return None
                 if key not in self._index:
                     # Lazily register a cold on-disk entry, with the exact byte
-                    # size just read (H2): the RAM-mirror gate and the byte
+                    # size just read: the RAM-mirror gate and the byte
                     # budget need a real size, and recording it here is what
                     # keeps every size lookup off the disk path.
                     self._index[key] = path
@@ -380,12 +380,12 @@ class ContentCache:
         """
         envelope, expires = self._entry_to_store(value, ttl)
         # Serialize first: entries over the per-entry cap are refused before
-        # any disk write (H9), and the byte size feeds total-budget accounting.
+        # any disk write, and the byte size feeds total-budget accounting.
         data = json.dumps(envelope)
         path = self._path_for(key)
         with self._lock:
             if self.max_entry_bytes is not None and len(data) > self.max_entry_bytes:
-                # Refuse before any disk write (N5): a still-valid older
+                # Refuse before any disk write: a still-valid older
                 # entry for this key is kept; TTL governs its staleness.
                 return
             self._write_data(path, data)
@@ -400,8 +400,8 @@ class ContentCache:
 
     async def aget(self, key: str, ttl: int | None = None) -> Any | None:
         """Async ``get``: offload the (potentially large) on-disk envelope read
-        and JSON parse to a worker thread so the event loop is never stalled
-        (adversarial perf #1.2 / #2.2). The read itself runs outside
+        and JSON parse to a worker thread so the event loop is never stalled.
+        The read itself runs outside
         ``self._lock`` (see ``_read_envelope``), so a concurrent ``aset`` is
         not queued behind it."""
         hit = self._memory_probe(key)
@@ -412,7 +412,7 @@ class ContentCache:
         return None if envelope is None else envelope.get("value")
 
     async def aset(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Async ``set`` with the same byte-budget contract (N1/H9): the value
+        """Async ``set`` with the same byte-budget contract: the value
         is serialized in a worker thread first, the size decision is made
         under the lock before any index or disk mutation, and the large disk
         write is offloaded so the event loop is never stalled."""
@@ -426,8 +426,8 @@ class ContentCache:
         size = len(data)
         with self._lock:
             if self.max_entry_bytes is not None and size > self.max_entry_bytes:
-                # Refuse before any disk write (N1): the payload never hits
-                # disk and any still-valid older entry is kept (N5).
+                # Refuse before any disk write: the payload never hits
+                # disk and any still-valid older entry is kept.
                 return
         try:
             await asyncio.to_thread(self._write_data, path, data)
@@ -436,7 +436,7 @@ class ContentCache:
             # this point, and atomic_write_text leaves the prior file byte-
             # identical on failure — so the pre-write state is already exactly
             # consistent. A prior valid entry stays reachable and a new key
-            # stays absent; there is nothing to roll back. Just propagate (N1).
+            # stays absent; there is nothing to roll back. Just propagate.
             raise
         with self._lock:
             # The prior size is read here rather than before the size check, so a
@@ -525,7 +525,7 @@ class ContentCache:
                     # reconciliation below touches it.
                     surviving[path] = self._index_sizes[key]
             # Rebuild the index and the byte accounting from what survived on
-            # disk (N1). An entry whose file was unreadable or gone at glob
+            # disk. An entry whose file was unreadable or gone at glob
             # time drops out; a later read re-registers it from disk, exactly
             # like a warm restart.
             live: OrderedDict[str, Path] = OrderedDict(

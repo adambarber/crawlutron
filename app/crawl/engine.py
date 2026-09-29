@@ -114,7 +114,7 @@ def _parse_lastmod(lastmod: str | None) -> float | None:
     every regeneration. It parses to ``None``, the same verdict as an absent
     stamp: the seed fails open to re-fetch, and the freshness check declines
     before composing cache keys, so the garbage costs nothing. The
-    degradation direction is deliberate (H7): never "fresher than now".
+    degradation direction is deliberate: never "fresher than now".
     """
     if not lastmod:
         return None
@@ -203,7 +203,7 @@ _SPILL_PREFIX = "bc-spill-"
 # process dying, releases ownership automatically, which is what lets the sweep
 # still reclaim what killed runs leave behind.
 
-# Cadence gate for _ResultSpill's stale-spill sweep (perf tier-2 T5): at most
+# Cadence gate for _ResultSpill's stale-spill sweep: at most
 # one temp-dir scan per interval per process; None means "never scanned",
 # forcing the first construction to sweep immediately.
 _SPILL_GC_MIN_INTERVAL_SECONDS = 300.0
@@ -261,8 +261,7 @@ class _ResultSpill:
         if self._own:
             fd, resolved = tempfile.mkstemp(prefix=_SPILL_PREFIX, suffix=".ndjson")
             # An exception between mkstemp and fdopen would leak the raw fd
-            # AND the on-disk file. Close the fd if fdopen fails (adversarial
-            # review F-result-spill-fd-leak).
+            # AND the on-disk file. Close the fd if fdopen fails.
             try:
                 self._fh = os.fdopen(fd, "w", encoding="utf-8")
             except Exception:
@@ -282,7 +281,7 @@ class _ResultSpill:
         self.count = 0
         self._claim_ownership()
         # Serialize writes (the file handle is shared) while the (potentially
-        # large) json.dumps is offloaded off the event loop (adversarial #1.3).
+        # large) json.dumps is offloaded off the event loop.
         self._write_lock = asyncio.Lock()
         global _LAST_SPILL_GC_MONOTONIC
         now_mono = time.monotonic()
@@ -290,7 +289,7 @@ class _ResultSpill:
             _LAST_SPILL_GC_MONOTONIC is None
             or now_mono - _LAST_SPILL_GC_MONOTONIC >= _SPILL_GC_MIN_INTERVAL_SECONDS
         ):
-            # Cadence gate (perf tier-2 T5): the temp-dir sweep is O(dir) and
+            # Cadence gate: the temp-dir sweep is O(dir) and
             # ran per crawl request. The None-initial stamp guarantees the
             # first construction in a process always scans, so spill files
             # orphaned by killed runs are still reclaimed; the age predicate
@@ -350,7 +349,7 @@ class _ResultSpill:
 
     async def write(self, index: int, result: EngineCrawlResult) -> None:
         # Offload the (potentially large) json.dumps to a worker thread so the
-        # event loop is never stalled serializing results (adversarial #1.3).
+        # event loop is never stalled serializing results.
         line = await asyncio.to_thread(json.dumps, {"i": index, "r": to_dict(result)})
         async with self._write_lock:
             self._fh.write(line + "\n")
@@ -424,9 +423,9 @@ async def crawl_request(
 ) -> dict[str, Any]:
     active_settings = settings or CrawlerSettings.from_mapping()
     host_policy = HostPolicy.from_settings(active_settings)
-    # L4: the batch cap is enforced by the same gate the async endpoint uses
+    # The batch cap is enforced by the same gate the async endpoint uses
     # before accepting, so sync and async cannot drift on oversized batches.
-    # A forwarded batch (tier-2 T3) skips re-derivation but not the cap.
+    # A forwarded batch skips re-derivation but not the cap.
     urls = checked_payload_urls(
         payload,
         active_settings.max_batch_size,
@@ -443,8 +442,7 @@ async def crawl_request(
     # Bind the cookie namespace for the lifetime of this crawl so concurrent
     # multi-tenant calls cannot leak cookies through the shared
     # ``_GLOBAL_COOKIE_JAR``. Defaults to "" (legacy shared behavior) so
-    # single-tenant callers and tests see no change (adversarial review
-    # F-cookie-cross-contamination).
+    # single-tenant callers and tests see no change.
     _cookie_token = _set_cookie_namespace(policy)
     try:
         state = _PipelineState(

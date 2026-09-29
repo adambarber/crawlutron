@@ -64,7 +64,7 @@ def match_bounded(
 ):
     """Bounded match; raises RegexTimeout instead of hanging.
 
-    Fail-closed direction (G8): crawl scope treats ``RegexTimeout`` as
+    Fail-closed direction: crawl scope treats ``RegexTimeout`` as
     ``no-match`` (fail-closed exclusion); robots matcher treats it as
     disallowed; document extractor returns empty. No unbounded hang escapes.
     """
