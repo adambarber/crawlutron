@@ -239,15 +239,3 @@ max-statements = 87
     "PLR0915",
 ]
 "**/__pycache__/**" = ["ALL"]
-
-[tool.pytest.ini_options]
-# Mirrors pytest.ini; the actual runner config lives in pytest.ini at the
-# repo root so ``pytest`` picks it up automatically.
-asyncio_mode = "auto"
-testpaths = ["tests"]
-addopts = "--strict-markers -m 'not browser and not slow'"
-markers = [
-    "browser: launches a real headless browser (Camoufox/Playwright); skipped by default.",
-    "slow: takes noticeably longer than the fast default; skipped by default.",
-    "integration: exercises cross-module behavior against real servers.",
-]
