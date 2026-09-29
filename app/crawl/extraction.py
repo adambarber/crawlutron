@@ -985,9 +985,13 @@ def _extract_frames(
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def _extract_forms(html: str | None, source_url: str | None, **options: Any) -> list[dict[str, Any]]:
-    host_policy: HostPolicy = options["host_policy"]
-    tree: Any | None = options.get("tree")
+def _extract_forms(
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    tree: Any | None = None,
+) -> list[dict[str, Any]]:
     walkable = _walkable(html, source_url, tree)
     if walkable is None:
         return []
@@ -1031,9 +1035,13 @@ def _extract_forms(html: str | None, source_url: str | None, **options: Any) -> 
     return forms
 
 
-def _html_diagnostics(html: str | None, source_url: str | None, **options: Any) -> dict[str, Any]:
-    host_policy: HostPolicy = options["host_policy"]
-    tree: Any | None = options.get("tree")
+def _html_diagnostics(
+    html: str | None,
+    source_url: str | None,
+    *,
+    host_policy: HostPolicy,
+    tree: Any | None = None,
+) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
     tree = _diagnostic_inputs(html, tree)
     frames = _extract_frames(html, source_url, host_policy=host_policy, tree=tree)

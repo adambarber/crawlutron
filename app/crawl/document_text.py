@@ -16,11 +16,10 @@ def _format_extracted_document_text(text: str, *, source_url: str) -> str:
     records: list[str] = []
     action_by_item: dict[str, str] = {}
     index = 0
-    while index < len(lines):
-        line = lines[index]
-        if not line:
-            index += 1
-            continue
+    while (line_index := _next_non_empty_document_line(lines, index)) is not None:
+        # `index` stays *on* this line: the branches below advance it once they
+        # are done, and two of them jump elsewhere entirely.
+        index, line = line_index, lines[line_index]
         if _is_document_non_item_section(line):
             index += 1
             continue
@@ -120,6 +119,18 @@ def _clean_document_line(line: str) -> str:
 
 
 def _next_non_empty_document_line(lines: list[str], start: int) -> int | None:
+    """Index of the first non-blank line at or after ``start``, or ``None``.
+
+    The funnel for this module's line scanners, returning the *index* on
+    purpose: every caller must keep scanning from a position it chose, and
+    both scanners also need to know which line they hold. Skipping blanks
+    inline instead of asking here is what puts the obligation to advance past
+    one -- the rule that keeps a scanner from spinning on it -- in the body,
+    where nothing announces it.
+
+    Blank means falsy after ``_clean_document_line``, which is what makes
+    "blank" one rule across the module rather than a regex per scanner.
+    """
     for index in range(start, len(lines)):
         if lines[index]:
             return index
@@ -147,11 +158,9 @@ def _is_document_non_item_section(line: str) -> bool:
 def _collect_document_item_lines(lines: list[str], start: int) -> tuple[list[str], int]:
     title_lines: list[str] = []
     index = start
-    while index < len(lines):
-        line = lines[index]
-        if not line:
-            index += 1
-            continue
+    while (line_index := _next_non_empty_document_line(lines, index)) is not None:
+        line = lines[line_index]
+        index = line_index
         numbered_continuation = re.match(r"^\d+\.\s+(?P<text>.+)$", line)
         if numbered_continuation:
             title_lines.append(numbered_continuation.group("text"))
