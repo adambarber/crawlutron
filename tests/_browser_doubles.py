@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -5,9 +7,31 @@ from app.crawl.strategies.browser import BrowserRenderer
 from app.crawl.strategies.browser_pool import (
     BROWSER_POOL_ACQUIRE_TIMEOUT_SECONDS,
     BrowserPool,
+    set_browser_pool,
 )
 
 ROUTE_ARG_UNSET = object()
+
+
+@contextmanager
+def owned_browser_pool(pool: BrowserPool | None) -> Iterator[None]:
+    """Install ``pool`` as the process-wide browser pool, then restore the previous one.
+
+    The save/restore lives here because a test that installs a pool and does not
+    restore it makes every later test's 503-versus-200 answer depend on test
+    ordering -- and the failure lands somewhere else entirely. Written once
+    because the alternative is two copies that drift: the one that grows a
+    ``try/finally`` protects its neighbours and the one that does not does not,
+    and which is which is only visible in the diff.
+
+    ``None`` installs the no-pool state, which is how a test asserts the pool-down
+    guard answers 503.
+    """
+    previous = set_browser_pool(pool)
+    try:
+        yield
+    finally:
+        set_browser_pool(previous)
 
 
 class FakeBrowserPool(BrowserPool):

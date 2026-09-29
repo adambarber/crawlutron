@@ -411,42 +411,35 @@ CrawlWorker = SyncCrawlWorker | AsyncCrawlWorker
 # synthesizes a signature, so a correct three-argument call read as a missing
 # argument. The return is the result model, not ``Any``.
 #
-# :class:`HttpFetchContract` is the same shape before the policy is bound; this
-# is what the engine hands the chain once it has bound it.
+# This is the ONLY declaration of the fetcher call shape. A second Protocol for
+# the same four parameters, plus a keyword-only ``policy`` and an ``impersonate``
+# keyword, used to sit here beside it -- the bound view and the concrete-fetcher
+# contract -- and Python cannot derive one from the other, because a function
+# with a *required* keyword-only argument does not satisfy a Protocol that does
+# not require it. So the four lines were written twice and could only be kept in
+# step by a guard that compared each half against a third thing, which is how
+# jscpd found them.
+#
+# The bound view is the right one to keep: it is the narrower declaration, and it
+# is the one a call site needs. The keywords a production fetcher adds on top of
+# it are not a second contract, they are a fact about each fetcher, and
+# ``tests/test_type_contracts.py::test_http_fetcher_contract_holds_tree_wide``
+# checks them where they are declared: every coroutine in ``app/`` returning a
+# fetch result must take exactly the keyword-only ``policy`` (required) and
+# ``impersonate``, with the same four positional parameters and the same
+# optionality. Both halves are load-bearing, and the defaulting half was found the
+# hard way: a fetcher that gave ``policy`` a default matched every name, because
+# protocol conformance is one-directional and a default changes no name -- so a
+# missing SSRF keyword would have become an unrestricted HostPolicy instead of a
+# TypeError, silently.
 class HttpFetcher(Protocol):
-    """The four positional parameters of a fetcher whose policy is already bound."""
+    """The four positional parameters of a fetcher whose policy is already bound.
 
-    async def __call__(
-        self,
-        url: str,
-        headers: dict[str, str],
-        timeout_seconds: int,
-        max_content_length: int = ...,
-    ) -> HttpFetchResult: ...
-
-
-class HttpFetchContract(Protocol):
-    """The concrete-fetcher contract, stated once.
-
-    Four positional parameters -- (url, headers, timeout_seconds,
-    max_content_length) -- a keyword-only ``policy``, an ``impersonate`` keyword
-    carrying the transport preference, and an :class:`HttpFetchResult` return.
-    :func:`app.crawl.strategies.fetchers._default_http_fetcher` satisfies it, and
-    it is the only function in ``app/`` that does: the impersonating transport
-    used to be a second entry point, which meant the contract had to be spelled
-    twice and could only be kept honest by a guard that walked the tree. The
-    engine binds the preference instead of the signature, so there is one
-    spelling left to drift from.
-
-    What this type buys is that one place. ``test_http_fetcher_contract_holds_tree_wide``
-    walks all of ``app/`` to prove every coroutine returning a fetch result still
-    matches it -- by name *and* by which parameters it makes optional. Both
-    halves are load-bearing and the second was found the hard way: a fetcher that
-    gave ``policy`` a default satisfied this Protocol and satisfied a name-only
-    comparison, because protocol conformance is one-directional (an implementation
-    may accept more than the contract asks for) and a default changes no name.
-    That is the only thing the duplication was ever able to cause, so it is now
-    checked rather than asserted.
+    Also the declaration of what a fetcher looks like *before* it is bound, which
+    is the only sense in which this is a contract for the whole of ``app/``: a
+    production fetcher is this call plus a keyword-only ``policy`` and an
+    ``impersonate`` keyword, and the tree-wide check is what proves the "plus"
+    is exactly those two.
     """
 
     async def __call__(
@@ -455,9 +448,6 @@ class HttpFetchContract(Protocol):
         headers: dict[str, str],
         timeout_seconds: int,
         max_content_length: int = ...,
-        *,
-        policy: HostPolicy,
-        impersonate: bool = ...,
     ) -> HttpFetchResult: ...
 
 

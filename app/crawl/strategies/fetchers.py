@@ -60,8 +60,8 @@ async def _default_http_fetcher(
     Sensitive headers (Cookie, Authorization) are stripped when crossing host
     boundaries to prevent credential leakage (Fix 3).
 
-    The signature is :data:`app.models.HttpFetchContract`, checked tree-wide by
-    ``test_http_fetcher_contract_holds_tree_wide``.
+    The signature is :data:`app.models.HttpFetcher` plus the two bound keywords,
+    checked tree-wide by ``test_http_fetcher_contract_holds_tree_wide``.
     """
     if impersonate:
         attempted = await _cffi_fetch(url, headers, timeout_seconds, max_content_length, policy=policy)

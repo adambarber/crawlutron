@@ -12,18 +12,15 @@ import pytest
 from app.api.render_endpoint import render
 from app.api_models import RenderRequest
 from app.settings import CrawlerSettings
-from tests._browser_doubles import FakeBrowserPool
+from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 
 @pytest.fixture()
 def _pool_up():
     """The pool-down guard answers 503 before validation runs; own the premise
     so the test exercises the ValueError branch, not startup ordering."""
-    from app.crawl.strategies.browser_pool import set_browser_pool
-
-    previous = set_browser_pool(FakeBrowserPool())
-    yield
-    set_browser_pool(previous)
+    with owned_browser_pool(FakeBrowserPool()):
+        yield
 
 
 async def test_render_value_error_reports_validation_error_code(monkeypatch, _pool_up):

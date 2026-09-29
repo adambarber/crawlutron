@@ -21,7 +21,7 @@ import inspect
 import pytest
 
 from app.crawl.strategies.fetchers import _default_http_fetcher
-from app.models import HttpFetchContract, HttpFetcher, HttpFetchResult
+from app.models import HttpFetcher, HttpFetchResult
 from tests.chokepoint_walks import app_python_files
 
 # There is ONE concrete fetcher. The impersonating transport is a binding of it
@@ -30,51 +30,92 @@ from tests.chokepoint_walks import app_python_files
 _CONCRETE_FETCHERS = [pytest.param(_default_http_fetcher, id="_default_http_fetcher")]
 
 
-def _contract_signature() -> dict[str, object]:
-    """The contract's own shape, read off ``HttpFetchContract``.
+def _unbound_call(protocol: type, *, resolve_annotations: bool = True) -> inspect.Signature:
+    """A Protocol's ``__call__`` signature with the ``self`` wrapper dropped.
 
-    Derived, not typed. A tuple written here is a second copy of the Protocol
-    whose only reviewer is the comparison in this same file, so the copy went
-    stale the moment ``impersonate`` was added to the contract and every
-    fetcher check below went red for a reason that had nothing to do with a
-    fetcher. Reading the Protocol means a keyword is guarded the day it is
-    added.
+    Read unbound, a Protocol's ``__call__`` carries ``self``; the contract is
+    about the call, not about the wrapper. Opening with a parameter by any other
+    name means the Protocol is not shaped the way this reading assumes, which is
+    a fact about the declaration rather than about the four parameters -- so it
+    fails here instead of skewing every comparison made with the result.
+
+    One reader for every Protocol read in this file, because three copies of
+    "drop self, take the positionals" is three places for a wrapper to be handled
+    inconsistently.
+
+    ``eval_str`` is load-bearing where it can be: the source uses postponed
+    annotations, so without it every parameter type reads as the string
+    ``'int'`` -- a string compares equal to nothing a caller can check.
+
+    ``HttpFetchContract`` has to be read with ``resolve_annotations=False``, and
+    that is a layering fact rather than a limitation. Its ``policy`` annotation
+    names ``HostPolicy``, which lives in ``app.validation``, which imports
+    ``NormalizedUrl`` from ``app.models`` -- so ``app.models`` may only name it
+    under ``TYPE_CHECKING`` and the annotation does not exist at runtime. A
+    caller asking for the real types would get a ``NameError``; the comparisons
+    made against the contract are by name, which a string answers exactly.
     """
-    parameters = list(inspect.signature(HttpFetchContract.__call__).parameters.values())
-    if parameters and parameters[0].name == "self":
-        # Read as an unbound function, the protocol's __call__ carries `self`;
-        # the contract is about the call, not about the wrapper.
-        parameters = parameters[1:]
-    positional = tuple(
-        param.name
-        for param in parameters
-        if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    declared = inspect.signature(protocol.__call__, eval_str=resolve_annotations)
+    parameters = list(declared.parameters.values())
+    assert parameters[0].name == "self", (
+        f"{protocol.__name__}.__call__ opens with {parameters[0].name!r}, not self"
     )
-    keyword_only = tuple(param.name for param in parameters if param.kind is inspect.Parameter.KEYWORD_ONLY)
-    return {
-        "positional": positional,
-        "keyword_only": keyword_only,
-        "is_coroutine": inspect.iscoroutinefunction(HttpFetchContract.__call__),
-    }
+    return declared.replace(parameters=parameters[1:])
 
 
-_CONTRACT = _contract_signature()
+def _omittable(parameters: list[inspect.Parameter]) -> frozenset[str]:
+    """The parameters a caller may omit: every one carrying a default."""
+    return frozenset(param.name for param in parameters if param.default is not inspect.Parameter.empty)
 
-# Which parameters HttpFetchContract gives a default to, read off the Protocol
-# rather than typed here. This is the axis the name comparison above cannot see,
-# and it is the one with a safety edge: a default on `policy` turns a missing
-# SSRF keyword from a TypeError into an unrestricted HostPolicy, and the caller
-# never finds out. A name-only comparison passes that mutation -- verified: a
-# twin with `policy: HostPolicy = HostPolicy((), ())` satisfies HttpFetchContract
-# (mypy is happy, because protocol conformance is one-directional: an
-# implementation may accept more than the contract asks for) and matches every
-# key in _CONTRACT, so both the type checker and the tree-wide guard below went
-# green on a fetcher that silently stopped requiring the policy.
-_CONTRACT_DEFAULTED = frozenset(
-    name
-    for name, param in inspect.signature(HttpFetchContract.__call__).parameters.items()
-    if param.default is not inspect.Parameter.empty
-)
+
+def _parameters_of_kind(signature: inspect.Signature, kinds: frozenset) -> list[inspect.Parameter]:
+    """Every parameter of one or more kinds, in declaration order.
+
+    One selector rather than one per kind, because the kinds differ only in the
+    set they name and two comprehensions differing by one constant is the shape a
+    copy takes. Positional is a pair of kinds -- a Protocol may declare its
+    parameters positional-only, positional-or-keyword, or both -- so the argument
+    is a set rather than a single kind.
+    """
+    return [param for param in signature.parameters.values() if param.kind in kinds]
+
+
+_POSITIONAL = frozenset({inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD})
+_KEYWORD_ONLY = frozenset({inspect.Parameter.KEYWORD_ONLY})
+
+
+# What a production fetcher is this call PLUS: the keyword-only arguments the
+# engine binds and the call site never passes. Typed here rather than read off a
+# second Protocol, because that Protocol was the duplication jscpd reported -- the
+# four positional parameters written twice, kept in step only by comparing each
+# half against something else. ``HttpFetcher`` is the single declaration of the
+# shared shape; what each fetcher adds on top of it is a fact about that fetcher,
+# so it is stated once, here, next to the check that enforces it.
+#
+# ``policy`` is required and ``impersonate`` defaults, and which of them is
+# optional is the axis a name-only comparison cannot see. It is the axis with the
+# safety edge: a default on ``policy`` turns a missing SSRF keyword from a
+# TypeError into an unrestricted HostPolicy and the caller never finds out.
+# Verified: a twin with ``policy: HostPolicy = HostPolicy((), ())`` matches every
+# name below (mypy is happy too, because protocol conformance is one-directional --
+# an implementation may accept more than the contract asks for), so both the type
+# checker and the tree-wide guard went green on a fetcher that silently stopped
+# requiring the policy.
+_BOUND_KEYWORDS = ("policy", "impersonate")
+_BOUND_KEYWORD_OPTIONAL = frozenset({"impersonate"})
+
+# The shape every production fetcher must have: HttpFetcher's own positional
+# parameters, read off the Protocol so a rename there is a rename here, plus the
+# two bound keywords typed above. Derived in one place because it is compared
+# against every coroutine in app/ and a copy of it would be a second thing to
+# keep in step.
+_FETCHER_POSITIONALS = _parameters_of_kind(_unbound_call(HttpFetcher), _POSITIONAL)
+_EXPECTED_SHAPE = {
+    "positional": tuple(param.name for param in _FETCHER_POSITIONALS),
+    "keyword_only": _BOUND_KEYWORDS,
+    "is_coroutine": True,
+}
+_EXPECTED_OMITTABLE = _omittable(_FETCHER_POSITIONALS) | _BOUND_KEYWORD_OPTIONAL
 
 
 def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
@@ -102,39 +143,18 @@ def _defaulted_params(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset
     return frozenset([*positional, *keyword_only])
 
 
+@pytest.mark.parametrize("fetcher", _CONCRETE_FETCHERS)
 def _http_fetcher_alias_signature() -> inspect.Signature:
-    """The alias's own signature, read off its Protocol.
+    """The bound view's own signature, read off its Protocol.
 
-    ``HttpFetcher`` is a Protocol, so its shape is a real signature rather than
-    a ``Callable`` type argument: ``get_args(HttpFetcher)[0]`` is empty, and the
+    ``HttpFetcher`` is a Protocol, so its shape is a real signature rather than a
+    ``Callable`` type argument: ``get_args(HttpFetcher)[0]`` is empty, and the
     argument types live on ``__call__`` where a caller can also see *which* of
     them carry a default. The old reading could count the parameters and name
     their types, but it could not tell an optional fourth from a required one --
     which is the axis the alias got wrong.
-
-    ``self`` is dropped because a Protocol's ``__call__`` is read unbound. A
-    first parameter by any other name means the Protocol is not shaped the way
-    this reading assumes, which is a fact about the file rather than about the
-    four parameters, so it fails here instead of skewing the comparison.
-
-    ``eval_str`` because the source is written with postponed annotations, so
-    without it every parameter type reads as the string ``'int'`` rather than
-    the class -- and a string compares equal to nothing a caller can check.
     """
-    declared = inspect.signature(HttpFetcher.__call__, eval_str=True)
-    parameters = list(declared.parameters.values())
-    assert parameters[0].name == "self", (
-        f"HttpFetcher.__call__ opens with {parameters[0].name!r}, not self"
-    )
-    return declared.replace(parameters=parameters[1:])
-
-
-def _positional(signature: inspect.Signature) -> list[inspect.Parameter]:
-    return [
-        param
-        for param in signature.parameters.values()
-        if param.kind in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
-    ]
+    return _unbound_call(HttpFetcher)
 
 
 @pytest.mark.parametrize("fetcher", _CONCRETE_FETCHERS)
@@ -145,8 +165,8 @@ def test_http_fetcher_alias_matches_the_concrete_fetcher_arity(fetcher):
     caller typed against the alias calls ``fetcher(url, headers, timeout,
     max_content_length)`` by position.
     """
-    alias_names = [param.name for param in _positional(_http_fetcher_alias_signature())]
-    concrete_names = [param.name for param in _positional(inspect.signature(fetcher))]
+    alias_names = [param.name for param in _parameters_of_kind(_http_fetcher_alias_signature(), _POSITIONAL)]
+    concrete_names = [param.name for param in _parameters_of_kind(inspect.signature(fetcher), _POSITIONAL)]
     assert alias_names == concrete_names, (
         f"HttpFetcher declares {alias_names} but {fetcher.__name__} accepts {concrete_names}"
     )
@@ -157,7 +177,7 @@ def test_http_fetcher_alias_carries_the_documented_argument_types():
     (url, headers, timeout_seconds, max_content_length) tuple the concrete
     fetchers accept -- not the three-parameter shape it drifted to."""
     alias = _http_fetcher_alias_signature()
-    assert [param.annotation for param in _positional(alias)] == [
+    assert [param.annotation for param in _parameters_of_kind(alias, _POSITIONAL)] == [
         str,
         dict[str, str],
         int,
@@ -214,47 +234,46 @@ def _concrete_fetchers_in_app() -> list[tuple[str, str, ast.AsyncFunctionDef]]:
 
 
 def test_http_fetcher_contract_holds_tree_wide():
-    """Every production fetcher matches HttpFetchContract, wherever it lives.
+    """Every production fetcher is ``HttpFetcher`` plus exactly the bound keywords.
 
-    ``HttpFetchContract`` states the shape once precisely because the two
-    concrete fetchers cannot share a signature -- Python has no way to say it
-    once for two entry points the engine hands out separately. That makes this
-    check the only thing standing between the copy and silent drift: if a
-    parameter is added to one fetcher and not the other, this fails instead of
-    the first call site that omits it.
+    ``HttpFetcher`` is the one declaration of the call shape, and a production
+    fetcher adds a keyword-only ``policy`` and an ``impersonate`` keyword to it.
+    Those two facts are typed in this file, next to the check that enforces them,
+    rather than spelled as a second Protocol in ``app/models.py`` -- which is what
+    they used to be, and which is how the same four positional parameters came to
+    be written twice. This check is the only thing standing between the two
+    spellings now that there is one: if a parameter is added to a fetcher and not
+    to the Protocol, or the other way round, this fails instead of the first call
+    site that omits it.
 
     Names alone are not the whole shape. Which parameters are *optional* is a
     separate axis, and it is the one that bites: a fetcher that gives ``policy``
-    a default accepts a call the contract forbids, so an SSRF keyword silently
-    goes missing and the fetch runs against a default policy instead of raising.
-    mypy cannot see it, because a protocol only constrains what an
+    a default accepts a call the engine must never make, so an SSRF keyword
+    silently goes missing and the fetch runs against a default policy instead of
+    raising. mypy cannot see it, because a protocol only constrains what an
     implementation must accept, never what it may accept beyond that. So the
-    comparison here includes defaulting, taken from the Protocol itself.
+    comparison here includes defaulting.
     """
     offenders = []
-    contract_defaulted = _CONTRACT_DEFAULTED
     for filename, funcname, node in _concrete_fetchers_in_app():
         args = node.args
-        positional = tuple(arg.arg for arg in [*args.posonlyargs, *args.args])
-        keyword_only = tuple(arg.arg for arg in args.kwonlyargs)
         actual = {
-            "positional": positional,
-            "keyword_only": keyword_only,
+            "positional": tuple(arg.arg for arg in [*args.posonlyargs, *args.args]),
+            "keyword_only": tuple(arg.arg for arg in args.kwonlyargs),
             "is_coroutine": True,
         }
-        if actual != _CONTRACT:
+        if actual != _EXPECTED_SHAPE:
             offenders.append(f"{filename}:{node.lineno} {funcname} -> {actual}")
             continue
         defaulted = _defaulted_params(node)
-        if defaulted != contract_defaulted:
+        if defaulted != _EXPECTED_OMITTABLE:
             offenders.append(
                 f"{filename}:{node.lineno} {funcname} makes {sorted(defaulted)} optional "
-                f"but HttpFetchContract makes {sorted(contract_defaulted)} optional; a caller "
-                f"may omit a parameter the contract requires"
+                f"but the fetcher contract makes {sorted(_EXPECTED_OMITTABLE)} optional; a "
+                f"caller may omit a parameter the contract requires"
             )
-    assert not offenders, "production fetchers must match app.models.HttpFetchContract:\n  " + "\n  ".join(
-        offenders
-    )
+    detail = "production fetchers must match app.models.HttpFetcher:\n  " + "\n  ".join(offenders)
+    assert not offenders, detail
 
 
 def test_the_contract_guard_sees_defaulting_not_just_names():
@@ -263,10 +282,9 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
     This is the mutation that motivated comparing defaulting at all, and it is
     the one mypy accepts: a protocol constrains what an implementation must
     accept, not what it may additionally accept, so widening one twin with a
-    default on a required parameter satisfies HttpFetchContract and every
-    name-based key in the comparison above. On ``policy`` the default would be
-    a HostPolicy, and a caller omitting the SSRF keyword would get that instead
-    of a TypeError.
+    default on a required parameter satisfies HttpFetcher and every name-based
+    key in the comparison above. On ``policy`` the default would be a HostPolicy,
+    and a caller omitting the SSRF keyword would get that instead of a TypeError.
 
     Written against the real tree: the sweep finds the fetchers, then the
     comparison is run over a synthetic fetcher carrying the mutation, so this
@@ -278,9 +296,9 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
         "the real set, so it has to be the real set"
     )
     honest = next(node for _, name, node in found if name == "_default_http_fetcher")
-    assert _defaulted_params(honest) == _CONTRACT_DEFAULTED, (
+    assert _defaulted_params(honest) == _EXPECTED_OMITTABLE, (
         f"the production fetcher defaults {sorted(_defaulted_params(honest))} but the contract "
-        f"defaults {sorted(_CONTRACT_DEFAULTED)}; the clean tree must agree or this test is "
+        f"defaults {sorted(_EXPECTED_OMITTABLE)}; the clean tree must agree or this test is "
         "asserting nothing"
     )
 
@@ -289,11 +307,11 @@ def test_the_contract_guard_sees_defaulting_not_just_names():
         "async def f(url, headers, timeout_seconds, "
         "max_content_length=1, *, policy=None, impersonate=False): ...\n"
     ).body[0]
-    assert tuple(arg.arg for arg in mutated.args.args) == _CONTRACT["positional"]
-    assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _CONTRACT["keyword_only"]
+    assert tuple(arg.arg for arg in mutated.args.args) == _EXPECTED_SHAPE["positional"]
+    assert tuple(arg.arg for arg in mutated.args.kwonlyargs) == _EXPECTED_SHAPE["keyword_only"]
     widened = _defaulted_params(mutated)
-    assert widened == _CONTRACT_DEFAULTED | {"policy"}, widened
-    assert widened != _CONTRACT_DEFAULTED, (
+    assert widened == _EXPECTED_OMITTABLE | {"policy"}, widened
+    assert widened != _EXPECTED_OMITTABLE, (
         "the mutation must differ from the contract in defaulting only, or it proves nothing"
     )
 

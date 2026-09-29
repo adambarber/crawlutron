@@ -14,7 +14,7 @@ import json
 import pytest
 
 from tests._assertions import one_search_result
-from tests._browser_doubles import FakeBrowserPool
+from tests._browser_doubles import FakeBrowserPool, owned_browser_pool
 
 _PROTOCOL_VERSION = "2026-07-28"
 
@@ -259,11 +259,8 @@ def browser_pool_stub():
     stub pool is never actually used; it only needs to exist so the engine's
     ``browser_pool_unavailable`` guard does not 503.
     """
-    from app.crawl.strategies.browser_pool import set_browser_pool
-
-    previous = set_browser_pool(FakeBrowserPool())
-    yield
-    set_browser_pool(previous)
+    with owned_browser_pool(FakeBrowserPool()):
+        yield
 
 
 class TestToolsCall:
