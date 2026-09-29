@@ -26,7 +26,7 @@ from typing import Any
 from app.api.crawl_executor import execute_crawl
 from app.api.job_runner import arecord_terminal_failure
 from app.api.response_shaping import EnvelopeOptions, abuild_unified_crawl_response
-from app.crawl.job_store import JobStatus
+from app.crawl.job_store import TERMINAL_STATUSES, JobStatus
 from app.metrics import get_metrics
 from app.settings import CrawlerSettings
 from app.validation import HostPolicy, get_env_int
@@ -151,23 +151,65 @@ async def run_async_crawl(
                 "total_failed": failed,
             }
             await job_store.asave(job)
-            await job_store.aset_status(request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING)
+            # The terminal write is a compare-and-set and it can lose: pause_job
+            # compare-and-sets from RUNNING too, and whichever lands first wins.
+            # Its result is what decides whether this crawl is finished, so it
+            # is checked rather than discarded -- an unchecked CAS here is what
+            # let a paused job publish its results and read as 200 to a client
+            # polling GET /v1/crawl/{request_id}.
+            published = await job_store.aset_status(
+                request_id, JobStatus.COMPLETED, expected=JobStatus.RUNNING
+            )
+            if not published:
+                # The crawl finished, so a job that is no longer RUNNING is not
+                # a statement about this crawl -- unless it was moved deliberately.
+                # `recover_orphaned_running_jobs` rewinds RUNNING to PENDING on
+                # startup on the assumption that nothing is in flight, and that
+                # assumption does not hold whenever a second app instance shares
+                # the store: the job is rewound under a runner that is still
+                # working, and the terminal write then loses against PENDING. Left
+                # there, the job is unreachable -- PENDING is never picked up
+                # again, and the client polls a completion that cannot arrive.
+                #
+                # So the runner reconciles: PAUSED and CANCELLED are a caller
+                # asking for something else and are left alone, and anything else
+                # is a control-plane state this crawl did not choose, so the
+                # results are published against the state the job is actually in.
+                stranded = await job_store.aload(request_id)
+                if stranded is not None and stranded.status not in {
+                    JobStatus.PAUSED,
+                    JobStatus.CANCELLED,
+                    *TERMINAL_STATUSES,
+                }:
+                    logger.warning(
+                        "async_crawl_terminal_cas_lost",
+                        extra={"request_id": request_id, "status": stranded.status.value},
+                    )
+                    published = await job_store.aset_status(
+                        request_id, JobStatus.COMPLETED, expected=stranded.status
+                    )
 
-            # Also store in result_store for backward compat (sync path reads from here)
-            try:
-                await result_store.aput(request_id, response_payload)
-            except Exception:
-                logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
+            if published:
+                try:
+                    await result_store.aput(request_id, response_payload)
+                except Exception:
+                    logger.warning("crawl_result_store_failed", extra={"request_id": request_id})
 
-            # Deliver webhook if provided
-            if webhook_url:
-                from app.api.webhooks import post_webhook
+                # The webhook rides with the terminal write, in the success branch
+                # exactly as the failure branch below fires one after recording a
+                # terminal failure. That makes "a webhook arrived" mean "this job
+                # is finished" for every consumer, and it is the contract the
+                # delivery was already implying: announcing a completed crawl
+                # that was paused or cancelled mid-flight is how a caller ends up
+                # with a success notification for results it can never read back.
+                if webhook_url:
+                    from app.api.webhooks import post_webhook
 
-                await post_webhook(
-                    webhook_url,
-                    response_payload,
-                    host_policy=HostPolicy.from_settings(crawl_settings),
-                )
+                    await post_webhook(
+                        webhook_url,
+                        response_payload,
+                        host_policy=HostPolicy.from_settings(crawl_settings),
+                    )
 
     except Exception as exc:
         logger.error("async_crawl_failed", extra={"request_id": request_id, "error": str(exc)})

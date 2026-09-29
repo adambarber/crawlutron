@@ -5,6 +5,49 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A job row now belongs to the test that made it.** `app/main.py` binds
+  `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import and hands every
+  test one process-wide `JobStore` built on it, and no test overrode
+  `CRAWLUTRON_CACHE_DIR`. The whole suite therefore shared a single on-disk
+  database: a `PENDING` job row seeded by one test stayed claimable by any other
+  test — including one running at the same instant in a different xdist worker,
+  since `recover_and_start_pending_jobs` starts every `PENDING` whole-site job it
+  finds — and by the next run of the suite. That surfaced as an intermittent
+  `assert 'running' == 'pending'` in `test_v1_jobs_create_runs_and_list_get`, and
+  it also meant the suite was writing into the developer's real cache directory.
+  The suite now points `CRAWLUTRON_CACHE_DIR` at a per-worker scratch directory,
+  set in `conftest.py` at import time because import order is the constraint, and
+  removed at session teardown — guarded on identity so an operator-supplied
+  `CRAWLUTRON_CACHE_DIR` is never deleted.
+- **`GET /v1/crawl/{request_id}` no longer answers 200 for a job that is not
+  finished.** The endpoint read the result store before the job store, so any
+  row in the store produced a 200 regardless of the job's status, while its
+  docstring promised the opposite. The job is now consulted first; a
+  `request_id` with no job at all still answers 200 from the store, which is the
+  synchronous path and is finished by construction.
+- **A paused or cancelled async crawl no longer publishes results or announces
+  completion.** `run_async_crawl` wrote `COMPLETED` through a compare-and-set,
+  discarded the result, and then published to the result store unconditionally —
+  so a job paused mid-flight still answered 200 to a client polling it and still
+  delivered a success webhook for results it would never serve. The set is now
+  checked and the publish and webhook ride with it.
+- **A crawl whose terminal write loses its compare-and-set is no longer
+  stranded.** This is what the discarded result was hiding:
+  `recover_orphaned_running_jobs` rewinds `RUNNING` to `PENDING` on startup on
+  the assumption that no crawl is in flight, and that assumption does not hold
+  when a second app instance shares the store. The job is rewound under a runner
+  that is still working, the terminal write loses against `PENDING`, and the job
+  is unreachable — `PENDING` is never picked up again, so the client polls a
+  completion that cannot arrive. The runner now reconciles: `PAUSED` and
+  `CANCELLED` are a caller's decision and are left alone; anything else is a
+  control-plane state this crawl did not choose, and results are published
+  against the state the job is actually in.
+- **`crawl_api` no longer lets a crawl outlive its test.** The fixture handed out
+  a client and nothing else, so a test asserting only the 202 left a crawl
+  running into the next test's teardown, which replaces the app's process-global
+  shutdown event. Teardown now drains the crawls the fixture handed out.
+
 ### Changed
 - **The duplication gate is now 3 lines / 30 tokens, and reports zero clones.**
   The hook read `--min-lines 4 --min-tokens 25`, but jscpd counts *newlines*

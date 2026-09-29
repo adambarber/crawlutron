@@ -336,14 +336,12 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         from app.api.crawl_endpoint import get_crawl_result
 
         await _off_loop(loop_guard_store.create_single_shot, "req-1", _ROOT, {"strategies": []})
-        stored = {
-            "request_id": "req-1",
-            "results": [],
-            "submitted_count": 0,
-            "policy_schema_version": "",
-            "success": True,
-        }
-        await _off_loop(result_store.put, "req-1", stored)
+        # Completed, not fresh: this test is about *where* the read happens, and
+        # a still-pending job would make it a test of the status contract as
+        # well -- two questions, one assertion, and the second one was
+        # answering the wrong way.
+        await _off_loop(loop_guard_store.set_status, "req-1", JobStatus.COMPLETED, expected=JobStatus.PENDING)
+        await _off_loop(result_store.put, "req-1", _stored_response("req-1"))
 
         response = await get_crawl_result("req-1", loop_guard_store, result_store)
         assert response.request_id == "req-1"
@@ -357,6 +355,22 @@ class TestSingleShotResultStoreStaysOffTheLoop:
         assert raised.value.status_code == 202
 
 
+def _stored_response(request_id: str) -> dict:
+    """The payload the result store holds for one finished crawl.
+
+    Three tests read a stored response and one writes one; each used to spell
+    the five keys out, and a copy that dropped ``policy_schema_version`` asserts
+    against a model that fills it in rather than against the stored shape.
+    """
+    return {
+        "request_id": request_id,
+        "results": [],
+        "submitted_count": 0,
+        "policy_schema_version": "",
+        "success": True,
+    }
+
+
 async def _job_with_results_written(store, job_id: str) -> None:
     """Put a single-shot job into the state the runner passes through mid-flight.
 
@@ -367,15 +381,7 @@ async def _job_with_results_written(store, job_id: str) -> None:
     """
     await _off_loop(store.set_status, job_id, JobStatus.RUNNING, expected=JobStatus.PENDING)
     job = await _off_loop(store.load, job_id)
-    job.results = [
-        {
-            "request_id": job_id,
-            "results": [],
-            "submitted_count": 0,
-            "policy_schema_version": "",
-            "success": True,
-        }
-    ]
+    job.results = [_stored_response(job_id)]
     await _off_loop(store.save, job)
 
 
@@ -399,6 +405,62 @@ class TestStatusEndpointAnswersOnlyForTerminalJobs:
         with pytest.raises(HTTPException) as raised:
             await get_crawl_result("req-3", loop_guard_store, result_store)
         assert raised.value.status_code == 202, raised.value.detail
+
+    async def test_a_stored_result_does_not_answer_200_for_a_running_job(
+        self, loop_guard_store, result_store
+    ):
+        """The result store cannot be the thing that decides the answer.
+
+        ``run_async_crawl`` publishes to the result store *after* its terminal
+        status write, but that write is a compare-and-set whose result it does
+        not check: a job paused between the two is published anyway. Keyed on
+        the store alone -- which is what the endpoint's first branch does --
+        that job answers 200 while the job store still says ``running``. That
+        is the failure this class exists to prevent, reached by the other door.
+        """
+        from app.api.crawl_endpoint import get_crawl_result
+
+        await _off_loop(loop_guard_store.create_single_shot, "req-5", _ROOT, {"strategies": []})
+        await _off_loop(loop_guard_store.set_status, "req-5", JobStatus.RUNNING, expected=JobStatus.PENDING)
+        await _off_loop(result_store.put, "req-5", _stored_response("req-5"))
+
+        with pytest.raises(HTTPException) as raised:
+            await get_crawl_result("req-5", loop_guard_store, result_store)
+        assert raised.value.status_code == 202, raised.value.detail
+
+    async def test_a_stored_result_does_not_answer_200_for_a_paused_job(self, loop_guard_store, result_store):
+        """The reachable form of the same hole: pause wins the race, publish loses it.
+
+        ``pause_job`` compare-and-sets from ``RUNNING``, and ``run_async_crawl``
+        compare-and-sets to ``COMPLETED`` from ``RUNNING``. Whichever lands
+        first wins; when pause does, the runner's terminal write fails and the
+        payload is still published. A paused job is stopped, not finished, so
+        the answer is still 202.
+        """
+        from app.api.crawl_endpoint import get_crawl_result
+
+        await _off_loop(loop_guard_store.create_single_shot, "req-6", _ROOT, {"strategies": []})
+        await _off_loop(loop_guard_store.set_status, "req-6", JobStatus.RUNNING, expected=JobStatus.PENDING)
+        await _off_loop(loop_guard_store.set_status, "req-6", JobStatus.PAUSED, expected=JobStatus.RUNNING)
+        await _off_loop(result_store.put, "req-6", _stored_response("req-6"))
+
+        with pytest.raises(HTTPException) as raised:
+            await get_crawl_result("req-6", loop_guard_store, result_store)
+        assert raised.value.status_code == 202, raised.value.detail
+
+    async def test_a_completed_job_with_a_stored_result_still_answers_200(
+        self, loop_guard_store, result_store
+    ):
+        """The complement on the store path: the fix must not make it unreadable."""
+        from app.api.crawl_endpoint import get_crawl_result
+
+        await _off_loop(loop_guard_store.create_single_shot, "req-7", _ROOT, {"strategies": []})
+        await _off_loop(loop_guard_store.set_status, "req-7", JobStatus.RUNNING, expected=JobStatus.PENDING)
+        await _off_loop(loop_guard_store.set_status, "req-7", JobStatus.COMPLETED, expected=JobStatus.RUNNING)
+        await _off_loop(result_store.put, "req-7", _stored_response("req-7"))
+
+        response = await get_crawl_result("req-7", loop_guard_store, result_store)
+        assert response.request_id == "req-7"
 
     async def test_the_same_job_answers_200_once_it_is_completed(self, loop_guard_store, result_store):
         """The complement: the fix must not make a finished job unreadable."""

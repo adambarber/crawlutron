@@ -203,20 +203,30 @@ async def get_crawl_result(
     ``run_async_crawl`` performs those two writes in that order: reporting the
     result a moment early tells a polling client the crawl is finished while it
     is still running, and the job store it then reads says ``running``.
+
+    The job is consulted *before* the result store for the same reason. The
+    store is a cache of finished crawls, but nothing about a row in it proves
+    the job finished: the runner publishes after its terminal write, so a job
+    paused in between sits in the store while it is still running, and reading
+    the store first turns that into a 200 for a crawl that is not done.
+
+    A request_id with no job at all still answers 200 from the store. That is
+    the synchronous path, which writes the store as the last step of a crawl
+    that has already returned -- there was never a job to be in flight.
     """
-    stored = await result_store.aget(request_id)
-    if stored is not None:
-        return UnifiedCrawlResponse(**stored)
     job = await job_store.aload(request_id)
-    if job is not None and job.kind == JobKind.SINGLE_SHOT:
-        if job.results and job.status in TERMINAL_STATUSES:
-            return UnifiedCrawlResponse(**job.results[0])
+    if job is not None and job.status not in TERMINAL_STATUSES:
         raise http_error(
             202,
             "pending",
             f"Job {request_id} is still {job.status.value}",
             {"status": job.status.value},
         )
+    stored = await result_store.aget(request_id)
+    if stored is not None:
+        return UnifiedCrawlResponse(**stored)
+    if job is not None and job.kind == JobKind.SINGLE_SHOT and job.results:
+        return UnifiedCrawlResponse(**job.results[0])
     raise http_error(404, "not_found", f"Unknown or expired request_id: {request_id}")
 
 

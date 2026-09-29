@@ -10,6 +10,7 @@ importable from the package root.
 import asyncio
 import contextlib
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -57,6 +58,39 @@ if ROOT.exists() and str(ROOT) not in sys.path:
 # ``_assertions.block_private_targets(monkeypatch)`` or the
 # ``ssrf_guard_required`` fixture regardless of mode.
 os.environ.setdefault("CRAWLUTRON_ALLOW_PRIVATE_TARGETS", "0")
+
+# `app.main` binds `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at
+# import time and hands every test the same process-wide `JobStore` built on it.
+# Nothing else moved that file, so a PENDING job row seeded by one test stayed
+# readable and claimable by every other test -- including one running at the
+# same moment in a different xdist worker -- and by the next full run of the
+# suite. A job row was therefore not owned by the test that made it.
+#
+# One cache directory per worker process, set here because import order is the
+# whole constraint: this runs while conftest is imported, before any test
+# module reaches `app.main`. A path rather than a created directory, so nothing
+# accumulates at import; the app makes it on demand, and
+# `_remove_test_cache_dir` below takes it away when the worker is done.
+_SCRATCH_CACHE_DIR = (
+    Path(tempfile.gettempdir())
+    / f"crawlutron-tests-{os.environ.get('PYTEST_XDIST_WORKER', 'master')}-{os.getpid()}"
+)
+os.environ.setdefault("CRAWLUTRON_CACHE_DIR", str(_SCRATCH_CACHE_DIR))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _remove_test_cache_dir():
+    """Delete this worker's scratch cache directory once the session is over.
+
+    Guarded on identity rather than on the env var: if the operator pointed
+    ``CRAWLUTRON_CACHE_DIR`` somewhere real, that directory is not the suite's
+    to delete, and the teardown must be the one thing in this file that cannot
+    destroy their data.
+    """
+    yield
+    if os.environ.get("CRAWLUTRON_CACHE_DIR") == str(_SCRATCH_CACHE_DIR):
+        shutil.rmtree(_SCRATCH_CACHE_DIR, ignore_errors=True)
+
 
 _TEST_STRICT_SSRF = os.environ.get("CRAWLUTRON_TEST_STRICT_SSRF", "0") == "1"
 

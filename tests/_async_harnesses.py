@@ -7,7 +7,8 @@ part that was easy to get wrong -- ``WEBHOOK_RECEIVED`` is one process-global
 list in ``helpers.server``, so a test that polls it without clearing it first
 can be handed the previous test's delivery and still pass. The clear belongs
 with handing out the client, which is what makes the pairing a fixture rather
-than a convention.
+than a convention. The teardown drain is the other half of that pairing: the
+fixture owns the crawls it hands out, so it is what stops them.
 """
 
 import asyncio
@@ -53,12 +54,50 @@ class CrawlApi:
 
 
 @pytest.fixture
-def crawl_api(async_client, base_url) -> CrawlApi:
-    """An ASGI client, the helper server's origin, and a cleared webhook sink."""
+async def crawl_api(async_client, base_url) -> CrawlApi:
+    """An ASGI client, the helper server's origin, and a cleared webhook sink.
+
+    Teardown drains the crawls this test started, because a crawl that outlives
+    its test is a defect that lands on the *next* one. The app's shutdown event
+    is process-global and the per-test teardown replaces it; a straggler still
+    running when that flips is paused, its terminal write then loses the
+    compare-and-set against ``PAUSED``, and the results it will never publish
+    leave a later test waiting for a completion that cannot arrive. A test that
+    only asserts the 202 still starts a crawl, so this belongs to the fixture
+    rather than to each test that remembered.
+    """
     from tests.helpers.server import WEBHOOK_RECEIVED
 
     WEBHOOK_RECEIVED.clear()
-    return CrawlApi(client=async_client, base=base_url)
+    api = CrawlApi(client=async_client, base=base_url)
+    try:
+        yield api
+    finally:
+        await _drain_running_crawls()
+
+
+async def _drain_running_crawls(*, guard: float = 10.0) -> None:
+    """Wait for every job still ``RUNNING`` to leave it, or say which one did not.
+
+    Bounded rather than open-ended on purpose: a crawl that is genuinely stuck
+    should fail at its own assertion, not hold every later test open until the
+    suite's hang guard fires somewhere unrelated.
+    """
+    from app.crawl.job_store import JobStatus
+    from app.main import job_store
+
+    def running() -> list[str]:
+        # ``list_jobs`` is the status view, not the state, so this reads the
+        # row dict rather than materialising every result payload to ask a
+        # question about the status column.
+        return [row["job_id"] for row in job_store.list_jobs() if row["status"] == JobStatus.RUNNING.value]
+
+    try:
+        await await_until(running, "a crawl was still RUNNING when its test finished")
+    except AssertionError:
+        # A stuck crawl is reported, not raised: raising here would mask the
+        # assertion of the test that actually caused it.
+        pass
 
 
 async def run_loop_rebind_scenario(get_client, *, guard: float | None = None):
