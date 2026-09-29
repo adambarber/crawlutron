@@ -938,16 +938,11 @@ class _FrameCollector:
             )
 
 
-def _extract_frames(
-    html: str | None,
+def _frames_from(
+    walkable: _Walkable,
     source_url: str | None,
-    *,
     host_policy: HostPolicy,
-    tree: Any | None = None,
 ) -> list[dict[str, Any]]:
-    walkable = _walkable(html, source_url, tree)
-    if walkable is None:
-        return []
     source_host = (urlparse(walkable.source_url).hostname or "").lower()
     frames: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -985,16 +980,10 @@ def _extract_frames(
 _CONTROL_TAGS = ("input", "select", "textarea", "button")
 
 
-def _extract_forms(
-    html: str | None,
-    source_url: str | None,
-    *,
+def _forms_from(
+    walkable: _Walkable,
     host_policy: HostPolicy,
-    tree: Any | None = None,
 ) -> list[dict[str, Any]]:
-    walkable = _walkable(html, source_url, tree)
-    if walkable is None:
-        return []
     forms: list[dict[str, Any]] = []
     for form_el in walkable.tree.iter("form"):
         attrs = {key.lower(): value for key, value in form_el.attrib.items()}
@@ -1043,9 +1032,15 @@ def _html_diagnostics(
     tree: Any | None = None,
 ) -> dict[str, Any]:
     diagnostics: dict[str, Any] = {}
-    tree = _diagnostic_inputs(html, tree)
-    frames = _extract_frames(html, source_url, host_policy=host_policy, tree=tree)
-    forms = _extract_forms(html, source_url, host_policy=host_policy, tree=tree)
+    # One parse, one guard. The two extractors used to take the raw html and
+    # each re-derive the walkable, which put the "is there a tree to walk"
+    # precondition -- the one that silently yields an empty diagnostic rather
+    # than an error -- in front of both of them, spelled twice.
+    walkable = _walkable(html, source_url, tree)
+    if walkable is None:
+        return diagnostics
+    frames = _frames_from(walkable, source_url, host_policy)
+    forms = _forms_from(walkable, host_policy)
     if frames:
         diagnostics["frames"] = frames
     if forms:

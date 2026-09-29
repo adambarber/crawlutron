@@ -29,9 +29,10 @@ from app.crawl.engine import (
     crawl_request,
 )
 from app.crawl.extraction import (
-    _extract_forms,
-    _extract_frames,
+    _forms_from,
     _FrameCollector,
+    _frames_from,
+    _walkable,
 )
 from app.crawl.payload_helpers import _payload_urls
 from app.crawl.policy import PolicyTier, read_policy
@@ -252,11 +253,13 @@ class TestPureParsing:
             '<iframe src="javascript:alert(1)"></iframe>'
             '<iframe src="http://same.example/f"></iframe>'
         )
-        frames = _extract_frames(
+        walkable = _walkable(
             html,
             "http://same.example/",
-            host_policy=UNRESTRICTED_HOST_POLICY,
+            None,
         )
+        assert walkable is not None
+        frames = _frames_from(walkable, "http://same.example/", UNRESTRICTED_HOST_POLICY)
         assert len(frames) == 1
 
     def test_extract_discovered_links_skips_bad_scheme(self) -> None:
@@ -546,7 +549,7 @@ class TestCrawlRequest:
 
 class TestFetchHelperUtilities:
     def test_form_collector_select_textarea_button(self) -> None:
-        forms = _extract_forms(
+        walkable = _walkable(
             "<form action='/submit' method='post'>"
             "<input type='text' name='q' value='a'>"
             "<select name='s'><option value='1'>x</option></select>"
@@ -554,8 +557,10 @@ class TestFetchHelperUtilities:
             "<button name='b' value='go'>Go</button>"
             "</form>",
             "http://x/",
-            host_policy=UNRESTRICTED_HOST_POLICY,
+            None,
         )
+        assert walkable is not None
+        forms = _forms_from(walkable, UNRESTRICTED_HOST_POLICY)
         assert len(forms) == 1
         tags = {c["tag"] for c in forms[0]["controls"]}
         assert {"input", "select", "textarea", "button"} <= tags

@@ -305,21 +305,25 @@ def _drop_rejected(raw: dict[str, Any], exc: ValidationError) -> dict[str, Any] 
 PolicyLike = CrawlPolicy | dict[str, Any]
 
 
-def _already_built(raw: Any) -> CrawlPolicy | None:
-    """The policy ``raw`` already is, or ``None`` if it is something to validate.
+def _policy_input(raw: Any) -> CrawlPolicy | dict[str, Any] | None:
+    """``raw`` as the one of three things a policy edge can act on.
 
-    A validated policy must not be validated again. Re-validating one that
-    arrived as a model is not merely wasted work: the wire edge rejects a
-    non-mapping as ``invalid_policy``, so a caller holding a real
-    ``CrawlPolicy`` -- the whole-site runner reads one out of a job row and
-    hands it to the engine through the raw payload shape -- was having its
-    own policy refused, for the crime of already being valid.
+    A model is already validated and must be handed straight back -- validating
+    it again is not merely wasted work, it is how the strict edge used to reject
+    a valid policy as ``invalid_policy`` for not being a mapping. A mapping is
+    something to validate. ``None`` is neither, and it is the *only* case where
+    the two policy edges genuinely differ: the read edge answers with defaults
+    because it is total, the wire edge answers with a refusal because it is
+    not.
 
-    Stated once because it was stated twice, in two functions whose second
-    lines disagreed about what a non-policy is. Both now ask this, so a change
-    to what counts as already-valid cannot land in one and miss the other.
+    Stated once because it was stated twice, and the two copies had drifted
+    apart on the question that matters -- whether a re-read of a broken model
+    is even possible. It is not: a constructed model is valid by construction,
+    so returning one untouched is not a shortcut, it is the only correct answer.
     """
-    return raw if isinstance(raw, CrawlPolicy) else None
+    if isinstance(raw, CrawlPolicy):
+        return raw
+    return raw if isinstance(raw, dict) else None
 
 
 def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
@@ -343,11 +347,10 @@ def read_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolicy:
     removes at least one key, and it ends at full defaults only when there is
     nothing left to drop.
     """
-    if (built := _already_built(raw)) is not None:
-        return built
-    if not isinstance(raw, dict):
-        return CrawlPolicy()
-    candidate = _with_omitted_defaults(raw, tier)
+    resolved = _policy_input(raw)
+    if not isinstance(resolved, dict):
+        return resolved if resolved is not None else CrawlPolicy()
+    candidate = _with_omitted_defaults(resolved, tier)
     for _ in range(len(CrawlPolicy.model_fields)):
         try:
             return CrawlPolicy.model_validate(candidate)
@@ -384,11 +387,12 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
     just wasted work -- it was rejecting it, as ``invalid_policy``, for not
     being a dict.
     """
-    if (built := _already_built(raw)) is not None:
-        return built
-    if not isinstance(raw, dict):
+    resolved = _policy_input(raw)
+    if not isinstance(resolved, dict):
+        if resolved is not None:
+            return resolved
         raise ValueError("invalid_policy") from None
-    raw_limits = raw.get("limits")
+    raw_limits = resolved.get("limits")
     if raw_limits is not None and not isinstance(raw_limits, Mapping):
         # A caller sent something that is not a limits mapping. Nothing to
         # translate, and reaching in here is what made a bad ``limits`` raise
@@ -396,7 +400,7 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
         # untouched so it reports the shape itself, which lands on the same
         # invalid_policy_limits answer.
         try:
-            return CrawlPolicy.model_validate(_with_omitted_defaults(raw, tier))
+            return CrawlPolicy.model_validate(_with_omitted_defaults(resolved, tier))
         except ValidationError as exc:
             raise ValueError(_code_for(exc)) from None
     limits = dict(raw_limits or {})
@@ -414,6 +418,6 @@ def validate_wire_policy(raw: Any, tier: PolicyTier | None = None) -> CrawlPolic
     # (`if explicit:`), and 0 is what the wire echo has always carried.
     limits.setdefault("max_content_length_bytes", 0)
     try:
-        return CrawlPolicy.model_validate(_with_omitted_defaults({**raw, "limits": limits}, tier))
+        return CrawlPolicy.model_validate(_with_omitted_defaults({**resolved, "limits": limits}, tier))
     except ValidationError as exc:
         raise ValueError(_code_for(exc)) from None
