@@ -20,6 +20,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   set in `conftest.py` at import time because import order is the constraint, and
   removed at session teardown — guarded on identity so an operator-supplied
   `CRAWLUTRON_CACHE_DIR` is never deleted.
+
+  This removes cross-*process* sharing only. Roughly 1 run in 10 still flakes,
+  because the ASGI tests share the app's process-global runtime — the module
+  global `job_store`, the job runner's task registry, and the app's
+  `shutdown_event` — so a test that boots a lifespan changes the outcome of
+  every other test in its worker. Both the database lock in
+  `test_the_lifespan_boots_a_four_worker_fleet` and the stuck-`running` job in
+  `test_v1_jobs_create_runs_and_list_get` come from that one channel. See
+  issue #35; the direction is a funnel that hands each test an owned view of the
+  runtime rather than three separate patches.
+- **A test that runs alone must not be the only way a test passes.** Under
+  back-to-back suite runs `test_cooldown_delay_applied_to_domain` and
+  `test_v1_crawl_async_mode_concurrent_limit` fail, while 20/20 in isolation
+  they pass. Both measure elapsed wall-clock instead of an injected clock, so
+  they assert on the machine rather than on the code. See issue #36; raising
+  the timeout would mask it.
 - **`GET /v1/crawl/{request_id}` no longer answers 200 for a job that is not
   finished.** The endpoint read the result store before the job store, so any
   row in the store produced a 200 regardless of the job's status, while its
