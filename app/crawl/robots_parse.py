@@ -8,7 +8,7 @@ RFC 9309 most-specific-group selection. The copies had already drifted on
 one gate (an empty ``Crawl-delay:`` must not open a group while an empty
 ``Disallow:`` must, because it means allow-all).
 
-The family is linear-time by construction (#1766): a str.find/partition
+The family is linear-time by construction: a str.find/partition
 walk, never a regex over attacker-controlled text. ``accepts`` is the
 per-parser policy of *which directives it consumes*; everything structural
 is shared here so a robots-parsing fix lands once.
@@ -80,7 +80,15 @@ def select_robots_values(
 
     Matching is against the product token, not the full User-Agent string —
     URL/version fragments in a robots group must not claim our crawler.
+
+    Both sides are lower-cased here. ``robots_groups`` already lower-cases the
+    file side, so without this the comparison silently depended on the caller
+    passing an already-lower-case token: a mixed-case token would match no group
+    and fall through to the star group, which answers a question RFC 9309 2.2.1
+    makes case-insensitive by throwing it away. Normalising at the comparison
+    keeps the guarantee next to the code that depends on it.
     """
+    token = token.lower()
     best: list[Any] | None = None
     best_len = -1
     star: list[Any] | None = None

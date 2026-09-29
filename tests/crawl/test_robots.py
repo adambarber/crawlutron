@@ -205,10 +205,13 @@ def _module_source(module) -> str:
     return pathlib.Path(module.__file__).read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("token", ["Browser-Crawler", "browser-crawler"])
+@pytest.mark.parametrize("token", [TOKEN.capitalize(), TOKEN])
 def test_agent_matching_is_case_insensitive(token):
-    text = "User-agent: BROWSER-CRAWLER\nDisallow: /x\n"
-    assert parse_robots_rules(text, token=token.lower()) == [(False, "/x")]
+    # The file declares the agent in upper case while the query arrives mixed
+    # and lower, so all three spellings are one token. A matcher that compared
+    # literally would pass the lower param and fail the mixed one.
+    text = f"User-agent: {TOKEN.upper()}\nDisallow: /x\n"
+    assert parse_robots_rules(text, token=token) == [(False, "/x")]
 
 
 def test_wildcard_disallow_blocks_subpaths():
