@@ -542,7 +542,15 @@ def _markdown_documents() -> list[str]:
     return sorted(
         str(document.relative_to(REPO_ROOT))
         for document in REPO_ROOT.rglob("*.md")
-        if not _SKIP_DIRECTORIES.intersection(document.parts)
+        # Relative parts, never absolute ones: the skip list names directories
+        # of THIS repository (`docs/work/`), and matching it against the
+        # absolute path drops every document on any checkout that happens to
+        # live under a directory with one of those names. GitHub Actions
+        # checks out to /home/runner/work/<repo>/<repo>, so the `work` entry
+        # alone excluded the entire tree and the doc gate passed by examining
+        # nothing -- a gate that is green because it looked at zero files is
+        # worse than one that is red, because it is silently disarmed.
+        if not _SKIP_DIRECTORIES.intersection(document.relative_to(REPO_ROOT).parts)
     )
 
 

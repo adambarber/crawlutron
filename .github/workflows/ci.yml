@@ -89,8 +89,16 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Install Camoufox browser binary
         run: python3 -m camoufox fetch
-      - name: Run pytest (full)
-        run: python3 -m pytest -o addopts=
+      - name: Run pytest (browser)
+        # Widens the marker filter to admit `browser`, and only that. The
+        # previous `-o addopts=` blanked the entire addopts string to get there,
+        # which also dropped `--strict-markers` (a misspelled marker would
+        # silently select nothing), `-m "not slow"` (the slow suite, which the
+        # fast job deliberately excludes and which no browser test needs), and
+        # `-n auto --dist worksteal` -- running the whole 2200-test suite
+        # serially in a job that exists to add one marker. Spelling the filter
+        # out keeps the rest of the configuration intact.
+        run: python3 -m pytest -m "not slow"
 
   # One required check. A repository ruleset should require exactly
   # this job: GitHub treats a skipped job as success, so the individual jobs

@@ -7,7 +7,7 @@ import pytest
 from app.crawl.policy import PolicyTier, read_policy, validate_wire_policy
 from tests._fetcher_factories import failing_fetcher, request_fetcher, run_http_strategy, scripted_fetcher
 from tests._policy_factories import http_strategy_policy
-from tests._transport_doubles import join_or_kill
+from tests._transport_doubles import isolated_process, isolated_queue, join_or_kill
 from tests.helpers.server import _Handler, spawn_threaded_server
 
 
@@ -66,13 +66,19 @@ class TestHttpStrategyEdges:
         In-process real cffi is banned (#1744/#1746): under fast_sleeps the
         curl watchdog busy-spins the GIL and wedges the pytest process, so
         the fetch runs in an isolated interpreter with a hard join.
-        """
-        import multiprocessing
 
+        The isolation is the load-bearing part, and it has to be asked for. A
+        default ``multiprocessing.Process`` forks on Linux, and a forked child
+        inherits the suite-wide ``impersonating_fetcher`` stub, so this test
+        received the stub instead of the transport it is about and failed with
+        "curl_cffi stubbed in tests" -- on CI only, having passed on the macOS
+        where the same default spawns. ``isolated_process`` names the start
+        method so the test means the same thing on both.
+        """
         server = spawn_threaded_server(_Handler)
         url = f"http://127.0.0.1:{server.server_port}/"
-        out_queue: multiprocessing.Queue = multiprocessing.Queue()
-        worker = multiprocessing.Process(target=_cffi_smoke_worker, args=(url, out_queue))
+        out_queue = isolated_queue()
+        worker = isolated_process(_cffi_smoke_worker, (url, out_queue))
         try:
             worker.start()
             join_or_kill(worker, 10.0, "the cffi fetcher on a normal response")

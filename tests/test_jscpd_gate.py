@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import tests._jscpd_gate as gate
+from tests._executables import require_repo_tool
 
 
 def _args(threshold: float = 0) -> argparse.Namespace:
@@ -447,11 +448,19 @@ def test_a_cross_tree_pair_whose_fragment_moved_is_drift(monkeypatch, tmp_path, 
     assert "drift" in capsys.readouterr().err
 
 
-def test_jscpd_command_uses_service_venv(monkeypatch, tmp_path) -> None:
+def test_jscpd_command_resolves_the_service_copy(monkeypatch, tmp_path) -> None:
+    """The command names the repository's own jscpd, whichever install it came from.
+
+    Asserted against ``require_repo_tool`` rather than against a spelled-out
+    path, because the install is genuinely two-shaped: a repository-root
+    ``.venv`` locally, the runner's console script in CI. Spelling the venv
+    path here made the assertion false in CI for a command that was correct,
+    which is the same mistake the gate itself was making.
+    """
     commands = _run_against_empty_tree(monkeypatch, tmp_path)
     assert commands
     for command in commands:
-        assert command[0] == str(gate.SERVICE_ROOT / ".venv" / "bin" / "jscpd")
+        assert command[0] == require_repo_tool(gate.SERVICE_ROOT, "jscpd")
         assert "--fail-on-empty" in command
         assert command[command.index("--threshold") + 1] == "0"
     # The floor each command carries is checked across all roots by
@@ -771,10 +780,12 @@ def test_migrations_clones_are_not_reported_but_production_clones_are(monkeypatc
     _write_expectations(mirror / "expectations.json", [])
     # The real `.jscpd.json` is NOT redirected: the ignore list is the thing
     # under test. The venv is a property of the machine, not of the scanned
-    # tree, so the mirror borrows the real one and the jscpd invocation stays
-    # the same binary. TREE_ROOTS keeps its production values; only the source
-    # floor moves, because this tree is four files instead of three hundred.
-    (mirror / ".venv").symlink_to(gate.SERVICE_ROOT / ".venv", target_is_directory=True)
+    # tree, so the mirror borrows the real one when there is one and the gate
+    # falls back to PATH when there is not. TREE_ROOTS keeps its production
+    # values; only the source floor moves, because this tree is four files
+    # instead of three hundred.
+    if (gate.SERVICE_ROOT / ".venv").exists():
+        (mirror / ".venv").symlink_to(gate.SERVICE_ROOT / ".venv", target_is_directory=True)
     monkeypatch.setattr(gate, "SERVICE_ROOT", mirror)
     monkeypatch.setattr(gate, "EXPECTATIONS_PATH", mirror / "expectations.json")
     monkeypatch.setattr(gate, "MIN_SOURCES", {"all": 1})

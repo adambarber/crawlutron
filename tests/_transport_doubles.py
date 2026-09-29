@@ -20,6 +20,17 @@ process, so the genuine fetcher runs in a spawned interpreter with a hard join
 :func:`real_cffi_fetch_outcome` owns that arrangement -- the child, the queue,
 the join, the terminate -- and a test states only the outcome it is about: a
 status code, or the class of the transport failure that ended the fetch.
+
+"Spawned" is a decision this module makes, not a platform default it inherits.
+The default start method is ``fork`` on Linux and ``spawn`` on macOS, and a fork
+child is a copy of the test process: it inherits the ``monkeypatch``ed
+``impersonating_fetcher`` stub and the zeroed ``time.sleep``. On a fork platform
+the isolation this file exists to provide silently did not happen, so a test
+marked ``real_cffi`` got the stub, and curl's LOW_SPEED watchdog -- which depends
+on real sleeps -- busy-spun in the child until the hang guard killed it. Both
+symptoms were platform-local: on macOS the tests passed. :func:`isolated_process`
+and :func:`isolated_queue` are the one place the start method is named, so the
+isolation is a property of the harness rather than of the kernel it runs on.
 """
 
 import multiprocessing
@@ -31,6 +42,27 @@ import httpx
 import pytest
 
 from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
+
+_ISOLATED = multiprocessing.get_context("spawn")
+
+
+def isolated_queue() -> Any:
+    """A queue from the same context as :func:`isolated_process`.
+
+    The two must agree: a queue created by the default context and handed to a
+    spawned process is the kind of pairing that works until it does not.
+    """
+    return _ISOLATED.Queue()
+
+
+def isolated_process(target: Any, args: tuple[Any, ...]) -> multiprocessing.Process:
+    """A child process that inherits nothing from this test process.
+
+    Named rather than inlined because the start method is the whole point: a
+    default ``multiprocessing.Process`` is isolated on macOS and a fork on Linux,
+    so a test written against it is a test that passes on the author's machine.
+    """
+    return _ISOLATED.Process(target=target, args=args)
 
 
 class _ScriptedBody(httpx.AsyncByteStream):
@@ -287,10 +319,8 @@ def real_cffi_fetch_outcome(
     parameter because it is not a production constant and must not be
     re-spelled per test.
     """
-    out_queue: Any = multiprocessing.Queue()
-    worker = multiprocessing.Process(
-        target=_outcome_worker, args=(url, timeout_seconds, max_content_length, out_queue)
-    )
+    out_queue = isolated_queue()
+    worker = isolated_process(_outcome_worker, (url, timeout_seconds, max_content_length, out_queue))
     worker.start()
     join_or_kill(worker, join_timeout, f"the genuine cffi fetcher on {url}")
     if worker.exitcode != 0:
@@ -302,6 +332,8 @@ def real_cffi_fetch_outcome(
 
 __all__ = [
     "CffiFetchOutcome",
+    "isolated_process",
+    "isolated_queue",
     "MockResponse",
     "allow_scripted_egress",
     "dispatching_transport_client",

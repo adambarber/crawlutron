@@ -119,6 +119,26 @@ def _doc_extraction_worker_count() -> int:
 # Sized by doc_worker_count() (app.resource_pressure -- the single home for the
 # count) so memory stays within the container ceiling. Defined after the
 # worker-count helper above.
+
+# The start method is named, never inherited from the platform. The default is
+# `fork` on Linux and `spawn` on macOS, and a forked extraction worker is a copy
+# of the whole crawler: the running event loop, every open socket, the HTTP
+# cache, and any lock another thread held at fork time -- held for good, since
+# the thread that owned it does not exist in the child. This worker does nothing
+# but CPU-bound markitdown over a pipe, so a clean interpreter is both safer and
+# no more costly, and the persistent pool above already exists to amortize the
+# spawn cost that naming it does not remove.
+#
+# It is also why the pool is honest about its own environment. A forked child
+# freezes the parent's env at fork time, so a long-lived worker predating a
+# setting never observed it -- which is how the timeout suite passed on macOS
+# and failed on the same assertion on Linux, with no change to the code under
+# test. Every process object handed to the child comes from this one context:
+# a pipe from the default context and a process from another is not a pairing
+# that works.
+_DOC_WORKER_CONTEXT = multiprocessing.get_context("spawn")
+
+
 class _DocWorker:
     """One persistent markitdown worker: process + parent end of its task pipe."""
 
@@ -253,8 +273,8 @@ def _markitdown_extract(body: bytes) -> str | None:
 
 def _spawn_doc_worker() -> _DocWorker:
     """Start one persistent worker and return its parent-side handle."""
-    parent_conn, child_conn = multiprocessing.Pipe(duplex=True)
-    proc = multiprocessing.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
+    parent_conn, child_conn = _DOC_WORKER_CONTEXT.Pipe(duplex=True)
+    proc = _DOC_WORKER_CONTEXT.Process(target=_doc_worker_main, args=(child_conn,), daemon=True)
     proc.start()
     child_conn.close()  # parent keeps only its end of the pipe
     return _DocWorker(proc, parent_conn)

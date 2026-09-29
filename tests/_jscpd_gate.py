@@ -25,6 +25,8 @@ from typing import Any
 
 import yaml
 
+from tests._executables import require_repo_tool
+
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 # A clone's location: repo-relative path and the line range jscpd reported.
 LocationKey = tuple[str, int, int]
@@ -514,7 +516,7 @@ def jscpd_report(
     with tempfile.TemporaryDirectory(prefix="jscpd-gate-") as raw_output:
         output = Path(raw_output)
         command = [
-            str(SERVICE_ROOT / ".venv" / "bin" / "jscpd"),
+            require_repo_tool(SERVICE_ROOT, "jscpd"),
             "--config",
             str(CONFIG_PATH),
             "-f",

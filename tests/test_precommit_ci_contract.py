@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 import tests._jscpd_gate as gate
-from tests._executables import BASH, GIT, require_executable
+from tests._executables import BASH, GIT, require_executable, require_repo_tool
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = SERVICE_ROOT / ".pre-commit-config.yaml"
@@ -161,7 +161,7 @@ def _hook_blocks(config: str) -> list[tuple[str, dict]]:
     return hooks
 
 
-PRE_COMMIT_PATH = SERVICE_ROOT / ".venv" / "bin" / "pre-commit"
+PRE_COMMIT = "pre-commit"
 
 
 def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subprocess.CompletedProcess[str]:
@@ -179,7 +179,7 @@ def _run_precommit_on_temp_config(temp_dir: Path, config_text: str) -> subproces
         [require_executable(GIT), "-C", str(temp_dir), "add", "probe.py"], check=True, capture_output=True
     )
     return subprocess.run(
-        [str(PRE_COMMIT_PATH), "run", "--all-files", "--config", str(config_path)],
+        [require_repo_tool(SERVICE_ROOT, PRE_COMMIT), "run", "--all-files", "--config", str(config_path)],
         cwd=temp_dir,
         capture_output=True,
         text=True,

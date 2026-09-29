@@ -253,4 +253,13 @@ max-statements = 87
     "PLR0912",
     "PLR0915",
 ]
+# `scripts/extract_comments.py` is the one script that spawns a process, and
+# it is the same pair the tests carry, for the same reason: importing
+# subprocess is not the risk, and the resolved executable is a path rather than
+# input. It resolves git with `shutil.which` and takes its documented rglob
+# fallback when git is absent, so it neither needs git nor passes a shell.
+"scripts/**" = [
+    "S404",
+    "S603",
+]
 "**/__pycache__/**" = ["ALL"]
