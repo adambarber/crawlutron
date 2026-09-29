@@ -512,6 +512,30 @@ _SKIP_DIRECTORIES = frozenset({".git", ".venv", "work", "node_modules", ".pytest
 _BACKTICKED_PATH = re.compile(
     r"^[\w][\w./-]*/[\w./-]*\.(?:py|md|toml|json|ya?ml|ini|cfg|txt|in|sh)(?::\d+)?$"
 )
+_BACKTICKED_REPO_DOCUMENT = re.compile(r"^[\w][\w-]*\.md$")
+
+
+def _is_tree_path_claim(candidate: str) -> bool:
+    """Whether a backticked span claims something exists in this repository.
+
+    A slash makes the claim directly: only a path with a directory separator
+    is a statement about this tree's layout. A bare basename normally is not
+    -- ``robots.txt`` in prose is the protocol file, not a file we ship.
+
+    A ``.md`` basename is the exception, and the exception is about what a
+    markdown filename *is* rather than about the words around it. Every
+    markdown file in this repository is a document of this repository; there
+    is no third-party markdown artifact for a document to discuss. So a bare
+    ``.md`` span is a pointer at one of our documents whatever verb precedes
+    it, and the gate must check it.
+
+    This is the hole that let four live documents point at
+    ``ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`` -- a file renamed to
+    ``ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`` -- while the gate that exists
+    to catch exactly this reported a clean tree. Restricting the new arm to
+    ``.md`` is what keeps it from flagging protocol filenames in prose.
+    """
+    return bool(_BACKTICKED_PATH.match(candidate) or _BACKTICKED_REPO_DOCUMENT.match(candidate))
 
 
 def _markdown_documents() -> list[str]:
@@ -548,10 +572,13 @@ def _broken_doc_reference_offenders(
     everything else: the document a reader arrives intending to follow, where
     a dead path is a navigational dead end and not history.
 
-    The span must contain a separator, and that is not a stylistic filter. A
-    bare `robots.txt` or `browser.py` in prose is a basename being discussed,
-    not a path being pointed at; only a slash makes the span a claim about
-    this tree's layout.
+    The span must look like a repository artifact, and that is not a stylistic
+    filter. A bare `robots.txt` or `browser.py` in prose is a basename being
+    discussed, not a path being pointed at; only a slash makes the span a
+    claim about this tree's layout. A bare ``.md`` span is a claim without a
+    slash, because a markdown filename in this tree always names a document of
+    this tree -- see `_is_tree_path_claim` for why that arm is bounded to
+    markdown.
 
     ``root`` and ``documents`` exist so the proof that this detector bites can
     run on a copy of a real document instead of on the real one, which is a
@@ -562,7 +589,7 @@ def _broken_doc_reference_offenders(
         document = root / name
         for span in re.findall(r"`([^`\n]+)`", document.read_text(encoding="utf-8")):
             candidate = span.strip()
-            if not _BACKTICKED_PATH.match(candidate):
+            if not _is_tree_path_claim(candidate):
                 continue
             if not (root / candidate.split(":")[0]).exists():
                 offenders.append(f"{name} points at `{candidate}`, which does not exist")
@@ -672,6 +699,13 @@ def test_live_doc_reference_detector_bites(tmp_path):
     )
     offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
     assert "README.md points at `app/does_not_exist.py`, which does not exist" in offenders
+
+    (tmp_path / "README.md").write_text(
+        document.read_text(encoding="utf-8") + "\nSee `DOES_NOT_EXIST.md` for the audit trail.\n",
+        encoding="utf-8",
+    )
+    offenders = _broken_doc_reference_offenders(root=tmp_path, documents=["README.md"])
+    assert "README.md points at `DOES_NOT_EXIST.md`, which does not exist" in offenders
 
 
 def test_documented_knob_detector_bites():
