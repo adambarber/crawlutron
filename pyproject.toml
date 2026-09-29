@@ -78,6 +78,11 @@ dev = [
     # It was previously present only as a transitive dependency of pre-commit,
     # which is not a reason for a test to depend on it.
     "pyyaml>=6.0",
+    # Stubs for the above. Two test modules import `yaml` and mypy cannot type a
+    # library it has no stub for, so the import was reported as untyped --
+    # which is not the same as untyped, and a reader of that report has to work
+    # out the difference. Same reason as the `types-*` entries below.
+    "types-PyYAML>=6.0",
     # Static type-checking. The app tree IS mypy-clean (0 errors across 85
     # files) and `typecheck` now runs in CI as a required gate, so this is a
     # real gate, not an advisory one — the old comment claiming otherwise was
