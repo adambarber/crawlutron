@@ -299,3 +299,64 @@ class TestOutputFormatsEdges:
         results = [{"url": "http://x/", "text": "content"}]
         with pytest.raises(ValueError):
             serialize_results(results, "unknown")
+
+
+class TestTheSerializerCoversTheVocabulary:
+    """Admission and dispatch must be the same decision, and they were not.
+
+    ``serialize_results`` admits on ``fmt not in SUPPORTED_OUTPUT_FORMATS`` and
+    then dispatches through a chain of its own. Every copy of the set was pinned
+    by some test, so a naive edit fails somewhere -- but a *coordinated* edit
+    that adds a format to the annotation, the set, and both test copies while
+    writing no branch lands green, and the first caller who names the new format
+    gets ``unsupported_output_format`` from the terminal raise instead of a
+    serialized page.
+
+    That gap is a property of the two blocks, not of any one of them, so it is
+    asserted here against the function's own AST.
+    """
+
+    @staticmethod
+    def _dispatched_formats() -> set[str]:
+        import ast
+        import inspect
+        import textwrap
+
+        import app.output_formats as output_formats
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(output_formats.serialize_results)))
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef))
+        dispatched: set[str] = set()
+        for node in function.body:
+            if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+                continue
+            comparison = node.test
+            # ``fmt == "json"`` and ``fmt in ("jsonl", "ndjson")`` are both
+            # dispatches; ``fmt not in SUPPORTED_OUTPUT_FORMATS`` is the admission
+            # check and is deliberately not one, which the op filter excludes.
+            if not (
+                isinstance(comparison.left, ast.Name)
+                and comparison.left.id == "fmt"
+                and len(comparison.ops) == 1
+                and isinstance(comparison.ops[0], (ast.Eq, ast.In))
+            ):
+                continue
+            for comparator in comparison.comparators:
+                if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+                    dispatched.add(comparator.value)
+                elif isinstance(comparator, (ast.Tuple, ast.List)):
+                    dispatched.update(
+                        element.value
+                        for element in comparator.elts
+                        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+                    )
+        return dispatched
+
+    def test_every_admitted_format_has_a_branch(self):
+        from app.output_formats import SUPPORTED_OUTPUT_FORMATS
+
+        dispatched = self._dispatched_formats()
+        assert dispatched == set(SUPPORTED_OUTPUT_FORMATS), (
+            f"admitted without a serializer branch: {set(SUPPORTED_OUTPUT_FORMATS) - dispatched}; "
+            f"branched but not admitted: {dispatched - set(SUPPORTED_OUTPUT_FORMATS)}"
+        )

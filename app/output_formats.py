@@ -12,6 +12,12 @@ underlying data shape:
 
 All serializers are pure and JSON-safe (pydantic models and arbitrary objects
 are reduced to dicts/strings via ``_default``).
+
+This module owns the vocabulary. ``OutputFormat`` is the only place the set is
+written out -- ``Literal`` cannot be built from a runtime tuple -- and
+``SUPPORTED_OUTPUT_FORMATS`` below is derived from it, so the annotation the
+model enforces and the set this module dispatches on cannot drift apart. The
+serializer's if/elif chain is asserted against the same set.
 """
 
 from __future__ import annotations
@@ -19,9 +25,18 @@ from __future__ import annotations
 import csv
 import io
 import json
-from typing import Any
+from typing import Any, Literal, get_args
 
-SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = ("json", "jsonl", "ndjson", "markdown", "csv")
+#: The formats a caller may name. Spelled out here because ``Literal`` requires
+#: literal members, and kept here because this is the module that has to
+#: dispatch on them. Everything else derives from it.
+OutputFormat = Literal["json", "jsonl", "ndjson", "markdown", "csv"]
+
+#: Derived from the annotation above rather than written beside it. Two
+#: hand-kept copies of one set is the drift this project rejects elsewhere, and
+#: it was the state this module was in: the serializer's membership test and the
+#: model's annotation could disagree, and nothing tested that they did.
+SUPPORTED_OUTPUT_FORMATS: tuple[str, ...] = get_args(OutputFormat)
 
 
 def _default(obj: Any) -> Any:
