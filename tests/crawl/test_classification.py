@@ -420,13 +420,23 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
 
     A page with N unclosed <script> tags made _HTML_NOISE_RE cost O(N^2):
     each tag anchor re-scanned to end-of-string for a closing tag that never
-    comes. The replacement scanner must stay
-    linear: doubling the input must roughly double, not quadruple, the time.
+    comes. The replacement scanner must stay linear.
 
-    Measured in CPU seconds, not wall clock. The claim is about the scanner's
-    work; a wall clock also reports how busy the box was, and a descheduled
-    process reads as a slow one. That is how this test came to fail a linear
-    scanner at a 37x ratio for a 2x input under a loaded full-suite run.
+    Measured in CPU seconds, not wall clock, and sized so the signal is
+    unambiguous. Both choices were arrived at by being wrong first.
+
+    *Wall clock* reports how busy the box was, not how much work the scanner
+    did: a descheduled process keeps the wall clock running while its own CPU
+    clock stands still, which is how a scanner spending a flat ~2ns per byte
+    measured as 37x super-linear for a 2x input.
+
+    *Size* is the subtler one. At the 400-tag payload this test used to build,
+    a full pass cost ~0.4ms, and at that scale the growth term is the same
+    order as the fixed one -- a linear implementation measured 4.5x for a 2x
+    input. Measuring over 1MB->4MB instead puts the linear term 100x above the
+    noise, and widening the range from 2x to 4x makes the assertion *stronger*,
+    not weaker: linear lands near 4x, quadratic near 16x, and the band between
+    them is wider than the one it replaces.
     """
     from app.classify import _strip_html_noise
 
@@ -434,15 +444,16 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
         payload = ("<script>" + "a" * 500) * n
         return cpu_seconds(lambda: _strip_html_noise(payload))
 
-    t_small = cpu_for(400)
-    t_big = cpu_for(800)
-    assert t_big < t_small * 3.5, (
-        f"super-linear blowup: {t_small:.6f}s -> {t_big:.6f}s (ratio {t_big / t_small:.1f}x for 2x input)"
+    t_small = cpu_for(2_000)
+    t_big = cpu_for(8_000)
+    assert t_big < t_small * 7, (
+        f"super-linear blowup: {t_small:.6f}s -> {t_big:.6f}s (ratio {t_big / t_small:.1f}x for 4x input)"
     )
-    # Absolute ceiling: the ~400 KB pass must cost well under a quarter second
-    # of CPU on any reasonable machine; a quadratic reimplementation would be
-    # orders of magnitude slower.
-    assert t_big < 0.25, f"linear scan too slow: {t_big:.6f}s of CPU for ~400 KB"
+    # Absolute ceiling, set from the measured ~2ns/byte: a linear pass over 4MB
+    # costs ~8ms, while the quadratic this guards against costs minutes. 50ms
+    # is 6x the headroom a slower instruction set needs and still well under
+    # the regression it exists to catch.
+    assert t_big < 0.05, f"linear scan too slow: {t_big:.6f}s of CPU for ~4MB"
 
 
 def test_strip_unclosed_script_neutralizes_to_end_and_keeps_preceding_text():
