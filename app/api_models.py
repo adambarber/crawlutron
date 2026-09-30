@@ -676,6 +676,19 @@ class Credential(BaseModel):
         return self
 
 
+#: Most entries in a crawl's strategy ladder. The ladder runs one outbound
+#: network attempt per entry, and this is the only collection on the model that
+#: was not capped -- ``urls`` carries 500 and ``headers`` 64 -- so a list of two
+#: thousand was a 200 that meant two thousand attempts per URL.
+#:
+#: A ceiling and not a dedupe, because a repetition is not always waste: a
+#: browser render mints a session cookie that a later ``HTTP_CFFI_IMPERSONATE``
+#: entry replays, so a non-blocked-but-unusable first attempt can leave the jar
+#: in a state that makes its own repetition succeed. Three strategies and a
+#: repeat or two is any useful ladder, so 16 bounds the repetition without
+#: declaring all of it worthless.
+MAX_CRAWL_STRATEGIES: Final[int] = 16
+
 #: The ``request_profile`` key set, as it appears in the OpenAPI document. A sorted
 #: list rather than a ``frozenset`` because a set is not JSON serialisable and the
 #: document is served; a test reads this back to assert every advertised key has a
@@ -723,6 +736,7 @@ class CrawlPolicy(BaseModel):
             CrawlStrategy.BROWSER_HEADED_WARMED,
         ],
         min_length=1,
+        max_length=MAX_CRAWL_STRATEGIES,
         description="Ordered fetch execution chain. Default: HTTP_DECLARED_CRAWLER, then "
         "HTTP_CFFI_IMPERSONATE, then BROWSER_HEADLESS, then BROWSER_HEADED_WARMED. Strategies run in order, "
         "the service records every attempted strategy, and fallback stops at the first successful content "

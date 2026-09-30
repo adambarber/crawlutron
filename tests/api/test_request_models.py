@@ -14,7 +14,7 @@ from httpx import AsyncClient
 from pydantic import BaseModel, ValidationError
 
 from app import api_models, api_responses
-from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, RenderRequest
+from app.api_models import MAX_BROWSER_ACTIONS, CrawlRequest, CrawlStrategy, RenderRequest
 from app.constants import (
     ACTIONS_REQUIRING_SELECTOR,
     ALLOWED_BROWSER_ACTION_TYPES,
@@ -1104,3 +1104,62 @@ class TestCallerKnobsBehindClosedKeysAreCeilinged:
         # Garbage still falls back to the default rather than raising, as before.
         assert renderer._scroll_config_for({"lazy_scroll_steps": "not a number"}) == (3, 0.5)
         assert renderer._scroll_config_for({"lazy_scroll_steps": -5}) == (0, 0.5)
+
+
+class TestStrategyLadderIsBounded:
+    """``strategies`` is the outbound fan-out per URL, and it was the one collection left uncapped.
+
+    ``urls`` has carried ``max_length=500`` and ``headers`` ``max_length=64`` all
+    along. ``strategies`` had ``min_length=1`` and nothing above it, which reads
+    as an oversight rather than a decision: it is a list of outbound network
+    attempts, and the ladder runs one per entry.
+
+    The ceiling is a ceiling and not a dedupe, deliberately. A duplicate is
+    usually pure waste -- if a strategy comes back blocked, the same strategy
+    blocks again, and a usable one returns immediately -- but not always: a
+    browser render mints a session cookie that a later ``HTTP_CFFI_IMPERSONATE``
+    entry replays, so a non-blocked-but-unusable first attempt can leave the jar
+    in a state that makes its own repetition succeed. Dedupe would have thrown
+    that path away. A ceiling bounds the repetition instead of declaring all of
+    it worthless.
+    """
+
+    #: Most ladder entries in one request. The vocabulary is three strategies and
+    #: cookie replay needs a repeat or two after a browser render, so this is
+    #: several times more than any useful ladder.
+    MAX_STRATEGIES = 16
+
+    def test_a_ladder_at_the_ceiling_is_accepted(self):
+        from app.api_models import CrawlPolicy
+
+        ladder = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * self.MAX_STRATEGIES
+        assert len(CrawlPolicy(strategies=ladder).strategies) == self.MAX_STRATEGIES
+
+    def test_a_ladder_over_the_ceiling_is_refused(self):
+        from app.api_models import CrawlPolicy
+
+        over = [CrawlStrategy.HTTP_DECLARED_CRAWLER] * (self.MAX_STRATEGIES + 1)
+        with pytest.raises(ValidationError, match="at most"):
+            CrawlPolicy(strategies=over)
+
+    def test_an_empty_ladder_is_still_refused(self):
+        """The lower bound is unchanged: an empty ladder has no strategy to run."""
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError):
+            CrawlPolicy(strategies=[])
+
+    def test_the_ceiling_is_a_ceiling_on_work_not_on_distinct_strategies(self):
+        """A repetition the caller means is allowed, up to the ceiling.
+
+        Pins the distinction the ceiling rests on, so a later reader does not
+        "fix" this by deduping and break cookie replay.
+        """
+        from app.api_models import CrawlPolicy
+
+        repeated = [
+            CrawlStrategy.BROWSER_HEADLESS,
+            CrawlStrategy.HTTP_CFFI_IMPERSONATE,
+            CrawlStrategy.HTTP_CFFI_IMPERSONATE,
+        ]
+        assert len(CrawlPolicy(strategies=repeated).strategies) == 3
