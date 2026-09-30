@@ -1,4 +1,4 @@
-"""#2 Site-map endpoint support.
+"""Site-map endpoint support.
 
 A "map" is a structured discovery of the URLs reachable from a root URL: the
 in-page discovered links plus the URLs advertised via robots.txt sitemaps and

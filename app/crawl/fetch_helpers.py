@@ -207,7 +207,7 @@ async def fetch_sitemap_urls(
 
     Each collected entry is a ``(url, lastmod)`` tuple where ``lastmod`` is the
     sitemap ``<lastmod>`` for that URL when present (used to skip re-fetching
-    unchanged pages, #1); it is ``None`` when the entry has no ``<lastmod>``.
+    unchanged pages); it is ``None`` when the entry has no ``<lastmod>``.
 
     If a previous resolution cached an ETag/Last-Modified (or the caller passes
     ``conditional``), the root sitemap is fetched with a conditional request

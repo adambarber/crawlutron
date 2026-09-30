@@ -88,7 +88,7 @@ async def _run_shutdown_steps(steps: Sequence[_TeardownStep]) -> None:
 # not contend for anything the large infrequent job writes need.
 DATABASE_PATH = settings.cache_dir + "/crawler.db"
 
-# Job store for resumable crawls (#3+#14)
+# Job store for resumable crawls
 job_store = JobStore(
     DATABASE_PATH,
     policy=HostPolicy.from_settings(settings),
@@ -189,7 +189,7 @@ if FastAPI is not None:
 
         # Shutdown: stop the world FIRST so in-flight job crawls can't
         # deliver webhooks against cleared dependencies or mint cookies
-        # after the snapshot is taken (final review #4). Then release webhook
+        # after the snapshot is taken. Then release webhook
         # deps and close clients. The cookie jar needs no shutdown step: the
         # shared store is the persistence, so there is no whole-jar write left
         # to be last-writer-wins.

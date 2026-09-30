@@ -485,7 +485,7 @@ class CrawlPolicy(BaseModel):
     @field_validator("browser_profile")
     @classmethod
     def _reject_execute_js_actions(cls, profile: dict[str, Any]) -> dict[str, Any]:
-        """Reject caller-supplied ``execute_js`` actions (#2, RCE-class risk).
+        """Reject caller-supplied ``execute_js`` actions (RCE-class risk).
 
         The browser action chain never runs arbitrary JavaScript, and we also
         block it at the API boundary so a malicious payload never reaches a
@@ -513,7 +513,7 @@ class CrawlPolicy(BaseModel):
         origin is REJECTED rather than narrowed. ``https://a.example/secret``
         is a path-scoped key, and canonicalizing it to ``https://a.example``
         would silently widen the credential from one path to every request to
-        that host, which is the outcome #1912 exists to prevent. So only the
+        that host, which is the outcome this rejection exists to prevent. So only the
         parts that cannot change what the credential reaches are normalized --
         scheme and host case, and a default port -- and a key that narrows the
         scope is reported to the caller rather than rewritten into a broader
@@ -667,7 +667,7 @@ class CrawlRequest(_SingleUrlSourceRequest):
     output_format: Annotated[
         str | None,
         Field(
-            description="#17 Multiple output formats for the crawl results. One of: json (default), jsonl, "
+            description="Multiple output formats for the crawl results. One of: json (default), jsonl, "
             "ndjson, markdown, csv. Non-json formats are returned as a plain Response with the matching "
             "media type instead of a UnifiedCrawlResponse model.",
         ),
@@ -675,7 +675,7 @@ class CrawlRequest(_SingleUrlSourceRequest):
 
 
 class MapRequest(BaseModel):
-    """#2 Site-map request: discover the URL frontier for a root URL.
+    """Site-map request: discover the URL frontier for a root URL.
 
     Discovery (robots sitemaps + feeds + in-page links) is forced on; the caller
     controls the fetch ``policy`` (strategies, limits, scope_regex) and the rest
@@ -1081,7 +1081,7 @@ class DiscoveryResponse(BaseModel):
 
 
 class JobCreateRequest(BaseModel):
-    """Create a new resumable whole-site crawl job (#3+#14)."""
+    """Create a new resumable whole-site crawl job."""
 
     model_config = ConfigDict(extra="ignore")
 

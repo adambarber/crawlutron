@@ -82,8 +82,8 @@ async def aformat_crawl_item(item: dict[str, Any]) -> tuple[str | None, dict[str
     The fallback ``_extract_llm_metadata`` path (items without a carried
     ``llm_metadata`` dict) still builds an lxml tree per item; on a batch of
     N such results the sync path parks the event loop N times. The async
-    path runs the identical sync formatter in a worker thread (perf
-    throughput #2); engine-produced items skip the tree entirely. Byte-
+    path runs the identical sync formatter in a worker thread;
+    engine-produced items skip the tree entirely. Byte-
     identical to :func:`format_crawl_item` for every item shape.
     """
     return await asyncio.to_thread(format_crawl_item, item)
@@ -421,7 +421,7 @@ async def abuild_unified_crawl_response(
 ) -> UnifiedCrawlResponse:
     """Async :func:`build_unified_crawl_response` for use inside async endpoints.
 
-    The whole batch is shaped in ONE event-loop offload (perf throughput #2):
+    The whole batch is shaped in ONE event-loop offload:
     fanning one ``to_thread`` per item made every response pay N Future +
     thread-dispatch overheads, and the default executor serializes those
     submissions anyway once N exceeds the pool. Output is identical to the

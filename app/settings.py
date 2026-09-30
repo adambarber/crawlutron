@@ -102,7 +102,7 @@ class CrawlerSettings:
     max_concurrent_pages: int = DEFAULT_MAX_CONCURRENT_PAGES
     browser_pool_size: int = DEFAULT_BROWSER_POOL_SIZE
     challenge_wait_seconds: int = DEFAULT_CHALLENGE_WAIT_SECONDS
-    # Browser fixed-overhead knobs (perf throughput #7): configurability
+    # Browser fixed-overhead knobs: configurability
     # only -- defaults equal the hardcoded behavior (3 steps / 1s / 5.0s).
     # Per-request ``browser_profile`` keys (``lazy_scroll_steps``,
     # ``lazy_scroll_delay_seconds``, ``cookie_harvest_timeout_seconds``)

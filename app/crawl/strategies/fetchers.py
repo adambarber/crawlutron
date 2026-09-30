@@ -191,7 +191,7 @@ async def _cffi_fetch(
     # Same release point as the http fetcher: any pooled client superseded by a
     # loop change (either kind) is closed here, on this live loop.
     await http_client_pool._drain_pending_client_closes()
-    # Shared session (perf throughput #4): built once per event loop instead of
+    # Shared session: built once per event loop instead of
     # per request. NOTE: the client class is AsyncSession (curl_cffi>=0.7 API).
     # AsyncClient does not exist; referencing it raises AttributeError
     # and would silently degrade every impersonated fetch to plain httpx.

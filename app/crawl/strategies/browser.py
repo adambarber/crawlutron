@@ -458,7 +458,7 @@ class BrowserRenderer:
                 )
         else:
             self._challenge_wait_seconds = challenge_wait_seconds
-        # Fixed-overhead knobs (perf throughput #7, configurability only):
+        # Fixed-overhead knobs (configurability only):
         # operator settings when present, else the module defaults above
         # (identical values). Per-request browser_profile keys override both
         # at render time via _scroll_config_for/_harvest_timeout_for.
@@ -966,7 +966,7 @@ class BrowserRenderer:
         return on_response
 
     def _scroll_config_for(self, browser_profile: dict[str, Any] | None) -> tuple[int, float]:
-        """Resolve lazy-scroll steps/delay: policy profile beats settings (perf #7)."""
+        """Resolve lazy-scroll steps/delay: policy profile beats settings."""
         profile = browser_profile or {}
         return (
             _profile_int(profile, "lazy_scroll_steps", self._lazy_scroll_steps),
@@ -1111,7 +1111,7 @@ class BrowserRenderer:
             return ""
 
     async def _flatten_shadow_dom(self, page: Any) -> None:
-        # #25: move the children of every open shadow root into its light-DOM host
+        # Move the children of every open shadow root into its light-DOM host
         # so that page.content() (and thus link/text extraction) includes shadow-DOM
         # content. Closed shadow roots are not accessible and are left untouched.
         # Nested shadow roots are handled by recursing into each shadow root before

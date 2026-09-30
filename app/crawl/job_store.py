@@ -1,4 +1,4 @@
-"""#3+#14 Resumable whole-site crawl job persistence (SQLite-backed).
+"""Resumable whole-site crawl job persistence (SQLite-backed).
 
 Provides a job store for managing long-running crawl jobs with pause/resume
 capability. Jobs persist their frontier, visited set, and results to SQLite

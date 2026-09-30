@@ -416,7 +416,7 @@ class DomainScheduler:
         )
         # Retain results in memory only when the caller needs them back
         # (recursive frontier expansion). With on_result set, results are spilled
-        # per-job and never accumulated here, bounding batch RAM (#3.1).
+        # per-job and never accumulated here, bounding batch RAM.
         results: dict[int, _Result] = {}
 
         # ``on_result`` and the returned mapping are mutually exclusive delivery

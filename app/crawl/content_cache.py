@@ -290,7 +290,7 @@ class ContentCache:
         return value
 
     def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
-        """Store into the RAM mirror under the serialized-size gate (N5/final #1)
+        """Store into the RAM mirror under the serialized-size gate
         and the entry-count cap — the single home of the store so no path can
         lose either bound. Oversized values are dropped, never mirrored.
         """

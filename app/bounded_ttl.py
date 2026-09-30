@@ -1,6 +1,6 @@
 """BoundedTTLCache: one locked, TTL'd, LRU-bounded cache.
 
-Choikepoints review, primitive #1. The same shape (a dict + a lock + a TTL
+Chokepoints review, first primitive. The same shape (a dict + a lock + a TTL
 + a cap) was hand-rolled at three sites and produced two lock bugs (the
 robots cap mutating outside _ROBOTS_CACHE_LOCK; the DNS soft-cap clear
 under the lock window). Here the lock lives INSIDE every operation, so

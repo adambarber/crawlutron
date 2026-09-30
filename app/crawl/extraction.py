@@ -1156,7 +1156,7 @@ def extract_post_fetch_discovery(
     include_metadata: bool = False,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    """Sync post-fetch discovery block for the strategy result builders (perf #9).
+    """Sync post-fetch discovery block for the strategy result builders.
 
     Parses the HTML once and derives frames/forms diagnostics, discovered
     links, raw JS endpoints, and the pagination hint in one pass. Pure CPU
