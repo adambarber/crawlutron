@@ -238,7 +238,7 @@ def _spill_is_unowned(path: str) -> bool:
 
 
 class _ResultSpill:
-    """Append-only NDJSON spill of page results (#2-stream).
+    """Append-only NDJSON spill of page results.
 
     Each completed page is serialized to disk the moment its batch finishes, so
     peak RSS scales with batch size instead of total pages. RAM keeps only the

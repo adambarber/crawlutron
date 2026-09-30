@@ -1,6 +1,6 @@
 """Bounded-execution regex for attacker-influenced patterns and inputs.
 
-N-1 root cause: static shape-rejection of "pathological" regexes is
+Root cause: static shape-rejection of "pathological" regexes is
 bypassable by construction — the depth-3 nested-quantifier bypass
 ``(((a|aa)))*`` defeated every guard heuristics could enumerate (measured:
 4.5s per match at 36 chars, doubling per character). Static rejection is
@@ -8,7 +8,7 @@ effectively undecidable, so the durable defense is to BOUND EXECUTION:
 the third-party ``regex`` engine implements ``timeout=`` inside its C
 matching loop, which is interruptible even under the fast_sleeps test
 harness (unlike stdlib re, whose C loop holds the GIL — the same wedge
-class as curl_cffi under fast_sleeps, #1746).
+class as curl_cffi under fast_sleeps).
 """
 
 from __future__ import annotations

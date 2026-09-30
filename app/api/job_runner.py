@@ -135,7 +135,7 @@ async def recover_orphaned_running_jobs(job_store: JobStore) -> int:
     for summary in await job_store.alist_jobs():
         if summary.get("status") == JobStatus.RUNNING.value:
             # Control-plane CAS: rewind RUNNING -> PENDING without rewriting
-            # the row's data (H3: save() no longer carries status anyway).
+            # the row's data; save() no longer carries status anyway.
             if await job_store.aset_status(summary["job_id"], JobStatus.PENDING, expected=JobStatus.RUNNING):
                 recovered += 1
     return recovered

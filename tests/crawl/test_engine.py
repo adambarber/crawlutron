@@ -210,7 +210,7 @@ class TestEngineChainEdges:
         assert "screenshot" in diag
 
     async def test_per_url_budget_fails_slow_chain(self):
-        """Adversarial perf #2.2: a URL that blows its total_url_budget_seconds
+        """A URL that blows its total_url_budget_seconds
         must be failed as network_error instead of holding a slot."""
 
         # True tarpit: never returns until the caller's deadline cancels us.
@@ -256,7 +256,7 @@ class TestEngineChainEdges:
         assert abs(scheduler._domain_cooldowns["example.com"] - (time.time() + 30)) <= 5
 
     async def test_robots_crawl_delay_sets_domain_min_delay(self, monkeypatch):
-        """Adversarial perf #2.6: a host's robots Crawl-delay is honored as a
+        """A host's robots Crawl-delay is honored as a
         per-domain minimum delay during the crawl."""
         calls = []
         orig = DomainScheduler.set_domain_min_delay
@@ -278,7 +278,7 @@ class TestEngineChainEdges:
         assert any(d == "example.com" and abs(s - 2.0) < 1e-6 for d, s in calls), calls
 
     def test_effective_max_content_length_scales(self):
-        """Adversarial perf #2.1: per-page cap shrinks as concurrency rises, floor
+        """Per-page cap shrinks as concurrency rises, floor
         respected, explicit policy value wins."""
         from app.constants import DEFAULT_MAX_CONTENT_LENGTH_BYTES
         from app.crawl.strategies.content_cache_key import _effective_max_content_length

@@ -217,7 +217,7 @@ async def test_robots_disallows_initial_job_as_skip(recording_worker):
 
 
 # ---------------------------------------------------------------------------
-# Result alignment (B1): the spill index must match the job that produced the
+# Result alignment: the spill index must match the job that produced the
 # result, even when tiers interleave or a job fails.
 # ---------------------------------------------------------------------------
 def assert_spill_keeps_job_pairing(spill, jobs) -> None:

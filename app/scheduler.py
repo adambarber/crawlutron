@@ -416,14 +416,14 @@ class DomainScheduler:
         )
         # Retain results in memory only when the caller needs them back
         # (recursive frontier expansion). With on_result set, results are spilled
-        # per-job and never accumulated here, bounding batch RAM (#3.1).
+        # per-job and never accumulated here, bounding batch RAM.
         results: dict[int, _Result] = {}
 
         # ``on_result`` and the returned mapping are mutually exclusive delivery
         # channels (spill-to-disk vs. in-memory). The single sink below keeps
         # that invariant in one place: narrowing ``dict | None`` inside the
         # closure could not track which branch held, and the two delivery
-        # channels had historically drifted (H1: a slot silently vanished).
+        # channels had historically drifted: a slot silently vanished.
         #
         # Both a worker's return and the failure envelopes are ``_Result``: the
         # caller supplies ``failed_result`` so the shape a broken job gets is

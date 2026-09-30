@@ -30,8 +30,8 @@ It is a powerful SSRF-enabled service that:
 - Resolves and **pins** the IP of every URL it fetches to defeat DNS
   rebinding (finding F9 in `ADVERSARIAL_REVIEW_BROWSER_CRAWLER.md`).
 - Validates every redirect hop manually so a `302 -> 169.254.169.254/`
-  cannot be followed (F1).
-- Pins the browser navigation IP and re-validates post-redirect URLs (F2).
+  cannot be followed.
+- Pins the browser navigation IP and re-validates post-redirect URLs.
 - Caps request bodies (16 MiB), decompressed responses (50 MiB), CSS/XPath
   selector runtime (1 s), and HTML-size-to-lxml input (4 MiB) so a malicious
   input cannot exhaust memory or pin a worker.

@@ -127,7 +127,7 @@ async def _fetch_and_decode(
 
     The body is present only on 200; the status lets callers distinguish
     "no such document" (404) from "origin is erroring" (5xx), which
-    robots handling treats differently (fail closed, M7). ``(None, None)``
+    robots handling treats differently (fail closed). ``(None, None)``
     on transport-level failure.
     """
     resp = await _fetch_decode_discovery(fetcher, url, headers, timeout_seconds)
@@ -207,7 +207,7 @@ async def fetch_sitemap_urls(
 
     Each collected entry is a ``(url, lastmod)`` tuple where ``lastmod`` is the
     sitemap ``<lastmod>`` for that URL when present (used to skip re-fetching
-    unchanged pages, #1); it is ``None`` when the entry has no ``<lastmod>``.
+    unchanged pages); it is ``None`` when the entry has no ``<lastmod>``.
 
     If a previous resolution cached an ETag/Last-Modified (or the caller passes
     ``conditional``), the root sitemap is fetched with a conditional request

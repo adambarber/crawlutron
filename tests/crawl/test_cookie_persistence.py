@@ -1,4 +1,4 @@
-"""#9 Cookie persistence - pure tests (no mocks)."""
+"""Cookie persistence - pure tests (no mocks)."""
 
 from app.crawl.strategies.cookie_jar import CookieJar
 

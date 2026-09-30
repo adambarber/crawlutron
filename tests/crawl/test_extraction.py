@@ -331,7 +331,7 @@ def _reset_doc_extraction_pool():
 
 
 async def test_extract_document_timeout_is_enforced(monkeypatch):
-    """A document extraction exceeding the wall-clock timeout returns None (F5).
+    """A document extraction exceeding the wall-clock timeout returns None.
 
     The hang lives in the worker SUBPROCESS and is injected there through the
     environment, so the suite's in-process sleep patch is irrelevant to it --
@@ -367,7 +367,7 @@ async def test_extract_document_child_death_returns_empty(monkeypatch):
 
 
 async def test_extract_document_output_capped_at_5mb(monkeypatch):
-    """Extracted markdown is truncated to _MAX_EXTRACTED_MARKDOWN (F5)."""
+    """Extracted markdown is truncated to _MAX_EXTRACTED_MARKDOWN."""
     # Use a smaller cap for faster test (10KB instead of 5MB)
     test_cap = 10000
     huge = "x" * (test_cap + 1000)
@@ -412,7 +412,7 @@ async def test_extract_document_normal_works():
 
 
 # ============================================================
-# Adversarial perf #3.2: document extraction runs in a process that is
+# Document extraction runs in a process that is
 # forcefully killed on timeout (no lingering zombie / stalled pool).
 # ============================================================
 
@@ -459,7 +459,7 @@ async def test_extract_document_process_pool_normal_works(monkeypatch):
 async def test_extract_document_recovers_after_timeout(monkeypatch):
     """After a timed-out (killed) extraction, the next call still works.
 
-    Adversarial perf #3.2: a killed worker must not leave a zombie that stalls
+    A killed worker must not leave a zombie that stalls
     the (semaphore-bounded) extraction concurrency.
     """
     # First call hangs and is killed on timeout (short timeout, hang injected).

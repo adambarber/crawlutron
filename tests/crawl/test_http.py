@@ -92,7 +92,7 @@ def _run_kwargs(fetcher):
 
 class TestHttpStrategy:
     async def test_discovery_fetch_omits_page_conditional_headers(self):
-        # #1-fix: If-None-Match / If-Modified-Since belong to the HTML page
+        # If-None-Match / If-Modified-Since belong to the HTML page
         # request. Forwarding them to robots.txt/sitemap fetches invites false
         # 304s -- discovery fetches get base headers only.
         recorded: list[tuple[str, dict]] = []
@@ -120,7 +120,7 @@ class TestHttpStrategy:
             assert "if-modified-since" not in lower
 
     async def test_html_diagnostics_skipped_without_discovery(self):
-        # #2: _html_diagnostics (frames/forms via lxml parse) must be skipped
+        # _html_diagnostics (frames/forms via lxml parse) must be skipped
         # when discovery is not requested, to avoid a redundant HTML parse on
         # every page of a content-only crawl.
         html = "<html><body><iframe src='/x'></iframe></body></html>"
@@ -135,7 +135,7 @@ class TestHttpStrategy:
         assert "frames" in r2.diagnostics
 
     async def test_http_strategy_extracts_html_markdown_content_only(self, base_url):
-        # #2-fix: content-only crawl (no discovery, depth 0) skips link
+        # Content-only crawl (no discovery, depth 0) skips link
         # extraction entirely -- discovered_links comes back empty instead of
         # paying an HTML parse per page nobody consumes.
         result = await _run(
@@ -230,7 +230,7 @@ class TestHttpStrategy:
         r1 = await _run(policy=http_policy(discovery=None), **kwargs)
         assert r1.diagnostics["js_endpoints"] == []
         assert "discovery" not in r1.diagnostics
-        # content-only crawl: link extraction skipped entirely (#2-fix)
+        # content-only crawl: link extraction skipped entirely
         assert r1.discovered_link_count == 0
         # next_page_url is always computed (standard field, proven by
         # test_http_strategy_extracts_html_markdown_and_links); it must not be
@@ -248,7 +248,7 @@ class TestHttpStrategy:
 
 
 async def test_recursive_crawl_drops_sitewide_lists_from_page_diagnostics(monkeypatch):
-    # #13-fix: during recursive crawls, site-wide sitemap/feed URL lists are
+    # During recursive crawls, site-wide sitemap/feed URL lists are
     # frontier seeds, not per-page payload -- returning them on every page's
     # diagnostics wastes memory across thousands of pages.
     import app.crawl.strategies.fetch_policy as http_mod

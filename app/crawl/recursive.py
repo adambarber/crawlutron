@@ -34,7 +34,7 @@ from app.validation import HostPolicy, registrable_domain
 # A transiently-failed URL is not a dead page: our fetch died, or capacity was
 # the problem, so the page itself is still worth having. The recursive loop
 # re-queues such a task onto the frontier tail so the at-least-once contract
-# holds for a DNS blip and an exhausted renderer pool alike (memory #1947). The
+# holds for a DNS blip and an exhausted renderer pool alike. The
 # cap stops a permanently unreachable host from spinning one URL forever: after
 # this many re-queues the URL fails for real and the crawl degrades instead of
 # livelocking. Which failures qualify is the taxonomy's call, not a local list

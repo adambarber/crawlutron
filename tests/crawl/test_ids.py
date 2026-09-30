@@ -1,4 +1,4 @@
-"""Request/job id entropy contract (HIGH #9 policy, extended to handles).
+"""Request/job id entropy contract (extended to handles).
 
 GET /v1/crawl/{request_id} takes the id as its only lookup credential, so
 the "avoid brute-forceable short IDs" policy that job_store documents for

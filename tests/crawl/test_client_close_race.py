@@ -1,4 +1,4 @@
-"""Close-race tests for best-effort client teardown scheduling (H5).
+"""Close-race tests for best-effort client teardown scheduling.
 
 ``_schedule_client_close`` swaps the shared ``_LoopBoundPooledClient`` from
 synchronous call sites (client-creation and DNS-recovery paths). The scheduled

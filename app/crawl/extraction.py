@@ -206,7 +206,7 @@ def _doc_worker_main(conn) -> None:
 
     Each task arrives as ``(body, hooks)``; hooks come from the parent's
     per-call snapshot (never the worker's spawn-time env). A ``die`` hook
-    exits without sending (M8: a worker segfaulting on hostile input).
+    exits without sending (a worker segfaulting on hostile input).
     """
     try:
         _configure_doc_worker_logging()
@@ -1156,7 +1156,7 @@ def extract_post_fetch_discovery(
     include_metadata: bool = False,
     host_policy: HostPolicy,
 ) -> dict[str, Any]:
-    """Sync post-fetch discovery block for the strategy result builders (perf #9).
+    """Sync post-fetch discovery block for the strategy result builders.
 
     Parses the HTML once and derives frames/forms diagnostics, discovered
     links, raw JS endpoints, and the pagination hint in one pass. Pure CPU

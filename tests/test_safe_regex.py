@@ -53,7 +53,7 @@ class TestMatchBounded:
 
         Both halves are the point. A thread-abandonment implementation would
         pass the wall-time half alone while leaving a wedged worker burning
-        behind (G1) -- so pin the wall time AND that no thread survived, and
+        behind -- so pin the wall time AND that no thread survived, and
         assert them in one place so a new catastrophic shape cannot pin one and
         forget the other.
         """

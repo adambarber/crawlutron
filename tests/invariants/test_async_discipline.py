@@ -32,7 +32,7 @@ from tests.invariants._shared import assert_trees_clean
 # The admission sizing weights are one value
 #
 # ``_build_admission_policy`` and ``max_http_concurrency_for`` each took the same
-# four sizing weights as keyword-only parameters, and the pair jscpd reported was
+# four sizing weights as keyword-only parameters, and the duplication was
 # those two signatures rather than any logic. The weights are now one frozen
 # ``resource_pressure.TaskRamBudget`` that the caller builds and the policy
 # function hands on unchanged.

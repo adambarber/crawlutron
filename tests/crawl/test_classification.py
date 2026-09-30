@@ -420,7 +420,7 @@ def test_strip_is_linear_under_pathological_unclosed_script_flood():
 
     A page with N unclosed <script> tags made _HTML_NOISE_RE cost O(N^2):
     each tag anchor re-scanned to end-of-string for a closing tag that never
-    comes (adversarial review H-final-1). The replacement scanner must stay
+    comes. The replacement scanner must stay
     linear: doubling the input must roughly double, not quadruple, the time.
 
     Measured in CPU seconds, not wall clock. The claim is about the scanner's

@@ -43,7 +43,7 @@ async def render(payload: RenderRequest, settings: CrawlerSettings) -> UnifiedCr
     """Render ``payload`` URLs with the pooled browser worker."""
     with request_gate("render_request_rejected", logger=logger, reject=_render_rejection):
         # Every render request needs the browser by definition: fail clean
-        # with a 503 when the pool is down (startup/shutdown window, M13)
+        # with a 503 when the pool is down (startup/shutdown window)
         # instead of an AttributeError 500 from inside the worker.
         pool = get_browser_pool()
         if pool is None:

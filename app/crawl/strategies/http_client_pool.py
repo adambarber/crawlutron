@@ -480,7 +480,7 @@ async def close_async_http_client() -> None:
 # Shared curl_cffi TLS-impersonation session (one per running event loop).
 # A fresh AsyncSession per request rebuilt TLS state and the connection pool
 # every time; sharing it keeps warm connections and the impersonated
-# fingerprint across requests (perf throughput #4). Mirrors
+# fingerprint across requests. Mirrors
 # get_async_http_client, including the loop-change rebuild.
 _DEFAULT_CFFI_SESSION: Any | None = None
 _CFFI_SESSION_INIT_LOCK = threading.Lock()

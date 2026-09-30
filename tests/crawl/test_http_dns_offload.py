@@ -1,4 +1,4 @@
-"""Adversarial perf #1.1: the HTTP fetcher must offload blocking DNS resolution
+"""The HTTP fetcher must offload blocking DNS resolution
 to a worker thread so the event loop is never stalled by a resolver call."""
 
 import threading

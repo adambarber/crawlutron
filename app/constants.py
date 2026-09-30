@@ -612,7 +612,7 @@ ENGINE_BATCH_CONCURRENCY_MULTIPLIER: int = 2
 DEFAULT_MAX_BROWSER_RENDERS: int = 100
 DEFAULT_MAX_CONCURRENT_PAGES: int = 3
 
-# Browser fixed-overhead knobs (perf throughput #7, configurability only):
+# Browser fixed-overhead knobs (configurability only):
 # lazy-load scroll repetitions, the pause between scrolls, and the bounded
 # wait for the cookie harvest. Values equal the long-standing hardcoded
 # behavior (3 steps / 1s / 5.0s); change them via CrawlerSettings/env or the

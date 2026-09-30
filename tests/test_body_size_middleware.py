@@ -29,15 +29,14 @@ def _read_capped_receive() -> str:
 
 def test_chunked_request_under_cap_is_not_rejected_pre_emptively():
     """The Content-Length pre-check must reject only when CL > cap.
-    A small CL body is allowed through to the wrapped receive() path
-    (adversarial review F-no-body-size-limit)."""
+    A small CL body is allowed through to the wrapped receive() path."""
     source = _read_middleware_source()
     assert "int(content_length) > _MAX_REQUEST_BODY_BYTES" in source
 
 
 def test_chunked_request_truncation_sets_connection_close():
     """Truncated requests must have Connection: close so keep-alive
-    sockets are not poisoned (adversarial review F-no-body-size-limit C1)."""
+    sockets are not poisoned."""
     source = _read_middleware_source()
     assert 'response.headers["Connection"] = "close"' in source
 

@@ -96,14 +96,14 @@ def test_cache_envelope_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Crawl-response shaping chokepoint (jscpd #1 class)
+# Crawl-response shaping chokepoint
 # ---------------------------------------------------------------------------
 
 
 def _crawl_response_construction_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag explicit ``UnifiedCrawlResponse(..., results=[...])`` construction
     outside response_shaping — callers must use build_unified_crawl_response so
-    persisted/webhook/REST payloads cannot drift (the #1754 rule, endpoint-wide).
+    persisted/webhook/REST payloads cannot drift (endpoint-wide).
     ``**stored`` deserialization splats have no explicit results= keyword."""
     if path.name == "response_shaping.py":
         return []
@@ -418,7 +418,7 @@ def test_render_options_chokepoint_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Error-envelope shape (jscpd #3 class)
+# Error-envelope shape
 # ---------------------------------------------------------------------------
 
 # app/api/exceptions.py owns the envelope; it is the sanctioned definition
@@ -433,7 +433,7 @@ def _dict_keys(node: ast.Dict) -> set[str]:
 def _envelope_dict_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     """Flag hand-rolled error envelopes; the factory is the only definition.
 
-    Three shapes: ANY ``HTTPException(...)`` construction (M8: the wire shape
+    Three shapes: ANY ``HTTPException(...)`` construction (the wire shape
     may only be built by :func:`http_error`/``browser_pool_unavailable`` -- a
     bare ``HTTPException(detail="str")`` reaches the handler's fallback and
     used to be laundered into a fabricated ``http_<status>`` code); a

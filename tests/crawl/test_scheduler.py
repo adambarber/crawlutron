@@ -87,7 +87,7 @@ class TestScheduler:
         results = await scheduler.run(jobs, ok_worker, failed_result=engine_envelope)
         assert results is not None
         # run reports a job.index -> result mapping so callers align each result
-        # with its own job regardless of completion order (B1).
+        # with its own job regardless of completion order.
         assert sorted(results) == [0, 1, 2]
         assert [results[i].normalized_url for i in sorted(results)] == [
             f"http://example.com/{i}" for i in range(3)
@@ -371,7 +371,7 @@ class TestSchedulerPolicies:
         assert scheduler._max_rps > 0
 
     def test_circuit_breaker_exponential_backoff(self):
-        """Adversarial perf #2.1: consecutive trips escalate the cooldown
+        """Consecutive trips escalate the cooldown
         exponentially (base -> doubled -> ... -> cap)."""
         s = make_scheduler(
             circuit_threshold=5,
@@ -394,7 +394,7 @@ class TestSchedulerPolicies:
         assert s._circuit_trip_count["x"] == 0
 
     def test_scheduler_set_domain_min_delay(self):
-        """Adversarial perf #2.6: a robots Crawl-delay is enforced as a floor
+        """A robots Crawl-delay is enforced as a floor
         on top of the global/adaptive delay."""
         s = make_scheduler(global_limit=2)
         assert s.current_delay("a.com") == 0.0
@@ -437,7 +437,7 @@ class TestSchedulerPolicies:
         assert "example.com" not in scheduler._domain_min_delay
 
     async def test_run_streams_results_via_on_result(self):
-        """Adversarial perf #3.1: with ``on_result`` set, each completed result is
+        """With ``on_result`` set, each completed result is
         delivered immediately (a fast job is delivered before a slow one) and
         ``run`` returns None (nothing accumulated in memory).
 

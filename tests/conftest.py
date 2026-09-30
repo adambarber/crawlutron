@@ -511,7 +511,7 @@ def _reset_global_http_state():
                     loop.run_until_complete(pool_mod.close_async_http_client())
             except RuntimeError:
                 pool_mod._DEFAULT_HTTP_CLIENT = None
-    # Shared curl_cffi session (perf throughput #4): same loop-hygiene as the
+    # Shared curl_cffi session: same loop-hygiene as the
     # pooled httpx client so tests stay order-independent under asyncio.run.
     with contextlib.suppress(Exception):
         if pool_mod._DEFAULT_CFFI_SESSION is not None:
@@ -549,8 +549,7 @@ def _reset_global_http_state():
         _invalidate_cgroup_cache()
     # DNS cache + pending client close queue + cookie namespace contextvar
     # isolation between tests. Without these a test that mutates ``_DNS_CACHE``
-    # or schedules a client close would leak state into the next test
-    # (adversarial review F-test-isolation).
+    # or schedules a client close would leak state into the next test.
     # ``cookie_mod``/``pool_mod`` are the ones bound at the top of this fixture;
     # only ``pinned_mod`` is new here.
     from app.crawl.strategies import pinned_transport as pinned_mod

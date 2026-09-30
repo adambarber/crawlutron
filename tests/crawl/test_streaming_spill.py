@@ -85,8 +85,8 @@ async def test_auto_spill_deleted_after_successful_request(monkeypatch):
 async def test_stale_spills_garbage_collected_on_next_crawl(monkeypatch):
     import app.crawl.engine as engine
 
-    # The cadence gate skips a temp-dir sweep inside the interval (perf tier-2
-    # T5); reset the stamp so this crawl is the one that performs the sweep
+    # The cadence gate skips a temp-dir sweep inside the interval; reset the
+    # stamp so this crawl is the one that performs the sweep
     # the test exists to observe.
     monkeypatch.setattr(engine, "_LAST_SPILL_GC_MONOTONIC", None)
 

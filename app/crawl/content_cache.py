@@ -290,7 +290,7 @@ class ContentCache:
         return value
 
     def _remember_memory_locked(self, key: str, value: Any, expires: float | None, size: int) -> None:
-        """Store into the RAM mirror under the serialized-size gate (N5/final #1)
+        """Store into the RAM mirror under the serialized-size gate
         and the entry-count cap — the single home of the store so no path can
         lose either bound. Oversized values are dropped, never mirrored.
         """
@@ -468,7 +468,7 @@ class ContentCache:
         self._index_total_bytes += size - old_size
 
     def _write_data(self, path: Path, data: str) -> None:
-        """Persist a pre-serialized envelope (N1: ``aset`` sizes the exact
+        """Persist a pre-serialized envelope: ``aset`` sizes the exact
         bytes before writing; ``set`` keeps its synchronous inline write)."""
         atomic_write_text(path, data)
 

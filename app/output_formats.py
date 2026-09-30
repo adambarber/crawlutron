@@ -1,4 +1,4 @@
-"""#17 Multiple output formats for crawl results.
+"""Multiple output formats for crawl results.
 
 The unified crawl result is a list of dicts (one per crawled URL). This module
 serializes that list into the caller-requested wire format without changing the

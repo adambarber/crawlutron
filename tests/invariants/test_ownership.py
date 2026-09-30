@@ -136,7 +136,7 @@ def test_lock_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# ContentCache mirror twins (jscpd #2 class)
+# ContentCache mirror twins
 # ---------------------------------------------------------------------------
 
 _CACHE_TWIN_METHODS = {"get", "aget", "set", "aset"}
@@ -265,7 +265,7 @@ def test_locked_helper_lock_ownership_detector_bites():
 
 
 # ---------------------------------------------------------------------------
-# Handle minting is single-sourced (H4 residue / HIGH #9 entropy policy)
+# Handle minting is single-sourced (entropy policy)
 # ---------------------------------------------------------------------------
 
 _ID_MINT_SANCTIONED = frozenset({"ids.py"})

@@ -1,7 +1,7 @@
-"""Adversarial fix: per-request cookie namespace isolates concurrent crawls.
+"""Per-request cookie namespace isolates concurrent crawls.
 
 Without isolation, the shared ``_GLOBAL_COOKIE_JAR`` would leak cookies from
-one tenant to another (adversarial review F-cookie-cross-contamination). The
+one tenant to another. The
 namespace contextvar is set per ``crawl_request`` from
 ``request_profile.cookie_namespace`` so cookies are keyed by tenant.
 """

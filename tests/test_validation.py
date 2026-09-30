@@ -47,7 +47,7 @@ class TestDeepUrlNormalization:
 
 class TestNormalizationGuardMemoization:
     """Per-anchor normalization must not re-derive the env decision or the
-    host SSRF verdict on every call (perf tier-2 T2): the env read is keyed
+    host SSRF verdict on every call: the env read is keyed
     on its raw value and the host verdict is a pure function of the host."""
 
     URL = "https://MEMO-T2-9E16C.TEST:443/path/?b=2&utm_source=x&a=1#frag"

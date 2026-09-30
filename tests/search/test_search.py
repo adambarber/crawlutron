@@ -173,7 +173,7 @@ class TestProviderParsing:
         assert [r.url for r in results] == ["https://example.gov/a", "https://example.gov/b"]
 
 
-# --- Shared result collector (jscpd #4: three provider loops were verbatim) -
+# --- Shared result collector (three provider loops were verbatim) ---------
 
 
 class TestCollectResults:
@@ -378,7 +378,7 @@ class _FakeStreamResponse:
 
     Mirrors the REAL httpx attribute surface _provider_http relies on —
     ``encoding`` (never ``charset``), ``status_code``, ``aiter_bytes`` — per
-    the #1745 rule that fakes must mirror the real client surface. The
+    the rule that fakes must mirror the real client surface. The
     shared ``fake_provider_http`` fixture patches _provider_http wholesale,
     which left this decode path with zero coverage and shipped a reference
     to an attribute httpx does not have (500 on every real search request).

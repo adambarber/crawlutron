@@ -58,8 +58,8 @@ from tests.property_registry import PROPERTY_BY_NAME, PROPERTY_REGISTRY, Propert
 # app/api/response_shaping.py RAISED to (9, 8) for the same reason: `EnvelopeOptions`
 # is the one record the sync and async envelope builders both take, and it exists
 # because the two builders each restated the same six optional parameters in
-# their signatures -- six more places to add an option and forget one, and jscpd
-# was holding the pair as a same-file clone. Folding them into a record is what
+# their signatures -- six more places to add an option and forget one, and the
+# copy-paste gate was holding the pair as a same-file clone. Folding them into a record is what
 # made the builders agree by construction; a narrower budget would push the
 # options back out into two hand-maintained lists.
 #

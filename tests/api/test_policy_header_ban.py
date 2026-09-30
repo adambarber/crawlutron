@@ -1,7 +1,7 @@
-"""M12: policy.headers may not carry chokepoint-bypassing header names.
+"""policy.headers may not carry chokepoint-bypassing header names.
 
 Two families, both rejected at the *model* (rejection at the validation site,
-never a silent strip at consumption, per #1912):
+never a silent strip at consumption):
 
 - Conditional headers (``if-none-match`` / ``if-modified-since``) belong to
   the ``validators`` map.

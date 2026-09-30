@@ -69,7 +69,7 @@ def _require_meta_key(
 ) -> Any:
     """Return ``meta[key]``, or reject with the reason naming what was wrong.
 
-    Absent and wrong-typed are reported as different failures (N-6) because they
+    Absent and wrong-typed are reported as different failures because they
     are different mistakes: a client that never sent the key has to send it, and
     one that sent the wrong shape has to fix it. Collapsing the two into one
     message leaves a client unable to act on the correction.
