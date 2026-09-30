@@ -244,3 +244,80 @@ def _sample_field(model: type[BaseModel]) -> dict[str, object]:
         "DiscoveryConfig": {},
     }
     return dict(fixtures[model.__name__])
+
+
+class TestRequestCollectionsAreBounded:
+    """A caller-supplied collection with no ceiling is an unbounded fan-out.
+
+    ``credentials`` has carried ``max_length=32`` all along, while its siblings
+    in the same model were left uncapped. That asymmetry reads as an oversight
+    rather than a decision, and each capped collection is a place where a
+    malicious or merely careless payload turns into work the service agreed to:
+    a policy naming a thousand origins, a crawl naming a million URLs.
+
+    The ceilings are policy decisions, not derivable facts, so they live here
+    beside the tests that pin them rather than being spread across the model.
+    """
+
+    #: Longest caller-supplied URL list accepted in one request. A whole-site
+    #: job is the unbounded path -- it exists precisely so this is bounded.
+    MAX_URLS = 500
+    #: Most validators in one request. Each is a conditional-request header pair.
+    MAX_VALIDATORS = 64
+    #: Most custom headers in one request.
+    MAX_HEADERS = 64
+
+    def test_url_lists_are_capped(self):
+        from app.api_models import CrawlRequest
+
+        at_ceiling = {"urls": [f"https://example.com/{index}" for index in range(self.MAX_URLS)]}
+        assert len(CrawlRequest(**at_ceiling).urls or []) == self.MAX_URLS
+        with pytest.raises(ValidationError):
+            CrawlRequest(urls=[f"https://example.com/{i}" for i in range(self.MAX_URLS + 1)])
+
+    def test_the_render_and_map_models_cap_urls_too(self):
+        """The cap must travel with the shared url-source base, not just CrawlRequest.
+
+        Three models bind URLs and they share one base class; a ceiling declared
+        on only the biggest one leaves the other two uncapped, which is the
+        shape this test exists to prevent.
+        """
+        from app.api_models import MapRequest, RenderRequest
+
+        too_many = [f"https://example.com/{index}" for index in range(self.MAX_URLS + 1)]
+        for model in (MapRequest, RenderRequest):
+            with pytest.raises(ValidationError):
+                model(urls=too_many)
+
+    def test_validator_maps_are_capped(self):
+        from app.api_models import CrawlRequest
+
+        at_ceiling = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS)}
+        # A url source is required alongside it -- unrelated to the cap, but the
+        # model will not validate a validators map on its own.
+        assert (
+            len(CrawlRequest(url="https://example.com/0", validators=at_ceiling).validators)
+            == self.MAX_VALIDATORS
+        )
+        over = {f"https://example.com/{i}": {"if_none_match": "x"} for i in range(self.MAX_VALIDATORS + 1)}
+        with pytest.raises(ValidationError):
+            CrawlRequest(url="https://example.com/0", validators=over)
+
+    def test_header_maps_are_capped(self):
+        from app.api_models import CrawlPolicy
+
+        at_ceiling = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS)}
+        assert len(CrawlPolicy(headers=at_ceiling).headers) == self.MAX_HEADERS
+        over = {f"x-custom-{i}": "v" for i in range(self.MAX_HEADERS + 1)}
+        with pytest.raises(ValidationError):
+            CrawlPolicy(headers=over)
+
+    def test_the_credential_ceiling_still_holds(self):
+        """Pins the pre-existing cap so the siblings are not capped BELOW it by accident."""
+        from app.api_models import CrawlPolicy
+
+        at_ceiling = {f"https://h{i}.example": {"kind": "bearer", "token": "t"} for i in range(32)}
+        assert len(CrawlPolicy(credentials=at_ceiling).credentials) == 32
+        over = {f"https://h{i}.example": {"kind": "bearer", "token": "t"} for i in range(33)}
+        with pytest.raises(ValidationError):
+            CrawlPolicy(credentials=over)

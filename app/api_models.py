@@ -47,6 +47,16 @@ from app.constants import (
 
 POLICY_SCHEMA_VERSION = "2026-06-23"
 
+#: Ceilings on caller-supplied collections. Declared here, once, because they are
+#: policy rather than schema: three of these four fields are dicts or lists a
+#: caller can size freely, and an unbounded one is a fan-out the service agreed
+#: to before any admission check runs. ``credentials`` already carried 32 and
+#: keeps it -- the point is that its siblings now carry a decision too, not that
+#: they match it.
+MAX_URLS_PER_REQUEST = 500
+MAX_VALIDATORS_PER_REQUEST = 64
+MAX_HEADERS_PER_REQUEST = 64
+
 # The identity block every discovery response opens with, declared once. It lives
 # here rather than in ``app.constants`` because it spans both: the version comes
 # from constants, the policy schema version is this module's own. Two payloads
@@ -376,6 +386,13 @@ class CrawlPolicy(BaseModel):
         "x-forwarded-for": "origin-side identity headers must not be caller-controlled",
         "x-forwarded-host": "origin-side identity headers must not be caller-controlled",
         "x-real-ip": "origin-side identity headers must not be caller-controlled",
+        "content-length": "body framing belongs to the HTTP client, not to a crawl input",
+        "transfer-encoding": "body framing belongs to the HTTP client, not to a crawl input",
+        "connection": "hop-by-hop header; the connection is not the caller's to describe",
+        "te": "hop-by-hop header; transfer coding is negotiated per connection",
+        "trailer": "hop-by-hop header; trailers are framed by the client, not declared here",
+        "upgrade": "hop-by-hop header; protocol upgrade is not a crawl input",
+        "keep-alive": "hop-by-hop header; connection persistence is the client's decision",
     }
 
     schema_version: Annotated[
@@ -419,6 +436,7 @@ class CrawlPolicy(BaseModel):
     )
     headers: dict[str, str] = Field(
         default_factory=dict,
+        max_length=MAX_HEADERS_PER_REQUEST,
         description="Optional caller-approved headers for direct HTTP strategies. Use for explicit, "
         "reviewable host policies; do not use to smuggle credentials or bypass access controls. "
         "Authorization belongs in policy.credentials, which scopes it to one origin.",
@@ -652,6 +670,11 @@ class _SingleUrlSourceRequest(BaseModel):
     urls: Annotated[
         list[str] | None,
         Field(
+            # Bounded because a whole-site job is the unbounded path: it exists
+            # precisely so a caller does not have to enumerate. Without a ceiling
+            # a list is unbounded work the service silently agreed to, admitted
+            # before any admission check can see it.
+            max_length=MAX_URLS_PER_REQUEST,
             description="Batch of public HTTP(S) URLs. Use either url or urls.",
         ),
     ] = None
@@ -675,6 +698,7 @@ class CrawlRequest(_SingleUrlSourceRequest):
     )
     validators: dict[str, FetchValidators] = Field(
         default_factory=dict,
+        max_length=MAX_VALIDATORS_PER_REQUEST,
         description="Optional map of submitted URL -> cached validators for conditional revalidation. "
         "Keys may be the original or normalized URL. Matching URLs are fetched with "
         "If-None-Match / If-Modified-Since; a 304 produces a not_modified result with no content.",

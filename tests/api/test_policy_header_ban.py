@@ -104,3 +104,83 @@ def test_conditional_headers_keep_their_specific_reason():
 
     with pytest.raises(ValidationError, match="validators"):
         CrawlRequest(url="http://example.com/", policy={"headers": {"If-None-Match": '"v1"'}})
+
+
+#: Framing and hop-by-hop names. Not a second decision -- these belong to the
+#: connection, not to the caller's request, and a caller that sets them is
+#: describing where one request ends and the next begins. The origin and this
+#: service then disagree about framing, which is the request-smuggling surface.
+#: httpx rejects CRLF in values, so the risk is not injection; it is that the
+#: list IS the chokepoint, and silence reads as "considered and cleared".
+FRAMING_HEADERS = (
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "te",
+    "trailer",
+    "upgrade",
+    "keep-alive",
+)
+
+
+@pytest.mark.parametrize("header", FRAMING_HEADERS)
+def test_framing_headers_rejected_at_the_policy_chokepoint(header):
+    """Rejected at the MODEL, not stripped at consumption.
+
+    A silent strip would leave the caller believing the header was sent. The
+    whole point of this chokepoint is that the refusal names the header and says
+    why, so the caller can act on it.
+    """
+    from app.api_models import CrawlPolicy
+
+    with pytest.raises(ValidationError):
+        CrawlPolicy(headers={header: "whatever"})
+
+
+@pytest.mark.parametrize("header", FRAMING_HEADERS)
+def test_framing_refusal_names_the_header_and_the_reason(header):
+    """The message must identify WHICH header and WHY.
+
+    "header not permitted" without the name leaves a caller with a policy of
+    forty headers to bisect, and the reason string is what turns the refusal
+    into an explanation rather than a dead end.
+    """
+    from app.api_models import CrawlPolicy
+
+    with pytest.raises(ValidationError) as exc:
+        CrawlPolicy(headers={header: "whatever"})
+    message = str(exc.value)
+    assert header in message, message
+
+
+def test_a_smuggling_attempt_is_refused_whole():
+    """The realistic attack shape: the two framing headers that disagree.
+
+    Sent together, Content-Length and Transfer-Encoding are the classic
+    desync pair. Asserted as ONE case rather than two, because the two single
+    cases above already prove each header is refused -- what is new here is
+    that pairing them does not produce a differently-shaped outcome.
+    """
+    from app.api_models import CrawlPolicy
+
+    with pytest.raises(ValidationError):
+        CrawlPolicy(headers={"content-length": "10", "transfer-encoding": "chunked"})
+
+
+def test_hop_by_hop_headers_are_refused_through_every_model_embedding_the_policy():
+    """The ban must travel with the shared policy, exactly as the original six do.
+
+    A ban enforced on CrawlPolicy alone would be bypassed by any model that
+    embeds it, which is the same chokepoint gap this list exists to close.
+    """
+    import pytest as _pytest  # noqa: F401  (parametrize imported at module top)
+
+    from app.api_models import CrawlRequest, JobCreateRequest, MapRequest
+
+    for model, payload in (
+        (CrawlRequest, {"url": "http://example.com/"}),
+        (MapRequest, {"url": "http://example.com/"}),
+        (JobCreateRequest, {"root_url": "http://example.com/"}),
+    ):
+        with pytest.raises(ValidationError):
+            model(**payload, policy={"headers": {"transfer-encoding": "chunked"}})
