@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Address classification is now one primitive, and the service says when it
+  is reachable from the network.** Parsing a host into an address, unwrapping
+  any IPv4 inside an IPv6 wrapper, and reading the range predicates was written
+  out at each call site, so a range added for one consumer was invisible to the
+  others. `app/addresses.py` owns that work as `classify()`, and the egress
+  guard (`app/validation.py`), the pinning path, and the new startup bind check
+  all ask that one classification. The two *questions* stay separate on
+  purpose: `10.0.0.5` is not a safe public egress target and is still
+  reachable by every host on the LAN, so `is_loopback_bind()` is its own
+  predicate rather than an inversion of the egress verdict. Because nothing
+  authenticates a caller — every `Authorization` header in the tree is
+  outbound, attached to a crawled origin rather than presented by one — the
+  service now logs a warning at startup when its bind address leaves loopback,
+  naming the exposure and how to avoid it. It is a warning and not a refusal
+  because the shipped compose file binds `0.0.0.0` inside the container and
+  publishes only to `127.0.0.1`, which Docker port mapping requires.
+
 ### Fixed
 - **A job row now belongs to the test that made it.** `app/main.py` binds
   `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import and hands every

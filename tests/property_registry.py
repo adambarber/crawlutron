@@ -25,11 +25,20 @@ class Property:
 PROPERTY_REGISTRY = (
     Property(
         name="public-target",
-        owner_module="app/validation.py",
-        owner_symbols=("_host_is_public", "_is_public_ip", "_is_public_ip_value", "_classified_ip_address"),
-        definition_site="app/validation.py:_is_public_ip",
+        owner_module="app/addresses.py",
+        owner_symbols=(
+            "classify",
+            "_parse",
+            "_embedded_ipv4",
+            "_resolver_numeric_ipv4",
+            "_resolver_numeric_part",
+        ),
+        definition_site="app/addresses.py:classify",
         fingerprints=("ipaddress_range_verdict",),
-        reason="URL normalization and HTTP pinning must share one public-address verdict.",
+        reason=(
+            "Address ranges are classified once; every egress, pinning and bind "
+            "consumer asks that one classification."
+        ),
     ),
     Property(
         name="bool-env",

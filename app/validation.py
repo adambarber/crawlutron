@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
 import logging
 import math
 import os
@@ -13,6 +12,7 @@ from importlib import import_module
 from typing import Protocol, TypeVar, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+from app.addresses import AddressClass, classify
 from app.models import NormalizedUrl
 
 
@@ -111,10 +111,6 @@ def _host_policy_reason(host: str, *, policy: HostPolicy) -> str | None:
     return None
 
 
-_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
-_IPV6_UNIQUE_LOCAL_NETWORK = ipaddress.ip_network("fc00::/7")
-_NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
-
 # Lazily-initialised public-suffix list. ``publicsuffixlist`` is an optional
 # dependency, and importing it (and building the table) is only worth paying
 # for when a URL actually needs its suffix resolved. ``_PSL_UNSET`` is the
@@ -150,66 +146,6 @@ _TRACKING_PARAM_EXACT = frozenset(
 def _is_tracking_param(key: str) -> bool:
     k = key.lower()
     return k.startswith("utm_") or k in _TRACKING_PARAM_EXACT
-
-
-def _resolver_numeric_part(part: str) -> int | None:
-    """Parse one numeric IP component the way glibc-style resolvers do."""
-    if not part:
-        return None
-    lowered = part.lower()
-    if lowered.startswith("0x"):
-        digits = lowered[2:]
-        if not digits or any(c not in "0123456789abcdef" for c in digits):
-            return None
-        return int(digits, 16)
-    if len(part) > 1 and part.startswith("0"):
-        if any(c not in "01234567" for c in part):
-            return None
-        return int(part, 8)
-    if not part.isdigit():
-        return None
-    return int(part, 10)
-
-
-def _resolver_numeric_ipv4(host: str) -> int | None:
-    """Interpret *host* as IPv4 the way resolvers parse numeric forms.
-
-    ``ipaddress`` rejects bare integers (``2130706433``), hex
-    (``0x7f000001``), and short dotted quads (``127.1``), but resolvers
-    accept them -- so layer 1 must classify the packed value itself instead
-    of treating every unparseable host as a plain hostname. Returns the
-    32-bit value, or None when the host is not a numeric form (or is out of
-    range, which resolvers also reject).
-    """
-    if not host or any(c not in "0123456789abcdefxABCDEF." for c in host):
-        return None
-    if "." not in host:
-        value = _resolver_numeric_part(host)
-        if value is None:
-            return None
-        # Oversized single integers wrap mod 2**32 on resolvers (verified
-        # against getaddrinfo); classify the effective address, not None.
-        return value & 0xFFFFFFFF
-    parts = host.split(".")
-    if not 2 <= len(parts) <= 4:
-        return None
-    values = []
-    for part in parts:
-        parsed = _resolver_numeric_part(part)
-        if parsed is None:
-            return None
-        values.append(parsed)
-    width = len(values)
-    for leading in values[:-1]:
-        if leading > 0xFF:
-            return None
-    last_limit = 1 << (8 * (5 - width))
-    if values[-1] >= last_limit:
-        return None
-    result = 0
-    for index, value in enumerate(values[:-1]):
-        result |= value << (8 * (3 - index))
-    return result | values[-1]
 
 
 def normalize_public_http_url(url: str, *, policy: HostPolicy) -> NormalizedUrl:
@@ -324,76 +260,20 @@ def _host_is_public(host: str) -> bool:
     """
     if host in PRIVATE_HOSTS:
         return False
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    if address is None:
-        # Resolver-numeric forms ipaddress rejects: classify the
-        # packed value with the same predicate set.
-        numeric = _resolver_numeric_ipv4(host)
-        if numeric is not None:
-            address = ipaddress.ip_address(numeric)
-    if address is not None and not _is_public_ip(address):
-        return False
-    return True
-
-
-def _embedded_ipv4(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
-    """Unwrap an IPv4 address hidden inside an IPv6 wrapper.
-
-    IPv4-mapped (``::ffff:0:0/96``), 6to4 (``2002::/16``) and Teredo
-    (``2001::/32``) all reach an IPv4 target, so the SSRF verdict must be taken
-    on the embedded IPv4 rather than the wrapper. Otherwise a wrapper hides
-    whatever the IPv4 range check rejects: ``::ffff:100.64.0.1`` wrapped a
-    carrier-grade NAT target and was classified public. Returns ``None``
-    for native IPv6 and bare IPv4, meaning "classify ``addr`` as-is".
-    """
-    if not isinstance(addr, ipaddress.IPv6Address):
-        return None
-    embedded = addr.ipv4_mapped or addr.sixtofour
-    if embedded is None and addr.teredo is not None:
-        # Teredo exposes (server, client); the client is the reachable target.
-        embedded = addr.teredo[1]
-    return embedded
-
-
-def _classified_ip_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address):
-    """Return the address an SSRF range verdict must be computed on.
-
-    The single chokepoint for IPv6-embedded IPv4 unwrapping so the mapped and
-    bare forms of a target can never diverge.
-    """
-    return _embedded_ipv4(addr) or addr
-
-
-def _is_public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Return whether one parsed address is safe for public egress."""
-    classified = _classified_ip_address(address)
-    if (
-        classified.is_private
-        or classified.is_loopback
-        or classified.is_link_local
-        or classified.is_reserved
-        or classified.is_multicast
-        or classified.is_unspecified
-    ):
-        return False
-    if isinstance(classified, ipaddress.IPv4Address) and classified in _CGNAT_NETWORK:
-        return False
-    if isinstance(classified, ipaddress.IPv6Address) and classified in _IPV6_UNIQUE_LOCAL_NETWORK:
-        return False
-    if isinstance(classified, ipaddress.IPv6Address) and classified in _NAT64_NETWORK:
-        return False
-    return True
+    # A host that is not an address at all is a name, and what it resolves to
+    # is judged separately against ``_is_public_ip_value`` once the resolver
+    # has answered. Only a literal that lands in a rejected range is refused.
+    address_class = classify(host)
+    return address_class in (AddressClass.NOT_AN_ADDRESS, AddressClass.PUBLIC)
 
 
 def _is_public_ip_value(value: str) -> bool:
-    try:
-        address = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    return _is_public_ip(address)
+    """Return whether a host string is safe for public egress.
+
+    Unlike ``_host_is_public`` this is asked of a *resolved* address, so a
+    string that is not an address at all is not public here.
+    """
+    return classify(value) is AddressClass.PUBLIC
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:

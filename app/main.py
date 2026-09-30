@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 # entry point logs the same way. Integration deployments that want richer
 # logging can override ``configure_service_logging`` in their own
 # integration layer.
+from app.addresses import is_loopback_bind
 from app.crawl.policy import PolicyTier
 from app.logging_config import configure_service_logging
 from app.validation import HostPolicy, get_env_float, get_env_int
@@ -130,6 +131,33 @@ logger = configure_service_logging(
 logging.getLogger("trafilatura").setLevel(logging.ERROR)
 
 
+def _warn_if_bound_off_loopback(host: str) -> None:
+    """Say so at startup when the API is reachable from off the machine.
+
+    Nothing authenticates a caller here: every ``Authorization`` header in the
+    tree is outbound, attached to a crawled origin rather than presented by
+    one. Loopback is what makes that safe, so the moment the bind leaves
+    loopback the whole surface -- crawl execution, job control, result
+    retrieval, webhooks -- is open.
+
+    A warning and not a refusal, because the shipped compose file binds
+    ``0.0.0.0`` inside the container (Docker port mapping cannot reach a
+    loopback-bound process) and publishes only to ``127.0.0.1``. Refusing that
+    bind would refuse this project's own supported deployment to guard a
+    configuration nobody ships.
+    """
+    if is_loopback_bind(host):
+        return
+    logger.warning(
+        "Binding to %s puts the crawl API on the network with no caller "
+        "authentication: crawl execution, job control, result retrieval and "
+        "webhooks are all reachable by anyone who can route to this port. "
+        "Bind 127.0.0.1, or keep this address and publish only to loopback "
+        "as docker-compose.yml does.",
+        (host or "").strip(),
+    )
+
+
 if FastAPI is not None:
     # Declared once here so both this branch and the ``else`` below agree on
     # the type: FastAPI is optional at import time, so the module-level app is
@@ -151,6 +179,11 @@ if FastAPI is not None:
         # The module-level gate is built at import time with no running
         # loop, so its lag probe must start here.
         _resource_gate.start_lag_probe()
+
+        # Before anything is listening: the exposure is a property of the bind
+        # and is true from the first moment, so it is stated before the first
+        # request rather than on one.
+        _warn_if_bound_off_loopback(settings.host)
 
         await initialize_browser_pool(settings)
         # Cookies first: recovered jobs can receive cookies in their first
