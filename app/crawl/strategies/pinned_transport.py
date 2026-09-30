@@ -16,6 +16,7 @@ from typing import Any, ParamSpec, TypeVar
 from urllib.parse import urljoin, urlparse
 
 from app.bounded_ttl import BoundedTTLCache
+from app.crawl.credentials import origin_of
 from app.models import HttpFetchResult
 from app.validation import (
     HostPolicy,
@@ -281,16 +282,37 @@ def _redirect_target(
     redirect, else ``None`` (terminal response). The caller must re-run
     ``_build_pinned_request`` for ``new_url`` so every hop re-validates against
     the SSRF blocklist and re-pins DNS. Sensitive headers (Cookie,
-    Authorization) are stripped when crossing host boundaries.
+    Authorization) are stripped when crossing an origin boundary.
+
+    The boundary is ``origin_of``, the same helper ``credentials`` scopes by, and
+    that sharing is the point. This used to compare ``hostname``, so a hop to a
+    different port on the same host kept the credential while ``apply_credentials``
+    would have refused to send it there -- one definition of origin was in the
+    sibling chokepoint and a looser one here, and the looser one is where the
+    credential leaks. Comparing origins also catches an https-to-http downgrade,
+    which the host comparison missed in the direction where it matters most.
     """
     if status_code not in _REDIRECT_STATUSES or not location or hops >= _MAX_REDIRECT_HOPS:
         return None
     new_url = str(normalize_public_http_url(urljoin(current_url, location), policy=policy))
-    new_host = urlparse(new_url).hostname
-    current_host = urlparse(current_url).hostname
-    if new_host != current_host:
+    if _crosses_origin(new_url, current_url):
         request_headers = {k: v for k, v in request_headers.items() if k.lower() not in _CREDENTIAL_HEADERS}
     return new_url, request_headers
+
+
+def _crosses_origin(new_url: str, current_url: str) -> bool:
+    """Whether a redirect hop leaves the origin, per ``credentials.origin_of``.
+
+    Falls back to treating the hop as a boundary when either side cannot be
+    canonicalised. ``normalize_public_http_url`` has already rejected the
+    non-HTTP schemes and userinfo that ``origin_of`` refuses, so this is
+    defensive -- and it fails toward stripping, since a header we keep is
+    unrecoverable and a header we drop only costs a re-login.
+    """
+    try:
+        return origin_of(new_url) != origin_of(current_url)
+    except ValueError:  # pragma: no cover - normalize_public_http_url precedes this
+        return True
 
 
 class _RedirectChain:
