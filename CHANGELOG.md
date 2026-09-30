@@ -41,6 +41,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   publishes only to `127.0.0.1`, which Docker port mapping requires.
 
 ### Fixed
+- **A redirect to a different port on the same host kept `Cookie` and `Authorization`.**
+  `pinned_transport._redirect_target` decided whether to strip credential headers
+  by comparing `urlparse(...).hostname`, so `https://a.com/x` to
+  `https://a.com:8443/z` kept all three, and so did an https-to-http downgrade
+  on the same host. The service already had the stricter definition in the
+  sibling chokepoint: `credentials.origin_of` is `scheme://host[:port]` with
+  default ports dropped, and `apply_credentials` sends a credential only to that
+  exact origin — so a credential scoped to `https://a.com:443` was already
+  refused for `https://a.com:8443`, while one attached to `https://a.com` was
+  sent there by the redirect path. Two chokepoints answering "is this the same
+  origin?" and disagreeing, with the looser one being where the credential went.
+  The scrub now compares `origin_of` on both sides, which does not reconcile the
+  two answers but deletes the second one. The default-port case is pinned too,
+  because it is the half a naive string comparison gets wrong: every legitimate
+  redirect that spells `:443` out would have lost its session.
 - **A refused target now gets no identity, instead of its own raw URL back.**
   `app/crawl/admission.py:_frontier_identity` asked the page-identity owner for a
   canonical identity and, when the owner returned `None`, handed back the raw
@@ -124,6 +139,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   shutdown event. Teardown now drains the crawls the fixture handed out.
 
 ### Changed
+- **Every caller-supplied collection on the policy is now bounded, and every caller-supplied key vocabulary is closed.**
+  `strategies` was the last uncapped collection on `CrawlPolicy` while its
+  siblings all had ceilings (`urls` 500, `headers` 64, `credentials` 32,
+  `validators` 64), which reads as an oversight rather than a decision. It is
+  the outbound fan-out per URL — `execute_crawl_chain` runs one ladder step per
+  entry — so a list of 2,000 was a 200 meaning 2,000 network attempts. Capped
+  at 16, and capped rather than deduplicated on purpose: a browser render mints
+  a session cookie that a later `HTTP_CFFI_IMPERSONATE` entry replays, so
+  `[browser, cffi, cffi]` is a real path and dedupe would have thrown it away.
+  A test pins that ladder as accepted so a later reader does not "improve" it
+  back into a dedupe.
+- **`request_profile` and `browser_profile.actions` are closed vocabularies.**
+  `request_profile` was `dict[str, Any]` with no constraints, so
+  `{"cookie_jarr": "per_host"}` disabled the per-host jar and reported success,
+  and the field description advertised `accept_language` when the consumer reads
+  `accept_languages` — prose committing to a key that did nothing. Inside an
+  action, `{"type": "fill", "selector": "#q", "val": "hi"}` filled an empty string
+  and reported success. Both are the same failure as the inert `state` key this
+  series removed from `browser_profile`, at the two places it could still hide.
+  Each declared set is asserted against the consumer's own reads, so a reader
+  added without a declaration fails where it is written.
+- **A closed key set is now also ceilinged.** Closing `browser_profile` in
+  #55 said which keys exist and was silent about how large their values could
+  be, so four knobs took whatever the caller sent: `lazy_scroll_steps: 10**12`
+  on a scroll that runs directly below an action chain whose docstring says
+  production must pass a budget; an unbounded cookie-harvest timeout holding a
+  *pooled* renderer from a `finally` block; and `screenshot_selectors`, where
+  each entry appends a base64 PNG to the result. Each is now bounded at both the
+  boundary (a 422 naming the key) and the reader (the actual guarantee, since by
+  the time a profile reaches a renderer the validator is no longer in the path).
 - **The duplication gate is now 3 lines / 30 tokens, and reports zero clones.**
   The hook read `--min-lines 4 --min-tokens 25`, but jscpd counts *newlines*
   inside a fragment, so a floor of 4 enforced fragments of five lines and was

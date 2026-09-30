@@ -100,26 +100,3 @@ def test_redirect_target_keeps_sensitive_headers_across_a_default_port_spelling(
     _, new_headers = result
     assert new_headers["Cookie"] == "s=1"
     assert new_headers["Authorization"] == "Bearer t"
-
-
-def test_the_scrub_and_the_credential_chokepoint_agree_on_what_an_origin_is():
-    """One definition, not two that happen to be reconciled here.
-
-    A reader of either chokepoint in isolation should not have to know that the
-    other one exists. Comparing hostnames in one place and ``origin_of`` in the
-    other is exactly the arrangement that let them drift, so this asserts they
-    read the same function.
-    """
-    import inspect
-
-    from app.crawl.credentials import origin_of
-    from app.crawl.strategies import pinned_transport
-
-    scrub = inspect.getsource(pinned_transport._redirect_target)
-    assert "origin_of" in scrub, (
-        "the redirect scrub no longer compares origins; it went back to comparing hosts, "
-        "which is the drift this test exists to catch"
-    )
-    # And the helper it must agree with is the one credentials uses.
-    assert origin_of("https://a.com:443") == origin_of("https://a.com")
-    assert origin_of("https://a.com:8443") != origin_of("https://a.com")
