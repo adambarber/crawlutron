@@ -3,8 +3,8 @@
 Originally hardcoded to ``/opt/stack/crawlutron`` and
 ``/opt/stack/shared/python`` for an in-house container; rewritten to derive
 those paths from the script location and ``CRAWLUTRON_*`` env vars so
-the probe runs in any clone of the repository (adversarial review
-F-probe-session-hardcoded-paths).
+the probe runs in any clone of the repository, with no absolute path
+from the deployment it was written for.
 
 Run from the repository root:
 
