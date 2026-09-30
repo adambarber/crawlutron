@@ -4,7 +4,12 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from app.api_models import SERVICE_IDENTITY, DiscoveryResponse
+from app.api_models import (
+    SERVICE_IDENTITY,
+)
+from app.api_responses import (
+    DiscoveryResponse,
+)
 
 
 def discovery_payload() -> dict[str, Any]:

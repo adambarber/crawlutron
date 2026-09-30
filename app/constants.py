@@ -246,6 +246,61 @@ FAILED_CLASSIFICATIONS = _classification_values(
 # ---------------------------------------------------------------------------
 ResultStatus = Literal["success", "blocked", "disallowed", "retry_exhausted", "failed", "skipped"]
 
+
+# ---------------------------------------------------------------------------
+# Browser action vocabulary: THE single source of truth.
+#
+# ``BrowserRenderer._perform_actions`` recognises these by an if/elif chain and
+# ``CrawlPolicy._reject_execute_js_actions`` refuses one member of the same set
+# at the model boundary. Two hand-written lists that must agree is the shape of
+# bug this table exists to remove: the consumer silently no-ops a type it does
+# not recognise, so a caller whose action was misspelled got a page that loaded
+# with nothing done and nothing said.
+#
+# ``execute_js`` is listed rather than omitted because refusing it is a decision
+# about a member of this vocabulary, not a fact about a different one. It is
+# refused in BOTH places deliberately: at the model so a malicious payload never
+# reaches a render, and at the consumer so a policy that reached the browser by
+# any other route still cannot run script.
+# ---------------------------------------------------------------------------
+BROWSER_ACTION_TYPES: Final[tuple[str, ...]] = (
+    "click",
+    "fill",
+    "hover",
+    "scroll",
+    "scroll_bottom",
+    "wait",
+    "wait_seconds",
+    "execute_js",
+)
+
+#: Actions a caller may actually request. ``execute_js`` is excluded by
+#: subtraction from the vocabulary above rather than by restating it, so adding a
+#: new action to the vocabulary cannot silently widen what a caller may invoke.
+ALLOWED_BROWSER_ACTION_TYPES: Final[frozenset[str]] = frozenset(BROWSER_ACTION_TYPES).difference(
+    {"execute_js"}
+)
+
+#: The top-level keys a ``browser_profile`` may carry. Read off the renderer,
+#: which is where they take effect; an unknown key is inert, so accepting one
+#: silently is the same failure as a misspelled action type.
+BROWSER_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "state",
+        "viewport",
+        "resource_mode",
+        "storage_state",
+        "actions",
+        "include_html",
+        "include_screenshot",
+        "screenshot_selectors",
+        "auto_accept_cookie_consent",
+        "lazy_scroll_steps",
+        "lazy_scroll_delay_seconds",
+        "cookie_harvest_timeout_seconds",
+    }
+)
+
 # ---------------------------------------------------------------------------
 # Classification -> result status: THE single source of truth.
 #

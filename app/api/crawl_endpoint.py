@@ -27,7 +27,12 @@ from app.api.job_runner import start_tracked_task
 from app.api.main_helpers import record_crawl_completion, request_gate
 from app.api.response_shaping import _aunified_response_from_result
 from app.api.webhooks import validate_webhook_url_async
-from app.api_models import CrawlRequest, UnifiedCrawlResponse
+from app.api_models import (
+    CrawlRequest,
+)
+from app.api_responses import (
+    UnifiedCrawlResponse,
+)
 from app.crawl.ids import new_request_id
 from app.crawl.job_store import TERMINAL_STATUSES, JobKind, JobStore
 from app.crawl.payload_helpers import checked_payload_urls

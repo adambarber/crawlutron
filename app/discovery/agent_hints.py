@@ -6,9 +6,11 @@ from fastapi import APIRouter
 
 from app.api.policy_defaults import BROWSER_FALLBACK_POLICY, DOCUMENT_EXTRACTION_POLICY
 from app.api_models import (
-    AgentHintsResponse,
     CrawlExtractionMethod,
     CrawlStrategy,
+)
+from app.api_responses import (
+    AgentHintsResponse,
 )
 from app.constants import (
     CFFI_IMPERSONATE_TARGET,

@@ -176,7 +176,9 @@ class TestEmittedErrorCodesAreValidClassifications:
     """
 
     async def test_strategy_error_codes_shape_through_the_response_model(self):
-        from app.api_models import StrategyAttempt
+        from app.api_responses import (
+            StrategyAttempt,
+        )
 
         for exc, expected_code in _ERROR_CODE_CASES:
             res = await _run(exc)

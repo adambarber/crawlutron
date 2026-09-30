@@ -14,7 +14,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.exceptions import validation_http_error
-from app.api_models import JobStatusResponse
+from app.api_responses import (
+    JobStatusResponse,
+)
 from app.health.readiness import READINESS_STATE as readiness_state
 from app.metrics import get_metrics
 

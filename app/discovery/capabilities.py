@@ -7,16 +7,18 @@ from fastapi import APIRouter, Depends
 from app.api.dependencies import get_settings
 from app.api_models import (
     SERVICE_IDENTITY,
-    CapabilitiesResponse,
-    CrawlClassification,
     CrawlExtractionMethod,
     CrawlStrategy,
+)
+from app.api_responses import (
+    CapabilitiesResponse,
 )
 from app.constants import (
     DEFAULT_CHALLENGE_WAIT_SECONDS,
     DEFAULT_MAX_DISCOVERED_LINKS,
     DEFAULT_TOTAL_URL_BUDGET_SECONDS,
     LARGE_CRAWL_GUIDANCE,
+    CrawlClassification,
 )
 from app.search import active_search_provider_name, configured_search_providers
 from app.settings import CrawlerSettings

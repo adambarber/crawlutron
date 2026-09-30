@@ -24,6 +24,8 @@ from urllib.parse import urljoin
 
 from app.api_models import (
     CrawlStatus,
+)
+from app.api_responses import (
     PageMetadata,
     StrategyAttempt,
     UnifiedCrawlResponse,

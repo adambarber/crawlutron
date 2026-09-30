@@ -16,7 +16,12 @@ from app.api.exceptions import browser_pool_unavailable, http_error
 from app.api.main_helpers import request_gate
 from app.api.render import render_request
 from app.api.response_shaping import _aunified_response_from_result, render_result_to_unified
-from app.api_models import RenderRequest, UnifiedCrawlResponse
+from app.api_models import (
+    RenderRequest,
+)
+from app.api_responses import (
+    UnifiedCrawlResponse,
+)
 from app.crawl.strategies.browser_pool import (
     BrowserPoolExhaustedError,
     PooledBrowserWorker,

@@ -13,7 +13,9 @@ import re
 
 import pytest
 
-from app.api_models import UnifiedCrawlResponse
+from app.api_responses import (
+    UnifiedCrawlResponse,
+)
 from app.crawl.migrations.manifest import LEGACY_COLUMNS, StoreSchema
 from tests.chokepoint_walks import (
     REPO_ROOT,
@@ -622,8 +624,9 @@ def test_raw_exception_error_detector_bites():
 
 # --- A wire model may not silently drop a domain model's field ---------------
 #
-# app/models.py holds the internal dataclasses and app/api_models.py the pydantic
-# response models. `DiscoveredLink` is declared in both, with the same seven
+# app/models.py holds the internal dataclasses and the pydantic response models
+# are the ones in app/api_responses.py (app/api_models.py is the caller-supplied
+# side). `DiscoveredLink` is declared in both, with the same seven
 # field names, and *nothing* connects the two: response_shaping converts
 # generically by attribute, and a strict pydantic response model DROPS any key
 # it does not declare. So adding a field to the dataclass and forgetting the
@@ -639,7 +642,12 @@ def test_raw_exception_error_detector_bites():
 _DOMAIN_MODEL_MODULE = "app/models.py"
 
 
-_WIRE_MODEL_MODULE = "app/api_models.py"
+# The pydantic RESPONSE models, which moved to their own module when the wire
+# surface was split by direction. This constant is the only thing that had to
+# change, and it is a module path rather than a list of class names on purpose:
+# the rule below is written over whatever pair exists, so the split did not
+# require a second edit here or any new class name to be listed.
+_WIRE_MODEL_MODULE = "app/api_responses.py"
 
 
 def _is_dataclass(node: ast.ClassDef) -> bool:

@@ -6,7 +6,6 @@ import inspect
 import pytest
 
 from app import constants as app_constants
-from app.api_models import CrawlClassification
 from app.classify import (
     CLASSIFICATION_SIGNATURES,
     STRONG_CLASSIFICATION_MARKERS,
@@ -19,6 +18,7 @@ from app.constants import (
     FAILED_CLASSIFICATIONS,
     HTTP_BLOCKED_CLASSIFICATIONS,
     NON_TRANSIENT_CLASSIFICATIONS,
+    CrawlClassification,
     status_for_classification,
 )
 from app.crawl.result_helpers import TerminalResult

@@ -5,7 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies import get_settings
-from app.api_models import CrawlerError, SearchRequest, SearchResponse
+from app.api_models import (
+    SearchRequest,
+)
+from app.api_responses import (
+    CrawlerError,
+    SearchResponse,
+)
 from app.constants import ROUTER_MODULE_DOC
 from app.search.endpoint import search as search_handler
 

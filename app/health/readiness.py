@@ -8,7 +8,9 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api_models import ReadinessResponse
+from app.api_responses import (
+    ReadinessResponse,
+)
 from app.metrics import get_metrics
 
 # Self-managed saturation thresholds. These mirror the resource-gate ride

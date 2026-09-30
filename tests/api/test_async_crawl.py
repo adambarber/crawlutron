@@ -259,7 +259,16 @@ class TestAsyncCrawlJobStoreIntegration:
 
     async def test_job_store_single_shot_persists_results(self):
         """Results are stored in job.results for SINGLE_SHOT jobs."""
-        from app.api_models import CrawlClassification, CrawlStatus, UnifiedCrawlResponse, UnifiedCrawlResult
+        from app.api_models import (
+            CrawlStatus,
+        )
+        from app.api_responses import (
+            UnifiedCrawlResponse,
+            UnifiedCrawlResult,
+        )
+        from app.constants import (
+            CrawlClassification,
+        )
         from app.crawl.job_store import JobKind, JobStatus
 
         with single_shot_job() as (store, job):

@@ -17,9 +17,11 @@ from app.api.dependencies import JobStoreDep, SettingsDep, ShutdownEventDep
 from app.api.exceptions import http_error, validation_http_error
 from app.api.main_helpers import _build_job_status
 from app.api_models import (
-    CrawlerError,
     JobControlRequest,
     JobCreateRequest,
+)
+from app.api_responses import (
+    CrawlerError,
     JobCreateResponse,
     JobListResponse,
     JobStatusResponse,

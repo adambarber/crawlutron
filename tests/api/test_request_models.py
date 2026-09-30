@@ -384,3 +384,91 @@ class TestOutputFormatIsTheDocumentedSet:
         with pytest.raises(ValidationError) as exc:
             CrawlRequest(url="https://example.com/", output_format="jsonlines")
         assert any("output_format" in str(error["loc"]) for error in exc.value.errors())
+
+
+class TestBrowserProfileVocabularyIsClosed:
+    """An open profile means every future dangerous key is a separate audit.
+
+    ``browser_profile`` is ``dict[str, Any]`` and exactly one key was checked
+    (``execute_js``). Every other key a caller may set is prose in a field
+    description, and a key that is inert reads identically to one that worked --
+    so a caller who misspelled an action type got a page that loaded with
+    nothing done and nothing said.
+
+    The vocabulary is asserted against the renderer's own if/elif chain, so
+    closing the model side cannot drift from the consumer that acts on it.
+    """
+
+    ALLOWED = ("click", "fill", "hover", "scroll", "scroll_bottom", "wait", "wait_seconds")
+
+    def test_the_allowed_set_is_what_the_renderer_recognises(self):
+        """The model must not permit an action the renderer cannot perform.
+
+        A type in the model but not the renderer is the worst pairing: accepted
+        at the boundary, then silently skipped at the point of use.
+        """
+        from app.constants import ALLOWED_BROWSER_ACTION_TYPES
+
+        assert set(self.ALLOWED) == set(ALLOWED_BROWSER_ACTION_TYPES)
+
+    @pytest.mark.parametrize("action_type", ALLOWED)
+    def test_each_allowed_action_validates(self, action_type):
+        from app.api_models import CrawlPolicy
+
+        profile = CrawlPolicy(browser_profile={"actions": [{"type": action_type, "selector": "#x"}]})
+        assert profile.browser_profile["actions"][0]["type"] == action_type
+
+    def test_execute_js_stays_refused_with_its_reasoning_intact(self):
+        """The RCE refusal must survive, and must still be about execute_js."""
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError, match="execute_js"):
+            CrawlPolicy(browser_profile={"actions": [{"type": "execute_js", "value": "fetch('x')"}]})
+
+    @pytest.mark.parametrize("typo", ["clik", "Execute_JS", "fill_text", "", "CLICK_ALL"])
+    def test_an_unrecognised_action_type_is_refused(self, typo):
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError) as exc:
+            CrawlPolicy(browser_profile={"actions": [{"type": typo, "selector": "#x"}]})
+        message = str(exc.value)
+        assert "actions" in message, message
+
+    def test_the_refusal_names_the_allowed_vocabulary(self):
+        """A refusal that does not say what IS allowed leaves the caller guessing.
+
+        The message must list the accepted types, so a caller can correct the
+        call without reading this service's source.
+        """
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError) as exc:
+            CrawlPolicy(browser_profile={"actions": [{"type": "clik"}]})
+        message = str(exc.value)
+        for action_type in self.ALLOWED:
+            assert action_type in message, f"{action_type} missing from refusal: {message}"
+
+    def test_an_action_type_is_case_insensitive_because_the_renderer_is(self):
+        """The renderer lowercases, so a mixed-case type WOULD have worked.
+
+        Rejecting ``CLICK`` while ``click`` passes would refuse something the
+        consumer handles. The rule is the vocabulary, not the spelling.
+        """
+        from app.api_models import CrawlPolicy
+
+        assert CrawlPolicy(browser_profile={"actions": [{"type": "CLICK", "selector": "#x"}]})
+
+    @pytest.mark.parametrize("key", ["state", "viewport", "resource_mode", "actions"])
+    def test_documented_profile_keys_are_accepted(self, key):
+        from app.api_models import CrawlPolicy
+
+        value = [] if key == "actions" else "desktop"
+        assert CrawlPolicy(browser_profile={key: value}).browser_profile[key] == value
+
+    @pytest.mark.parametrize("typo", ["viewports", "resourceMode", "user_agent_family", "exec_js"])
+    def test_an_unknown_profile_key_is_refused(self, typo):
+        """A misspelled profile key is inert, so it must not pass silently."""
+        from app.api_models import CrawlPolicy
+
+        with pytest.raises(ValidationError):
+            CrawlPolicy(browser_profile={typo: "x"})
