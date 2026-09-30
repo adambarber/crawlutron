@@ -13,6 +13,7 @@ All findings below are **new**; nothing from the first review is repeated. Items
 ```python
 def _default_global_concurrency() -> int:
     from app.settings import CrawlerSettings
+
     try:
         return max(1, int(CrawlerSettings.from_mapping().global_concurrency))
     except Exception:
@@ -83,6 +84,7 @@ def _evict_if_needed(self) -> None:
 **Fix:**
 ```python
 import itertools
+
 for url in list(itertools.islice(self._data, over)):
     self._data.pop(url, None)
 ```
@@ -96,10 +98,12 @@ for url in list(itertools.islice(self._data, over)):
 ```python
 _BROWSER_COOKIES_BY_DOMAIN: OrderedDict[str, str] = OrderedDict()
 
+
 def _store_browser_cookies(domain: str, header: str) -> None:
     _BROWSER_COOKIES_BY_DOMAIN[domain] = header
     while len(_BROWSER_COOKIES_BY_DOMAIN) > _BROWSER_COOKIES_MAX:
         _BROWSER_COOKIES_BY_DOMAIN.popitem(last=False)
+
 
 def get_browser_cookies_for(domain: str) -> str | None:
     val = _BROWSER_COOKIES_BY_DOMAIN.get(domain)
@@ -214,6 +218,8 @@ for strategy in policy.get("strategies", DEFAULT_STRATEGIES):
 **Where:** `app/crawl/engine.py`:
 ```python
 _SHARED_CONTENT_CACHE: ContentCache | None = None
+
+
 def _get_shared_content_cache() -> ContentCache:
     global _SHARED_CONTENT_CACHE
     if _SHARED_CONTENT_CACHE is None:
@@ -223,6 +229,8 @@ def _get_shared_content_cache() -> ContentCache:
 And `app/api/async_crawl_runner.py`:
 ```python
 _async_crawl_semaphore: asyncio.Semaphore | None = None
+
+
 def _get_async_crawl_semaphore() -> asyncio.Semaphore:
     global _async_crawl_semaphore
     if _async_crawl_semaphore is None:
@@ -243,6 +251,7 @@ Two threads can both observe `None` and both construct. The loser's object is di
 
 ```python
 _CGROUP_CACHE: dict[str, tuple[float, object]] = {}
+
 
 def _read_text(path: str) -> str | None:
     ...

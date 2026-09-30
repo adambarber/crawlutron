@@ -4,11 +4,15 @@ Both set silently ignored url; neither failed downstream in _payload_urls.
 Fail fast at the model boundary instead.
 """
 
+import inspect
+import typing
+
 import httpx
 import pytest
 from httpx import AsyncClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
+from app import api_models
 from app.api_models import CrawlRequest, RenderRequest
 from tests._app_factory import service_app
 
@@ -49,3 +53,194 @@ class TestWebhookUrlValidation:
                 "/v1/crawl", json={"url": "http://example.com/", "webhook_url": "not_a_url"}
             )
             assert resp.status_code == 422
+
+
+#: The models FastAPI binds a request body to. Everything reachable from one of
+#: these is caller-supplied, which is the property that decides ``extra``.
+#: Derived by NAME on purpose: these are the shapes a route hands to the
+#: framework, and they have to be listed here because a route's binding is a
+#: runtime fact the model layer cannot see.
+_BOUND_REQUEST_BODIES = (
+    "CrawlRequest",
+    "JobCreateRequest",
+    "JobControlRequest",
+    "MapRequest",
+    "RenderRequest",
+    "SearchRequest",
+    "DiscoveryConfig",
+)
+
+
+def _declared_models() -> dict[str, type[BaseModel]]:
+    """Every request/response model the wire layer declares."""
+    return {
+        name: obj
+        for name, obj in vars(api_models).items()
+        if inspect.isclass(obj)
+        and issubclass(obj, BaseModel)
+        and obj is not BaseModel
+        and obj.__module__ == api_models.__name__
+    }
+
+
+def _caller_supplied() -> set[str]:
+    """Transitive closure of the bound request bodies over field annotations.
+
+    Reachability rather than a hand-kept list, because the failure this guards
+    against is a model being ADDED to the input side and inheriting pydantic's
+    default ``ignore`` with nobody deciding otherwise. A list written by hand
+    goes stale silently and reproduces the exact bug it was meant to prevent.
+    """
+    models = _declared_models()
+    reachable, frontier = set(), set(_BOUND_REQUEST_BODIES)
+    while frontier:
+        frontier -= reachable
+        reachable |= frontier
+        nxt: set[str] = set()
+        for name in frontier:
+            # Inheritance is an edge too. ``_SingleUrlSourceRequest`` is never a
+            # FIELD of a bound request body -- it is their BASE CLASS -- so a
+            # field-only walk classifies it as output-side and exempts it, which
+            # is precisely the wrong answer: a caller constructs it directly, and
+            # it already carries a validator that can raise.
+            for base in models[name].__mro__[1:]:
+                if base is not BaseModel and base.__name__ in models:
+                    nxt.add(base.__name__)
+            for field in models[name].model_fields.values():
+                for arg in typing.get_args(field.annotation) or (field.annotation,):
+                    for candidate in typing.get_args(arg) or (arg,):
+                        if (
+                            isinstance(candidate, type)
+                            and issubclass(candidate, BaseModel)
+                            and candidate.__name__ in models
+                        ):
+                            nxt.add(candidate.__name__)
+        frontier = nxt
+    return reachable
+
+
+class TestExtraKeysAreRefusedOnTheInputSide:
+    """An unknown key on an input model is a caller believing they configured
+    something they did not.
+
+    The dangerous cases are all silent today: a mistyped ``max_rps`` disables
+    rate limiting against a third-party target, a mistyped ``strategies`` runs
+    the default chain (which includes a HEADED browser), a mistyped
+    ``respect_robots`` changes nothing while appearing in the caller's payload.
+
+    Response models are deliberately NOT covered: they describe what this service
+    produced, and a caller sending extras to one is not a configuration mistake.
+    """
+
+    def test_the_caller_supplied_set_is_not_empty(self):
+        """Guards the rest of this class from passing by finding nothing.
+
+        A reachability walk that silently resolves to the empty set would make
+        every assertion below vacuously true -- a gate that reports success
+        because it examined no models. This is the premise the other tests rest
+        on, so it is asserted rather than assumed.
+        """
+        supplied = _caller_supplied()
+        assert len(supplied) >= 10, f"reachability walk found too little: {sorted(supplied)}"
+        assert "CrawlPolicy" in supplied, "CrawlPolicy is caller-supplied via CrawlRequest.policy"
+
+    def test_every_caller_supplied_model_refuses_unknown_keys(self):
+        offenders = sorted(
+            name
+            for name in _caller_supplied()
+            if _declared_models()[name].model_config.get("extra") != "forbid"
+        )
+        assert not offenders, (
+            "caller-supplied models must forbid unknown keys, because an unknown key is a "
+            f"caller believing they configured something they did not: {offenders}"
+        )
+
+    @pytest.mark.parametrize(
+        "model_name",
+        [
+            "CrawlRequest",
+            "CrawlPolicy",
+            "CrawlPolicyLimits",
+            "Credential",
+            "FetchValidators",
+            "JobCreateRequest",
+            "MapRequest",
+            "RenderOptionsRequest",
+        ],
+    )
+    def test_the_error_names_the_offending_field(self, model_name):
+        """A rejection a caller cannot act on is a rejection they route around.
+
+        The error must carry a loc pointing at the key they sent. A model-level
+        message would report loc=() and the API's code derivation could not map
+        it, so a caller whose only mistake was a typo would be told a code that
+        names no field.
+        """
+        model = _declared_models()[model_name]
+        with pytest.raises(ValidationError) as exc:
+            model(**{**_sample_field(model), "not_a_real_setting": 1})
+        locations = {str(part) for error in exc.value.errors() for part in error["loc"]}
+        assert any("not_a_real_setting" in location for location in locations), locations
+
+    def test_response_models_are_not_forbidden(self):
+        """The other half of the split, as an invariant over the whole output side.
+
+        Asserted as a set rather than per-model, so a new response model is
+        covered the day it is written. A blanket ``forbid`` everywhere would break
+        every response the service emits, and would be the wrong correction: the
+        caller is not configuring our output, so an extra key on a response is
+        not a mistake anyone needs to be told about.
+        """
+        models = _declared_models()
+        offenders = sorted(
+            name
+            for name in set(models) - _caller_supplied()
+            if models[name].model_config.get("extra") == "forbid"
+        )
+        assert not offenders, (
+            f"response models describe our output; forbidding extras is wrong for: {offenders}"
+        )
+
+    def test_response_models_accept_extras(self):
+        """Behavioural companion to the config assertion above.
+
+        Restricted to output models that need no required fields, so a valid
+        instance is ``{}``. A hand-written sample for the 14-field
+        ``CapabilitiesResponse`` would be a second copy of the response schema
+        living in the test suite -- exactly the drift-prone hand-maintained
+        declaration this codebase already rejects elsewhere.
+        """
+        models = _declared_models()
+        checkable = sorted(
+            name
+            for name in set(models) - _caller_supplied()
+            if not any(field.is_required() for field in models[name].model_fields.values())
+        )
+        assert checkable, "no output model is constructible with no arguments; the premise is void"
+        for name in checkable:
+            assert models[name](not_a_real_setting=1) is not None, name
+
+
+def _sample_field(model: type[BaseModel]) -> dict[str, object]:
+    """One minimal valid instance of ``model``, for the extra-key assertions.
+
+    Only the INPUT side needs a sample: those models are the ones that must
+    reject, and they are small enough that a literal is cheaper to read than a
+    generated instance. See ``test_response_models_accept_extras`` for why the
+    output side deliberately avoids this.
+    """
+    fixtures: dict[str, dict[str, object]] = {
+        "CrawlRequest": {"url": "https://example.com/"},
+        "CrawlPolicy": {"limits": {"max_pages": 5}},
+        "CrawlPolicyLimits": {"max_pages": 5},
+        "Credential": {"kind": "bearer", "token": "t"},
+        "FetchValidators": {"if_none_match": "abc"},
+        "JobCreateRequest": {"root_url": "https://example.com/"},
+        "JobControlRequest": {"action": "pause"},
+        "MapRequest": {"url": "https://example.com/"},
+        "RenderRequest": {"url": "https://example.com/"},
+        "RenderOptionsRequest": {"timeout_seconds": 5},
+        "SearchRequest": {"query": "x"},
+        "DiscoveryConfig": {},
+    }
+    return dict(fixtures[model.__name__])

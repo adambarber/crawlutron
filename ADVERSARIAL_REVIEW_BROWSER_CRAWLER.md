@@ -26,7 +26,7 @@ resp_headers = {key.lower(): value for key, value in response.headers.items()}
 body = _decompress_body(response.body, resp_headers.get("content-encoding", ""))
 
 # BUG: response.body from httpx.stream().aread() is ALREADY decompressed by httpx
-# when Content-Encoding: gzip is present. _decompress_body() then tries to 
+# when Content-Encoding: gzip is present. _decompress_body() then tries to
 # gzip-decompress an already-decompressed body, producing garbage or raising.
 ```
 
@@ -113,7 +113,9 @@ async with httpx.AsyncClient(timeout=30.0) as client:
 ```python
 @staticmethod
 def make_key(*parts: Any) -> str:
-    return "|".join(json.dumps(p, sort_keys=True, separators=(",", ":")) if not isinstance(p, str) else p for p in parts)
+    return "|".join(
+        json.dumps(p, sort_keys=True, separators=(",", ":")) if not isinstance(p, str) else p for p in parts
+    )
 ```
 
 **Bug**: String parts are NOT JSON-encoded. If a string contains `|`, it breaks key parsing.
@@ -247,7 +249,7 @@ if (
 **File**: `app/crawl/strategies/http.py` → `get_async_http_client()`
 
 ```python
-limits=httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0)
+limits = httpx.Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0)
 ```
 
 **Issue**: With `global_concurrency=4` (default), 100 connections is fine. But if scaled to 50 workers, pool exhaustion occurs. Make pool size configurable via settings.

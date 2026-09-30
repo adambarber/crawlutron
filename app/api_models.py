@@ -157,6 +157,8 @@ class FetchValidators(BaseModel):
     full-fetch cost on unchanged pages.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     if_none_match: Annotated[
         str | None,
         Field(
@@ -188,6 +190,7 @@ class ContentValidators(BaseModel):
 
 
 class CrawlPolicyLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     timeout_seconds: Annotated[
         int,
         Field(
@@ -321,6 +324,8 @@ class Credential(BaseModel):
     diagnostics (policy echoes strip them, same discipline as cookies).
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: Literal["bearer", "basic"]
     token: Annotated[
         str | None,
@@ -357,6 +362,7 @@ class Credential(BaseModel):
 
 
 class CrawlPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     # Rejected policy.headers names -> why. Conditional pairs keep the
     # reason (they must arrive via ``validators``); the rest bypass an
     # engine chokepoint or spoof origin-side identity. The map is the single
@@ -640,6 +646,8 @@ class _SingleUrlSourceRequest(BaseModel):
     render"), which is not a difference worth a re-declaration per model.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     url: Annotated[str | None, Field(description="Single public HTTP(S) URL. Use either url or urls.")] = None
     urls: Annotated[
         list[str] | None,
@@ -654,6 +662,7 @@ class _SingleUrlSourceRequest(BaseModel):
 
 
 class CrawlRequest(_SingleUrlSourceRequest):
+    model_config = ConfigDict(extra="forbid")
     # `url`, `urls` and the exactly-one-of validator are inherited, not restated.
     # This model used to redeclare all three, with a comment on the `url`
     # re-declaration admitting it was inherited -- and the re-declared `Field`
@@ -704,7 +713,7 @@ class MapRequest(BaseModel):
     is delegated to the shared crawl engine.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     url: str = Field(..., description="Root public HTTP(S) URL to map.")
     policy: CrawlPolicy = Field(
@@ -790,7 +799,7 @@ class SearchResponse(BaseModel):
 class RenderOptionsRequest(BaseModel):
     """Browser render options for ``/v1/render`` (all optional; server applies defaults)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     timeout_seconds: Annotated[
         int | None,
@@ -822,7 +831,7 @@ class RenderOptionsRequest(BaseModel):
 class RenderRequest(_SingleUrlSourceRequest):
     """Request body for ``POST /v1/render`` (backward-compatible browser render)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     # `url`, `urls` and the exactly-one-of validator are inherited, not restated --
     # see the note on CrawlRequest.
@@ -1105,7 +1114,7 @@ class DiscoveryResponse(BaseModel):
 class JobCreateRequest(BaseModel):
     """Create a new resumable whole-site crawl job."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     root_url: str = Field(..., description="Root public HTTP(S) URL; stored canonically at crawl depth 0.")
     policy: CrawlPolicy = Field(
@@ -1165,6 +1174,6 @@ class JobListResponse(BaseModel):
 class JobControlRequest(BaseModel):
     """Control a crawl job (pause/resume/cancel)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     action: str = Field(..., description="One of: pause, resume, cancel.")
