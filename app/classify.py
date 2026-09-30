@@ -111,7 +111,7 @@ def classify_page(html: str | None, text: str | None, *, title: str | None = Non
 # Structural markers that are effectively unforgeable by accident: a benign
 # municipal page never contains Cloudflare/captcha plumbing. Adapted from the
 # marker-tuple approach used by maigret (MIT) and cloudscraper (MIT); a single
-# marker hit is sufficient evidence.
+# marker hit is sufficient evidence. NOTICE carries their copyright lines.
 STRONG_CLASSIFICATION_MARKERS: tuple[tuple[Classification, tuple[str, ...]], ...] = (
     (
         "bot_challenge_detected",

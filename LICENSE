@@ -2,6 +2,10 @@ MIT License
 
 Copyright (c) 2024-2026 crawlutron contributors
 
+This project contains work adapted from MIT-licensed projects, and depends on
+third-party packages under the MIT, BSD-3-Clause, Apache-2.0, CNRI-Python and
+MPL-2.0 licenses. See NOTICE for the attributions and the full dependency list.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

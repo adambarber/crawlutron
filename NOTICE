@@ -1,0 +1,59 @@
+crawlutron
+Copyright (c) 2024-2026 crawlutron contributors
+
+This project is distributed under the MIT License; see LICENSE.
+
+
+ADAPTED WORK
+------------
+
+`app/classify.py` notes that its classification-marker tuple approach is adapted
+from two MIT-licensed projects. Their copyright notices are reproduced here in
+compliance with those licenses.
+
+  maigret (MIT)
+  https://github.com/soxoj/maigret
+  Copyright (c) 2020-2026 Soxoj
+
+  cloudscraper (MIT)
+  https://github.com/VeNoMouS/cloudscraper
+  copyright (c) 2025 Zied Boughdir
+  Copyright (c) 2019 VeNoMouS
+  Copyright (c) 2015 Anorov
+
+Full license text for both: https://opensource.org/license/mit
+
+
+THIRD-PARTY DEPENDENCIES
+------------------------
+
+crawlutron depends on the packages below, each used unmodified and as a
+declared dependency. None is vendored into this tree. Licenses are taken from
+each distribution's own metadata.
+
+  MIT
+    beautifulsoup4, brotli, brotli-stubs, camoufox, charset-normalizer,
+    curl_cffi, fastapi, h2, jscpd, markdownify, markitdown, mypy, pdfplumber,
+    pre-commit, pydantic, pyright, pytest, pytest-httpx, pytest-randomly,
+    pytest-xdist, pyyaml, ruff
+
+  BSD-3-Clause
+    httpx, lxml, uvicorn
+
+  Apache-2.0
+    pytest-asyncio, trafilatura, yoyo-migrations, types-lxml, types-PyYAML,
+    types-regex
+
+  MPL-2.0
+    publicsuffixlist
+
+  Apache-2.0 AND CNRI-Python
+    regex
+
+publicsuffixlist is distributed under the Mozilla Public License 2.0, which is
+weak (file-scope) copyleft: it obliges a party to publish modifications to the
+MPL-covered files under the MPL. crawlutron uses it as an unmodified
+dependency and does not distribute or modify its files, so the obligation does
+not attach to this project. It is recorded here because it is the only direct
+dependency not under a permissive license, and a reader redistributing this
+software should be able to see that without inspecting the dependency tree.
