@@ -177,8 +177,7 @@ READINESS_SLOTS_GO_THROUGH_THE_GATE = Rule(
         # The release is the expensive one to lose, in both its spellings: a finally
         # and a return.
         Bites(
-            "def f():\n    try:\n        pass\n    finally:\n"
-            "        readiness_state.end_request()\n",
+            "def f():\n    try:\n        pass\n    finally:\n        readiness_state.end_request()\n",
             "end_request",
         ),
         Bites("def f():\n    return READINESS_STATE.end_request()\n", "end_request"),

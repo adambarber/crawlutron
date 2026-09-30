@@ -15,7 +15,7 @@ import pathlib
 import pytest
 
 from tests.chokepoint_walks import trees_under
-from tests.rules import Bites, Registry, Rule, Trips
+from tests.rules import Bites, Registry, Rule, Silent, Trips
 
 
 def _finds_any_call(tree: ast.Module, path: pathlib.Path) -> list[str]:
@@ -302,6 +302,90 @@ class TestRuleScope:
         rule = _urljoin_rule(scope=recording, excludes=frozenset({"x.py"}))
         rule.scan()
         assert seen == [frozenset({"x.py"})]
+
+
+class TestAProofStatesWhichModuleItRunsIn:
+    """A detector keyed on a file's path is two claims, and one path holds one.
+
+    ``at`` exists because "this is correct" and "this is correct *in this file*"
+    are different claims, and only the second is what a path comparison enforces.
+    Both halves have to be run, which is why the location is per proof and why a
+    rule that places its bite somewhere must also place a ``Silent`` elsewhere.
+    """
+
+    OWNER = pathlib.Path("/repo/app/owner.py")
+    ELSEWHERE = pathlib.Path("/repo/app/crawl/other.py")
+    SOURCE = "class R:\n    async def close(self):\n        self._browser = None\n"
+
+    @staticmethod
+    def _clears_somewhere(tree, path):
+        return (
+            ["cleared outside the chokepoint"]
+            if any(isinstance(n, ast.Assign) for n in ast.walk(tree))
+            else []
+        )
+
+    def _only_in_owner(self, tree, path):
+        return self._clears_somewhere(tree, path) if path.name == "owner.py" else []
+
+    def _rule(self, *, clean=None, **overrides):
+        return Rule(
+            name="path-keyed",
+            find=self._only_in_owner,
+            bite=lambda: Bites(self.SOURCE, "chokepoint", at=self.OWNER),
+            clean=clean,
+            **overrides,
+        )
+
+    def test_a_bite_proof_runs_where_it_says(self):
+        self._rule(clean=lambda: (Silent(self.SOURCE, at=self.ELSEWHERE),)).check_bites()
+
+    def test_proving_at_the_default_path_instead_does_not_count_as_the_second_half(self):
+        """A ``Silent`` at the firing path proves the same thing twice.
+
+        This is the mistake the requirement exists to catch: the rule looks fully
+        proved while the ninety files the detector deliberately ignores — the whole
+        content of the guard — have never been swept once.
+        """
+        with pytest.raises(TypeError, match="somewhere else"):
+            self._rule(clean=lambda: (Silent(self.SOURCE, at=self.OWNER),))
+
+    def test_a_path_keyed_rule_without_any_clean_proof_cannot_be_constructed(self):
+        with pytest.raises(TypeError, match="somewhere else"):
+            self._rule()
+
+    def test_a_rule_that_places_nothing_is_not_required_to_have_a_second_half(self):
+        """``at`` is what raises the bar, so a rule that never uses it is unaffected."""
+        Rule(name="plain", find=self._only_in_owner, bite=lambda: Bites(self.SOURCE, "chokepoint"))
+
+    def test_a_silent_that_fires_is_reported_rather_than_ignored(self):
+        """The proof is run at the path it names, not merely counted as declared.
+
+        A detector that fires everywhere, paired with a ``Silent`` naming a module
+        it does not fire in, is the false-negative shape: the declaration looks
+        complete and the second half was never actually run against anything.
+        """
+        with pytest.raises(AssertionError, match="must not fire"):
+            Rule(
+                name="path-keyed",
+                find=self._clears_somewhere,
+                bite=lambda: Bites(self.SOURCE, "chokepoint", at=pathlib.Path("/repo/app/other.py")),
+                clean=lambda: (Silent(self.SOURCE, at=self.OWNER),),
+            ).check_bites()
+
+    def test_a_silent_is_not_flattened_into_the_lookalikes(self):
+        """A lookalike promises "spared everywhere"; a ``Silent`` promises one module.
+
+        Folding the two together would assert the stronger claim at every path the
+        rule happens to run, which is a claim nobody proved.
+        """
+        rule = self._rule(clean=lambda: (Silent(self.SOURCE, at=self.ELSEWHERE), "x = 1"))
+        assert rule.looksalikes() == ("x = 1",)
+
+    def test_a_string_lookalike_still_runs_beside_a_silent(self):
+        self._rule(
+            clean=lambda: (Silent(self.SOURCE, at=self.ELSEWHERE), "x = 1"),
+        ).check_bites()
 
 
 class TestRegistryReportsEveryFailure:

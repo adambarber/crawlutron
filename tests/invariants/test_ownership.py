@@ -11,18 +11,12 @@ import pathlib
 
 from tests.chokepoint_walks import (
     REPO_ROOT,
-    SANCTIONED,
-    app_offenders,
-    app_trees,
-    assert_detector,
-    assert_fires_once,
     assignment_targets,
     call_nodes,
     calls_named_leaf,
     functions,
     name_reads,
     nodes_of,
-    offender,
     offender_at,
     relative_posix,
     subscript_reads,
@@ -30,12 +24,8 @@ from tests.chokepoint_walks import (
     unary_ops,
     with_blocks,
 )
-from tests.invariants._shared import (
-    _enclosing_calls,
-    _enclosing_defs,
-    assert_trees_clean,
-    function_defs,
-)
+from tests.invariants._shared import _enclosing_calls, _enclosing_defs, function_defs
+from tests.rules import Bites, Rule, Silent, Trips
 
 
 def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -72,7 +62,15 @@ def _lock_bodies_with_awaits(tree: ast.AST, path: pathlib.Path) -> list[str]:
                 continue
             for inner in nodes_of(node):
                 if isinstance(inner, ast.Await):
-                    offenders.append(offender(path, inner.lineno))
+                    offenders.append(
+                        offender_at(
+                            path,
+                            inner,
+                            f"await inside `with {referred}` holds a threading lock across the "
+                            f"await, which blocks the event loop; take the async wait outside the "
+                            f"`with` and hold only the lock inside it",
+                        )
+                    )
             break
     return offenders
 
@@ -101,38 +99,52 @@ def _threading_lock_bindings(tree: ast.AST) -> set[str]:
     return names
 
 
+_OWNER_PATH = REPO_ROOT / "app" / "crawl" / "strategies" / "browser.py"
+_OWNER_MODULE = "app/crawl/strategies/browser.py"
+_ELSEWHERE = REPO_ROOT / "app" / "crawl" / "content_cache.py"
+
+
+LOCK_HELD_ACROSS_AN_AWAIT = Rule(
+    name="lock-held-across-an-await",
+    find=_lock_bodies_with_awaits,
+    summary=(
+        "A threading lock held across an await blocks the event loop; route the "
+        "asynchronous wait outside the `with` and take only the lock inside it"
+    ),
+    bite=lambda: (
+        # A name stem, and a name bound to a threading lock-family constructor: the
+        # second is the one a rename tries to escape, since self._mutex is not a
+        # lock by name at all.
+        Bites(
+            "class C:\n    def __init__(self):\n        self._mutex = __import__('threading').Lock()\n"
+            "    async def go(self):\n        with self._mutex:\n            await x()\n",
+            "holds a threading lock across the",
+        ),
+        Bites(
+            "import threading\n\n_async_gate = threading.RLock()\n\n"
+            "async def go():\n    with _async_gate:\n        await x()\n",
+            "holds a threading lock across the",
+        ),
+    ),
+    clean=lambda: (
+        # asyncio.Lock bodies may await -- that IS the sanctioned pattern, and the
+        # only reason the sweep reads `with` and skips `async with`.
+        "import asyncio\n\nclass C:\n    def __init__(self):\n        self._lock = asyncio.Lock()\n"
+        "    async def go(self):\n        async with self._lock:\n            await x()\n",
+        # A context manager that is not a lock is not this rule's business.
+        "def go():\n    with open('f'):\n        pass\n",
+    ),
+)
+
+
 def test_no_await_inside_lock_bodies():
     """A lock held across an await blocks the loop and can deadlock."""
-    assert_trees_clean(
-        _lock_bodies_with_awaits,
-        "Lock held across await",
-        trees=app_trees(),
-    )
+    LOCK_HELD_ACROSS_AN_AWAIT.scan()
 
 
 def test_lock_detector_bites():
     """Name stems beyond 'lock' and threading-bound aliases must fire."""
-    mutex = ast.parse(
-        "class C:\n    def __init__(self):\n        self._mutex = __import__('threading').Lock()\n"
-        "    async def go(self):\n        with self._mutex:\n            await x()\n"
-    )
-    assert _lock_bodies_with_awaits(mutex, REPO_ROOT / "app" / "_synthetic.py"), "_mutex escaped the sweep"
-    bound = ast.parse(
-        "import threading\n\n_async_gate = threading.RLock()\n\n"
-        "async def go():\n    with _async_gate:\n        await x()\n"
-    )
-    assert _lock_bodies_with_awaits(bound, REPO_ROOT / "app" / "_synthetic.py"), (
-        "threading-bound name escaped"
-    )
-    asyncio_ok = ast.parse(
-        "import asyncio\n\nclass C:\n    def __init__(self):\n        self._lock = asyncio.Lock()\n"
-        "    async def go(self):\n        async with self._lock:\n            await x()\n"
-    )
-    assert not _lock_bodies_with_awaits(asyncio_ok, REPO_ROOT / "app" / "_synthetic.py"), (
-        "asyncio lock flagged"
-    )
-    plain_ok = ast.parse("def go():\n    with open('f'):\n        pass\n")
-    assert not _lock_bodies_with_awaits(plain_ok, REPO_ROOT / "app" / "_synthetic.py")
+    LOCK_HELD_ACROSS_AN_AWAIT.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -159,28 +171,35 @@ def _memory_cache_twin_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]
     return offenders
 
 
+MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS = Rule(
+    name="memory-cache-twins-must-go-through-the-locked-helpers",
+    find=_memory_cache_twin_offenders,
+    summary=(
+        "aget once lost the LRU count cap and the pre-write mirror never rolled "
+        "back, both invisible to a twin review; probe and store through "
+        "_take_memory_locked/_remember_memory_locked so the twins cannot drift"
+    ),
+    bite=lambda: Bites(
+        "class C:\n    async def aget(self, key):\n        with self._lock:\n"
+        "            if key in self._memory_cache:\n"
+        "                return self._memory_cache["
+        "key][1]\n",
+        "aget() reads/writes _memory_cache directly",
+    ),
+    clean=lambda: (
+        "class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",
+    ),
+)
+
+
 def test_memory_cache_only_via_locked_helpers():
     """Get/set/aget/aset never touch the raw RAM-mirror dict."""
-    assert_trees_clean(
-        _memory_cache_twin_offenders,
-        "Use _take_memory_locked/_remember_memory_locked",
-        trees=app_trees(),
-    )
+    MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS.scan()
 
 
 def test_memory_cache_twin_detector_bites():
     """Synthetic drifted twin fires; helper-shaped code stays clean."""
-    assert_detector(
-        _memory_cache_twin_offenders,
-        path=REPO_ROOT / "app" / "crawl" / "_synthetic.py",
-        fires={
-            "class C:\n    async def aget(self, key):\n        with self._lock:\n"
-            "            if key in self._memory_cache:\n"
-            "                return self._memory_cache["
-            "key][1]\n": "aget() reads/writes _memory_cache directly",
-        },
-        clean=("class C:\n    async def aget(self, key):\n        return self._take_memory_locked(key)\n",),
-    )
+    MEMORY_CACHE_TWINS_MUST_GO_THROUGH_THE_LOCKED_HELPERS.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -238,37 +257,38 @@ def _locked_calls_outside_lock_offenders(tree: ast.AST, path: pathlib.Path) -> l
     return offenders
 
 
+LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK = Rule(
+    name="locked-helpers-are-called-under-the-lock",
+    find=_locked_calls_outside_lock_offenders,
+    summary=(
+        "A *_locked helper touches shared index/RAM state with no internal "
+        "acquisition; call it inside `with self._lock` or the async and sync "
+        "paths drift apart again"
+    ),
+    bite=lambda: Bites(
+        "class C:\n    def get(self, key):\n        return self._remember_memory_locked(key)\n",
+        "called outside a lock context manager",
+    ),
+    clean=lambda: (
+        "class C:\n    def get(self, key):\n        with self._lock:\n"
+        "            return self._remember_memory_locked(key)\n",
+    ),
+)
+
+
 def test_locked_cache_helpers_are_called_under_the_lock():
     """Every ``_*_locked`` call sits inside a ``with...lock`` block."""
-    assert_trees_clean(
-        _locked_calls_outside_lock_offenders,
-        "call *_locked helpers inside `with self._lock`",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK.scan()
 
 
 def test_locked_helper_lock_ownership_detector_bites():
     """An off-lock *_locked call fires; the guarded form stays clean."""
-    assert_detector(
-        _locked_calls_outside_lock_offenders,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        fires={
-            "class C:\n    def get(self, key):\n        return self._remember_memory_locked(key)\n": (
-                "_remember_memory_locked() called outside a lock context manager"
-            )
-        },
-        clean=(
-            "class C:\n    def get(self, key):\n        with self._lock:\n"
-            "            return self._remember_memory_locked(key)\n",
-        ),
-    )
+    LOCKED_HELPERS_ARE_CALLED_UNDER_THE_LOCK.check_bites()
 
 
 # ---------------------------------------------------------------------------
 # Handle minting is single-sourced (entropy policy)
 # ---------------------------------------------------------------------------
-
-_ID_MINT_SANCTIONED = frozenset({"ids.py"})
 
 
 def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -292,23 +312,30 @@ def _id_mint_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
 
 
+HANDLE_MINTING_IS_SINGLE_SOURCED = Rule(
+    name="handle-minting-is-single-sourced",
+    find=_id_mint_offenders,
+    summary=(
+        "Handles double as the lookup credential for the status/result routes, "
+        "so a re-inlined mint is where a shorter slice silently regresses to 48 "
+        "bits; mint through app/crawl/ids.py"
+    ),
+    skip=frozenset({"app/crawl/ids.py"}),
+    bite=lambda: Trips(
+        "import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n",
+        count=2,
+    ),
+    clean=lambda: ("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
+)
+
+
 def test_handles_are_minted_in_one_place():
     """Only app/crawl/ids.py calls uuid4 or slices its hex ()."""
-    assert_trees_clean(
-        _id_mint_offenders,
-        "handle minting is single-sourced in app/crawl/ids.py",
-        trees=app_trees(exclude=SANCTIONED | _ID_MINT_SANCTIONED),
-    )
+    HANDLE_MINTING_IS_SINGLE_SOURCED.scan()
 
 
 def test_id_mint_detector_bites():
-    assert_detector(
-        _id_mint_offenders,
-        path=REPO_ROOT / "app" / "api" / "_synthetic.py",
-        # Uuid4 call AND hex slice are two findings, not one.
-        trips={"import uuid\n\ndef f():\n    return uuid.uuid4().hex[:12]\n": 2},
-        clean=("from app.crawl.ids import new_request_id\n\ndef f():\n    return new_request_id()\n",),
-    )
+    HANDLE_MINTING_IS_SINGLE_SOURCED.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -344,31 +371,36 @@ def _unbounded_domain_delay_writes(tree: ast.AST, path: pathlib.Path) -> list[st
     return offenders
 
 
+DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER = Rule(
+    name="domain-politeness-floor-only-via-the-setter",
+    find=_unbounded_domain_delay_writes,
+    summary=(
+        "The Crawl-delay floor is clamped to a finite politeness ceiling only in "
+        "set_domain_min_delay, so any other write can drop an inf straight into "
+        "asyncio.sleep; commit it through the clamped setter"
+    ),
+    bite=lambda: Trips(
+        "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
+        "    def bump(self):\n        self._domain_min_delay['y'] += 1\n",
+        count=2,
+    ),
+    clean=lambda: (
+        # The setter's clamped write and a read are both fine: the rule is about
+        # who may WRITE, and an augmented assignment is still a write.
+        "class S:\n    def set_domain_min_delay(self, d, s):\n"
+        "        self._domain_min_delay[d] = min(s, 300.0)\n"
+        "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
+    ),
+)
+
+
 def test_domain_politeness_floor_is_committed_only_via_the_setter():
     """Only set_domain_min_delay writes _domain_min_delay (chokepoint)."""
-    assert_trees_clean(
-        _unbounded_domain_delay_writes,
-        "commit the Crawl-delay floor through the clamped set_domain_min_delay",
-        trees=app_trees(exclude=SANCTIONED),
-    )
+    DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER.scan()
 
 
 def test_domain_delay_detector_bites():
-    assert_detector(
-        _unbounded_domain_delay_writes,
-        path=REPO_ROOT / "app" / "_synthetic.py",
-        # Both a write and an augmented assignment are unbounded; only the
-        # setter's clamped write is not.
-        trips={
-            "class S:\n    def other(self):\n        self._domain_min_delay['x'] = 1e9\n"
-            "    def bump(self):\n        self._domain_min_delay['y'] += 1\n": 2,
-        },
-        clean=(
-            "class S:\n    def set_domain_min_delay(self, d, s):\n"
-            "        self._domain_min_delay[d] = min(s, 300.0)\n"
-            "    def read(self, d):\n        return self._domain_min_delay.get(d, 0.0)\n",
-        ),
-    )
+    DOMAIN_POLITENESS_FLOOR_ONLY_VIA_THE_SETTER.check_bites()
 
 
 # ---------------------------------------------------------------------------
@@ -414,40 +446,50 @@ def _unowned_age_deletions(tree, path) -> list[str]:
     return offenders
 
 
-def test_age_based_deletion_consults_ownership_first():
-    offenders = app_offenders(_unowned_age_deletions)
-    assert not offenders, "; ".join(offenders)
-
-
-def test_unowned_age_deletion_detector_bites():
-    # The shape that lost a live crawl result: a sweep that unlinks by age only.
-    bad = ast.parse(
-        "def _gc_stale(max_age):\n"
-        "    for name in os.listdir(tmp):\n"
-        "        if now - os.path.getmtime(name) > max_age:\n"
-        "            os.unlink(name)\n"
-    )
-    assert len(_unowned_age_deletions(bad, REPO_ROOT / "app" / "_synthetic.py")) == 1
-
-    # The fixed shape: the same sweep, asking who owns each candidate first.
-    # The guard has to be something the KERNEL can answer -- ownership another
-    # process can also see -- not a set this process happens to be holding.
-    good = ast.parse(
+AGE_BASED_DELETION_CONSULTS_OWNERSHIP = Rule(
+    name="age-based-deletion-consults-ownership",
+    find=_unowned_age_deletions,
+    summary=(
+        "Age is not ownership: a scratch file lives exactly as long as the work "
+        "writing it, and a process-wide sweep reaches every one of them. Skip "
+        "paths that are live rather than unlinking by age alone."
+    ),
+    bite=lambda: (
+        Bites(
+            "def _gc_stale(max_age):\n"
+            "    for name in os.listdir(tmp):\n"
+            "        if now - os.path.getmtime(name) > max_age:\n"
+            "            os.unlink(name)\n",
+            "unlinks without an ownership check",
+        ),
+        # A method named for cleanup still has to ask; the name is a trigger, not
+        # a grant.
+        Bites(
+            "class C:\n    def cleanup(self):\n        os.remove(self.path)\n",
+            "unlinks without an ownership check",
+        ),
+    ),
+    clean=lambda: (
+        # The guard has to be something the KERNEL can answer -- ownership another
+        # process can also see -- not a set this process happens to be holding.
         "def _gc_stale(max_age):\n"
         "    for name in os.listdir(tmp):\n"
         "        if not _spill_is_unowned(name):\n"
         "            continue\n"
-        "        os.unlink(name)\n"
-    )
-    assert not _unowned_age_deletions(good, REPO_ROOT / "app" / "_synthetic.py")
+        "        os.unlink(name)\n",
+        # A function that deletes but is not a sweep is not this rule's business.
+        "def close(self):\n    os.unlink(self.path)\n",
+    ),
+)
 
-    # A function that deletes but is not a sweep is not this gate's business.
-    not_a_sweep = ast.parse("def close(self):\n    os.unlink(self.path)\n")
-    assert not _unowned_age_deletions(not_a_sweep, REPO_ROOT / "app" / "_synthetic.py")
 
-    # A method named for cleanup still has to ask.
-    method = ast.parse("class C:\n    def cleanup(self):\n        os.remove(self.path)\n")
-    assert len(_unowned_age_deletions(method, REPO_ROOT / "app" / "_synthetic.py")) == 1
+def test_age_based_deletion_consults_ownership_first():
+    AGE_BASED_DELETION_CONSULTS_OWNERSHIP.scan()
+
+
+def test_unowned_age_deletion_detector_bites():
+    # The shape that lost a live crawl result: a sweep that unlinks by age only.
+    AGE_BASED_DELETION_CONSULTS_OWNERSHIP.check_bites()
 
 
 # --- 4c: the webhook semaphore is touched only through its loop accessor -----
@@ -481,30 +523,44 @@ def _semaphore_global_touch_offenders(tree: ast.AST, path: pathlib.Path) -> list
     ]
 
 
-def test_async_crawl_semaphore_globals_are_loop_bound():
-    assert not (offenders := app_offenders(_semaphore_global_touch_offenders)), ", ".join(offenders)
-
-
-def test_async_crawl_semaphore_loop_binding_detector_bites():
-    # A direct read from a random function -- the loop-bound bypass.
-    bad = ast.parse("async def f():\n    return _async_crawl_semaphore.acquire()\n")
-    offenders = list(_semaphore_global_touch_offenders(bad, REPO_ROOT / "app" / "_synthetic.py"))
-    assert len(offenders) == 1 and "loop" in offenders[0], offenders
-    # A direct write is the same bypass.
-    bad_write = ast.parse("def f():\n    _async_crawl_semaphore = None\n")
-    assert list(_semaphore_global_touch_offenders(bad_write, REPO_ROOT / "app" / "_synthetic.py"))
-    # The module-level declaration is the definition, not a touch.
-    declaration = ast.parse("_async_crawl_semaphore: asyncio.Semaphore | None = None\n")
-    assert not _semaphore_global_touch_offenders(declaration, REPO_ROOT / "app" / "_synthetic.py")
-    # The accessor itself is exempt, including the companion loop global.
-    accessor = ast.parse(
+SEMAPHORE_GLOBALS_ARE_LOOP_BOUND = Rule(
+    name="semaphore-globals-are-loop-bound",
+    find=_semaphore_global_touch_offenders,
+    summary=(
+        "The cached Semaphore is bound to the loop that built it, so reading or "
+        "assigning the global anywhere but the accessor is a Semaphore awaited "
+        "off its own loop; go through the accessor instead"
+    ),
+    bite=lambda: (
+        Bites(
+            "async def f():\n    return _async_crawl_semaphore.acquire()\n",
+            "use the accessor so the instance stays bound to the running loop",
+        ),
+        # A direct write is the same bypass.
+        Bites(
+            "def f():\n    _async_crawl_semaphore = None\n",
+            "use the accessor so the instance stays bound to the running loop",
+        ),
+    ),
+    clean=lambda: (
+        # The module-level declaration is the definition, not a touch.
+        "_async_crawl_semaphore: asyncio.Semaphore | None = None\n",
+        # The accessor itself is exempt, including the companion loop global.
         "def _get_async_crawl_semaphore():\n"
         "    global _async_crawl_semaphore, _async_crawl_semaphore_loop\n"
         "    if _async_crawl_semaphore is None:\n"
         "        _async_crawl_semaphore = _build_async_crawl_semaphore()\n"
-        "    return _async_crawl_semaphore\n"
-    )
-    assert not _semaphore_global_touch_offenders(accessor, REPO_ROOT / "app" / "_synthetic.py")
+        "    return _async_crawl_semaphore\n",
+    ),
+)
+
+
+def test_async_crawl_semaphore_globals_are_loop_bound():
+    SEMAPHORE_GLOBALS_ARE_LOOP_BOUND.scan()
+
+
+def test_async_crawl_semaphore_loop_binding_detector_bites():
+    SEMAPHORE_GLOBALS_ARE_LOOP_BOUND.check_bites()
 
 
 # --- 4d: the doc pool reaps retired slots on every acquisition ---------------
@@ -571,39 +627,51 @@ def _doc_pool_reap_offenders(tree: ast.AST, path: pathlib.Path) -> list[str]:
     ]
 
 
-def test_doc_pool_acquirer_reaps_retired_slots():
-    assert not (offenders := app_offenders(_doc_pool_reap_offenders)), ", ".join(offenders)
-
-
-def test_doc_pool_reap_detector_bites():
-    # The acquirer without the reap filter: the regression the detector hunts.
-    bad = ast.parse(
-        "def _acquire_doc_worker():\n"
-        "    with _POOL_LOCK:\n"
-        "        want = _doc_extraction_worker_count()\n"
-        "        while True:\n"
-        "            for worker in _DOC_POOL:\n"
-        "                if not worker.busy:\n"
-        "                    return worker\n"
-    )
-    offenders = list(_doc_pool_reap_offenders(bad, REPO_ROOT / "app" / "crawl" / "_synthetic.py"))
-    assert len(offenders) == 1 and "retired" in offenders[0], offenders
-    # The real filter satisfies it.
-    good = ast.parse(
+DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS = Rule(
+    name="doc-pool-acquirer-reaps-retired-slots",
+    find=_doc_pool_reap_offenders,
+    summary=(
+        "A retired slot can never be handed out, so leaving one in the pool "
+        "strands it forever and inflates the pool-size budget; rebuild the pool "
+        "without retired entries in _acquire_doc_worker"
+    ),
+    bite=lambda: (
+        # The acquirer without the reap filter: the regression the detector hunts.
+        Bites(
+            "def _acquire_doc_worker():\n"
+            "    with _POOL_LOCK:\n"
+            "        want = _doc_extraction_worker_count()\n"
+            "        while True:\n"
+            "            for worker in _DOC_POOL:\n"
+            "                if not worker.busy:\n"
+            "                    return worker\n",
+            "no longer reaps retired slots",
+        ),
+        # A pool rebuild that filters on something else is not the reap.
+        Bites(
+            "def _acquire_doc_worker():\n"
+            "    with _POOL_LOCK:\n"
+            "        _DOC_POOL = [each for each in _DOC_POOL if not each.busy]\n"
+            "        return _DOC_POOL[0]\n",
+            "no longer reaps retired slots",
+        ),
+    ),
+    clean=lambda: (
+        # The real filter satisfies it.
         "def _acquire_doc_worker():\n"
         "    with _POOL_LOCK:\n"
         "        _DOC_POOL = [each for each in _DOC_POOL if not each.retired]\n"
-        "        return _DOC_POOL[0]\n"
-    )
-    assert not _doc_pool_reap_offenders(good, REPO_ROOT / "app" / "crawl" / "_synthetic.py")
-    # A pool rebuild that filters on something else is not the reap.
-    not_reap = ast.parse(
-        "def _acquire_doc_worker():\n"
-        "    with _POOL_LOCK:\n"
-        "        _DOC_POOL = [each for each in _DOC_POOL if not each.busy]\n"
-        "        return _DOC_POOL[0]\n"
-    )
-    assert list(_doc_pool_reap_offenders(not_reap, REPO_ROOT / "app" / "crawl" / "_synthetic.py"))
+        "        return _DOC_POOL[0]\n",
+    ),
+)
+
+
+def test_doc_pool_acquirer_reaps_retired_slots():
+    DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS.scan()
+
+
+def test_doc_pool_reap_detector_bites():
+    DOC_POOL_ACQUIRER_REAPS_RETIRED_SLOTS.check_bites()
 
 
 # --- Response cookies enter the jar only through the fetch-completion tail -----
@@ -646,43 +714,64 @@ def _cookie_writes_off_the_fetch_tail(tree: ast.AST, path: pathlib.Path) -> list
     return offenders
 
 
+RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL = Rule(
+    name="response-cookies-enter-via-the-fetch-tail",
+    find=_cookie_writes_off_the_fetch_tail,
+    summary=(
+        "The httpx and curl_cffi fetchers each carried their own cookie tail and "
+        "had already drifted, so a third fetch path growing its own handling is a "
+        "silently missing cookie; persist through fetchers._finish_fetch"
+    ),
+    bite=lambda: (
+        Bites(
+            "import x\nx._store_set_cookies(url, headers)\n",
+            "_store_set_cookies() outside _finish_fetch()",
+        ),
+        Bites(
+            "import jar\njar.add_cookie_header(url, cookie)\n",
+            "add_cookie_header() outside _store_set_cookies()",
+        ),
+        Bites("def nested():\n    jar.add_cookie_header(url, cookie)\n", "add_cookie_header() outside"),
+    ),
+    clean=lambda: (
+        # The sanctioned two-hop chain, spared at the paths that own it. Both
+        # halves are Silents rather than lookalike strings: each is sanctioned at
+        # ONE path and must fire at every other, so a string -- which is always run
+        # at the rule's single proof path -- would assert the opposite claim here.
+        Silent(
+            "from app.crawl.strategies.request_profile import _store_set_cookies\n"
+            "def _finish_fetch(**kwargs):\n"
+            "    return _store_set_cookies(kwargs)\n",
+            at=REPO_ROOT / _COOKIE_TAIL,
+        ),
+        Silent(
+            "def _store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n",
+            at=REPO_ROOT / _COOKIE_HELPER,
+        ),
+        # The half that makes it a PATH-keyed rule: that very same fetch-tail
+        # source still fires anywhere else. A detector keyed on the function name
+        # alone would wave it through, which is the whole reason the rule is keyed
+        # on the path -- so this is a firing proof, not another exemption.
+        Bites(
+            "from app.crawl.strategies.request_profile import _store_set_cookies\n"
+            "def _finish_fetch(**kwargs):\n"
+            "    return _store_set_cookies(kwargs)\n",
+            "_store_set_cookies() outside _finish_fetch()",
+            at=_ELSEWHERE,
+        ),
+    ),
+    proof_path=REPO_ROOT / _COOKIE_TAIL,
+)
+
+
 def test_response_cookies_enter_the_jar_only_through_the_fetch_tail():
     """Cookie persistence has one door, and that door is the shared fetch tail."""
-    offenders = app_offenders(_cookie_writes_off_the_fetch_tail)
-    assert not offenders, (
-        f"Persist response cookies via {_COOKIE_TAIL}::{_COOKIE_TAIL_FN}, which calls "
-        f"{_COOKIE_HELPER_FN} for you, instead of reaching for the jar where you are: " + ", ".join(offenders)
-    )
+    RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL.scan()
 
 
 def test_cookie_tail_detector_bites():
     """Every bypass shape fires; the sanctioned two-hop chain stays clean."""
-    synthetic = REPO_ROOT / "app" / "_synthetic.py"
-    assert_fires_once(
-        _cookie_writes_off_the_fetch_tail,
-        {
-            "import x\nx._store_set_cookies(url, headers)\n": "_store_set_cookies()",
-            "import jar\njar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
-            "def nested():\n    jar.add_cookie_header(url, cookie)\n": "add_cookie_header()",
-        },
-        synthetic,
-    )
-
-    tail_call = (
-        "from app.crawl.strategies.request_profile import _store_set_cookies\n"
-        "def _finish_fetch(**kwargs):\n"
-        "    return _store_set_cookies(kwargs)\n"
-    )
-    # The sanctioned chain is silent at its own path...
-    assert not _cookie_writes_off_the_fetch_tail(ast.parse(tail_call), REPO_ROOT / _COOKIE_TAIL)
-    assert not _cookie_writes_off_the_fetch_tail(
-        ast.parse("def _store_set_cookies(url, headers):\n    jar.add_cookie_header(url, c)\n"),
-        REPO_ROOT / _COOKIE_HELPER,
-    )
-    # ...and the very same source still fires anywhere else. A detector keyed on
-    # the function name alone would wave this tree through, which is the whole
-    # reason the rule is keyed on the path.
-    assert _cookie_writes_off_the_fetch_tail(ast.parse(tail_call), synthetic)
+    RESPONSE_COOKIES_ENTER_VIA_THE_FETCH_TAIL.check_bites()
 
 
 # --- browser instance release -------------------------------------------------
@@ -738,57 +827,54 @@ def _browser_release_offenders(tree, path, *, owner, fields, chokepoint):
                 )
 
 
+def _browser_release_source() -> str:
+    """The proof's source, with its resets generated from the swept field tuple.
+
+    Written out twice it was the same three lines of drift-prone fixture, and the
+    drift is invisible: a field added to the tuple would leave a hand-written
+    proof asserting on a source that never mentions it.
+    """
+    reset = "\n".join(f"        self.{field} = None" for field in _BROWSER_RELEASE_FIELDS)
+    return (
+        "class Renderer:\n"
+        f"    def __init__(self):\n{reset}\n\n"
+        f"    async def {_BROWSER_RELEASE_CHOKEPOINT}(self):\n{reset}\n\n"
+        "    async def close(self):\n"
+        "        self._browser = None\n"
+    )
+
+
+BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT = Rule(
+    name="browser-release-only-through-the-chokepoint",
+    find=lambda tree, path: _browser_release_offenders(
+        tree,
+        path,
+        owner=_OWNER_PATH,
+        fields=_BROWSER_RELEASE_FIELDS,
+        chokepoint=_BROWSER_RELEASE_CHOKEPOINT,
+    ),
+    summary=(
+        "_acquire_browser and close have to forget the same cached fields, and "
+        "spelling that out twice is how one of them grows a stale field the other "
+        "never clears; release every field through _release_browser"
+    ),
+    bite=lambda: Bites(
+        _browser_release_source(),
+        "is cleared to None in",
+        at=_OWNER_PATH,
+    ),
+    clean=lambda: (
+        # __init__ putting the fields at their initial None is not a release, and
+        # neither is the chokepoint's own body.
+        Silent(_browser_release_source(), at=_ELSEWHERE),
+        f"class R:\n    async def {_BROWSER_RELEASE_CHOKEPOINT}(self):\n        self._browser = None\n",
+    ),
+)
+
+
 def test_browser_instance_fields_are_cleared_only_by_the_release_chokepoint():
-    offenders: list[str] = []
-    for path, tree in app_trees(exclude=SANCTIONED):
-        offenders.extend(
-            _browser_release_offenders(
-                tree,
-                path,
-                owner=REPO_ROOT / _BROWSER_RELEASE_OWNER,
-                fields=_BROWSER_RELEASE_FIELDS,
-                chokepoint=_BROWSER_RELEASE_CHOKEPOINT,
-            )
-        )
-    assert not offenders, "the browser release chokepoint was bypassed: " + ", ".join(offenders)
+    BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT.scan()
 
 
 def test_browser_release_detector_bites():
-    # The reset is generated from the field tuple the detector sweeps, so the
-    # synthetic source cannot claim to cover a field the guard does not check.
-    # Written out twice it was the same three lines of drift-prone fixture, and
-    # the drift is invisible: a field added to the tuple would leave this proof
-    # asserting on a source that never mentions it.
-    reset = "\n".join(f"        self.{field} = None" for field in _BROWSER_RELEASE_FIELDS)
-    source = f"""
-class Renderer:
-    def __init__(self):
-{reset}
-
-    async def {_BROWSER_RELEASE_CHOKEPOINT}(self):
-{reset}
-
-    async def close(self):
-        self._browser = None
-"""
-    args = {
-        "owner": REPO_ROOT / _BROWSER_RELEASE_OWNER,
-        "fields": _BROWSER_RELEASE_FIELDS,
-        "chokepoint": _BROWSER_RELEASE_CHOKEPOINT,
-    }
-    # List(), not the generator: a generator object is always truthy, so
-    # asserting on one directly would pass without ever running the sweep.
-    offenders = list(
-        _browser_release_offenders(ast.parse(source), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args)
-    )
-    assert offenders, "a field cleared outside the release chokepoint escaped the sweep"
-    elsewhere = list(
-        _browser_release_offenders(
-            ast.parse(source), REPO_ROOT / "app" / "crawl" / "content_cache.py", **args
-        )
-    )
-    assert not elsewhere, f"scoped to the wrong module -- ignored: {elsewhere}"
-    clean = "class R:\n    async def _release_browser(self):\n        self._browser = None\n"
-    assert not list(
-        _browser_release_offenders(ast.parse(clean), REPO_ROOT / _BROWSER_RELEASE_OWNER, **args)
-    ), "the chokepoint's own body must not be flagged"
+    BROWSER_RELEASE_ONLY_THROUGH_THE_CHOKEPOINT.check_bites()
