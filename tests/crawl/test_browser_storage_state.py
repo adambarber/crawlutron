@@ -16,20 +16,47 @@ class TestStorageStatePathValidation:
         assert r._validate_storage_state_path("/etc/some-storage.json") is None
         assert r._validate_storage_state_path("/app/cache/some-storage.json") is not None
 
-    def test_storage_state_allows_platform_temp_dir_when_no_settings(self):
-        """With no settings the allowlist is the platform temp dir, and only that.
+    def test_no_cache_dir_means_no_allowed_storage_state_path(self):
+        """Fail closed: with no ``cache_dir`` there is no allowlist, so nothing passes.
 
-        This fallback branch is what makes local-mode dev usage work, and it keys
-        off ``tempfile.gettempdir()`` -- so the test has to build its path from
-        the same call. A hardcoded ``/tmp`` asserts against Linux's temp dir
-        while the code checks this platform's, which is how the branch went
-        uncovered: the two agreed on one OS and disagreed on the other.
+        The branch this replaces allowed anything under ``tempfile.gettempdir()``,
+        and the sibling test that covered it recorded the exposure in its own
+        docstring: on Linux ``/tmp`` is world-readable, which is precisely what
+        the validator's docstring said it refused. A ``storage_state`` is cookies
+        and tokens, so a directory any local user can write is a directory any
+        local user can seed -- Playwright would load the file the attacker
+        planted instead of one an operator chose.
+
+        Failing closed costs a local dev who passes a path with no configured
+        ``cache_dir`` a diagnostic and an explicit config line. The alternative
+        costs a deployment its session, silently.
         """
         r = BrowserRenderer()
-        allowed = f"{tempfile.gettempdir()}/some-storage.json"
-        assert r._validate_storage_state_path(allowed) is not None
-        # An allowlist, not a pass-everything fallback.
+        assert r._cache_dir is None
+        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
+        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/../etc/storage.json") is None
         assert r._validate_storage_state_path("/app/cache/some-storage.json") is None
+        assert r._validate_storage_state_path("relative/storage.json") is None
+
+    def test_refusing_without_a_cache_dir_names_the_setting_to_configure(self, caplog):
+        """A refused path must say WHY it was refused, not just return None.
+
+        Returning None for every path is indistinguishable from "that path is not
+        allowed" -- the operator gets a render that quietly drops their session
+        with nothing in the logs. The configured-``cache_dir`` rejections are
+        silent by design, since there the allowlist exists and the answer is
+        simply no; the no-``cache_dir`` case is different in kind, because no
+        allowlist was ever configured and that is the actionable fact.
+        """
+        import logging
+
+        r = BrowserRenderer()
+        with caplog.at_level(logging.WARNING, logger="app.crawl.strategies.browser"):
+            assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is None
+
+        assert any("cache_dir" in record.getMessage() for record in caplog.records), (
+            f"the refusal did not name the setting to configure: {[r.getMessage() for r in caplog.records]}"
+        )
 
     def test_storage_state_rejects_bare_names_that_are_not_paths(self):
         """A string is a FILE PATH to Playwright, not the name of a session.
@@ -57,24 +84,6 @@ class TestStorageStatePathValidation:
         settings = CrawlerSettings(cache_dir="/app/cache")
         r = BrowserRenderer(settings=settings)
         assert r._validate_storage_state_path("/app/elsewhere/x.json") is None
-
-    def test_storage_state_fallback_to_tmp_only_when_no_settings(self):
-        """No-settings callers (local dev) still allow the platform temp dir.
-
-        ``tempfile.gettempdir()``, not a literal ``/tmp``: on macOS the platform
-        temp dir is a per-user ``/var/folders/...`` path, and on Linux ``/tmp`` is
-        world-readable, which is precisely the exposure the validator's own
-        docstring says it refuses. Hardcoding ``/tmp`` here would have pinned the
-        test to a platform assumption the production code never made.
-        """
-        import tempfile
-
-        r = BrowserRenderer()
-        assert r._cache_dir is None
-        # The platform temp dir is allowed in local-dev mode.
-        assert r._validate_storage_state_path(f"{tempfile.gettempdir()}/storage.json") is not None
-        # But not /elsewhere
-        assert r._validate_storage_state_path("/elsewhere/x.json") is None
 
     def test_browser_renderer_stores_cache_dir(self):
         """The cache_dir set on settings is accessible for storage_state validation."""

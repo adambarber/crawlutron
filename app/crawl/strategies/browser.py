@@ -69,6 +69,37 @@ from app.validation import (
 logger = logging.getLogger(__name__)
 
 
+def _refuse_storage_state_without_cache_dir(storage_state: str) -> None:
+    """Log why a ``storage_state`` was dropped because no ``cache_dir`` is set.
+
+    The caller owns the return value; this owns the explanation. A separate
+    chokepoint for one reason: this is the only refusal in the validator that is
+    not "that path is not allowed". The configured-``cache_dir`` rejections stay
+    silent, because there the allowlist exists and the answer is simply no. With
+    no ``cache_dir`` no allowlist was ever configured, and that is the actionable
+    fact -- so this one names the setting instead of letting the caller return a
+    bare ``None`` indistinguishable from a path merely outside the allowlist.
+
+    The allowlist this replaced was the platform temp dir, which is not operator
+    control: it is world-readable on most hosts, so any local user could seed a
+    file another tenant's render then loads as its session. Losing a local dev's
+    ``storage_state`` is the cost; that is a diagnostic and a config line, against
+    a deployment's session otherwise.
+    """
+    logger.warning(
+        "browser_storage_state_no_cache_dir",
+        extra={
+            "storage_state": str(storage_state),
+            "detail": (
+                "no cache_dir is configured, so there is no allowlist to check this path "
+                "against and the storage_state is dropped; set CRAWLUTRON_CACHE_DIR to a "
+                "directory this deployment owns and place the file there"
+            ),
+        },
+    )
+    return None
+
+
 async def _resolve_browser_target(url: str, *, policy: HostPolicy) -> tuple[str, dict[str, str]]:
     """SSRF-check + IP-pin ``url`` for browser navigation.
 
@@ -1029,32 +1060,23 @@ class BrowserRenderer:
         should not instead hand out three unvalidated paths relative to the
         process working directory.
 
-        When the operator has supplied a ``cache_dir`` via settings, only that
-        directory is accepted. ``/tmp`` is intentionally NOT in the default
-        allowlist: it is world-readable on most hosts and would let any user
-        on the box read another tenant's session tokens.
+        The allowlist is exactly the operator's ``cache_dir`` and nothing else.
+        The platform temp dir is NOT an implicit root: it is world-readable on
+        most hosts, so treating it as trusted would let any local user seed a
+        file another tenant's render then loads as its session. See
+        :func:`_refuse_storage_state_without_cache_dir` for the no-``cache_dir``
+        case, which fails closed rather than substituting a guess.
         """
-        import tempfile
         from pathlib import Path
 
         # For file paths, ensure they live under an operator-controlled dir.
         with contextlib.suppress(Exception):
             path = Path(storage_state).resolve()
-            allowed_dirs: list[Path] = []
-            if self._cache_dir:
-                allowed_dirs.append(Path(self._cache_dir).resolve())
-            else:
-                # No settings -> local-mode dev usage. Use the platform temp dir
-                # as the only fallback (and document the trade-off via the log
-                # line). Not a hardcoded /tmp: the platform dir is the one the
-                # interpreter already trusts for scratch files.
-                allowed_dirs.append(Path(tempfile.gettempdir()).resolve())
-            for allowed in allowed_dirs:
-                try:
-                    path.relative_to(allowed)
-                    return str(path)
-                except ValueError:
-                    continue
+            if not self._cache_dir:
+                _refuse_storage_state_without_cache_dir(storage_state)
+                return None
+            path.relative_to(Path(self._cache_dir).resolve())
+            return str(path)
         return None
 
     def _get_page_kwargs(self, browser_profile: dict[str, Any]) -> dict[str, Any]:
