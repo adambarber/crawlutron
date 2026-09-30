@@ -18,6 +18,7 @@ from app.crawl.cache import HttpCache
 from app.crawl.content_cache import ContentCache
 from app.crawl.fetch_helpers import fetch_sitemap_urls
 from app.crawl.ids import new_request_id
+from app.crawl.job_store import durable_page_identity
 from app.crawl.policy import DiscoveryFlags, discovery_flags
 from app.crawl.recursive import RECURSIVE_RAMP_MAX, _spill_write, run_recursive_crawl
 from app.crawl.render_options import policy_wants_html
@@ -36,7 +37,7 @@ from app.resource_pressure import (
 from app.safe_regex import BoundedPattern
 from app.scheduler import DomainScheduler
 from app.settings import CrawlerSettings
-from app.validation import HostPolicy, normalize_public_http_url, registrable_domain, safe_public_url_or_none
+from app.validation import HostPolicy, normalize_public_http_url, registrable_domain
 
 
 @dataclass(frozen=True)
@@ -124,10 +125,7 @@ def _build_validators(state: _PipelineState) -> dict[str, dict[str, str]]:
         if not entry:
             continue
         validators_by_url[url] = entry
-        validators_by_url.setdefault(
-            safe_public_url_or_none(url, policy=state.host_policy) or url,
-            entry,
-        )
+        validators_by_url.setdefault(durable_page_identity(url, state.host_policy), entry)
     return validators_by_url
 
 

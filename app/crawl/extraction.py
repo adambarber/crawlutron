@@ -32,6 +32,12 @@ from html import unescape
 from typing import Any, Literal, NamedTuple, TypeVar
 from urllib.parse import urljoin, urlparse
 
+from lxml import etree
+from lxml.etree import ParserError
+from markdownify import markdownify as html_to_md
+from markitdown import MarkItDown
+from trafilatura import extract as _trafilatura_extract
+
 # Lxml does not mark re-exports, so importing a name that IS present at runtime is
 # reported as a private import; `reportPrivateImportUsage` is off in
 # pyrightconfig.json for that reason. These carried
@@ -41,12 +47,7 @@ from urllib.parse import urljoin, urlparse
 # dependency: the two function-local imports these replace each carried a
 # `try/except ImportError` that returned "no content" for a package that cannot
 # be absent.
-from lxml import etree
-from lxml.etree import ParserError
-from markdownify import markdownify as html_to_md
-from markitdown import MarkItDown
-from trafilatura import extract as _trafilatura_extract
-
+from app.crawl.job_store import durable_page_identity
 from app.crawl.llm_format import _llm_metadata_from_tree, _text_from_html
 from app.models import DiscoveredLink
 from app.resource_pressure import doc_worker_count
@@ -1076,7 +1077,7 @@ def _extract_discovered_links(
 ) -> tuple[list[Any], int, bool]:
     if not html or not source_url:
         return [], 0, False
-    norm_source = safe_public_url_or_none(source_url, policy=host_policy) or source_url
+    norm_source = durable_page_identity(source_url, host_policy)
     source_host = (urlparse(norm_source).hostname or "").lower()
     if tree is None:
         tree = _parse_html_tree(html)

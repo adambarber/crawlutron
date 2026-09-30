@@ -33,13 +33,29 @@ from tests.chokepoint_walks import (
     REPO_ROOT,
     app_offenders,
     assert_detector,
+    enclosing_function,
     nodes_of,
     offender_at,
     or_nodes,
+    parent_map,
     resolved_call_name,
 )
 
 _OWNER = "durable_page_identity"
+
+# The three names the same function answers to. `safe_public_url_or_none` is the
+# root, `canonical_page_identity` the alias the crawl path reads through, and
+# `durable_page_identity` the memoized owner that carries the fallback. The gate
+# has to watch all three: watching only the alias reported a clean sweep while
+# two call sites in extraction.py and request_pipeline.py wrote the same rule
+# out against the root.
+_CANONICAL_NAMES = frozenset({"safe_public_url_or_none", "canonical_page_identity", _OWNER})
+
+# The owner's own body, and the memo it reads. Exempting the defining function
+# rather than its whole module is the difference between a gate and a blind
+# spot: a module-wide exemption would let the next stray fallback be written
+# three lines below the owner and pass.
+_RULE_OWNERS = frozenset({_OWNER, "_canonical_cached"})
 
 
 def _inline_identity_fallbacks(tree: ast.AST, path: pathlib.Path) -> list[str]:
@@ -54,7 +70,11 @@ def _inline_identity_fallbacks(tree: ast.AST, path: pathlib.Path) -> list[str]:
     are excluded by name so this detects copies rather than the definition.
     """
     offenders: list[str] = []
+    parents = parent_map(tree)
     for node in or_nodes(tree):
+        owner = enclosing_function(node, parents)
+        if owner is not None and owner.name in _RULE_OWNERS:
+            continue
         if _names_canonical_call(tree, node):
             offenders.append(offender_at(path, node, "inline-identity-fallback"))
     return offenders
@@ -72,7 +92,7 @@ def _names_canonical_call(tree: ast.AST, node: ast.AST) -> bool:
     of the ten call sites that are the actual problem.
     """
     return any(
-        resolved_call_name(tree, child).rsplit(".", 1)[-1] in {"canonical_page_identity", _OWNER}
+        resolved_call_name(tree, child).rsplit(".", 1)[-1] in _CANONICAL_NAMES
         for child in nodes_of(node)
         if isinstance(child, ast.Call)
     )
@@ -81,7 +101,7 @@ def _names_canonical_call(tree: ast.AST, node: ast.AST) -> bool:
 def test_page_identity_fallback_is_not_written_out_at_call_sites():
     offenders = app_offenders(_inline_identity_fallbacks)
     assert not offenders, (
-        "identity is computed as `canonical_page_identity(...) or <raw>` at a call "
+        "identity is computed as `<canonical function>(...) or <raw>` at a call "
         f"site instead of through {_OWNER}():\n  " + "\n  ".join(offenders)
     )
 
@@ -99,7 +119,12 @@ def test_page_identity_fallback_detector_bites():
         fires={
             "def f(u, hp):\n    return canonical_page_identity(u, host_policy=hp) or u\n": (
                 "inline-identity-fallback"
-            )
+            ),
+            # The same rule written against the root function, which is how
+            # extraction.py and request_pipeline.py spelled it.
+            "def f(u, hp):\n    return safe_public_url_or_none(u, policy=hp) or u\n": (
+                "inline-identity-fallback"
+            ),
         },
         clean=(
             # An `or` over something that cannot be None is a different rule.
