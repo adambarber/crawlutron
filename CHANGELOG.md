@@ -41,6 +41,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   publishes only to `127.0.0.1`, which Docker port mapping requires.
 
 ### Fixed
+- **A refused target now gets no identity, instead of its own raw URL back.**
+  `app/crawl/admission.py:_frontier_identity` asked the page-identity owner for a
+  canonical identity and, when the owner returned `None`, handed back the raw
+  string. `None` is how the owner says *refused* -- `private_network_target` or
+  `host_not_allowed` -- so the fallback turned a rejection into an answer, and
+  every caller could no longer tell the two apart. Its two siblings,
+  `_candidate_stream` and `normalize_sitemap_candidates`, both drop on `None`,
+  which made this the one place in the module where a refusal and an
+  acceptance looked alike. It is now fail-closed like the other two.
+
+  Scope, stated honestly: the admission *decision* was never reached, because
+  `_candidate_stream` drops before anything is admitted, and this helper's only
+  production caller uses it to build a dedupe reservation set. So this was a
+  divergence and a latent hazard, not a live SSRF -- the "denied target is
+  persisted and reported as accepted (202)" claim in the property inventory was
+  wrong and is corrected there. The hazard was real: a helper whose `None` means
+  "refused" but which returns a string anyway is one edit away from being an
+  admission.
+
+  Covered by `tests/crawl/test_ssrf.py::TestFrontierIdentityRefusesRejectedTargets`,
+  which asserts the refusal for every input shape (string, dict, `FrontierEntry`,
+  `(key, entry)` tuple, duck-typed `normalized_url`), for both refusal reasons,
+  and -- in the other direction -- that a public target still gets its identity,
+  so `return None` cannot satisfy the guard.
 - **A job row now belongs to the test that made it.** `app/main.py` binds
   `DATABASE_PATH = settings.cache_dir + "/crawler.db"` at import and hands every
   test one process-wide `JobStore` built on it, and no test overrode

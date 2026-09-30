@@ -177,6 +177,80 @@ class TestSSRFProtection:
         assert resolved == ["example.com"]
 
 
+class TestFrontierIdentityRefusesRejectedTargets:
+    """A rejected target must get no identity, not a fallback one.
+
+    ``_frontier_identity`` is the admission seam's dedupe helper. It asks the
+    owner for a canonical identity and, when the owner returns ``None``, used to
+    hand back the raw string. That silently converted a refusal into an
+    admission: the cloud-metadata address, a loopback port and a host outside an
+    allow-list all came back with non-``None`` identities, so they were
+    persisted, scheduled and reported as accepted (202) before the engine ever
+    validated them. The sibling helper ``normalize_sitemap_candidates`` drops the
+    same inputs, which is why the behaviour is a divergence and not a policy.
+    """
+
+    REJECTED = [
+        "http://169.254.169.254/latest/meta-data/",
+        "http://127.0.0.1:8080/x",
+        "http://10.0.0.5/internal",
+        "http://192.168.1.1/admin",
+    ]
+
+    @pytest.mark.parametrize("target", REJECTED)
+    def test_private_target_is_not_given_an_identity(self, monkeypatch, target):
+        block_private_targets(monkeypatch)
+        from app.crawl.admission import _frontier_identity
+
+        assert _frontier_identity(target, host_policy=HostPolicy.unrestricted()) is None
+
+    def test_every_entry_shape_is_covered(self, monkeypatch):
+        """The refusal must not depend on which shape the value arrived in.
+
+        ``_frontier_identity`` accepts a bare string, a ``FrontierEntry``, a
+        ``(key, entry)`` tuple, a dict and any object with ``normalized_url``.
+        A guard that only pins the string case leaves the other four open.
+        """
+        block_private_targets(monkeypatch)
+        from app.crawl.admission import _frontier_identity
+        from app.crawl.job_store import FrontierEntry
+
+        target = "http://169.254.169.254/latest/meta-data/"
+        policy = HostPolicy.unrestricted()
+        entry = FrontierEntry(url=target, depth=1)
+        shapes = [target, {"url": target}, entry, ("k", entry), type("S", (), {"normalized_url": target})()]
+        for shape in shapes:
+            label = type(shape).__name__
+            assert _frontier_identity(shape, host_policy=policy) is None, (
+                f"{label} shape was given an identity for a rejected target"
+            )
+
+    def test_host_outside_the_allow_list_is_not_given_an_identity(self, monkeypatch):
+        """The other refusal reason fails the same way.
+
+        ``private_network_target`` and ``host_not_allowed`` are the two ways the
+        owner refuses. If only the first is honoured the guard is half a guard.
+        """
+        block_private_targets(monkeypatch)
+        from app.crawl.admission import _frontier_identity
+
+        policy = HostPolicy.from_strings("example.com", "")
+        assert _frontier_identity("http://evil.test/x", host_policy=policy) is None
+
+    def test_a_public_target_still_gets_its_identity(self, monkeypatch):
+        """The other direction: returning ``None`` always would pass the above.
+
+        An identity is the whole point of this helper, so the guard has to reject
+        the refused and admit the allowed. This is what stops the fix from being
+        ``return None`` on line 114.
+        """
+        block_private_targets(monkeypatch)
+        from app.crawl.admission import _frontier_identity
+
+        got = _frontier_identity("https://example.gov/page/", host_policy=HostPolicy.unrestricted())
+        assert got == "https://example.gov/page", f"a public target lost its identity: {got!r}"
+
+
 class TestSsrfDnsPinning:
     def test_resolves_once_and_pins_ip(self, monkeypatch):
         with host_resolves_to(monkeypatch, "93.184.216.34") as resolved:

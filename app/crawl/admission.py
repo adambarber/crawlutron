@@ -110,8 +110,17 @@ def _frontier_identity(value: Any, *, host_policy: HostPolicy) -> str | None:
         raw_url = getattr(value, "normalized_url", None)
     if not isinstance(raw_url, str) or not raw_url:
         return None
+    # A refused target gets no identity. The owner returns None for both refusal
+    # reasons -- private_network_target and host_not_allowed -- and the raw
+    # string is not a consolation prize: it is exactly the value the policy just
+    # rejected, so falling back to it re-admits by another name. The sibling
+    # helpers here (``_candidate_stream``, ``normalize_sitemap_candidates``) both
+    # drop on None; this one used to hand the raw string back, which made it the
+    # only place in the module where a refusal and an acceptance looked alike.
     identity = canonical_page_identity(raw_url, host_policy=host_policy)
-    return str(identity or raw_url)
+    if identity is None:
+        return None
+    return str(identity)
 
 
 def _candidate_stream(
