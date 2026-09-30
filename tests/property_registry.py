@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class Suppression:
+class _Suppression:
     module: str
     symbol: str
     fingerprint: str
@@ -19,7 +19,7 @@ class Property:
     definition_site: str
     fingerprints: tuple[str, ...]
     reason: str
-    suppressions: tuple[Suppression, ...] = ()
+    suppressions: tuple[_Suppression, ...] = ()
 
 
 PROPERTY_REGISTRY = (
@@ -61,13 +61,13 @@ PROPERTY_REGISTRY = (
         ),
         reason="The engine and durable admission path must share one robots policy loader and cache.",
         suppressions=(
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="iter_robots_fields",
                 fingerprint="parse_robots_rules_definition",
                 reason="The tokenizer is a shared lower-level primitive consumed by the policy owner.",
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="robots_groups",
                 fingerprint="parse_robots_rules_definition",
@@ -75,7 +75,7 @@ PROPERTY_REGISTRY = (
                 "lower-level parser component consumed by the policy "
                 "owner.",
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="select_robots_values",
                 fingerprint="parse_robots_rules_definition",
@@ -83,7 +83,7 @@ PROPERTY_REGISTRY = (
                 "lower-level parser component consumed by the policy "
                 "owner.",
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="parse_robots_rules",
                 fingerprint="parse_robots_rules_definition",
@@ -92,7 +92,7 @@ PROPERTY_REGISTRY = (
                     "is the only module that fetches, caches, and serves its result."
                 ),
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="parse_robots_crawl_delay",
                 fingerprint="parse_robots_rules_definition",
@@ -101,7 +101,7 @@ PROPERTY_REGISTRY = (
                     "by the policy owner."
                 ),
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots_parse.py",
                 symbol="parse_robots_sitemaps",
                 fingerprint="parse_robots_rules_definition",
@@ -110,7 +110,7 @@ PROPERTY_REGISTRY = (
                     "by the policy owner."
                 ),
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/strategies/fetch_policy.py",
                 symbol="_discovery_diagnostics",
                 fingerprint="robots_url",
@@ -119,7 +119,7 @@ PROPERTY_REGISTRY = (
                     "has no cached sitemap hints; it is not a policy decision or cache owner."
                 ),
             ),
-            Suppression(
+            _Suppression(
                 module="app/crawl/robots.py",
                 symbol="<module>",
                 fingerprint="robots_bounded_ttl_cache",

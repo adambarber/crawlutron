@@ -36,7 +36,6 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 
 from tests.chokepoint_walks import REPO_ROOT, SANCTIONED, app_trees, relative_posix
-from tests.matching import Matcher
 
 #: Where a bite proof's synthetic module is pretended to live. The path is part of
 #: what a detector may legitimately inspect (a rule scoped to one directory reads
@@ -158,7 +157,7 @@ def _relative(path: pathlib.Path) -> str:
 
 
 @dataclass(frozen=True)
-class Rule(Matcher):
+class Rule:
     """One property, the detector that decides it, and the proof it can fire.
 
     :param find: ``(tree, path) -> offender strings``. An empty iterable means the
@@ -274,17 +273,6 @@ class Rule(Matcher):
 
     def offenders(self, tree: ast.Module, path: pathlib.Path) -> list[str]:
         return self._run(tree, path)
-
-    def matches(self, actual: tuple[ast.Module, pathlib.Path]) -> bool:
-        """A ``(tree, path)`` pair satisfies the rule when nothing fires on it."""
-        tree, path = actual
-        return not self.offenders(tree, path)
-
-    def describe(self, actual: tuple[ast.Module, pathlib.Path]) -> str:
-        tree, path = actual
-        found = self.offenders(tree, path)
-        wanted = self.summary or self.name
-        return f"{path}: expected {wanted}, found {len(found)}: {'; '.join(found)}"
 
     # -- the clean half ---------------------------------------------------
 
@@ -506,13 +494,3 @@ class Registry:
 
     def __len__(self) -> int:
         return len(self.rules)
-
-
-def rule_ids(rule: Rule) -> str:
-    """pytest id for one rule: its name, plus its bite when that is what failed."""
-    return rule.name
-
-
-def registry_ids(registry: Registry) -> list[str]:
-    """pytest ids for a whole registry."""
-    return [rule.name for rule in registry]

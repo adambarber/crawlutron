@@ -101,8 +101,22 @@ _OWNER_PUBLIC_SURFACE_RATCHET = {
 
 _PUBLIC_SURFACE_PROPERTY = Property(
     name="one-public-door",
-    owner_module="app/crawl/sqlite_store.py",
-    owner_symbols=(),
+    # Deliberately not in PROPERTY_REGISTRY, and deliberately not pointing at an
+    # app module. The registry models "this app module owns this property", and
+    # this constraint has no owner: `one-public-door` is enforced over the 13
+    # modules of _OWNER_PUBLIC_SURFACE_RATCHET at once, each declaring its own
+    # __all__ and adding no new entry point. Naming sqlite_store.py as the owner
+    # was the original mistake -- it is one module of thirteen, and the claim is
+    # false. The registry's owner check requires definition_site's symbol to be
+    # declared in owner_symbols AND to resolve inside app/, so a descriptor whose
+    # definition site is a test-tree detector cannot be registered without
+    # asserting an ownership that does not exist.
+    #
+    # This object exists only because assert_property_detector_bites takes a
+    # Property and reads its .name for the failure text. It is a detector
+    # descriptor, not a registry entry.
+    owner_module="tests/invariants/test_registry.py",
+    owner_symbols=("_public_surface_offenders",),
     definition_site="tests/invariants/test_registry.py:_public_surface_offenders",
     fingerprints=("public_surface",),
     reason="A property owner declares one public surface and cannot add another entry point.",

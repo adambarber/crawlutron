@@ -310,15 +310,6 @@ def assignment_targets(node: ast.Assign | ast.AnnAssign) -> list[ast.expr]:
     return list(node.targets) if isinstance(node, ast.Assign) else [node.target]
 
 
-def import_statements(root: ast.AST) -> tuple[ast.Import | ast.ImportFrom, ...]:
-    """Every import, plain and from-form alike, in walk order."""
-    return tuple(
-        node
-        for node in _narrow(root, "import", ast.Import, ast.ImportFrom)
-        if isinstance(node, ast.Import | ast.ImportFrom)
-    )
-
-
 def plain_imports(root: ast.AST) -> tuple[ast.Import, ...]:
     """``import x`` only, split from the from-form because the module a tree
     pulls in is the first part of the alias here, not ``node.module``."""
@@ -534,7 +525,7 @@ def app_offenders(
     return offenders
 
 
-def call_leaf_name(call: ast.Call) -> str:
+def _call_leaf_name(call: ast.Call) -> str:
     """The bare name a call is made through: ``uuid4()`` -> ``uuid4``, ``uuid.uuid4()`` -> ``uuid4``.
 
     ``getattr(call.func, "id", None) or getattr(call.func, "attr", None)`` is how a
@@ -554,7 +545,7 @@ def bare_callee(node: ast.AST) -> str | None:
     shape itself, and detectors kept testing it themselves: the ``isinstance``
     pair this replaces was written out separately by each one, which is how the
     jscpd gate came to flag the same five lines in two files. Unlike
-    :func:`call_leaf_name` this does not fall back to an attribute callee, so
+    :func:`_call_leaf_name` this does not fall back to an attribute callee, so
     ``obj.int(x)`` is not a match.
     """
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
@@ -571,7 +562,7 @@ def calls_named_leaf(tree: ast.AST, names: frozenset[str] | set[str]) -> Iterato
     shape each re-derived the leaf name, so this is that derivation, once.
     """
     for call in call_nodes(tree):
-        if call_leaf_name(call) in names:
+        if _call_leaf_name(call) in names:
             yield call
 
 
@@ -642,7 +633,7 @@ def local_calls(node: ast.AST) -> tuple[ast.Call, ...]:
     """Every call in ``node``'s local subtree, walked once per node.
 
     ``local_call_leaf_names`` re-walked the subtree on every call, and it is in
-    turn the body of ``calls_naming_method`` and ``has_method_call``, so one
+    turn the body of ``_calls_naming_method`` and ``has_method_call``, so one
     question about a node cost a fresh walk of it. Only the tree-independent
     half is cached -- which nodes are calls -- because the name a call resolves
     to is a property of the tree it is read in, and a node reached through two
@@ -663,7 +654,7 @@ def local_call_leaf_names(tree: ast.AST, node: ast.AST) -> Iterator[tuple[str, a
         yield resolved_call_name(tree, call).rsplit(".", 1)[-1].lower(), call
 
 
-def getattr_literal_name(call: ast.Call) -> str | None:
+def _getattr_literal_name(call: ast.Call) -> str | None:
     """The attribute name of ``getattr(obj, "name")`` when it is a literal string.
 
     ``getattr(x, "strip")`` and ``x.strip()`` name the same method, and a detector
@@ -677,7 +668,7 @@ def getattr_literal_name(call: ast.Call) -> str | None:
     return None
 
 
-def calls_naming_method(
+def _calls_naming_method(
     tree: ast.AST,
     node: ast.AST,
     method_names: frozenset[str],
@@ -692,16 +683,16 @@ def calls_naming_method(
     for name, call in local_call_leaf_names(tree, node):
         if name in method_names:
             yield call
-        elif name == "getattr" and getattr_literal_name(call) in method_names:
+        elif name == "getattr" and _getattr_literal_name(call) in method_names:
             yield call
 
 
 def has_method_call(tree: ast.AST, node: ast.AST, method_names: frozenset[str]) -> bool:
     """Does ``node`` reach any of ``method_names``? The boolean form."""
-    return next(calls_naming_method(tree, node, method_names), None) is not None
+    return next(_calls_naming_method(tree, node, method_names), None) is not None
 
 
-def spelled_non_member(value: ast.expr, members: Container[str]) -> str | None:
+def _spelled_non_member(value: ast.expr, members: Container[str]) -> str | None:
     """The string literal at ``value`` when it is not a member, else ``None``.
 
     The two decisions every "a spelled value must be a real member" detector has
@@ -722,7 +713,7 @@ def non_member_literals(
 ) -> Iterator[tuple[ast.Call, str, str]]:
     """``(node, field, value, members)`` tuples narrowed to spelled non-members.
 
-    The set-valued funnel over :func:`spelled_non_member`, for the detectors that
+    The set-valued funnel over :func:`_spelled_non_member`, for the detectors that
     sweep more than one keyword at a time and so cannot fix ``members`` up front
     -- a Literal field's members are keyed by the field name, which is also what
     the offending message has to name. Reporting the value rather than the
@@ -735,7 +726,7 @@ def non_member_literals(
     on to read.
     """
     for node, field, value, members in candidates:
-        spelled = spelled_non_member(value, members)
+        spelled = _spelled_non_member(value, members)
         if spelled is not None:
             yield node, field, spelled
 
@@ -762,7 +753,7 @@ def literal_keyword_membership_offenders(
 
     A non-string literal is never reported, which is what admits ``None`` for
     "no strategy was attempted" without a special case -- see
-    :func:`spelled_non_member`, which owns that decision for every detector here
+    :func:`_spelled_non_member`, which owns that decision for every detector here
     and in ``tests/membership_gate.py`` rather than each restating it.
     """
     return [

@@ -150,7 +150,7 @@ def _module_constants(tree: ast.AST) -> dict[str, str]:
     return values
 
 
-def primitive_keyword_calls(
+def _primitive_keyword_calls(
     tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
 ) -> list[tuple[ast.Call, ast.keyword]]:
     """Yield ``(call, keyword)`` for every keyword of a result-primitive call.
@@ -185,10 +185,10 @@ def primitive_keyword_calls(
 FieldMembers: TypeAlias = dict[str, set[str]]
 
 
-def named_primitive_keyword_calls(
+def _named_primitive_keyword_calls(
     tree: ast.AST, *, arg_names: str | frozenset[str] | set[str] | dict[str, Any] | None = None
 ) -> Iterator[tuple[ast.Call, str, ast.expr]]:
-    """``primitive_keyword_calls``, each keyword paired with its name and value.
+    """``_primitive_keyword_calls``, each keyword paired with its name and value.
 
     The underlying walk already drops ``**kwargs`` -- a keyword with no name is
     not a member of any field's set -- but it hands back an ``ast.keyword``,
@@ -196,7 +196,7 @@ def named_primitive_keyword_calls(
     field's member set by that name had to re-assert a fact the walk already
     guarantees. Three of the four were doing exactly that.
     """
-    for call, keyword in primitive_keyword_calls(tree, arg_names=arg_names):
+    for call, keyword in _primitive_keyword_calls(tree, arg_names=arg_names):
         assert keyword.arg is not None, ast.unparse(keyword)
         yield call, keyword.arg, keyword.value
 
@@ -222,7 +222,7 @@ def generic_literal_field_offenders(tree: ast.AST, path: pathlib.Path, *, member
         )
         for node, field, value in non_member_literals(
             (node, field, value, members[field])
-            for node, field, value in named_primitive_keyword_calls(tree, arg_names=members)
+            for node, field, value in _named_primitive_keyword_calls(tree, arg_names=members)
         )
     ]
 
@@ -281,7 +281,7 @@ def namespace_constant_offenders(tree: ast.AST, path: pathlib.Path, *, members: 
     """
     constants = _module_constants(tree)
     out: list[str] = []
-    for node, field, value in named_primitive_keyword_calls(tree, arg_names=members):
+    for node, field, value in _named_primitive_keyword_calls(tree, arg_names=members):
         if not isinstance(value, ast.Name):
             continue
         if value.id not in constants:
@@ -543,7 +543,7 @@ def _aliased_module_bindings(tree: ast.AST) -> set[str]:
     return bound
 
 
-def aliased_sanctioned_func_names(tree: ast.AST) -> dict[str, set[str]]:
+def _aliased_sanctioned_func_names(tree: ast.AST) -> dict[str, set[str]]:
     """Every local alias of a sanctioned chokepoint function, by canonical name.
 
     ``from app.crawl.decompression import decompress_body`` binds
@@ -636,7 +636,7 @@ def aliased_sanctioned_func_offenders(tree: ast.AST, path: pathlib.Path) -> list
     -- an unguarded chokepoint is a different finding.
     """
     out: list[str] = []
-    aliases = aliased_sanctioned_func_names(tree)
+    aliases = _aliased_sanctioned_func_names(tree)
     if not aliases:
         return out
     # The spellings each name-matching detector hard-codes today. An alias
@@ -720,6 +720,6 @@ def error_field_taxonomy_offenders(
         )
         for node, _field, value in non_member_literals(
             (node, "error", value, members)
-            for node, _field, value in named_primitive_keyword_calls(tree, arg_names={"error"})
+            for node, _field, value in _named_primitive_keyword_calls(tree, arg_names={"error"})
         )
     ]
