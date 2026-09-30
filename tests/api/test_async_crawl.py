@@ -11,9 +11,16 @@ from tests._job_harnesses import loaded_job, single_shot_job
 from tests.helpers.server import WEBHOOK_RECEIVED
 
 # The client + origin + cleared webhook sink come from the shared fixture, so
-# this module does not re-declare the arrangement in a `setup` method. The
-# alias-then-rebind is what lets the fixture keep its own name in this
-# namespace: a test asks for a fixture by the name it was defined under.
+# this module does not re-declare the arrangement in a `setup` method.
+#
+# The alias-then-rebind is not ceremony. Every test below takes the fixture as a
+# parameter named `crawl_api`, so binding that name at module scope collides with
+# each of them and F811 rejects the import outright. Binding under a name nothing
+# shadows, then publishing it once, is what keeps the fixture resolvable here.
+# The alternative is to move the fixture into ``conftest.py``, which is worth
+# doing the moment a second module wants it -- and not before, because until then
+# it would put a fixture used by one file into the global namespace of all of
+# them.
 crawl_api = _crawl_api
 
 

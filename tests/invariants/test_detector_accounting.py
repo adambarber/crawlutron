@@ -87,6 +87,11 @@ class DetectorAudit:
 
     detectors: tuple[str, ...]
     declared: tuple[str, ...]
+    #: Suffix-matching functions that read no tree, so are not detectors: helpers
+    #: a walk composes, and factories that build one. Reported rather than
+    #: counted, because folding them into ``detectors`` is what let one number
+    #: mean three different things at once.
+    not_detectors: tuple[str, ...] = ()
 
     @property
     def unaccounted(self) -> int:
@@ -156,18 +161,56 @@ def _survey(root: pathlib.Path) -> tuple[list[str], list[str]]:
     """
     detectors: list[str] = []
     declared: list[str] = []
+    not_detectors: list[str] = []
     for path in sorted(root.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         wired = _wired_finds(tree)
         for node in functions(tree):
-            if node.name.endswith(DETECTOR_SUFFIX):
-                entry = f"{_display(path)}:{node.lineno} {node.name}"
-                detectors.append(entry)
-                if node.name in wired:
-                    declared.append(entry)
-    return detectors, declared
+            if not node.name.endswith(DETECTOR_SUFFIX):
+                continue
+            entry = f"{_display(path)}:{node.lineno} {node.name}"
+            if not _reads_a_tree(node):
+                not_detectors.append(entry)
+                continue
+            detectors.append(entry)
+            if node.name in wired:
+                declared.append(entry)
+    return detectors, declared, not_detectors
+
+
+def _reads_a_tree(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether this function walks a parsed module, and is therefore a detector.
+
+    The suffix alone does not decide it, and getting that wrong is worse than the
+    counting being approximate. A helper whose job is to compare two sets and a
+    factory whose job is to build a detector both end in ``_offenders``; counted
+    alongside real walks they make one total carry "work still to do", "not a
+    detector at all", and "cannot be expressed by the framework", which are three
+    different conversations. A reader given that number cannot tell which one
+    they are in, and neither could the author of it.
+
+    A detector's first parameter is the tree it walks. A method's first parameter
+    is ``self``, and a detector defined as a method still walks a tree, so the
+    receiver is skipped -- the bite that plants one caught that omission.
+
+    Some declare the type and some do not, and the union is deliberate: requiring
+    an annotation would drop the older half of the suite from the count, which is
+    the same mistake the retired subtraction made in the other direction.
+    """
+    if not node.args.args:
+        return False
+    positional = node.args.args
+    if positional[0].arg in {"self", "cls"}:
+        positional = positional[1:]
+    if not positional:
+        return False
+    first = positional[0]
+    if first.arg == "tree":
+        return True
+    annotation = ast.unparse(first.annotation) if first.annotation is not None else ""
+    return "ast.AST" in annotation or "ast.Module" in annotation
 
 
 def detector_functions(root: pathlib.Path) -> list[str]:
@@ -194,8 +237,12 @@ def _display(path: pathlib.Path) -> str:
 
 def audit(root: pathlib.Path = INVARIANTS_ROOT) -> DetectorAudit:
     """Count the walks under ``root``, and the share of them a ``Rule`` names."""
-    detectors, declared = _survey(root)
-    return DetectorAudit(detectors=tuple(detectors), declared=tuple(declared))
+    detectors, declared, not_detectors = _survey(root)
+    return DetectorAudit(
+        detectors=tuple(detectors),
+        declared=tuple(declared),
+        not_detectors=tuple(not_detectors),
+    )
 
 
 def test_the_walk_sees_every_detector_in_the_suite() -> None:
@@ -223,6 +270,13 @@ def test_planting_a_detector_moves_the_count_by_one(tmp_path: pathlib.Path) -> N
     satisfies the count. Without the second, a walk that counts every function
     in the file would pass while never having looked at a detector at all --
     which is the failure mode a name-based count is supposed to rule out.
+
+    The method takes ``(self, tree, path)``, not ``(self)``. A receiver is not a
+    tree, so a method that walks nothing is not a detector however it is spelled,
+    and planting one here would have kept the count honest only by accident:
+    this plant predates the rule that a detector must read a tree, and passed for
+    the wrong reason. A detector defined as a method is still a detector, which is
+    why the receiver is skipped rather than the method excluded.
     """
     root = tmp_path / "invariants"
     root.mkdir()
@@ -236,7 +290,7 @@ def test_planting_a_detector_moves_the_count_by_one(tmp_path: pathlib.Path) -> N
         "\n"
         "\n"
         "class _Holder:\n"
-        "    def _method_offenders(self):\n"
+        "    def _method_offenders(self, tree, path):\n"
         "        return []\n"
         "\n"
         "\n"
@@ -310,6 +364,10 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
         "    return []\n"
         "\n"
         "\n"
+        "def _documented_knob_offenders(documented, references):\n"
+        "    return [name for name in sorted(documented - references)]\n"
+        "\n"
+        "\n"
         "def test_something():\n"
         "    pass\n",
         encoding="utf-8",
@@ -328,6 +386,12 @@ def test_a_rule_backed_detector_counts_as_declared_and_a_hand_rolled_one_does_no
     )
     assert result.unaccounted == 1, (
         f"the one hand-rolled detector is the whole migration gap; got {result.unaccounted}"
+    )
+    assert not any("_documented_knob_offenders" in entry for entry in result.detectors), (
+        "a function that reads no tree was counted as a detector"
+    )
+    assert any("_documented_knob_offenders" in entry for entry in result.not_detectors), (
+        f"a non-detector was dropped rather than reported apart: {result.not_detectors}"
     )
 
 
